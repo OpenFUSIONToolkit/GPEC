@@ -14,5 +14,3 @@ Manifest.toml
 build.log
 docs/build/
 anaconda_projects/
-# REMOVE THIS BEFORE PR
-notebooks/test.ipynb

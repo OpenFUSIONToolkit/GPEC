@@ -113,6 +113,9 @@ function Main(path::String)
     display(intr.sing)
 
     # Determine poloidal mode numbers
+    if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
+        error("Negative delta_mlow or delta_mhigh not allowed")
+    end
     if ctrl.cyl_flag
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh

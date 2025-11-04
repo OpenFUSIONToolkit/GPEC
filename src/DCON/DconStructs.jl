@@ -9,8 +9,8 @@
 @kwdef mutable struct SingType
     m::Vector{Int} = Int[]
     n::Vector{Int} = Int[]
-    r1::Vector{Int} = [0]
-    r2::Vector{Int} = [0, 0]
+    r1::Vector{Int} = Int[]
+    r2::Vector{Int} = Int[]
     psifac::Float64 = 0.0
     rho::Float64 = 0.0
     q::Float64 = 0.0

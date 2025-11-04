@@ -288,6 +288,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
         end
 
         # Factorize and build composites
+        # Note: we store the nonsingular forms of F and K, F = QF̄Qᴴ, K = QK̄, and multiplicity
+        # by singfac later when performing computations (eq. 29 in Glasser 2016)
         amat = reshape(amats_flatview, intr.numpert_total, intr.numpert_total)
         cmat = reshape(cmats_flatview, intr.numpert_total, intr.numpert_total)
         dmat = reshape(dmats_flatview, intr.numpert_total, intr.numpert_total)

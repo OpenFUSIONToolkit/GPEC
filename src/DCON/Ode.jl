@@ -111,7 +111,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
 
     # Always integrate once, even if no rational surfaces are crossed
     ode_step!(odet, ctrl, equil, ffit, intr, outp)
-    
+
     # If at a rational surface, do the appropriate crossing routine, then integrate again
     while odet.ising != ctrl.ksing && odet.next == "cross"
         if ctrl.kin_flag
@@ -579,11 +579,11 @@ function compute_tols(ctrl, intr, odet)
         # singfac = m-nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
         # Note: odet.q is updated within the derivative calculation
         if odet.ising <= intr.msing
-            singfac_local = abs(minimum(intr.sing[odet.ising].n) * (intr.sing[odet.ising].q * odet.q))
+            singfac_local = abs(minimum(intr.sing[odet.ising].n) * (intr.sing[odet.ising].q - odet.q))
         end
         # If in between singular surfaces, check distance to both
         if odet.ising > 1
-            singfac_local = min(singfac_local, abs(minimum(intr.sing[odet.ising-1].n) * (intr.sing[odet.ising-1].q * odet.q)))
+            singfac_local = min(singfac_local, abs(minimum(intr.sing[odet.ising-1].n) * (intr.sing[odet.ising-1].q - odet.q)))
         end
     end
     rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
@@ -722,12 +722,10 @@ function ode_fixup!(odet::OdeState, intr::DconInternal, outp::DconOutput, sing_f
     for isol in 1:intr.numpert_total
         ksol = odet.index[isol, ifix]
         mask[2, ksol] = false
-        if !test
-            # Find max location
-            @. @views masked = abs(odet.u[:, ksol, 1]) * mask[1, :]
-            @views kpert = argmax(masked)
-            mask[1, kpert] = false
-        end
+        # Find max location
+        @. @views masked = abs(odet.u[:, ksol, 1]) * mask[1, :]
+        @views kpert = argmax(masked)
+        mask[1, kpert] = false
         for jsol in 1:intr.numpert_total
             if mask[2, jsol]
                 odet.fixfac[ksol, jsol, ifix] = -odet.u[kpert, jsol, 1] / odet.u[kpert, ksol, 1]
