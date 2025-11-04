@@ -547,46 +547,6 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-
-    # Dump sq_nodes and rzphi_nodes to files for inspection
-    open("sq_nodes.txt", "w") do io
-        for ipsi in 1:size(sq_nodes, 1)
-            println(io, join(sq_nodes[ipsi, :], ","))
-        end
-    end
-    open("sq_fs1_nodes.txt", "w") do io
-        for ipsi in 1:size(sq_nodes, 1)
-            println(io, join(sq.fs1[ipsi, :], ","))
-        end
-    end
-    open("rzphi_nodes.txt", "w") do io
-        for ipsi in 1:size(rzphi_nodes, 1)
-            for itheta in 1:size(rzphi_nodes, 2)
-                println(io, join(rzphi_nodes[ipsi, itheta, :], ","))
-            end
-        end
-    end
-    open("rzphi_fsx_nodes.txt", "w") do io
-        for ipsi in 1:size(rzphi_nodes, 1)
-            for itheta in 1:size(rzphi_nodes, 2)
-                println(io, join(rzphi.fsx[ipsi, itheta, :], ","))
-            end
-        end
-    end
-    open("rzphi_fsy_nodes.txt", "w") do io
-        for ipsi in 1:size(rzphi_nodes, 1)
-            for itheta in 1:size(rzphi_nodes, 2)
-                println(io, join(rzphi.fsy[ipsi, itheta, :], ","))
-            end
-        end
-    end
-    open("eqfun_nodes.txt", "w") do io
-        for ipsi in 1:size(eqfun_fs_nodes, 1)
-            for itheta in 1:size(eqfun_fs_nodes, 2)
-                println(io, join(eqfun_fs_nodes[ipsi, itheta, :], ","))
-            end
-        end
-    end
     eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; bctypex="extrap", bctypey="periodic")
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), sq, rzphi, eqfun, ro, zo, psio)
 end
