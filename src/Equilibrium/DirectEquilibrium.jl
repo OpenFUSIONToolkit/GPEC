@@ -518,6 +518,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             r = ro + rfac * cos(eta)
             jacfac = f[4]
 
+
             v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) * d(rfac)/d(psi_norm)
             v[1, 2] = fx[2] * 2π * rfac                             # 2π*rfac * d(eta)/d(psi_norm)
             v[1, 3] = fx[3] * r                                     # r * d(phi_s)/d(psi_norm)

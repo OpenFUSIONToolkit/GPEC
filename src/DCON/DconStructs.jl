@@ -1,17 +1,4 @@
 # TODO: add descriptions of what all variables are and/or explanation of defaults
-# TODO: remove all unused variables before first pull request
-@kwdef mutable struct ResistType
-    e::Float64 = 0.0
-    f::Float64 = 0.0
-    h::Float64 = 0.0
-    m::Float64 = 0.0
-    g::Float64 = 0.0
-    k::Float64 = 0.0
-    eta::Float64 = 0.0
-    rho::Float64 = 0.0
-    taua::Float64 = 0.0
-    taur::Float64 = 0.0
-end
 
 # TODO: ideally, everything is allocated at construction, but mpert is determined after
 # since these are allocated in sing_find. What's the best way to handle this?
@@ -35,7 +22,6 @@ end
     vmat::Union{Missing,Array{ComplexF64,4}} = missing
     mmat::Union{Missing,Array{ComplexF64,4}} = missing
     m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
-    restype::ResistType = ResistType()
 end
 # @kwdef mutable struct SingType
 #     mpert::Int
@@ -55,7 +41,6 @@ end
 #     vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, 2 * mpert, 2, order + 1)
 #     mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, 2 * mpert, 2, order + 3)
 #     m0mat::Union{Nothing, Matrix{ComplexF64}} = zeros(ComplexF64, 2, 2)
-#     restype::ResistType = ResistType()
 # end
 # # Constructor to allocate matrices
 # SingType(mpert::Int, order::Int; kwargs...) = SingType(; mpert, order, kwargs...)
@@ -90,7 +75,6 @@ end
     ode_flag::Bool = false
     vac_flag::Bool = false
     mer_flag::Bool = false
-    res_flag::Bool = false
     fft_flag::Bool = false
     node_flag::Bool = false
     mthvac::Int = 480
@@ -109,12 +93,10 @@ end
     numsteps_init::Int = 4000 # used to set initial size of data store in OdeState
     numunorms_init::Int = 100 # used to set initial size of saved unorm data in OdeState
     singfac_min::Float64 = 0.0
-    singfac_max::Float64 = 0.0
     cyl_flag::Bool = false
     set_psilim_via_dmlim::Bool = false # previously sas_flag, if true, determines psilim using outermost rational + dmlim
     dmlim::Float64 = 0.2 # % outside the last rational surface to go out to determine dW if set_psilim_via_dmlim is true
     sing_order::Int = 2
-    sort_type::String = "absm"
     termbycross_flag::Bool = false
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
@@ -187,7 +169,6 @@ end
     bin_euler::Bool = false
     euler_stride::Int = 1
     bin_vac::Bool = false # TODO: deprecated
-    ahb_flag::Bool = false # TODO: deprecated
     mthsurf0::Float64 = 1.0 # TODO: deprecated
     msol_ahb::Int = 0 # TODO: deprecated
     netcdf_out::Bool = true # TODO: might be deprecated
@@ -214,11 +195,6 @@ end
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
-
-    # TODO: these might be deprecated? They're used with a ahb_flag in free
-    asmat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
-    bsmat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
-    csmat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
 
     parallel_threads::Int = 0
     dcon_kin_threads::Int = 0

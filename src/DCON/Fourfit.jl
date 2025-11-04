@@ -321,16 +321,6 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
 
-    if ctrl.set_psilim_via_dmlim
-        # TODO: these seem to only be used for the ahb_flag, which I think is deprecated
-        ffit.asmat = reshape(Spl.spline_eval!(ffit.amats, intr.psilim), intr.mpert, intr.mpert)
-        ffit.bsmat = reshape(Spl.spline_eval!(ffit.bmats, intr.psilim), intr.mpert, intr.mpert)
-        ffit.csmat = reshape(Spl.spline_eval!(ffit.cmats, intr.psilim), intr.mpert, intr.mpert)
-        # TODO: this is used in free.f vacuum calculations, verify this is correct
-        # Should we store lower triangular factorization?
-        ffit.asmat .= cholesky(Hermitian(ffit.asmat)).L
-    end
-
     # This is used in free_run
     ffit.jmat = jmat
 

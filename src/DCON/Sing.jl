@@ -5,12 +5,16 @@ Scan all singular surfaces and calculate asymptotic vmat and mmat matrices
 and Mericer criterion. Performs the same function as `sing_scan` in the Fortran code.
 """
 function sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput)
-    write_output(outp, :dcon_out, "\n Singular Surfaces:")
-    write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
+    if outp.write_dcon_out
+        write_output(outp, :dcon_out, "\n Singular Surfaces:")
+        write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
+    end
     for ising in 1:intr.msing
         sing_vmat!(intr, ctrl, equil, ffit, outp, ising)
     end
-    write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
+    if outp.write_dcon_out
+        write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
+    end
 end
 
 """
@@ -188,7 +192,9 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     singp.power[ipert0] = -singp.alpha
     singp.power[ipert0+intr.mpert] = singp.alpha
 
-    write_output(outp, :dcon_out, @sprintf("%3d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e", ising, psifac, rho, q, q1, di0, singp.di, singp.di / di0 - 1))
+    if outp.write_dcon_out
+        write_output(outp, :dcon_out, @sprintf("%3d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e", ising, psifac, rho, q, q1, di0, singp.di, singp.di / di0 - 1))
+    end
 
     # Zeroth-order non-resonant solutions
     singp.vmat .= 0
@@ -237,7 +243,6 @@ Better way to unpack the cubic splines
 function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
     # Initial allocations
-    msol = 2 * intr.mpert # TODO: make sure this doesn't get updated as a global elsewhere in the Fortran
     q = @MVector zeros(Float64, 4)
     singfac = zeros(Float64, intr.mpert, 4)
     f_lower_interp = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
@@ -248,8 +253,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     ff_lower = zeros(ComplexF64, intr.mpert, intr.mpert, ctrl.sing_order + 1)
     g_lower = zeros(ComplexF64, intr.mpert, intr.mpert, ctrl.sing_order + 1)
     k = zeros(ComplexF64, intr.mpert, intr.mpert, ctrl.sing_order + 1)
-    v = zeros(ComplexF64, intr.mpert, msol, 2)
-    x = zeros(ComplexF64, intr.mpert, msol, 2, ctrl.sing_order + 1)
+    v = zeros(ComplexF64, intr.mpert, 2 * intr.mpert, 2)
+    x = zeros(ComplexF64, intr.mpert, 2 * intr.mpert, 2, ctrl.sing_order + 1)
 
     singp = intr.sing[ising]
 
@@ -396,7 +401,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     # Compute zeroth-order x1
-    for isol in 1:msol
+    for isol in 1:2*intr.mpert
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
     # f is prefactorized so can just use this calculation to get F⁻¹x
@@ -404,7 +409,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Compute higher-order x1
     for i in 1:ctrl.sing_order
-        for isol in 1:msol
+        for isol in 1:2*intr.mpert
             for j in 1:i
                 @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
             end
@@ -415,7 +420,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Compute x2
     for i in 0:ctrl.sing_order
-        for isol in 1:msol
+        for isol in 1:2*intr.mpert
             for j in 0:i
                 x[:, isol, 2, i+1] .+= k[:, :, j+1]' * x[:, isol, 1, i-j+1]
             end
@@ -568,7 +573,7 @@ function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     temp1[intr.mpert+1:2*intr.mpert, :] .= ua[:, :, 2]
 
     # Built temp2
-    temp2 = zeros(ComplexF64, 2 * intr.mpert, odet.msol)
+    temp2 = zeros(ComplexF64, 2 * intr.mpert, intr.mpert)
     temp2[1:intr.mpert, :] .= odet.u[:, :, 1]
     temp2[intr.mpert+1:2*intr.mpert, :] .= odet.u[:, :, 2]
 
@@ -576,9 +581,9 @@ function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     temp2 .= lu(temp1) \ temp2
 
     # Build ca
-    ca = zeros(ComplexF64, intr.mpert, 2 * intr.mpert, 2)
-    ca[:, 1:odet.msol, 1] .= temp2[1:intr.mpert, :]
-    ca[:, 1:odet.msol, 2] .= temp2[intr.mpert+1:2*intr.mpert, :]
+    ca = zeros(ComplexF64, intr.mpert, intr.mpert, 2)
+    ca[:, :, 1] .= temp2[1:intr.mpert, :]
+    ca[:, :, 2] .= temp2[intr.mpert+1:2*intr.mpert, :]
 
     return ca
 end
@@ -612,8 +617,8 @@ more simplistic code with similar performance.
 
 ### Arguments
 
-  - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, msol, 2), updated in-place
-  - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, msol, 2)
+  - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
+  - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
   - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState, DconOutput}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
 

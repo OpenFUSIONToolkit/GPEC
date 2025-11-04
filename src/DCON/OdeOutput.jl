@@ -107,10 +107,14 @@ function ode_output_init(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium
     # Write crit.out header
     if odet.ising > 0 && odet.ising <= intr.msing
         singp = intr.sing[odet.ising]
-        write_output(outp, :crit_out, @sprintf("   ising   psi         q          di      re alpha   im alpha\n"))
-        write_output(outp, :crit_out, @sprintf("%6d%11.3e%11.3e%11.3e%11.3e%11.3e\n", odet.ising, singp.psifac, singp.q, singp.di, real(singp.alpha), imag(singp.alpha)))
+        if outp.write_crit_out
+            write_output(outp, :crit_out, @sprintf("   ising   psi         q          di      re alpha   im alpha\n"))
+            write_output(outp, :crit_out, @sprintf("%6d%11.3e%11.3e%11.3e%11.3e%11.3e\n", odet.ising, singp.psifac, singp.q, singp.di, real(singp.alpha), imag(singp.alpha)))
+        end
     end
-    write_output(outp, :crit_out, "    psifac      dpsi        q       singfac     eval1\n")
+    if outp.write_crit_out
+        write_output(outp, :crit_out, "    psifac      dpsi        q       singfac     eval1\n")
+    end
 end
 
 """
@@ -181,9 +185,13 @@ function ode_output_monitor(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibr
         if (crit_med - crit) * (crit_med - odet.crit_prev) < 0 &&
            abs(crit_med) < 0.5 * min(abs(crit), abs(odet.crit_prev))
             println("Zero crossing detected at psi = $psi_med, q = $q_med")
-            write_output(outp, :dcon_out, @sprintf("Zero crossing at psi = %10.3e, q = %10.3e", psi_med, q_med))
-            write_output(outp, :crit_out, @sprintf("Zero crossing at psi = %10.3e, q = %10.3e", psi_med, q_med))
-            write_output(outp, :crit_out, @sprintf("%11.3e%11.3e%11.3e%11.3e%11.3e", psi_med, dpsi, q_med, singfac_med, crit_med))
+            if outp.write_dcon_out
+                write_output(outp, :dcon_out, @sprintf("Zero crossing at psi = %10.3e, q = %10.3e", psi_med, q_med))
+            end
+            if outp.write_crit_out
+                write_output(outp, :crit_out, @sprintf("Zero crossing at psi = %10.3e, q = %10.3e", psi_med, q_med))
+                write_output(outp, :crit_out, @sprintf("%11.3e%11.3e%11.3e%11.3e%11.3e", psi_med, dpsi, q_med, singfac_med, crit_med))
+            end
             odet.nzero += 1
         end
         if ctrl.termbycross_flag
@@ -194,7 +202,9 @@ function ode_output_monitor(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibr
     end
 
     # Write new crit
-    write_output(outp, :crit_out, @sprintf("%11.3e%11.3e%11.3e%11.3e%11.3e", odet.psifac, dpsi, odet.q, singfac, crit))
+    if outp.write_crit_out
+        write_output(outp, :crit_out, @sprintf("%11.3e%11.3e%11.3e%11.3e%11.3e", odet.psifac, dpsi, odet.q, singfac, crit))
+    end
 
     # Update saved values
     odet.psi_prev = odet.psifac
@@ -224,7 +234,6 @@ A tuple `(q, singfac, logpsi1, logsingfac, crit)` of critical data for the time 
 
 ### TODOs
 
-Add dVdpsi multiplication back once equilibrium bug is fixed
 Decide if we want to just pass in the relevant quantities instead of structs for functions like this
 """
 function ode_output_get_crit(psi::Float64, u::Array{ComplexF64,3}, mpert::Int, m1::Int, nn::Int, sq::Spl.CubicSpline)

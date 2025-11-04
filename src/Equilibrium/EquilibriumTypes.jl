@@ -195,7 +195,7 @@ end
 
 
 """
-    SolevevConfig(...)
+    SolovevConfig(...)
 
 A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium model.
 
@@ -212,7 +212,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
   - `b0fac`: scale toroidal field at constant beta (s*Phi,s*f,s^2*P. bt changes. Shape,beta constant)
   - `f0fac`: scale toroidal field at constant pressure (s*f. beta,q changes. Phi,p,bp constant)
 """
-@kwdef mutable struct SolevevConfig
+@kwdef mutable struct SolovevConfig
     mr::Int = 128      # number of radial grid zones
     mz::Int = 128      # number of axial grid zones
     ma::Int = 128      # number of flux grid zones
@@ -229,10 +229,10 @@ end
 Outer constructor for LarConfig that enables a toml file
 interface for specifying the configuration settings
 """
-function SolevevConfig(path::String) # if we use @kwdef, it generates SolevevConfig() so it conflicts with this line.
+function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevConfig() so it conflicts with this line.
     raw = TOML.parsefile(path)
     input_data = get(raw, "SOL_INPUT", Dict())
-    return SolevevConfig(; symbolize_keys(input_data)...)
+    return SolovevConfig(; symbolize_keys(input_data)...)
 end
 
 

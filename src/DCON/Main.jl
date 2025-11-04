@@ -148,10 +148,6 @@ function Main(path::String)
             error("kin_flag not implemented yet")
         end
         sing_scan!(intr, ctrl, equil, ffit, outp)
-        # TODO: implement resist_eval at some point, not urgent for initial functionality.
-        # for ising in 1:msing
-        #  resist_eval(sing[ising])
-        # end
         if ctrl.kin_flag
             # ksing_find()
         end
@@ -173,7 +169,7 @@ function Main(path::String)
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        plasma1, vacuum1, total1 = free_run(ctrl, equil, ffit, intr, odet, outp; op_netcdf_out=false) # outp.netcdf_out)
+        plasma1, vacuum1, total1 = free_run!(odet, ctrl, equil, ffit, intr, outp; op_netcdf_out=false) # outp.netcdf_out)
     end
 
     # Output results of fixed-boundary stability calculations
