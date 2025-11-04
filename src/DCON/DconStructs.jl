@@ -7,16 +7,16 @@
 # then creating them all at once after mpert is determined in dcon.jl
 # This wouldn't be as clean, but would allow preallocation. Does this greatly impact performance?
 @kwdef mutable struct SingType
-    m::Vector{Int} = Int[]
-    n::Vector{Int} = Int[]
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
     psifac::Float64 = 0.0
     rho::Float64 = 0.0
+    m::Vector{Int} = Int[]
+    n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
     di::Float64 = 0.0
-    alpha::ComplexF64 = 0.0 + 0.0im
+    alpha::Vector{ComplexF64} = ComplexF64[]
+    r1::Vector{Int} = Int[]
+    r2::Vector{Int} = Int[]
     n1::Vector{Int} = Int[]
     n2::Vector{Int} = Int[]
     power::Union{Missing,Vector{ComplexF64}} = missing # we know the size of these, but it depends on mpert

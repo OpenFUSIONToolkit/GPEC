@@ -174,7 +174,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # In 2D, see eq. 41 of 2016 Glasser DCON paper
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     singp.r1 = ipert_res
-    singp.r2 = vcat(ipert_res, ipert_res .+ intr.numpert_total)
+    singp.r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
     singp.n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
     singp.n2 = vcat(singp.n1, [i + intr.numpert_total for i in singp.n1])
 
@@ -186,17 +186,19 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Compute Mercier criterion and singular power
     sing_mmat!(intr, ctrl, equil, ffit, ising)
-    error("debug")
-    singp.m0mat = transpose(singp.mmat[singp.r1[1], singp.r2, :, 1])
-    # TODO: this is a little odd. di is complex since m0 is complex (but the imaginaries are negligible),
-    # its then stored in singp where the type is real, and then converted to complex again for alpha and power.
-    # There's gotta be a more clear way to do this? But this is the most faithful to the Fortran
-    di = singp.m0mat[1, 1] * singp.m0mat[2, 2] - singp.m0mat[2, 1] * singp.m0mat[1, 2]
-    singp.di = real(di)
-    singp.alpha = sqrt(-complex(singp.di))
-    
-    singp.power[ipert_res] = -singp.alpha
-    singp.power[ipert_res+intr.mpert] = singp.alpha
+    # TODO: I am not sure if this will generalize to 3D, but I think it works for 2D
+    if length(singp.r1) == 1
+        singp.m0mat = transpose(singp.mmat[singp.r1[1], singp.r2, :, 1])
+    else
+        singp.m0mat = vcat([transpose(singp.mmat[singp.r1[i], singp.r2, :, 1]) for i in eachindex(singp.r1)]...)
+    end
+
+    singp.alpha = eigen(singp.m0mat).values[length(singp.r1)+1:end] # take the M largest eigenvalues
+    # Maybe? di isn't super well defined for multiplicity > 1
+    singp.di = real(singp.alpha[1]^2)
+
+    singp.power[ipert_res] .= -singp.alpha
+    singp.power[ipert_res .+ intr.numpert_total] .= singp.alpha
 
     if outp.write_dcon_out
         write_output(outp, :dcon_out, @sprintf("%3d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e", ising, psifac, rho, q, q1, di0, singp.di, singp.di / di0 - 1))
@@ -204,22 +206,30 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Zeroth-order non-resonant solutions
     singp.vmat .= 0
-    for ipert in 1:intr.mpert
+    for ipert in 1:intr.numpert_total
         singp.vmat[ipert, ipert, 1, 1] = 1
-        singp.vmat[ipert, ipert+intr.mpert, 2, 1] = 1
+        singp.vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
+    end
+    
+    # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
+    # TODO: no idea if this is the correct way of doing this
+    M = length(singp.r1) # multiplicity
+    for i in 1:M # go block by block and do the same eigenvector solve/normalization?
+        m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+        rpert_1 = singp.r1[i]
+        rpert_2 = rpert_1 + intr.numpert_total
+        alpha = singp.alpha[i]
+        singp.vmat[rpert_1, rpert_1, 1, 1] = 1
+        singp.vmat[rpert_1, rpert_2, 1, 1] = 1
+        singp.vmat[rpert_1, rpert_1, 2, 1] = -(m0mat[1, 1] + alpha) / m0mat[1, 2]
+        singp.vmat[rpert_1, rpert_2, 2, 1] = -(m0mat[1, 1] - alpha) / m0mat[1, 2]
+        det =
+            conj(singp.vmat[rpert_1, rpert_1, 1, 1]) * singp.vmat[rpert_1, rpert_2, 2, 1] -
+            conj(singp.vmat[rpert_1, rpert_2, 1, 1]) * singp.vmat[rpert_1, rpert_1, 2, 1]
+        singp.vmat[rpert_1, :, :, 1] ./= sqrt(det)
     end
 
-    # Zeroth-order resonant solutions
-    singp.vmat[ipert_res, ipert_res, 1, 1] = 1
-    singp.vmat[ipert_res, ipert_res+intr.mpert, 1, 1] = 1
-    singp.vmat[ipert_res, ipert_res, 2, 1] = -(singp.m0mat[1, 1] + singp.alpha) / singp.m0mat[1, 2]
-    singp.vmat[ipert_res, ipert_res+intr.mpert, 2, 1] = -(singp.m0mat[1, 1] - singp.alpha) / singp.m0mat[1, 2]
-    det =
-        conj(singp.vmat[ipert_res, ipert_res, 1, 1]) * singp.vmat[ipert_res, ipert_res+intr.mpert, 2, 1] -
-        conj(singp.vmat[ipert_res, ipert_res+intr.mpert, 1, 1]) * singp.vmat[ipert_res, ipert_res, 2, 1]
-    singp.vmat[ipert_res, :, :, 1] ./= sqrt(det)
-
-    # Higher order solutions
+    # Higher order solutions - need to solve iteratively
     for k in 1:2*ctrl.sing_order
         sing_solve!(singp, intr, k)
     end
@@ -351,10 +361,15 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     for n in 0:ctrl.sing_order
         fac1 = 1
         for j in 0:n
-            for jpert in 1:intr.mpert
-                for ipert in jpert:min(intr.mpert, jpert + intr.mband)
-                    for kpert in max(1, ipert - intr.mband):jpert
-                        ff_lower[ipert, jpert, n+1] += fac1 * f_lower[ipert, kpert, j+1] * conj(f_lower[jpert, kpert, n-j+1])
+            for ipert_n in 1:intr.npert
+                for jpert_m in 1:intr.mpert
+                    for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+                        for kpert_m in max(1, ipert_m - intr.mband):jpert_m
+                            ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                            jpert = jpert_m + (ipert_n - 1) * intr.mpert
+                            kpert = kpert_m + (ipert_n - 1) * intr.mpert
+                            ff_lower[ipert, jpert, n+1] += fac1 * f_lower[ipert, kpert, j+1] * conj(f_lower[jpert, kpert, n-j+1])
+                        end
                     end
                 end
             end
@@ -366,74 +381,82 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Compute non-Hermitian matrix K = QK̄ Taylor series coefficients
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
-    for jpert in 1:intr.mpert
-        for ipert in max(1, jpert - intr.mband):min(intr.mpert, jpert + intr.mband)
-            k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
-            if ctrl.sing_order ≥ 1
-                k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
-                                     singfac[ipert, 2] * k_interp[ipert, jpert, 1]
-            end
-            if ctrl.sing_order ≥ 2
-                k[ipert, jpert, 3] =
-                    singfac[ipert, 1] * k_interp[ipert, jpert, 3] / 2 +
-                    singfac[ipert, 2] * k_interp[ipert, jpert, 2] +
-                    singfac[ipert, 3] * k_interp[ipert, jpert, 1] / 2
-            end
-            if ctrl.sing_order ≥ 3
-                k[ipert, jpert, 4] =
-                    singfac[ipert, 1] * k_interp[ipert, jpert, 4] / 6 +
-                    singfac[ipert, 2] * k_interp[ipert, jpert, 3] / 2 +
-                    singfac[ipert, 3] * k_interp[ipert, jpert, 2] / 2 +
-                    singfac[ipert, 4] * k_interp[ipert, jpert, 1] / 6
-            end
-            if ctrl.sing_order ≥ 4
-                k[ipert, jpert, 5] =
-                    singfac[ipert, 2] * k_interp[ipert, jpert, 4] / 6 +
-                    singfac[ipert, 3] * k_interp[ipert, jpert, 3] / 4 +
-                    singfac[ipert, 4] * k_interp[ipert, jpert, 2] / 6
-            end
-            if ctrl.sing_order ≥ 5
-                k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
-                                     singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
-            end
-            if ctrl.sing_order ≥ 6
-                k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
+    for ipert_n in 1:intr.npert
+        for jpert_m in 1:intr.mpert
+            for ipert_m in max(1, jpert_m - intr.mband):min(intr.mpert, jpert_m + intr.mband)
+                ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                jpert = jpert_m + (ipert_n - 1) * intr.mpert
+                k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
+                if ctrl.sing_order ≥ 1
+                    k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
+                                        singfac[ipert, 2] * k_interp[ipert, jpert, 1]
+                end
+                if ctrl.sing_order ≥ 2
+                    k[ipert, jpert, 3] =
+                        singfac[ipert, 1] * k_interp[ipert, jpert, 3] / 2 +
+                        singfac[ipert, 2] * k_interp[ipert, jpert, 2] +
+                        singfac[ipert, 3] * k_interp[ipert, jpert, 1] / 2
+                end
+                if ctrl.sing_order ≥ 3
+                    k[ipert, jpert, 4] =
+                        singfac[ipert, 1] * k_interp[ipert, jpert, 4] / 6 +
+                        singfac[ipert, 2] * k_interp[ipert, jpert, 3] / 2 +
+                        singfac[ipert, 3] * k_interp[ipert, jpert, 2] / 2 +
+                        singfac[ipert, 4] * k_interp[ipert, jpert, 1] / 6
+                end
+                if ctrl.sing_order ≥ 4
+                    k[ipert, jpert, 5] =
+                        singfac[ipert, 2] * k_interp[ipert, jpert, 4] / 6 +
+                        singfac[ipert, 3] * k_interp[ipert, jpert, 3] / 4 +
+                        singfac[ipert, 4] * k_interp[ipert, jpert, 2] / 6
+                end
+                if ctrl.sing_order ≥ 5
+                    k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
+                                        singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
+                end
+                if ctrl.sing_order ≥ 6
+                    k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
+                end
             end
         end
     end
 
     # Compute Hermitian matrix G (lower half only) Taylor series coefficients
     # G = [G, G', G''/2, G'''/6]
-    for jpert in 1:intr.mpert
-        for ipert in jpert:min(intr.mpert, jpert + intr.mband)
+    for ipert_n in 1:intr.npert
+        for jpert_m in 1:intr.mpert
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+                ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
-            if ctrl.sing_order ≥ 1
-                g_lower[ipert, jpert, 2] = g_interp[ipert, jpert, 2]
-            end
-            if ctrl.sing_order ≥ 2
-                g_lower[ipert, jpert, 3] = g_interp[ipert, jpert, 3] / 2
-            end
-            if ctrl.sing_order ≥ 3
-                g_lower[ipert, jpert, 4] = g_interp[ipert, jpert, 4] / 6
+                if ctrl.sing_order ≥ 1
+                    g_lower[ipert, jpert, 2] = g_interp[ipert, jpert, 2]
+                end
+                if ctrl.sing_order ≥ 2
+                    g_lower[ipert, jpert, 3] = g_interp[ipert, jpert, 3] / 2
+                end
+                if ctrl.sing_order ≥ 3
+                    g_lower[ipert, jpert, 4] = g_interp[ipert, jpert, 4] / 6
+                end
             end
         end
     end
 
     # Start with the identity matrix, (which can be used to index the projection onto resonant/nonresonant modes?)
-    for ipert in 1:intr.mpert
+    for ipert in 1:intr.numpert_total
         v[ipert, ipert, 1] = 1
-        v[ipert, ipert+intr.mpert, 2] = 1
+        v[ipert, ipert+intr.numpert_total, 2] = 1
     end
 
     # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
     # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
-    for isol in 1:2*intr.mpert
+    for isol in 1:2*intr.numpert_total
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
     # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
     for i in 1:ctrl.sing_order
-        for isol in 1:2*intr.mpert
+        for isol in 1:2*intr.numpert_total
             for j in 1:i
                 @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
             end
@@ -444,10 +467,9 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ - ∑Kⱼ^† x¹ₙ₋ⱼ at each order
     for i in 0:ctrl.sing_order
-        for isol in 1:2*intr.mpert
+        for isol in 1:2*intr.numpert_total
             for j in 0:i
-                # TODO: should the ' be an adjoint here?
-                x[:, isol, 2, i+1] .+= k[:, :, j+1]' * x[:, isol, 1, i-j+1]
+                x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
             end
             x[:, isol, 2, i+1] .+= Hermitian(g_lower[:, :, i+1], :L) * v[:, isol, 1]
         end
@@ -468,9 +490,11 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         j += 2
     end
 
-    # Apply the shearing transformation matrix R at resonant indices
-    singp.mmat[r1, r2[1], 1, 1] .+= 0.5
-    singp.mmat[r1, r2[2], 2, 1] .-= 0.5
+    # Apply the shearing transformation matrix R for each set of resonant indices
+    for i in eachindex(r1)
+        singp.mmat[r1[i], r2[2 * i - 1], 1, 1] += 0.5
+        singp.mmat[r1[i], r2[2 * i], 2, 1] -= 0.5
+    end
 end
 
 """
@@ -489,7 +513,8 @@ function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
     for l in 1:k
         singp.vmat[:, :, :, k+1] .+= sing_matmul(singp.mmat[:, :, :, l+1], singp.vmat[:, :, :, k-l+1])
     end
-    for isol in 1:2*intr.mpert
+    for isol in 1:2*intr.numpert_total
+        # CONTINUE FROM HERE - maybe try the same block representation as above?
         # a = M₀ - (α + k/2)I
         a = copy(singp.m0mat)
         a[1, 1] -= k / 2.0 + singp.power[isol]
