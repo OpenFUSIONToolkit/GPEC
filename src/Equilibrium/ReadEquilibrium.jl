@@ -267,9 +267,12 @@ Parses a binary CHEASE file, creates initial 1D and 2D splines, and bundles
 them into a `InverseRunInput` object.
 
 ## Arguments:
-- `equil_config`: The `EquilConfig` object containing the filename and parameters.
+
+  - `equil_config`: The `EquilConfig` object containing the filename and parameters.
+
 ## Returns:
-- A `InverseRunInput` object ready for the inverse solver.
+
+  - A `InverseRunInput` object ready for the inverse solver.
 """
 function read_chease(config::EquilibriumConfig)
     println("--> Reading CHEASE file: $(config.control.eq_filename)")

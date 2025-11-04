@@ -207,7 +207,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 end
 
 """
-This function handles the Soloviev analytical equilibrium model, transforming the input parameters
+This function handles the Solovev analytical equilibrium model, transforming the input parameters
 into the necessary splines and scalar values for equilibrium construction. This is a Julia version
 of the Fortran code in sol.f, with no major differences except for arrays going from 0:n to 1:n+1.
 

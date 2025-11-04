@@ -27,7 +27,7 @@ end
     FieldLineDerivParams
 
 A struct to hold constant parameters for the ODE integration, making them
-easily accessible within the derivative function `direct_fl_der!`.
+easily accessible within the derivative function `direct_fieldline_der!`.
 """
 struct FieldLineDerivParams
     ro::Float64
@@ -64,7 +64,7 @@ function direct_get_bfield!(
     r::Float64,
     z::Float64,
     psi_in::Spl.BicubicSpline,
-    sq_in::Spl.CubicSpline,
+    sq_in::Spl.CubicSpline{Float64},
     psio::Float64;
     derivs::Int=0
 )
@@ -113,12 +113,14 @@ function direct_get_bfield!(
 end
 
 """
-    direct_position(raw_profile)
+    direct_position!(raw_profile)
 
 Finds the key geometric locations of the equilibrium: the magnetic axis (O-point)
-and the inboard/outboard separatrix crossings on the midplane. This performs the same
-overall function as the Fortran `direct_position` subroutine with better iteration
-control and error handling. We have also added a helper function for separatrix finding.
+and the inboard/outboard separatrix crossings on the midplane. It also updates the
+spline representing the poloidal flux `ψ(R,Z)` based on the new magnetic axis location.
+This function performs the same overall function as the Fortran `direct_position`
+subroutine with better iteration control and error handling. We have also added a
+helper function for separatrix finding.
 
 ## Arguments:
 
@@ -132,7 +134,7 @@ control and error handling. We have also added a helper function for separatrix 
   - `rs2`: R-coordinate of the outboard separatrix crossing [m].
   - `psi_in_new` : returns psi_in renormalized by * psio/psi(ro,zo)
 """
-function direct_position(raw_profile::DirectRunInput)
+function direct_position!(raw_profile::DirectRunInput)
 
     bfield = DirectBField()
     max_iterations = 200
@@ -182,10 +184,9 @@ function direct_position(raw_profile::DirectRunInput)
 
     # Renormalize psi based on the value at the magnetic axis
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=0)
-    fac = raw_profile.psio / bfield.psi
-    new_psi_fs = raw_profile.psi_in.fs .* fac
     x_coords = Vector(raw_profile.psi_in.xs)
     y_coords = Vector(raw_profile.psi_in.ys)
+    new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs; bctypex=3, bctypey=3)
 
@@ -444,7 +445,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
     # Find radial position of magnetic axis and separatrix
-    ro, zo, rs1, rs2 = direct_position(raw_profile)
+    ro, zo, rs1, rs2 = direct_position!(raw_profile)
 
     # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros(Float64, mpsi + 1, 4)
@@ -517,7 +518,6 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
             jacfac = f[4]
-
 
             v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) * d(rfac)/d(psi_norm)
             v[1, 2] = fx[2] * 2π * rfac                             # 2π*rfac * d(eta)/d(psi_norm)

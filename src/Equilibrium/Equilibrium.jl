@@ -18,7 +18,7 @@ include("AnalyticEquilibrium.jl")
 export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutput, PlasmaEquilibrium, EquilibriumParameters
 
 # --- Constants ---
-const mu0 = 4.0 * pi * 1e-7
+const mu0 = 4π * 1e-7
 
 """
     setup_equilibrium(equil_input::EquilInput)
@@ -100,7 +100,6 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     # Diagnoses grad-shafranov solution.
     equilibrium_gse!(plasma_equilibrium)
 
-    println("--- Equilibrium Setup Complete ---")
     return plasma_equilibrium
 end
 
@@ -108,12 +107,12 @@ end
     equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
 Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext).
+Performs the same function as equil_out_sep_find in the Fortran code.
 """
 function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     rzphi = pe.rzphi
     mpsi = size(rzphi.fs, 1) - 1
     mtheta = size(rzphi.fs, 2) - 1
-    twopi = 2π
 
     # Allocate vector to store eta offset from rzphi
     vector = zeros(Float64, mtheta + 1)
@@ -142,7 +141,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             end
         end
         f = Spl.bicube_eval!(rzphi, psifac, theta)
-        rsep[iside] = pe.ro + sqrt(f[1]) * cos(twopi * (theta + f[2]))
+        rsep[iside] = pe.ro + sqrt(f[1]) * cos(2π * (theta + f[2]))
         eta0 = 0.5
         idx = findmin(abs.(vector .- eta0))[2]
         theta = rzphi.ys[idx]
@@ -168,9 +167,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             rfac = sqrt(r2)
             rfac1 = r2y / (2 * rfac)
             rfac2 = (r2yy - r2y * rfac1 / rfac) / (2 * rfac)
-            phase = twopi * (theta + eta)
-            phase1 = twopi * (1 + eta1)
-            phase2 = twopi * eta2
+            phase = 2π * (theta + eta)
+            phase1 = 2π * (1 + eta1)
+            phase2 = 2π * eta2
             cosfac = cos(phase)
             sinfac = sin(phase)
             z = pe.zo + rfac * sinfac
@@ -194,13 +193,18 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     return (rsep, zsep, rext, zext)
 end
 
+"""
+    equilibrium_global_parameters!(pe::PlasmaEquilibrium)
+
+Computes and populates global equilibrium parameters in the `PlasmaEquilibrium`
+struct, such as rmean, amean, kappa, bt0, crnt, betat, betan, li1, etc. Performs
+the same function as equil_out_global in the Fortran code.
+"""
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     rzphi = pe.rzphi
     sq = pe.sq
     mpsi = size(rzphi.fs, 1) - 1
     mtheta = size(rzphi.fs, 2) - 1
-    twopi = 2π
-    mu0 = 4π * 1e-7
 
     # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
@@ -212,7 +216,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
     dpsi = 1.0 - rzphi.xs[mpsi+1]
-    bt0 = (sq.fs[mpsi+1, 1] + sq.fs1[mpsi+1, 1] * dpsi) / (twopi * rmean)
+    bt0 = (sq.fs[mpsi+1, 1] + sq.fs1[mpsi+1, 1] * dpsi) / (2π * rmean)
 
     pe.params.rmean = rmean
     pe.params.amean = amean
@@ -229,24 +233,24 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     for itheta in 0:mtheta
         f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[mpsi+1], rzphi.ys[itheta+1])
         jac = f[4]
-        chi1 = twopi * psio / jac
+        chi1 = 2π * psio / jac
         jacfac = π / jac
         rfac = sqrt(f[1])
-        eta = twopi * (rzphi.ys[itheta+1] + f[2])
+        eta = 2π * (rzphi.ys[itheta+1] + f[2])
         r = pe.ro + rfac * cos(eta)
-        v21 = jacfac * fy[1] / (twopi * rfac)
+        v21 = jacfac * fy[1] / (2π * rfac)
         v22 = jacfac * (1 + fy[2]) * (2 * rfac)
-        v33 = jacfac * twopi * (r / π)
+        v33 = jacfac * 2π * (r / π)
         dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
-        gs1[itheta+1] = sqrt(dvsq) / (twopi * r)
-        gs2[itheta+1] = chi1 * dvsq / (twopi * r)^2
+        gs1[itheta+1] = sqrt(dvsq) / (2π * r)
+        gs2[itheta+1] = chi1 * dvsq / (2π * r)^2
     end
 
     int1 = sum(gs1) / (mtheta + 1)
     int2 = sum(gs2) / (mtheta + 1)
     crnt = int2 / (1e6 * mu0)
     bp0 = int2 / int1
-    bwall = 1e6 * mu0 * crnt / (twopi * amean)
+    bwall = 1e6 * mu0 * crnt / (2π * amean)
 
     pe.params.crnt = crnt
     pe.params.bwall = bwall
@@ -298,11 +302,17 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.betap3 = betap3
     pe.params.li1 = li1
     pe.params.li2 = li2
-    return pe.params.li3 = li3
+    pe.params.li3 = li3
 end
 
+"""
+    equilibrium_qfind!(equil::PlasmaEquilibrium)
+
+Finds the extrema of the safety factor profile q(ψ) in the plasma equilibrium
+and computes derived q-values such as q0, qmin, qmax, qa, and q95. Performs
+the same function as equil_out_qfind in the Fortran code.
+"""
 function equilibrium_qfind!(equil::PlasmaEquilibrium)
-    println("Finding q profile...")
 
     sq = equil.sq
     mpsi = length(sq.xs) - 1
@@ -357,23 +367,22 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     f95 = Spl.spline_eval!(sq, 0.95)
     q95 = f95[4]
 
-
-    # Print and store
-    println(
-        "q0: $q0, qmin: $qmin, qmax: $qmax, qa: $qa, q95: $q95, qmax_edge: $qmax_edge, psiexl: $(equil.params.qextrema_psi), qexl: $(equil.params.qextrema_q), mextrema: $(equil.params.mextrema)"
-    )
-
+    # Store derived values
     equil.params.q0 = q0
     equil.params.qmin = qmin
     equil.params.qmax = qmax
     equil.params.qa = qa
     equil.params.q95 = q95
-
-    return equil
 end
 
+"""
+    equilibrium_gse!(equil::PlasmaEquilibrium)
+
+Diagnoses the Grad-Shafranov solution by computing the residual of the
+Grad-Shafranov equation across the grid and writing diagnostic data to HDF5 files.
+Performs the same function as equil_out_gse in the Fortran code.
+"""
 function equilibrium_gse!(equil::PlasmaEquilibrium)
-    println("Diagnosing Grad-Shafranov solution...")
 
     rzphi = equil.rzphi
     sq = equil.sq
@@ -381,8 +390,12 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     ro, zo = equil.ro, equil.zo
     psio = equil.psio
     verbose = equil.params.verbose
-    diagnose_src = true #equil.params.diagnose_src
+    diagnose_src = equil.params.diagnose_src
     diagnose_maxima = equil.params.diagnose_maxima
+
+    if verbose
+        println("Diagnosing Grad-Shafranov solution...")
+    end
 
     rfac = zeros(Float64, mtheta + 1)
     angle = zeros(Float64, mtheta + 1)
@@ -418,9 +431,6 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             end
         end
     end
-
-
-
     flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs; bctypex="extrap", bctypey="periodic")
 
     source = zeros(Float64, mpsi + 1, mtheta + 1)
@@ -471,7 +481,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     errlogi = @. ifelse(errori > 0, log10(errori), 0.0)
 
     if diagnose_src
-        println("Writing diagnostics to HDF5 files...")
+        if verbose
+            println("Writing diagnostics to HDF5 files...")
+        end
 
         # Write contour data
         h5open(joinpath(dirname(equil.config.control.eq_filename), "gsec.h5"), "w") do file
@@ -484,7 +496,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["source"] = Float32.(source)
             file["total"] = Float32.(total)
             file["error"] = Float32.(error)
-            return file["errlog"] = Float32.(errlog)
+            file["errlog"] = Float32.(errlog)
         end
 
         # Write xy plot data
@@ -501,7 +513,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
                     gse_data[ipsi+1, itheta+1, 7] = Float32(error[ipsi+1, itheta+1])
                 end
             end
-            return file["gse_data"] = gse_data
+            file["gse_data"] = gse_data
         end
 
         # Write integrated error criterion
@@ -510,10 +522,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["term"] = Float32.(term)
             file["totali"] = Float32.(totali)
             file["errori"] = Float32.(errori)
-            return file["errlogi"] = Float32.(errlogi)
+            file["errlogi"] = Float32.(errlogi)
         end
     end
-    return equil
 end
 
 end # module Equilibrium
