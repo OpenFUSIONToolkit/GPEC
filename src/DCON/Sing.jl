@@ -628,11 +628,11 @@ Implement kin_flag functionality
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,DconInternal,OdeState,DconOutput},
+        FourFitVars,DconInternal,OdeState},
     psieval::Float64)
 
     # Unpack structs
-    ctrl, equil, ffit, intr, odet, _ = params
+    ctrl, equil, ffit, intr, odet = params
 
     # Spline evaluation
     odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
