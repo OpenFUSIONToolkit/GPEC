@@ -15,14 +15,11 @@ including solution vectors, tolerances, and flags for the integration process.
     # Saved data throughout integration
     step::Int = 1                    # current step of integration (this is like istep in Fortran)
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)  # psi at each step of integration
+    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)    # q at each step of integration
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, mpert, 2, numsteps_init) # store of u at each step of integration
     ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, mpert, 2, numsteps_init) # store of ud at each step of integration
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, mpert, 2, msing) # asymptotic coefficients just right of singular surface
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, mpert, 2, msing) # asymptotic coefficients just left of singular surface
-    index::Array{Int,2} = zeros(Int, mpert, numunorms_init)                                   # indices for sorting solutions
-    sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
-    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, numunorms_init)             # fixup factors for Gaussian reduction
-    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)  # dW at each step in the edge
@@ -39,9 +36,6 @@ including solution vectors, tolerances, and flags for the integration process.
     psimax::Float64 = 0.0         # maximum psi value for the integrator
     singfac::Float64 = 0.0      # separation from singular surface in terms of m - nq
     next::String = ""           # next integration action ("cross" or "finish")
-    psi_prev::Float64 = 0.0     # previous psi value
-    crit_prev::Float64 = 0.0    # previous crit value
-    u_prev::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, 2) # previous solution array
     nzero::Int = 0              # count of zero crossings detected
 
     # Used for Gaussian reduction
@@ -49,6 +43,10 @@ including solution vectors, tolerances, and flags for the integration process.
     unorm::Vector{Float64} = zeros(Float64, mpert)                        # norms of solution vectors
     unorm0::Vector{Float64} = zeros(Float64, mpert)                       # initial norms of solution vectors
     ifix::Int = 0                # index for number of unorms performed
+    index::Array{Int,2} = zeros(Int, mpert, numunorms_init)                                   # indices for sorting solutions
+    sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
+    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, numunorms_init)             # fixup factors for Gaussian reduction
+    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
 
     # Temporary matrices for sing_der calculations
     amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
@@ -61,18 +59,6 @@ including solution vectors, tolerances, and flags for the integration process.
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, mpert)
 end
-
-# Base struct that handles storage of the ODE solution throughout integration
-mutable struct OdeDataStore
-    psi::Vector{Float64}
-    u::Vector{Array{ComplexF64,3}}
-    ud::Vector{Array{ComplexF64,3}}
-    step::Int
-end
-
-# Initialize function for data storage object of a given size, will resize as needed
-OdeDataStore(numsteps_init::Int) =
-    OdeDataStore(Vector{Float64}(undef, numsteps_init), Vector{Array{ComplexF64,3}}(undef, numsteps_init), Vector{Array{ComplexF64,3}}(undef, numsteps_init), 0)
 
 # Initialize function for OdeState with relevant parameters for array initialization
 OdeState(mpert::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; mpert, numsteps_init, numunorms_init, msing)
@@ -154,7 +140,10 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
         trim_storage!(odet)
     end
 
-    # form the true solution vectors, undoing the Gaussian reduction applied during fixups throughout the integration
+    # Evaluate stability criterion (critical determinant) of saved solutions
+    odet.nzero = evaluate_stability_criterion(ctrl, equil, intr, odet, outp)
+
+    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
     transform_u!(odet, intr)
 
     if outp.write_euler_h5
@@ -168,7 +157,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
             euler_h5["info/qlim"] = intr.qlim
             euler_h5["integration/nstep"] = odet.step
             euler_h5["integration/psi"] = odet.psi_store
-            euler_h5["integration/q"] = Spl.spline_eval(equil.sq, odet.psi_store, 0)[4]
+            euler_h5["integration/q"] = odet.q_store
             if !ctrl.vac_flag # we normalize by wt before dumping if calling free_run
                 euler_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
                 euler_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
@@ -293,8 +282,6 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     for ipert in 1:intr.mpert
         odet.u[ipert, ipert, 2] = 1
     end
-    odet.u_prev .= odet.u
-    odet.psi_prev = odet.psifac
 
     # Compute conditions at next singular surface
     if false #TODO: (kin_flag)
@@ -333,7 +320,6 @@ end
 #     # Allocate and initialize solution arrays
 #     u      = zeros(Complex{r8}, mpert, mpert, 2)
 #     du     = zeros(Complex{r8}, mpert, mpert, 2)
-#     u_prev = zeros(Complex{r8}, mpert, mpert, 2)
 #     unorm0 = zeros(r8, 2*mpert)
 #     unorm  = zeros(r8, 2*mpert)
 #     index  = zeros(Int, 2*mpert)
@@ -350,8 +336,6 @@ end
 #             u[i, j, k] = ua[i, mpert+j, k]
 #         end
 #     end
-#     u_prev .= u
-#     psi_prev = psifac
 #     msol = mpert
 #     neq = 4 * mpert * msol
 
@@ -452,24 +436,14 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
         singp = intr.sing[odet.ising] # Update singp
         odet.psimax = singp.psifac - ctrl.singfac_min / abs(ctrl.nn * singp.q1)
         odet.m1 = round(Int, ctrl.nn * singp.q, RoundFromZero)
-        if outp.write_crit_out
-            write_output(outp, :crit_out, @sprintf("   ising   psi         q          di      re alpha   im alpha\n"))
-            write_output(outp, :crit_out, @sprintf("%6d%11.3e%11.3e%11.3e%11.3e%11.3e\n", odet.ising, singp.psifac, singp.q, singp.di, real(singp.alpha), imag(singp.alpha)))
-        end
     end
 
     # Restart ode solver
     odet.new = true
     odet.psi_store[odet.step] = odet.psifac # Store current psi
+    odet.q_store[odet.step] = odet.q # Store current q
     odet.u_store[:, :, :, odet.step] = odet.u   # Store current u
     odet.step += 1 # Advance step to account for crossing step
-    odet.u_prev .= odet.u
-    odet.psi_prev = odet.psifac
-
-    # Write next header before continuing integration
-    if outp.write_crit_out
-        write_output(outp, :crit_out, "    psifac      dpsi        q       singfac     eval1")
-    end
 end
 
 # Example stub for kinetic crossing
@@ -494,16 +468,17 @@ the solution at the new point.
 
 ### TODOs
 
-Check if additional output is needed at the start and end of integration
 Check sensitivity of results to tolerances, currently using same logic as Fortran
 Check absolute tolerances, currently only relative tolerances are updated
 """
 function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
 
-    # Set up the callback to be run at every step
+    # Callback to be run at every step, handles fixups, tolerances, and data storage
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
 
     # Choose integration bounds
+    # TODO: Nik is this needed?! If not, this function becomes extremely clean
+    # I think this is effectively "only integrate to exact equilibrium nodes"
     if ctrl.node_flag # TODO: I can't find any mention of what this flag is for, can we get rid of it?
         while odet.psifac >= equil.sq.xs[ix]
             ix += 1
@@ -514,14 +489,6 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         psiout = odet.psimax
     end
 
-    # TODO: need input here! Fortran emphasized that it was important to record data at the first and last step
-    # However, the recording for u, ud, psi is now done after integration. Is there anything still within
-    # ode_output_step that needs to be recorded with this precision, or can it just be called within the
-    # callback? Currently, ode_output_step does: ode_output_monitor (crit values), and in Fortran also does
-    # ode_output_get_evals, and ode_output_sol
-    # We don't use the `first` variable, and instead call the functions directly here before/after integration
-    ode_output_step(ctrl, equil, intr, odet, outp)
-
     # Advance differential equation to next singular surface or edge
     rtol, atol = compute_tols(ctrl, intr, odet) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (odet.psifac, psiout), (ctrl, equil, ffit, intr, odet, outp))
@@ -531,9 +498,6 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Update u and psifac with the solution at the end of the interval
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
-
-    # TODO: same as above, this might not be needed
-    ode_output_step(ctrl, equil, intr, odet, outp) # always output final condition
 
     println("   ψ = $(odet.psifac), max u = $(maximum(abs, odet.u)), steps = $(odet.step-1)")
 end
@@ -563,13 +527,6 @@ function integrator_callback!(integrator)
     ode_unorm!(odet, ctrl, intr, outp, false)
     integrator.u .= odet.u # Update integrator.u with normalized odet.u
 
-    # Compute eigenvalues and check for zero crossing
-    # TODO: this logic can be updated - technically, if we save crit to memory,
-    # we could do all these calculations in post processing if a stability calculation
-    # is desired. If we keep it here, I'd rename to `check_for_zero_crossing` (what is
-    # current `ode_output_monitor`). A lot of `ode_output.f` has been deprecated due to
-    # in-memory integration
-    ode_output_step(ctrl, equil, intr, odet, outp)
     # Compute total dW in edge region (if `psiedge < psilim`)
     # Same as above, this could technically be done in post processing if desired
     ode_record_edge_dW!(odet, ctrl, equil, ffit, intr)
@@ -580,6 +537,7 @@ function integrator_callback!(integrator)
     end
     # Save values
     odet.psi_store[odet.step] = odet.psifac
+    odet.q_store[odet.step] = odet.q
     odet.u_store[:, :, :, odet.step] .= odet.u
     odet.ud_store[:, :, :, odet.step] .= odet.ud
     # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
@@ -621,7 +579,7 @@ function compute_tols(ctrl, intr, odet)
         end
     end
     rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
-    # Absolute tolerances
+    # Absolute tolerances (not used for now)
     atol = similar(odet.u, Float64)
     for ieq in 1:size(odet.u, 3), isol in 1:size(odet.u, 2)
         @views atol0 = maximum(abs, odet.u[:, isol, ieq]) * tol
@@ -646,16 +604,19 @@ function resize_storage!(odet::OdeState)
     u_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
     ud_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
     psi_new = Vector{Float64}(undef, newlen)
+    q_new = Vector{Float64}(undef, newlen)
 
     # Copy old data
     u_new[:, :, :, 1:odet.step] = odet.u_store[:, :, :, 1:odet.step]
     ud_new[:, :, :, 1:odet.step] = odet.ud_store[:, :, :, 1:odet.step]
     psi_new[1:odet.step] = odet.psi_store[1:odet.step]
+    q_new[1:odet.step] = odet.q_store[1:odet.step]
 
     # Replace old arrays
     odet.u_store = u_new
     odet.ud_store = ud_new
     odet.psi_store = psi_new
+    odet.q_store = q_new
 end
 
 """
@@ -667,6 +628,7 @@ removing any unused allocated space.
 """
 function trim_storage!(odet::OdeState)
     resize!(odet.psi_store, odet.step)
+    resize!(odet.q_store, odet.step)
     odet.u_store = odet.u_store[:, :, :, 1:odet.step]
     odet.ud_store = odet.ud_store[:, :, :, 1:odet.step]
 end
@@ -726,15 +688,6 @@ relevant data are stored in memory instead of dumped to `euler.bin`. Used when
 the spread in norms exceeds a threshold or when a rational surface is reached.
 """
 function ode_fixup!(odet::OdeState, intr::DconInternal, outp::DconOutput, sing_flag::Bool)
-
-    # Write to output
-    if outp.write_crit_out
-        write_output(outp, :crit_out, "\n   psifac      dpsi        q       singfac     eval1")
-        write_output(outp, :crit_out, @sprintf("\nGaussian Reduction at psi = %10.3e, q = %6.3f\n", odet.psifac, odet.q))
-        if !sing_flag
-            write_output(outp, :crit_out, "   psifac      dpsi        q       singfac     eval1\n")
-        end
-    end
 
     # Store data for the current fixup
     ifix = odet.ifix
@@ -796,42 +749,6 @@ function ode_record_edge_dW!(odet::OdeState, ctrl::DconControl, equil::Equilibri
             odet.wvmat_spline_created = true
         end
         odet.dW_edge[odet.step] = free_compute_total(equil, ffit, intr, odet)
-    end
-end
-
-"""
-    get_psi_saves!(odet::OdeState, ctrl::DconControl, intr::DconInternal)
-
-Calculates the psi values at which to save the solution during ODE integration based on specified spacing type,
-number of saves per region, and number of rational surfaces, and saves into `odet.psi_save_nodes`. Note that
-`odet.psi_save_nodes` does not store the start/endpoints, since those are saved automatically.
-"""
-# TODO: this is no longer used, but might be useful code? Leaving for now, but likely can be removed
-function get_psi_saves!(odet::OdeState, ctrl::DconControl, intr::DconInternal)
-
-    # This function is called after the ode init functions, so the starting psi is stored in odet.psifac
-    # This repeats some logic used in the init and cross functions
-
-    # Loop through interrational intervals (just one interval if no rational surfaces)
-    for ising in 1:intr.msing+1
-        # Determine bottom of interrational interval
-        if ising == 1
-            psibot = odet.psifac
-        else
-            psibot = intr.sing[ising-1].psifac + ctrl.singfac_min / abs(ctrl.nn * intr.sing[ising-1].q1)
-        end
-        # Determine top of interrational interval
-        if ising <= intr.msing
-            psitop = intr.sing[ising].psifac - ctrl.singfac_min / abs(ctrl.nn * intr.sing[ising].q1)
-        else
-            psitop = intr.psilim * (1 - eps)
-        end
-        # Calculate save nodes in interval
-        if ctrl.save_spacing == "Chebyshev"
-            odet.psi_saves[(ising-1)*ctrl.saves_per_region+1:ising*ctrl.saves_per_region] = chebyshev_nodes(psibot, psitop, ctrl.saves_per_region)
-        else
-            error("Cannot recognize save_spacing = $(ctrl.save_spacing)")
-        end
     end
 end
 
