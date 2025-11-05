@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Spline Examples · JPEC.jl</title><meta name="title" content="Spline Examples · JPEC.jl"/><meta property="og:title" content="Spline Examples · JPEC.jl"/><meta property="twitter:title" content="Spline Examples · JPEC.jl"/><meta name="description" content="Documentation for JPEC.jl."/><meta property="og:description" content="Documentation for JPEC.jl."/><meta property="twitter:description" content="Documentation for JPEC.jl."/><meta property="og:url" content="https://OpenFUSIONToolkit.github.io/JPEC/examples/splines/"/><meta property="twitter:url" content="https://OpenFUSIONToolkit.github.io/JPEC/examples/splines/"/><link rel="canonical" href="https://OpenFUSIONToolkit.github.io/JPEC/examples/splines/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">JPEC.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../splines/">Splines</a></li><li><a class="tocitem" href="../../vacuum/">Vacuum</a></li><li><a class="tocitem" href="../../equilibrium/">Equilibrium</a></li></ul></li><li><span class="tocitem">Examples</span><ul><li class="is-active"><a class="tocitem" href>Spline Examples</a><ul class="internal"><li><a class="tocitem" href="#1D-Cubic-Spline-Interpolation"><span>1D Cubic Spline Interpolation</span></a></li><li><a class="tocitem" href="#2D-Bicubic-Spline-Interpolation"><span>2D Bicubic Spline Interpolation</span></a></li><li><a class="tocitem" href="#Performance-Tips"><span>Performance Tips</span></a></li></ul></li><li><a class="tocitem" href="../vacuum/">Vacuum Examples</a></li><li><a class="tocitem" href="../equilibrium/">Equilibrium Examples</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Spline Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Spline Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC/blob/develop/docs/src/examples/splines.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Spline-Examples"><a class="docs-heading-anchor" href="#Spline-Examples">Spline Examples</a><a id="Spline-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Spline-Examples" title="Permalink"></a></h1><p>This page demonstrates the usage of the Splines module with practical examples.</p><h2 id="1D-Cubic-Spline-Interpolation"><a class="docs-heading-anchor" href="#1D-Cubic-Spline-Interpolation">1D Cubic Spline Interpolation</a><a id="1D-Cubic-Spline-Interpolation-1"></a><a class="docs-heading-anchor-permalink" href="#1D-Cubic-Spline-Interpolation" title="Permalink"></a></h2><h3 id="Basic-Usage"><a class="docs-heading-anchor" href="#Basic-Usage">Basic Usage</a><a id="Basic-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage" title="Permalink"></a></h3><pre><code class="language-julia hljs">using JPEC, Plots
+
+# Create sample data
+xs = collect(range(0.0, stop=2π, length=21))
+fs = sin.(xs)
+fc = cos.(xs)
+
+# Combine into matrix (each column is a different quantity)
+fs_matrix = hcat(fs, fc)
+
+# Set up spline for 2 quantities
+spline = JPEC.SplinesMod.CubicSpline(xs, fs_matrix, 2)
+
+# Evaluate on fine grid
+xs_fine = collect(range(0.0, stop=2π, length=100))
+fs_fine = JPEC.SplinesMod.spline_eval(spline, xs_fine)
+
+# Plot results
+plot(xs_fine, fs_fine[:, 1], label=&quot;sin(x) spline&quot;, legend=:topright)
+plot!(xs_fine, fs_fine[:, 2], label=&quot;cos(x) spline&quot;)
+scatter!(xs, fs, label=&quot;sin(x) data&quot;)
+scatter!(xs, fc, label=&quot;cos(x) data&quot;)</code></pre><h3 id="Complex-valued-Splines"><a class="docs-heading-anchor" href="#Complex-valued-Splines">Complex-valued Splines</a><a id="Complex-valued-Splines-1"></a><a class="docs-heading-anchor-permalink" href="#Complex-valued-Splines" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Create complex exponential data
+xs = collect(range(0.0, stop=2π, length=20))
+fm = exp.(-im .* xs)  # e^(-ix)
+fp = exp.(im .* xs)   # e^(ix)
+
+# Combine complex data
+fs_matrix = hcat(fm, fp)
+
+# Set up complex spline
+spline = JPEC.SplinesMod.CubicSpline(xs, fs_matrix, 2)
+
+# Evaluate
+xs_fine = collect(range(0.0, stop=2π, length=100))
+fs_fine = JPEC.SplinesMod.spline_eval(spline, xs_fine)
+
+# Plot real and imaginary parts
+plot(xs_fine, real.(fs_fine[:, 1]), label=&quot;Re(e^(-ix))&quot;)
+plot!(xs_fine, imag.(fs_fine[:, 1]), label=&quot;Im(e^(-ix))&quot;)</code></pre><h2 id="2D-Bicubic-Spline-Interpolation"><a class="docs-heading-anchor" href="#2D-Bicubic-Spline-Interpolation">2D Bicubic Spline Interpolation</a><a id="2D-Bicubic-Spline-Interpolation-1"></a><a class="docs-heading-anchor-permalink" href="#2D-Bicubic-Spline-Interpolation" title="Permalink"></a></h2><h3 id="Basic-2D-Function"><a class="docs-heading-anchor" href="#Basic-2D-Function">Basic 2D Function</a><a id="Basic-2D-Function-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-2D-Function" title="Permalink"></a></h3><pre><code class="language-julia hljs">using JPEC, Plots
+
+# Create 2D grid
+xs = collect(range(0.0, stop=2π, length=20))
+ys = collect(range(0.0, stop=2π, length=20))
+
+# Create 2D function data
+fs1 = sin.(xs&#39;) .* cos.(ys) .+ 1.0
+fs2 = cos.(xs&#39;) .* sin.(ys) .+ 1.0
+
+# Prepare data array (nx × ny × nquantities)
+fs = zeros(20, 20, 2)
+fs[:, :, 1] = fs1
+fs[:, :, 2] = fs2
+
+# Set up bicubic spline
+bcspline = JPEC.SplinesMod.bicube_setup(xs, ys, fs, 2, 2)
+
+# Evaluate on fine grid
+xs_fine = collect(range(0.0, stop=2π, length=100))
+ys_fine = collect(range(0.0, stop=2π, length=100))
+fs_fine = JPEC.SplinesMod.bicube_eval(bcspline, xs_fine, ys_fine)
+
+# Create contour plot
+contourf(xs_fine, ys_fine, fs_fine[:, :, 1]&#39;,
+         title=&quot;Bicubic Spline: sin(x)cos(y) + 1&quot;)</code></pre><h3 id="With-Derivatives"><a class="docs-heading-anchor" href="#With-Derivatives">With Derivatives</a><a id="With-Derivatives-1"></a><a class="docs-heading-anchor-permalink" href="#With-Derivatives" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Evaluate with first derivatives
+fs_fine, fsx_fine, fsy_fine = JPEC.SplinesMod.bicube_eval(bcspline, xs_fine, ys_fine, 1)
+
+# Plot function and derivatives
+p1 = contourf(xs_fine, ys_fine, fs_fine[:, :, 1]&#39;, title=&quot;f(x,y)&quot;)
+p2 = contourf(xs_fine, ys_fine, fsx_fine[:, :, 1]&#39;, title=&quot;∂f/∂x&quot;)
+p3 = contourf(xs_fine, ys_fine, fsy_fine[:, :, 1]&#39;, title=&quot;∂f/∂y&quot;)
+
+plot(p1, p2, p3, layout=(1,3), size=(1200, 400))</code></pre><h3 id="Equilibrium-Example"><a class="docs-heading-anchor" href="#Equilibrium-Example">Equilibrium Example</a><a id="Equilibrium-Example-1"></a><a class="docs-heading-anchor-permalink" href="#Equilibrium-Example" title="Permalink"></a></h3><p>This example shows spline usage with the Solov&#39;ev equilibrium:</p><pre><code class="language-julia hljs"># Create equilibrium parameters
+kappa = 1.8  # elongation
+a = 1.0      # minor radius
+r0 = 3.5     # major radius
+q0 = 1.25    # safety factor
+
+# Create spatial grid
+mr, mz = 40, 43
+rmin, rmax = r0 - 1.5*a, r0 + 1.5*a
+zmin, zmax = -1.5*kappa*a, 1.5*kappa*a
+
+rs = collect(range(rmin, stop=rmax, length=mr))
+zs = collect(range(zmin, stop=zmax, length=mz))
+
+# Create Solov&#39;ev equilibrium psi field
+f0 = r0 * 1.0  # b0fac = 1.0
+psio = kappa * f0 * a^2 / (2 * q0 * r0)
+psifac = psio / (a*r0)^2
+efac = 1/kappa^2
+
+psifs = zeros(mr, mz, 1)
+for i in 1:mr, j in 1:mz
+    psifs[i, j, 1] = psio - psifac * (efac * (rs[i] * zs[j])^2 + (rs[i]^2-r0^2)^2/4)
+end
+
+# Set up bicubic spline for psi
+psi_spline = JPEC.SplinesMod.bicube_setup(rs, zs, psifs, 3, 3)
+
+# Evaluate on fine grid for plotting
+rs_fine = collect(range(rmin, stop=rmax, length=110))
+zs_fine = collect(range(zmin, stop=zmax, length=100))
+psi_fine = JPEC.SplinesMod.bicube_eval(psi_spline, rs_fine, zs_fine)
+
+# Create contour plot
+contourf(rs_fine, zs_fine, psi_fine[:, :, 1]&#39;,
+         title=&quot;Ψ: Solov&#39;ev Equilibrium&quot;,
+         xlabel=&quot;R&quot;, ylabel=&quot;Z&quot;,
+         aspect_ratio=:equal)</code></pre><h2 id="Performance-Tips"><a class="docs-heading-anchor" href="#Performance-Tips">Performance Tips</a><a id="Performance-Tips-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Tips" title="Permalink"></a></h2><ol><li><strong>Batch evaluations</strong>: Evaluate multiple points simultaneously for better performance</li><li><strong>Memory management</strong>: Splines should not be re-created frequently; reuse existing spline objects</li></ol></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../equilibrium/">« Equilibrium</a><a class="docs-footer-nextpage" href="../vacuum/">Vacuum Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.14.1 on <span class="colophon-date" title="Wednesday 5 November 2025 17:59">Wednesday 5 November 2025</span>. Using Julia version 1.11.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
