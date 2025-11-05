@@ -686,8 +686,8 @@ function findmax_dW_edge!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
 
     # Loop through integration, compute dW at steps where psifac >= psiedge
     for istep in 1:odet.step
+        odet.psifac = odet.psi_store[istep]
         if odet.psifac >= ctrl.psiedge
-            odet.psifac = odet.psi_store[istep]
             odet.u .= odet.u_store[:, :, :, istep]
             odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
         end
