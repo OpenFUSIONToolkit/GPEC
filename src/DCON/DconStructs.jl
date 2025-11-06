@@ -76,7 +76,6 @@ end
     vac_flag::Bool = false
     mer_flag::Bool = false
     fft_flag::Bool = false
-    node_flag::Bool = false
     mthvac::Int = 480
     sing_start::Int = 0
     nn::Int = 0

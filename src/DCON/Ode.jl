@@ -450,22 +450,9 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Callback to be run at every step, handles fixups, tolerances, and data storage
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
 
-    # Choose integration bounds
-    # TODO: Nik is this needed?! If not, this function becomes extremely clean
-    # I think this is effectively "only integrate to exact equilibrium nodes"
-    if ctrl.node_flag # TODO: I can't find any mention of what this flag is for, can we get rid of it?
-        while odet.psifac >= equil.sq.xs[ix]
-            ix += 1
-        end
-        psiout = equil.sq.xs[ix]
-        psiout = min(psiout, odet.psimax)
-    else
-        psiout = odet.psimax
-    end
-
     # Advance differential equation to next singular surface or edge
     rtol = compute_tols(ctrl, intr, odet) # initial tolerances
-    prob = ODEProblem(sing_der!, odet.u, (odet.psifac, psiout), (ctrl, equil, ffit, intr, odet))
+    prob = ODEProblem(sing_der!, odet.u, (odet.psifac, odet.psimax), (ctrl, equil, ffit, intr, odet))
     sol = solve(prob, Tsit5(); reltol=rtol, callback=cb)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
