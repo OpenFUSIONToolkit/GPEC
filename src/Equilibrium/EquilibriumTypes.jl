@@ -1,20 +1,6 @@
-#=
-This file is the one stop shop for all the fundemental structures used in
-    creating equilibrium descriptions for the DCON ODE to use.
-=#
-
-using Base: @kwdef
-
-# --- Helper function ---
-
-
 function symbolize_keys(dict::Dict{String,Any})
     return Dict(Symbol(k) => v for (k, v) in dict)
 end
-
-
-# --- Main Structures for the Equilibrium Code ---
-
 
 @kwdef mutable struct EquilibriumControl
     eq_type::String = "efit"
@@ -91,7 +77,6 @@ end
     dump_flag::Bool = false
 end
 
-
 """
     EquilibriumConfig(...)
 
@@ -102,7 +87,6 @@ fortran namelsits.
     control::EquilibriumControl = EquilibriumControl()
     output::EquilibriumOutput = EquilibriumOutput()
 end
-#
 
 """
 Constructor that allows users to form a EquilibriumConfig struct from dictionaries
@@ -144,8 +128,6 @@ function EquilibriumConfig(path::String)
     return EquilibriumConfig(; control=control, output=output)
 end
 
-
-
 """
     LargeAspectRatioConfig(...)
 
@@ -165,21 +147,16 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
   - `zeroth`: If set to true, it neglects the Shafranov shift
 """
 @kwdef mutable struct LargeAspectRatioConfig
-    lar_r0::Float64 = 10.0    # Major radius of the plasma
-    lar_a::Float64 = 1.0      # Minor radius of the plasma
-
-    beta0::Float64 = 1e-3     # beta on axis
-    q0::Float64 = 1.5         # q (safety factor) on axis
-
-    p_pres::Float64 = 2.0     # p00 * (1-(r/a)**2)**p_pres
-    p_sig::Float64 = 1.0      # The exponent that determines the shape of the current-related function profile
-
-    sigma_type::String = "default" # can be 'default' or 'wesson'. If 'wesson', switch sigma profile to sigma0*(1-(r/a)**2)**p_sig
-
-    mtau::Int = 128       # the number of grid points in the poloidal direction
-    ma::Int = 128         # the number of grid points in the radial direction
-
-    zeroth::Bool = false     #  If set to true, it neglects the Shafranov shift, creating an ideal concentric circular cross-section.
+    lar_r0::Float64 = 10.0
+    lar_a::Float64 = 1.0
+    beta0::Float64 = 1e-3
+    q0::Float64 = 1.5
+    p_pres::Float64 = 2.0
+    p_sig::Float64 = 1.0
+    sigma_type::String = "default"
+    mtau::Int = 128
+    ma::Int = 128
+    zeroth::Bool = false
 end
 
 """
@@ -191,8 +168,6 @@ function LargeAspectRatioConfig(path::String)
     input_data = get(raw, "LAR_INPUT", Dict())
     return LargeAspectRatioConfig(; symbolize_keys(input_data)...)
 end
-
-
 
 """
     SolovevConfig(...)
@@ -226,7 +201,7 @@ A mutable struct holding parameters for the Solev'ev (SOL) plasma equilibrium mo
 end
 
 """
-Outer constructor for LarConfig that enables a toml file
+Outer constructor for SolovevConfig that enables a toml file
 interface for specifying the configuration settings
 """
 function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevConfig() so it conflicts with this line.
@@ -235,42 +210,41 @@ function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevCon
     return SolovevConfig(; symbolize_keys(input_data)...)
 end
 
-
 """
     DirectRunInput(...)
 
 A container struct that bundles all necessary inputs for the `direct_run` function.
-It is created by the `_read_efit` function after parsing the raw equilibrium file
-and preparing the initial splines.
+It is created by one of the equilibrium file read-in functions after processing the
+raw equilibrium data and preparing the initial splines.
 
-## Fields:
+## Fields
 
-  - `equil_input`: The original `EquilInput` object.
+  - `equil_input::EquilInput`
+    The original equilibrium input object.
+
   - `sq_in`
+    1D spline data versus normalized poloidal flux `psin`.
+    Quantities:
 
-    # x value: psin
+     1. `F = R * B_t` — toroidal flux function [m·T]
+     2. `μ₀ * Pressure` — plasma pressure (non-negative) [T²]
+     3. `q` — safety factor profile
+     4. `√ψ_norm` — square root of normalized flux
+  - `psi_in`
+    2D spline data on the (R, Z) grid [m].
+    The z-values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
+    Definitions:
 
-    # Quantity 1: F = R*Bt  [m T]
+     1. `ψ(R, Z) = ψ_boundary - ψ(R, Z)`
+     2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
-    # Quantity 2: mu0 * Pressure (non-negative) [nt^2 / m^2 * mu0 = T^2]
-
-    # Quantity 3: q-profile
-
-    # Quantity 4: sqrt(psi_norm)
-  - `psi_in`:
-
-    # x, y value: R, Z [m]
-
-    # z value : poloidal flux adjusted to be zero at the boundary [Weber/radian]
-
-    # 1. ψ(R,Z) = ψ_boundary - ψ(R,Z)
-
-    # 2. if ψ = ψ * sign(ψ(centerR,centerZ))       # 1D profile spline (CubicSpline)
-  - `rmin`: Minimum R-coordinate of the computational grid [m].      # 2D flux spline (BicubicSpline)
-  - `rmax`: Maximum R-coordinate of the computational grid [m].    # Minimum R-coordinate of the computational grid [m].
-  - `zmin`: Minimum Z-coordinate of the computational grid [m].    # Maximum R-coordinate of the computational grid [m].
-  - `zmax`: Maximum Z-coordinate of the computational grid [m].    # Minimum Z-coordinate of the computational grid [m].
-  - `psio`: The total flux difference `abs(ψ_axis - ψ_boundary)` [Weber / radian].    # Maximum Z-coordinate of the computational grid [m].
+          * 1D profiles are represented by `CubicSpline`
+          * 2D flux surfaces by `BicubicSpline`
+  - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
+  - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
+  - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
+  - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
+  - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
 mutable struct DirectRunInput
     config::EquilibriumConfig
@@ -300,8 +274,6 @@ mutable struct InverseRunInput
     zo::Float64          # Z axis location
     psio::Float64        # Total flux difference |psi_axis - psi_boundary|
 end
-
-
 
 @kwdef mutable struct EquilibriumParameters
     ro::Union{Nothing,Float64} = nothing # R-coordinate of the magnetic axis [m]
@@ -356,61 +328,46 @@ end
     li3::Union{Nothing,Float64} = nothing  # Total inductance at the axis
 end
 
-
-
-
-
 """
     PlasmaEquilibrium(...)
 
-The final, self-contained result of the equilibrium reconstruction. This object
-provides a complete representation of the processed plasma equilibrium in flux coordinates.
+The final, self-contained result of the equilibrium reconstruction.
+This object provides a complete representation of the processed plasma equilibrium in flux coordinates.
 
-## Fields:
+# Fields
 
-  - `equil_input`: The original `EquilInput` object used for the reconstruction.
-  - `sq`: The final 1D profile spline (`CubicSpline{Float64}`).
+  - `equil_input::EquilInput`:
+    The original `EquilInput` object used for the reconstruction.
 
-    # x value: normalized psi
+  - `sq::CubicSpline{Float64}`:
+    Final 1D profile spline.
 
-    # Quantity 1: Toroidal Field Function * 2π, `F * 2π` (where `F = R * B_toroidal`)
+      + **x value:** normalized ψ
+      + **Quantity 1:** Toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
+      + **Quantity 2:** Pressure × μ₀, `P * μ₀`
+      + **Quantity 3:** dV/dψ
+      + **Quantity 4:** q
+  - `rzphi::BicubicSpline`:
+    Final 2D flux-coordinate mapping spline.
 
-    # Quantity 2: Pressure * μ₀, `P * μ₀`.
+      + **x value:** normalized ψ
+      + **y value:** SFL poloidal angle ∈ [0, 1]
+      + **Quantity 1:** r_coord² = (R - ro)² + (Z - zo)²
+      + **Quantity 2:** Offset between the geometric poloidal angle (η) and the new angle (θₙₑw), η / (2π) - θₙₑw
+      + **Quantity 3:** ν in ϕ = 2πζ + ν(ψ, θ)
+      + **Quantity 4:** Jacobian
+  - `eqfun::BicubicSpline`:
+    2D spline storing local physics and geometric quantities that vary across flux surfaces.
+    These are precomputed for efficient use in subsequent stability and transport codes.
 
-    # Quantity 3: dVdpsi
-
-    # Quantity 4: q
-  - `rzphi`: The final 2D flux-coordinate mapping spline (`BicubicSpline`).
-
-    # x value: normlized psi
-
-    # y value: SFL poloidal angle [0,1]
-
-    # Quantity 1: r_coord² = (R - ro)² + (Z - zo)²
-
-    # Quantity 2: Offset between the geometric poloidal angle (η) and the new angle (θ_new)
-
-    `η / (2π) - θ_new
-
-    # Quantity 3: ν in ϕ=2πζ+ν(ψ,θ)
-
-    # Quantity 4: Jacobian.
-  - `eqfun`: A 2D spline storing local physics and geometric quantities that vary across the flux surfaces.
-           # Parameters for the equilibrium
-    # These are pre-calculated for efficient use in subsequent stability and transport codes.                     # Final 1D profile spline
-            # Final 2D coordinate mapping spline
-    # x value: Normalized poloidal flux, ψ_norm ∈ [0, 1].
-
-    # y value: SFL poloidal angle, θ_new ∈ [0, 1].
-
-    # Quantity 1: Total magnetic field strength, B [T]
-
-    # Quantity 2: (e₁⋅e₂ + q⋅e₃⋅e₁) / (J⋅B²).
-
-    # Quantity 3: (e₂⋅e₃ + q⋅e₃⋅e₃) / (J⋅B²).
-  - `ro`: R-coordinate of the magnetic axis [m].
-  - `zo`: Z-coordinate of the magnetic axis [m].
-  - `psio`: Total flux difference `|Ψ_axis - Ψ_boundary|` [Weber / radian].
+      + **x value:** normalized ψ ∈ [0, 1]
+      + **y value:** SFL poloidal angle θₙₑw ∈ [0, 1]
+      + **Quantity 1:** Total magnetic field strength, B [T]
+      + **Quantity 2:** (e₁⋅e₂ + q⋅e₃⋅e₁) / (J⋅B²)
+      + **Quantity 3:** (e₂⋅e₃ + q⋅e₃⋅e₃) / (J⋅B²)
+  - `ro::Float64`: R-coordinate of the magnetic axis [m]
+  - `zo::Float64`: Z-coordinate of the magnetic axis [m]
+  - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
 mutable struct PlasmaEquilibrium
     config::EquilibriumConfig
