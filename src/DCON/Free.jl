@@ -41,13 +41,11 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Evaluate dV/dpsi at the plasma edge
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
 
-    # Compute plasma response matrix.
+    # Compute plasma response matrix W = U₂ * U₁⁻¹ = adj(adj(U₁)⁻¹ * adj(U₂))
     if ctrl.ode_flag
-        temp .= adjoint(odet.u[:, 1:intr.mpert, 1])
-        wp .= adjoint(odet.u[:, 1:intr.mpert, 2])
-        # Compute wp using LU decomposition
-        temp_fact = lu(temp)
-        wp .= temp_fact \ wp
+        temp .= adjoint(odet.u[:, :, 1])
+        wp .= adjoint(odet.u[:, :, 2])
+        wp .= temp \ wp
         wp .= adjoint(wp) / equil.psio^2
     end
 

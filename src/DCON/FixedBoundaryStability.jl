@@ -104,13 +104,15 @@ in the Fortran code.
 """
 function compute_smallest_eigenvalue(psi::Float64, u::Array{ComplexF64,3}, sq::Spl.CubicSpline{Float64})
 
-    # Compute inverse plasma response matrix
-    # TODO: is this actually the inverse?
+    # Compute inverse plasma response matrix W = U₁ * U₂⁻¹ = adj(adj(U₂)⁻¹ * adj(U₁))
     wp_inverse = adjoint(u[:, :, 1])
     temp = adjoint(u[:, :, 2])
     wp_inverse = temp \ wp_inverse
 
-    # Symmetrize to be Hermitian
+    # Enforce that W is Hermitian
+    # TODO: Is this necessary? The DCON paper says W is Hermitian by construction.
+    # Couldn't this mask numerical issues we should be addressing directly?
+    # i.e. we should error out in the Hermitian eigenvalue solver if W is not Hermitian?
     wp_inverse .+= adjoint(wp_inverse)
     wp_inverse .*= 0.5
 

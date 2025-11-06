@@ -26,7 +26,7 @@ Performs the same function as `sing_find` in the Fortran code.
 """
 function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
-    # loop over all toroidal mode numbers
+    # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
@@ -75,6 +75,8 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
             end
         end
     end
+    # Sort singular surfaces by increasing ψ
+    intr.sing = sort(intr.sing, by = s -> s.psifac)
 end
 
 """
@@ -213,20 +215,18 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     
     # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
     # TODO: no idea if this is the correct way of doing this
-    M = length(singp.r1) # multiplicity
-    for i in 1:M # go block by block and do the same eigenvector solve/normalization?
+    for i in eachindex(singp.r1) # go block by block in M₀
         m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
-        rpert_1 = singp.r1[i]
-        rpert_2 = rpert_1 + intr.numpert_total
+        r1 = singp.r1[i]
+        r2 = r1 + intr.numpert_total
         alpha = singp.alpha[i]
-        singp.vmat[rpert_1, rpert_1, 1, 1] = 1
-        singp.vmat[rpert_1, rpert_2, 1, 1] = 1
-        singp.vmat[rpert_1, rpert_1, 2, 1] = -(m0mat[1, 1] + alpha) / m0mat[1, 2]
-        singp.vmat[rpert_1, rpert_2, 2, 1] = -(m0mat[1, 1] - alpha) / m0mat[1, 2]
-        det =
-            conj(singp.vmat[rpert_1, rpert_1, 1, 1]) * singp.vmat[rpert_1, rpert_2, 2, 1] -
-            conj(singp.vmat[rpert_1, rpert_2, 1, 1]) * singp.vmat[rpert_1, rpert_1, 2, 1]
-        singp.vmat[rpert_1, :, :, 1] ./= sqrt(det)
+        singp.vmat[r1, r1, 1, 1] = 1
+        singp.vmat[r1, r2, 1, 1] = 1
+        singp.vmat[r1, r1, 2, 1] = -(m0mat[1, 1] + alpha) / m0mat[1, 2]
+        singp.vmat[r1, r2, 2, 1] = -(m0mat[1, 1] - alpha) / m0mat[1, 2]
+        det = conj(singp.vmat[r1, r1, 1, 1]) * singp.vmat[r1, r2, 2, 1] -
+            conj(singp.vmat[r1, r2, 1, 1]) * singp.vmat[r1, r1, 2, 1]
+        singp.vmat[r1, :, :, 1] ./= sqrt(det)
     end
 
     # Higher order solutions - need to solve iteratively
@@ -514,16 +514,18 @@ function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
         singp.vmat[:, :, :, k+1] .+= sing_matmul(singp.mmat[:, :, :, l+1], singp.vmat[:, :, :, k-l+1])
     end
     for isol in 1:2*intr.numpert_total
-        # CONTINUE FROM HERE - maybe try the same block representation as above?
-        # a = M₀ - (α + k/2)I
-        a = copy(singp.m0mat)
-        a[1, 1] -= k / 2.0 + singp.power[isol]
-        a[2, 2] -= k / 2.0 + singp.power[isol]
-        det = a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]
-        # Solve the resonant indices
-        x = -singp.vmat[singp.r1[1], isol, :, k+1]
-        singp.vmat[singp.r1[1], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
-        singp.vmat[singp.r1[1], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
+        for i in eachindex(singp.r1) # go block by block?
+            # a = M₀ - (α + k/2)I (for multi-n 2D, we make a the ith block fo M₀)
+            m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+            a = copy(m0mat)
+            a[1, 1] -= k / 2.0 + singp.power[isol]
+            a[2, 2] -= k / 2.0 + singp.power[isol]
+            det = a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]
+            # Solve the resonant indices
+            x = -singp.vmat[singp.r1[i], isol, :, k+1]
+            singp.vmat[singp.r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
+            singp.vmat[singp.r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
+        end
         # Solve the non-resonant indices (where M₀v is in the null space?)
         singp.vmat[singp.n1, isol, :, k+1] ./= (singp.power[isol] + k / 2.0)
     end
@@ -584,26 +586,30 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     r2 = singp.r2
 
     # Compute distance from singular surface
-    dpsi = odet.psifac - singp.psifac
-    sqrtfac = sqrt(complex(dpsi)) # √zᵏ
-    pfac = abs(dpsi)^singp.alpha # zᵅ
+    dpsi = odet.psifac - singp.psifac # z
+    sqrtfac = sqrt(complex(dpsi)) # √z
 
     # Compute power series via Horner's method (eq. 45 in Glasser 2016)
     ua = copy(singp.vmat[:, :, :, 2*ctrl.sing_order+1])
     for iorder in (2*ctrl.sing_order-1):-1:0
-        ua .= ua .* sqrtfac .+ singp.vmat[:, :, :, iorder+1]
+        ua .= ua .* sqrtfac .+ singp.vmat[:, :, :, iorder+1] # sqrtfac becomes √zᵏ here
     end
 
-    # Restore powers (undo shearing transformation using z^(±0.5) and zᵅ)
-    ua[r1, :, 1] ./= sqrtfac
-    ua[r1, :, 2] .*= sqrtfac
-    ua[:, r2[1], :] ./= pfac
-    ua[:, r2[2], :] .*= pfac
+    # Do this for each alpha - this might change in 3D
+    # For now, just loop through resonances
+    for i in eachindex(r1)
+        # Restore powers (undo shearing transformation using z^(±0.5) and zᵅ)
+        pfac = abs(dpsi).^singp.alpha[i] # zᵅ
+        ua[r1[i], :, 1] ./= sqrtfac
+        ua[r1[i], :, 2] .*= sqrtfac
+        ua[:, r2[2 * i - 1], :] ./= pfac
+        ua[:, r2[2 * i], :] .*= pfac
 
-    # Renormalize
-    if odet.psifac < singp.psifac
-        ua[:, r2[1], :] .*= abs(ua[r1[1], r2[1], 1]) / ua[r1[1], r2[1], 1]
-        ua[:, r2[2], :] .*= abs(ua[r1[1], r2[2], 1]) / ua[r1[1], r2[2], 1]
+        # Renormalize
+        if odet.psifac < singp.psifac
+            ua[:, r2[2 * i - 1], :] .*= abs(ua[r1[i], r2[2 * i - 1], 1]) / ua[r1[i], r2[2 * i - 1], 1]
+            ua[:, r2[2 * i], :] .*= abs(ua[r1[i], r2[2 * i], 1]) / ua[r1[i], r2[2 * i], 1]
+        end
     end
 
     return ua
@@ -621,22 +627,22 @@ function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     ua = sing_get_ua(ctrl, intr, odet)
 
     # Build temp1
-    temp1 = zeros(ComplexF64, 2 * intr.mpert, 2 * intr.mpert)
-    temp1[1:intr.mpert, :] .= ua[:, :, 1]
-    temp1[intr.mpert+1:2*intr.mpert, :] .= ua[:, :, 2]
+    temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
+    temp1[1:intr.numpert_total, :] .= ua[:, :, 1]
+    temp1[intr.numpert_total+1:2*intr.numpert_total, :] .= ua[:, :, 2]
 
     # Built temp2
-    temp2 = zeros(ComplexF64, 2 * intr.mpert, intr.mpert)
-    temp2[1:intr.mpert, :] .= odet.u[:, :, 1]
-    temp2[intr.mpert+1:2*intr.mpert, :] .= odet.u[:, :, 2]
+    temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
+    temp2[1:intr.numpert_total, :] .= odet.u[:, :, 1]
+    temp2[intr.numpert_total+1:2*intr.numpert_total, :] .= odet.u[:, :, 2]
 
     # LU factorization and solve
     temp2 .= lu(temp1) \ temp2
 
     # Build ca
-    ca = zeros(ComplexF64, intr.mpert, intr.mpert, 2)
-    ca[:, :, 1] .= temp2[1:intr.mpert, :]
-    ca[:, :, 2] .= temp2[intr.mpert+1:2*intr.mpert, :]
+    ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
+    ca[:, :, 2] .= temp2[intr.numpert_total+1:2*intr.numpert_total, :]
 
     return ca
 end
