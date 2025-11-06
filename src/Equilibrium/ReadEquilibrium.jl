@@ -1,10 +1,3 @@
-#=
-This file contains functions for reading equilibrium files from diferent codes
-    that use different formating and collecting the inputs required to form
-    a complete PlasmaEquilibrium using either direct or inverse construction
-=#
-
-
 """
 _read_1d_gfile_format(lines_block, num_values)
 
@@ -93,10 +86,8 @@ function read_efit(config::EquilibriumConfig)
     qprof_data = parse_block(nw)
 
     psi_rz = reshape(psi_flat_vec, nw, nh)
-    println("--> All main data blocks parsed successfully.")
 
     # --- Create 1D Profile Spline (sq_in) ---
-    println("--> Creating 1D profile splines...")
     psi_norm_grid = range(0.0, 1.0; length=nw)
     sq_fs_nodes = hcat(
         abs.(fpol_data),
@@ -105,7 +96,6 @@ function read_efit(config::EquilibriumConfig)
         sqrt.(psi_norm_grid)
     )
     sq_in = Spl.CubicSpline(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap")
-    println("--> 1D Spline fitting complete.")
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -117,7 +107,6 @@ function read_efit(config::EquilibriumConfig)
     end
 
     # --- Create 2D Psi Spline (psi_in) ---
-    println("--> Creating 2D psi spline...")
     r_grid = range(rleft, rleft + rdim; length=nw)
     z_grid = range(zmid - zdim / 2, zmid + zdim / 2; length=nh)
     rmin, rmax = extrema(r_grid)
@@ -125,7 +114,6 @@ function read_efit(config::EquilibriumConfig)
 
     psi_proc_3d = reshape(psi_proc, (nw, nh, 1))
     psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d; bctypex="extrap", bctypey="extrap")
-    println("--> 2D Spline fitting complete.")
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
@@ -279,11 +267,13 @@ Parses a binary CHEASE file, creates initial 1D and 2D splines, and bundles
 them into a `InverseRunInput` object.
 
 ## Arguments:
-- `equil_config`: The `EquilConfig` object containing the filename and parameters.
-## Returns:
-- A `InverseRunInput` object ready for the inverse solver.
-"""
 
+  - `equil_config`: The `EquilConfig` object containing the filename and parameters.
+
+## Returns:
+
+  - A `InverseRunInput` object ready for the inverse solver.
+"""
 function read_chease(config::EquilibriumConfig)
     println("--> Reading CHEASE file: $(config.control.eq_filename)")
     diagnostics = false # Set to true to enable detailed print output
@@ -413,11 +403,8 @@ function read_chease(config::EquilibriumConfig)
                 println("  Last  5 entries: ", flat[n-4:n])
             end
         end
-
-
         println("--> Finished reading CHEASE equilibrium.")
         println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
-
         return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
     end
 end

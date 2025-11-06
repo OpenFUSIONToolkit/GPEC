@@ -681,11 +681,11 @@ Implement kin_flag functionality
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,DconInternal,OdeState,DconOutput},
+        FourFitVars,DconInternal,OdeState},
     psieval::Float64)
 
     # Unpack structs and initialize
-    ctrl, equil, ffit, intr, odet, _ = params
+    ctrl, equil, ffit, intr, odet = params
     fill!(odet.tmp, 0)
     u1 = @view(u[:, :, 1])
     u2 = @view(u[:, :, 2])

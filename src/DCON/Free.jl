@@ -425,10 +425,9 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
 
     # Compute plasma response matrix.
-    temp = adjoint(odet.u[:, 1:intr.mpert, 1])
-    wp .= adjoint(odet.u[:, 1:intr.mpert, 2])
-    temp_fact = lu(temp)
-    wp .= temp_fact \ wp
+    temp .= adjoint(odet.u[:, :, 1])
+    wp .= adjoint(odet.u[:, :, 2])
+    wp .= temp \ wp
     wp .= adjoint(wp) / equil.psio^2
 
     # Compute vacuum matrix from spline

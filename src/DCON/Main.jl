@@ -224,4 +224,7 @@ function Main(path::String)
     println("----------------------------------")
     println("Run time: $end_time seconds")
     println("Normal termination.")
+
+    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+
 end

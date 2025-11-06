@@ -82,7 +82,6 @@ end
     vac_flag::Bool = false
     mer_flag::Bool = false
     fft_flag::Bool = false
-    node_flag::Bool = false
     mthvac::Int = 480
     sing_start::Int = 0
     nn::Int = 0
@@ -105,7 +104,6 @@ end
     set_psilim_via_dmlim::Bool = false # previously sas_flag, if true, determines psilim using outermost rational + dmlim
     dmlim::Float64 = 0.2 # % outside the last rational surface to go out to determine dW if set_psilim_via_dmlim is true
     sing_order::Int = 2
-    termbycross_flag::Bool = false
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
     con_flag::Bool = false
@@ -135,16 +133,16 @@ end
 # Since file I/O in Julia will be very different than Fortran, this will likely be reworked significantly
 @kwdef mutable struct DconOutput
     # output switches
-    write_crit_out::Bool = false
     write_dcon_out::Bool = false
     write_euler_h5::Bool = true
     write_eqdata_h5::Bool = true
+    write_crit_h5::Bool = true
 
     # filenames
-    fname_crit_out::String = "crit.out"
     fname_dcon_out::String = "dcon.out"
     fname_euler_h5::String = "euler.h5"
     fname_eqdata_h5::String = "eqdata.h5"
+    fname_crit_h5::String = "crit.h5"
 
     handles::Dict{Symbol,Any} = Dict()
 

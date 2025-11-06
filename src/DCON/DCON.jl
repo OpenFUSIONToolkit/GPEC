@@ -21,7 +21,7 @@ include("Mercier.jl")
 include("Ode.jl")
 include("Sing.jl")
 include("Fourfit.jl")
-include("OdeOutput.jl")
+include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 

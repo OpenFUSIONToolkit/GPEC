@@ -37,14 +37,9 @@ crossover = 1e-2              # Fractional distance from rational q at which tol
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
 
-numunorms_init = 30           # Storage size for unorming data
-
-termbycross_flag = false      # Terminate ODE solver in the event of a zero crossing
-
 use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
 
 [DCON_OUTPUT]
-write_crit_out = true         # Write crit.out which contains integration data
 write_dcon_out = true         # Write dcon.out which contains equilibrium data and final eigenvalues/vectors
 write_euler_h5 = true         # Write euler.h5 (euler.bin Julia equivalent)
 write_eqdata_h5 = true        # Write eqdata.h5, which contains profile and stability data
