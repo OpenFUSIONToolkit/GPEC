@@ -323,19 +323,23 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
     # Find next singular surface (either the next in the list or outside integration limits)
-    for i in (odet.ising + 1):intr.msing
-        odet.ising = i
-        singp = intr.sing[odet.ising]
-        (intr.psilim < singp.psifac || any(m -> intr.mlow <= m <= intr.mhigh, singp.m)) && break
+    # TODO: CLEAN UP THIS MESS
+    if odet.ising == intr.msing
+        odet.ising += 1
+    else
+        for i in (odet.ising + 1):intr.msing
+            odet.ising = i
+            singp = intr.sing[odet.ising]
+            (intr.psilim < singp.psifac || any(m -> intr.mlow <= m <= intr.mhigh, singp.m)) && break
+        end
     end
-    singp = intr.sing[odet.ising] # singp loses scope outside of loop
     
     # Determine psimax and classify next integration limit type
-    if odet.ising > intr.msing || intr.psilim < singp.psifac || ctrl.singfac_min == 0
+    if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
         odet.psimax = intr.psilim * (1 - eps)
         odet.next = "finish"
     else
-        odet.psimax = singp.psifac - ctrl.singfac_min / abs(minimum(singp.n) * singp.q1)
+        odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
     end
 
     # Store values after crossing step and advance
@@ -421,8 +425,6 @@ function integrator_callback!(integrator)
     odet.ud_store[:, :, :, odet.step] .= odet.ud
     # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
     odet.step += 1
-
-    println("      ψ = $(integrator.t), max u = $(maximum(abs, integrator.u))")
 end
 
 """
