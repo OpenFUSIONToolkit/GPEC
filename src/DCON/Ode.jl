@@ -293,13 +293,22 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     dpsi = singp.psifac - odet.psifac
     odet.psifac += 2 * dpsi # jump to other side of singular surface
     ua = sing_get_ua(ctrl, intr, odet)
+    # TODO: single n, we remove the largest solution and sub in the asymptotic on the other side
+    # However, if we do remove the N largest modes, we zero out a that lives in the upper block
+    # and then sub in the asymptotic solution which lives in the lower block, messing up the block
+    # diagonal structure of the matrix and later calculations
+    # I don't have a good reason for doing this, but for now we will make sure we only remove the largest mode
+    # in the same block as the resonant mode
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+
     if !ctrl.con_flag
         # Eliminate the solution with the largest norm for each resonances
         # TODO: should we make sure we make sure to do this once per n? Or are just the M largest modes ok? (with M being multiplicity)
         for i in eachindex(singp.r1)
-            println("Zeroing out solution i =  $(odet.index[i, odet.ifix]), resonant indices are $(1 .+ singp.m[i] .- intr.mlow .+ (singp.n[i] .- intr.nlow) .* intr.mpert)")
-            odet.u[:, odet.index[i, odet.ifix], :] .= 0
-        end
+            idx_max_same_block = findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total)
+            println("Zeroing out solution i =  $(odet.index[idx_max_same_block, odet.ifix])")
+                odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= 0
+            end
     end
 
     # Update solution vectors
@@ -310,12 +319,12 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
     if !ctrl.con_flag
-        ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
         for i in eachindex(singp.r1)
+            idx_max_same_block = findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
-            odet.u[:, odet.index[i, odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
+            odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
         end
     end
 
