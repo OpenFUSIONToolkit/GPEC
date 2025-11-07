@@ -25,18 +25,20 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     ahg_file = "ahg2msc_dcon.out" # Deprecated
 
     # Allocations
-    star = fill(' ', intr.mpert, intr.mpert)
-    ep = zeros(ComplexF64, intr.mpert)
-    ev = zeros(ComplexF64, intr.mpert)
-    et = zeros(ComplexF64, intr.mpert)
-    tt = zeros(ComplexF64, intr.mpert)
+    star = fill(' ', intr.numpert_total, intr.numpert_total)
+    ep = zeros(ComplexF64, intr.numpert_total)
+    ev = zeros(ComplexF64, intr.numpert_total)
+    et = zeros(ComplexF64, intr.numpert_total)
+    tt = zeros(ComplexF64, intr.numpert_total)
     wv = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wt = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wt0 = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    temp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wpt = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wvt = zeros(ComplexF64, intr.mpert, intr.mpert)
+    wv_full = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wt0 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    temp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    temp_small = zeros(ComplexF64, intr.mpert, intr.mpert)
+    wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
@@ -54,63 +56,68 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # TODO: actually, can probably remove this function entirely and just call set_dcon_params directly
     free_write_msc(intr.psilim, ctrl, equil, intr; inmemory_op=vac_memory, ahgstr_op=ahg_file)
 
-    # Compute vacuum response matrix.
-    grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
-    xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
+    for ipert_n in 1:intr.npert
+        # Compute vacuum response matrix.
+        grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
+        xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
 
-    farwal_flag = true
-    kernelsignin = -1.0
-    # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
-    VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+        farwal_flag = true
+        kernelsignin = -1.0
+        # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
+        VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
 
-    # TODO: assuming bin_vac is deprecated for good, will remove all calls later after checking
-    # if bin_vac
-    #     @warn "!! WARNING: Use of vacuum.bin is deprecated in GPEC. Set bin_vac = false in dcon.in to reduce file IO."
-    #     bin_open(vac_unit, "vacuum.bin", "UNKNOWN", "REWIND", "none")
-    #     write(vac_unit, grri)
-    # end
+        # TODO: assuming bin_vac is deprecated for good, will remove all calls later after checking
+        # if bin_vac
+        #     @warn "!! WARNING: Use of vacuum.bin is deprecated in GPEC. Set bin_vac = false in dcon.in to reduce file IO."
+        #     bin_open(vac_unit, "vacuum.bin", "UNKNOWN", "REWIND", "none")
+        #     write(vac_unit, grri)
+        # end
 
-    kernelsignin = 1.0
-    VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
-    # if bin_vac
-    #     write(vac_unit, grri)
-    # end
-    if ctrl.wv_farwall_flag
-        temp .= wv
-    end
+        kernelsignin = 1.0
+        VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+        # if bin_vac
+        #     write(vac_unit, grri)
+        # end
+        if ctrl.wv_farwall_flag
+            temp_small .= wv
+        end
 
-    farwal_flag = false
-    kernelsignin = -1.0
-    VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
-    # if bin_vac
-    #     write(vac_unit, grri)
-    # end
+        farwal_flag = false
+        kernelsignin = -1.0
+        VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+        # if bin_vac
+        #     write(vac_unit, grri)
+        # end
 
-    kernelsignin = 1.0
-    VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
-    # if bin_vac
-    #     write(vac_unit, grri)
-    #     write(vac_unit, xzpts)
-    #     bin_close(vac_unit)
-    # end
+        kernelsignin = 1.0
+        VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+        # if bin_vac
+        #     write(vac_unit, grri)
+        #     write(vac_unit, xzpts)
+        #     bin_close(vac_unit)
+        # end
 
-    if ctrl.wv_farwall_flag
-        wv .= temp
-    end
+        if ctrl.wv_farwall_flag
+            wv .= temp_small
+        end
 
-    # Scale vacuum matrix by singfac = (m - nn*qlim)
-    singfac = (intr.mlow .- ctrl.nn .* intr.qlim) .+ collect(0:intr.mpert-1)
-    for ipert in 1:intr.mpert
-        wv[ipert, :] .*= singfac[ipert]
-        wv[:, ipert] .*= singfac[ipert]
+        # Scale vacuum matrix by singfac = (m - nn*qlim)
+        singfac = (intr.mlow .- (ipert_n - intr.nlow + 1) .* intr.qlim) .+ collect(0:intr.mpert-1)
+        for ipert in 1:intr.mpert
+            wv[ipert, :] .*= singfac[ipert]
+            wv[:, ipert] .*= singfac[ipert]
+        end
+
+        # Fill in the ith block of the full vacuum matrix
+        @views wv_full[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv
     end
 
     # Compute complex energy eigenvalues
-    wt .= wp .+ wv
+    wt .= wp .+ wv_full
     wt0 .= wt
 
     # use Eigen decomposition for general complex matrix (get left & right eigenvectors)
@@ -124,17 +131,19 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     tt .= et
     # rearrange wt columns to correspond to eigenvector reordering similar to Fortran
-    for ipert in 1:intr.mpert
-        wt[:, ipert] .= Ev.vectors[:, eindex[intr.mpert+1-ipert]]
-        et[ipert] = tt[eindex[intr.mpert+1-ipert]]
+    for ipert in 1:intr.numpert_total
+        wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
+        et[ipert] = tt[eindex[intr.numpert_total+1-ipert]]
     end
 
     # Normalize eigenfunction and energy.
     if normalize
-        for isol in 1:intr.mpert
+        for isol in 1:intr.numpert_total
             norm = 0.0 + 0.0im
-            for ipert in 1:intr.mpert, jpert in 1:intr.mpert
-                norm += ffit.jmat[jpert-ipert+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+            for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+                ipert = (ipert_n - 1) * intr.mpert + ipert_m
+                jpert = (ipert_n - 1) * intr.mpert + jpert_m
+                norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
             end
             norm /= v1
             wt[:, isol] ./= sqrt(norm)
@@ -144,7 +153,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Normalize phase and label largest component.
     imax = 0
-    for isol in 1:intr.mpert
+    for isol in 1:intr.numpert_total
         # get index of largest absolute component (first occurrence)
         imax = argmax(abs.(wt[:, isol]))
         phase = abs(wt[imax, isol]) / wt[imax, isol]
@@ -156,9 +165,9 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Compute plasma and vacuum contributions.
     # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
     wpt .= adjoint(wt) * (wp * wt)
-    wvt .= adjoint(wt) * (wv * wt)
+    wvt .= adjoint(wt) * (wv_full * wt)
 
-    for ipert in 1:intr.mpert
+    for ipert in 1:intr.numpert_total
         ep[ipert] = wpt[ipert, ipert]
         ev[ipert] = wvt[ipert, ipert]
     end
@@ -207,7 +216,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Write eigenvalues to file
         write_output(outp, :dcon_out, "\nTotal Energy Eigenvalues:")
         write_output(outp, :dcon_out, "\n   isol   plasma      vacuum   re total   im total\n")
-        for isol in 1:intr.mpert
+        for isol in 1:intr.numpert_total
             write_output(outp, :dcon_out, @sprintf("%6d %11.3e %11.3e %11.3e %11.3e",
                 isol, real(ep[isol]), real(ev[isol]), real(et[isol]), imag(et[isol])))
         end
@@ -215,13 +224,13 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Write eigenvectors to file
         write_output(outp, :dcon_out, "Total Energy Eigenvectors:")
-        m = intr.mlow .+ collect(0:intr.mpert-1)
-        for isol in 1:intr.mpert
+        m = intr.mlow .+ collect(0:intr.numpert_total-1)
+        for isol in 1:intr.numpert_total
             write_output(outp, :dcon_out, "\n   isol   imax   plasma      vacuum   re total   im total\n")
             write_output(outp, :dcon_out, @sprintf("%6d %6d %11.3e %11.3e %11.3e %11.3e",
                 isol, imax, real(ep[isol]), real(ev[isol]), real(et[isol]), imag(et[isol])))
             write_output(outp, :dcon_out, "\n  ipert     m      re wt      im wt      abs wt\n")
-            for ipert in 1:intr.mpert
+            for ipert in 1:intr.numpert_total
                 write_output(outp, :dcon_out,
                     @sprintf("%6d %6d %11.3e %11.3e %11.3e %s",
                         ipert, m[ipert], real(wt[ipert, isol]), imag(wt[ipert, isol]), abs(wt[ipert, isol]), star[ipert, isol]))
@@ -231,10 +240,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Write the plasma matrix to file
         write_output(outp, :dcon_out, "Plasma Energy Matrix:\n")
-        for isol in 1:intr.mpert
+        for isol in 1:intr.numpert_total
             write_output(outp, :dcon_out, "isol = $(isol), m = $(m[isol])")
             write_output(outp, :dcon_out, "\n  i     re wp        im wp        abs wp\n")
-            for ipert in 1:intr.mpert
+            for ipert in 1:intr.numpert_total
                 write_output(outp, :dcon_out, @sprintf("%3d%13.5e%13.5e%13.5e",
                     ipert, real(wp[ipert, isol]), imag(wp[ipert, isol]), abs(wp[ipert, isol])))
             end
@@ -248,12 +257,12 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     ep .= Ev_wp.values
     eindex = sortperm(real.(ep); rev=true)
     tt .= ep
-    for ipert in 1:intr.mpert
-        wp[:, ipert] .= Ev_wp.vectors[:, eindex[intr.mpert+1-ipert]]
-        ep[ipert] = tt[eindex[intr.mpert+1-ipert]]
+    for ipert in 1:intr.numpert_total
+        wp[:, ipert] .= Ev_wp.vectors[:, eindex[intr.numpert_total+1-ipert]]
+        ep[ipert] = tt[eindex[intr.numpert_total+1-ipert]]
     end
     # For vacuum (Hermitian) use eigen of Hermitian wv
-    Ev_wv = eigen(Hermitian(wv, :U))
+    Ev_wv = eigen(Hermitian(wv_full, :U))
     ev .= Ev_wv.values
 
     # Optionally write netcdf file

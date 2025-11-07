@@ -306,7 +306,6 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
         # TODO: should we make sure we make sure to do this once per n? Or are just the M largest modes ok? (with M being multiplicity)
         for i in eachindex(singp.r1)
             idx_max_same_block = findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total)
-            println("Zeroing out solution i =  $(odet.index[idx_max_same_block, odet.ifix])")
                 odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= 0
             end
     end
@@ -639,21 +638,21 @@ for a chosen force-free solution, which can be done in postprocessing.
 function transform_u!(odet::OdeState, intr::DconInternal)
 
     # Gaussian reduction matrices for each fixup
-    gauss = Array{ComplexF64,3}(undef, intr.mpert, intr.mpert, odet.ifix)
+    gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
-    transforms = Array{ComplexF64,3}(undef, intr.mpert, intr.mpert, odet.ifix + 1)
+    transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
 
     # Construct gaussian reduction matrices for each fixup
-    identity = Matrix{ComplexF64}(I, intr.mpert, intr.mpert)
-    mask = trues(intr.mpert)
+    identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
+    mask = trues(intr.numpert_total)
     for ifix in 1:odet.ifix
         gauss[:, :, ifix] = copy(identity)
         mask .= true
-        for isol in 1:intr.mpert
+        for isol in 1:intr.numpert_total
             ksol = odet.index[isol, ifix]
             mask[ksol] = false
             temp = copy(identity)
-            for jsol in 1:intr.mpert
+            for jsol in 1:intr.numpert_total
                 if mask[jsol]
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
