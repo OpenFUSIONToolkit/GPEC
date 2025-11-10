@@ -166,12 +166,9 @@ end
     bin_evals::Bool = false
     bin_euler::Bool = false
     euler_stride::Int = 1
-    bin_vac::Bool = false # TODO: deprecated
     mthsurf0::Float64 = 1.0 # TODO: deprecated
     msol_ahb::Int = 0 # TODO: deprecated
-    netcdf_out::Bool = true # TODO: might be deprecated
     out_fund::Bool = false
-    out_ahg2msc::Bool = false # TODO: deprecated
 end
 
 # TODO: how can we initialize the splines to not be nothings?

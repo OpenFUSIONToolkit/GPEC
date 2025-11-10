@@ -43,21 +43,16 @@ function sing_find!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
             psifac = (psi0 + psi1) / 2 # initial guess for bisection
 
             # Bisection method to find singular surface
-            while it < itmax
-                it += 1
+            converged = false
+            for _ in 1:itmax
                 psifac = (psi0 + psi1) / 2
-                singfac = (m - ctrl.nn * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
-                if abs(singfac) <= 1e-8
-                    break
-                elseif singfac > 0
-                    psi0 = psifac
-                else
-                    psi1 = psifac
-                end
+                singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
+                abs(singfac) < 1e-8 && (converged = true; break)
+                singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
             end
 
-            if it == itmax
-                error("Bisection did not converge for m = $m")
+            if !converged
+                error("Bisection did not converge for m = $m after $itmax iterations.")
             else
                 push!(intr.sing, SingType(;
                     m=m,
@@ -122,15 +117,19 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
         q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
 
         intr.psilim = equil.sq.xs[jpsi]
+        converged = false
         for _ in 1:itmax
             dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
             intr.psilim += dpsi
-            abs(dpsi) < eps * abs(intr.psilim) && return intr.q1lim = q1val(intr.psilim)
+            if abs(dpsi) < eps * abs(intr.psilim)
+                converged = true
+                intr.q1lim = q1val(intr.psilim)
+                break
+            end
         end
-        error("Can't find psilim after $itmax iterations.")
-    else
-        # Just use the equilibrium values for psilim, qlim, and q1lim
-        return
+        if !converged
+            error("Can't find psilim after $itmax iterations.")
+        end
     end
 end
 
@@ -168,7 +167,9 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         return
     end
 
-    # Compute ranges
+    # Compute the resonant (r) and nonresonant (n) indices of the shearing transformation matrix R
+    # 1 indexes along the N*M dimension, and 2 along the 2*N*M dimension
+    # In 2D, see eq. 41 of 2016 Glasser DCON paper
     singp.r1 = [ipert0]
     singp.r2 = [ipert0, ipert0 + intr.mpert]
     singp.n1 = [i for i in 1:intr.mpert if i != ipert0]
@@ -189,6 +190,8 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     di = singp.m0mat[1, 1] * singp.m0mat[2, 2] - singp.m0mat[2, 1] * singp.m0mat[1, 2]
     singp.di = real(di)
     singp.alpha = sqrt(-complex(singp.di))
+
+    # This is the parameter α but for all modes - α = 0 for non-resonant modes
     singp.power[ipert0] = -singp.alpha
     singp.power[ipert0+intr.mpert] = singp.alpha
 
@@ -203,7 +206,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         singp.vmat[ipert, ipert+intr.mpert, 2, 1] = 1
     end
 
-    # Zeroth-order resonant solutions
+    # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
     singp.vmat[ipert0, ipert0, 1, 1] = 1
     singp.vmat[ipert0, ipert0+intr.mpert, 1, 1] = 1
     singp.vmat[ipert0, ipert0, 2, 1] = -(singp.m0mat[1, 1] + singp.alpha) / singp.m0mat[1, 2]
@@ -213,7 +216,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         conj(singp.vmat[ipert0, ipert0+intr.mpert, 1, 1]) * singp.vmat[ipert0, ipert0, 2, 1]
     singp.vmat[ipert0, :, :, 1] ./= sqrt(det)
 
-    # Higher order solutions
+    # Higher order solutions - need to solve iteratively
     for k in 1:2*ctrl.sing_order
         sing_solve!(singp, intr, k)
     end
@@ -222,14 +225,21 @@ end
 """
     sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
-Calculate asymptotic mmat matrix for singular surface `ising`.
-Performs the same function as `sing_mmat` in the Fortran code.
-Main differences are 1-indexing for the expansion orders and
-using dense matrices instead of banded. We keep the Fortran
-convention of only filling in the lower half of the Hermitian
-matrices, and wrap the subsequent multiplications in `Hermitian()`
-calls to take advantage of the symmetry. We have tried to be explicit
-in which matrices have only their lower triangle stored to avoid confusion.
+Calculate asymptotic mmat matrix for singular surface `ising`. Performs the same
+function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
+the expansion orders and using dense matrices instead of banded. We keep the Fortran
+convention of only filling in the lower half of the Hermitian matrices, and wrap the
+subsequent multiplications in `Hermitian()` calls to take advantage of the symmetry.
+We have tried to be explicit in which matrices have only their lower triangle stored
+to avoid confusion.
+
+More specifically, in this function we construct the Taylor series M_k of the matrix M
+(eq. 43-44 in Glasser 2016). This involves: evaluating the cubic splines and their
+derivatives at the singular surface, constructing the Taylor series coefficients for each
+composite matrix (simple for G, more complicated for F and K since they are stored as
+their nonsingular forms and need to be multiplied by Q, which is itself a Taylor series
+so the coefficients get complicated), solving x = L v for each order in the Taylor series,
+and then reconstructing mmat from x.
 
 ### Arguments
 
@@ -239,6 +249,8 @@ in which matrices have only their lower triangle stored to avoid confusion.
 
 Check third derivative accuracy in cubic splines or determine if it matters
 Better way to unpack the cubic splines
+Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
+Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
 function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
@@ -267,19 +279,26 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
     k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
 
-    # Evaluate singfac and its derivatives
-    ipert0 = singp.m - intr.mlow + 1
-    mvec = intr.mlow:intr.mhigh
-    singfac[:, 1] .= mvec .- ctrl.nn * q[1]
+    # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
+    singfac[:, 1] .= intr.mlow:intr.mhigh .- ctrl.nn * q[1]
     singfac[:, 2] .= -ctrl.nn * q[2]
     singfac[:, 3] .= -ctrl.nn * q[3]
     singfac[:, 4] .= -ctrl.nn * q[4]
+    # For resonant modes mᵢ - nᵢq(ψ) = [-nᵢq', -nᵢq'', -nᵢq'''] - shift up terms by 1 index
+    # Add scaling to account for hardcoding coefficients in computations below
+    ipert0 = singp.m - intr.mlow + 1
     singfac[ipert0, 1] = -ctrl.nn * q[2]
     singfac[ipert0, 2] = -ctrl.nn * q[3] / 2
     singfac[ipert0, 3] = -ctrl.nn * q[4] / 3
     singfac[ipert0, 4] = 0
 
-    # Compute factored Hermitian F and its derivatives (lower half only)
+    # This section becomes tricky because we need to reform F = QL̄L̄ᴴQᴴ
+    # TODO: this section can absolutely be simplified using some intuition on the coefficients.
+    # Possibly could just store an unfactorized F spline? Then logic would just look like K but
+    # with an extra singfac/altered coefficients since it would just be F = QF̄Q
+    # For now, leaving overly detailed comments to remind so I don't have to work through this again
+    # First, compute Taylor series coefficients of QL̄ (but without scaling by 1/n!), so we get binomial coefficients leftover
+    # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for jpert in 1:intr.mpert
         for ipert in jpert:min(intr.mpert, jpert + intr.mband)
             f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
@@ -317,10 +336,9 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     end
     @views f0_lower .= f_lower[:, :, 1]
 
-    # Compute product (lower half only) of Hermitian matrix F
-    # When we wrap the matrix multiplications later with Hermitian(ff),
-    # Julia will handle filling the upper half via the Hermitian property
-    # internally, just like LAPACK does in Fortran
+    # Compute Taylor series coefficients of F = QL̄L̄ᴴQᴴ (lower half only due to indexing) from QL̄ computed above
+    # Here, we build in the Taylor series coefficients iteratively (fac1 = (n choose j), fac0 = 1/n!)
+    # so the final coefficient is 1/(n-j)!j! as desired (and hardcoded in the K computation below)
     fac0 = 1
     for n in 0:ctrl.sing_order
         fac1 = 1
@@ -338,7 +356,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         fac0 *= (n + 1)
     end
 
-    # Compute non-Hermitian matrix K
+    # Compute non-Hermitian matrix K = QK̄ Taylor series coefficients
+    # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for jpert in 1:intr.mpert
         for ipert in max(1, jpert - intr.mband):min(intr.mpert, jpert + intr.mband)
             k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
@@ -375,7 +394,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         end
     end
 
-    # Compute Hermitian matrix G (lower half only)
+    # Compute Hermitian matrix G (lower half only) Taylor series coefficients
+    # G = [G, G', G''/2, G'''/6]
     for jpert in 1:intr.mpert
         for ipert in jpert:min(intr.mpert, jpert + intr.mband)
             g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
@@ -394,20 +414,21 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         end
     end
 
-    # Compute identity
+    # We will now compute the Taylor series expansion of x = Lv, with L specified in eq. 23 of Glasser 2016
+    # Start with the identity matrix (which can be indexed to project onto resonant/nonresonant modes)
     for ipert in 1:intr.mpert
         v[ipert, ipert, 1] = 1
         v[ipert, ipert+intr.mpert, 2] = 1
     end
 
-    # Compute zeroth-order x1
+    # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
+    # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
     for isol in 1:2*intr.mpert
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
-    # f is prefactorized so can just use this calculation to get F⁻¹x
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
-    # Compute higher-order x1
+    # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
     for i in 1:ctrl.sing_order
         for isol in 1:2*intr.mpert
             for j in 1:i
@@ -418,32 +439,38 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         @views x[:, :, 1, i+1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, i+1])
     end
 
-    # Compute x2
+    # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
     for i in 0:ctrl.sing_order
         for isol in 1:2*intr.mpert
             for j in 0:i
-                x[:, isol, 2, i+1] .+= k[:, :, j+1]' * x[:, isol, 1, i-j+1]
+                x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
             end
             x[:, isol, 2, i+1] .+= Hermitian(g_lower[:, :, i+1], :L) * v[:, isol, 1]
         end
     end
 
-    # Principal terms of mmat
+    # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
+    # eq. 28 in Glasser 2023 PoP paper
     singp.mmat .= 0
     r1 = singp.r1
     r2 = singp.r2
     n1 = singp.n1
     n2 = singp.n2
     j = 0
+    # Start with the S⁻¹LS components
+    # Glasser PoP 2023 eq. 39: at each other of L, we get contributions to z^k from RLR,
+    # z^k+0.5 from RLA and ALR, and z^k+1 from ALA (where A is the nonresonant part)
     for i in 0:ctrl.sing_order
         singp.mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
         singp.mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
         singp.mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
         singp.mmat[n1, n2, :, j+3] .= x[n1, n2, :, i+1]
+        # Expansion of M is in half powers of z due to shearing transformation, so we jump by 2
         j += 2
     end
 
-    # Shearing terms
+    # Apply the effect of the shearing transformation to the resonant indices R
+    # Glasser PoP 2023 eq. 25 + 28: M = zS⁻¹LS - zS⁻¹S' = zS⁻¹LS + 0.5 [R, 0; 0, -R], 0ᵗʰ order only
     singp.mmat[r1, r2[1], 1, 1] .+= 0.5
     singp.mmat[r1, r2[2], 2, 1] .-= 0.5
 end
@@ -457,13 +484,16 @@ See equation 47 in the Glass 2016 DCON paper. Identical to the Fortran
 
 ## Arguments
 
-  - `singp::SingType`: The singularity data structure containing all relevant matrices and parameters.
+  - `singp::SingType`: The singular surface data structure containing all relevant matrices and parameters.
   - `k::Int`: The current order in the power series expansion.
 """
 function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
+    # TODO: rename this solver_higher_order_vmat?
+    # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
         singp.vmat[:, :, :, k+1] .+= sing_matmul(singp.mmat[:, :, :, l+1], singp.vmat[:, :, :, k-l+1])
     end
+    # Solve a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ
     for isol in 1:2*intr.mpert
         a = copy(singp.m0mat)
         a[1, 1] -= k / 2.0 + singp.power[isol]
@@ -519,10 +549,11 @@ end
 """
     sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
-Compute the asymptotic series solution for a given singularity.
-Fills and returns `ua` with the asymptotic solution vmat
-for the specified singular surface and psi value. Performs
-the same function as `sing_get_ua` in the Fortran code.
+Compute the asymptotic series solution for a given singular surface.
+Fills and returns `ua` with the asymptotic solution vmat computed in
+`sing_vmat`. We obtain the solution using equations 45 and 41 in the
+2016 DCON paper. Performs the same function as `sing_get_ua` in the
+Fortran code.
 """
 function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
@@ -530,22 +561,24 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     r1 = singp.r1
     r2 = singp.r2
 
-    # Compute distance from singular surface
+    # Compute distance from singular surface (z)
     dpsi = odet.psifac - singp.psifac
     sqrtfac = sqrt(complex(dpsi))
-    pfac = abs(dpsi)^singp.alpha
 
-    # Compute power series via Horner's method
+    # Compute power series via Horner's method (eq. 45 in Glasser 2016)
     ua = copy(singp.vmat[:, :, :, 2*ctrl.sing_order+1])
     for iorder in (2*ctrl.sing_order-1):-1:0
-        ua .= ua .* sqrtfac .+ singp.vmat[:, :, :, iorder+1]
+        ua .= ua .* sqrtfac .+ singp.vmat[:, :, :, iorder+1] # sqrtfac becomes √zᵏ here
     end
 
-    # Restore powers
-    ua[r1, :, 1] ./= sqrtfac
-    ua[r1, :, 2] .*= sqrtfac
+    # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
+    pfac = abs(dpsi)^singp.alpha
     ua[:, r2[1], :] ./= pfac
     ua[:, r2[2], :] .*= pfac
+
+    # Apply shearing transformation u = Rv (eq. 41 in Glasser 2016)
+    ua[r1, :, 1] ./= sqrtfac
+    ua[r1, :, 2] .*= sqrtfac
 
     # Renormalize
     if odet.psifac < singp.psifac
@@ -631,10 +664,15 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         FourFitVars,DconInternal,OdeState},
     psieval::Float64)
 
-    # Unpack structs
+    # Unpack structs and initialize
     ctrl, equil, ffit, intr, odet = params
+    fill!(odet.tmp, 0)
+    u1 = @view(u[:, :, 1])
+    u2 = @view(u[:, :, 2])
+    du1 = @view(du[:, :, 1])
+    du2 = @view(du[:, :, 2])
 
-    # Spline evaluation
+    # Compute singfac = 1 / (m - nq)
     odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
     odet.singfac_vec .= 1.0 ./ (intr.mlow .- ctrl.nn * odet.q .+ (0:intr.mpert-1))
     chi1 = 2π * equil.psio
@@ -644,7 +682,6 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         error("kin_flag not implemented yet")
     else
         # Evaluate splines at psieval and reshape avoiding new allocations
-        # TODO: is this actually more efficient?
         Spl.spline_eval!(odet.amat, ffit.amats, psieval)
         amat = reshape(odet.amat, intr.mpert, intr.mpert)
         Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
@@ -667,36 +704,32 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         ldiv!(odet.Afact, cmat)
     end
 
-    odet.tmp .= 0
-    u1 = @view(u[:, :, 1])
-    u2 = @view(u[:, :, 2])
     # Compute du
     if false #(TODO: kin_flag)
         error("kin_flag not implemented yet")
     else
-        # See equation 23 in Glasser 2016 DCON paper for derivation
-        # du[1] = - K * u[1] + u[2]
-
-        du[:, :, 1] .= u2 .* odet.singfac_vec
+        # See equations 22-24 in Glasser 2016 DCON paper for derivation
+        # du[1] = - K̄ * u[1] + Q⁻¹ * u[2]
+        du1 .= u2 .* odet.singfac_vec
         mul!(odet.tmp, kmat, u1)
-        @views du[:, :, 1] .-= odet.tmp
-
-        # du[1] = - F⁻¹ * K * u[1] + F⁻¹ * u[2] (remember F is already stored in factored form)
-        @views ldiv!(LowerTriangular(fmat_lower), du[:, :, 1])
-        @views ldiv!(UpperTriangular(fmat_lower'), du[:, :, 1])
-
-        # du[2] = G * u[1] + K' * du[1] = G * u[1] - K^† * F⁻¹ * K * u[1] + K^† * F⁻¹ * u[2]
+        du1 .-= odet.tmp
+        # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
+        ldiv!(LowerTriangular(fmat_lower), du1)
+        ldiv!(UpperTriangular(fmat_lower'), du1)
+        # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
         mul!(odet.tmp, gmat, u1)
-        @views du[:, :, 2] .= odet.tmp
-        @views mul!(odet.tmp, adjoint(kmat), du[:, :, 1])
-        @views du[:, :, 2] .+= odet.tmp
-        @views du[:, :, 1] .*= odet.singfac_vec
+        du2 .= odet.tmp
+        mul!(odet.tmp, adjoint(kmat), du1)
+        du2 .+= odet.tmp
+        # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
+        du1 .*= odet.singfac_vec
     end
 
-    # u-derivative used in GPEC
-    @views odet.ud[:, :, 1] .= du[:, :, 1]
-    @views mul!(odet.tmp, bmat, du[:, :, 1])
+    # ud[1] = Ξ'_Ψ
+    @views odet.ud[:, :, 1] .= du1
+    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), equation 18 of Glasser 2016
+    mul!(odet.tmp, bmat, du1)
     odet.ud[:, :, 2] .= .-odet.tmp
-    @views mul!(odet.tmp, cmat, u[:, :, 1])
+    mul!(odet.tmp, cmat, u1)
     @views odet.ud[:, :, 2] .-= odet.tmp
 end

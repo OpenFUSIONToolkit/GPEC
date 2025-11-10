@@ -65,13 +65,9 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     mpsi = length(rzphi.xs)
     mtheta = length(rzphi.ys)
 
-    println("   Equilibrium grid: $mpsi (ψ) × $mtheta (θ)")
-    println("   Fourier fit modes (mband): $mband")
-
-    metric = MetricData(mpsi, mtheta)
-
     # Set coordinate grids based on the input equilibrium
     # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
+    metric = MetricData(mpsi, mtheta)
     metric.xs .= Vector(rzphi.xs)
     metric.ys .= Vector(rzphi.ys .* 2π)
 
@@ -177,18 +173,12 @@ and does not affect the actual matrix sizes, they are all dense.
 
 Add kinetic metric tensor components for kin_flag = true
 Set powers if necessary
-Determine if set_psilim_via_dmlim logic is needed
 """
 function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, intr::DconInternal, metric::MetricData)
 
     # --- Extract inputs ---
     sq = equil.sq
     mpsi = metric.mpsi
-
-    if ctrl.verbose
-        println("   Toroidal mode n=$(ctrl.nn), Poloidal modes m=$(intr.mlow):$(intr.mhigh) ($(intr.mpert) modes)")
-        println("   Matrix bandwidth: $(intr.mband)")
-    end
 
     # Allocations
     amats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
@@ -268,6 +258,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
                 jpert = ipert + dm
                 dmidx = dm + mid
 
+                # Note: dmat and emat here do not correspond to their representations in eq. A6 of the DCON paper,
+                # but rather to subterms that appear in the composite matrix construction in A7 and A8, respectively
                 amat[ipert, jpert] = (2π)^2 * (ctrl.nn^2 * g22[dmidx] + ctrl.nn * (m1 + m2) * g23[dmidx] + m1 * m2 * g33[dmidx])
                 bmat[ipert, jpert] = -2π * im * chi1 * (ctrl.nn * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
                 cmat[ipert, jpert] =
@@ -288,13 +280,13 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
         end
 
         # Factorize and build composites
-        # TODO: Fortran threw an error if the factorization fails for a/fmat due to small matrix bandwidth,
-        # (i.e. we cut off too many terms and matrix no longer positive definite). Should add this back in
-        # if we implement banded matrices.
+        # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser 2016)
+        # We multiply by Q (singfac) later when performing computations later
+        # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
+        # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
         temp1 = amat_fact \ dmat
         temp2 = amat_fact \ cmat
-        # Use * for matrix multiplication (instead of .* for element-wise)
         fmat .-= adjoint(dmat) * temp1
         kmat .= emat .- (adjoint(kmat) * temp2)
         gmat .= hmat .- (adjoint(cmat) * temp2)

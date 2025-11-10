@@ -104,7 +104,7 @@ in the Fortran code.
 """
 function compute_smallest_eigenvalue(psi::Float64, u::Array{ComplexF64,3}, sq::Spl.CubicSpline{Float64})
 
-    # Compute inverse plasma response matrix W = U₁ * U₂⁻¹ = adj(adj(U₂)⁻¹ * adj(U₁))
+    # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹ = adj(adj(U₂)⁻¹ * adj(U₁))
     wp_inverse = adjoint(u[:, :, 1])
     temp = adjoint(u[:, :, 2])
     wp_inverse = temp \ wp_inverse
