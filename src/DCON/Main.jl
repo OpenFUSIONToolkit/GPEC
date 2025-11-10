@@ -14,7 +14,7 @@ function Main(path::String)
 
     # Set up variables
     # TODO: dcon_kin_threads logic?
-    ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
+    # ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
@@ -200,9 +200,10 @@ function Main(path::String)
     end
 
     # Output results of fixed-boundary stability calculations
+    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
     if ctrl.ode_flag && odet.nzero != 0
         if ctrl.verbose
-            println("Fixed-boundary mode unstable for nn = $(ctrl.nn).")
+            println("Fixed-boundary mode unstable for n = $nstring.")
         end
     end
 
@@ -210,11 +211,11 @@ function Main(path::String)
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1 && outp.bin_sol)
         if real(total1) < 0
             if ctrl.verbose
-                println("Free-boundary mode unstable for nn = $(ctrl.nn).")
+                println("Free-boundary mode unstable for n = $nstring.")
             end
         else
             if ctrl.verbose
-                println("All free-boundary modes stable for nn = $(ctrl.nn).")
+                println("All free-boundary modes stable for n = $nstring.")
             end
         end
     end

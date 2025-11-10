@@ -27,16 +27,15 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Allocations
     star = fill(' ', intr.numpert_total, intr.numpert_total)
     ep = zeros(ComplexF64, intr.numpert_total)
+    etemp = zeros(ComplexF64, intr.numpert_total)
     ev = zeros(ComplexF64, intr.numpert_total)
     et = zeros(ComplexF64, intr.numpert_total)
-    tt = zeros(ComplexF64, intr.numpert_total)
     wv = zeros(ComplexF64, intr.mpert, intr.mpert)
     wv_full = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wt0 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     temp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    temp_small = zeros(ComplexF64, intr.mpert, intr.mpert)
     wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
@@ -51,15 +50,19 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         wp .= adjoint(wp) / equil.psio^2
     end
 
-    # Write file for mscvac
-    # TODO: can likely remove last two arguments, ahgstr_op is deprecated
-    # TODO: actually, can probably remove this function entirely and just call set_dcon_params directly
-    free_write_msc(intr.psilim, ctrl, equil, intr; inmemory_op=vac_memory, ahgstr_op=ahg_file)
-
     for ipert_n in 1:intr.npert
+
+        n = ipert_n - 1 + intr.nlow
+
+        # Write file for mscvac
+        # TODO: can likely remove last two arguments, ahgstr_op is deprecated
+        # TODO: actually, can probably remove this function entirely and just call set_dcon_params directly
+        free_write_msc(intr.psilim, n, equil, intr)
+
         # Compute vacuum response matrix.
         grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
         xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
+        temp_small = zeros(ComplexF64, intr.mpert, intr.mpert)
 
         farwal_flag = true
         kernelsignin = -1.0
@@ -105,8 +108,8 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
             wv .= temp_small
         end
 
-        # Scale vacuum matrix by singfac = (m - nn*qlim)
-        singfac = (intr.mlow .- (ipert_n - intr.nlow + 1) .* intr.qlim) .+ collect(0:intr.mpert-1)
+        # Scale vacuum matrix by singfac = (m - n*qlim)
+        singfac = collect(intr.mlow:intr.mhigh) .- n .* intr.qlim
         for ipert in 1:intr.mpert
             wv[ipert, :] .*= singfac[ipert]
             wv[:, ipert] .*= singfac[ipert]
@@ -114,26 +117,25 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Fill in the ith block of the full vacuum matrix
         @views wv_full[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv
+
+        if vac_memory
+            VacuumMod.unset_dcon_params()
+        end
     end
 
-    # Compute complex energy eigenvalues
+    # Compute complex energy eigenvalues and vectors
     wt .= wp .+ wv_full
     wt0 .= wt
 
-    # use Eigen decomposition for general complex matrix (get left & right eigenvectors)
-    # For general complex: use eigen(wt) which returns eigenvalues and eigenvectors (right)
-    # For left eigenvectors we can compute eigen(wt') and conj-transpose as needed,
-    # but Fortran uses zgeev('V','V',...) returning both vl and vr.
-    Ev = eigen(wt)  # Ev.values, Ev.vectors (columns are eigenvectors)
-    # Ev.vectors are right eigenvectors; we need to reorder by magnitude using bubble on real parts of eigenvalues
+    Ev = eigen(wt)
     et .= Ev.values
     eindex = sortperm(real.(et); rev=true)
 
-    tt .= et
+    etemp .= et
     # rearrange wt columns to correspond to eigenvector reordering similar to Fortran
     for ipert in 1:intr.numpert_total
         wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
-        et[ipert] = tt[eindex[intr.numpert_total+1-ipert]]
+        et[ipert] = etemp[eindex[intr.numpert_total+1-ipert]]
     end
 
     # Normalize eigenfunction and energy.
@@ -175,10 +177,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     plasma1 = ComplexF64(real(ep[1]), 0.0)
     vacuum1 = ComplexF64(real(ev[1]), 0.0)
     total1 = ComplexF64(real(et[1]), 0.0)
-
-    if vac_memory
-        VacuumMod.unset_dcon_params()
-    end
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:,:,1,end] \ (wt .* (2π * equil.psio * 1e-3))
@@ -256,10 +254,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     Ev_wp = eigen(wp)
     ep .= Ev_wp.values
     eindex = sortperm(real.(ep); rev=true)
-    tt .= ep
+    etemp .= ep
     for ipert in 1:intr.numpert_total
         wp[:, ipert] .= Ev_wp.vectors[:, eindex[intr.numpert_total+1-ipert]]
-        ep[ipert] = tt[eindex[intr.numpert_total+1-ipert]]
+        ep[ipert] = etemp[eindex[intr.numpert_total+1-ipert]]
     end
     # For vacuum (Hermitian) use eigen of Hermitian wv
     Ev_wv = eigen(Hermitian(wv_full, :U))
@@ -294,12 +292,11 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
 
 Remove `inmemory_op` and `ahgstr_op` arguments and related logic, always use in-memory communication
 """
-function free_write_msc(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal; inmemory_op::Union{Bool,Nothing}=nothing,
-    ahgstr_op::Union{String,Nothing}=nothing)
+function free_write_msc(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Defaults for optional arguments
-    inmemory = isnothing(inmemory_op) ? false : inmemory_op
-    ahgstr = isnothing(ahgstr_op) ? "ahg2msc_dcon.out" : ahgstr_op
+    # inmemory = isnothing(inmemory_op) ? false : inmemory_op
+    # ahgstr = isnothing(ahgstr_op) ? "ahg2msc_dcon.out" : ahgstr_op
     inmemory = true # TODO: remove the above, and modify the code logic so VACUUM is always in memory
 
     # Allocations
@@ -323,8 +320,7 @@ function free_write_msc(psifac::Float64, ctrl::DconControl, equil::Equilibrium.P
     z .= equil.zo .+ rfac .* sin.(angle)
 
     # Invert values for nn < 0
-    n = ctrl.nn
-    if ctrl.nn < 0
+    if n < 0
         qa = -qa
         delta .= -delta
         n = -n
@@ -347,6 +343,8 @@ Compute a spline of vacuum response matrices over the range of psi from 'ctrl.ps
 same function as `free_wvmats` in the Fortran code.
 """
 function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+
+    # TODO: NEED TO UPDATE THIS TO MULTI-N
 
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?

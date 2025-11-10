@@ -42,6 +42,7 @@ including solution vectors, tolerances, and flags for the integration process.
     ifix::Int = 0                # index for number of unorms performed
     index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)                                   # indices for sorting solutions
     sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
+    zeroed_solution_indices::Vector{Vector{Int}} = Vector{Vector{Int}}(undef, numunorms_init)  # indices of zeroed solutions at each unorm
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)             # fixup factors for Gaussian reduction
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
 
@@ -143,7 +144,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
 
     if outp.write_euler_h5
         if ctrl.verbose
-            println("Writing saved integration data to euler.h5")
+            println("Writing saved integration data to $(outp.fname_euler_h5)")
         end
         write_euler_h5(ctrl, equil, intr, odet, outp)
     end
@@ -254,10 +255,8 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     # Initialize solutions with the identity matrix for U_22 as described in [Glasser PoP 2016] Section VI
-    for jpert in 1:intr.npert
-        for ipert in 1:intr.mpert
-            odet.u[ipert + (jpert - 1) * intr.mpert, ipert + (jpert - 1) * intr.mpert, 2] = 1
-        end
+    for ipert in 1:intr.numpert_total
+        odet.u[ipert, ipert, 2] = 1
     end
 end
 
@@ -293,21 +292,22 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     dpsi = singp.psifac - odet.psifac
     odet.psifac += 2 * dpsi # jump to other side of singular surface
     ua = sing_get_ua(ctrl, intr, odet)
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    
     # TODO: single n, we remove the largest solution and sub in the asymptotic on the other side
     # However, if we do remove the N largest modes, we zero out a that lives in the upper block
     # and then sub in the asymptotic solution which lives in the lower block, messing up the block
     # diagonal structure of the matrix and later calculations
     # I don't have a good reason for doing this, but for now we will make sure we only remove the largest mode
     # in the same block as the resonant mode
-    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-
     if !ctrl.con_flag
-        # Eliminate the solution with the largest norm for each resonances
-        # TODO: should we make sure we make sure to do this once per n? Or are just the M largest modes ok? (with M being multiplicity)
+        # Eliminate the solution with the largest norm for each resonance
+        odet.zeroed_solution_indices[odet.ifix] = Int[]
         for i in eachindex(singp.r1)
             idx_max_same_block = findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total)
-                odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= 0
-            end
+            push!(odet.zeroed_solution_indices[odet.ifix], idx_max_same_block)
+            odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= 0
+        end
     end
 
     # Update solution vectors
@@ -325,6 +325,7 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
             odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
         end
+        println("Zeroing solution index", odet.zeroed_solution_indices[odet.ifix], " = ", odet.index[odet.zeroed_solution_indices[odet.ifix], odet.ifix], " at ifix = ", odet.ifix)
     end
 
     # Get asymptotic coefficients after crossing rational surface
@@ -556,6 +557,10 @@ function ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, 
     # Store data for the current fixup
     ifix = odet.ifix
     odet.sing_flag[ifix] = sing_flag
+    # TODO: TEMP, clean this up later if it works
+    if !sing_flag
+        odet.zeroed_solution_indices[ifix] = [0]
+    end
     # Since the current step has been fixed-up, we denote the end of the previous
     # fixup region as the previous step (this just avoids a -1 index later)
     odet.fixstep[ifix] = odet.step - 1
@@ -661,7 +666,10 @@ function transform_u!(odet::OdeState, intr::DconInternal)
             gauss[:, :, ifix] .= gauss[:, :, ifix] * temp
         end
         if odet.sing_flag[ifix]
-            gauss[:, odet.index[1, ifix], ifix] .= 0.0
+            for zeroed_index in odet.zeroed_solution_indices[ifix]
+                println("Zeroing index[$zeroed_index] = $(odet.index[zeroed_index, ifix]) in fixup $ifix")
+                gauss[:, odet.index[zeroed_index, ifix], ifix] .= 0.0
+            end
         end
     end
 
@@ -714,7 +722,12 @@ function write_euler_h5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium,
         euler_h5["info/mband"] = intr.mband
         euler_h5["info/mlow"] = intr.mlow
         euler_h5["info/mhigh"] = intr.mhigh
-        euler_h5["info/nn"] = ctrl.nn
+        euler_h5["info/npert"] = intr.npert
+        euler_h5["info/nlow"] = intr.nlow
+        euler_h5["info/nhigh"] = intr.nhigh
+        m = [(i - 1) % intr.mpert + intr.mlow for i in 1:(intr.numpert_total)]
+        n = [(i - 1) ÷ intr.mpert + intr.nlow for i in 1:(intr.numpert_total)]
+        euler_h5["info/mn_index"] = hcat(m, n)   # (N, 2) matrix
         euler_h5["info/singfac_min"] = ctrl.singfac_min
         euler_h5["info/kin_flag"] = ctrl.kin_flag
         euler_h5["info/con_flag"] = ctrl.con_flag
