@@ -14,9 +14,9 @@ The WIP documentation can be found [here](https://openfusiontoolkit.github.io/JP
 All developers need to use Vincent Driessen's [GitFlow](http://nvie.com/posts/a-successful-git-branching-model) workflow when editing the GPEC package. PLEASE READ THE ENTIRE POST. It is short, very thorough, and good for both experienced and new git users.
 
 The highlights are,
-  - There are two permanent branches: master and develop
-  - The master branch is only updated for at release ready stages
-  - New features should be developed in short-lived (days) branches coming off of and merging back to the development branch.
+  - There are two permanent branches: main (the post uses "master") and develop
+  - The main branch is only updated for at release ready stages
+  - New features should be developed in short-lived (days) branches coming off of and merging back to the develop branch.
 
 Specific instructions are given in the link above as to exactly how to branch and merge these various branches. For example, the --no-ff option should be used when merging in order to keep branch histories. Just follow the examples and you wont go wrong!
 

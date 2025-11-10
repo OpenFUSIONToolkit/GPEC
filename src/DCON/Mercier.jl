@@ -2,8 +2,8 @@
     mercier_scan!(locstab_fs::Array{Float64,5}, plasma_eq::PlasmaEquilibrium)
 
 Evaluates Mercier criterion for local stability and modifies results in place
-within the local stability array.
-
+within the local stability array. Performs the same function as `mercier_scan`
+in the Fortran code.
 """
 function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
@@ -29,7 +29,7 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             theta = rzphi.ys[itheta]
 
             # Evaluate bicubic spline at grid point
-            f, _, fy = Spl.bicube_eval(rzphi, rzphi.xs[ipsi], theta, 1)
+            f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi], theta)
 
             rfac = sqrt(f[1])
             eta = 2π * (theta + f[2])
@@ -52,7 +52,7 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             ff_fs[itheta, 5] = bsq
 
             # Weight by jacobian and volume element
-            ff_fs[itheta, :] .*= jac / v1
+            @views ff_fs[itheta, :] .*= jac / v1
         end
 
         ff = Spl.CubicSpline(Vector(rzphi.ys), ff_fs; bctype=2) # bctype=2 is periodic
@@ -69,8 +69,8 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
 
         # Store results in output spline structure
-        locstab_fs[ipsi, 1] = di * sq.xs[ipsi] # is this the right 'psis'?
-        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * sq.xs[ipsi] # is this the right 'psis'?
+        locstab_fs[ipsi, 1] = di * sq.xs[ipsi]
+        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * sq.xs[ipsi]
         locstab_fs[ipsi, 3] = h
     end
 end

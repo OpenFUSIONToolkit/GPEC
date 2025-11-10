@@ -7,8 +7,8 @@ function Main(path::String)
     # Read input data and set up data structures
     intr = DconInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
-    ctrl = DconControl(; (Symbol(k)=>v for (k,v) in inputs["DCON_CONTROL"])...)
-    outp = DconOutput(; (Symbol(k)=>v for (k,v) in inputs["DCON_OUTPUT"])...)
+    ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
+    outp = DconOutput(; (Symbol(k) => v for (k, v) in inputs["DCON_OUTPUT"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     init_files(outp, intr.dir_path)
 
@@ -16,10 +16,17 @@ function Main(path::String)
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
-    # Determine if qhigh is truncating before psihigh and reform equilibrium if needed
+    # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
+    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
+        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
+            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
+        ctrl.psiedge = 1.0
+    end
+
+    # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.control.psihigh && ctrl.reform_eq_with_psilim
-        @warn "psilim != psihigh not implemented yet, skipping reforming equilibrium splines"
+        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.control.psihigh)."
         # JMH - Nik please put the logic we discussed here
         # something like ?
         # equil.config.control.psihigh = intr.psilim
@@ -48,38 +55,40 @@ function Main(path::String)
 
     # Dump equilibrium data to files
     if outp.write_eqdata_h5
-        write_output(outp, :eqdata_h5, Vector(equil.sq.xs); dsetname="psi")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 1] ./ (2π)); dsetname="f")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 2]); dsetname="mu0p")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 3]); dsetname="dV/dpsi")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 4]); dsetname="q")
-        write_output(outp, :eqdata_h5, Vector(locstab_fs[:, 1] ./ equil.sq.xs); dsetname="di")
-        write_output(outp, :eqdata_h5, Vector(locstab_fs[:, 2] ./ equil.sq.xs); dsetname="dr")
-        write_output(outp, :eqdata_h5, Vector(locstab_fs[:, 4]); dsetname="ca1")
+        h5open(joinpath(intr.dir_path, outp.fname_eqdata_h5), "w") do eqdata_h5
+            eqdata_h5["psi"] = Vector(equil.sq.xs)
+            eqdata_h5["f"] = Vector(equil.sq.fs[:, 1] ./ (2π))
+            eqdata_h5["mu0p"] = Vector(equil.sq.fs[:, 2])
+            eqdata_h5["dVdpsi"] = Vector(equil.sq.fs[:, 3])
+            eqdata_h5["q"] = Vector(equil.sq.fs[:, 4])
+            eqdata_h5["di"] = Vector(locstab_fs[:, 1] ./ equil.sq.xs)
+            eqdata_h5["dr"] = Vector(locstab_fs[:, 2] ./ equil.sq.xs)
+            eqdata_h5["ca1"] = Vector(locstab_fs[:, 4])
+        end
     end
 
     if outp.write_dcon_out
-        write_output(outp, :dcon_out, @sprintf("%4s %12s %12s %12s %12s %12s %12s %12s %12s", "ipsi","psifac","f","mu0 p","dvdpsi","q","di","dr","ca1"))
+        write_output(outp, :dcon_out, @sprintf("%4s %12s %12s %12s %12s %12s %12s %12s %12s", "ipsi", "psifac", "f", "mu0 p", "dvdpsi", "q", "di", "dr", "ca1"))
         for ipsi in 1:length(equil.sq.xs)
             write_output(outp, :dcon_out,
                 @sprintf("%4d %12.4e %12.4e %12.4e %12.4e %12.4e %12.4e %12.4e %12.4e",
-                        ipsi,
-                        equil.sq.xs[ipsi],
-                        equil.sq.fs[ipsi, 1] / (2π),
-                        equil.sq.fs[ipsi, 2],
-                        equil.sq.fs[ipsi, 3],
-                        equil.sq.fs[ipsi, 4],
-                        locstab_fs[ipsi, 1] / equil.sq.xs[ipsi],
-                        locstab_fs[ipsi, 2] / equil.sq.xs[ipsi],
-                        locstab_fs[ipsi, 4]
+                    ipsi,
+                    equil.sq.xs[ipsi],
+                    equil.sq.fs[ipsi, 1] / (2π),
+                    equil.sq.fs[ipsi, 2],
+                    equil.sq.fs[ipsi, 3],
+                    equil.sq.fs[ipsi, 4],
+                    locstab_fs[ipsi, 1] / equil.sq.xs[ipsi],
+                    locstab_fs[ipsi, 2] / equil.sq.xs[ipsi],
+                    locstab_fs[ipsi, 4]
                 )
             )
         end
-        write_output(outp, :dcon_out, @sprintf("%4s %12s %12s %12s %12s %12s %12s %12s %12s", "ipsi","psifac","f","mu0 p","dvdpsi","q","di","dr","ca1"))
+        write_output(outp, :dcon_out, @sprintf("%4s %12s %12s %12s %12s %12s %12s %12s %12s", "ipsi", "psifac", "f", "mu0 p", "dvdpsi", "q", "di", "dr", "ca1"))
     end
 
     # Find all singular surfaces in the equilibrium
-    sing_find!(ctrl, equil, intr)
+    sing_find!(intr, ctrl, equil)
 
     # Determine poloidal mode numbers
     if ctrl.cyl_flag
@@ -97,6 +106,10 @@ function Main(path::String)
         intr.mhigh = trunc(Int, intr.nn * equil.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
+    if ctrl.delta_mband >= intr.mpert
+        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
+        ctrl.delta_mband = 0
+    end
     intr.mband = intr.mpert - 1 - ctrl.delta_mband
     intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
 
@@ -104,7 +117,7 @@ function Main(path::String)
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             println("     q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
-            println("     sas_flag = $(ctrl.sas_flag), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
+            println("     set_psilim_via_dmlim = $(ctrl.set_psilim_via_dmlim), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
             println("     betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
             println("     nn = $(ctrl.nn), mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
             println(" Fourier analysis of metric tensor components")
@@ -112,29 +125,29 @@ function Main(path::String)
 
         if outp.write_dcon_out
             write_output(outp, :dcon_out, @sprintf("\n   mlow   mhigh   mpert   mband   nn   lim_fl   dmlim      qlim      psilim"))
-            write_output(outp, :dcon_out, @sprintf("%6d %6d %6d %6d %6d %6s %11.3e %11.3e %11.3e",
-                intr.mlow, intr.mhigh, intr.mpert, intr.mband, ctrl.nn,
-                string(ctrl.sas_flag), ctrl.dmlim, intr.qlim, intr.psilim))
+            write_output(
+                outp,
+                :dcon_out,
+                @sprintf("%6d %6d %6d %6d %6d %6s %11.3e %11.3e %11.3e",
+                    intr.mlow, intr.mhigh, intr.mpert, intr.mband, ctrl.nn,
+                    string(ctrl.set_psilim_via_dmlim), ctrl.dmlim, intr.qlim, intr.psilim)
+            )
         end
 
         # Compute metric tensor
-        metric = make_metric(equil, mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
             println("Computing F, G, and K Matrices")
         end
 
         # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(metric, equil, ctrl, intr)
+        ffit = make_matrix(equil, ctrl, intr, metric)
 
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
         end
         sing_scan!(intr, ctrl, equil, ffit, outp)
-        # TODO: implement resist_eval at some point, not urgent for initial functionality.
-        # for ising in 1:msing
-        #  resist_eval(sing[ising])
-        # end
         if ctrl.kin_flag
             # ksing_find()
         end
@@ -145,23 +158,7 @@ function Main(path::String)
         if ctrl.verbose
             println("Integrating Euler-Lagrange equation")
         end
-        odet = ode_run(ctrl, equil, intr, ffit, outp)
-        if intr.size_edge > 0
-            # Find peak index in dw_edge[pre_edge:i_edge]
-            dw_slice = real.(intr.dw_edge[intr.pre_edge:intr.i_edge])
-            peak_index = findmax(dw_slice)[2] + (intr.pre_edge - 1)
-            ctrl.qhigh = intr.q_edge[peak_index]
-            ctrl.sas_flag = false
-            ctrl.psiedge = equil.psihigh
-            sing_lim!(intr, ctrl, equil)
-            println("Re-Integrating to peak dW @ qlim = $(intr.qlim), psilim = $(intr.psilim)")
-            # Full re-run because outputs were written to disk each step
-            # making it hard to backtrack
-            # if outp.bin_euler
-            #    bin_close(euler_bin_unit) # TODO: Need to decide ho we're handling io
-            # end
-            odet = ode_run(ctrl, equil, intr, ffit, outp)
-        end
+        odet = ode_run(ctrl, equil, ffit, intr, outp)
     end
 
     # Compute free boundary energies
@@ -172,7 +169,7 @@ function Main(path::String)
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        plasma1, vacuum1, total1 = free_run(odet, ctrl, intr, equil, ffit, outp; op_netcdf_out=false) # outp.netcdf_out)
+        plasma1, vacuum1, total1 = free_run!(odet, ctrl, equil, ffit, intr, outp; op_netcdf_out=false) # outp.netcdf_out)
     end
 
     # Output results of fixed-boundary stability calculations
@@ -200,4 +197,7 @@ function Main(path::String)
     println("----------------------------------")
     println("Run time: $end_time seconds")
     println("Normal termination.")
+
+    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+
 end

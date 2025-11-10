@@ -1,48 +1,7 @@
-# This is to implement the original bubble function found in equil/utils.f
-# If you are sorting the entire array, just replace the call to bubble with
-#
-# index = sortperm(key) # for ascending order or
-# index = sortperm(key; rev = true) # for descending order
-
-# This will return the indices of the sort range in descending order
-function sortperm_subrange(key::Vector{Float64}, mrange::UnitRange{Int}; descend = true )
-    sorted_inds = sort(mrange; by = i -> key[i], rev = descend)
-    return collect(sorted_inds)
-end
-
-#If you want to mutate an existing index array like your original code:
-function sortperm_subrange!(key::Vector{Float64}, index::Vector{Int}, mrange::UnitRange{Int}; descend = true )
-    sorted_inds = sort(mrange; by = i -> key[i], rev = descend)
-    for (j, i) in enumerate(sorted_inds)
-        index[first(mrange) + j - 1] = i
-    end
-end
-
-function load_u_matrix(filename)
-    lines = readlines(filename)
-    data = [parse.(Float64, split(l)) for l in lines[2:end]]
-    i_vals = Int.(getindex.(data, 1))
-    j_vals = Int.(getindex.(data, 2))
-    k_vals = Int.(getindex.(data, 3))
-    imax = maximum(i_vals)
-    jmax = maximum(j_vals)
-    kmax = maximum(k_vals)
-    mat = zeros(ComplexF64, imax, jmax, kmax)
-    for row in data
-        i = Int(row[1])
-        j = Int(row[2])
-        k = Int(row[3])
-        re = Float64(row[4])
-        im = Float64(row[5])
-        mat[i, j, k] = complex(re, im)
-    end
-    return mat
-end
-
 """
     init_files(out::DconOutput, path::String)
 
-Open all requested output files into `path` and store handles.
+Open requested output text files into `path` and store handles.
 """
 function init_files(out::DconOutput, path::String)
     for pname in propertynames(out)
@@ -54,45 +13,27 @@ function init_files(out::DconOutput, path::String)
 
             full_path = joinpath(path, fname)
 
-            if endswith(fname, ".out") || endswith(fname, ".txt")
-                out.handles[base] = open(full_path, "w")
-
-            elseif endswith(fname, ".h5") && !haskey(out.handles, base)
-                fid = h5open(full_path, "w")
-                out.handles[base] = fid
-
-            else
-                error("Unknown file extension for $fname, need to add to init_files!")
+            if !endswith(fname, ".h5") # we don't pre-open h5 files
+                if endswith(fname, ".out") || endswith(fname, ".txt")
+                    out.handles[base] = open(full_path, "w")
+                else
+                    error("Unknown file extension for $fname, need to add to init_files!")
+                end
             end
         end
     end
-    return out
 end
 
 """
     write_output(out::DconOutput, key::Symbol, data; dsetname=nothing, slice=:)
 
-Writes `data` to the file corresponding to `key`.
-- For text files: appends a line.
-- For HDF5 files: writes into `dsetname` at `slice`.
+Writes `data` to the text file corresponding to `key`.
 """
-function write_output(out::DconOutput, key::Symbol, data; dsetname=nothing, slice=:)
+function write_output(out::DconOutput, key::Symbol, data)
     handle = out.handles[key]
 
     if handle isa IOStream
         println(handle, data)
-
-    elseif handle isa HDF5.File
-        if dsetname === nothing
-            error("Must specify dsetname when writing to HDF5 file $key")
-        end
-        if haskey(handle, dsetname)
-            handle[dsetname][slice...] = data
-        else
-            # create dataset if not present
-            handle[dsetname] = data
-        end
-
     else
         error("Unsupported handle type for key $key")
     end
@@ -101,10 +42,7 @@ end
 """
     close_files(out::DconOutput)
 
-Closes all open files.
-# TODO: is there a way to make the code run this if it errors out anywhere?
-# In existing state, files will remain open if there is an error, so you have
-# to manually exit and reopen Julia.
+Closes all open text files.
 """
 function close_files(out::DconOutput)
     for (key, handle) in out.handles
@@ -114,13 +52,45 @@ function close_files(out::DconOutput)
 end
 
 """
-    chebyshev_nodes(a::Float64, b::Float64, N::Int)
-Generates `N` Chebyshev-Lobatto nodes in the interval `[a, b]`
-in ascending order.
+    resize_storage!(odet::OdeState)
+
+Resize storage arrays in `odet` when the current step exceeds allocated size.
+Doubles the size of the storage arrays for `u_store`, `ud_store`, `psi_store`,
+and `q_store`, and copies over existing data to the new arrays.
 """
-# TODO: this is no longer used, but might be useful code? Leaving for now, but likely can be removed
-function chebyshev_nodes(a::Float64, b::Float64, N::Int)
-    j = 0:N-1
-    nodes = (a+b)/2 .+ (b-a)/2 .* cos.(π * j ./ (N - 1))
-    return reverse(nodes)
+function resize_storage!(odet::OdeState)
+    oldlen = size(odet.u_store, 4)
+    newlen = 2 * oldlen
+
+    # Allocate new arrays
+    u_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
+    ud_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
+    psi_new = Vector{Float64}(undef, newlen)
+    q_new = Vector{Float64}(undef, newlen)
+
+    # Copy old data
+    u_new[:, :, :, 1:odet.step] = odet.u_store[:, :, :, 1:odet.step]
+    ud_new[:, :, :, 1:odet.step] = odet.ud_store[:, :, :, 1:odet.step]
+    psi_new[1:odet.step] = odet.psi_store[1:odet.step]
+    q_new[1:odet.step] = odet.q_store[1:odet.step]
+
+    # Replace old arrays
+    odet.u_store = u_new
+    odet.ud_store = ud_new
+    odet.psi_store = psi_new
+    odet.q_store = q_new
+end
+
+"""
+    trim_storage!(odet::OdeState)
+
+Trim storage arrays in `odet` to the actual number of steps taken.
+Resizes `u_store`, `ud_store`, `psi_store`, and `q_store` to the
+current step count, removing any unused allocated space.
+"""
+function trim_storage!(odet::OdeState)
+    resize!(odet.psi_store, odet.step)
+    resize!(odet.q_store, odet.step)
+    odet.u_store = odet.u_store[:, :, :, 1:odet.step]
+    odet.ud_store = odet.ud_store[:, :, :, 1:odet.step]
 end

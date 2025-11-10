@@ -34,7 +34,7 @@ function build_fortran()
     results = [
         # build_jpec_fortran() add here
         build_spline_fortran(),
-        build_vacuum_fortran(),
+        build_vacuum_fortran()
     ]
 
     if all(results)
