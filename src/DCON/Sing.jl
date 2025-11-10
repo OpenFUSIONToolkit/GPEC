@@ -174,11 +174,12 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # Compute the resonant (r) and nonresonant (n) indices of the shearing transformation matrix R
     # 1 indexes along the N*M dimension, and 2 along the 2*N*M dimension
     # In 2D, see eq. 41 of 2016 Glasser DCON paper
+    # TODO: if we remove the 3rd dimension, no need for both r1 and r2
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     singp.r1 = ipert_res
     singp.r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
     singp.n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
-    singp.n2 = vcat(singp.n1, [i + intr.numpert_total for i in singp.n1])
+    singp.n2 = vec([i + j * intr.numpert_total for j in 0:1, i in singp.n1])
 
     psifac = singp.psifac
     q = singp.q
@@ -189,6 +190,8 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # Compute Mercier criterion and singular power
     sing_mmat!(intr, ctrl, equil, ffit, ising)
     # TODO: I am not sure if this will generalize to 3D, but I think it works for 2D
+    # We only need the transpose here because the third dimension corresponds to the bottom half of the 2N X 2N matrix
+    # If we get rid of the 3rd dimension, this becomes simpler
     if length(singp.r1) == 1
         singp.m0mat = transpose(singp.mmat[singp.r1[1], singp.r2, :, 1])
     else
@@ -197,8 +200,12 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     singp.alpha = eigen(singp.m0mat).values[length(singp.r1)+1:end] # take the M largest eigenvalues
     # Maybe? di isn't super well defined for multiplicity > 1
+    # This is only used to compare to the analytic, can be deprecated in 3D
+    # In 3D, need to do a surface average to obtain the di computed in Mercier.jl
     singp.di = real(singp.alpha[1]^2)
 
+    # This is the parameter α but for all modes - α = 0 for non-resonant modes
+    # TODO: this can be removed, and the section in sing_solve that uses it can just be replaced with 0
     singp.power[ipert_res] .= -singp.alpha
     singp.power[ipert_res .+ intr.numpert_total] .= singp.alpha
 
@@ -207,6 +214,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     # Zeroth-order non-resonant solutions
+    # TODO: without the third dimension, this is just setting to the identity
     singp.vmat .= 0
     for ipert in 1:intr.numpert_total
         singp.vmat[ipert, ipert, 1, 1] = 1
@@ -214,7 +222,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     end
     
     # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
-    # TODO: no idea if this is the correct way of doing this
+    # TODO: this will probably need a better generalization in 3D
     for i in eachindex(singp.r1) # go block by block in M₀
         m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
         r1 = singp.r1[i]
@@ -291,7 +299,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
     k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
 
-    # Evaluate Taylor series coefficients for Q = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
+    # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
     for i in 2:4
         singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i], inner=intr.mpert)
@@ -307,7 +315,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # TODO: this section can absolutely be simplified using some intuition on the coefficients.
     # Possibly could just store an unfactorized F spline? Then logic would just look like K but
     # with an extra singfac/altered coefficients since it would just be F = QF̄Q
-    # For now, leaving overly detailed comments to remind
+    # For now, leaving overly detailed comments to remind so I don't have to work through this again
     # First, compute Taylor series coefficients of QL̄ (but without scaling by 1/n!), so we get binomial coefficients leftover
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
@@ -465,7 +473,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         @views x[:, :, 1, i+1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, i+1])
     end
 
-    # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ - ∑Kⱼ^† x¹ₙ₋ⱼ at each order
+    # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
     for i in 0:ctrl.sing_order
         for isol in 1:2*intr.numpert_total
             for j in 0:i
@@ -475,22 +483,25 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         end
     end
 
-    # Principal terms of mmat (what is going on here?)
-    singp.mmat .= 0
+    # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
     r1 = singp.r1
     r2 = singp.r2
     n1 = singp.n1
     n2 = singp.n2
     j = 0
+    # Start with the S⁻¹LS components
+    # Glasser PoP 2023 eq. 39: at each other of L, we get contributions to z^k from RLR,
+    # z^k+0.5 from RLA and ALR, and z^k+1 from ALA (where A is the nonresonant part)
     for i in 0:ctrl.sing_order
         singp.mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
         singp.mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
         singp.mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
         singp.mmat[n1, n2, :, j+3] .= x[n1, n2, :, i+1]
+        # Expansion of M is in half powers of z due to shearing transformation, so we jump by 2
         j += 2
     end
-
-    # Apply the shearing transformation matrix R for each set of resonant indices
+    # Apply the effect of the shearing transformation to the resonant indices R
+    # Glasser PoP 2023 eq. 25 + 28: M = zS⁻¹LS - zS⁻¹S' = zS⁻¹LS + 0.5 [R, 0; 0, -R], 0ᵗʰ order only
     for i in eachindex(r1)
         singp.mmat[r1[i], r2[2 * i - 1], 1, 1] += 0.5
         singp.mmat[r1[i], r2[2 * i], 2, 1] -= 0.5
@@ -510,6 +521,8 @@ See equation 47 in the Glass 2016 DCON paper. Identical to the Fortran
   - `k::Int`: The current order in the power series expansion.
 """
 function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
+    # TODO: rename this solver_higher_order_vmat?
+    # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
         singp.vmat[:, :, :, k+1] .+= sing_matmul(singp.mmat[:, :, :, l+1], singp.vmat[:, :, :, k-l+1])
     end
@@ -526,7 +539,7 @@ function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
             singp.vmat[singp.r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
             singp.vmat[singp.r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
         end
-        # Solve the non-resonant indices (where M₀v is in the null space?)
+        # Solve the non-resonant indices (the eigenvalyue α = 0, so M₀v = 0 (null space))
         singp.vmat[singp.n1, isol, :, k+1] ./= (singp.power[isol] + k / 2.0)
     end
 end
@@ -598,12 +611,14 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     # Do this for each alpha - this might change in 3D
     # For now, just loop through resonances
     for i in eachindex(r1)
-        # Restore powers (undo shearing transformation using z^(±0.5) and zᵅ)
+        # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
         pfac = abs(dpsi).^singp.alpha[i] # zᵅ
-        ua[r1[i], :, 1] ./= sqrtfac
-        ua[r1[i], :, 2] .*= sqrtfac
-        ua[:, r2[2 * i - 1], :] ./= pfac
+        ua[:, r2[2 * i - 1], :] ./= pfac # /zᵅ = z⁻ᵅ
         ua[:, r2[2 * i], :] .*= pfac
+
+        # Apply shearing transformation u = Rv (eq. 41 in Glasser 2016)
+        ua[r1[i], :, 1] ./= sqrtfac # z^-0.5
+        ua[r1[i], :, 2] .*= sqrtfac # z^0.5
 
         # Renormalize
         if odet.psifac < singp.psifac
