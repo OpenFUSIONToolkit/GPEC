@@ -12,7 +12,7 @@ qhigh = 1e3                   # Integration terminated at q limit determined by 
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
 nn_low = 1                    # Lower toroidal mode number
-nn_high = 1                 # Upper toroidal mode number
+nn_high = 2                   # Upper toroidal mode number
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...

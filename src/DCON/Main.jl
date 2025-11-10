@@ -1,4 +1,4 @@
-function Main(path::String)
+function Main(path::String="./")
 
     println("DCON START")
     println("----------------------------------")
@@ -14,7 +14,7 @@ function Main(path::String)
 
     # Set up variables
     # TODO: dcon_kin_threads logic?
-    # ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
+    ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
