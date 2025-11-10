@@ -587,10 +587,11 @@ end
 """
     sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
-Compute the asymptotic series solution for a given singularity.
-Fills and returns `ua` with the asymptotic solution vmat
-for the specified singular surface and psi value. Performs
-the same function as `sing_get_ua` in the Fortran code.
+Compute the asymptotic series solution for a given singular surface.
+Fills and returns `ua` with the asymptotic solution vmat computed in
+`sing_vmat`. We obtain the solution using equations 45 and 41 in the
+2016 DCON paper. Performs the same function as `sing_get_ua` in the
+Fortran code.
 """
 function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
@@ -608,8 +609,7 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
         ua .= ua .* sqrtfac .+ singp.vmat[:, :, :, iorder+1] # sqrtfac becomes √zᵏ here
     end
 
-    # Do this for each alpha - this might change in 3D
-    # For now, just loop through resonances
+    # Loop through resonances - this might change in 3D
     for i in eachindex(r1)
         # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
         pfac = abs(dpsi).^singp.alpha[i] # zᵅ

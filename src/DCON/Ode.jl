@@ -42,7 +42,7 @@ including solution vectors, tolerances, and flags for the integration process.
     ifix::Int = 0                # index for number of unorms performed
     index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)                                   # indices for sorting solutions
     sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
-    zeroed_solution_indices::Vector{Vector{Int}} = Vector{Vector{Int}}(undef, numunorms_init)  # indices of zeroed solutions at each unorm
+    zeroed_idx::Vector{Vector{Int}} = Vector{Vector{Int}}(undef, numunorms_init)  # indices of zeroed solutions at each unorm
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)             # fixup factors for Gaussian reduction
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
 
@@ -54,7 +54,7 @@ including solution vectors, tolerances, and flags for the integration process.
     kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Cholesky{ComplexF64, BlockDiagonals.BlockDiagonal{ComplexF64, Matrix{ComplexF64}}}, Nothing} = nothing
+    Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing} = nothing
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 end
 
@@ -295,39 +295,37 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     
     # TODO: single n, we remove the largest solution and sub in the asymptotic on the other side
-    # However, if we do remove the N largest modes, we zero out a that lives in the upper block
+    # However, if we do remove the N largest modes, we can zero out one that lives in the upper block
     # and then sub in the asymptotic solution which lives in the lower block, messing up the block
     # diagonal structure of the matrix and later calculations
     # I don't have a good reason for doing this, but for now we will make sure we only remove the largest mode
-    # in the same block as the resonant mode
+    # in the same block as the resonant mode. Does this change in 3D?
     if !ctrl.con_flag
-        # Eliminate the solution with the largest norm for each resonance
-        odet.zeroed_solution_indices[odet.ifix] = Int[]
+        # Eliminate the solution with the largest norm (in the same block) for each resonance
+        odet.zeroed_idx[odet.ifix] = Int[]
         for i in eachindex(singp.r1)
-            idx_max_same_block = findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total)
-            push!(odet.zeroed_solution_indices[odet.ifix], idx_max_same_block)
-            odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= 0
+            push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
         end
     end
 
-    # Update solution vectors
+    # Approximate solution vectors across singular surface
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     params = (ctrl, equil, ffit, intr, odet)
     sing_der!(du1, odet.u, params, psi_old)
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
+
+    # Apply asymptotic solution on other side of singular surface
     if !ctrl.con_flag
         for i in eachindex(singp.r1)
-            idx_max_same_block = findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
-            odet.u[:, odet.index[idx_max_same_block, odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
         end
-        println("Zeroing solution index", odet.zeroed_solution_indices[odet.ifix], " = ", odet.index[odet.zeroed_solution_indices[odet.ifix], odet.ifix], " at ifix = ", odet.ifix)
     end
-
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
@@ -557,10 +555,6 @@ function ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, 
     # Store data for the current fixup
     ifix = odet.ifix
     odet.sing_flag[ifix] = sing_flag
-    # TODO: TEMP, clean this up later if it works
-    if !sing_flag
-        odet.zeroed_solution_indices[ifix] = [0]
-    end
     # Since the current step has been fixed-up, we denote the end of the previous
     # fixup region as the previous step (this just avoids a -1 index later)
     odet.fixstep[ifix] = odet.step - 1
@@ -665,10 +659,10 @@ function transform_u!(odet::OdeState, intr::DconInternal)
             # Matrix multiplication gauss = gauss * temp
             gauss[:, :, ifix] .= gauss[:, :, ifix] * temp
         end
+        # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
         if odet.sing_flag[ifix]
-            for zeroed_index in odet.zeroed_solution_indices[ifix]
-                println("Zeroing index[$zeroed_index] = $(odet.index[zeroed_index, ifix]) in fixup $ifix")
-                gauss[:, odet.index[zeroed_index, ifix], ifix] .= 0.0
+            for zeroed_idx in odet.zeroed_idx[ifix]
+                gauss[:, odet.index[zeroed_idx, ifix], ifix] .= 0.0
             end
         end
     end
