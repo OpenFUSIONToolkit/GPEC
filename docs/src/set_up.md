@@ -64,7 +64,8 @@
 
 4. Install Python/Jupyter in WSL 
    
-   This step is only really required if you want to run the `.ipynb` test notebooks.
+   This step is only really required if you want to run the `.ipynb` test notebooks. You do not necessarily need Python3 installed, but Jupyter runs on a Python server. 
+   If you do not want to install Python3 and Jupyter, you can install the "IJulia" package to your Julia environment instead and run the command 'notebook()' in the terminal.
    1. To install Python3 and Jupyter notebooks, use these commands
         ```shell
         sudo apt install python3-pip python3-venv -y
