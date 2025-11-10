@@ -344,15 +344,13 @@ same function as `free_wvmats` in the Fortran code.
 """
 function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
-    # TODO: NEED TO UPDATE THIS TO MULTI-N
-
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
     qedge = Spl.spline_eval!(equil.sq, ctrl.psiedge)[4]
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * ctrl.nn * 4))
     psii = ctrl.psiedge
     psi_array = zeros(Float64, npsi + 1)
-    wv_array = zeros(ComplexF64, npsi + 1, intr.mpert^2)
+    wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:npsi+1
         # Space points evenly in q
@@ -377,36 +375,40 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             error("Newton iteration for psilim did not converge after $itmax iterations.")
         end
 
-        # Prepare vacuum matrices
-        free_write_msc(psii, ctrl, equil, intr; inmemory_op=true, ahgstr_op="")
-        grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
-        xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
-        wv = zeros(ComplexF64, intr.mpert, intr.mpert)
-        complex_flag = true
-        kernelsignin = 1.0
-        wall_flag = false
-        farwal_flag = false
-        ahg_file = "ahg2msc_dcon.out" # Deprecated
+        for ipert_n in 1:intr.npert
+            n = ipert_n - 1 + intr.mlow
 
-        # Compute vacuum matrix
-        VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+            # Prepare to run VACUUM
+            free_write_msc(psii, n, equil, intr)
+            grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
+            xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
+            wv = zeros(ComplexF64, intr.mpert, intr.mpert)
+            complex_flag = true
+            kernelsignin = 1.0
+            wall_flag = false
+            farwal_flag = false
+            ahg_file = "ahg2msc_dcon.out" # Deprecated
 
-        # Apply singular factor scaling
-        singfac = intr.mlow .- ctrl.nn * qi .+ collect(0:intr.mpert-1)
-        for ipert in 1:intr.mpert
-            wv[ipert, :] .*= singfac[ipert]
-            wv[:, ipert] .*= singfac[ipert]
+            # Compute vacuum matrix
+            VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+                wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+
+            # Apply singular factor scaling
+            singfac = collect(intr.mlow:intr.mhigh) .- n * qi
+            for ipert in 1:intr.mpert
+                wv[ipert, :] .*= singfac[ipert]
+                wv[:, ipert] .*= singfac[ipert]
+            end
+
+            # Store flattened matrix in spline field
+            @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv
+
+            # Free VACUUM memory
+            VacuumMod.unset_dcon_params()
         end
-
-        # Store flattened matrix in spline field
-        wv_array[i, :] .= reshape(wv, intr.mpert^2)
     end
 
-    # Free VACUUM memory
-    VacuumMod.unset_dcon_params()
-
-    return Spl.CubicSpline(psi_array, wv_array; bctype=3)
+    return Spl.CubicSpline(psi_array, reshape(wv_array, npsi+1, :); bctype="extrap")
 end
 
 """
@@ -422,10 +424,10 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     normalize = true
 
-    wp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    temp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    et = zeros(ComplexF64, intr.mpert)
-    wt = zeros(ComplexF64, intr.mpert, intr.mpert)
+    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    temp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    et = zeros(ComplexF64, intr.numpert_total)
+    wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
 
@@ -436,7 +438,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     wp .= adjoint(wp) / equil.psio^2
 
     # Compute vacuum matrix from spline
-    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.mpert, intr.mpert)
+    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.numpert_total, intr.numpert_total)
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
@@ -444,17 +446,19 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     # Sort eigenvalues and reorder columns of wt
     eindex = sortperm(real.(Ev.values); rev=true)
-    for ipert in 1:intr.mpert
-        wt[:, ipert] .= Ev.vectors[:, eindex[intr.mpert+1-ipert]]
-        et[ipert] = Ev.values[eindex[intr.mpert+1-ipert]]
+    for ipert in 1:intr.numpert_total
+        wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
+        et[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
     end
 
     # Normalize eigenfunction and energy (only need the first eigenmode)
     if normalize
         isol = 1
         norm = 0.0 + 0.0im
-        for ipert in 1:intr.mpert, jpert in 1:intr.mpert
-            norm += ffit.jmat[jpert-ipert+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+        for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+            ipert = (ipert_n - 1) * intr.mpert + ipert_m
+            jpert = (ipert_n - 1) * intr.mpert + jpert_m
+            norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
         end
         norm /= v1
         et[isol] /= norm
