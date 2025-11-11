@@ -674,7 +674,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # Compute singfac = 1 / (m - nq)
     odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
-    odet.singfac_vec .= 1.0 ./ (intr.mlow .- ctrl.nn * odet.q .+ (0:intr.mpert-1))
+    odet.singfac_vec .= 1.0 ./ (collect(intr.mlow:intr.mhigh) .- ctrl.nn * odet.q )
     chi1 = 2π * equil.psio
 
     # kinetic stuff - skip for now
@@ -695,8 +695,6 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
         gmat = reshape(odet.gmat, intr.mpert, intr.mpert)
 
-        # ldiv!(A,B): Compute A \ B in-place and overwriting B to store the result,
-        # where A is a factorization object.
         odet.Afact = cholesky(Hermitian(amat))
         # bmat = A⁻¹ * bmat
         ldiv!(odet.Afact, bmat)
@@ -709,11 +707,10 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         error("kin_flag not implemented yet")
     else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
-        # du[1] = - K̄ * u[1] + Q⁻¹ * u[2]
+        # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         du1 .= u2 .* odet.singfac_vec
         mul!(odet.tmp, kmat, u1)
         du1 .-= odet.tmp
-        # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         ldiv!(LowerTriangular(fmat_lower), du1)
         ldiv!(UpperTriangular(fmat_lower'), du1)
         # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
@@ -727,7 +724,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # ud[1] = Ξ'_Ψ
     @views odet.ud[:, :, 1] .= du1
-    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), equation 18 of Glasser 2016
+    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), eq. 18 of Glasser 2016
     mul!(odet.tmp, bmat, du1)
     odet.ud[:, :, 2] .= .-odet.tmp
     mul!(odet.tmp, cmat, u1)
