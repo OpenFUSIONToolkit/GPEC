@@ -202,7 +202,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # Maybe? di isn't super well defined for multiplicity > 1
     # This is only used to compare to the analytic, can be deprecated in 3D
     # In 3D, need to do a surface average to obtain the di computed in Mercier.jl
-    singp.di = real(singp.alpha[1]^2)
+    singp.di = -real(singp.alpha[1]^2)
 
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
     # TODO: this can be removed, and the section in sing_solve that uses it can just be replaced with 0
