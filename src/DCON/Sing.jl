@@ -46,7 +46,7 @@ function sing_find!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
             converged = false
             for _ in 1:itmax
                 psifac = (psi0 + psi1) / 2
-                singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
+                singfac = (m - ctrl.nn * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
                 abs(singfac) < 1e-8 && (converged = true; break)
                 singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
             end
@@ -280,7 +280,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
-    singfac[:, 1] .= intr.mlow:intr.mhigh .- ctrl.nn * q[1]
+    singfac[:, 1] .= collect(intr.mlow:intr.mhigh) .- ctrl.nn .* q[1]
     singfac[:, 2] .= -ctrl.nn * q[2]
     singfac[:, 3] .= -ctrl.nn * q[3]
     singfac[:, 4] .= -ctrl.nn * q[4]
