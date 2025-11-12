@@ -1,4 +1,4 @@
-function Main(path::String="./")
+function Main(path::String)
 
     println("DCON START")
     println("----------------------------------")
@@ -110,12 +110,8 @@ function Main(path::String="./")
 
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
-    display(intr.sing)
 
     # Determine poloidal mode numbers
-    if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
-        error("Negative delta_mlow or delta_mhigh not allowed")
-    end
     if ctrl.cyl_flag
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
@@ -147,7 +143,6 @@ function Main(path::String="./")
             println("     betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
             println("     mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
             println("     nlow = $(intr.nlow), nhigh = $(intr.nhigh), npert = $(intr.npert)")
-            println("Fourier analysis of metric tensor components")
         end
 
         if outp.write_dcon_out

@@ -64,6 +64,10 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     rzphi = equil.rzphi
     mpsi = length(rzphi.xs)
     mtheta = length(rzphi.ys)
+
+    println("   Equilibrium grid: $mpsi (ψ) × $mtheta (θ)")
+    println("   Fourier fit modes (mband): $mband")
+
     metric = MetricData(mpsi, mtheta)
 
     # Set coordinate grids based on the input equilibrium
@@ -180,6 +184,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
     # --- Extract inputs ---
     sq = equil.sq
     mpsi = metric.mpsi
+
+    if ctrl.verbose
+        println("   Toroidal mode n=$(ctrl.nn), Poloidal modes m=$(intr.mlow):$(intr.mhigh) ($(intr.mpert) modes)")
+        println("   Matrix bandwidth: $(intr.mband)")
+    end
 
     # Allocations (use flat storage for all matrices to fill splines)
     # TODO: This can be made more efficient for 2D equilibria by using block diagonals

@@ -7,7 +7,6 @@ using TOML
 using FFTW
 using OrdinaryDiffEq
 using HDF5
-using BlockDiagonals
 import ..Equilibrium
 import ..Spl
 import ..VacuumMod

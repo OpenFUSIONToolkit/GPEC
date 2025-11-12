@@ -96,10 +96,6 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
         error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
     end
 
-    if ctrl.verbose # mimicing output from ode_output_open
-        println("   ψ = $(odet.psifac), q = $(Spl.spline_eval!(equil.sq, odet.psifac)[4])")
-    end
-
     # Always integrate once, even if no rational surfaces are crossed
     ode_step!(odet, ctrl, equil, ffit, intr)
 
@@ -228,26 +224,26 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     # end
     else
         # Find next singular surface (either next one in the list or outside integration limits)
-        # TODO: (ask Nik) this is tricky, did I generalize the logic correctly? (shorten this comment later)
-        # Basically, want to choose the next singular surface based on being within our integration limits
-        # and also being resonant with our included poloidal mode numbers. When there are mulitple toroidal
-        # mode numbers, we need to check if any of them are resonant with the singular surface. This is equivalent
-        # to checking if any of the m values in that singular surface are within the range of mlow and mhigh,
-        # Will this ever not be true? I thought we set mlow and mhigh to be wide enough to include all resonant surfaces?
-        # single n: in_q_range = intr.mlow <= ctrl.nn * sing.q <= intr.mhigh
-        # multi n: in_q_range = check if any n*q is resonant, equivalent to checking singp m-vector
-        for i in (odet.ising + 1):intr.msing
-            odet.ising = i
-            singp = intr.sing[odet.ising]
-            (intr.psilim < singp.psifac || any(m -> intr.mlow <= m <= intr.mhigh, singp.m)) && break
+        # TODO: Based on the existing logic, I don't think checking if mlow <= m <= mhigh is necessary,
+        # since DCON sets the poloidal mode numbers to include the resonant modes anyway. However, based
+        # on discussion with Nik, eventually we might just want to allow the user to set mlow/mhigh, in
+        # which case this check would be necessary. In 3D, this might be even more applicable since rational
+        # surfaces will be more dense so we might not set out mode spectrum to include all resonances.
+        while true
+            odet.ising += 1
+            if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+                break
+            end
+            if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
+                break
+            end
         end
-        singp = intr.sing[odet.ising] # singp loses scope outside of loop
         # Determine psimax and classify next integration limit type
         if odet.ising > intr.msing || intr.psilim < singp.psifac || ctrl.singfac_min == 0
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
-            # TODO: (ask Nik) where does singfac_min / n * q' come from? How does it generalize to multi-n?
+            # TODO: Nik: where does singfac_min / n * q' come from? Unclear how to generalize to multi-n
             # Safest choice for now is to use the smallest resonant n for maximum separation
             odet.psimax = singp.psifac - ctrl.singfac_min / abs(minimum(singp.n) * singp.q1)
             odet.next = "cross"
@@ -294,12 +290,12 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     ua = sing_get_ua(ctrl, intr, odet)
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     
-    # TODO: single n, we remove the largest solution and sub in the asymptotic on the other side
-    # However, if we do remove the N largest modes, we can zero out one that lives in the upper block
-    # and then sub in the asymptotic solution which lives in the lower block, messing up the block
-    # diagonal structure of the matrix and later calculations
-    # I don't have a good reason for doing this, but for now we will make sure we only remove the largest mode
-    # in the same block as the resonant mode. Does this change in 3D?
+    # TODO: make this comment shorter?
+    # Single n: remove largest solution and sub in asymptotics on the other side
+    # Multi-n: if we remove the N largest modes in arbitrary order, we can mess up the
+    # diagonal structure of the matrix and later calculations. zeroed_idx let's us make sure
+    # the solution vector we're zeroing corresponds to the same block as the resonant mode we
+    # introduce. It is also needed when transforming u back to the full solution after integration.
     if !ctrl.con_flag
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
@@ -330,19 +326,18 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
     # Find next singular surface (either the next in the list or outside integration limits)
-    # TODO: CLEAN UP THIS MESS
-    if odet.ising == intr.msing
+    while true
         odet.ising += 1
-    else
-        for i in (odet.ising + 1):intr.msing
-            odet.ising = i
-            singp = intr.sing[odet.ising]
-            (intr.psilim < singp.psifac || any(m -> intr.mlow <= m <= intr.mhigh, singp.m)) && break
+        if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+            break
+        end
+        if intr.mlow <= ctrl.nn * intr.sing[odet.ising].q && intr.mhigh >= ctrl.nn * intr.sing[odet.ising].q
+            break
         end
     end
     
     # Determine psimax and classify next integration limit type
-    if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
+    if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
         odet.psimax = intr.psilim * (1 - eps)
         odet.next = "finish"
     else
@@ -460,9 +455,7 @@ function compute_tols(ctrl, intr, odet)
     if false  # kin_flag (not implemented)
     # Insert kin_flag branch if needed
     else
-        # TODO: some of this tolerance logic might not even be needed, but for now
-        # I'll generalize it to multi-n, preserving as much of the original logic as possible
-        # singfac = m-nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
+        # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
         # Note: odet.q is updated within the derivative calculation
         if odet.ising <= intr.msing
             singfac_local = abs(minimum(intr.sing[odet.ising].n) * (intr.sing[odet.ising].q - odet.q))
