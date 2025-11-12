@@ -239,13 +239,13 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
             end
         end
         # Determine psimax and classify next integration limit type
-        if odet.ising > intr.msing || intr.psilim < singp.psifac || ctrl.singfac_min == 0
+        if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
             # TODO: Nik: where does singfac_min / n * q' come from? Unclear how to generalize to multi-n
             # Safest choice for now is to use the smallest resonant n for maximum separation
-            odet.psimax = singp.psifac - ctrl.singfac_min / abs(minimum(singp.n) * singp.q1)
+            odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
             odet.next = "cross"
         end
     end
