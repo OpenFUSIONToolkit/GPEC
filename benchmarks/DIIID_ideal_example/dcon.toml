@@ -38,8 +38,3 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
 
 use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
-
-[DCON_OUTPUT]
-write_dcon_out = true         # Write dcon.out which contains equilibrium data and final eigenvalues/vectors
-write_euler_h5 = true         # Write euler.h5 (euler.bin Julia equivalent)
-write_eqdata_h5 = true        # Write eqdata.h5, which contains profile and stability data

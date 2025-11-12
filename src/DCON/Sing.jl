@@ -1,19 +1,12 @@
 """
-    sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput)
+    sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
 
 Scan all singular surfaces and calculate asymptotic vmat and mmat matrices
 and Mericer criterion. Performs the same function as `sing_scan` in the Fortran code.
 """
-function sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput)
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, "\n Singular Surfaces:")
-        write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
-    end
+function sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
     for ising in 1:intr.msing
-        sing_vmat!(intr, ctrl, equil, ffit, outp, ising)
-    end
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
+        sing_vmat!(intr, ctrl, equil, ffit, ising)
     end
 end
 
@@ -135,7 +128,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 end
 
 """
-    sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput, ising::Int)
+    sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
 Calculate asymptotic vmat and mmat matrices and Mercier criterion for
 singular surface `ising`. Performs the same function as `sing_vmat` in the Fortran code.
@@ -150,7 +143,7 @@ the 2016 Glasser DCON paper for the mathematical details.
 
 Check logic on typing of di
 """
-function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput, ising::Int)
+function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
     # Allocations
     singp = intr.sing[ising]
@@ -174,12 +167,6 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     singp.n1 = [i for i in 1:intr.mpert if i != ipert0]
     singp.n2 = vcat(singp.n1, [i + intr.mpert for i in singp.n1])
 
-    psifac = singp.psifac
-    q = singp.q
-    di0 = Spl.spline_eval!(intr.locstab, singp.psifac)[1] / singp.psifac
-    q1 = singp.q1
-    rho = singp.rho
-
     # Compute Mercier criterion and singular power
     sing_mmat!(intr, ctrl, equil, ffit, ising)
     singp.m0mat = transpose(singp.mmat[singp.r1[1], singp.r2, :, 1])
@@ -191,10 +178,6 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     singp.alpha = sqrt(-complex(singp.di))
     singp.power[ipert0] = -singp.alpha
     singp.power[ipert0+intr.mpert] = singp.alpha
-
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, @sprintf("%3d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e", ising, psifac, rho, q, q1, di0, singp.di, singp.di / di0 - 1))
-    end
 
     # Zeroth-order non-resonant solutions
     singp.vmat .= 0
@@ -592,7 +575,7 @@ end
     sing_der!(
         du::Array{ComplexF64,3},
         u::Array{ComplexF64,3},
-        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState, DconOutput},
+        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState},
         psieval::Float64
     )
 
@@ -619,7 +602,7 @@ more simplistic code with similar performance.
 
   - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
-  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState, DconOutput}`: Tuple of relevant structs
+  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
 
 ### TODOs
