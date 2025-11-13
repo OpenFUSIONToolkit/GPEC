@@ -57,7 +57,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                     error("Bisection did not converge for m = $m after $itmax iterations.")
                 elseif any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
                     # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
-                    # Technically only need one, but simplifies some later code and cheap to store both
+                    # Technically only need m or n, but simplifies some later code and cheap to store both
                     push!(intr.sing[findfirst(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)].m, m)
                     push!(intr.sing[findfirst(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)].n, n)
                 else
@@ -189,8 +189,9 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Compute Mercier criterion and singular power
     sing_mmat!(intr, ctrl, equil, ffit, ising)
-    # TODO: I am not sure if this will generalize to 3D, but I think it works for 2D
-    # We only need the transpose here because the third dimension corresponds to the bottom half of the 2N X 2N matrix
+    # TODO: My approach for the following logic is to mimic the existing code but go block by block
+    # in m0mat (i.e. looping through each resonance). I think it works for 2D, probably not 3D
+    # Note: We only need the transpose here because the third dimension corresponds to the bottom half of the 2N X 2N matrix
     # If we get rid of the 3rd dimension, this becomes simpler
     if length(singp.r1) == 1
         singp.m0mat = transpose(singp.mmat[singp.r1[1], singp.r2, :, 1])
@@ -199,13 +200,11 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     singp.alpha = eigen(singp.m0mat).values[length(singp.r1)+1:end] # take the M largest eigenvalues
-    # Maybe? di isn't super well defined for multiplicity > 1
-    # This is only used to compare to the analytic, can be deprecated in 3D
     # In 3D, need to do a surface average to obtain the di computed in Mercier.jl
+    # In 2D, I think alphas are the same for all resonances so can just take the first index
     singp.di = -real(singp.alpha[1]^2)
 
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
-    # TODO: this can be removed, and the section in sing_solve that uses it can just be replaced with 0
     singp.power[ipert_res] .= -singp.alpha
     singp.power[ipert_res .+ intr.numpert_total] .= singp.alpha
 
@@ -539,7 +538,7 @@ function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
             singp.vmat[singp.r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
             singp.vmat[singp.r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
         end
-        # Solve the non-resonant indices (the eigenvalyue α = 0, so M₀v = 0 (null space))
+        # Solve the non-resonant indices (the eigenvalue α = 0, so M₀v = 0 (null space))
         singp.vmat[singp.n1, isol, :, k+1] ./= (singp.power[isol] + k / 2.0)
     end
 end
@@ -729,7 +728,8 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
         Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
         
-        # Form full matrices from flat representations, either block-diagonal or full
+        # Form full matrices from flat representations
+        # TODO: make these block diagonal for multi-n?
         amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
         bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
         cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
