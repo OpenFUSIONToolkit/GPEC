@@ -60,12 +60,14 @@ function main()
     # Start timer
     timer(mode=0)
     
-    # Clear working directory
+        # Clear working directory
     if clean
         if verbose
             println("clearing working directory")
         end
-        run(`rm -f pentrc_*.out`)
+        # Use an explicit shell invocation to avoid parse-time errors from
+        # unquoted glob characters inside a command literal (e.g. "*").
+        run(`bash`, "-c", "rm -f pentrc_*.out")
     end
     
     # Administrative setup/diagnostics/debugging

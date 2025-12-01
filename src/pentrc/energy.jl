@@ -30,7 +30,11 @@ include("params.jl")  # For r8, mp, me, e, npsi_out, nell_out, nlambda_out, nmet
 include("utilities.jl")  # For get_free_file_unit, append_2d, check
 include("dcon_interface.jl")  # For shotnum, shottime, machine
 
-using NCDatasets  # NetCDF library
+try
+    using NCDatasets  # NetCDF library
+catch
+    @warn "NCDatasets not available; NetCDF functionality disabled."
+end
 using DifferentialEquations  # Julia's ODE solver (replaces LSODE)
 using Printf
 

@@ -2,6 +2,10 @@
 Minimal spline_mod stub for tests.
 Provides use_classic_splines() placeholder.
 """
+"""
+Minimal spline_mod stub for tests.
+Provides use_classic_splines() placeholder.
+"""
 function use_classic_splines()
     # no-op placeholder
     return nothing
