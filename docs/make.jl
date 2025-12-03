@@ -22,6 +22,7 @@ makedocs(;
     modules=[JPEC],
     pages=[
         "Home" => "index.md",
+        "Setup" => "set_up.md",
         "API Reference" => [
             "Splines" => "splines.md",
             "Vacuum" => "vacuum.md",
