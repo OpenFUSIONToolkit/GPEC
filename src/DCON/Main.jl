@@ -1,4 +1,4 @@
-function Main(path::String)
+function Main(path::String="./")
 
     println("DCON START")
     println("----------------------------------")
@@ -53,6 +53,9 @@ function Main(path::String)
     sing_find!(intr, ctrl, equil)
 
     # Determine poloidal mode numbers
+    if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
+        error("Negative delta_mlow or delta_mhigh not allowed")
+    end
     if ctrl.cyl_flag
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
@@ -78,11 +81,11 @@ function Main(path::String)
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
-            println("     q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
-            println("     set_psilim_via_dmlim = $(ctrl.set_psilim_via_dmlim), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
-            println("     betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
-            println("     nn = $(ctrl.nn), mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
-            println(" Fourier analysis of metric tensor components")
+            println("Run parameters:")
+            println("   q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
+            println("   set_psilim_via_dmlim = $(ctrl.set_psilim_via_dmlim), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
+            println("   betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
+            println("   nn = $(ctrl.nn), mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
         end
 
         # Compute metric tensor

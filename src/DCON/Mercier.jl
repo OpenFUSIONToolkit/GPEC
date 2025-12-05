@@ -55,7 +55,7 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        ff = Spl.CubicSpline(Vector(rzphi.ys), ff_fs; bctype=2) # bctype=2 is periodic
+        ff = Spl.CubicSpline(Vector(rzphi.ys), ff_fs; bctype="periodic")
 
         # Integrate quantities with respect to theta
         Spl.spline_integrate!(ff)

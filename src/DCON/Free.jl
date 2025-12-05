@@ -1,5 +1,5 @@
 """
-    free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal; op_netcdf_out::Bool=false)
+    free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Compute the free boundary energies using VACUUM. Performs the same function as `free_run`
 in the Fortran code, except now all data is passed in memory instead of via files. This
@@ -7,15 +7,10 @@ modifies `odet` in place to normalize the eigenfunctions stored in `u_store` and
 and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
 and data dumping.
 
-### Arguments
-  - `op_netcdf_out`: Whether to write netcdf output (Bool, optional, default=false) (DEPRECATED)
-
 ### TODOs
-Remove `op_netcdf_out` argument and related logic, as netcdf output is deprecated
-Remove ahg and ahb related logic
 Check if normalize is ever false, currently always true, and if not, remove related logic
 """
-function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal; op_netcdf_out::Bool=false)
+function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # TODO: it looks like vac_memory is always true - remove all ahg things and just assume true?
     vac_memory = true
@@ -24,7 +19,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Flags used within VACUUM
     complex_flag = true
     wall_flag = false
-    ahg_file = "ahg2msc_dcon.out" # Deprecated
+    ahg_file = "ahg2msc_dcon.out" # Deprecated, but needed for VACUUM function call
 
     # Initializations and allocations
     vac = VacuumData(ctrl.mthvac, intr.mpert)
@@ -37,20 +32,13 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Evaluate dV/dpsi at the plasma edge
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
 
-    # Compute plasma response matrix.
+    # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
-        temp .= adjoint(odet.u[:, 1:intr.mpert, 1])
-        wp .= adjoint(odet.u[:, 1:intr.mpert, 2])
-        # Compute wp using LU decomposition
-        temp_fact = lu(temp)
-        wp .= temp_fact \ wp
-        wp .= adjoint(wp) / equil.psio^2
+        @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
     end
 
-    # Write file for mscvac
-    # TODO: can likely remove last two arguments, ahgstr_op is deprecated
-    # TODO: actually, can probably remove this function entirely and just call set_dcon_params directly
-    free_write_msc(intr.psilim, ctrl, equil, intr; inmemory_op=vac_memory, ahgstr_op=ahg_file)
+    # Set VACUUM run parameters and boundary shape
+    set_vacuum_inputs(intr.psilim, ctrl, equil, intr)
 
     # Compute vacuum response matrix.
     farwal_flag = true
@@ -81,7 +69,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     end
 
     # Scale vacuum matrix by singfac = (m - nn*qlim)
-    singfac = (intr.mlow .- ctrl.nn .* intr.qlim) .+ collect(0:intr.mpert-1)
+    singfac = collect(intr.mlow:intr.mhigh) .- ctrl.nn .* intr.qlim
     for ipert in 1:intr.mpert
         vac.wv[ipert, :] .*= singfac[ipert]
         vac.wv[:, ipert] .*= singfac[ipert]
@@ -155,8 +143,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 end
 
 """
-    free_write_msc(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal; inmemory_op::Union{Bool,Nothing}=nothing,
-    ahgstr_op::Union{String,Nothing}=nothing)
+    set_vacuum_inputs(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
 Prepare and write the necessary parameters and boundary shape to VACUUM for computing the vacuum response matrix.
 Performs the same function as `free_write_msc` in the Fortran code, except we will always use in-memory communication.
@@ -167,20 +154,9 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `ctrl`: DCON control parameters (DconControl)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
-  - `inmemory_op`: Whether to use in-memory communication with VACUUM (Bool, optional, default=false)
-  - `ahgstr_op`: Communication file name if not using in-memory (String, optional, default="ahg2msc_dcon.out")
 
-### TODOs
-
-Remove `inmemory_op` and `ahgstr_op` arguments and related logic, always use in-memory communication
 """
-function free_write_msc(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal; inmemory_op::Union{Bool,Nothing}=nothing,
-    ahgstr_op::Union{String,Nothing}=nothing)
-
-    # Defaults for optional arguments
-    inmemory = isnothing(inmemory_op) ? false : inmemory_op
-    ahgstr = isnothing(ahgstr_op) ? "ahg2msc_dcon.out" : ahgstr_op
-    inmemory = true # TODO: remove the above, and modify the code logic so VACUUM is always in memory
+function set_vacuum_inputs(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
@@ -211,12 +187,8 @@ function free_write_msc(psifac::Float64, ctrl::DconControl, equil::Equilibrium.P
     end
 
     # Pass all required values to VACUUM
-    if inmemory
-        VacuumMod.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
-            reverse(r), reverse(z), reverse(delta))
-    else
-        # TODO: this section contains ahg2msc file writing, which is deprecated, just remove
-    end
+    VacuumMod.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
+        reverse(r), reverse(z), reverse(delta))
 end
 
 """
@@ -246,22 +218,22 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
 
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
-        it = 0
+        converged = false
         for _ in 1:itmax
             dpsi = (qi - qval(psii)) / q1val(psii)
             psii += dpsi
-            it += 1
-            abs(dpsi) < eps * abs(psii) && break
+            if abs(dpsi) < eps * abs(psii)
+                converged = true
+                psi_array[i] = psii
+                break
+            end
         end
-
-        if it == itmax
-            error("Can't find psilim after $itmax iterations.")
-        else
-            psi_array[i] = psii
+        if !converged
+            error("Newton iteration for psilim did not converge after $itmax iterations.")
         end
 
         # Prepare vacuum matrices
-        free_write_msc(psii, ctrl, equil, intr; inmemory_op=true, ahgstr_op="")
+        set_vacuum_inputs(psii, ctrl, equil, intr)
         grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
         xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
         wv = zeros(ComplexF64, intr.mpert, intr.mpert)
@@ -276,7 +248,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
 
         # Apply singular factor scaling
-        singfac = intr.mlow .- ctrl.nn * qi .+ collect(0:intr.mpert-1)
+        singfac = collect(intr.mlow:intr.mhigh) .- ctrl.nn * qi
         for ipert in 1:intr.mpert
             wv[ipert, :] .*= singfac[ipert]
             wv[:, ipert] .*= singfac[ipert]
@@ -307,7 +279,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     wp = zeros(ComplexF64, intr.mpert, intr.mpert)
     temp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    et = zeros(ComplexF64, intr.mpert)
+    tot_eigvals = zeros(ComplexF64, intr.mpert)
     wt = zeros(ComplexF64, intr.mpert, intr.mpert)
 
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
@@ -329,7 +301,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     eindex = sortperm(real.(Ev.values); rev=true)
     for ipert in 1:intr.mpert
         wt[:, ipert] .= Ev.vectors[:, eindex[intr.mpert+1-ipert]]
-        et[ipert] = Ev.values[eindex[intr.mpert+1-ipert]]
+        tot_eigvals[ipert] = Ev.values[eindex[intr.mpert+1-ipert]]
     end
 
     # Normalize eigenfunction and energy (only need the first eigenmode)
@@ -340,8 +312,8 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
             norm += ffit.jmat[jpert-ipert+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
         end
         norm /= v1
-        et[isol] /= norm
+        tot_eigvals[isol] /= norm
     end
 
-    return et[1]
+    return tot_eigvals[1]
 end
