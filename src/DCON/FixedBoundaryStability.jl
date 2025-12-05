@@ -63,7 +63,8 @@ function check_for_zero_crossings!(crit_store::Vector{Float64}, odet::OdeState, 
     # Compute smallest eigenvalue (crit) at current step
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
-    crit_store[istep] = compute_smallest_eigenvalue(psi, u, sq)
+    dVdpsi = Spl.spline_eval!(sq, psi)[3]
+    crit_store[istep] = compute_smallest_eigenvalue(u) * dVdpsi^2
 
     # Check for zero crossing via change in sign of crit between current and previous step
     zero_cross = false
@@ -74,7 +75,8 @@ function check_for_zero_crossings!(crit_store::Vector{Float64}, odet::OdeState, 
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep - 1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep - 1]))
-        crit_mid = compute_smallest_eigenvalue(psi_mid, u_mid, sq)
+        dVdpsi = Spl.spline_eval!(sq, psi_mid)[3]
+        crit_mid = compute_smallest_eigenvalue(u_mid) * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
             zero_cross = true
             println("Zero crossing detected at psi = $psi_mid, q = $q_mid")
@@ -84,39 +86,43 @@ function check_for_zero_crossings!(crit_store::Vector{Float64}, odet::OdeState, 
 end
 
 """
-    compute_smallest_eigenvalue(psi, u, sq) -> crit
+    compute_smallest_eigenvalue(u) -> crit
 
-Form the inverse plasma response matrix W⁻¹ at flux surface `psi` using the
-solution matrix `u`,and compute its eigenvalues. Return the smallest eigenvalue
-(in magnitude) scaled by dV/dψ². Performs the same function as `ode_output_get_crit`
-in the Fortran code.
+Form the inverse plasma response matrix W⁻¹ using the solution matrix `u` and
+returns its minimum eigenvalue by magnitude. Performs the same function as
+`ode_output_get_crit` in the Fortran code, except we explicitly form W⁻¹ here
+from U₁ * U₂⁻¹ using Julia's right division operator `/` instead of
+adj(adj(U₂)⁻¹ * adj(U₁)) as done in Fortran. We have also added a check to
+ensure W is Hermitian within tolerance, as the matrix should be Hermitian by
+construction but may accumulate numerical noise during integration.
 
 ### Arguments
 
-  - `psi::Float64`: The flux surface at which to evaluate
   - `u::Array{ComplexF64, 3}`: Solution matrix at `psi`
-  - `sq::Spl.CubicSpline`: Spline object containing equilibrium profiles
 
 ### Returns
 
   - `crit::Float64`: the computed scaled critical eigenvalue
 
 """
-function compute_smallest_eigenvalue(psi::Float64, u::Array{ComplexF64,3}, sq::Spl.CubicSpline{Float64})
+function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
 
-    # Compute inverse plasma response matrix
-    # TODO: is this actually the inverse?
-    wp_inverse = adjoint(u[:, :, 1])
-    temp = adjoint(u[:, :, 2])
-    wp_inverse = temp \ wp_inverse
+    # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
+    wp_inverse = u[:, :, 1] / u[:, :, 2]
 
-    # Symmetrize to be Hermitian
-    wp_inverse .+= adjoint(wp_inverse)
-    wp_inverse .*= 0.5
+    # TODO: This section not be necessary since W should be Hermitian by construction.
+    # This likely just removes any numerical noise during integration
+    # However, if we do remove it, note that Hermitian(wp_inverse) in the eigval solve enforces Hermiticity
+    # by ignoring the lower triangle (by default, can ignore upper using `uplo=:L`), which will
+    # NOT produce identical results to taking the Hermitian part as done here unless is exactly Hermitian.
+    # Check to make sure W is at least close to Hermitian before enforcing it
+    nonherm_error = norm(0.5 * (wp_inverse - adjoint(wp_inverse))) / norm(0.5 * (wp_inverse + adjoint(wp_inverse)))
+    if nonherm_error > 1e-3
+        @warn "Computed W inverse matrix is not Hermitian within tolerance: $nonherm_error"
+    end
+    # Enforce that W is Hermitian
+    hermitianpart!(wp_inverse) # Overwrites W⁻¹ with (W⁻¹ + (W⁻¹)') / 2
 
-    # Compute inverse eigenvalues, sort, and return the smallest (with a scale factor)
-    evalsi = eigvals!(Hermitian(wp_inverse))
-    indexi = sortperm(evalsi; by=abs)
-    dVdpsi = Spl.spline_eval!(sq, psi)[3]
-    return evalsi[indexi[1]] * dVdpsi^2
+    # Compute eigenvalues and return the smallest
+    return findmin(abs, eigvals!(Hermitian(wp_inverse)))[1]
 end
