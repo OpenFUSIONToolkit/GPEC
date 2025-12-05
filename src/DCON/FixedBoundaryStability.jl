@@ -1,39 +1,24 @@
 """
-    evaluate_stability_criterion(ctrl, equil, intr, odet, outp) -> nzero
+    evaluate_stability_criterion!(odet, equil) -> nzero
 
 Evaluate the stability criterion over the entire integration, counting the number of
 zero crossings of the critical eigenvalue which indicate instability. This acts as an
 outer wrapper for `check_for_zero_crossings!` since our in-memory integration allow
-this to be done post-integration rather than during like the Fortran. Optionally, we
-also write the `crit.h5` file containing the crit values over the integration.
+this to be done post-integration rather than during like the Fortran. We update
+the `crit_store` in `odet` in place, and return the total number of zero crossings found.
 
 """
-function evaluate_stability_criterion(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, outp::DconOutput)
+function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium)
 
     # Initialization
-    if ctrl.verbose
-        println("Evaluating stability criterion over entire integration")
-    end
+    resize!(odet.crit_store, odet.step)
     nzero = 0
-    crit_store = zeros(Float64, odet.step)
 
     # Loop over integration steps, computing crit/checking for zero crossings
     for istep in 1:odet.step
-        zero_cross = check_for_zero_crossings!(crit_store, odet, equil.sq, istep)
+        zero_cross = check_for_zero_crossings!(odet, equil.sq, istep)
         if zero_cross
             nzero += 1
-        end
-    end
-
-    # Write crit values to HDF5 file
-    if outp.write_crit_h5
-        if ctrl.verbose
-            println("   Writing crit.h5 file")
-        end
-        h5open(joinpath(intr.dir_path, outp.fname_crit_h5), "w") do crit_h5
-            crit_h5["psi"] = odet.psi_store
-            crit_h5["q"] = odet.q_store
-            crit_h5["crit"] = crit_store
         end
     end
     return nzero
@@ -53,24 +38,23 @@ can do it post-integration rather than during and don't directly handle file out
 
 ### Arguments
 
-  - `crit_store::Vector{Float64}`: Stores computed crit values, updated in place at index `istep`
   - `sq::Spl.CubicSpline`: Spline object containing equilibrium profiles
   - `istep::Int`: Current integration step index
 
 """
-function check_for_zero_crossings!(crit_store::Vector{Float64}, odet::OdeState, sq::Spl.CubicSpline{Float64}, istep::Int)
+function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64}, istep::Int)
 
     # Compute smallest eigenvalue (crit) at current step
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
     dVdpsi = Spl.spline_eval!(sq, psi)[3]
-    crit_store[istep] = compute_smallest_eigenvalue(u) * dVdpsi^2
+    odet.crit_store[istep] = compute_smallest_eigenvalue(u) * dVdpsi^2
 
     # Check for zero crossing via change in sign of crit between current and previous step
     zero_cross = false
-    if istep > 1 && crit_store[istep] * crit_store[istep - 1] < 0
-        crit = crit_store[istep]
-        crit_prev = crit_store[istep - 1]
+    if istep > 1 && odet.crit_store[istep] * odet.crit_store[istep - 1] < 0
+        crit = odet.crit_store[istep]
+        crit_prev = odet.crit_store[istep - 1]
         # Ensure the zero crossing is physical and not just numerical noise
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep - 1])
