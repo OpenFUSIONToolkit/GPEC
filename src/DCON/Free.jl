@@ -189,7 +189,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)
 
-    # Invert values for nn < 0
+    # Invert values for n < 0
     if n < 0
         qa = -qa
         delta .= -delta
@@ -213,7 +213,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
     qedge = Spl.spline_eval!(equil.sq, ctrl.psiedge)[4]
-    npsi = max(4, ceil(Int, (intr.qlim - qedge) * ctrl.nn * 4))
+    npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psii = ctrl.psiedge
     psi_array = zeros(Float64, npsi + 1)
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)

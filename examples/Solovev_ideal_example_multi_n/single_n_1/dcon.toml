@@ -11,7 +11,8 @@ qlow = 1.02                   # Integration initiated at q determined by min(q0,
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn = 1                        # Toroidal mode number
+nn_low = 1                    # Smallest toroidal mode number to include
+nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 10              # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...

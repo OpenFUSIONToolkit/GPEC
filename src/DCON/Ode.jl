@@ -247,7 +247,7 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
         if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
             break
         end
-        if intr.mlow <= ctrl.nn * intr.sing[odet.ising].q && intr.mhigh >= ctrl.nn * intr.sing[odet.ising].q
+        if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
             break
         end
     end

@@ -50,24 +50,15 @@ function Main(path::String="./")
     intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
 
     # Determine toroidal mode numbers
-    if ctrl.nn == 0 && ctrl.nn_low == ctrl.nn_high # single n mode
-        if ctrl.nn_low == 0
-            error("Need to specify at least one of nn, or nn_low/nn_high != 0 in dcon.toml")
-        else
-            @warn "nn_low and nn_high specified but equal, running with a single nn = nn_low = nn_high = $(ctrl.nn_low)"
-            intr.nlow = ctrl.nn_low
-            intr.nhigh = ctrl.nn_low
-            ctrl.nn = ctrl.nn_low # TODO: DEBUG ONLY UNTIL ALL CTRL.NNs HAVE BEEN REPLACED
-        end
-    elseif ctrl.nn != 0
-        intr.nlow = intr.nhigh = ctrl.nn
-        if ctrl.nn_low != 0 || ctrl.nn_high != 0
-            @warn "Both nn and nn_low/nn_high specified, proceeding with nn = $(ctrl.nn) only."
-        end
-    else
-        intr.nlow = ctrl.nn_low
-        intr.nhigh = ctrl.nn_high
+    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+        error("Either nn_low or nn_high must be set in DCON_CONTROL (both are 0)")
+    elseif ctrl.nn_low == 0
+        ctrl.nn_low = ctrl.nn_high
+    elseif ctrl.nn_high == 0
+        ctrl.nn_high = ctrl.nn_low
     end
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
     intr.npert = intr.nhigh - intr.nlow + 1
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
@@ -120,7 +111,7 @@ function Main(path::String="./")
         end
 
         # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(equil, ctrl, intr, metric)
+        ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
             error("kin_flag not implemented yet")

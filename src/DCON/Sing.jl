@@ -101,16 +101,16 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
     # Optionally override qlim based on dmlim
     if ctrl.set_psilim_via_dmlim
         if ctrl.nn_low != ctrl.nn_high
-            @warn "When setting psilim via dmlim, only single n is currently supported. Setting nn_low = nn_high = $(ctrl.nn)."
-            ctrl.nn_low = ctrl.nn_high = ctrl.nn
+            @warn "When setting psilim via dmlim, only single n is currently supported. Setting nn_low = nn_high = $(ctrl.nn_low)."
+            ctrl.nn_high = ctrl.nn_low
         end
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, ctrl.nn * intr.qlim) + ctrl.dmlim) / ctrl.nn
+        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
 
         # Reduce qlim if above qmax
         while intr.qlim > equil.params.qmax
-            intr.qlim -= 1.0 / ctrl.nn
+            intr.qlim -= 1.0 / ctrl.nn_low
         end
     end
 
@@ -280,9 +280,6 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
     # Evaluate cubic splines
-    # TODO: third derivative has some error, but only included via sing_fac[ipert_res] for sing_order < 3. Tests with solovev ideal indicate little sensitivity
-    # TODO: this is an annoying way to have to take apart this tuple of vectors, I think
-    # this is a planned fix already (i.e. separating cubic splines)
     q .= getindex.(Spl.spline_deriv3!(equil.sq, singp.psifac), 4)
     f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
     g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)

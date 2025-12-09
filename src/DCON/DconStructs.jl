@@ -83,7 +83,6 @@ end
     fft_flag::Bool = false
     mthvac::Int = 480
     sing_start::Int = 0
-    nn::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
     delta_mlow::Int = 0
