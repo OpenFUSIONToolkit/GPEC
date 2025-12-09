@@ -1,19 +1,12 @@
 """
-    sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput)
+    sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
 
 Scan all singular surfaces and calculate asymptotic vmat and mmat matrices
 and Mericer criterion. Performs the same function as `sing_scan` in the Fortran code.
 """
-function sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput)
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, "\n Singular Surfaces:")
-        write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
-    end
+function sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
     for ising in 1:intr.msing
-        sing_vmat!(intr, ctrl, equil, ffit, outp, ising)
-    end
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, @sprintf("%3s %11s %11s %11s %11s %11s %11s %11s", "i", "psi", "rho", "q", "q1", "di0", "di", "err"))
+        sing_vmat!(intr, ctrl, equil, ffit, ising)
     end
 end
 
@@ -136,19 +129,20 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
         for _ in 1:itmax
             dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
             intr.psilim += dpsi
-            abs(dpsi) < eps * abs(intr.psilim) && (converged = true; break)
+            if abs(dpsi) < eps * abs(intr.psilim)
+                converged = true
+                intr.q1lim = q1val(intr.psilim)
+                break
+            end
         end
-
-        if converged
-            intr.q1lim = q1val(intr.psilim)
-        else
+        if !converged
             error("Can't find psilim after $itmax iterations.")
         end
     end
 end
 
 """
-    sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput, ising::Int)
+    sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
 Calculate asymptotic vmat and mmat matrices and Mercier criterion for
 singular surface `ising`. Performs the same function as `sing_vmat` in the Fortran code.
@@ -163,7 +157,7 @@ the 2016 Glasser DCON paper for the mathematical details.
 
 Check logic on typing of di
 """
-function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, outp::DconOutput, ising::Int)
+function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
     # Allocations
     singp = intr.sing[ising]
@@ -207,10 +201,6 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
     singp.power[ipert_res] .= -singp.alpha
     singp.power[ipert_res .+ intr.numpert_total] .= singp.alpha
-
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, @sprintf("%3d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e", ising, psifac, rho, q, q1, di0, singp.di, singp.di / di0 - 1))
-    end
 
     # Zeroth-order non-resonant solutions
     # TODO: without the third dimension, this is just setting to the identity
@@ -449,7 +439,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         end
     end
 
-    # Start with the identity matrix, (which can be used to index the projection onto resonant/nonresonant modes?)
+    # We will now compute the Taylor series expansion of x = Lv, with L specified in eq. 23 of Glasser 2016
+    # Start with the identity matrix (which can be indexed to project onto resonant/nonresonant modes)
     for ipert in 1:intr.numpert_total
         v[ipert, ipert, 1] = 1
         v[ipert, ipert+intr.numpert_total, 2] = 1
@@ -461,6 +452,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
+
     # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
     for i in 1:ctrl.sing_order
         for isol in 1:2*intr.numpert_total
@@ -483,6 +475,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
+    # eq. 28 in Glasser 2023 PoP paper
+    singp.mmat .= 0
     r1 = singp.r1
     r2 = singp.r2
     n1 = singp.n1
@@ -527,7 +521,7 @@ function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
     end
     for isol in 1:2*intr.numpert_total
         for i in eachindex(singp.r1) # go block by block?
-            # a = M₀ - (α + k/2)I (for multi-n 2D, we make a the ith block fo M₀)
+            # a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ (for multi-n 2D, we make a the ith block fo M₀)
             m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
             a = copy(m0mat)
             a[1, 1] -= k / 2.0 + singp.power[isol]
@@ -598,9 +592,9 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     r1 = singp.r1
     r2 = singp.r2
 
-    # Compute distance from singular surface
-    dpsi = odet.psifac - singp.psifac # z
-    sqrtfac = sqrt(complex(dpsi)) # √z
+    # Compute distance from singular surface (z)
+    dpsi = odet.psifac - singp.psifac
+    sqrtfac = sqrt(complex(dpsi))
 
     # Compute power series via Horner's method (eq. 45 in Glasser 2016)
     ua = copy(singp.vmat[:, :, :, 2*ctrl.sing_order+1])
@@ -665,7 +659,7 @@ end
     sing_der!(
         du::Array{ComplexF64,3},
         u::Array{ComplexF64,3},
-        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState, DconOutput},
+        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState},
         psieval::Float64
     )
 
@@ -692,7 +686,7 @@ more simplistic code with similar performance.
 
   - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
-  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState, DconOutput}`: Tuple of relevant structs
+  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
 
 ### TODOs
@@ -737,8 +731,6 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
         gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
 
-        # ldiv!(A,B): Compute A \ B in-place and overwriting B to store the result,
-        # where A is a factorization object.
         odet.Afact = cholesky(Hermitian(amat))
         # bmat = A⁻¹ * bmat
         ldiv!(odet.Afact, bmat)
@@ -751,11 +743,10 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         error("kin_flag not implemented yet")
     else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
-        # du[1] = - K̄ * u[1] + Q⁻¹ * u[2]
+        # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         du1 .= u2 .* odet.singfac_vec
         mul!(odet.tmp, kmat, u1)
         du1 .-= odet.tmp
-        # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         ldiv!(LowerTriangular(fmat_lower), du1)
         ldiv!(UpperTriangular(fmat_lower'), du1)
         # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
@@ -769,7 +760,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # ud[1] = Ξ'_Ψ
     @views odet.ud[:, :, 1] .= du1
-    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), equation 18 of Glasser 2016
+    # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), eq. 18 of Glasser 2016
     mul!(odet.tmp, bmat, du1)
     odet.ud[:, :, 2] .= .-odet.tmp
     mul!(odet.tmp, cmat, u1)

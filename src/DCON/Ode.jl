@@ -1,67 +1,4 @@
 """
-OdeState
-
-A mutable struct to hold the state of the ODE solver for DCON.
-This struct contains all necessary fields to manage the ODE integration process,
-including solution vectors, tolerances, and flags for the integration process.
-"""
-@kwdef mutable struct OdeState
-    # Initialization parameters
-    numpert_total::Int                  # total number of modes
-    numunorms_init::Int             # initial storage size for unorm data
-    msing::Int                   # number of singular surfaces
-    numsteps_init::Int             # initial size of data store
-
-    # Saved data throughout integration
-    step::Int = 1                    # current step of integration (this is like istep in Fortran)
-    psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)  # psi at each step of integration
-    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)    # q at each step of integration
-    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init) # store of u at each step of integration
-    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init) # store of ud at each step of integration
-    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing) # asymptotic coefficients just right of singular surface
-    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing) # asymptotic coefficients just left of singular surface
-
-    # Used for to find peak dW in the edge
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)  # dW at each step in the edge
-    wvmat_spline::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing  # spline of wv matrices for free_test # TODO: how to initialize a spline?
-
-    # Data for integrator
-    psifac::Float64 = 0.0       # normalized flux coordinate
-    q::Float64 = 0.0            # q value at psifac
-    u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)            # solution vectors
-    ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)           # derivative of solution vectors used in GPEC
-    ising::Int = 0               # index of next singular surface
-    psimax::Float64 = 0.0         # maximum psi value for the integrator
-    next::String = ""           # next integration action ("cross" or "finish")
-    nzero::Int = 0              # count of zero crossings detected
-
-    # Used for Gaussian reduction
-    new::Bool = true            # flag for computing new unorm0 after a fixup
-    unorm::Vector{Float64} = zeros(Float64, numpert_total)                        # norms of solution vectors
-    unorm0::Vector{Float64} = zeros(Float64, numpert_total)                       # initial norms of solution vectors
-    ifix::Int = 0                # index for number of unorms performed
-    index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)                                   # indices for sorting solutions
-    sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
-    zeroed_idx::Vector{Vector{Int}} = Vector{Vector{Int}}(undef, numunorms_init)  # indices of zeroed solutions at each unorm
-    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)             # fixup factors for Gaussian reduction
-    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
-
-    # Temporary matrices for sing_der calculations
-    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing} = nothing
-    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
-end
-
-# Initialize function for OdeState with relevant parameters for array initialization
-OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
-
-"""
     `ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)`
 
 Main driver for integrating plasma equilibrium and detecting singular surfaces.
@@ -83,7 +20,7 @@ restype functionality if we decide to do this
 
 An OdeState struct containing the final state of the ODE solver after integration is complete.
 """
-function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -137,17 +74,13 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
     end
 
     # Evaluate stability criterion (critical determinant) of saved solutions
-    odet.nzero = evaluate_stability_criterion(ctrl, equil, intr, odet, outp)
+    if ctrl.verbose
+        println("Evaluating fixed-boundary stability criterion")
+    end
+    odet.nzero = evaluate_stability_criterion!(odet, equil)
 
     # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
     transform_u!(odet, intr)
-
-    if outp.write_euler_h5
-        if ctrl.verbose
-            println("Writing saved integration data to $(outp.fname_euler_h5)")
-        end
-        write_euler_h5(ctrl, equil, intr, odet, outp)
-    end
 
     return odet
 end
@@ -202,32 +135,11 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     # Find next singular surface
-    if false # TODO: (kin_flag)
-    # while true
-    #     ising += 1
-    #     if ising > kmsing
-    #         break
-    #     end
-    #     if psilim < kinsing[ising].psifac
-    #         break
-    #     end
-    #     odet.q = kinsing[ising].q
-    #     if mlow <= nn * odet.q && mhigh >= nn * odet.q
-    #         break
-    #     end
-    # end
-    # if ising > kmsing || singfac_min == 0
-    #     psimax = psilim * (1 - eps)
-    #     next = "finish"
-    # elseif psilim < kinsing[ising].psifac
-    #     psimax = psilim * (1 - eps)
-    #     next = "finish"
-    # else
-    #     psimax = kinsing[ising].psifac - singfac_min / abs(nn * kinsing[ising].q1)
-    #     next = "cross"
-    # end
+    if false
+        # TODO: (kin_flag)
     else
         # Find next singular surface (either next one in the list or outside integration limits)
+        # TODO: clean this up in integration bounds PR, this exact block appears several times
         # TODO: Based on the existing logic, I don't think checking if mlow <= m <= mhigh is necessary,
         # since DCON sets the poloidal mode numbers to include the resonant modes anyway. However, based
         # on discussion with Nik, eventually we might just want to allow the user to set mlow/mhigh, in
@@ -341,7 +253,7 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     end
     
     # Determine psimax and classify next integration limit type
-    if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+    if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac
         odet.psimax = intr.psilim * (1 - eps)
         odet.next = "finish"
     else
@@ -363,7 +275,7 @@ function ode_kin_cross()
 end
 
 """
-    ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+    ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Integrate the Euler-Lagrange equations to the next rational surface or edge.
 Performs the same function as `ode_step` in the Fortran code, with the addition of
@@ -687,133 +599,5 @@ function transform_u!(odet::OdeState, intr::DconInternal)
             odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * transforms[:, :, ifix]
         end
         jfix = kfix + 1
-    end
-end
-
-"""
-    write_euler_h5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, outp::DconOutput)
-
-Helper function to write the euler.h5 file with relevant run and equilibrium parameters.
-This combines the functionality of several pieces of the Fortran code in `ode_output.f`,
-primarily `ode_output_open` and the various `bin_euler` writes that occur throughout the
-integration. Note that if `vac_flag` is true, additional outputs related to vacuum solutions
-are dumped in `free_run`, with this file opened in append mode.
-
-### TODOs
-
-Remove deprecated outputs
-Combine spline unpacking if possible, too many extra lines
-
-"""
-function write_euler_h5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, outp::DconOutput)
-
-    h5open(joinpath(intr.dir_path, outp.fname_euler_h5), "w") do euler_h5
-        # Write run parameters
-        euler_h5["info/mpert"] = intr.mpert
-        euler_h5["info/mband"] = intr.mband
-        euler_h5["info/mlow"] = intr.mlow
-        euler_h5["info/mhigh"] = intr.mhigh
-        euler_h5["info/npert"] = intr.npert
-        euler_h5["info/nlow"] = intr.nlow
-        euler_h5["info/nhigh"] = intr.nhigh
-        m = [(i - 1) % intr.mpert + intr.mlow for i in 1:(intr.numpert_total)]
-        n = [(i - 1) ÷ intr.mpert + intr.nlow for i in 1:(intr.numpert_total)]
-        euler_h5["info/mn_index"] = hcat(m, n)   # (N, 2) matrix
-        euler_h5["info/singfac_min"] = ctrl.singfac_min
-        euler_h5["info/kin_flag"] = ctrl.kin_flag
-        euler_h5["info/con_flag"] = ctrl.con_flag
-        euler_h5["info/mthvac"] = ctrl.mthvac
-        euler_h5["info/mthsurf0"] = outp.mthsurf0 #TODO: mthsurf0 is deprecated
-
-        # Write equilibrium parameters
-        euler_h5["equil/nr"] = length(equil.rzphi.xs) # TODO: equil save mpsi as really mpsi - 1, fix this
-        euler_h5["equil/nz"] = length(equil.rzphi.ys)
-        euler_h5["equil/ro"] = equil.ro
-        euler_h5["equil/zo"] = equil.zo
-        euler_h5["equil/amean"] = equil.params.amean
-        euler_h5["equil/rmean"] = equil.params.rmean
-        euler_h5["equil/aratio"] = equil.params.aratio
-        euler_h5["equil/kappa"] = equil.params.kappa
-        euler_h5["equil/delta1"] = equil.params.delta1
-        euler_h5["equil/delta2"] = equil.params.delta2
-        euler_h5["equil/li1"] = equil.params.li1
-        euler_h5["equil/li2"] = equil.params.li2
-        euler_h5["equil/li3"] = equil.params.li3
-        euler_h5["equil/betap1"] = equil.params.betap1
-        euler_h5["equil/betap2"] = equil.params.betap2
-        euler_h5["equil/betap3"] = equil.params.betap3
-        euler_h5["equil/betat"] = equil.params.betat
-        euler_h5["equil/betan"] = equil.params.betan
-        euler_h5["equil/bt0"] = equil.params.bt0
-        euler_h5["equil/q0"] = equil.params.q0
-        euler_h5["equil/q95"] = equil.params.q95
-        euler_h5["equil/qmin"] = equil.params.qmin
-        euler_h5["equil/qmax"] = equil.params.qmax
-        euler_h5["equil/qa"] = equil.params.qa
-        euler_h5["equil/crnt"] = equil.params.crnt
-        euler_h5["equil/psio"] = equil.psio
-        euler_h5["equil/psilow"] = equil.config.control.psilow
-        euler_h5["equil/power_b"] = equil.config.control.power_b
-        euler_h5["equil/power_r"] = equil.config.control.power_r
-        euler_h5["equil/power_bp"] = equil.config.control.power_bp
-        euler_h5["equil/shotnum"] = 0 # TODO: equil.params.shotnum
-        euler_h5["equil/shottime"] = 0 # TODO: equil.params.shottime
-
-        # Write spline arrays
-        euler_h5["splines/sq/xs"] = Vector(equil.sq.xs)
-        # TODO: getting errors when trying to dump just fs, so splitting for now, which adds so many lines
-        # This should be fixed if we separate these like Nik mentioned
-        euler_h5["splines/sq/fs/2piF"] = equil.sq.fs[:, 1]
-        euler_h5["splines/sq/fs/mu0p"] = equil.sq.fs[:, 2]
-        euler_h5["splines/sq/fs/dVdpsi"] = equil.sq.fs[:, 3]
-        euler_h5["splines/sq/fs/q"] = equil.sq.fs[:, 4]
-        euler_h5["splines/sq/fs1/2piF"] = equil.sq.fs1[:, 1]
-        euler_h5["splines/sq/fs1/mu0p"] = equil.sq.fs1[:, 2]
-        euler_h5["splines/sq/fs1/dVdpsi"] = equil.sq.fs1[:, 3]
-        euler_h5["splines/sq/fs1/q"] = equil.sq.fs1[:, 4]
-        euler_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
-        euler_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
-        euler_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
-        euler_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, 1]
-        euler_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, 2]
-        euler_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, 3]
-        euler_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, 4]
-        euler_h5["splines/rzphi/fsx/rcoords"] = equil.rzphi.fsx[:, 1]
-        euler_h5["splines/rzphi/fsx/offset"] = equil.rzphi.fsx[:, 2]
-        euler_h5["splines/rzphi/fsx/nu"] = equil.rzphi.fsx[:, 3]
-        euler_h5["splines/rzphi/fsx/jac"] = equil.rzphi.fsx[:, 4]
-        euler_h5["splines/rzphi/fsy/rcoords"] = equil.rzphi.fsy[:, 1]
-        euler_h5["splines/rzphi/fsy/offset"] = equil.rzphi.fsy[:, 2]
-        euler_h5["splines/rzphi/fsy/nu"] = equil.rzphi.fsy[:, 3]
-        euler_h5["splines/rzphi/fsy/jac"] = equil.rzphi.fsy[:, 4]
-        euler_h5["splines/rzphi/fsxy/rcoords"] = equil.rzphi.fsxy[:, 1]
-        euler_h5["splines/rzphi/fsxy/offset"] = equil.rzphi.fsxy[:, 2]
-        euler_h5["splines/rzphi/fsxy/nu"] = equil.rzphi.fsxy[:, 3]
-        euler_h5["splines/rzphi/fsxy/jac"] = equil.rzphi.fsxy[:, 4]
-        euler_h5["splines/rzphi/x0"] = 0 # TODO: equil.rzphi.x0
-        euler_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
-        euler_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
-        euler_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
-
-        # Write integration data
-        euler_h5["info/psilim"] = intr.psilim
-        euler_h5["info/qlim"] = intr.qlim
-        euler_h5["integration/nstep"] = odet.step
-        euler_h5["integration/psi"] = odet.psi_store
-        euler_h5["integration/q"] = odet.q_store
-        if !ctrl.vac_flag # we normalize by wt before dumping if calling free_run
-            euler_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
-            euler_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-            euler_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
-            euler_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
-        end
-
-        # Write singular surface data
-        euler_h5["singular/msing"] = intr.msing
-        euler_h5["singular/psi"] = [intr.sing[ising].psifac for ising in 1:intr.msing]
-        euler_h5["singular/q"] = [intr.sing[ising].q for ising in 1:intr.msing]
-        euler_h5["singular/q1"] = [intr.sing[ising].q1 for ising in 1:intr.msing]
-        euler_h5["singular/ca_left"] = odet.ca_l
-        euler_h5["singular/ca_right"] = odet.ca_r
     end
 end

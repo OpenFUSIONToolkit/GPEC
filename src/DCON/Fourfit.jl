@@ -65,13 +65,9 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     mpsi = length(rzphi.xs)
     mtheta = length(rzphi.ys)
 
-    println("   Equilibrium grid: $mpsi (ψ) × $mtheta (θ)")
-    println("   Fourier fit modes (mband): $mband")
-
-    metric = MetricData(mpsi, mtheta)
-
     # Set coordinate grids based on the input equilibrium
     # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
+    metric = MetricData(mpsi, mtheta)
     metric.xs .= Vector(rzphi.xs)
     metric.ys .= Vector(rzphi.ys .* 2π)
 
@@ -177,18 +173,12 @@ and does not affect the actual matrix sizes, they are all dense.
 
 Add kinetic metric tensor components for kin_flag = true
 Set powers if necessary
-Determine if set_psilim_via_dmlim logic is needed
 """
 function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, intr::DconInternal, metric::MetricData)
 
     # --- Extract inputs ---
     sq = equil.sq
     mpsi = metric.mpsi
-
-    if ctrl.verbose
-        println("   Toroidal mode n=$(ctrl.nn), Poloidal modes m=$(intr.mlow):$(intr.mhigh) ($(intr.mpert) modes)")
-        println("   Matrix bandwidth: $(intr.mband)")
-    end
 
     # Allocations (use flat storage for all matrices to fill splines)
     # TODO: This can be made more efficient for 2D equilibria by using block diagonals
@@ -276,6 +266,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
                     ipert_flat = ipert + (jpert - 1) * intr.numpert_total
 
                     # Compute matrix values at the current m, m', n (and eventually n')
+                    # Note: dmat and emat here do not correspond to their representations in eq. A6 of the DCON paper,
+                    # but rather to subterms that appear in the composite matrix construction in A7 and A8, respectively
                     amats_flatview[ipert_flat] = (2π)^2 * (n^2 * g22[dmidx] + n * (m1 + m2) * g23[dmidx] + m1 * m2 * g33[dmidx])
                     bmats_flatview[ipert_flat] = -2π * im * chi1 * (n * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
                     cmats_flatview[ipert_flat] =
@@ -297,8 +289,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
         end
 
         # Factorize and build composites
-        # Note: we store the nonsingular forms of F and K, F = QF̄Qᴴ, K = QK̄, and multiplicity
-        # by singfac later when performing computations (eq. 29 in Glasser 2016)
+        # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser 2016)
+        # We multiply by Q (singfac) later when performing computations later
         amat = reshape(amats_flatview, intr.numpert_total, intr.numpert_total)
         cmat = reshape(cmats_flatview, intr.numpert_total, intr.numpert_total)
         dmat = reshape(dmats_flatview, intr.numpert_total, intr.numpert_total)
@@ -307,9 +299,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
         fmat = reshape(fmats_lower_flatview, intr.numpert_total, intr.numpert_total)
         kmat = reshape(kmats_flatview, intr.numpert_total, intr.numpert_total)
         gmat = reshape(gmats_flatview, intr.numpert_total, intr.numpert_total)
-        # TODO: Fortran threw an error if the factorization fails for a/fmat due to small matrix bandwidth,
-        # (i.e. we cut off too many terms and matrix no longer positive definite). Should add this back in
-        # if we implement banded matrices.
+        # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
+        # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
         temp1 = amat_fact \ dmat
         temp2 = amat_fact \ cmat
