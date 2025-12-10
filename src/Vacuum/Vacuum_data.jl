@@ -111,7 +111,7 @@ immutable/thread-safe for the duration of a run. Anything set directly by user i
     dth::Float64    = 0.0
     wall::Bool      = true
     farwal::Bool    = true
-    kernelsign::Bool = true
+    kernelsign::Float64 = 1.0
 end
 
 #############################################
@@ -134,7 +134,7 @@ Numerical and input control parameters for grid and harmonics.
 """
 @kwdef mutable struct Modes
     mth::Int = 480
-    xiin::NTuple{9, Int} = (0, 0, 0, 0, 0, 0, 0, 1, 0)
+    xiin::Vector{Int} = [0, 0, 0, 0, 0, 0, 0, 1, 0]
     lsymz::Bool = true
     leqarcw::Int = 1
 end

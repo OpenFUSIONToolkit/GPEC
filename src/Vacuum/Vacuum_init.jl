@@ -12,8 +12,6 @@ WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP WIP
 
 """
 
-using Interpolations
-
 function build_vacuum_globals(
     mthvac::Int,
     mpert::Int,
@@ -41,14 +39,14 @@ function build_vacuum_globals(
 
     lmin = [input.mlow]
     lmax = [input.mhigh]
-
     n = input.n
-    thgr = range(0, stop=2π, length=mth1)
 
     # Arrays from input
     xinf = copy(input.r)
     zinf = copy(input.z)
     delta = copy(input.delta)
+    
+    # TODO: need to add trans (interpolate grids from mtheta -> mthvac) in here, see readahg in Fortran
 
     # Physical derived parameters
     qa1 = input.qa
@@ -61,14 +59,14 @@ function build_vacuum_globals(
     xwalp = zeros(mth1)
     zwalp = zeros(mth1)
 
-    farwal = farwal || (settings.Shape.a >= 10.)
+    farwal = farwal || (settings.shape.a >= 10.)
 
     delx, delz, xwal, zwal, xwalp, zwalp,
         cnqd, snqd, sinlt, coslt, snlth, 
         cslth, xplap, zplap = setuparrays!(
-            mth, dth, thgr, lmin, lmax,
-            qa1, n, settings.Shape.delfac,
-            delta, input.xpla, input.zpla
+            mth, dth, lmin, lmax,
+            qa1, n, settings.vacdat.delfac,
+            delta, input.r, input.z
         )
 
 
@@ -76,6 +74,7 @@ function build_vacuum_globals(
     
 
     return VacuumGlobalsType(
+        n=n,
         mth=mth,
         mth1=mth1,
         mth2=mth2,
@@ -91,8 +90,8 @@ function build_vacuum_globals(
         qa1=qa1,
         ga1=ga1,
         fa1=fa1,
-        delx=delx,
-        delz=delz,
+        # delx=delx,
+        # delz=delz,
         xwal=xwal,
         zwal=zwal,
         xwalp=xwalp,
@@ -107,7 +106,6 @@ end
 function setuparrays!(
     mth::Int,
     dth::Float64,
-    thgr::Vector{Float64},
     lmin::Vector{Int},
     lmax::Vector{Int},
     q::Float64,
@@ -119,6 +117,7 @@ function setuparrays!(
 )
     # Sizes
     mth1 = mth + 1
+    thgr = range(0, stop=2π, length=mth1)
     jmax1 = lmax[1] - lmin[1] + 1
     nq = n * q
 
@@ -136,8 +135,8 @@ function setuparrays!(
     # Wall shape (placeholder: straight line wall matching plasma)
     # This is a placeholder for the wall shape, which should be replaced
     # with the actual wall shape logic in wwall.
-    xwal = copy(xpla[1:mth1])
-    zwal = copy(zpla[1:mth1])
+    xwal = rand(mth1)
+    zwal = rand(mth1)
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     # Derivatives (simple finite difference instead of spline)
@@ -145,45 +144,55 @@ function setuparrays!(
     # xwalp = [ (xwal[mod1(i+1,mth)] - xwal[i]) / dth for i in 1:mth ]
     # zwalp = [ (zwal[mod1(i+1,mth)] - zwal[i]) / dth for i in 1:mth ]
 
-    itp_x = Interpolations.interpolate((theta,), xwal, Interpolations.BSpline(Interpolations.Cubic(Interpolations.Periodic(OnGrid()))))
-    itp_z = Interpolations.interpolate((theta,), zwal, Interpolations.BSpline(Interpolations.Cubic(Interpolations.Periodic(OnGrid()))))
+    function periodic_cubic(th, vals)
+        raw = interpolate(vals, BSpline(Cubic(Periodic(OnGrid()))))
+        return scale(raw, th)
+    end
 
-    xwalp = [Interpolations.derivative(itp_x, 1, theta) for theta in thgr[1:mth1]]
-    zwalp = [Interpolations.derivative(itp_z, 1, theta) for theta in thgr[1:mth1]]
+    # Wall
+    itp_x = periodic_cubic(thgr, xwal)
+    itp_z = periodic_cubic(thgr, zwal)
 
-    itp_x = Interpolations.interpolate((theta,), xpla, Interpolations.BSpline(Interpolations.Cubic(Interpolations.Periodic(OnGrid()))))
-    itp_z = Interpolations.interpolate((theta,), zpla, Interpolations.BSpline(Interpolations.Cubic(Interpolations.Periodic(OnGrid()))))
+    xwalp = first.(Interpolations.gradient.(Ref(itp_x), thgr))
+    zwalp = first.(Interpolations.gradient.(Ref(itp_z), thgr))
 
-    xplap = [Interpolations.derivative(itp_x, 1, theta) for theta in thgr[1:mth1]]
-    zplap = [Interpolations.derivative(itp_z, 1, theta) for theta in thgr[1:mth1]]
+    # Plasma boundary
+    # TEMP - need to get sizes corrected between mtheta and mthvac (please rename these to mtheta_plas/mtheta_vac or something)
+    thgr_plas = range(0, stop=2π, length=length(xpla))
+    itp_x = periodic_cubic(thgr_plas, xpla)
+    itp_z = periodic_cubic(thgr_plas, zpla)
+
+    xplap = first.(Interpolations.gradient.(Ref(itp_x), thgr_plas))
+    zplap = first.(Interpolations.gradient.(Ref(itp_z), thgr_plas))
 
     push!(xplap, xwalp[1])
     push!(zplap, zwalp[1])
 
     # Allocate arrays
-    cnqd = zeros(Float64, mth1)
-    snqd = zeros(Float64, mth1)
-    sinlt = zeros(Float64, mth1, jmax1)
-    coslt = zeros(Float64, mth1, jmax1)
-    snlth = zeros(Float64, mth1, jmax1)
-    cslth = zeros(Float64, mth1, jmax1)
+    cnqd = zeros(mth1)
+    snqd = zeros(mth1)
+    sinlt = zeros(mth1, jmax1)
+    coslt = zeros(mth1, jmax1)
+    snlth = zeros(mth1, jmax1)
+    cslth = zeros(mth1, jmax1)
 
     # Trigonometric basis arrays
-    for is in 1:mth1
-        theta = (is-1) * dth
-        znqd = nq * delta[is]
-        cnqd[is] = cos(znqd)
-        snqd[is] = sin(znqd)
-        for l1 in 1:jmax1
-            ll = lmin[1] - 1 + l1
-            elth = ll * theta
-            elthnq = ll * theta + znqd
-            sinlt[is,l1] = sin(elth)
-            coslt[is,l1] = cos(elth)
-            snlth[is,l1] = sin(elthnq)
-            cslth[is,l1] = cos(elthnq)
-        end
-    end
+    # UNCOMMENT ONCE WE HAVE THE RIGHT SIZES
+    # for is in 1:mth1
+    #     theta = (is-1) * dth
+    #     znqd = nq * delta[is]
+    #     cnqd[is] = cos(znqd)
+    #     snqd[is] = sin(znqd)
+    #     for l1 in 1:jmax1
+    #         ll = lmin[1] - 1 + l1
+    #         elth = ll * theta
+    #         elthnq = ll * theta + znqd
+    #         sinlt[is,l1] = sin(elth)
+    #         coslt[is,l1] = cos(elth)
+    #         snlth[is,l1] = sin(elthnq)
+    #         cslth[is,l1] = cos(elthnq)
+    #     end
+    # end
 
     return (
         delx, delz, xwal, zwal, xwalp, zwalp,

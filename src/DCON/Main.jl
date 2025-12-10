@@ -123,7 +123,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr; op_netcdf_out=false) # outp.netcdf_out)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
                 println("Free-boundary mode unstable for nn = $(ctrl.nn).")
