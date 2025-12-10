@@ -1,8 +1,8 @@
 const BCTYPE_MAP = Dict(
-    "natural"      => 1, # unstable
-    "periodic"     => 2,
+    "natural" => 1, # unstable
+    "periodic" => 2,
     "extrap" => 3,
-    "not-a-knot"   => 4,
+    "not-a-knot" => 4,
     "notaknot" => 4
 )
 
@@ -12,14 +12,17 @@ const BCTYPE_MAP = Dict(
 Internal helper to parse a boundary condition into a validated integer code.
 
 ## Arguments:
-- `bctype`: The boundary condition as a `String` or `Int`. Valid options are:
-    - `"natural"` or `1`
-    - `"periodic"` or `2`
-    - `"extrap"` or `3`
-    - `"not-a-knot"` or `4`
+
+  - `bctype`: The boundary condition as a `String` or `Int`. Valid options are:
+
+      + `"natural"` or `1`
+      + `"periodic"` or `2`
+      + `"extrap"` or `3`
+      + `"not-a-knot"` or `4`
 
 ## Returns:
-- A validated `Int` code (1-4).
+
+  - A validated `Int` code (1-4).
 """
 function parse_bctype(bctype::String)
     normalized_bctype = replace(lowercase(bctype), r"[-_\s]" => "")
@@ -52,46 +55,46 @@ struct ReadOnlyArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
     data::A
 end
 
-Base.size(A::ReadOnlyArray)               = size(A.data)
-Base.getindex(A::ReadOnlyArray, I...)     = @inbounds A.data[I...]
-Base.setindex!(::ReadOnlyArray, args...)  =
+Base.size(A::ReadOnlyArray) = size(A.data)
+Base.getindex(A::ReadOnlyArray, I...) = @inbounds A.data[I...]
+Base.setindex!(::ReadOnlyArray, args...) =
     throw(ArgumentError("Cannot modify a read-only array."))
 
 
-    """
-    @expose_fields TypeName field1 field2 ...
+"""
+@expose_fields TypeName field1 field2 ...
 
-    Create a *read-only public interface* for a struct while still allowing
-    internal code to mutate the underlying buffers.
+Create a *read-only public interface* for a struct while still allowing
+internal code to mutate the underlying buffers.
 
-    For every symbol `field` you list (e.g. `fs`, `fs1`),
+For every symbol `field` you list (e.g. `fs`, `fs1`),
 
-    * an **internal** field named `:_field` (e.g. `:_fs`, `:_fs1`) is assumed to
-    exist in `TypeName`;
-    * the macro generates the following methods:
-    """
+* an **internal** field named `:_field` (e.g. `:_fs`, `:_fs1`) is assumed to
+exist in `TypeName`;
+* the macro generates the following methods:
+"""
 
 macro expose_fields(typ, fields...)
     # 1) Create a list of internal field names (Symbol)
     internal_syms = map(f -> Symbol("_" * string(f)), fields)
     # 2) Convert to a tuple literal AST (planted here as a QuoteNode)
-    internal_tuple = Expr(:tuple, map(x->QuoteNode(x), internal_syms)...)
+    internal_tuple = Expr(:tuple, map(x -> QuoteNode(x), internal_syms)...)
 
     quote
         ######## getproperty ########
         function Base.getproperty(s::$(esc(typ)), fld::Symbol)
             $(
                 foldr(
-                    (f, rest) -> :(
-                        if fld === $(QuoteNode(f))
-                            return ReadOnlyArray(getfield(s, $(QuoteNode(Symbol("_", f)))))
-                        else
-                            $rest
-                        end
-                    ),
-                    fields,
-                    init = :(return getfield(s, fld))
-                )
+                (f, rest) -> :(
+                    if fld === $(QuoteNode(f))
+                        return ReadOnlyArray(getfield(s, $(QuoteNode(Symbol("_", f)))))
+                    else
+                        $rest
+                    end
+                ),
+                fields;
+                init=:(return getfield(s, fld))
+            )
             )
         end
 

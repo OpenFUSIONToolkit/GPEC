@@ -12,7 +12,7 @@ const libvac = joinpath(libdir, "libvac")
 """
     set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
-Initialize DCON (Displacement CONtinuum) parameters for vacuum field calculations.
+Initialize DCON parameters for vacuum field calculations.
 
 # Arguments
 
@@ -57,6 +57,32 @@ function set_dcon_params(mthin::Integer, lmin::Integer, lmax::Integer, nnin::Int
         pointer(xin), pointer(zin), pointer(deltain))
 end
 
+"""
+    unset_dcon_params()
+
+Unset DCON parameters previously set by `set_dcon_params`.
+
+This subroutine deallocates in-memory arrays (`x_dcon`, `z_dcon`, and `delta_dcon`)
+and resets the internal DCON state for future vacuum calculations.
+
+# Notes
+
+  - Must be called after `set_dcon_params` if you want to reset the DCON memory.
+  - No arguments are required.
+
+# Example
+
+```julia
+# Set parameters
+set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+
+# Reset DCON parameters
+unset_dcon_params()
+```
+"""
+function unset_dcon_params()
+    ccall((:unset_dcon_params_, libvac), Nothing, ())
+end
 
 """
     mscvac(wv, mpert, mtheta, mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, grrio, xzptso, op_ahgfile=nothing)
@@ -132,20 +158,21 @@ function mscvac(
 
     # TODO: this allows VACUUM to be called from a specified folder, like the rest of the Julia DCON
     # vac.in is hardcoded in the fortran, so this just changes the working directory temporarily for VACUUM
+    # Eventually, find a better way to do this
     cd(folder) do
-        ccall((:__vacuum_mod_MOD_mscvac, libvac),
+        return ccall((:__vacuum_mod_MOD_mscvac, libvac),
             Nothing,
             (Ptr{ComplexF64},       # wv(mpert,mpert)
-            Ref{Cint},            # mpert
-            Ref{Cint},            # mtheta
-            Ref{Cint},            # mthvac
-            Ref{Cint},            # complex_flag (logical)
-            Ref{Cdouble},         # kernelsignin
-            Ref{Cint},            # wall_flag (logical)
-            Ref{Cint},            # farwal_flag (logical)
-            Ptr{Cdouble},         # grrio(:,:)
-            Ptr{Cdouble},         # xzptso(:,:)
-            Ptr{UInt8}),          # op_ahgfile (optional)
+                Ref{Cint},            # mpert
+                Ref{Cint},            # mtheta
+                Ref{Cint},            # mthvac
+                Ref{Cint},            # complex_flag (logical)
+                Ref{Cdouble},         # kernelsignin
+                Ref{Cint},            # wall_flag (logical)
+                Ref{Cint},            # farwal_flag (logical)
+                Ptr{Cdouble},         # grrio(:,:)
+                Ptr{Cdouble},         # xzptso(:,:)
+                Ptr{UInt8}),          # op_ahgfile (optional)
             pointer(wv),
             Ref(Int32(mpert)),
             Ref(Int32(mtheta)),
