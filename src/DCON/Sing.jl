@@ -101,8 +101,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
     # Optionally override qlim based on dmlim
     if ctrl.set_psilim_via_dmlim
         if ctrl.nn_low != ctrl.nn_high
-            @warn "When setting psilim via dmlim, only single n is currently supported. Setting nn_low = nn_high = $(ctrl.nn_low)."
-            ctrl.nn_high = ctrl.nn_low
+            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
         end
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)
