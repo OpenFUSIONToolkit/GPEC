@@ -57,6 +57,9 @@ function Main(path::String="./")
     elseif ctrl.nn_high == 0
         ctrl.nn_high = ctrl.nn_low
     end
+    if ctrl.nn_low > ctrl.nn_high
+        error("nn_low cannot be greater than nn_high")
+    end
     intr.nlow = ctrl.nn_low
     intr.nhigh = ctrl.nn_high
     intr.npert = intr.nhigh - intr.nlow + 1
