@@ -1,5 +1,3 @@
-using Printf
-
 """
     bounds(x, z, istart, ifinish)
 
@@ -405,9 +403,8 @@ function wwall(vac_set::VacuumSettingsType, vac_glob::VacuumGlobalsType)
 
     if farwal
         @info "No wall"
-        vac_glob.xwal = nothing
-        vac_glob.zwal = nothing
-        return
+        # Return zeros, no wall defined
+        return xwal1, zwal1
     end
 
     xshift = a

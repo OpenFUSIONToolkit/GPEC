@@ -1,6 +1,6 @@
 module VacuumMod
 
-using TOML, Interpolations
+using TOML, Interpolations, SpecialFunctions, Printf
 
 include("Vacuum_data.jl")
 include("Vacuum_init.jl")
@@ -222,9 +222,18 @@ function compute_vacuum_response(vac_inputs::VacuumInputType, mpert::Int, mtheta
         settings,
         vac_inputs
     )
-
     display(globals)
 
+    # Set up plasma and wall position arrays (`arrays` function in Fortran)
+    delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth = setuparrays!(globals, settings)
+
+    # Call funint
+
+    # call vaccal (fortran has: if not wall, call vaccal, but that was only if wall = true in the debugs section of the .in, which we removed)
+
+    # do the main conditional ieig logic
+
+    # copy vacuum response matrix to output and return
     wv = zeros(ComplexF64, mpert, mpert)
     grri = zeros(Float64, 2 * (mtheta_vac + 5), mpert * 2)
     xzpts = zeros(Float64, mtheta_vac + 5, 4)
