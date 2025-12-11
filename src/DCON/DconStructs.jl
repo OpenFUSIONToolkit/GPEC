@@ -1,17 +1,4 @@
 # TODO: add descriptions of what all variables are and/or explanation of defaults
-# TODO: remove all unused variables before first pull request
-@kwdef mutable struct ResistType
-    e::Float64 = 0.0
-    f::Float64 = 0.0
-    h::Float64 = 0.0
-    m::Float64 = 0.0
-    g::Float64 = 0.0
-    k::Float64 = 0.0
-    eta::Float64 = 0.0
-    rho::Float64 = 0.0
-    taua::Float64 = 0.0
-    taur::Float64 = 0.0
-end
 
 # TODO: ideally, everything is allocated at construction, but mpert is determined after
 # since these are allocated in sing_find. What's the best way to handle this?
@@ -20,22 +7,22 @@ end
 # then creating them all at once after mpert is determined in dcon.jl
 # This wouldn't be as clean, but would allow preallocation. Does this greatly impact performance?
 @kwdef mutable struct SingType
-    m::Int = 0
-    r1::Vector{Int} = [0]
-    r2::Vector{Int} = [0, 0]
     psifac::Float64 = 0.0
     rho::Float64 = 0.0
+    m::Vector{Int} = Int[]
+    n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
     di::Float64 = 0.0
-    alpha::ComplexF64 = 0.0 + 0.0im
+    alpha::Vector{ComplexF64} = ComplexF64[]
+    r1::Vector{Int} = Int[]
+    r2::Vector{Int} = Int[]
     n1::Vector{Int} = Int[]
     n2::Vector{Int} = Int[]
-    power::Union{Missing, Vector{ComplexF64}} = missing # we know the size of these, but it depends on mpert
-    vmat::Union{Missing, Array{ComplexF64,4}} = missing
-    mmat::Union{Missing, Array{ComplexF64,4}} = missing
+    power::Union{Missing,Vector{ComplexF64}} = missing # we know the size of these, but it depends on mpert
+    vmat::Union{Missing,Array{ComplexF64,4}} = missing
+    mmat::Union{Missing,Array{ComplexF64,4}} = missing
     m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
-    restype::ResistType = ResistType()
 end
 # @kwdef mutable struct SingType
 #     mpert::Int
@@ -55,17 +42,20 @@ end
 #     vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, 2 * mpert, 2, order + 1)
 #     mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, 2 * mpert, 2, order + 3)
 #     m0mat::Union{Nothing, Matrix{ComplexF64}} = zeros(ComplexF64, 2, 2)
-#     restype::ResistType = ResistType()
 # end
 # # Constructor to allocate matrices
 # SingType(mpert::Int, order::Int; kwargs...) = SingType(; mpert, order, kwargs...)
 
 @kwdef mutable struct DconInternal
     dir_path::String = ""
-    mlow::Int = 0 #Copy of delta_mlow, but with limits enforced
-    mhigh::Int = 0 #Copy of delta_mhigh, but with limits enforced
-    mpert::Int = 0 #mpert = mhigh-mlow+1
-    mband::Int = 0 #mband = mpert-1-delta_mband
+    mlow::Int = 0
+    mhigh::Int = 0
+    mpert::Int = 0 # mpert = mhigh-mlow+1
+    mband::Int = 0 # mband = mpert-1-delta_mband
+    nlow::Int = 0
+    nhigh::Int = 0
+    npert::Int = 0 # npert = nhigh-nlow+1
+    numpert_total = 0 # numpert_total = mpert*npert
     vac_memory::Bool = true # TODO: most likely just remove, always true in ahg_flag is deprecated
     keq_out::Bool = false
     theta_out::Bool = false
@@ -74,20 +64,13 @@ end
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
-    sing::Union{Nothing, Vector{SingType}} = SingType[]
-    kinsing::Union{Nothing, Vector{SingType}} = SingType[]
+    sing::Union{Nothing,Vector{SingType}} = SingType[]
+    kinsing::Union{Nothing,Vector{SingType}} = SingType[]
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     # TODO: how to initialize a spline? This will be a spline of size mpsi x 5
-    locstab::Union{Missing, Spl.CubicSpline{Float64}} = missing
-    size_edge::Int = 0
-    pre_edge::Int = 1
-    i_edge::Int = 1
-    # TODO: what are the lengths of these? can use to initialize
-    q_edge::Union{Missing, Vector{Float64}} = missing
-    psi_edge::Union{Missing, Vector{Float64}} = missing
-    dw_edge::Union{Missing, Vector{ComplexF64}} = missing
+    locstab::Union{Missing,Spl.CubicSpline{Float64}} = missing
 end
 
 @kwdef mutable struct DconControl
@@ -97,14 +80,11 @@ end
     ode_flag::Bool = false
     vac_flag::Bool = false
     mer_flag::Bool = false
-    res_flag::Bool = false
     fft_flag::Bool = false
-    node_flag::Bool = false
-    # saves_per_region::Int = 2 # number of u to save per interrational region, must be >> 0 to run GPEC
-    # save_spacing::String = "Chebyshev" # method for determining spacing of saved u points
     mthvac::Int = 480
     sing_start::Int = 0
-    nn::Int = 0
+    nn_low::Int = 0
+    nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
     delta_mband::Int = 0
@@ -118,14 +98,10 @@ end
     numsteps_init::Int = 4000 # used to set initial size of data store in OdeState
     numunorms_init::Int = 100 # used to set initial size of saved unorm data in OdeState
     singfac_min::Float64 = 0.0
-    singfac_max::Float64 = 0.0
     cyl_flag::Bool = false
-    dmlim::Float64 = 0.5
-    lim_flag::Bool = false
-    sas_flag::Bool = false
+    set_psilim_via_dmlim::Bool = false # previously sas_flag, if true, determines psilim using outermost rational + dmlim
+    dmlim::Float64 = 0.2 # % outside the last rational surface to go out to determine dW if set_psilim_via_dmlim is true
     sing_order::Int = 2
-    sort_type::String = "absm"
-    termbycross_flag::Bool = false
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
     con_flag::Bool = false
@@ -144,65 +120,13 @@ end
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
     nperq_edge::Int = 20
-    wv_farwall_flag::Bool = false
+    wv_farwall_flag::Bool = true
     dcon_kin_threads::Int = 1
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
-end
-
-# TODO: a lot of these will be deprecated, this will be a general data structure that handles output
-# Since file I/O in Julia will be very different than Fortran, this will likely be reworked significantly
-@kwdef mutable struct DconOutput
-    # output switches
-    write_crit_out::Bool   = true
-    write_dcon_out::Bool   = true
-    write_euler_h5::Bool   = true
-    write_eqdata_h5::Bool  = false
-
-    # filenames
-    fname_crit_out::String  = "crit.out"
-    fname_dcon_out::String  = "dcon.out"
-    fname_euler_h5::String  = "euler.h5"
-    fname_eqdata_h5::String = "eqdata.h5"
-
-    handles::Dict{Symbol,Any} = Dict()
-
-    # Old or unused yet
-    interp::Bool = false
-    crit_break::Bool = true
-    out_bal1::Bool = false
-    bin_bal1::Bool = false
-    out_bal2::Bool = false
-    bin_bal2::Bool = false
-    out_metric::Bool = false
-    bin_metric::Bool = false
-    feval_flag::Bool = false
-    out_fmat::Bool = false
-    bin_fmat::Bool = false
-    out_gmat::Bool = false
-    bin_gmat::Bool = false
-    out_kmat::Bool = false
-    bin_kmat::Bool = false
-    out_sol::Bool = false
-    out_sol_min::Int = 0
-    out_sol_max::Int = 0
-    bin_sol::Bool = false
-    bin_sol_min::Int = 0
-    bin_sol_max::Int = 0
-    out_fl::Bool = false
-    bin_fl::Bool = false
-    out_evals::Bool = false
-    bin_evals::Bool = false
-    bin_euler::Bool = false
-    euler_stride::Int = 1
-    bin_vac::Bool = false # TODO: deprecated
-    ahb_flag::Bool = false # TODO: deprecated
-    mthsurf0::Float64 = 1.0 # TODO: deprecated
-    msol_ahb::Int = 0 # TODO: deprecated
-    netcdf_out::Bool = true # TODO: might be deprecated
-    out_fund::Bool = false
-    out_ahg2msc::Bool = false # TODO: deprecated
+    write_outputs_to_HDF5::Bool = true
+    HDF5_filename::String = "euler.h5"
 end
 
 # TODO: how can we initialize the splines to not be nothings?
@@ -218,41 +142,99 @@ end
     dmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
     emats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
     hmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    dbats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    ebats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    fbats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    fmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
+    fmats_lower::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
     kmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
     gmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    # kaats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # gaats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # f0mats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # pmats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # paats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # kkmats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # kkaats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # r1mats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # r2mats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # r3mats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # akmats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # bkmats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
-    # ckmats::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing
 
-    # k0s::JPEC.Spl.SplineType
-
-    # ipiva::Union{Nothing,Vector{Int}} = nothing
-    # TODO: these might be deprecated? They're used with a ahb_flag in free
-    asmat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
-    bsmat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
-    csmat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
+    # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 
     parallel_threads::Int = 0
     dcon_kin_threads::Int = 0
-
-    # kinetic ABCDEH mats for sing_mod
-    # kwmats::Vector{JPEC.Spl.CubicSpline{ComplexF64}} = [JPEC.Spl.CubicSpline{ComplexF64}() for _ in 1:6]
-    # ktmats::Vector{JPEC.Spl.CubicSpline{ComplexF64}} = [JPEC.Spl.CubicSpline{ComplexF64}() for _ in 1:6]
 end
 
 FourFitVars(mpert::Int) = FourFitVars(; mpert)
+
+# TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
+@kwdef struct VacuumData
+    mthvac::Int
+    mpert::Int
+    numpert_total::Int
+
+    wt::Array{ComplexF64, 2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
+    wt0::Array{ComplexF64, 2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
+    wv::Array{ComplexF64, 2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
+    ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+    ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+    et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+
+    # VACUUM can't handle 3D yet, so these are temporary mpert arrays
+    grri::Array{Float64, 2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)
+    xzpts::Array{Float64, 2} = Array{Float64}(undef, mthvac + 5, 4)
+end
+
+VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)
+
+"""
+OdeState
+
+A mutable struct to hold the state of the ODE solver for DCON.
+This struct contains all necessary fields to manage the ODE integration process,
+including solution vectors, tolerances, and flags for the integration process.
+"""
+@kwdef mutable struct OdeState
+    # Initialization parameters
+    numpert_total::Int                  # total number of modes
+    numunorms_init::Int             # initial storage size for unorm data
+    msing::Int                   # number of singular surfaces
+    numsteps_init::Int             # initial size of data store
+
+    # Saved data throughout integration
+    step::Int = 1                    # current step of integration (this is like istep in Fortran)
+    psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)  # psi at each step of integration
+    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)    # q at each step of integration
+    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init) # store of u at each step of integration
+    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init) # store of ud at each step of integration
+    crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)  # store of crit at each step of integration
+    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing) # asymptotic coefficients just right of singular surface
+    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing) # asymptotic coefficients just left of singular surface
+
+    # Used for to find peak dW in the edge
+    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)  # dW at each step in the edge
+    wvmat_spline::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing  # spline of wv matrices for free_test # TODO: how to initialize a spline?
+
+    # Data for integrator
+    psifac::Float64 = 0.0       # normalized flux coordinate
+    q::Float64 = 0.0            # q value at psifac
+    u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)            # solution vectors
+    ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)           # derivative of solution vectors used in GPEC
+    ising::Int = 0               # index of next singular surface
+    psimax::Float64 = 0.0         # maximum psi value for the integrator
+    next::String = ""           # next integration action ("cross" or "finish")
+    nzero::Int = 0              # count of zero crossings detected
+
+    # Used for Gaussian reduction
+    new::Bool = true            # flag for computing new unorm0 after a fixup
+    unorm::Vector{Float64} = zeros(Float64, numpert_total)                        # norms of solution vectors
+    unorm0::Vector{Float64} = zeros(Float64, numpert_total)                       # initial norms of solution vectors
+    ifix::Int = 0                # index for number of unorms performed
+    index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)                                   # indices for sorting solutions
+    sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
+    zeroed_idx::Vector{Vector{Int}} = Vector{Vector{Int}}(undef, numunorms_init)  # indices of zeroed solutions at each unorm
+    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)             # fixup factors for Gaussian reduction
+    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
+
+    # Temporary matrices for sing_der calculations
+    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing} = nothing
+    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+end
+
+# Initialize function for OdeState with relevant parameters for array initialization
+OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)

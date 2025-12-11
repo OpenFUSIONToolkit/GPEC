@@ -1,4 +1,4 @@
-function Main(path::String)
+function Main(path::String="./")
 
     println("DCON START")
     println("----------------------------------")
@@ -6,27 +6,31 @@ function Main(path::String)
 
     # Read input data and set up data structures
     intr = DconInternal(; dir_path=path)
+    # TODO: leaving DCON_CONTROL as a part of the toml file, eventually can combine equil, gpec, etc. into one input file?
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
-    ctrl = DconControl(; (Symbol(k)=>v for (k,v) in inputs["DCON_CONTROL"])...)
-    outp = DconOutput(; (Symbol(k)=>v for (k,v) in inputs["DCON_OUTPUT"])...)
+    ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
-    init_files(outp, intr.dir_path)
 
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
-    # Determine if qhigh is truncating before psihigh and reform equilibrium if needed
+    # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
+    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
+        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
+            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
+        ctrl.psiedge = 1.0
+    end
+
+    # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.control.psihigh && ctrl.reform_eq_with_psilim
-        @warn "psilim != psihigh not implemented yet, skipping reforming equilibrium splines"
+        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.control.psihigh)."
         # JMH - Nik please put the logic we discussed here
         # something like ?
         # equil.config.control.psihigh = intr.psilim
         # equil = set_up_equilibrium(equil.config)
     end
-
-    # TODO: add some data dump to dcon.out from equil here or in setup_equilibrium
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
@@ -42,99 +46,80 @@ function Main(path::String)
     #   IF(ctrl.verbose) WRITE(*,*)"Evaluating ballooning criterion"
     #   CALL bal_scan
     #ENDIF
+    # Fit data to splines
+    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
 
-    # Fit stability data to splines and dump to file
-    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype=3)
-
-    # Dump equilibrium data to files
-    if outp.write_eqdata_h5
-        write_output(outp, :eqdata_h5, Vector(equil.sq.xs); dsetname="psi")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 1] ./ (2π)); dsetname="f")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 2]); dsetname="mu0p")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 3]); dsetname="dV/dpsi")
-        write_output(outp, :eqdata_h5, Vector(equil.sq.fs[:, 4]); dsetname="q")
-        write_output(outp, :eqdata_h5, Vector(locstab_fs[:, 1] ./ equil.sq.xs); dsetname="di")
-        write_output(outp, :eqdata_h5, Vector(locstab_fs[:, 2] ./ equil.sq.xs); dsetname="dr")
-        write_output(outp, :eqdata_h5, Vector(locstab_fs[:, 4]); dsetname="ca1")
+    # Determine toroidal mode numbers
+    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+        error("Either nn_low or nn_high must be set in DCON_CONTROL (both are 0)")
+    elseif ctrl.nn_low == 0
+        ctrl.nn_low = ctrl.nn_high
+    elseif ctrl.nn_high == 0
+        ctrl.nn_high = ctrl.nn_low
     end
-
-    if outp.write_dcon_out
-        write_output(outp, :dcon_out, @sprintf("%4s %12s %12s %12s %12s %12s %12s %12s %12s", "ipsi","psifac","f","mu0 p","dvdpsi","q","di","dr","ca1"))
-        for ipsi in 1:length(equil.sq.xs)
-            write_output(outp, :dcon_out,
-                @sprintf("%4d %12.4e %12.4e %12.4e %12.4e %12.4e %12.4e %12.4e %12.4e",
-                        ipsi,
-                        equil.sq.xs[ipsi],
-                        equil.sq.fs[ipsi, 1] / (2π),
-                        equil.sq.fs[ipsi, 2],
-                        equil.sq.fs[ipsi, 3],
-                        equil.sq.fs[ipsi, 4],
-                        locstab_fs[ipsi, 1] / equil.sq.xs[ipsi],
-                        locstab_fs[ipsi, 2] / equil.sq.xs[ipsi],
-                        locstab_fs[ipsi, 4]
-                )
-            )
-        end
-        write_output(outp, :dcon_out, @sprintf("%4s %12s %12s %12s %12s %12s %12s %12s %12s", "ipsi","psifac","f","mu0 p","dvdpsi","q","di","dr","ca1"))
+    if ctrl.nn_low > ctrl.nn_high
+        error("nn_low cannot be greater than nn_high")
     end
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
+    intr.npert = intr.nhigh - intr.nlow + 1
+    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
     # Find all singular surfaces in the equilibrium
-    sing_find!(ctrl, equil, intr)
+    sing_find!(intr, equil)
 
     # Determine poloidal mode numbers
+    if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
+        error("Negative delta_mlow or delta_mhigh not allowed")
+    end
     if ctrl.cyl_flag
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     elseif ctrl.sing_start == 0
-        intr.mlow = min(ctrl.nn * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, ctrl.nn * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
         for ising in Int(ctrl.sing_start):intr.msing
             intr.mmin = min(intr.mmin, sing[ising].m)
         end
         intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nn * equil.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
+    if ctrl.delta_mband >= intr.mpert
+        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
+        ctrl.delta_mband = 0
+    end
     intr.mband = intr.mpert - 1 - ctrl.delta_mband
     intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
+    intr.numpert_total = intr.mpert * intr.npert
 
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
-            println("     q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
-            println("     sas_flag = $(ctrl.sas_flag), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
-            println("     betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
-            println("     nn = $(ctrl.nn), mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
-            println(" Fourier analysis of metric tensor components")
-        end
-
-        if outp.write_dcon_out
-            write_output(outp, :dcon_out, @sprintf("\n   mlow   mhigh   mpert   mband   nn   lim_fl   dmlim      qlim      psilim"))
-            write_output(outp, :dcon_out, @sprintf("%6d %6d %6d %6d %6d %6s %11.3e %11.3e %11.3e",
-                intr.mlow, intr.mhigh, intr.mpert, intr.mband, ctrl.nn,
-                string(ctrl.sas_flag), ctrl.dmlim, intr.qlim, intr.psilim))
+            println("Run parameters:")
+            println("   q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
+            println("   set_psilim_via_dmlim = $(ctrl.set_psilim_via_dmlim), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
+            println("   betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
+            println("   mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
+            println("   nlow = $(intr.nlow), nhigh = $(intr.nhigh), npert = $(intr.npert)")
         end
 
         # Compute metric tensor
-        metric = make_metric(equil, mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
-            println("Computing F, G, and K Matrices")
+            println("   Computing F, G, and K Matrices")
         end
 
         # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(metric, equil, ctrl, intr)
+        ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
         end
-        sing_scan!(intr, ctrl, equil, ffit, outp)
-        # TODO: implement resist_eval at some point, not urgent for initial functionality.
-        # for ising in 1:msing
-        #  resist_eval(sing[ising])
-        # end
+        sing_scan!(intr, ctrl, equil, ffit)
         if ctrl.kin_flag
             # ksing_find()
         end
@@ -145,59 +130,173 @@ function Main(path::String)
         if ctrl.verbose
             println("Integrating Euler-Lagrange equation")
         end
-        odet = ode_run(ctrl, equil, intr, ffit, outp)
-        if intr.size_edge > 0
-            # Find peak index in dw_edge[pre_edge:i_edge]
-            dw_slice = real.(intr.dw_edge[intr.pre_edge:intr.i_edge])
-            peak_index = findmax(dw_slice)[2] + (intr.pre_edge - 1)
-            ctrl.qhigh = intr.q_edge[peak_index]
-            ctrl.sas_flag = false
-            ctrl.psiedge = equil.psihigh
-            sing_lim!(intr, ctrl, equil)
-            println("Re-Integrating to peak dW @ qlim = $(intr.qlim), psilim = $(intr.psilim)")
-            # Full re-run because outputs were written to disk each step
-            # making it hard to backtrack
-            # if outp.bin_euler
-            #    bin_close(euler_bin_unit) # TODO: Need to decide ho we're handling io
-            # end
-            odet = ode_run(ctrl, equil, intr, ffit, outp)
+        odet = ode_run(ctrl, equil, ffit, intr)
+        if odet.nzero > 0 && ctrl.verbose
+            println("Fixed-boundary mode unstable for n = $nstring.")
         end
     end
 
     # Compute free boundary energies
-    plasma1 = 0
-    vacuum1 = 0
-    total1 = 0
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        plasma1, vacuum1, total1 = free_run(odet, ctrl, intr, equil, ffit, outp; op_netcdf_out=false) # outp.netcdf_out)
-    end
-
-    # Output results of fixed-boundary stability calculations
-    if ctrl.ode_flag && odet.nzero != 0
-        if ctrl.verbose
-            println("Fixed-boundary mode unstable for nn = $(ctrl.nn).")
-        end
-    end
-
-    # Output results of free-boundary stability calculations
-    if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1 && outp.bin_sol)
-        if real(total1) < 0
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
+        if real(vac_data.et[1]) < 0
             if ctrl.verbose
-                println("Free-boundary mode unstable for nn = $(ctrl.nn).")
+                println("Free-boundary mode unstable for n = $nstring.")
             end
         else
             if ctrl.verbose
-                println("All free-boundary modes stable for nn = $(ctrl.nn).")
+                println("All free-boundary modes stable for n = $nstring.")
             end
         end
     end
 
+    if ctrl.write_outputs_to_HDF5
+        if ctrl.verbose
+            println("Writing saved data to $(ctrl.HDF5_filename)")
+        end
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
+    end
+
     end_time = time() - start_time
-    close_files(outp)
     println("----------------------------------")
     println("Run time: $end_time seconds")
     println("Normal termination.")
+
+    # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+end
+
+"""
+    write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState)
+
+Helper function to write the HDF5 output file with relevant run and equilibrium parameters.
+This combines the functionality of several pieces of the Fortran code in `ode_output.f`,
+primarily `ode_output_open` and the various `bin_euler` writes that occur throughout the
+integration. Some parameters are only dumped in their respective flags are true, e.g.
+vacuum data if `vac_flag` is true.
+
+### TODOs
+
+Combine spline unpacking if possible, too many extra lines
+
+"""
+function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
+
+    h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
+
+        # Store input parameters
+        for (key, val) in zip(fieldnames(DconControl), getfield.(Ref(ctrl), fieldnames(DconControl)))
+            out_h5["input/DCON_CONTROL/$key"] = val
+        end
+        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumControl), getfield.(Ref(equil.config.control), fieldnames(Equilibrium.EquilibriumControl)))
+            out_h5["input/EQUIL_CONTROL/$key"] = val
+        end
+        # TODO: assuming EQUIL_OUTPUT is going to be deprecated
+        # TODO: should we store the equilibrium? difficult since it could be a gfile, sol.in, etc.
+        # TODO: if we do one input file, can just pass that in instead and loop easily since its parsed
+        # as a dict already (for (k, v) in inputs["DCON_CONTROL"]...). We have to do this since custom structs
+        # don't inherently have an iterator by default
+
+        # Write derived run parameters
+        out_h5["info/mpert"] = intr.mpert
+        out_h5["info/mband"] = intr.mband
+        out_h5["info/mlow"] = intr.mlow
+        out_h5["info/mhigh"] = intr.mhigh
+        out_h5["info/npert"] = intr.npert
+        out_h5["info/nlow"] = intr.nlow
+        out_h5["info/nhigh"] = intr.nhigh
+        m = [(i - 1) % intr.mpert + intr.mlow for i in 1:(intr.numpert_total)]
+        n = [(i - 1) ÷ intr.mpert + intr.nlow for i in 1:(intr.numpert_total)]
+        out_h5["info/mn_index"] = hcat(m, n)   # (N, 2) matrix
+        out_h5["info/psilim"] = intr.psilim
+        out_h5["info/qlim"] = intr.qlim
+        out_h5["info/q1lim"] = intr.q1lim
+
+        # Write derived equilibrium parameters
+        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
+            if val !== nothing # TODO: looks like ro, zo, psio, and b_norm are not set, so skipping those for now but should fix eventually
+                out_h5["equil/$key"] = val
+            end
+        end
+        out_h5["equil/psio"] = equil.psio
+        out_h5["equil/ro"] = equil.ro
+        out_h5["equil/zo"] = equil.zo
+
+        # Write spline arrays
+        out_h5["splines/sq/xs"] = Vector(equil.sq.xs)
+        # TODO: getting errors when trying to dump just fs, so splitting for now, which adds so many lines
+        # This should be fixed if we separate these like Nik mentioned
+        out_h5["splines/sq/fs/2piF"] = equil.sq.fs[:, 1]
+        out_h5["splines/sq/fs/mu0p"] = equil.sq.fs[:, 2]
+        out_h5["splines/sq/fs/dVdpsi"] = equil.sq.fs[:, 3]
+        out_h5["splines/sq/fs/q"] = equil.sq.fs[:, 4]
+        out_h5["splines/sq/fs1/2piF"] = equil.sq.fs1[:, 1]
+        out_h5["splines/sq/fs1/mu0p"] = equil.sq.fs1[:, 2]
+        out_h5["splines/sq/fs1/dVdpsi"] = equil.sq.fs1[:, 3]
+        out_h5["splines/sq/fs1/q"] = equil.sq.fs1[:, 4]
+        out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
+        out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
+        out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
+        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, 1]
+        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, 2]
+        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, 3]
+        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, 4]
+        out_h5["splines/rzphi/fsx/rcoords"] = equil.rzphi.fsx[:, 1]
+        out_h5["splines/rzphi/fsx/offset"] = equil.rzphi.fsx[:, 2]
+        out_h5["splines/rzphi/fsx/nu"] = equil.rzphi.fsx[:, 3]
+        out_h5["splines/rzphi/fsx/jac"] = equil.rzphi.fsx[:, 4]
+        out_h5["splines/rzphi/fsy/rcoords"] = equil.rzphi.fsy[:, 1]
+        out_h5["splines/rzphi/fsy/offset"] = equil.rzphi.fsy[:, 2]
+        out_h5["splines/rzphi/fsy/nu"] = equil.rzphi.fsy[:, 3]
+        out_h5["splines/rzphi/fsy/jac"] = equil.rzphi.fsy[:, 4]
+        out_h5["splines/rzphi/fsxy/rcoords"] = equil.rzphi.fsxy[:, 1]
+        out_h5["splines/rzphi/fsxy/offset"] = equil.rzphi.fsxy[:, 2]
+        out_h5["splines/rzphi/fsxy/nu"] = equil.rzphi.fsxy[:, 3]
+        out_h5["splines/rzphi/fsxy/jac"] = equil.rzphi.fsxy[:, 4]
+        out_h5["splines/rzphi/x0"] = 0 # TODO: equil.rzphi.x0
+        out_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
+        out_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
+        out_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
+
+        # Write local stability data
+        if ctrl.mer_flag
+            out_h5["locstab/di"] = Vector(intr.locstab.fs[:, 1] ./ equil.sq.xs)
+            out_h5["locstab/dr"] = Vector(intr.locstab.fs[:, 2] ./ equil.sq.xs)
+            out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
+        end
+        if ctrl.bal_flag
+            out_h5["locstab/ca1"] = Vector(locstab_fs[:, 4])
+        end
+
+        # Write integration data
+        # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
+        out_h5["integration/nstep"] = odet.step
+        out_h5["integration/psi"] = odet.psi_store
+        out_h5["integration/q"] = odet.q_store
+        out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
+        out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
+        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
+        out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
+        out_h5["integration/crit"] = odet.crit_store
+
+        # Write singular surface data
+        out_h5["singular/msing"] = intr.msing
+        out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]
+        out_h5["singular/q"] = [sing.q for sing in intr.sing]
+        out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
+        out_h5["singular/di"] = [sing.di for sing in intr.sing]
+        out_h5["singular/ca_left"] = odet.ca_l
+        out_h5["singular/ca_right"] = odet.ca_r
+
+        # Write vacuum Data
+        if ctrl.vac_flag
+            out_h5["vacuum/wt"] = vac.wt
+            out_h5["vacuum/wt0"] = vac.wt0
+            out_h5["vacuum/ep"] = vac.ep
+            out_h5["vacuum/ev"] = vac.ev
+            out_h5["vacuum/et"] = vac.et
+        end
+    end
 end

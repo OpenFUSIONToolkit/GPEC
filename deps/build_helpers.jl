@@ -19,8 +19,9 @@ function build_fortran()
         ENV["LIBS"] = "-lopenblas"
         ENV["LIBSUFFIX"] = ".so"
     elseif Sys.iswindows()
-        ENV["LIBS"] = "-lopenblas"
-        ENV["LIBSUFFIX"] = ".dll"
+        error("Unsupported OS for Fortran build- try using WSL")
+        #ENV["LIBS"] = "-lopenblas"
+        #ENV["LIBSUFFIX"] = ".dll"
     else
         error("Unsupported OS for Fortran build")
     end
@@ -33,7 +34,7 @@ function build_fortran()
     results = [
         # build_jpec_fortran() add here
         build_spline_fortran(),
-        build_vacuum_fortran(),
+        build_vacuum_fortran()
     ]
 
     if all(results)

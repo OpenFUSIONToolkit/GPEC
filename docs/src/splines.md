@@ -37,6 +37,10 @@ JPEC.SplinesMod.CubicSpline
 
 ### spline_eval
 ```@docs
+JPEC.SplinesMod.spline_eval!
+JPEC.SplinesMod.spline_deriv1!
+JPEC.SplinesMod.spline_deriv2!
+JPEC.SplinesMod.spline_deriv3!
 JPEC.SplinesMod.spline_eval
 ```
 
@@ -47,6 +51,9 @@ JPEC.SplinesMod.BicubicSpline
 
 ### bicube_eval
 ```@docs
+JPEC.SplinesMod.bicube_eval!
+JPEC.SplinesMod.bicube_deriv1!
+JPEC.SplinesMod.bicube_deriv2!
 JPEC.SplinesMod.bicube_eval
 ```
 
@@ -73,7 +80,12 @@ fs = sin.(xs)
 # Set up spline (1 quantity)
 spline = JPEC.SplinesMod.CubicSpline(xs, hcat(fs), 1)
 
-# Evaluate at new points
+# Evaluate at value (and derivatives) at single point
+x = 1.0
+f = JPEC.SplinesMod.spline_eval!(spline, x)
+f, f1, f2, f3 = JPEC.SplinesMod.spline_deriv3!(spline, x)
+
+# Evaluate at vector of new points
 xs_fine = collect(range(0.0, stop=2π, length=100))
 fs_fine = JPEC.SplinesMod.spline_eval(spline, xs_fine)
 ```
@@ -93,7 +105,8 @@ end
 # Set up bicubic spline
 bcspline = JPEC.SplinesMod.BicubicSpline(xs, ys, fs, 1, 1)
 
-# Evaluate with derivatives
+# Evaluate spline
 x_eval, y_eval = π/2, π/4
-f, fx, fy = JPEC.SplinesMod.bicube_eval(bcspline, x_eval, y_eval, 1)
+f = JPEC.SplinesMod.bicube_eval!(bcspline, x_eval, y_eval) # just the value
+f, fx, fy = JPEC.SplinesMod.bicube_deriv1!(bcspline, x_eval, y_eval, 1) #include first derivative
 ```

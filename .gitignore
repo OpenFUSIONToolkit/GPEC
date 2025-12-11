@@ -8,6 +8,7 @@
 *.h5
 .vscode
 *.DS_Store
+*.pdf
 .gitattributes
 Manifest.toml
 build.log
