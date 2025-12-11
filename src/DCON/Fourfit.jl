@@ -142,7 +142,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
 end
 
 """
-    make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, intr::DconInternal) -> FourFitVars
+    make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal) -> FourFitVars
 
 Constructs main DCON matrices for a given toroidal mode number and returns
 them as a new `FourFitVars` object. See the appendix of the 2016 Glasser
@@ -174,22 +174,23 @@ and does not affect the actual matrix sizes, they are all dense.
 Add kinetic metric tensor components for kin_flag = true
 Set powers if necessary
 """
-function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, intr::DconInternal, metric::MetricData)
+function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, metric::MetricData)
 
     # --- Extract inputs ---
     sq = equil.sq
     mpsi = metric.mpsi
 
-    # Allocations
-    amats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    bmats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    cmats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    dmats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    emats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    hmats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    fmats_lower = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    gmats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
-    kmats = zeros(ComplexF64, mpsi, intr.mpert, intr.mpert)
+    # Allocations (use flat storage for all matrices to fill splines)
+    # TODO: This can be made more efficient for 2D equilibria by using block diagonals
+    amats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    bmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    cmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    dmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    emats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    hmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     g11 = zeros(ComplexF64, 2 * intr.mband + 1)
     g22 = zeros(ComplexF64, 2 * intr.mband + 1)
     g33 = zeros(ComplexF64, 2 * intr.mband + 1)
@@ -207,23 +208,21 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
 
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
-        amat = @view amats[ipsi, :, :]
-        bmat = @view bmats[ipsi, :, :]
-        cmat = @view cmats[ipsi, :, :]
-        dmat = @view dmats[ipsi, :, :]
-        emat = @view emats[ipsi, :, :]
-        hmat = @view hmats[ipsi, :, :]
-        fmat = @view fmats_lower[ipsi, :, :]
-        gmat = @view gmats[ipsi, :, :]
-        kmat = @view kmats[ipsi, :, :]
-
+        amats_flatview = @view amats_flat[ipsi, :, :]
+        bmats_flatview = @view bmats_flat[ipsi, :, :]
+        cmats_flatview = @view cmats_flat[ipsi, :, :]
+        dmats_flatview = @view dmats_flat[ipsi, :, :]
+        emats_flatview = @view emats_flat[ipsi, :, :]
+        hmats_flatview = @view hmats_flat[ipsi, :, :]
+        fmats_lower_flatview = @view fmats_lower_flat[ipsi, :, :]
+        gmats_flatview = @view gmats_flat[ipsi, :, :]
+        kmats_flatview = @view kmats_flat[ipsi, :, :]
         # --- Profiles ---
         p1 = sq.fs1[ipsi, 2]
         q = sq.fs[ipsi, 4]
         q1 = sq.fs1[ipsi, 4]
         jtheta = -sq.fs1[ipsi, 1]
         chi1 = 2π * equil.psio
-        nq = ctrl.nn * q
 
         # Fill lower half (0, -1, …, -mband)
         g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:intr.mband+1]
@@ -247,41 +246,59 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
             jmat1[mid+k] = conj(jmat1[mid-k])
         end
 
-        # Construct primitive matrices via m1/dm loops
-        ipert = 0
-        for m1 in intr.mlow:intr.mhigh
-            ipert += 1
-            sing1 = m1 - nq
-            for dm in max(1 - ipert, -intr.mband):min(intr.mpert - ipert, intr.mband)
-                m2 = m1 + dm
-                sing2 = m2 - nq
-                jpert = ipert + dm
-                dmidx = dm + mid
+        # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
+        for n in intr.nlow:intr.nhigh
+            ipert_n = n - intr.nlow + 1
+            nq = n * q
+            # Construct primitive matrices via m1/dm loops
+            for m1 in intr.mlow:intr.mhigh
+                ipert_m = m1 - intr.mlow + 1
+                singfac1 = m1 - nq
+                for dm in max(1 - ipert_m, -intr.mband):min(intr.mpert - ipert_m, intr.mband)
+                    m2 = m1 + dm
+                    singfac2 = m2 - nq
+                    jpert_m = ipert_m + dm
+                    dmidx = dm + mid
+                    # Some complex indexing here... we flatten the 2D (mpert x npert) x (mpert x npert) matrix,
+                    # so we need a "ipert" for m, m', n, and n' (in full 3D). In 2D, just m, m', and n
+                    ipert = ipert_m + (ipert_n - 1) * intr.mpert
+                    jpert = jpert_m + (ipert_n - 1) * intr.mpert # TODO: this will be jpert_n in 3D-DCON
+                    ipert_flat = ipert + (jpert - 1) * intr.numpert_total
 
-                # Note: dmat and emat here do not correspond to their representations in eq. A6 of the DCON paper,
-                # but rather to subterms that appear in the composite matrix construction in A7 and A8, respectively
-                amat[ipert, jpert] = (2π)^2 * (ctrl.nn^2 * g22[dmidx] + ctrl.nn * (m1 + m2) * g23[dmidx] + m1 * m2 * g33[dmidx])
-                bmat[ipert, jpert] = -2π * im * chi1 * (ctrl.nn * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
-                cmat[ipert, jpert] =
-                    2π * im * ((2π * im * chi1 * sing2 * (ctrl.nn * g12[dmidx] + m1 * g31[dmidx])) -
-                               (q1 * chi1 * (ctrl.nn * g23[dmidx] + m1 * g33[dmidx]))) -
-                    2π * im * (jtheta * sing1 * imat[dmidx] + ctrl.nn * p1 / chi1 * jmat[dmidx])
-                dmat[ipert, jpert] = 2π * chi1 * (g23[dmidx] + g33[dmidx] * m1 / ctrl.nn)
-                emat[ipert, jpert] = -chi1 / ctrl.nn * (q1 * chi1 * g33[dmidx] - 2π * im * chi1 * g31[dmidx] * sing2 + jtheta * imat[dmidx])
-                hmat[ipert, jpert] =
-                    (q1 * chi1)^2 * g33[dmidx] +
-                    (2π * chi1)^2 * sing1 * sing2 * g11[dmidx] -
-                    2π * im * chi1 * dm * q1 * chi1 * g31[dmidx] +
-                    jtheta * q1 * chi1 * imat[dmidx] +
-                    p1 * jmat1[dmidx]
-                fmat[ipert, jpert] = (chi1 / ctrl.nn)^2 * g33[dmidx]
-                kmat[ipert, jpert] = 2π * im * chi1 * (g23[dmidx] + g33[dmidx] * m1 / ctrl.nn)
+                    # Compute matrix values at the current m, m', n (and eventually n')
+                    # Note: dmat and emat here do not correspond to their representations in eq. A6 of the DCON paper,
+                    # but rather to subterms that appear in the composite matrix construction in A7 and A8, respectively
+                    amats_flatview[ipert_flat] = (2π)^2 * (n^2 * g22[dmidx] + n * (m1 + m2) * g23[dmidx] + m1 * m2 * g33[dmidx])
+                    bmats_flatview[ipert_flat] = -2π * im * chi1 * (n * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
+                    cmats_flatview[ipert_flat] =
+                        2π * im * ((2π * im * chi1 * singfac2 * (n * g12[dmidx] + m1 * g31[dmidx])) -
+                                (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
+                        2π * im * (jtheta * singfac1 * imat[dmidx] + n * p1 / chi1 * jmat[dmidx])
+                    dmats_flatview[ipert_flat] = 2π * chi1 * (g23[dmidx] + g33[dmidx] * m1 / n)
+                    emats_flatview[ipert_flat] = -chi1 / n * (q1 * chi1 * g33[dmidx] - 2π * im * chi1 * g31[dmidx] * singfac2 + jtheta * imat[dmidx])
+                    hmats_flatview[ipert_flat] =
+                        (q1 * chi1)^2 * g33[dmidx] +
+                        (2π * chi1)^2 * singfac1 * singfac2 * g11[dmidx] -
+                        2π * im * chi1 * dm * q1 * chi1 * g31[dmidx] +
+                        jtheta * q1 * chi1 * imat[dmidx] +
+                        p1 * jmat1[dmidx]
+                    fmats_lower_flatview[ipert_flat] = (chi1 / n)^2 * g33[dmidx]
+                    kmats_flatview[ipert_flat] = 2π * im * chi1 * (g23[dmidx] + g33[dmidx] * m1 / n)
+                end
             end
         end
 
         # Factorize and build composites
         # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser 2016)
         # We multiply by Q (singfac) later when performing computations later
+        amat = reshape(amats_flatview, intr.numpert_total, intr.numpert_total)
+        cmat = reshape(cmats_flatview, intr.numpert_total, intr.numpert_total)
+        dmat = reshape(dmats_flatview, intr.numpert_total, intr.numpert_total)
+        emat = reshape(emats_flatview, intr.numpert_total, intr.numpert_total)
+        hmat = reshape(hmats_flatview, intr.numpert_total, intr.numpert_total)
+        fmat = reshape(fmats_lower_flatview, intr.numpert_total, intr.numpert_total)
+        kmat = reshape(kmats_flatview, intr.numpert_total, intr.numpert_total)
+        gmat = reshape(gmats_flatview, intr.numpert_total, intr.numpert_total)
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
@@ -293,22 +310,23 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, in
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
+        # TODO: does F stay Hermitian in the 3D case, allowing us to use the lower representation?
         fmat .= cholesky(Hermitian(fmat)).L
 
         # TODO: add kinetic matrices here
     end
 
-    # --- Fit splines (reshape 3D to 2D: (mpsi) × (mpert^2)) ---
+    # --- Fit splines ---
     ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband)
-    ffit.amats = Spl.CubicSpline(metric.xs, reshape(amats, mpsi, :); bctype=3)
-    ffit.bmats = Spl.CubicSpline(metric.xs, reshape(bmats, mpsi, :); bctype=3)
-    ffit.cmats = Spl.CubicSpline(metric.xs, reshape(cmats, mpsi, :); bctype=3)
-    ffit.dmats = Spl.CubicSpline(metric.xs, reshape(dmats, mpsi, :); bctype=3)
-    ffit.emats = Spl.CubicSpline(metric.xs, reshape(emats, mpsi, :); bctype=3)
-    ffit.hmats = Spl.CubicSpline(metric.xs, reshape(hmats, mpsi, :); bctype=3)
-    ffit.fmats_lower = Spl.CubicSpline(metric.xs, reshape(fmats_lower, mpsi, :); bctype=3)
-    ffit.gmats = Spl.CubicSpline(metric.xs, reshape(gmats, mpsi, :); bctype=3)
-    ffit.kmats = Spl.CubicSpline(metric.xs, reshape(kmats, mpsi, :); bctype=3)
+    ffit.amats = Spl.CubicSpline(metric.xs, amats_flat; bctype="extrap")
+    ffit.bmats = Spl.CubicSpline(metric.xs, bmats_flat; bctype="extrap")
+    ffit.cmats = Spl.CubicSpline(metric.xs, cmats_flat; bctype="extrap")
+    ffit.dmats = Spl.CubicSpline(metric.xs, dmats_flat; bctype="extrap")
+    ffit.emats = Spl.CubicSpline(metric.xs, emats_flat; bctype="extrap")
+    ffit.hmats = Spl.CubicSpline(metric.xs, hmats_flat; bctype="extrap")
+    ffit.fmats_lower = Spl.CubicSpline(metric.xs, fmats_lower_flat; bctype="extrap")
+    ffit.gmats = Spl.CubicSpline(metric.xs, gmats_flat; bctype="extrap")
+    ffit.kmats = Spl.CubicSpline(metric.xs, kmats_flat; bctype="extrap")
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

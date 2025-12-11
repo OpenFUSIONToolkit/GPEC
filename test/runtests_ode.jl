@@ -35,7 +35,7 @@ end
         odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
         odet.ifix = ifix
         odet.fixfac = zeros(ComplexF64, mpert, mpert, ifix)
-        intr = JPEC.DCON.DconInternal(; mpert=mpert)
+        intr = JPEC.DCON.DconInternal(; numpert_total=mpert)
 
         # Save copy of original u and run
         u_orig = copy(odet.u)
@@ -56,7 +56,7 @@ end
         odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
         odet.ifix = ifix
         odet.fixfac = zeros(ComplexF64, mpert, mpert, ifix)
-        intr = JPEC.DCON.DconInternal(; mpert=mpert)
+        intr = JPEC.DCON.DconInternal(; numpert_total=mpert)
 
         JPEC.DCON.ode_fixup!(odet.u, odet, intr, false)
 

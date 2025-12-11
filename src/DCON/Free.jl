@@ -22,12 +22,12 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     ahg_file = "ahg2msc_dcon.out" # Deprecated, but needed for VACUUM function call
 
     # Initializations and allocations
-    vac = VacuumData(ctrl.mthvac, intr.mpert)
-    tt = zeros(ComplexF64, intr.mpert)
-    wp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    temp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wpt = zeros(ComplexF64, intr.mpert, intr.mpert)
-    wvt = zeros(ComplexF64, intr.mpert, intr.mpert)
+    vac = VacuumData(ctrl.mthvac, intr.mpert, intr.numpert_total)
+    etemp = zeros(ComplexF64, intr.numpert_total)
+    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wv_temp = zeros(ComplexF64, intr.mpert, intr.mpert)
 
     # Evaluate dV/dpsi at the plasma edge
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
@@ -37,68 +37,84 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
     end
 
-    # Set VACUUM run parameters and boundary shape
-    vac_inputs = set_vacuum_inputs(intr.psilim, ctrl, equil, intr)
+    # Compute vacuum response matrix
+    wv_block = zeros(ComplexF64, intr.mpert, intr.mpert)
+    for ipert_n in 1:intr.npert
+        n = ipert_n - 1 + intr.nlow
+        
+        # Set VACUUM run parameters and boundary shape
+        vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr)
+        fill!(vac.grri, 0.0)
+        fill!(vac.xzpts, 0.0)
 
-    # Compute vacuum response matrix.
-    farwal_flag = true
-    kernelsignin = -1.0
-    # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
-    VacuumMod.mscvac(vac.wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        farwal_flag = true
+        kernelsignin = -1.0
+        # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
-    # Placeholder for Julia vacuum code
-    wv, grri, xzpts = VacuumMod.compute_vacuum_response(vac_inputs, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, intr.dir_path)
-    error("debug")
+        # Placeholder for Julia vacuum code
+        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(vac_inputs, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, intr.dir_path)
+        error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
-    kernelsignin = 1.0
-    VacuumMod.mscvac(vac.wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        kernelsignin = 1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
-    if ctrl.wv_farwall_flag
-        temp .= vac.wv
+        if ctrl.wv_farwall_flag
+            wv_temp .= wv_block
+        end
+
+        farwal_flag = false
+        kernelsignin = -1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+
+        kernelsignin = 1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+
+        if ctrl.wv_farwall_flag
+            wv_block .= wv_temp
+        end
+
+        # Scale vacuum matrix by singfac = (m - n*qlim)
+        singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
+        for ipert in 1:intr.mpert
+            wv_block[ipert, :] .*= singfac[ipert]
+            wv_block[:, ipert] .*= singfac[ipert]
+        end
+
+        # Store block in full wv matrix
+        @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
+
+        if vac_memory
+            VacuumMod.unset_dcon_params()
+        end
     end
 
-    farwal_flag = false
-    kernelsignin = -1.0
-    VacuumMod.mscvac(vac.wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-    kernelsignin = 1.0
-    VacuumMod.mscvac(vac.wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-        wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-    if ctrl.wv_farwall_flag
-        vac.wv .= temp
-    end
-
-    # Scale vacuum matrix by singfac = (m - nn*qlim)
-    singfac = collect(intr.mlow:intr.mhigh) .- ctrl.nn .* intr.qlim
-    for ipert in 1:intr.mpert
-        vac.wv[ipert, :] .*= singfac[ipert]
-        vac.wv[:, ipert] .*= singfac[ipert]
-    end
-
-    # Compute complex energy eigenvalues
+    # Compute complex energy eigenvalues and vectors
     vac.wt .= wp .+ vac.wv
     vac.wt0 .= vac.wt
     Ev = eigen(vac.wt)
     vac.et .= Ev.values
     eindex = sortperm(real.(vac.et); rev=true)
 
-    tt .= vac.et
-    # rearrange wt columns to correspond to eigenvector reordering similar to Fortran
-    for ipert in 1:intr.mpert
-        vac.wt[:, ipert] .= Ev.vectors[:, eindex[intr.mpert+1-ipert]]
-        vac.et[ipert] = tt[eindex[intr.mpert+1-ipert]]
+    etemp .= vac.et
+    # Rearrange wt columns for descending real eigenvalues
+    for ipert in 1:intr.numpert_total
+        vac.wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
+        vac.et[ipert] = etemp[eindex[intr.numpert_total+1-ipert]]
     end
 
     # Normalize eigenfunction and energy.
     if normalize
-        for isol in 1:intr.mpert
+        for isol in 1:intr.numpert_total
             norm = 0.0 + 0.0im
-            for ipert in 1:intr.mpert, jpert in 1:intr.mpert
-                norm += ffit.jmat[jpert-ipert+intr.mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
+            for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+                ipert = (ipert_n - 1) * intr.mpert + ipert_m
+                jpert = (ipert_n - 1) * intr.mpert + jpert_m
+                norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
             end
             norm /= v1
             vac.wt[:, isol] ./= sqrt(norm)
@@ -108,8 +124,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Normalize phase
     imax = 0
-    for isol in 1:intr.mpert
-        # get index of largest absolute component (first occurrence)
+    for isol in 1:intr.numpert_total
         imax = argmax(abs.(vac.wt[:, isol]))
         phase = abs(vac.wt[imax, isol]) / vac.wt[imax, isol]
         vac.wt[:, isol] .*= phase
@@ -119,13 +134,9 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
     wpt .= adjoint(vac.wt) * (wp * vac.wt)
     wvt .= adjoint(vac.wt) * (vac.wv * vac.wt)
-    for ipert in 1:intr.mpert
+    for ipert in 1:intr.numpert_total
         vac.ep[ipert] = wpt[ipert, ipert]
         vac.ev[ipert] = wvt[ipert, ipert]
-    end
-
-    if vac_memory
-        VacuumMod.unset_dcon_params()
     end
 
     # Normalize eigenvectors based on scaled wt
@@ -155,12 +166,12 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
 ### Arguments
 
   - `psifac`: Flux surface value at the plasma boundary (Float64)
-  - `ctrl`: DCON control parameters (DconControl)
+  - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
 
 """
-function set_vacuum_inputs(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
@@ -182,9 +193,8 @@ function set_vacuum_inputs(psifac::Float64, ctrl::DconControl, equil::Equilibriu
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)
 
-    # Invert values for nn < 0
-    n = ctrl.nn
-    if ctrl.nn < 0
+    # Invert values for n < 0
+    if n < 0
         qa = -qa
         delta .= -delta
         n = -n
@@ -219,10 +229,10 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
     qedge = Spl.spline_eval!(equil.sq, ctrl.psiedge)[4]
-    npsi = max(4, ceil(Int, (intr.qlim - qedge) * ctrl.nn * 4))
+    npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psii = ctrl.psiedge
     psi_array = zeros(Float64, npsi + 1)
-    wv_array = zeros(ComplexF64, npsi + 1, intr.mpert^2)
+    wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:npsi+1
         # Space points evenly in q
@@ -248,36 +258,41 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             error("Newton iteration for psilim did not converge after $itmax iterations.")
         end
 
-        # Prepare vacuum matrices
-        set_vacuum_inputs(psii, ctrl, equil, intr)
-        grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
-        xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
-        wv = zeros(ComplexF64, intr.mpert, intr.mpert)
-        complex_flag = true
-        kernelsignin = 1.0
-        wall_flag = false
-        farwal_flag = false
-        ahg_file = "ahg2msc_dcon.out" # Deprecated
+        wv_block = zeros(ComplexF64, intr.mpert, intr.mpert)
+        for ipert_n in 1:intr.npert
+            n = ipert_n - 1 + intr.mlow
 
-        # Compute vacuum matrix
-        VacuumMod.mscvac(wv, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+            # Prepare vacuum matrices
+            set_vacuum_inputs(psii, n, equil, intr)
+            grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
+            xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
 
-        # Apply singular factor scaling
-        singfac = collect(intr.mlow:intr.mhigh) .- ctrl.nn * qi
-        for ipert in 1:intr.mpert
-            wv[ipert, :] .*= singfac[ipert]
-            wv[:, ipert] .*= singfac[ipert]
+            complex_flag = true
+            kernelsignin = 1.0
+            wall_flag = false
+            farwal_flag = false
+            ahg_file = "ahg2msc_dcon.out" # Deprecated
+
+            # Compute vacuum matrix
+            VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+                wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+
+            # Apply singular factor scaling
+            singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
+            for ipert in 1:intr.mpert
+                wv_block[ipert, :] .*= singfac[ipert]
+                wv_block[:, ipert] .*= singfac[ipert]
+            end
+
+            # Store block in full wv matrix
+            @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
+
+            # Free VACUUM memory
+            VacuumMod.unset_dcon_params()
         end
-
-        # Store flattened matrix in spline field
-        wv_array[i, :] .= reshape(wv, intr.mpert^2)
     end
 
-    # Free VACUUM memory
-    VacuumMod.unset_dcon_params()
-
-    return Spl.CubicSpline(psi_array, wv_array; bctype=3)
+    return Spl.CubicSpline(psi_array, reshape(wv_array, npsi+1, :); bctype="extrap")
 end
 
 """
@@ -293,21 +308,17 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     normalize = true
 
-    wp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    temp = zeros(ComplexF64, intr.mpert, intr.mpert)
-    tot_eigvals = zeros(ComplexF64, intr.mpert)
-    wt = zeros(ComplexF64, intr.mpert, intr.mpert)
+    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    tot_eigvals = zeros(ComplexF64, intr.numpert_total)
+    wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
 
-    # Compute plasma response matrix.
-    temp .= adjoint(odet.u[:, :, 1])
-    wp .= adjoint(odet.u[:, :, 2])
-    wp .= temp \ wp
-    wp .= adjoint(wp) / equil.psio^2
+    # Compute plasma response matrix
+    @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
     # Compute vacuum matrix from spline
-    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.mpert, intr.mpert)
+    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.numpert_total, intr.numpert_total)
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
@@ -315,17 +326,19 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     # Sort eigenvalues and reorder columns of wt
     eindex = sortperm(real.(Ev.values); rev=true)
-    for ipert in 1:intr.mpert
-        wt[:, ipert] .= Ev.vectors[:, eindex[intr.mpert+1-ipert]]
-        tot_eigvals[ipert] = Ev.values[eindex[intr.mpert+1-ipert]]
+    for ipert in 1:intr.numpert_total
+        wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
+        tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
     end
 
     # Normalize eigenfunction and energy (only need the first eigenmode)
     if normalize
         isol = 1
         norm = 0.0 + 0.0im
-        for ipert in 1:intr.mpert, jpert in 1:intr.mpert
-            norm += ffit.jmat[jpert-ipert+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+        for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+            ipert = (ipert_n - 1) * intr.mpert + ipert_m
+            jpert = (ipert_n - 1) * intr.mpert + jpert_m
+            norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
         end
         norm /= v1
         tot_eigvals[isol] /= norm

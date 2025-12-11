@@ -11,8 +11,8 @@ qlow = 1.02                   # Integration initiated at q determined by min(q0,
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                    # Smallest toroidal mode number to include
-nn_high = 1                   # Largest toroidal mode number to include
+nn_low = 2                    # Smallest toroidal mode number to include
+nn_high = 2                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
@@ -38,3 +38,7 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 
 use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
+
+[DCON_OUTPUT]
+write_euler_h5 = true         # Write euler.h5 (euler.bin Julia equivalent)
+fname_euler_h5 = "euler_n2.h5"
