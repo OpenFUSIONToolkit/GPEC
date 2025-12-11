@@ -11,7 +11,7 @@ on:
       - develop
 
 jobs:
-  build:
+  runtests:
     runs-on: ubuntu-latest
 
     steps:
