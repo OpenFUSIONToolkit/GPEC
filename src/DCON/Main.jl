@@ -66,7 +66,7 @@ function Main(path::String="./")
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
     # Find all singular surfaces in the equilibrium
-    sing_find!(intr, equil)
+    sing_find!(intr, equil, should_break_test)
 
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
