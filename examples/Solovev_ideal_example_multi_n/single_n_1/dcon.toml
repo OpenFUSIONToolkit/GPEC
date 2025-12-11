@@ -14,7 +14,7 @@ sing_start = 0                # Start integration at the sing_start'th rational 
 nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
-delta_mhigh = 8               # Expands upper bound of Fourier harmonics
+delta_mhigh = 10              # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
 mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
@@ -38,3 +38,7 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 
 use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
+
+[DCON_OUTPUT]
+write_euler_h5 = true         # Write euler.h5 (euler.bin Julia equivalent)
+fname_euler_h5 = "euler_n1.h5"

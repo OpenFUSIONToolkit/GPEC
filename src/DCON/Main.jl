@@ -47,10 +47,26 @@ function Main(path::String="./")
     #   CALL bal_scan
     #ENDIF
     # Fit data to splines
-    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype=3)
+    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
+
+    # Determine toroidal mode numbers
+    if ctrl.nn_low == 0 && ctrl.nn_high == 0
+        error("Either nn_low or nn_high must be set in DCON_CONTROL (both are 0)")
+    elseif ctrl.nn_low == 0
+        ctrl.nn_low = ctrl.nn_high
+    elseif ctrl.nn_high == 0
+        ctrl.nn_high = ctrl.nn_low
+    end
+    if ctrl.nn_low > ctrl.nn_high
+        error("nn_low cannot be greater than nn_high")
+    end
+    intr.nlow = ctrl.nn_low
+    intr.nhigh = ctrl.nn_high
+    intr.npert = intr.nhigh - intr.nlow + 1
+    nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
     # Find all singular surfaces in the equilibrium
-    sing_find!(intr, ctrl, equil)
+    sing_find!(intr, equil)
 
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
@@ -60,15 +76,15 @@ function Main(path::String="./")
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     elseif ctrl.sing_start == 0
-        intr.mlow = min(ctrl.nn * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, ctrl.nn * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
         for ising in Int(ctrl.sing_start):intr.msing
             intr.mmin = min(intr.mmin, sing[ising].m)
         end
         intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nn * equil.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     if ctrl.delta_mband >= intr.mpert
@@ -77,6 +93,7 @@ function Main(path::String="./")
     end
     intr.mband = intr.mpert - 1 - ctrl.delta_mband
     intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
+    intr.numpert_total = intr.mpert * intr.npert
 
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
@@ -85,18 +102,19 @@ function Main(path::String="./")
             println("   q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
             println("   set_psilim_via_dmlim = $(ctrl.set_psilim_via_dmlim), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
             println("   betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
-            println("   nn = $(ctrl.nn), mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
+            println("   mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
+            println("   nlow = $(intr.nlow), nhigh = $(intr.nhigh), npert = $(intr.npert)")
         end
 
         # Compute metric tensor
         metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
-            println("Computing F, G, and K Matrices")
+            println("   Computing F, G, and K Matrices")
         end
 
         # Compute matrices and populate FourFitVars struct
-        ffit = make_matrix(equil, ctrl, intr, metric)
+        ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
@@ -114,7 +132,7 @@ function Main(path::String="./")
         end
         odet = ode_run(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
-            println("Fixed-boundary mode unstable for nn = $(ctrl.nn).")
+            println("Fixed-boundary mode unstable for n = $nstring.")
         end
     end
 
@@ -123,14 +141,14 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr; op_netcdf_out=false) # outp.netcdf_out)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
-                println("Free-boundary mode unstable for nn = $(ctrl.nn).")
+                println("Free-boundary mode unstable for n = $nstring.")
             end
         else
             if ctrl.verbose
-                println("All free-boundary modes stable for nn = $(ctrl.nn).")
+                println("All free-boundary modes stable for n = $nstring.")
             end
         end
     end
@@ -186,6 +204,12 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["info/mband"] = intr.mband
         out_h5["info/mlow"] = intr.mlow
         out_h5["info/mhigh"] = intr.mhigh
+        out_h5["info/npert"] = intr.npert
+        out_h5["info/nlow"] = intr.nlow
+        out_h5["info/nhigh"] = intr.nhigh
+        m = [(i - 1) % intr.mpert + intr.mlow for i in 1:(intr.numpert_total)]
+        n = [(i - 1) ÷ intr.mpert + intr.nlow for i in 1:(intr.numpert_total)]
+        out_h5["info/mn_index"] = hcat(m, n)   # (N, 2) matrix
         out_h5["info/psilim"] = intr.psilim
         out_h5["info/qlim"] = intr.qlim
         out_h5["info/q1lim"] = intr.q1lim

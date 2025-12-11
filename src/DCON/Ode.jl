@@ -23,8 +23,7 @@ An OdeState struct containing the final state of the ODE solver after integratio
 function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # Initialization
-    odet = OdeState(intr.mpert, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-
+    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
         ode_axis_init!(odet, ctrl, equil, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -95,7 +94,6 @@ determining `psifac`, `psimax`, `ising`, `singfac`, and initializing `u`.
 ### TODOs
 
 Support for `kin_flag`
-Remove while true logic
 """
 function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
@@ -116,7 +114,6 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
         # Refine psifac using Newton iteration
         converged = false
         for _ in 1:itmax
-            it += 1
             dpsi = (ctrl.qlow - qval(odet.psifac)) / q1val(odet.psifac)
             odet.psifac += dpsi
             abs(dpsi) < eps * abs(odet.psifac) && (converged = true; break)
@@ -143,27 +140,34 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     else
         # Find next singular surface (either next one in the list or outside integration limits)
         # TODO: clean this up in integration bounds PR, this exact block appears several times
+        # TODO: Based on the existing logic, I don't think checking if mlow <= m <= mhigh is necessary,
+        # since DCON sets the poloidal mode numbers to include the resonant modes anyway. However, based
+        # on discussion with Nik, eventually we might just want to allow the user to set mlow/mhigh, in
+        # which case this check would be necessary. In 3D, this might be even more applicable since rational
+        # surfaces will be more dense so we might not set out mode spectrum to include all resonances.
         while true
             odet.ising += 1
             if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
                 break
             end
-            if intr.mlow <= ctrl.nn * intr.sing[odet.ising].q && intr.mhigh >= ctrl.nn * intr.sing[odet.ising].q
+            if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
                 break
             end
         end
         # Determine psimax and classify next integration limit type
-        if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac || ctrl.singfac_min == 0
+        if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
-            odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(ctrl.nn * intr.sing[odet.ising].q1)
+            # TODO: Nik: where does singfac_min / n * q' come from? Unclear how to generalize to multi-n
+            # Safest choice for now is to use the smallest resonant n for maximum separation
+            odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
             odet.next = "cross"
         end
     end
 
     # Initialize solutions with the identity matrix for U_22 as described in [Glasser PoP 2016] Section VI
-    for ipert in 1:intr.mpert
+    for ipert in 1:intr.numpert_total
         odet.u[ipert, ipert, 2] = 1
     end
 end
@@ -197,28 +201,43 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     # Re-initialize on opposite side of rational surface
     psi_old = odet.psifac
     singp = intr.sing[odet.ising]
-    ipert0 = round(Int, ctrl.nn * singp.q, RoundFromZero) - intr.mlow + 1
     dpsi = singp.psifac - odet.psifac
     odet.psifac += 2 * dpsi # jump to other side of singular surface
     ua = sing_get_ua(ctrl, intr, odet)
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    
+    # TODO: make this comment shorter?
+    # Single n: remove largest solution and sub in asymptotics on the other side
+    # Multi-n: if we remove the N largest modes in arbitrary order, we can mess up the
+    # diagonal structure of the matrix and later calculations. zeroed_idx let's us make sure
+    # the solution vector we're zeroing corresponds to the same block as the resonant mode we
+    # introduce. It is also needed when transforming u back to the full solution after integration.
     if !ctrl.con_flag
-        odet.u[:, odet.index[1, odet.ifix], :] .= 0
+        # Eliminate the solution with the largest norm (in the same block) for each resonance
+        odet.zeroed_idx[odet.ifix] = Int[]
+        for i in eachindex(singp.r1)
+            push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
+        end
     end
 
     # Approximate solution vectors across singular surface
-    du1 = zeros(ComplexF64, intr.mpert, intr.mpert, 2)
-    du2 = zeros(ComplexF64, intr.mpert, intr.mpert, 2)
+    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     params = (ctrl, equil, ffit, intr, odet)
     sing_der!(du1, odet.u, params, psi_old)
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
-    if !ctrl.con_flag
-        # Zero out the resonant components
-        odet.u[ipert0, :, :] .= 0
-        # Introduce the small asymptotic resonant solution on the other side of the singular surface
-        odet.u[:, odet.index[1, odet.ifix], :] .= ua[:, ipert0+intr.mpert, :]
-    end
 
+    # Apply asymptotic solution on other side of singular surface
+    if !ctrl.con_flag
+        for i in eachindex(singp.r1)
+            # Zero out the resonant components
+            odet.u[ipert_res[i], :, :] .= 0
+            # Introduce the small asymptotic resonant solution on the other side of the singular surface
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
+        end
+    end
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
@@ -228,18 +247,17 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
         if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
             break
         end
-        if intr.mlow <= ctrl.nn * intr.sing[odet.ising].q && intr.mhigh >= ctrl.nn * intr.sing[odet.ising].q
+        if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
             break
         end
     end
-
+    
     # Determine psimax and classify next integration limit type
-    if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+    if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac
         odet.psimax = intr.psilim * (1 - eps)
         odet.next = "finish"
     else
-        singp = intr.sing[odet.ising] # Update singp
-        odet.psimax = singp.psifac - ctrl.singfac_min / abs(ctrl.nn * singp.q1)
+        odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
     end
 
     # Store values after crossing step and advance
@@ -353,13 +371,14 @@ function compute_tols(ctrl, intr, odet)
     if false  # kin_flag (not implemented)
     # Insert kin_flag branch if needed
     else
+        # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
         # Note: odet.q is updated within the derivative calculation
         if odet.ising <= intr.msing
-            singfac_local = abs(intr.sing[odet.ising].m - ctrl.nn * odet.q)
+            singfac_local = abs(minimum(intr.sing[odet.ising].n) * (intr.sing[odet.ising].q - odet.q))
         end
         # If in between singular surfaces, check distance to both
         if odet.ising > 1
-            singfac_local = min(singfac_local, abs(intr.sing[odet.ising-1].m - ctrl.nn * odet.q))
+            singfac_local = min(singfac_local, abs(minimum(intr.sing[odet.ising-1].n) * (intr.sing[odet.ising-1].q - odet.q)))
         end
     end
     rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
@@ -450,22 +469,22 @@ function ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, 
     odet.fixstep[ifix] = odet.step - 1
 
     # Initialize fixfac
-    for isol in 1:intr.mpert
+    for isol in 1:intr.numpert_total
         odet.fixfac[isol, isol, ifix] = 1
     end
     # Sort unorm in descending order (since we triangularize from largest to smallest)
     odet.index[:, ifix] = sortperm(odet.unorm; rev=true)
 
     # Triangularize primary solutions
-    mask = trues(2, intr.mpert)
-    for isol in 1:intr.mpert
+    mask = trues(2, intr.numpert_total)
+    for isol in 1:intr.numpert_total
         ksol = odet.index[isol, ifix]
         mask[2, ksol] = false
         # Set pivot row based on max location
         @views kpert = argmax(abs.(u[:, ksol, 1]) .* mask[1, :])
         mask[1, kpert] = false
         # Eliminate other solution vectors below the pivot
-        for jsol in 1:intr.mpert
+        for jsol in 1:intr.numpert_total
             if mask[2, jsol]
                 odet.fixfac[ksol, jsol, ifix] = -u[kpert, jsol, 1] / u[kpert, ksol, 1]
                 @. @views u[:, jsol, :] .= u[:, jsol, :] .+ u[:, ksol, :] .* odet.fixfac[ksol, jsol, ifix]
@@ -527,21 +546,21 @@ for a chosen force-free solution, which can be done in postprocessing.
 function transform_u!(odet::OdeState, intr::DconInternal)
 
     # Gaussian reduction matrices for each fixup
-    gauss = Array{ComplexF64,3}(undef, intr.mpert, intr.mpert, odet.ifix)
+    gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
-    transforms = Array{ComplexF64,3}(undef, intr.mpert, intr.mpert, odet.ifix + 1)
+    transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
 
     # Construct gaussian reduction matrices for each fixup
-    identity = Matrix{ComplexF64}(I, intr.mpert, intr.mpert)
-    mask = trues(intr.mpert)
+    identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
+    mask = trues(intr.numpert_total)
     for ifix in 1:odet.ifix
         gauss[:, :, ifix] = copy(identity)
         mask .= true
-        for isol in 1:intr.mpert
+        for isol in 1:intr.numpert_total
             ksol = odet.index[isol, ifix]
             mask[ksol] = false
             temp = copy(identity)
-            for jsol in 1:intr.mpert
+            for jsol in 1:intr.numpert_total
                 if mask[jsol]
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
@@ -551,7 +570,9 @@ function transform_u!(odet::OdeState, intr::DconInternal)
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
         if odet.sing_flag[ifix]
-            gauss[:, odet.index[1, ifix], ifix] .= 0.0
+            for zeroed_idx in odet.zeroed_idx[ifix]
+                gauss[:, odet.index[zeroed_idx, ifix], ifix] .= 0.0
+            end
         end
     end
 

@@ -1,0 +1,30 @@
+[EQUIL_CONTROL]
+eq_type = "sol"             # Type of the input 2D equilibrium file
+eq_filename = "sol.toml"  # path to equilibrium file
+
+jac_type = "pest"          # Coordinate system (hamada, pest, boozer, equal_arc)
+power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
+power_b = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
+power_r = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
+
+grid_type = "ldp"            # Radial grid packing
+psilow = 1e-4                # Min psi (normalized)
+psihigh = 0.99999              # Max psi (normalized)
+mpsi = 128                   # Radial grid intervals
+mtheta = 256                 # Poloidal grid intervals
+
+newq0 = 0                    # Override q(0)
+etol = 1e-7                  # Reconstruction tolerance
+use_classic_splines = false  # Use classical spline (vs. tri-diagonal)
+
+input_only = false           # Quit after input read
+
+[EQUIL_OUTPUT]
+gse_flag = false           # Output G-S equation accuracy diagnostics
+out_eq_1d = false          # ASCII output of 1D eq data
+bin_eq_1d = false          # Binary output of 1D eq data
+out_eq_2d = false          # ASCII output of 2D eq data
+bin_eq_2d = true           # Binary output of 2D eq data (used by GPEC)
+out_2d = false             # ASCII output of processed 2D data
+bin_2d = false             # Binary output of processed 2D data
+dump_flag = false          # Binary dump of equilibrium data
