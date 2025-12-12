@@ -381,7 +381,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
 @kwdef mutable struct EquilibriumParameters
     ro::Union{Nothing,Float64} = nothing # R-coordinate of the magnetic axis [m]
     zo::Union{Nothing,Float64} = nothing # Z-coordinate of the magnetic axis [m]
-    psio::Union{Nothing,Float64} = nothing # Total flux difference |Ψ_axis - Ψ_boundary| [Weber / radian]
+    psio::Union{Nothing,Float64} = nothing # Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
     rsep::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma boundary [m]
     zsep::Union{Nothing,Vector{Float64}} = nothing # Z-coordinates of the plasma boundary [m]
     rext::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma edge [m]

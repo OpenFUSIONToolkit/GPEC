@@ -83,7 +83,7 @@ A mutable struct holding internal state variables for DCON stability calculation
 - `nlow::Int` - Lowest toroidal mode number
 - `nhigh::Int` - Highest toroidal mode number
 - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
-- `numpert_total` - Total number of perturbation modes (mpert × npert)
+- `numpert_total::Int` - Total number of perturbation modes (mpert × npert)
 - `vac_memory::Bool` - Memory allocation flag for vacuum calculations
 - `keq_out::Bool` - Flag to output equilibrium quantities
 - `theta_out::Bool` - Flag to output theta coordinate data
