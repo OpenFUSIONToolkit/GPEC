@@ -19,9 +19,9 @@
     r2::Vector{Int} = Int[]
     n1::Vector{Int} = Int[]
     n2::Vector{Int} = Int[]
-    power::Union{Missing,Vector{ComplexF64}} = missing # we know the size of these, but it depends on mpert
-    vmat::Union{Missing,Array{ComplexF64,4}} = missing
-    mmat::Union{Missing,Array{ComplexF64,4}} = missing
+    power::Vector{ComplexF64} = ComplexF64[]
+    vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
+    mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
     m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
 end
 # @kwdef mutable struct SingType
@@ -64,13 +64,12 @@ end
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
-    sing::Union{Nothing,Vector{SingType}} = SingType[]
-    kinsing::Union{Nothing,Vector{SingType}} = SingType[]
+    sing::Vector{SingType} = SingType[]
+    kinsing::Vector{SingType} = SingType[]
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    # TODO: how to initialize a spline? This will be a spline of size mpsi x 5
-    locstab::Union{Missing,Spl.CubicSpline{Float64}} = missing
+    locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
 end
 
 @kwdef mutable struct DconControl
@@ -129,22 +128,20 @@ end
     HDF5_filename::String = "euler.h5"
 end
 
-# TODO: how can we initialize the splines to not be nothings?
 @kwdef mutable struct FourFitVars
     mpert::Int
     mband::Int
 
     # Spline matrices
-    # TODO: how to initialize these splines?
-    amats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    bmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    cmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    dmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    emats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    hmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    fmats_lower::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    kmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
-    gmats::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing
+    amats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    bmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    cmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    dmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    emats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    hmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    fmats_lower::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    kmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    gmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
@@ -201,7 +198,7 @@ including solution vectors, tolerances, and flags for the integration process.
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)  # dW at each step in the edge
-    wvmat_spline::Union{Nothing,Spl.CubicSpline{ComplexF64}} = nothing  # spline of wv matrices for free_test # TODO: how to initialize a spline?
+    wvmat_spline::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)  # spline of wv matrices for free_test
 
     # Data for integrator
     psifac::Float64 = 0.0       # normalized flux coordinate
