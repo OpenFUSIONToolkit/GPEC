@@ -175,7 +175,7 @@ fspline_eval(fspline::FourierSpline, x::Float64, y::Float64, derivs::Int=0)
     - If `x`, `y` are scalars: A tuple containing the function value(s) and any requested derivatives. If nqty=1, the results are scalars, otherwise they are vectors.
 """
 function fspline_eval(fspline::FourierSpline, x::Float64, y::Float64, derivs::Int=0)
-
+    @assert fspline.handle != C_NULL "FourierSpline has not been initialized"
     @assert (derivs in 0:2) "Invalid number of derivatives requested: $derivs. Must be 0, 1, or 2."
 
     f = Vector{Float64}(undef, fspline.nqty)
@@ -225,7 +225,7 @@ function fspline_eval(fspline::FourierSpline, xs::Vector{Float64}, ys::Vector{Fl
     # xs -> Float64 (any length)
     # ys -> Float64 (any length)
     # Returns a matrix of Float64 (length(xs), length(ys), nqty)
-
+    @assert fspline.handle != C_NULL "FourierSpline has not been initialized"
     @assert (derivs in 0:2) "Invalid number of derivatives requested: $derivs. Must be 0, 1, or 2."
 
     n = length(xs)
@@ -268,4 +268,18 @@ function fspline_eval(fspline::FourierSpline, xs::Vector{Float64}, ys::Vector{Fl
     elseif derivs == 2
         return fs, fsx, fsy, fsxx, fsxy, fsyy
     end
+end
+
+"""
+    empty_FourierSpline()
+
+Create a minimal, type-stable placeholder Fourier spline with a C_NULL handle.
+This is safe for initialization in structs where the spline will be replaced later.
+The handle is set to C_NULL, which will cause an error if the spline is used
+before being properly initialized.
+"""
+function empty_FourierSpline()
+    cs = empty_CubicSpline(ComplexF64)
+    return FourierSpline(C_NULL, Float64[], Float64[], Array{Float64}(undef, 0, 0, 0),
+        0, 0, 0, 0, zero(Int32), zero(Int32), cs)
 end
