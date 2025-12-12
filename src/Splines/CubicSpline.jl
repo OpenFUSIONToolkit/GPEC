@@ -332,5 +332,9 @@ function empty_CubicSpline(::Type{T}=ComplexF64) where {T<:Union{Float64,Complex
     fs = Matrix{T}(undef, 0, 0)
     fsi = Matrix{T}(undef, 0, 0)
     fs1 = Matrix{T}(undef, 0, 0)
-    return CubicSpline(C_NULL, xs, fs, 0, 0, zero(Int32), fsi, fs1)
+    f = Vector{T}(undef, 0)
+    f1 = Vector{T}(undef, 0)
+    f2 = Vector{T}(undef, 0)
+    f3 = Vector{T}(undef, 0)
+    return CubicSpline{T}(C_NULL, xs, fs, 0, 0, zero(Int32), fsi, fs1, f, f1, f2, f3)
 end
