@@ -1,5 +1,27 @@
-# TODO: add descriptions of what all variables are and/or explanation of defaults
+"""
+    SingType
 
+A mutable struct containing data for singular surfaces in the plasma stability analysis.
+
+## Fields
+
+- `psifac::Float64` - Normalized flux coordinate at the singular surface
+- `rho::Float64` - Radial coordinate (√ψ)
+- `m::Vector{Int}` - Poloidal mode numbers
+- `n::Vector{Int}` - Toroidal mode numbers
+- `q::Float64` - Safety factor at the singular surface
+- `q1::Float64` - Derivative of safety factor with respect to ψ
+- `di::Float64` - Inertial layer width parameter
+- `alpha::Vector{ComplexF64}` - Complex phase angles for mode coupling
+- `r1::Vector{Int}` - Primary resonance indices
+- `r2::Vector{Int}` - Secondary resonance indices
+- `n1::Vector{Int}` - Primary toroidal mode indices
+- `n2::Vector{Int}` - Secondary toroidal mode indices
+- `power::Union{Missing,Vector{ComplexF64}}` - Power series coefficients (allocated after mpert determination)
+- `vmat::Union{Missing,Array{ComplexF64,4}}` - Velocity matrix (allocated after mpert determination)
+- `mmat::Union{Missing,Array{ComplexF64,4}}` - Mode coupling matrix (allocated after mpert determination)
+- `m0mat::Matrix{ComplexF64}` - Base mode matrix (2×2)
+"""
 # TODO: ideally, everything is allocated at construction, but mpert is determined after
 # since these are allocated in sing_find. What's the best way to handle this?
 # For now, leaving as missing, per Brendan's github comment
@@ -46,6 +68,37 @@ end
 # # Constructor to allocate matrices
 # SingType(mpert::Int, order::Int; kwargs...) = SingType(; mpert, order, kwargs...)
 
+"""
+    DconInternal
+
+A mutable struct holding internal state variables for DCON stability calculations.
+
+## Fields
+
+- `dir_path::String` - Directory path for output files
+- `mlow::Int` - Lowest poloidal mode number
+- `mhigh::Int` - Highest poloidal mode number
+- `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
+- `mband::Int` - Bandwidth for matrix operations (mpert - 1 - delta_mband)
+- `nlow::Int` - Lowest toroidal mode number
+- `nhigh::Int` - Highest toroidal mode number
+- `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
+- `numpert_total` - Total number of perturbation modes (mpert × npert)
+- `vac_memory::Bool` - Memory allocation flag for vacuum calculations
+- `keq_out::Bool` - Flag to output equilibrium quantities
+- `theta_out::Bool` - Flag to output theta coordinate data
+- `xlmda_out::Bool` - Flag to output eigenvalue data
+- `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation
+- `sol_base::Int` - Base index for solution vectors
+- `msing::Int` - Number of ideal singular surfaces
+- `kmsing::Int` - Number of kinetic singular surfaces
+- `sing::Union{Nothing,Vector{SingType}}` - Vector of ideal singular surface data
+- `kinsing::Union{Nothing,Vector{SingType}}` - Vector of kinetic singular surface data
+- `psilim::Float64` - Flux limit for integration
+- `qlim::Float64` - Safety factor at psilim
+- `q1lim::Float64` - Safety factor derivative at psilim
+- `locstab::Union{Missing,Spl.CubicSpline{Float64}}` - Spline for local stability analysis
+"""
 @kwdef mutable struct DconInternal
     dir_path::String = ""
     mlow::Int = 0
@@ -73,6 +126,67 @@ end
     locstab::Union{Missing,Spl.CubicSpline{Float64}} = missing
 end
 
+"""
+    DconControl
+
+A mutable struct containing control parameters for DCON stability analysis.
+
+## Fields
+
+- `verbose::Bool` - Enable verbose output
+- `bal_flag::Bool` - Enable ballooning mode analysis
+- `mat_flag::Bool` - Enable matrix output
+- `ode_flag::Bool` - Enable ODE integration diagnostics
+- `vac_flag::Bool` - Enable vacuum region calculation
+- `mer_flag::Bool` - Enable Mercier stability criterion
+- `fft_flag::Bool` - Enable Fourier transform analysis
+- `mthvac::Int` - Number of vacuum poloidal mesh points
+- `sing_start::Int` - Starting index for singular surface treatment
+- `nn_low::Int` - Lower bound for toroidal mode scan
+- `nn_high::Int` - Upper bound for toroidal mode scan
+- `delta_mlow::Int` - Offset for lowest poloidal mode
+- `delta_mhigh::Int` - Offset for highest poloidal mode
+- `delta_mband::Int` - Bandwidth reduction parameter
+- `thmax0::Float64` - Maximum integration step size
+- `nstep::Int` - Maximum number of integration steps
+- `ksing::Int` - Singular surface handling parameter
+- `tol_nr::Float64` - Newton-Raphson tolerance
+- `tol_r::Float64` - Residual tolerance
+- `crossover::Float64` - Crossover threshold for singular layer
+- `ucrit::Float64` - Critical value for solution normalization
+- `numsteps_init::Int` - Initial array size for ODE data storage
+- `numunorms_init::Int` - Initial array size for normalization data
+- `singfac_min::Float64` - Minimum singular factor threshold
+- `cyl_flag::Bool` - Enable cylindrical approximation
+- `set_psilim_via_dmlim::Bool` - Determine psilim from outermost rational + dmlim
+- `dmlim::Float64` - Distance beyond last rational surface (as percentage)
+- `sing_order::Int` - Order of singular layer expansion
+- `qhigh::Float64` - Upper limit for safety factor
+- `kin_flag::Bool` - Enable kinetic effects
+- `con_flag::Bool` - Enable continuum damping
+- `kinfac1::Float64` - First kinetic scaling factor
+- `kinfac2::Float64` - Second kinetic scaling factor
+- `kingridtype::Int` - Type of kinetic grid (0=standard)
+- `ktanh_flag::Bool` - Enable hyperbolic tangent profile
+- `passing_flag::Bool` - Include passing particles
+- `trapped_flag::Bool` - Include trapped particles
+- `ion_flag::Bool` - Include ion kinetic effects
+- `electron_flag::Bool` - Include electron kinetic effects
+- `ktc::Float64` - Kinetic collision parameter
+- `ktw::Float64` - Kinetic width parameter
+- `qlow::Float64` - Lower limit for safety factor
+- `use_classic_splines::Bool` - Use classic spline interpolation
+- `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim
+- `psiedge::Float64` - Normalized flux at edge
+- `nperq_edge::Int` - Number of points per q value at edge
+- `wv_farwall_flag::Bool` - Enable far wall vacuum calculation
+- `dcon_kin_threads::Int` - Number of threads for kinetic calculations
+- `parallel_threads::Int` - Number of parallel threads
+- `diagnose::Bool` - Enable diagnostic output
+- `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics
+- `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
+- `HDF5_filename::String` - Name of HDF5 output file
+"""
 @kwdef mutable struct DconControl
     verbose::Bool = true
     bal_flag::Bool = false
@@ -129,6 +243,28 @@ end
     HDF5_filename::String = "euler.h5"
 end
 
+"""
+    FourFitVars
+
+A mutable struct containing variables for Fourier fitting in DCON calculations.
+
+## Fields
+
+- `mpert::Int` - Number of poloidal modes
+- `mband::Int` - Bandwidth for matrix operations
+- `amats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for A matrix coefficients
+- `bmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for B matrix coefficients
+- `cmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for C matrix coefficients
+- `dmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for D matrix coefficients
+- `emats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for E matrix coefficients
+- `hmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for H matrix coefficients
+- `fmats_lower::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for lower F matrix coefficients
+- `kmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for K matrix coefficients
+- `gmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for G matrix coefficients
+- `jmat::Vector{ComplexF64}` - J matrix vector (size 2×mband + 1)
+- `parallel_threads::Int` - Number of parallel threads for computation
+- `dcon_kin_threads::Int` - Number of threads for kinetic calculations
+"""
 # TODO: how can we initialize the splines to not be nothings?
 @kwdef mutable struct FourFitVars
     mpert::Int
@@ -155,6 +291,25 @@ end
 
 FourFitVars(mpert::Int) = FourFitVars(; mpert)
 
+"""
+    VacuumData
+
+A struct containing vacuum region calculation data for DCON stability analysis.
+
+## Fields
+
+- `mthvac::Int` - Number of vacuum poloidal mesh points
+- `mpert::Int` - Number of poloidal modes
+- `numpert_total::Int` - Total number of perturbation modes
+- `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
+- `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
+- `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+- `ep::Vector{ComplexF64}` - Plasma edge displacement eigenvector
+- `ev::Vector{ComplexF64}` - Vacuum edge displacement eigenvector
+- `et::Vector{ComplexF64}` - Total edge displacement eigenvector
+- `grri::Array{Float64, 2}` - Green's function radial integrals (2×(mthvac+5) × 2×mpert)
+- `xzpts::Array{Float64, 2}` - X-Z coordinate points on plasma boundary (mthvac+5 × 4)
+"""
 # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
 @kwdef struct VacuumData
     mthvac::Int
