@@ -17,9 +17,9 @@ A mutable struct containing data for singular surfaces in the plasma stability a
 - `r2::Vector{Int}` - Secondary resonance indices
 - `n1::Vector{Int}` - Primary toroidal mode indices
 - `n2::Vector{Int}` - Secondary toroidal mode indices
-- `power::Union{Missing,Vector{ComplexF64}}` - Power series coefficients (allocated after mpert determination)
-- `vmat::Union{Missing,Array{ComplexF64,4}}` - Velocity matrix (allocated after mpert determination)
-- `mmat::Union{Missing,Array{ComplexF64,4}}` - Mode coupling matrix (allocated after mpert determination)
+- `power::Vector{ComplexF64}` - Power series coefficients
+- `vmat::Array{ComplexF64,4}` - Velocity matrix for singular layer analysis
+- `mmat::Array{ComplexF64,4}` - Mode coupling matrix for singular layer analysis
 - `m0mat::Matrix{ComplexF64}` - Base mode matrix (2×2)
 """
 # TODO: ideally, everything is allocated at construction, but mpert is determined after
@@ -84,20 +84,20 @@ A mutable struct holding internal state variables for DCON stability calculation
 - `nhigh::Int` - Highest toroidal mode number
 - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
 - `numpert_total::Int` - Total number of perturbation modes (mpert × npert)
-- `vac_memory::Bool` - Memory allocation flag for vacuum calculations
-- `keq_out::Bool` - Flag to output equilibrium quantities
-- `theta_out::Bool` - Flag to output theta coordinate data
-- `xlmda_out::Bool` - Flag to output eigenvalue data
-- `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation
-- `sol_base::Int` - Base index for solution vectors
+- `vac_memory::Bool` - Memory allocation flag for vacuum calculations (not yet implemented)
+- `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
+- `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
+- `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
+- `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
+- `sol_base::Int` - Base index for solution vectors (not yet implemented)
 - `msing::Int` - Number of ideal singular surfaces
-- `kmsing::Int` - Number of kinetic singular surfaces
-- `sing::Union{Nothing,Vector{SingType}}` - Vector of ideal singular surface data
-- `kinsing::Union{Nothing,Vector{SingType}}` - Vector of kinetic singular surface data
+- `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
+- `sing::Vector{SingType}` - Vector of ideal singular surface data
+- `kinsing::Vector{SingType}` - Vector of kinetic singular surface data (not yet implemented)
 - `psilim::Float64` - Flux limit for integration
 - `qlim::Float64` - Safety factor at psilim
 - `q1lim::Float64` - Safety factor derivative at psilim
-- `locstab::Union{Missing,Spl.CubicSpline{Float64}}` - Spline for local stability analysis
+- `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
 """
 @kwdef mutable struct DconInternal
     dir_path::String = ""
@@ -163,21 +163,21 @@ A mutable struct containing control parameters for DCON stability analysis.
 - `qhigh::Float64` - Upper limit for safety factor
 - `kin_flag::Bool` - Enable kinetic effects
 - `con_flag::Bool` - Enable continuum damping
-- `kinfac1::Float64` - First kinetic scaling factor
-- `kinfac2::Float64` - Second kinetic scaling factor
-- `kingridtype::Int` - Type of kinetic grid (0=standard)
-- `ktanh_flag::Bool` - Enable hyperbolic tangent profile
-- `passing_flag::Bool` - Include passing particles
-- `trapped_flag::Bool` - Include trapped particles
-- `ion_flag::Bool` - Include ion kinetic effects
-- `electron_flag::Bool` - Include electron kinetic effects
-- `ktc::Float64` - Kinetic collision parameter
-- `ktw::Float64` - Kinetic width parameter
+- `kinfac1::Float64` - First kinetic scaling factor (not yet implemented)
+- `kinfac2::Float64` - Second kinetic scaling factor (not yet implemented)
+- `kingridtype::Int` - Type of kinetic grid (0=standard) (not yet implemented)
+- `ktanh_flag::Bool` - Enable hyperbolic tangent profile (not yet implemented)
+- `passing_flag::Bool` - Include passing particles (not yet implemented)
+- `trapped_flag::Bool` - Include trapped particles (not yet implemented)
+- `ion_flag::Bool` - Include ion kinetic effects (not yet implemented)
+- `electron_flag::Bool` - Include electron kinetic effects (not yet implemented)
+- `ktc::Float64` - Kinetic collision parameter (not yet implemented)
+- `ktw::Float64` - Kinetic width parameter (not yet implemented)
 - `qlow::Float64` - Lower limit for safety factor
 - `use_classic_splines::Bool` - Use classic spline interpolation
 - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim
 - `psiedge::Float64` - Normalized flux at edge
-- `nperq_edge::Int` - Number of points per q value at edge
+- `nperq_edge::Int` - Number of points per q value at edge (not yet implemented)
 - `wv_farwall_flag::Bool` - Enable far wall vacuum calculation
 - `dcon_kin_threads::Int` - Number of threads for kinetic calculations
 - `parallel_threads::Int` - Number of parallel threads
@@ -251,15 +251,15 @@ A mutable struct containing variables for Fourier fitting in DCON calculations.
 
 - `mpert::Int` - Number of poloidal modes
 - `mband::Int` - Bandwidth for matrix operations
-- `amats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for A matrix coefficients
-- `bmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for B matrix coefficients
-- `cmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for C matrix coefficients
-- `dmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for D matrix coefficients
-- `emats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for E matrix coefficients
-- `hmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for H matrix coefficients
-- `fmats_lower::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for lower F matrix coefficients
-- `kmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for K matrix coefficients
-- `gmats::Union{Missing,Spl.CubicSpline{ComplexF64}}` - Spline for G matrix coefficients
+- `amats::Spl.CubicSpline{ComplexF64}` - Spline for A matrix coefficients
+- `bmats::Spl.CubicSpline{ComplexF64}` - Spline for B matrix coefficients
+- `cmats::Spl.CubicSpline{ComplexF64}` - Spline for C matrix coefficients
+- `dmats::Spl.CubicSpline{ComplexF64}` - Spline for D matrix coefficients
+- `emats::Spl.CubicSpline{ComplexF64}` - Spline for E matrix coefficients
+- `hmats::Spl.CubicSpline{ComplexF64}` - Spline for H matrix coefficients
+- `fmats_lower::Spl.CubicSpline{ComplexF64}` - Spline for lower F matrix coefficients
+- `kmats::Spl.CubicSpline{ComplexF64}` - Spline for K matrix coefficients
+- `gmats::Spl.CubicSpline{ComplexF64}` - Spline for G matrix coefficients
 - `jmat::Vector{ComplexF64}` - J matrix vector (size 2×mband + 1)
 - `parallel_threads::Int` - Number of parallel threads for computation
 - `dcon_kin_threads::Int` - Number of threads for kinetic calculations
