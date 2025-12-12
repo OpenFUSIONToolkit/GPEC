@@ -135,6 +135,7 @@ Evaluate the cubic spline at a single point using in-place operations.
   The result is stored in and returned from the spline's internal work array.
 """
 function spline_eval!(spline::CubicSpline{T}, x::Float64) where {T<:Union{Float64,ComplexF64}}
+    @assert spline.handle != C_NULL "CubicSpline has not been initialized"
     f = spline._f
     call_spline_c_eval(T, spline, x, f)
     return f
@@ -155,6 +156,7 @@ Evaluate the cubic spline and its first derivative at a single point using in-pl
   Results are stored in and returned from the spline's internal work arrays.
 """
 function spline_deriv1!(spline::CubicSpline{T}, x::Float64) where {T<:Union{Float64,ComplexF64}}
+    @assert spline.handle != C_NULL "CubicSpline has not been initialized"
     f, f1 = spline._f, spline._f1
     call_spline_c_eval(T, spline, x, f, f1)
     return f, f1
@@ -176,6 +178,7 @@ Evaluate the cubic spline and its first two derivatives at a single point using 
   Results are stored in and returned from the spline's internal work arrays.
 """
 function spline_deriv2!(spline::CubicSpline{T}, x::Float64) where {T<:Union{Float64,ComplexF64}}
+    @assert spline.handle != C_NULL "CubicSpline has not been initialized"
     f, f1, f2 = spline._f, spline._f1, spline._f2
     call_spline_c_eval(T, spline, x, f, f1, f2)
     return f, f1, f2
@@ -198,6 +201,7 @@ Evaluate the cubic spline and its first three derivatives at a single point usin
   Results are stored in and returned from the spline's internal work arrays.
 """
 function spline_deriv3!(spline::CubicSpline{T}, x::Float64) where {T<:Union{Float64,ComplexF64}}
+    @assert spline.handle != C_NULL "CubicSpline has not been initialized"
     f, f1, f2, f3 = spline._f, spline._f1, spline._f2, spline._f3
     call_spline_c_eval(T, spline, x, f, f1, f2, f3)
     return f, f1, f2, f3
@@ -217,6 +221,7 @@ the respective x-coordinate in `x`.
 function spline_eval(spline::CubicSpline{T}, xs::Vector{Float64}, derivs::Int=0) where {T<:Union{Float64,ComplexF64}}
     # xs -> Float64 (any length)
     # Returns a matrix of T (length(xs), nqty)
+    @assert spline.handle != C_NULL "CubicSpline has not been initialized"
     @assert (derivs in 0:3) "Invalid number of derivatives requested: $derivs. Must be 0, 1, 2, or 3."
 
     n = length(xs)
@@ -284,6 +289,7 @@ Results are written into `f` (and optionally `f1`, `f2`, `f3`).
 """
 function spline_eval!(f::Vector{T}, spline::CubicSpline{T}, x::Float64;
     derivs::Int=0, f1=nothing, f2=nothing, f3=nothing) where {T<:Union{Float64,ComplexF64}}
+    @assert spline.handle != C_NULL "CubicSpline has not been initialized"
     @assert (derivs in 0:3) "Invalid number of derivatives requested: $derivs"
 
     if derivs == 0
@@ -312,3 +318,19 @@ end
     `spline._fsi[i, :]` equals `∫_{xs[1]}^{xs[i]} f(x) dx` for each component.
 """
 spline_integrate!(spline::CubicSpline{T}) where {T<:Union{Float64,ComplexF64}} = call_spline_c_int(T, spline)
+
+"""
+    empty_CubicSpline(::Type{T}=ComplexF64) where {T<:Union{Float64,ComplexF64}}
+
+Create a minimal, type-stable placeholder spline with a C_NULL handle.
+This is safe for initialization in structs where the spline will be replaced later.
+The handle is set to C_NULL, which will cause an error if the spline is used
+before being properly initialized.
+"""
+function empty_CubicSpline(::Type{T}=ComplexF64) where {T<:Union{Float64,ComplexF64}}
+    xs = Float64[]
+    fs = Matrix{T}(undef, 0, 0)
+    fsi = Matrix{T}(undef, 0, 0)
+    fs1 = Matrix{T}(undef, 0, 0)
+    return CubicSpline(C_NULL, xs, fs, 0, 0, zero(Int32), fsi, fs1)
+end

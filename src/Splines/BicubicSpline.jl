@@ -140,6 +140,7 @@ Evaluate the bicubic spline at a single point using in-place operations.
     The result is stored in and returned from the spline's internal work array.
 """
 function bicube_eval!(bicube::BicubicSpline, x::Float64, y::Float64)
+    @assert bicube.handle != C_NULL "BicubicSpline has not been initialized"
     f = bicube._f
     call_bicube_c_eval(bicube, x, y, f)
     return f
@@ -164,6 +165,7 @@ Evaluate the bicubic spline and its first derivatives at a single point using in
     Results are stored in and returned from the spline's internal work arrays.
 """
 function bicube_deriv1!(bicube::BicubicSpline, x::Float64, y::Float64)
+    @assert bicube.handle != C_NULL "BicubicSpline has not been initialized"
     f, fx, fy = bicube._f, bicube._fx, bicube._fy
     call_bicube_c_eval(bicube, x, y, f, fx, fy)
     return f, fx, fy
@@ -191,6 +193,7 @@ Evaluate the bicubic spline and its first and second derivatives at a single poi
     Results are stored in and returned from the spline's internal work arrays.
 """
 function bicube_deriv2!(bicube::BicubicSpline, x::Float64, y::Float64)
+    @assert bicube.handle != C_NULL "BicubicSpline has not been initialized"
     f, fx, fy, fxx, fxy, fyy = bicube._f, bicube._fx, bicube._fy, bicube._fxx, bicube._fxy, bicube._fyy
     call_bicube_c_eval(bicube, x, y, f, fx, fy, fxx, fxy, fyy)
     return f, fx, fy, fxx, fxy, fyy
@@ -211,6 +214,7 @@ function bicube_eval(bicube::BicubicSpline, xs::Vector{Float64}, ys::Vector{Floa
     # xs -> Float64 (any length)
     # ys -> Float64 (any length)
     # Returns a matrix of Float64 (length(xs), length(ys), nqty)
+    @assert bicube.handle != C_NULL "BicubicSpline has not been initialized"
     @assert derivs in 0:2 "Invalid number of derivatives requested: $derivs. Must be 0, 1, or 2."
 
     n = length(xs)
@@ -254,4 +258,22 @@ function bicube_eval(bicube::BicubicSpline, xs::Vector{Float64}, ys::Vector{Floa
     elseif derivs == 2
         return fs, fsx, fsy, fsxx, fsxy, fsyy
     end
+end
+
+"""
+    empty_BicubicSpline()
+
+Create a minimal, type-stable placeholder bicubic spline with a C_NULL handle.
+This is safe for initialization in structs where the spline will be replaced later.
+The handle is set to C_NULL, which will cause an error if the spline is used
+before being properly initialized.
+"""
+function empty_BicubicSpline()
+    xs = Float64[]
+    ys = Float64[]
+    fs = Array{Float64}(undef, 0, 0, 0)
+    fsx = Array{Float64}(undef, 0, 0, 0)
+    fsy = Array{Float64}(undef, 0, 0, 0)
+    fsxy = Array{Float64}(undef, 0, 0, 0)
+    return BicubicSpline(C_NULL, xs, ys, fs, 0, 0, 0, zero(Int32), zero(Int32), fsx, fsy, fsxy)
 end
