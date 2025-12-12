@@ -130,7 +130,7 @@ end
 
 """
 Constructor that allows users to form a EquilibriumConfig struct from dictionaries
-for convinience when most of the defaults are fine.
+for convenience when most of the defaults are fine.
 """
 function EquilibriumConfig(control::Dict, output::Dict)
     construct = EquilibriumControl(; control...)
@@ -259,8 +259,8 @@ raw equilibrium data and preparing the initial splines.
 
 ## Fields
 
-  - `equil_input::EquilInput`
-    The original equilibrium input object.
+  - `config::EquilibriumConfig`
+    The equilibrium configuration object.
 
   - `sq_in`
     1D spline data versus normalized poloidal flux `psin`.
@@ -302,9 +302,14 @@ end
 
 A container struct for inputs to the `inverse_run` function.
 
-## Fields:
+## Fields
 
-  - `equil_input`: The original `EquilInput` object.
+  - `config::EquilibriumConfig` - The equilibrium configuration object
+  - `sq_in::Spl.CubicSpline{Float64}` - 1D spline input profile (F*Bt, Pressure, q)
+  - `rz_in::Spl.BicubicSpline` - 2D bicubic spline for (R,Z) geometry
+  - `ro::Float64` - R-coordinate of magnetic axis [m]
+  - `zo::Float64` - Z-coordinate of magnetic axis [m]
+  - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
 mutable struct InverseRunInput
     config::EquilibriumConfig
@@ -434,8 +439,11 @@ This object provides a complete representation of the processed plasma equilibri
 
 # Fields
 
-  - `equil_input::EquilInput`:
-    The original `EquilInput` object used for the reconstruction.
+  - `config::EquilibriumConfig`:
+    The equilibrium configuration object used for the reconstruction.
+
+  - `params::EquilibriumParameters`:
+    Computed equilibrium parameters and diagnostics.
 
   - `sq::CubicSpline{Float64}`:
     Final 1D profile spline.
