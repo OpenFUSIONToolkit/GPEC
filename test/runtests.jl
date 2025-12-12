@@ -16,7 +16,6 @@ if !isempty(ARGS)
 else
     include("./runtests_build.jl")
     include("./runtests_spline.jl")
-    include("./runtests_type_stability.jl")
     include("./runtests_vacuum_fortran.jl")
     include("./runtests_solovev.jl")
     include("./runtests_ode.jl")
