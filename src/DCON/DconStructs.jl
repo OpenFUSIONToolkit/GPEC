@@ -108,7 +108,7 @@ A mutable struct holding internal state variables for DCON stability calculation
     nlow::Int = 0
     nhigh::Int = 0
     npert::Int = 0 # npert = nhigh-nlow+1
-    numpert_total = 0 # numpert_total = mpert*npert
+    numpert_total::Int = 0 # numpert_total = mpert*npert
     vac_memory::Bool = true # TODO: most likely just remove, always true in ahg_flag is deprecated
     keq_out::Bool = false
     theta_out::Bool = false
