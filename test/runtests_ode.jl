@@ -196,8 +196,9 @@ end
         # We can't easily predict exact values without doing the full calculation,
         # but we can check that the operation completed without error
         @test size(odet.u_store) == size(u_orig)
-        # After trim_storage! is called in ode_run, ud_store will match step, but transform_u! doesn't change sizes
-        @test size(odet.ud_store, 4) == 10  # Original allocation size, not odet.step
+        # transform_u! doesn't resize arrays - it only applies transformations in-place
+        # The storage arrays retain their original allocated size
+        @test size(odet.ud_store, 4) == 10  # Original allocation size, unchanged by transform_u!
     end
 
     @testset "ode_fixup!" begin
@@ -424,21 +425,22 @@ end
         mpert = 2
         odet = JPEC.DCON.OdeState(mpert, 5, 10, 2)
         
-        # Simulate several integration steps
+        # Simulate several integration steps (storing 4 steps of data)
+        # Note: step counter points to the next step to be stored
         for istep in 1:4
             odet.psi_store[istep] = Float64(istep) * 0.1
             odet.q_store[istep] = Float64(istep) * 0.2
             odet.u_store[:, :, :, istep] .= ComplexF64(istep)
-            odet.step = istep + 1
         end
+        odet.step = 5  # After storing 4 steps, step counter is at 5
         
         # Check data was stored correctly
         @test odet.psi_store[1:4] ≈ [0.1, 0.2, 0.3, 0.4]
         @test odet.q_store[1:4] ≈ [0.2, 0.4, 0.6, 0.8]
         @test all(odet.u_store[:, :, :, 3] .== ComplexF64(3))
         
-        # Trim to actual size used
-        odet.step = 4
+        # Trim to actual size used (4 stored steps)
+        odet.step = 4  # Set to number of valid steps before trimming
         JPEC.DCON.trim_storage!(odet)
         
         # Check trimming worked
