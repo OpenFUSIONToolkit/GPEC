@@ -361,4 +361,117 @@ end
         JPEC.DCON.ode_unorm!(odet.u, odet, ctrl, intr, true)
         @test odet.new == true  # fixup triggered
     end
+
+    @testset "ode_fixup! - predictable transformations" begin
+        # Test with a simple 2x2 case where we can predict the result
+        mpert = 2
+        odet = JPEC.DCON.OdeState(mpert, 10, 10, 10)
+        
+        # Set up a simple u matrix where first column has larger norm
+        # u[:, 1, 1] = [3, 4] (norm = 5)
+        # u[:, 2, 1] = [1, 0] (norm = 1)
+        odet.u[:, 1, 1] .= [3.0 + 0.0im, 4.0 + 0.0im]
+        odet.u[:, 2, 1] .= [1.0 + 0.0im, 0.0 + 0.0im]
+        odet.u[:, :, 2] .= 0.0  # Set second equation to zero for simplicity
+        
+        odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
+        odet.ifix = 1
+        odet.fixfac = zeros(ComplexF64, mpert, mpert, 1)
+        intr = JPEC.DCON.DconInternal(; numpert_total=mpert)
+        
+        u_before = copy(odet.u)
+        
+        JPEC.DCON.ode_fixup!(odet.u, odet, intr, false)
+        
+        # After fixup:
+        # - index should sort by norm: [1, 2] (largest first)
+        @test odet.index[:, 1] == [1, 2]
+        
+        # - The largest element in the first column should be used as pivot
+        # - The second column should be modified to eliminate that element
+        # - fixfac should capture the elimination factor
+        @test odet.fixfac[1, 1, 1] == 1.0  # Diagonal
+        
+        # The pivot element should not change
+        pivot_idx = argmax(abs.(u_before[:, 1, 1]))
+        @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
+    end
+
+    @testset "resize_storage! - multiple resizes" begin
+        # Test that we can resize multiple times
+        mpert = 2
+        numsteps_init = 4
+        odet = JPEC.DCON.OdeState(mpert, numsteps_init, 10, 5)
+        
+        original_size = size(odet.u_store, 4)
+        @test original_size == 4
+        
+        # First resize
+        JPEC.DCON.resize_storage!(odet)
+        @test size(odet.u_store, 4) == 8
+        
+        # Second resize
+        JPEC.DCON.resize_storage!(odet)
+        @test size(odet.u_store, 4) == 16
+        
+        # Third resize
+        JPEC.DCON.resize_storage!(odet)
+        @test size(odet.u_store, 4) == 32
+    end
+
+    @testset "Integration workflow simulation" begin
+        # Simulate a simplified integration workflow
+        mpert = 2
+        odet = JPEC.DCON.OdeState(mpert, 5, 10, 2)
+        
+        # Simulate several integration steps
+        for istep in 1:4
+            odet.psi_store[istep] = Float64(istep) * 0.1
+            odet.q_store[istep] = Float64(istep) * 0.2
+            odet.u_store[:, :, :, istep] .= ComplexF64(istep)
+            odet.step = istep + 1
+        end
+        
+        # Check data was stored correctly
+        @test odet.psi_store[1:4] ≈ [0.1, 0.2, 0.3, 0.4]
+        @test odet.q_store[1:4] ≈ [0.2, 0.4, 0.6, 0.8]
+        @test all(odet.u_store[:, :, :, 3] .== ComplexF64(3))
+        
+        # Trim to actual size used
+        odet.step = 4
+        JPEC.DCON.trim_storage!(odet)
+        
+        # Check trimming worked
+        @test length(odet.psi_store) == 4
+        @test length(odet.q_store) == 4
+        @test size(odet.u_store, 4) == 4
+        
+        # Verify data is still correct after trimming
+        @test odet.psi_store ≈ [0.1, 0.2, 0.3, 0.4]
+        @test odet.q_store ≈ [0.2, 0.4, 0.6, 0.8]
+    end
+
+    @testset "Norm calculations" begin
+        # Test that norm calculations are correct
+        mpert = 3
+        odet = JPEC.DCON.OdeState(mpert, 10, 10, 5)
+        ctrl = JPEC.DCON.DconControl()
+        intr = JPEC.DCON.DconInternal(; mpert=mpert)
+        
+        # Set up vectors with known norms
+        odet.u[:, 1, 1] .= [3.0 + 0.0im, 4.0 + 0.0im, 0.0 + 0.0im]  # norm = 5
+        odet.u[:, 2, 1] .= [1.0 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]  # norm = 1
+        odet.u[:, 3, 1] .= [0.0 + 0.0im, 0.0 + 0.0im, 1.0 + 0.0im]  # norm = 1
+        
+        JPEC.DCON.ode_unorm!(odet.u, odet, ctrl, intr, false)
+        
+        # Check norms were computed correctly
+        @test odet.unorm[1] ≈ 5.0
+        @test odet.unorm[2] ≈ 1.0
+        @test odet.unorm[3] ≈ 1.0
+        
+        # Check unorm0 was set
+        @test odet.unorm0 == odet.unorm
+        @test odet.new == false
+    end
 end
