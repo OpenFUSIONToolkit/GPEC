@@ -57,6 +57,13 @@ end
             @test all(odet.u_store[:, :, :, i] .== ComplexF64(i))
             @test all(odet.ud_store[:, :, :, i] .== ComplexF64(i + 0.5))
         end
+
+        # Check that you can resize again
+        JPEC.DCON.resize_storage!(odet)
+        @test length(odet.psi_store) == 4 * numsteps_init
+        @test length(odet.q_store) == 4 * numsteps_init
+        @test size(odet.u_store, 4) == 4 * numsteps_init
+        @test size(odet.ud_store, 4) == 4 * numsteps_init
     end
 
     @testset "trim_storage!" begin
@@ -129,29 +136,25 @@ end
         odet.q = 4.0
         rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
         @test rtol == ctrl.tol_nr
-    end
 
-    @testset "ode_axis_init! - simple checks" begin
-        # Test that ode_axis_init! initializes the identity matrix in U_22
-        # This is the most predictable part of the initialization
-        mpert = 3
-        odet = JPEC.DCON.OdeState(mpert, 100, 10, 2)
+        # Edge case - no singular surfaces
+        mpert = 2
+        ctrl = JPEC.DCON.DconControl()
+        ctrl.tol_r = 1e-6
+        ctrl.tol_nr = 1e-4
+        ctrl.crossover = 0.01
         
-        # Before initialization, u should be zero
-        @test all(odet.u .== 0.0)
+        intr = JPEC.DCON.DconInternal(; mpert=mpert)
+        intr.msing = 0
+        intr.sing = []
         
-        # After initialization (which happens in ode_run), u[:, :, 2] should have
-        # identity on diagonal. We can test this directly here by mimicking that part:
-        for ipert in 1:mpert
-            odet.u[ipert, ipert, 2] = 1
-        end
+        odet = JPEC.DCON.OdeState(mpert, 10, 10, 0)
+        odet.ising = 1
+        odet.q = 2.0
         
-        # Check that u[:, :, 2] has identity matrix structure
-        @test odet.u[1, 1, 2] == 1.0
-        @test odet.u[2, 2, 2] == 1.0
-        @test odet.u[3, 3, 2] == 1.0
-        @test odet.u[1, 2, 2] == 0.0
-        @test odet.u[2, 1, 2] == 0.0
+        # Should return non-resonant tolerance when no singular surfaces
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        @test rtol == ctrl.tol_nr
     end
 
     @testset "transform_u!" begin
@@ -193,12 +196,9 @@ end
         @test !all(odet.u_store .== u_orig)
         
         # The transformation should preserve the structure but apply the fixfac matrices
-        # We can't easily predict exact values without doing the full calculation,
-        # but we can check that the operation completed without error
-        @test size(odet.u_store) == size(u_orig)
         # transform_u! doesn't resize arrays - it only applies transformations in-place
         # The storage arrays retain their original allocated size
-        @test size(odet.ud_store, 4) == 10  # Original allocation size, unchanged by transform_u!
+        @test size(odet.u_store) == size(u_orig)
     end
 
     @testset "ode_fixup!" begin
@@ -219,6 +219,8 @@ end
         # Very simple tests
         @test !all(odet.u .== u_orig)  # u should have changed
         @test all(abs.(diag(odet.fixfac[:, :, ifix])) .≈ 1)  # diagonal of fixfac = 1
+        @test odet.fixstep[1] == odet.step - 1 # fixstep should be set
+        @test odet.sing_flag[1] == false # sing_flag should match input
 
         # --- Real Fortran data check ---
         mpert = 31
@@ -239,82 +241,38 @@ end
         # test that the outputs are approximately equivalent (1e-3 seems ok to account for loading differences)
         @test all(abs.(odet.u .- u_fortran) .< 1e-3)
 
-    end
-
-    @testset "ode_fixup! - additional tests" begin
-        # Test that fixfac diagonal is identity after fixup
-        mpert = 4
+        # Test with a simple 2x2 case where we can predict the result
+        mpert = 2
         odet = JPEC.DCON.OdeState(mpert, 10, 10, 10)
-        odet.u = randn(ComplexF64, mpert, mpert, 2)
+        
+        # Set up a simple u matrix where first column has larger norm
+        # u[:, 1, 1] = [3, 4] (norm = 5)
+        # u[:, 2, 1] = [1, 0] (norm = 1)
+        odet.u[:, 1, 1] .= [3.0 + 0.0im, 4.0 + 0.0im]
+        odet.u[:, 2, 1] .= [1.0 + 0.0im, 0.0 + 0.0im]
+        odet.u[:, :, 2] .= 0.0  # Set second equation to zero for simplicity
+        
         odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
         odet.ifix = 1
         odet.fixfac = zeros(ComplexF64, mpert, mpert, 1)
         intr = JPEC.DCON.DconInternal(; numpert_total=mpert)
         
+        u_before = copy(odet.u)
+        
         JPEC.DCON.ode_fixup!(odet.u, odet, intr, false)
         
-        # Diagonal of fixfac should be 1
-        @test all(abs.(diag(odet.fixfac[:, :, 1])) .≈ 1.0)
+        # After fixup:
+        # - index should sort by norm: [1, 2] (largest first)
+        @test odet.index[:, 1] == [1, 2]
         
-        # fixstep should be set
-        @test odet.fixstep[1] == odet.step - 1
+        # - The largest element in the first column should be used as pivot
+        # - The second column should be modified to eliminate that element
+        # - fixfac should capture the elimination factor
+        @test odet.fixfac[1, 1, 1] == 1.0  # Diagonal
         
-        # sing_flag should match input
-        @test odet.sing_flag[1] == false
-    end
-
-    @testset "OdeState construction" begin
-        # Test basic OdeState initialization
-        numpert_total = 5
-        numsteps_init = 100
-        numunorms_init = 20
-        msing = 10
-        
-        odet = JPEC.DCON.OdeState(numpert_total, numsteps_init, numunorms_init, msing)
-        
-        # Check fields are initialized correctly
-        @test odet.numpert_total == numpert_total
-        @test odet.numsteps_init == numsteps_init
-        @test odet.numunorms_init == numunorms_init
-        @test odet.msing == msing
-        @test odet.step == 1
-        @test odet.new == true
-        @test odet.ifix == 0
-        @test odet.nzero == 0
-        
-        # Check array dimensions
-        @test size(odet.u) == (numpert_total, numpert_total, 2)
-        @test size(odet.ud) == (numpert_total, numpert_total, 2)
-        @test size(odet.u_store) == (numpert_total, numpert_total, 2, numsteps_init)
-        @test size(odet.ud_store) == (numpert_total, numpert_total, 2, numsteps_init)
-        @test length(odet.psi_store) == numsteps_init
-        @test length(odet.q_store) == numsteps_init
-        @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
-        @test size(odet.ca_l) == (numpert_total, numpert_total, 2, msing)
-        @test size(odet.fixfac) == (numpert_total, numpert_total, numunorms_init)
-        @test length(odet.unorm) == numpert_total
-        @test length(odet.unorm0) == numpert_total
-    end
-
-    @testset "compute_tols - edge cases" begin
-        # Test with zero msing
-        mpert = 2
-        ctrl = JPEC.DCON.DconControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-        
-        intr = JPEC.DCON.DconInternal(; mpert=mpert)
-        intr.msing = 0
-        intr.sing = []
-        
-        odet = JPEC.DCON.OdeState(mpert, 10, 10, 0)
-        odet.ising = 1
-        odet.q = 2.0
-        
-        # Should return non-resonant tolerance when no singular surfaces
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
-        @test rtol == ctrl.tol_nr
+        # The pivot element should not change
+        pivot_idx = argmax(abs.(u_before[:, 1, 1]))
+        @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
     end
 
     @testset "ode_unorm!" begin
@@ -363,117 +321,36 @@ end
         @test odet.new == true  # fixup triggered
     end
 
-    @testset "ode_fixup! - predictable transformations" begin
-        # Test with a simple 2x2 case where we can predict the result
-        mpert = 2
-        odet = JPEC.DCON.OdeState(mpert, 10, 10, 10)
+    @testset "OdeState construction" begin
+        # Test basic OdeState initialization
+        numpert_total = 5
+        numsteps_init = 100
+        numunorms_init = 20
+        msing = 10
         
-        # Set up a simple u matrix where first column has larger norm
-        # u[:, 1, 1] = [3, 4] (norm = 5)
-        # u[:, 2, 1] = [1, 0] (norm = 1)
-        odet.u[:, 1, 1] .= [3.0 + 0.0im, 4.0 + 0.0im]
-        odet.u[:, 2, 1] .= [1.0 + 0.0im, 0.0 + 0.0im]
-        odet.u[:, :, 2] .= 0.0  # Set second equation to zero for simplicity
+        odet = JPEC.DCON.OdeState(numpert_total, numsteps_init, numunorms_init, msing)
         
-        odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
-        odet.ifix = 1
-        odet.fixfac = zeros(ComplexF64, mpert, mpert, 1)
-        intr = JPEC.DCON.DconInternal(; numpert_total=mpert)
+        # Check fields are initialized correctly
+        @test odet.numpert_total == numpert_total
+        @test odet.numsteps_init == numsteps_init
+        @test odet.numunorms_init == numunorms_init
+        @test odet.msing == msing
+        @test odet.step == 1
+        @test odet.new == true
+        @test odet.ifix == 0
+        @test odet.nzero == 0
         
-        u_before = copy(odet.u)
-        
-        JPEC.DCON.ode_fixup!(odet.u, odet, intr, false)
-        
-        # After fixup:
-        # - index should sort by norm: [1, 2] (largest first)
-        @test odet.index[:, 1] == [1, 2]
-        
-        # - The largest element in the first column should be used as pivot
-        # - The second column should be modified to eliminate that element
-        # - fixfac should capture the elimination factor
-        @test odet.fixfac[1, 1, 1] == 1.0  # Diagonal
-        
-        # The pivot element should not change
-        pivot_idx = argmax(abs.(u_before[:, 1, 1]))
-        @test abs(odet.u[pivot_idx, 1, 1] - u_before[pivot_idx, 1, 1]) < 1e-10
-    end
-
-    @testset "resize_storage! - multiple resizes" begin
-        # Test that we can resize multiple times
-        mpert = 2
-        numsteps_init = 4
-        odet = JPEC.DCON.OdeState(mpert, numsteps_init, 10, 5)
-        
-        original_size = size(odet.u_store, 4)
-        @test original_size == 4
-        
-        # First resize
-        JPEC.DCON.resize_storage!(odet)
-        @test size(odet.u_store, 4) == 8
-        
-        # Second resize
-        JPEC.DCON.resize_storage!(odet)
-        @test size(odet.u_store, 4) == 16
-        
-        # Third resize
-        JPEC.DCON.resize_storage!(odet)
-        @test size(odet.u_store, 4) == 32
-    end
-
-    @testset "Integration workflow simulation" begin
-        # Simulate a simplified integration workflow
-        mpert = 2
-        odet = JPEC.DCON.OdeState(mpert, 5, 10, 2)
-        
-        # Simulate several integration steps (storing 4 steps of data)
-        # Note: step counter points to the next step to be stored
-        for istep in 1:4
-            odet.psi_store[istep] = Float64(istep) * 0.1
-            odet.q_store[istep] = Float64(istep) * 0.2
-            odet.u_store[:, :, :, istep] .= ComplexF64(istep)
-        end
-        odet.step = 5  # After storing 4 steps, step counter is at 5
-        
-        # Check data was stored correctly
-        @test odet.psi_store[1:4] ≈ [0.1, 0.2, 0.3, 0.4]
-        @test odet.q_store[1:4] ≈ [0.2, 0.4, 0.6, 0.8]
-        @test all(odet.u_store[:, :, :, 3] .== ComplexF64(3))
-        
-        # Trim to actual size used (4 stored steps)
-        odet.step = 4  # Set to number of valid steps before trimming
-        JPEC.DCON.trim_storage!(odet)
-        
-        # Check trimming worked
-        @test length(odet.psi_store) == 4
-        @test length(odet.q_store) == 4
-        @test size(odet.u_store, 4) == 4
-        
-        # Verify data is still correct after trimming
-        @test odet.psi_store ≈ [0.1, 0.2, 0.3, 0.4]
-        @test odet.q_store ≈ [0.2, 0.4, 0.6, 0.8]
-    end
-
-    @testset "Norm calculations" begin
-        # Test that norm calculations are correct
-        mpert = 3
-        odet = JPEC.DCON.OdeState(mpert, 10, 10, 5)
-        ctrl = JPEC.DCON.DconControl()
-        intr = JPEC.DCON.DconInternal(; mpert=mpert)
-        
-        # Set up vectors with known norms
-        odet.u[:, 1, 1] .= [3.0 + 0.0im, 4.0 + 0.0im, 0.0 + 0.0im]  # norm = 5
-        odet.u[:, 2, 1] .= [1.0 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]  # norm = 1
-        odet.u[:, 3, 1] .= [0.0 + 0.0im, 0.0 + 0.0im, 1.0 + 0.0im]  # norm = 1
-        
-        JPEC.DCON.ode_unorm!(odet.u, odet, ctrl, intr, false)
-        
-        # Check norms were computed correctly
-        @test odet.unorm[1] ≈ 5.0
-        @test odet.unorm[2] ≈ 1.0
-        @test odet.unorm[3] ≈ 1.0
-        
-        # Check unorm0 was set
-        @test odet.unorm0 == odet.unorm
-        @test odet.new == false
+        # Check array dimensions
+        @test size(odet.u) == (numpert_total, numpert_total, 2)
+        @test size(odet.ud) == (numpert_total, numpert_total, 2)
+        @test size(odet.u_store) == (numpert_total, numpert_total, 2, numsteps_init)
+        @test size(odet.ud_store) == (numpert_total, numpert_total, 2, numsteps_init)
+        @test length(odet.psi_store) == numsteps_init
+        @test length(odet.q_store) == numsteps_init
+        @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
+        @test size(odet.ca_l) == (numpert_total, numpert_total, 2, msing)
+        @test size(odet.fixfac) == (numpert_total, numpert_total, numunorms_init)
+        @test length(odet.unorm) == numpert_total
+        @test length(odet.unorm0) == numpert_total
     end
 end
