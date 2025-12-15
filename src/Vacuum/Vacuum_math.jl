@@ -34,12 +34,12 @@ export spline1d, spline1d_deriv, lagrange1d, search, green
 # Cubic spline and derivatives for line 1d array and return point value, 
 # replacing spl1d1, spl1d2
 #############################################################
-function spline1d(x::Vector, y::Vector, xq::Real)
+function spline1d(x, y, xq)
     itp = CubicSplineInterpolation(x, y)
     return itp(xq)
 end
 
-function spline1d_deriv(x::Vector, y::Vector, xq::Real)
+function spline1d_deriv(x, y, xq)
     itp = CubicSplineInterpolation(x, y)
     return Interpolations.gradient(itp, xq)
 end
