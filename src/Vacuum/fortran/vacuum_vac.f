@@ -655,6 +655,27 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     initialize.
 c-----------------------------------------------------------------------
+      INTEGER :: unit
+      CHARACTER(len=20) :: filename
+
+      IF(.FALSE.) THEN
+
+         filename = 'output_kernel_run_data.txt'
+         OPEN(UNIT=unit, FILE=filename, STATUS='UNKNOWN')
+
+         WRITE(unit, '(A)') 'xobs, zobs, xsce, zsce, j1, j2,' //
+     $     'isgn, iopw, iops, ischk'
+         WRITE(unit, *) xobs
+         WRITE(unit, *) zobs
+         WRITE(unit, *) xsce
+         WRITE(unit, *) zsce
+         WRITE(unit, *) j1, j2,
+     $      isgn, iopw, iops, ischk
+
+         CLOSE(unit)
+         STOP
+      ENDIF
+
       DO i=1,nths
          xpp(i)=0
          zpp(i)=0
@@ -667,6 +688,10 @@ c-----------------------------------------------------------------------
       jres=1
       isph = 0
       mthm=mth-1
+      ! WRITE(*,*) "mth1 =",mth1
+      ! WRITE(*,*) "nths =",nths
+      ! WRITE(*,*) "size of gren array =",SIZE(gren,1),SIZE(gren,2)
+      ! WRITE(*,*) "ZEROING GREN ARRAY"
       gren(1:mth1,1:mth1)=0
       the(1:mth1)=(/(i,i=0,mth)/)*dth
 c-----------------------------------------------------------------------
@@ -721,6 +746,7 @@ c-----------------------------------------------------------------------
          CALL spl1d2(mth1,the,zsce,zpp,1,theta,tab)
          zpr(i)=tab(2)
       ENDDO
+      ! WRITE(*,*) "BEGIN LOOP OVER INTERVALS"
 c-----------------------------------------------------------------------
 c     begin loop over intervals.
 c-----------------------------------------------------------------------
