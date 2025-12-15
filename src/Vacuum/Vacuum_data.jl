@@ -112,6 +112,13 @@ immutable/thread-safe for the duration of a run. Anything set directly by user i
     wall::Bool      = true
     farwal::Bool    = true
     kernelsign::Float64 = 1.0
+
+    cnqd::Vector{Float64} = Float64[]
+    snqd::Vector{Float64} = Float64[]
+    sinlt::Matrix{Float64} = Array{Float64,2}(undef,0,0)
+    coslt::Matrix{Float64} = Array{Float64,2}(undef,0,0)
+    snlth::Matrix{Float64} = Array{Float64,2}(undef,0,0)
+    cslth::Matrix{Float64} = Array{Float64,2}(undef,0,0)
 end
 
 #############################################

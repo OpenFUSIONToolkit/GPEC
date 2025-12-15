@@ -89,12 +89,12 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     globals.zplap = periodic_cubic_deriv(theta_grid, globals.zpla[1:globals.mth1])
 
     # Allocate arrays
-    cnqd = zeros(globals.mth1)
-    snqd = zeros(globals.mth1)
-    sinlt = zeros(globals.mth1, jmax1)
-    coslt = zeros(globals.mth1, jmax1)
-    snlth = zeros(globals.mth1, jmax1)
-    cslth = zeros(globals.mth1, jmax1)
+    globals.cnqd = zeros(globals.mth1)
+    globals.snqd = zeros(globals.mth1)
+    globals.sinlt = zeros(globals.mth1, jmax1)
+    globals.coslt = zeros(globals.mth1, jmax1)
+    globals.snlth = zeros(globals.mth1, jmax1)
+    globals.cslth = zeros(globals.mth1, jmax1)
 
     # TODO: add cplar/cwallr loop here if needed
 
@@ -102,21 +102,16 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     for is in 1:globals.mth1
         theta = (is-1) * globals.dth
         znqd = nq * globals.delta[is]
-        cnqd[is] = cos(znqd)
-        snqd[is] = sin(znqd)
+        globals.cnqd[is] = cos(znqd)
+        globals.snqd[is] = sin(znqd)
         for l1 in 1:jmax1
             ll = globals.lmin[1] - 1 + l1
             elth = ll * theta
             elthnq = ll * theta + znqd
-            sinlt[is,l1] = sin(elth)
-            coslt[is,l1] = cos(elth)
-            snlth[is,l1] = sin(elthnq)
-            cslth[is,l1] = cos(elthnq)
+            globals.sinlt[is,l1] = sin(elth)
+            globals.coslt[is,l1] = cos(elth)
+            globals.snlth[is,l1] = sin(elthnq)
+            globals.cslth[is,l1] = cos(elthnq)
         end
     end
-
-    # Should these get added to globals?
-    return (
-        delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth
-    )
 end

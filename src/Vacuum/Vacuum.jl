@@ -225,7 +225,7 @@ function compute_vacuum_response(vac_inputs::VacuumInputType, mpert::Int, mtheta
     )
 
     # Set up plasma and wall position arrays (`arrays` function in Fortran)
-    delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth = setuparrays!(globals, settings)
+    setuparrays!(globals, settings)
 
     # Call funint
 

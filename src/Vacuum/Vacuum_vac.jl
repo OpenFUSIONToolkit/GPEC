@@ -43,9 +43,18 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    display(globals.xpla)
-    display(globals.zpla)
-    kernel!(grdgre, grpp, xpla, zpla, xpla, zpla, j1, j2, ksgn, 1, 1, 0)
+
+    open("./xpla_zpla_julia.out", "w") do io
+        println(io, "# index\t xpla\t zpla")
+        n = max(length(globals.xpla), length(globals.zpla))
+        for i in 1:n
+            xv = i <= length(globals.xpla) ? globals.xpla[i] : NaN
+            zv = i <= length(globals.zpla) ? globals.zpla[i] : NaN
+            println(io, "$(i)\t$(xv)\t$(zv)")
+        end
+    end
+
+    kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, 0)
 
     # Enforce periodic boundary conditions
     for i = 1:globals.mth2
