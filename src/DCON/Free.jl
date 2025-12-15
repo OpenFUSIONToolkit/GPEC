@@ -43,7 +43,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         n = ipert_n - 1 + intr.nlow
         
         # Set VACUUM run parameters and boundary shape
-        set_vacuum_inputs(intr.psilim, n, equil, intr)
+        vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr)
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
 
@@ -52,6 +52,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
         VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
             wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+
+        # Placeholder for Julia vacuum code
+        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(vac_inputs, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, intr.dir_path)
+        error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
         kernelsignin = 1.0
         VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
@@ -199,6 +203,18 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     # Pass all required values to VACUUM
     VacuumMod.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
         reverse(r), reverse(z), reverse(delta))
+
+    # For input to the Julia vacuum code
+    return VacuumMod.VacuumInputType(
+        reverse(r),
+        reverse(z),
+        reverse(delta),
+        n,
+        intr.mhigh,
+        intr.mlow,
+        qa,
+        equil.config.control.mtheta
+    )
 end
 
 """

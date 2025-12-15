@@ -156,7 +156,7 @@ end
 FourFitVars(mpert::Int) = FourFitVars(; mpert)
 
 # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-@kwdef struct VacuumData
+@kwdef mutable struct VacuumData
     mthvac::Int
     mpert::Int
     numpert_total::Int
