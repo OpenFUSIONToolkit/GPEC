@@ -93,8 +93,8 @@ immutable/thread-safe for the duration of a run. Anything set directly by user i
     lmin::Vector{Int} = Int[]
     lmax::Vector{Int} = Int[]
 
-    xinf::Vector{Float64} = Float64[]
-    zinf::Vector{Float64} = Float64[]
+    xpla::Vector{Float64} = Float64[]
+    zpla::Vector{Float64} = Float64[]
     delta::Vector{Float64} = Float64[]
     xplap::Vector{Float64} = Float64[]
     zplap::Vector{Float64} = Float64[]

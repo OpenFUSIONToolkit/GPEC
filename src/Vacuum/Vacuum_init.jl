@@ -39,8 +39,8 @@ function build_vacuum_globals(
         mtot=mpert,
         lmin=[input.mlow],
         lmax=[input.mhigh],
-        xinf=xinf,
-        zinf=zinf,
+        xpla=xinf,
+        zpla=zinf,
         delta=delta,
         qa1=input.qa,
         ga1=1.0,  # Placeholder, fill with correct logic as needed
@@ -70,7 +70,7 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     nq = globals.n * globals.qa1
     
     # Compute geometric quantities
-    plrad = 0.5 * (maximum(globals.xinf) - minimum(globals.xinf)) # plasma radius (rename)
+    plrad = 0.5 * (maximum(globals.xpla) - minimum(globals.xpla)) # plasma radius (rename)
     delx = plrad * settings.vacdat.delfac # not used yet?
     delz = plrad * settings.vacdat.delfac
 
@@ -85,8 +85,8 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     globals.zwalp[globals.mth1] = globals.zwalp[1]
 
     # Plasma boundary theta derivative
-    globals.xplap = periodic_cubic_deriv(theta_grid, globals.xinf[1:globals.mth1])
-    globals.zplap = periodic_cubic_deriv(theta_grid, globals.zinf[1:globals.mth1])
+    globals.xplap = periodic_cubic_deriv(theta_grid, globals.xpla[1:globals.mth1])
+    globals.zplap = periodic_cubic_deriv(theta_grid, globals.zpla[1:globals.mth1])
 
     # Allocate arrays
     cnqd = zeros(globals.mth1)

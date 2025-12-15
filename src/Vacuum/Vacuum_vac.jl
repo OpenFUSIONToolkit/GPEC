@@ -12,158 +12,132 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
 
 function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
 
-    # ----------------------------------------------------------
-    # Allocate and zero arrays
-    # ----------------------------------------------------------
-    grdgre = zeros(Float64, nths2, nths2)
-    grwp   = zeros(Float64, nths2, nths2)
-    dummy  = zeros(Float64, nths2, nfm2)
-    ajll  .= 0.0
-    vacmat .= 0.0
-    vacmti .= 0.0
-
-    println(outmod, "\n          Matrix Storage: K(obs_ji,sou_ji):\n")
-    println(outmod, "          j = observer points, i = source points.")
-    println(outmod, "          ie. K operates on chi from the left.\n")
-    println(outmod, "          Observer Source  Block")
-    println(outmod, "          plasma  plasma   1  1")
-    println(outmod, "          plasma  wall     1  2")
-    println(outmod, "          wall    plasma   2  1")
-    println(outmod, "          wall    wall     2  2\n")
-
     # Initialization
-    xwal[1] = 0.0
-    zwal[1] = 0.0
-    factpi  = twopi
-    jmax    = 2*lmax[1] + 1
-    jmax1   = lmax[1] - lmin[1] + 1
-    lmax1   = lmax[1] + 1
-    ln      = lmin[1]
-    lx      = lmax[1]
+    globals.xwal[1] = 0.0
+    globals.zwal[1] = 0.0
+    factpi  = 2π
+    jmax    = 2*globals.lmax[1] + 1
+    jmax1   = globals.lmax[1] - globals.lmin[1] + 1
+    lmax1   = globals.lmax[1] + 1
+    ln      = globals.lmin[1]
+    lx      = globals.lmax[1]
     jdel    = 8
-    nq      = n*q
-    tmth    = 2*mth
+    nq      = globals.n * globals.qa1
+    tmth    = 2 * globals.mth
     mthsq   = tmth * tmth
-    lmth    = tmth * 2*jmax1
-    j1v     = nfm
-    j2v     = nfm
+    lmth    = tmth * 2 * jmax1
+    j1v     = globals.nfm
+    j2v     = globals.nfm
+
+    grri = zeros(Float64, 2 * (globals.mth + 5), 2 * globals.mtot)
+    grdgre = zeros(Float64, 2 * (globals.mth + 5), 2 * (globals.mth + 5))
+    grpp = zeros(Float64, 2 * (globals.mth + 5), 2 * (globals.mth + 5))
 
     # ----------------------------------------------------------
     # Apply wall boundary conditions
     # ----------------------------------------------------------
-    # wwall!(mth, xwal, zwal)
+    globals.xwal, globals.zwal = wwall(settings, globals)
 
     # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    grdgre, grwp = kernel!(xpla, zpla, xpla, zpla, j1, j2, ksgn, 1, 1, 0)
+    display(globals.xpla)
+    display(globals.zpla)
+    kernel!(grdgre, grpp, xpla, zpla, xpla, zpla, j1, j2, ksgn, 1, 1, 0)
 
-    fouran!(grwp, grdgre, cslth, 0, 0, lmin, lmax, mth)
-    fouran!(grwp, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
+    # Enforce periodic boundary conditions
+    for i = 1:globals.mth2
+        grpp[i,globals.mth1] = grpp[i,1]
+        grpp[i,globals.mth2] = grpp[i,2]
+    end
 
-    # NOTE: there needs to be an if not farwall statement here, this entire section is skipped if farwall is true
-    # # ----------------------------------------------------------
-    # # Plasma–Wall block
-    # # ----------------------------------------------------------
-    # j1, j2 = 1, 2
-    # ksgn = 2*j2 - 3
-    # grpw_block = similar(grdgre)
-    # #grdgre, grpw_block = kernel!(xpla, zpla, xwal, zwal, j1, j2, ksgn, 1, 1, 0)
+    # Fourier transform plasma-plasma block
+    fouran!(grri, grpp, cslth, 0, 0, lmin, lmax, mth)
+    fouran!(grri, grpp, snlth, 0, jmax1, lmin, lmax, mth)
 
-    # if lfele == 1
-    #     felang!(grpw_block, grdgre, cnqd, 0,0)
-    #     felang!(grpw_block, grdgre, snqd, 0,jmax1)
-    # end
-    # if lfour == 1
-    #     fouran!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-    #     fouran!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
-    # end
+    if !globals.farwal
+        error("Wall stuff not implemented yet, how did you get here")
+        # ----------------------------------------------------------
+        # Plasma–Wall block
+        # ----------------------------------------------------------
+        j1, j2 = 1, 2
+        ksgn = 2*j2 - 3
+        grpw_block = similar(grdgre)
+        grdgre, grpw_block = kernel!(xpla, zpla, xwal, zwal, j1, j2, ksgn, 1, 1, 0)
+        
+        fouran!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
+        fouran!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
 
-    # # After plasma-wall kernel
-    # dbg("grpw_block (plasma-wall)", grpw_block)
+        # ----------------------------------------------------------
+        # Wall–Plasma block
+        # ----------------------------------------------------------
+        j1, j2 = 2, 1
+        ksgn = 2*j2 - 3
+        grwpw_block = similar(grdgre)
+        grdgre, grwpw_block = kernel!(xwal, zwal, xpla, zpla, j1, j2, ksgn, 1, 1, 0)
 
-    # # ----------------------------------------------------------
-    # # Wall–Plasma block
-    # # ----------------------------------------------------------
-    # j1, j2 = 2, 1
-    # ksgn = 2*j2 - 3
-    # grwpw_block = similar(grdgre)
-    # #grdgre, grwpw_block = kernel!(xwal, zwal, xpla, zpla, j1, j2, ksgn, 1, 1, 0)
+        fouran!(grwpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
+        fouran!(grwpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
 
-    # if lfele == 1
-    #     felang!(grwpw_block, grdgre, cnqd, 0,0)
-    #     felang!(grwpw_block, grdgre, snqd, 0,jmax1)
-    # end
-    # if lfour == 1
-    #     fouran!(grwpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-    #     fouran!(grwpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
-    # end
+        # ----------------------------------------------------------
+        # Wall–Wall block
+        # ----------------------------------------------------------
+        j1, j2 = 2, 2
+        ksgn = 2*j2 - 3
+        grww_block = similar(grdgre)
+        grdgre, grww_block = kernel!(xwal, zwal, xwal, zwal, j1, j2, ksgn, 1, 1, 0)
 
-    # # After wall-plasma kernel
-    # dbg("grwpw_block (wall-plasma)", grwpw_block)
+        fouran!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
+        fouran!(grww_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
 
-    # # ----------------------------------------------------------
-    # # Wall–Wall block
-    # # ----------------------------------------------------------
-    # j1, j2 = 2, 2
-    # ksgn = 2*j2 - 3
-    # grww_block = similar(grdgre)
-    # #grdgre, grww_block = kernel!(xwal, zwal, xwal, zwal, j1, j2, ksgn, 1, 1, 0)
+        # ----------------------------------------------------------
+        # Assemble matrices for solving
+        # ----------------------------------------------------------
+        assemble_vacuum_matrix!(
+            vacmat, vacmti, vacmatu, vacmtiu,
+            grwp, grpw_block, grwpw_block, grww_block,
+            mth, jmax1, ln, lx, factpi
+        )
+    end
 
-    # if lfele == 1
-    #     felang!(grww_block, grdgre, cnqd, 0,0)
-    #     felang!(grww_block, grdgre, snqd, 0,jmax1)
-    # end
-    # if lfour == 1
-    #     fouran!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-    #     fouran!(grww_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
-    # end
+    # Add cn0 to make grdgre nonsingular for n=0 modes
+    if (abs(globals.n) <= 1e-5) && (!globals.farwal) && (settings.vacdat.ishape <= 10)
+        for i in 1:mth12, j in 1:mth12
+            grdgre[i, j] += settings.vacdat.cn0
+        end
+    end
 
-    # # After wall-wall kernel
-    # dbg("grww_block (wall-wall)", grww_block)
+    # Only needed for mutual inductance with the wall calculations
+    if globals.kernelsign < 0
+        grdgre .*= globals.kernelsign
+        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
+        for i in 1:2 * (globals.mth + 5)
+            grdgre[i, i] += 2.0
+        end
+    end
 
-    # # ----------------------------------------------------------
-    # # Assemble matrices for solving
-    # # ----------------------------------------------------------
-    # assemble_vacuum_matrix!(
-    #     vacmat, vacmti, vacmatu, vacmtiu,
-    #     grwp, grpw_block, grwpw_block, grww_block,
-    #     mth, jmax1, ln, lx, factpi
-    # )
+    # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
+    grri .= grdgre \ grri
 
-    # Need an equivalent assemble_vacuum_matrix! call here for the plasma-plasma block only
+    # I am not sure why we recall wwall here
+    globals.xwal, globals.zwal = wwall(settings, globals)
 
-    # After assembling vacmat
-    dbg("vacmat assembled", vacmat)
-    dbg_scalar("factpi", factpi)
+    # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    # ----------------------------------------------------------
-    # Solve vacuum system
-    # ----------------------------------------------------------
-    solve_vacuum!(
-        vacmat, vacmti, vacmatu, 
-        vacmtiu, ajll, chiwc
-    )
+    # Perform inverse Fourier transforms to get final response matrices (eq. 115-118 of Chance 2007)
+    foranv!(arr, grri, cslth, 0, 0)
+    foranv!(aii, grri, snlth, 0, jmax1)
+    foranv!(ari, grri, snlth, 0, 0)
+    foranv!(air, grri, cslth, 0, jmax1)
 
-    # After solving vacuum
-    dbg("ajll", ajll)
-    dbg("chiwc", chiwc)
-    dbg("chiws", chiws)
+    # Form final vacuum response matrix (eq. 114 of Chance 2007)
+    vacmat  .= arr .+ aii
+    vacmti .= air .- ari
 
-    println("vacmat size = ", size(vacmat))
-    println("ajll size = ", length(ajll))
-    println("chiwc size = ", length(chiwc))
-
-    # ----------------------------------------------------------
-    # Call arrays! here with proper parameters
-    # ----------------------------------------------------------
-    grri = zeros(Float64, nths2, nths2)    # allocate grri
-    delfac = 0.5                          # example value; set as needed
-    # Replace this with setuparrays! ?
-    # arrays!(mth, dth, lmin, lmax, qa1, n, delfac, delta, xpla, zpla, grri, farwal != 0)
-
+    # Not sure why setup_arrays has to get called again here either
+    delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth = setuparrays!(globals, settings)
 end
 
 """
@@ -187,7 +161,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grdgre`: Gradient Green's function matrix
 - `gren`: Green's function matrix
 """
-function kernel!(X, Z, Xp, Zp, j1, j2, isgn, iopw, iops, wall_flag)
+function kernel(X, Z, Xp, Zp, j1, j2, isgn, iopw, iops, wall_flag)
 
     # matrix output gren is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
@@ -454,35 +428,27 @@ function kernel!(X, Z, Xp, Zp, j1, j2, isgn, iopw, iops, wall_flag)
     return grdgre, gren
 end
 
-function foranv!(gil::Matrix{Float64}, gll::Matrix{Float64}, cs::Matrix{Float64},
+"""
+    foranv!(gll, gil, cs, m00, l00, mth, lmin, lmax, dth)
+
+    Purpose:
+      This routine performs the inverse Fourier transform of gil onto gll
+      using Fourier coefficients stored in cs.
+    
+    Inputs:
+      gil(i,l)   : input matrix of size (mth × jmax1), the Fourier-space data
+      cs(j,l)    : Fourier coefficient matrix (mth × jmax1)
+      m00, l00   : integer offsets in the gil matrix
+      lmin, lmax : define the active range of Fourier mode indices
+      mth        : number of θ-grid points (dimension of gil along i)
+      dth        : grid spacing in θ
+    
+    Output:
+      gll(l2,l1) : output matrix updated in-place
+"""
+function foranv!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64},
                  m00::Int, l00::Int, mth::Int, lmin::Int, lmax::Int,
                  dth::Float64)
-    
-    # -------------------------------------------------------------------------
-    # Purpose:
-    #   This routine performs the inverse Fourier transform of gil using the
-    #   coefficient matrix cs, producing the real-space matrix gll.
-    #
-    # Notes:
-    #   • The summation is over the θ-grid index i.
-    #   • The factor (dth ⋅ twopi) accounts for the discretized integration
-    #     over poloidal angle θ (with spacing dth and full 2π periodicity).
-    #   • gll is symmetric in the sense that its block depends on l1, l2
-    #     but the roles of l1 and l2 are not interchangeable here because
-    #     cs is indexed by (i, l2) and gil by (i, l1).
-    #
-    # Inputs:
-    #   gil(i', l') : input Fourier-space data, dimensions (nths2 × nfm2)
-    #   cs(i, l2)   : Fourier coefficient matrix (mth × jmax1)
-    #   m00, l00    : integer offsets into gil
-    #   mth         : number of θ-grid points
-    #   lmin, lmax  : Fourier mode index bounds
-    #   dth         : angular spacing (2π / mth)
-    #
-    # Output:
-    #   gll(l2, l1) : jmax1 × jmax1 real-space block
-    #
-    # -------------------------------------------------------------------------
 
     jmax1 = lmax - lmin + 1
 
@@ -505,9 +471,26 @@ function foranv!(gil::Matrix{Float64}, gll::Matrix{Float64}, cs::Matrix{Float64}
     return gll
 end
 
+"""
+    fouran!(gil, gij, cs, m00, l00, lmin, lmax, mth)
+
+    Purpose:
+      This routine performs a truncated Fourier transform of gij onto gil
+      using Fourier coefficients stored in cs.
+    
+    Inputs:
+      gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
+      cs(j,l)    : Fourier coefficient matrix (mth × jmax1)
+      m00, l00   : integer offsets in the gil matrix
+      lmin, lmax : define the active range of Fourier mode indices
+      mth        : number of θ-grid points (dimension of gij along i, j)
+    
+    Output:
+      gil(i', l') : matrix updated in-place, where i' = m00 + i and l' = l00 + l
+"""
 function fouran!(
-    gij::Matrix{Float64},
     gil::Matrix{Float64},
+    gij::Matrix{Float64},
     cs::Matrix{Float64},
     m00::Int,
     l00::Int,
@@ -515,24 +498,6 @@ function fouran!(
     lmax::Vector{Int},
     mth::Int
 )
-
-    # -------------------------------------------------------------------------
-    # Purpose:
-    #   This routine performs a truncated Fourier transform of gij onto gil
-    #   using Fourier coefficients stored in cs.
-    #
-    # Inputs:
-    #   gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
-    #   cs(j,l)    : Fourier coefficient matrix (mth × jmax1)
-    #   m00, l00   : integer offsets in the gil matrix
-    #   lmin, lmax : define the active range of Fourier mode indices
-    #   mth        : number of θ-grid points (dimension of gij along i, j)
-    #
-    # Output:
-    #   gil(i', l') : matrix updated in-place, where i' = m00 + i and l' = l00 + l
-    #
-    # -------------------------------------------------------------------------
-
     # Compute jmax1 like Fortran
     jmax1 = lmax[1] - lmin[1] + 1
 

@@ -336,8 +336,8 @@ function wwall(vac_set::VacuumSettingsType, vac_glob::VacuumGlobalsType)
     mth2 = vac_glob.mth2
 
     farwal = vac_glob.farwal
-    xinf = vac_glob.xinf
-    zinf = vac_glob.zinf
+    xinf = vac_glob.xpla
+    zinf = vac_glob.zpla
 
     aw = vac_set.vacdat.aw
     bw = vac_set.vacdat.bw
