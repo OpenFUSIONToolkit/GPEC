@@ -21,7 +21,8 @@ c-----------------------------------------------------------------------
       INTEGER, PARAMETER :: r4_=SELECTED_REAL_KIND(6,37),
      $     r8=SELECTED_REAL_KIND(13,307)
       LOGICAL :: lsymz,check1,check2,lanal,lkdis,lpest1,lpless,wall,
-     $     lnova,checks,lfunin,checke,checkd,symvac,verbose_timer_output
+     $     lnova,checks,lfunin,checke,checkd,symvac,
+     $     verbose_timer_output, use_legacy_greens_function
 
       INTEGER, PARAMETER :: nc31=31,maxc1=100,maxa1=200,max2=3,
      $     nccl3=72,numvar=100,ndima=2,ndim0=5,neqv1=1
@@ -41,7 +42,7 @@ c-----------------------------------------------------------------------
      $     iovac,ipshp,ladj,ldcon,leqarcw,lfele,lfour,lgato,lj,
      $     lkplt,lnsav,lrgato,lspark,lxsav,lzio,m,mdiv,mfel,mj,mp,mp0,
      $     mp1,mth,mth1,mth2,mthin,mthin1,mthin2,ndfel,neigvc,neigvl,
-     $     nj,nunst,nx,nz,nzd1,nzd2,idgt,idot,ieig,ieps,ishape,
+     $     nj,nosurf,nunst,nx,nz,nzd1,nzd2,idgt,idot,ieig,ieps,ishape,
      $     ismth,lff,lmax1,lpsub,lwrt11,mphi,mx,mz,nloop,nloopr,nminus,
      $     noutv,nph,nphil,nphse,nplus,nsing,ntloop,cdfid,nd1,nd2,nd12,
      $     neqv2,neqv3,neqv4,neqv5,nfmsq,ndimlp,
@@ -74,7 +75,7 @@ c-----------------------------------------------------------------------
       REAL(r8), DIMENSION(9) :: xiin=(/0,0,0,0,0,0,0,1,0/)
       REAL(r8), DIMENSION(100) :: eigval
       REAL(r8), DIMENSION(:), POINTER :: xirc,xirs,xiic,xiis,
-     $     grpssq,xsq,gpsdth,xsqdth,delta,xjdtxj,xsdtxs,
+     $     grpssq,xsq,gpsdth,xsqdth,xjacob,delta,xjdtxj,xsdtxs,
      $     gpdtgp,slngth,xinf,zinf,xplap,zplap,fv,val0,
      $     xobp,zobp,xloop,zloop
       REAL(r8), DIMENSION(:,:), POINTER :: vacmat,vacmatu,vacmtiu,vals
@@ -116,6 +117,7 @@ c-----------------------------------------------------------------------
 c     define derived sizes.
 c-----------------------------------------------------------------------
       WRITE(*,*) "m at beginning of global_alloc = ", m
+      use_legacy_greens_function = .false.
       ntsin=ntsin0+5
       nsf=nsf0+1
       nfe=1+nsf/2

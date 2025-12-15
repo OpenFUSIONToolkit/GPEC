@@ -91,7 +91,6 @@ c-----------------------------------------------------------------------
       nths0=mthvac
       nfm=mpert
       mtot=mpert
-
       call global_alloc(nths0,nfm,mtot,ntsin0)
       farwal=.false.
       IF (farwal_flag) farwal=.true.
@@ -363,6 +362,7 @@ c-----------------------------------------------------------------------
       mthin2 = mthin + 2
       mdiv   = 2
       idgt = 0
+      nosurf = ( mp - 1 ) * mdiv + 1
       n1surf = 4
       npsurf = 6
       dpsi   = one / mdiv / m
@@ -501,7 +501,7 @@ c-----------------------------------------------------------------------
          zork1(i+2) = dlenth(i)
       enddo
       zork1(1) = dlenth(mth-1)
-      zork1(2) = dlenth(mth)
+      zork1(2) = dlenth(mth) 
       zork1(mth3) = dlenth(1)
       zork1(mth4) = dlenth(2)
       zork1(mth5) = dlenth(3)
@@ -859,9 +859,9 @@ c-----------------------------------------------------------------------
              cwrkr(nsew,i) = 0.0
              cwrki(nsew,i) = 0.0
            end do
-
+           
            isg = 1
-
+           
            call chi ( xwal,zwal,xwalp,zwalp,isg,chiwc,chiws, ns,0,
      $          cwrkr,cwrki,nsew, blr,bli,rwall )
 

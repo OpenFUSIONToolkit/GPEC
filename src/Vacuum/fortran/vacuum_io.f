@@ -59,18 +59,18 @@ c-----------------------------------------------------------------------
       USE vglobal_mod
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
-
+      
       logical, save :: warned = .false.
 
       character(8) under
       data under / "--------" /
       namelist / modes  / mfel,m,mth,n,mdiv,lsymz,lfunin,xiin,
      .     leqarcw, lpest1, lnova, ladj, ldcon, lgato, lrgato, lspark,
-     $     ismth, lzio, mp0,mp1
+     $     ismth, lzio, mp0, mp1
       namelist / debugs / checkd, checke, check1, check2, checks,
      $     wall, lkplt, verbose_timer_output
       namelist / vacdat / ishape,aw,bw,cw,dw,tw,nsing,epsq,noutv,delg,
-     .     idgt, idot, delfac, idsk, cn0
+     .     idgt, idot, delfac, idsk, cn0, use_legacy_greens_function
       namelist / diagns / lkdis, ieig, iloop,
      $     nloop,nloopr,
      .     lpsub, nphil, nphse, mx, mz, nph, xofsl,
@@ -116,7 +116,7 @@ c-----------------------------------------------------------------------
      $        "  > Vacuum code overriding r",r," from vac.in, to be",0
          r=0.0
          warned = .true.
-      endif
+      endif 
 c-----------------------------------------------------------------------
 c     subsidiary computations.
 c-----------------------------------------------------------------------
