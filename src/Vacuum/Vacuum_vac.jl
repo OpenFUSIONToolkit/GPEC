@@ -51,7 +51,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # ----------------------------------------------------------
     # Apply wall boundary conditions
     # ----------------------------------------------------------
-    # wwall!(mth, xwal, zwal)
+    wwall!(mth, xwal, zwal)
 
     # ----------------------------------------------------------
     # Plasma–Plasma block
@@ -187,12 +187,16 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grdgre`: Gradient Green's function matrix
 - `gren`: Green's function matrix
 """
-function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag)
+function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, globals::VacuumGlobalsType)
+
+    dth = globals.dth
+    mth = globals.mth
+    mth1 = globals.mth1
 
     # matrix output gren is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
-
-    the = theta_values = LinRange(0, 2*pi, 100)
+    
+    the = LinRange(0, mth*dth, mth+1)
     thetas = the
 
     # 1. definition for solving parameters
@@ -450,6 +454,7 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
         gren[j, 1:mth] ./= twopi
 
     end
+
 end
 
 function foranv!(gil::Matrix{Float64}, gll::Matrix{Float64}, cs::Matrix{Float64},

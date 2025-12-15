@@ -4,10 +4,12 @@ using TOML, Interpolations, SpecialFunctions, Printf
 
 include("Vacuum_data.jl")
 include("Vacuum_init.jl")
+include("Vacuum_vac.jl")
 include("Vacuum_math.jl")
 include("Vacuum_wall.jl")
 
 export mscvac, set_dcon_params, VacuumInputType, compute_vacuum_response
+export kernel!
 
 # ======================================================================
 # Legacy fortran vacuum module interface
