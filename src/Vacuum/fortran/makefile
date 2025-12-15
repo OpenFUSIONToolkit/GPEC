@@ -24,7 +24,8 @@ OBJS = \
 	vacuum_penn.o \
 	vacuum_sprk2.o \
 	vacuum_ut.o \
-	vacuum_vac.o
+	vacuum_vac.o \
+	test_kernel_data.o
 
 # targets
 

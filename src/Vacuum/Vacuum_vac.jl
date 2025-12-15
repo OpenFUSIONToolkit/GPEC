@@ -170,7 +170,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grdgre`: Gradient Green's function matrix
 - `gren`: Green's function matrix
 """
-function kernel(X, Z, Xp, Zp, j1, j2, isgn, iopw, iops, wall_flag)
+function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag)
 
     # matrix output gren is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
@@ -433,8 +433,6 @@ function kernel(X, Z, Xp, Zp, j1, j2, isgn, iopw, iops, wall_flag)
         gren[j, 1:mth] ./= twopi
 
     end
-    
-    return grdgre, gren
 end
 
 """

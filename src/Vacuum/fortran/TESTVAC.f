@@ -143,10 +143,10 @@ c-----------------------------------------------------------------------
       INTEGER, PARAMETER :: mthvac = 900
       INTEGER :: mtheta = 200
       INTEGER :: i, j
-      LOGICAL :: complex_flag = .TRUE.
+      INTEGER :: complex_flag = 1
       REAL(r8) :: kernelsignin = 1.0_r8
-      LOGICAL :: walflag = .FALSE.
-      LOGICAL :: farwalflag = .TRUE.
+      INTEGER :: walflag = 0
+      INTEGER :: farwalflag = 1
       INTEGER, PARAMETER :: mpert = 34
       COMPLEX(r8), DIMENSION(mpert, mpert) :: wv
       REAL(r8), DIMENSION(2*(mthvac+5),mpert*2) :: grriio
@@ -246,6 +246,66 @@ c-----------------------------------------------------------------------
 
 c-----------------------------------------------------------------------
 
+c-----------------------------------------------------------------------
+c     Test 5: test kernel from vacuum_vac.f
+c-----------------------------------------------------------------------
+      SUBROUTINE test_kernel
+      USE vglobal_mod
+      USE vacuum_mod
+      USE test_kernel_data
+      IMPLICIT NONE
+
+      INTERFACE
+         SUBROUTINE kernel(xobs,zobs,xsce,zsce,grdgre,gren,
+     $        j1,j2,isgn,iopw,iops,ischk)
+            USE vglobal_mod, ONLY: r8
+            REAL(r8), DIMENSION(:), INTENT(IN) :: xobs,zobs,xsce,zsce
+            REAL(r8), DIMENSION(:,:), INTENT(OUT) :: grdgre
+            REAL(r8), DIMENSION(:,:), INTENT(OUT), TARGET :: gren
+            INTEGER, INTENT(IN) :: j1,j2,isgn,iopw,iops,ischk
+         END SUBROUTINE kernel
+      END INTERFACE
+
+      ! REAL(r8), DIMENSION(517) :: xobs, zobs, xsce, zsce
+      REAL(r8), DIMENSION(:, :), ALLOCATABLE :: grdgre
+      REAL(r8), DIMENSION(:, :), TARGET, ALLOCATABLE :: gren
+      ! INTEGER :: j1, j2, isgn, iopw, iops, ischk
+      INTEGER :: mthvac = 512
+      ! INTEGER :: nths
+      ! INTEGER :: nths2
+      INTEGER :: j, i
+      nths = mthvac + 5
+      nths2 = 2 * nths
+      mth = 900
+      mth1 = 901
+      mth = 512
+
+      ALLOCATE(grdgre(nths2,nths2))
+      ALLOCATE(gren(1:mth1,1:mth1))
+      
+      nths = 901
+      grdgre = 0.0_r8
+      gren = 0.0_r8
+
+      mth = 512
+      mth1 = mth + 1
+
+      ! WRITE(*,*) SIZE(gren,1), SIZE(gren,2)
+      
+      CALL kernel(xobs, zobs, xsce, zsce, grdgre, gren,
+     $            j1, j2, isgn, iopw, iops, ischk)
+
+      WRITE(*,*) 'gren(1:5,1:5) matrix:'
+      DO i = 1, 5
+         WRITE(*,'(5(F12.6,2X))') (gren(i,j), j=1,5)
+      END DO
+      WRITE(*,*) 'grdgre(1:5,1:5) matrix:'
+      DO i = 1, 5
+         WRITE(*,'(5(F12.6,2X))') (grdgre(i,j), j=1,5)
+      END DO
+
+      END SUBROUTINE test_kernel
+c-----------------------------------------------------------------------
       END MODULE TESTVAC_MOD
 
 c-----------------------------------------------------------------------
@@ -268,9 +328,12 @@ c-----------------------------------------------------------------------
       WRITE(*,*) "-----------------------------------"
       WRITE(*,*) "Test 3: MSCVAC"
       CALL test_mscvac
+      ! WRITE(*,*) "-----------------------------------"
+      ! WRITE(*,*) "Test 4: Vaccal"
+      ! CALL test_vaccal
       WRITE(*,*) "-----------------------------------"
-      WRITE(*,*) "Test 4: Vaccal"
-      CALL test_vaccal
+      WRITE(*,*) "Test 5: Kernel"
+      CALL test_kernel
 
       WRITE(*,*) "-----------------------------------"
       WRITE(*,*) "All tests completed successfully."
