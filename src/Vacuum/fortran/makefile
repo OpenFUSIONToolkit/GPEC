@@ -17,7 +17,6 @@ F90 = $(FC) $(FFLAGS) $(ZEROFLAG) $(RECURSFLAG) $(LEGACYFLAG)
 
 OBJS = \
 	bzio.o \
-	aleg_new.o \
 	vacuum_global.o \
 	vacuum_io.o \
 	vacuum_ma.o \
