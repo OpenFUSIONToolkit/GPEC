@@ -10,7 +10,7 @@ and data dumping.
 ### TODOs
 Check if normalize is ever false, currently always true, and if not, remove related logic
 """
-function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::VacuumMod.WallShapeSettings)
 
     # TODO: it looks like vac_memory is always true - remove all ahg things and just assume true?
     vac_memory = true
@@ -54,7 +54,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
             wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(vac_inputs, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, intr.dir_path)
         error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
         kernelsignin = 1.0

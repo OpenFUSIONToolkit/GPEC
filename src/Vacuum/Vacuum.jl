@@ -10,7 +10,7 @@ include("Vacuum_wall.jl")
 
 export mscvac, set_dcon_params, VacuumInputType, compute_vacuum_response
 export kernel!
-export VacuumSettingsType, Vacuum_Control, WallShape
+export WallShapeSettings
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -219,11 +219,11 @@ function compute_vacuum_response(wall_settings::WallShapeSettings, vac_inputs::V
     )
 
     # Set up plasma and wall position arrays (`arrays` function in Fortran)
-    setuparrays!(globals, settings)
+    setuparrays!(globals, wall_settings)
 
     # Call funint
 
-    vaccal!(globals, settings)
+    vaccal!(globals, wall_settings)
 
     # copy vacuum response matrix to output and return
     wv = zeros(ComplexF64, mpert, mpert)

@@ -324,12 +324,12 @@ function d3dwall!(xwall::Vector{Float64}, ywall::Vector{Float64}, mthh::Int,rext
 end
 
 """
-    wwall(vac_set::VacuumSettingsType, vac_glob::VacuumGlobalsType)
+    wwall(vac_set::WallShapeSettings, vac_glob::VacuumGlobalsType)
 
     return x array and z array for length mth1.
         
 """
-function wwall(vac_set::VacuumSettingsType, vac_glob::VacuumGlobalsType)
+function wwall(vac_set::WallShapeSettings, vac_glob::VacuumGlobalsType)
 
     mth = vac_glob.mth
     mth1 = vac_glob.mth1
@@ -339,23 +339,23 @@ function wwall(vac_set::VacuumSettingsType, vac_glob::VacuumGlobalsType)
     xinf = vac_glob.xpla
     zinf = vac_glob.zpla
 
-    aw = vac_set.vacdat.aw
-    bw = vac_set.vacdat.bw
-    cw = vac_set.vacdat.cw
-    dw = vac_set.vacdat.dw
-    tw = vac_set.vacdat.tw
+    aw = vac_set.aw
+    bw = vac_set.bw
+    cw = vac_set.cw
+    dw = vac_set.dw
+    tw = vac_set.tw
 
-    ishape = vac_set.vacdat.ishape
-    a = vac_set.wall.a
-    b = vac_set.wall.b
-    abulg = vac_set.wall.abulg
-    bbulg = vac_set.wall.bbulg
-    tbulg = vac_set.wall.tbulg
-    xma = vac_set.wall.xma
-    zma = vac_set.wall.zma
-    isph = vac_set.wall.isph
+    ishape = vac_set.ishape
+    a = vac_set.a
+    b = vac_set.b
+    abulg = vac_set.abulg
+    bbulg = vac_set.bbulg
+    tbulg = vac_set.tbulg
+    xma = vac_set.xma
+    zma = vac_set.zma
+    isph = vac_set.isph
 
-    leqarcw = vac_set.modes.leqarcw
+    leqarcw = vac_set.leqarcw
 
     dth = 2.0 * π / (mth1) # (2.0*pi / (mth+1))
     inside = 0

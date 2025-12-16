@@ -142,7 +142,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr, wall_settings)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
                 println("Free-boundary mode unstable for n = $nstring.")
