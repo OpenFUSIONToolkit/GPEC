@@ -27,7 +27,7 @@ wv = zeros(ComplexF64, mpert, mpert)
 complex_flag = true     # Use complex arithmetic
 kernelsignin = -1.0    # Kernel sign
 wall_flag = false      # Include wall effects
-farwal_flag = true     # Far wall approximation
+farwall_flag = true     # Far wall approximation
 
 # Geometry and source data
 grrio = rand(Float64, 2*(mthvac+5), mpert*2)  # Geometry data
@@ -37,7 +37,7 @@ xzptso = rand(Float64, mthvac+5, 4)           # Source points
 JPEC.VacuumMod.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
-    wall_flag, farwal_flag,
+    wall_flag, farwall_flag,
     grrio, xzptso
 )
 
@@ -58,7 +58,7 @@ heatmap(angle.(wv),
         ylabel=&quot;Mode i&quot;,
         color=:phase)</code></pre><h2 id="Advanced-Usage"><a class="docs-heading-anchor" href="#Advanced-Usage">Advanced Usage</a><a id="Advanced-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Usage" title="Permalink"></a></h2><h3 id="Including-Wall-Effects"><a class="docs-heading-anchor" href="#Including-Wall-Effects">Including Wall Effects</a><a id="Including-Wall-Effects-1"></a><a class="docs-heading-anchor-permalink" href="#Including-Wall-Effects" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Enable wall calculations
 wall_flag = true
-farwal_flag = false  # Do not use far wall approximation
+farwall_flag = false  # Do not use far wall approximation
 
 # Additional wall parameters might be needed
 # (specific implementation depends on geometry)
@@ -66,7 +66,7 @@ farwal_flag = false  # Do not use far wall approximation
 JPEC.VacuumMod.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
-    wall_flag, farwal_flag,
+    wall_flag, farwall_flag,
     grrio, xzptso
 )</code></pre><h3 id="Multi-mode-Analysis"><a class="docs-heading-anchor" href="#Multi-mode-Analysis">Multi-mode Analysis</a><a id="Multi-mode-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Multi-mode-Analysis" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Analyze eigenvalues of vacuum matrix
 using LinearAlgebra
@@ -111,5 +111,5 @@ using BenchmarkTools
 
 @time JPEC.VacuumMod.mscvac(wv, mpert, mtheta, mthvac,
                            complex_flag, kernelsignin,
-                           wall_flag, farwal_flag,
-                           grrio, xzptso)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../splines/">« Spline Examples</a><a class="docs-footer-nextpage" href="../equilibrium/">Equilibrium Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 16 December 2025 21:41">Tuesday 16 December 2025</span>. Using Julia version 1.11.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+                           wall_flag, farwall_flag,
+                           grrio, xzptso)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../splines/">« Spline Examples</a><a class="docs-footer-nextpage" href="../equilibrium/">Equilibrium Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 16 December 2025 22:39">Tuesday 16 December 2025</span>. Using Julia version 1.11.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
