@@ -324,38 +324,38 @@ function d3dwall!(xwall::Vector{Float64}, ywall::Vector{Float64}, mthh::Int,rext
 end
 
 """
-    wwall(vac_set::WallShapeSettings, vac_glob::VacuumGlobalsType)
+    wwall(wall_settings::WallShapeSettings, vac_glob::VacuumGlobalsType)
 
-    return x array and z array for length mth1.
+    return x array and z array for length. 
         
 """
-function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings)
+function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma_surf::PlasmaGeometry)
 
-    mth = vac_glob.mth
-    mth1 = vac_glob.mth1
-    mth2 = vac_glob.mth2
+    mth = inputs.mtheta
+    mth1 = inputs.mtheta + 1
+    mth2 = inputs.mtheta + 2
 
-    farwal = vac_glob.farwal
-    xinf = vac_glob.xpla
-    zinf = vac_glob.zpla
+    farwal = inputs.farwal_flag
+    xinf = plasma_surf.x
+    zinf = plasma_surf.z
 
-    aw = vac_set.aw
-    bw = vac_set.bw
-    cw = vac_set.cw
-    dw = vac_set.dw
-    tw = vac_set.tw
+    aw = wall_settings.aw
+    bw = wall_settings.bw
+    cw = wall_settings.cw
+    dw = wall_settings.dw
+    tw = wall_settings.tw
 
-    ishape = vac_set.ishape
-    a = vac_set.a
-    b = vac_set.b
-    abulg = vac_set.abulg
-    bbulg = vac_set.bbulg
-    tbulg = vac_set.tbulg
-    xma = vac_set.xma
-    zma = vac_set.zma
-    isph = vac_set.isph
+    ishape = wall_settings.ishape
+    a = wall_settings.a
+    b = wall_settings.b
+    abulg = wall_settings.abulg
+    bbulg = wall_settings.bbulg
+    tbulg = wall_settings.tbulg
+    xma = wall_settings.xma
+    zma = wall_settings.zma
+    isph = wall_settings.isph
 
-    leqarcw = vac_set.leqarcw
+    leqarcw = wall_settings.leqarcw
 
     dth = 2.0 * π / (mth1) # (2.0*pi / (mth+1))
     inside = 0
@@ -842,8 +842,8 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings)
             zwal1[i] = zpp[i]
         end
     end
-    vac_glob.xwal = xwal1
-    vac_glob.zwal = zwal1
+    xwal = xwal1
+    zwal = zwal1
 
     # Call to savewall(wcentr,xwal1,zwal1) from Fortran can be added here if implemented in Julia
     # savewall(wcentr, xwal1, zwal1) 
@@ -863,7 +863,7 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings)
     aw = awsave # restore value of aw
     bw = bwsave # restore value of bw
 
-    vac_glob.xwal = xwal1
-    vac_glob.zwal = zwal1
-    return xwal1, zwal1
+    xwal = xwal1
+    zwal = zwal1
+    return xwal, zwal
 end

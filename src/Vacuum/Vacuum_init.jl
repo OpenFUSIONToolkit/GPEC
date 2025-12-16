@@ -191,23 +191,24 @@ function initialize_plasma_surface(inputs::VacuumInputType)
     )
 end
 
-function initialize_wall(inputs::VacuumInputType, wall_settings::WallShapeSettings)
+function initialize_wall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma_surf::PlasmaGeometry)
 
-    # TODO: Wall arrays lengths are not debugged - these should become length mth like the plasma
-    theta_grid = range(0, stop=2π, length=globals.mth1)
+    mtheta = inputs.mtheta
+
+   # All of these arrays are of length mtheta with θ = [0, 1)
+    theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] 
+    
     # Get wall shape from wwall (these are of length mth + 2)
-    xwal, zwal = wwall(inputs, wall_settings)
+    x_wall, z_wall = wwall(inputs, wall_settings, plasma_surf)
     # We need [1:mth1] below because these arrays are of size mth + 2 (for periodic finite differencing?) - try to remove this later
     # Wall boundary theta derivative
-    xwalp = periodic_cubic_deriv(theta_grid, xwal[1:mth1])
-    zwalp = periodic_cubic_deriv(theta_grid, zwal[1:mth1])
-    xwalp[mth1] = xwalp[1] # enforce periodicity?
-    zwalp[mth1] = zwalp[1]
+    dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall[1:inputs.mtheta])
+    dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall[1:inputs.mtheta])
 
     return WallGeometry(
         x_wall,
         z_wall,
-        xwalp,
-        zwalp
+        dx_dtheta,
+        dz_dtheta
     )
 end

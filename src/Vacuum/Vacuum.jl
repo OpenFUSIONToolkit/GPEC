@@ -210,7 +210,7 @@ function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::Vacuu
 
     # Initialize plasma and wall surfaces
     plasma_surf = initialize_plasma_surface(inputs)
-    wall = initialize_wall(inputs, wall_settings)
+    wall = initialize_wall(inputs, wall_settings, plasma_surf)
 
     # Call funint
 
