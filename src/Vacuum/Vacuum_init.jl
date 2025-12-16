@@ -75,7 +75,6 @@ considerations that might be able to be avoided by just using periodic splines i
 function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     
     # Sizes
-    theta_grid = range(0, stop=2π, length=globals.mth1)
     jmax1 = globals.lmax[1] - globals.lmin[1] + 1 # this is just mpert from DCON, yeah? rename
     nq = globals.n * globals.qa1
     
@@ -84,9 +83,10 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     delx = plrad * settings.vacdat.delfac # not used yet?
     delz = plrad * settings.vacdat.delfac
 
+    # TODO: Wall arrays lengths are not debugged - these should become length mth like the plasma
+    theta_grid = range(0, stop=2π, length=globals.mth1)
     # Get wall shape from wwall (these are of length mth + 2)
     globals.xwal, globals.zwal = wwall(settings, globals)
-
     # We need [1:mth1] below because these arrays are of size mth + 2 (for periodic finite differencing?) - try to remove this later
     # Wall boundary theta derivative
     globals.xwalp = periodic_cubic_deriv(theta_grid, globals.xwal[1:globals.mth1])
@@ -94,9 +94,21 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     globals.xwalp[globals.mth1] = globals.xwalp[1] # enforce periodicity?
     globals.zwalp[globals.mth1] = globals.zwalp[1]
 
-    # Plasma boundary theta derivative
-    globals.xplap = periodic_cubic_deriv(theta_grid, globals.xpla[1:globals.mth1])
-    globals.zplap = periodic_cubic_deriv(theta_grid, globals.zpla[1:globals.mth1])
+    # Plasma boundary theta derivative (this is semi-working)
+    # All of these arrays are of length mth with θ = [0, 1)
+    theta_grid = range(0, stop=2π, length=globals.mth1)[1:end-1] # length mth
+    globals.xplap = periodic_cubic_deriv(theta_grid, globals.xpla)
+    globals.zplap = periodic_cubic_deriv(theta_grid, globals.zpla)
+
+    open("xplap_zplap_julia.out", "w") do io
+        println(io, "# index\t xplap\t zplap")
+        n = max(length(globals.xplap), length(globals.zplap))
+        for i in 1:n
+            xv = i <= length(globals.xplap) ? globals.xplap[i] : NaN
+            zv = i <= length(globals.zplap) ? globals.zplap[i] : NaN
+            println(io, "$(i)\t$(xv)\t$(zv)")
+        end
+    end
 
     # Allocate arrays
     globals.cnqd = zeros(globals.mth1)
@@ -109,8 +121,8 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # TODO: add cplar/cwallr loop here if needed
 
     # Trigonometric basis arrays
-    for is in 1:globals.mth1
-        theta = (is-1) * globals.dth
+    for is in 1:globals.mth
+        theta = (is-1) * globals.dth # 2π / mtheta
         znqd = nq * globals.delta[is]
         globals.cnqd[is] = cos(znqd)
         globals.snqd[is] = sin(znqd)

@@ -211,14 +211,10 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
 
     # Initialize
     mtheta_in = length(vecin)
-    vecout = similar(vecin, mtheta + 2)
 
-    # If mthin == mth, just copy and add periodic entries
+    # If mthin == mth, just return the input vector
     if mtheta == mtheta_in
-        vecout[1:mth] .= vecin
-        vecout[mtheta+1] = vecout[1]
-        vecout[mtheta+2] = vecout[2]
-        return vecout
+        return vecin
     end
 
     # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
@@ -226,13 +222,12 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
     itp = cubic_spline_interpolation(θin, vecin)
 
     # Interpolate to new grid with optional offsets
+    vecout = zeros(mtheta)
     for i in 1:mtheta
         x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
         x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
         vecout[i] = itp(x)
     end
-    vecout[mtheta+1] = vecout[1]
-    vecout[mtheta+2] = vecout[2]
     return vecout
 end
 
