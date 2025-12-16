@@ -6,7 +6,7 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 
-function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
+function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry)
 
     # Initialization
     grri = zeros(2 * inputs.mtheta, 2 * inputs.mpert)
@@ -86,7 +86,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     if (abs(inputs.n) <= 1e-5) && (!inputs.farwall_flag) && (wall.is_closed_toroidal)
         mth12 = inputs.farwall_flag ? inputs.mtheta : 2 * inputs.mtheta
         for i in 1:mth12, j in 1:mth12
-            grdgre[i, j] += wall_settings.cn0
+            grdgre[i, j] += inputs.cn0
         end
     end
 

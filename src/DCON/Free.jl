@@ -43,7 +43,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         n = ipert_n - 1 + intr.nlow
         
         # Set VACUUM run parameters and boundary shape
-        vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr)
+        vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
         vac_inputs.mtheta = ctrl.mthvac
@@ -78,9 +78,8 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Placeholder for Julia vacuum code
         wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, wall_flag, intr.dir_path)
-        println("WV from Fortran")
+        println("WV from Julia")
         display(wv_block)
-        # error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
         if ctrl.wv_farwall_flag
             wv_block .= wv_temp
@@ -179,7 +178,7 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `intr`: Internal DCON parameters (DconInternal)
 
 """
-function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
@@ -222,7 +221,8 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         mpert = intr.mpert,
         n = n,
         qa = qa,
-        mtheta_eq = equil.config.control.mtheta
+        mtheta_eq = equil.config.control.mtheta,
+        cn0 = ctrl.wv_cn0
     )
 end
 

@@ -29,6 +29,7 @@ Holds plasma boundary and mode data as provided from DCON namelist and computed 
     farwall_flag::Bool = false
     kernelsign::Float64 = 1.0
     force_wv_symmetry::Bool = true
+    cn0::Float64 = 1.0
 end
 
 """
@@ -122,7 +123,6 @@ Input settings for vacuum wall and geometry.
 - `idsk`: Not referenced.
 - `delg`: Non-integer. Size of arrows for the eddy current plots. Integer part is length of shaft and decimal part is size of the head.
 - `delfac`: Controls grid size to calculate derivatives in `spark` type calculations.
-- `cn0`: Constant added to the cal K matrix to make it nonsingular for n=0 modes.
 
 - `leqarcw`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
   the wall is very close to the plasma. See `ishape=6` option.
@@ -158,7 +158,6 @@ Input settings for vacuum wall and geometry.
     idsk::Int = 0
     delg::Float64 = 15.01
     delfac::Float64 = 0.001
-    cn0::Int = 1
 
     leqarcw::Int = 1
     ipshp::Int = 0
