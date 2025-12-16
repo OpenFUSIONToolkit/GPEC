@@ -183,7 +183,7 @@ Parameters for vacuum wall and geometry.
 - `xma` : shifting major radius point.
 
 """
-@kwdef mutable struct WallShape
+@kwdef mutable struct WallShapeSettings
     ishape::Int = 6
     aw::Float64 = 0.05
     bw::Float64 = 1.5
@@ -217,93 +217,4 @@ Parameters for vacuum wall and geometry.
     qain::Float64 = 2.5
     xma::Float64 = 1.0
     zma::Float64 = 0.0
-end
-
-"""
-    struct Vacuum_Control
-
-Vacuum calculation and output options
-
-- `mth` : Even integer. Number of grid points used for the calculation. The values of 
-  the needed quantities on these points are interpolated from those gotten from 
-  the plasma information in `mp0`, `mp1`, `vacin`, `invacuum`, or equivalent.
-- `lsymz`: .true. Symmetrizes the vacuum matrix.
-
-- `lkdis`: Logical. Turns on the eddy current calculations. Calls `subroutine kdis`.
-- `ieig`: Integer. Options for getting the surface eigenfunctions xi(l).
-    * 1: From pest-1. Writes the omega^2 and xi(l).
-    * 4: Reads from file `outdist`.
-    * 5: Gets xi(l) from the input `xiin` in namelist `modes`.
-    * 8: Re[xi(k)] and Im[xi(k)] from input file `vacin` for `gato`'s input.
-- `iloop`: Integer. Turns on Mirnov coils calculation.
-    * 1: Coil locations given by dee-shaped geometry set by parameters below.
-    * 2: PBX's Mirnov coil positions.
-- `lpsub`: Integer. Uses subroutines for coil positions. Otherwise uses namelist inputs `(xloop, zloop)`.
-- `nloop`: Number of coils around the plasma.
-- `nloopr`: Number of radial loops.
-- `nphil`: Number of phi positions for the loop calculations.
-- `nphse`: Number of phi positions for the eddy current plots.
-- `xofsl`: Offset of the loop positions.
-- `ntloop`: Number of loop positions distributed along the shell.
-- `aloop`: Distance of the loop "dee" from plasma.
-- `bloop`: Elongation of the loop "dee".
-- `dloop`: Triangularity of the loop "dee".
-- `rloop`: Not referenced.
-- `deloop`: Delta fraction of `plrad` to calculate magnetic field from the derivative of chi.
-- `mx`, `mz`: Contour grid for chi.
-- `nph`: Number of such contours in phi.
-- `nxlpin`, `nzlpin`: Number of X and Z grid points for field evaluation.
-- `epslp`: Grid tolerance for field evaluation.
-- `xlpmin`, `xlpmax`: X grid bounds for field evaluation.
-- `zlpmin`, `zlpmax`: Z grid bounds for field evaluation.
-- `linterior`: Field logic (0 = exterior, 1 = interior).
-"""
-@kwdef mutable struct Vacuum_Control
-    mth::Int = 480
-    lsymz::Bool = true
-
-    checkd::Bool = false
-	checke::Bool = false
-
-    lkdis::Bool = false
-    ieig::Int = 0
-    iloop::Int = 0
-    lpsub::Int = 1
-    nloop::Int = 128
-    nloopr::Int = 0
-    nphil::Int = 3
-    nphse::Int = 1
-    xofsl::Float64 = 0.0
-    ntloop::Int = 32
-    aloop::Float64 = 0.01
-    bloop::Float64 = 1.6
-    dloop::Float64 = 0.5
-    rloop::Float64 = 1.0
-    deloop::Float64 = 0.001
-    mx::Int = 21
-    mz::Int = 21
-    nph::Int = 0
-    nxlpin::Int = 6
-    nzlpin::Int = 11
-    epslp::Float64 = 0.02
-    xlpmin::Float64 = 0.7
-    xlpmax::Float64 = 2.7
-    zlpmin::Float64 = -1.5
-    zlpmax::Float64 = 1.5
-    linterior::Int = 2
-end
-
-
-"""
-    struct VacuumSettingsType
-
-Holds all user-configurable namelist (TOML) options for the vacuum solver, grouped by
-Fortran input namelist group. This struct is the canonical place for all user-input fields.
-
-- `wall`: Plasma and wall geometry parameters.
-- `control`: Vacuum calculation and output options.
-"""
-@kwdef mutable struct VacuumSettingsType
-    wall::WallShape = WallShape()
-    control::Vacuum_Control = Vacuum_Control()
 end

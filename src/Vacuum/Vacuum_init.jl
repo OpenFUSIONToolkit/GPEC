@@ -5,7 +5,7 @@
         wall::Bool,                 # Wall flag
         farwal::Bool,               # Far wall flag
         kernelsign::Float64,        # Kernel sign
-        settings::VacuumSettingsType, # Settings parsed from vac.toml
+        wall_settings::WallShapeSettings, # Settings parsed from toml
         input::VacuumInputType      # Vacuum input data from DCON
     ) -> VacuumGlobalsType
 
@@ -20,7 +20,7 @@ function build_vacuum_globals(
     wall::Bool,
     farwal::Bool,
     kernelsign::Float64,
-    settings::VacuumSettingsType,
+    wall_settings::WallShapeSettings,
     input::VacuumInputType,
 )
     # Interpolate arrays from input onto mthvac grid (in readahg in the Fortran)
@@ -38,7 +38,7 @@ function build_vacuum_globals(
         end
     end
 
-    farwal = farwal || (settings.wall.a >= 10.)
+    farwal = farwal || (wall_settings.a >= 10.)
 
     return VacuumGlobalsType(
         n=input.n,
@@ -63,7 +63,7 @@ function build_vacuum_globals(
 end
 
 """
-    setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
+    setuparrays!(globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
 
 Julia implementation of the Fortran `arrays`` function. Sets up geometric arrays and updates the `globals` struct in-place.
 It computes the wall shape and its derivatives, as well as the plasma boundary derivatives.
@@ -72,7 +72,7 @@ Returns delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth.
 This function will need checking against the Fortran version to ensure correctness. There are many complex indexing
 considerations that might be able to be avoided by just using periodic splines in Julia.
 """
-function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
+function setuparrays!(globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
     
     # Sizes
     jmax1 = globals.lmax[1] - globals.lmin[1] + 1 # this is just mpert from DCON, yeah? rename
@@ -80,13 +80,13 @@ function setuparrays!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     
     # Compute geometric quantities
     plrad = 0.5 * (maximum(globals.xpla) - minimum(globals.xpla)) # plasma radius (rename)
-    delx = plrad * settings.vacdat.delfac # not used yet?
-    delz = plrad * settings.vacdat.delfac
+    delx = plrad * wall_settings.delfac # not used yet?
+    delz = plrad * wall_settings.delfac
 
     # TODO: Wall arrays lengths are not debugged - these should become length mth like the plasma
     theta_grid = range(0, stop=2π, length=globals.mth1)
     # Get wall shape from wwall (these are of length mth + 2)
-    globals.xwal, globals.zwal = wwall(settings, globals)
+    globals.xwal, globals.zwal = wwall(wall_settings, globals)
     # We need [1:mth1] below because these arrays are of size mth + 2 (for periodic finite differencing?) - try to remove this later
     # Wall boundary theta derivative
     globals.xwalp = periodic_cubic_deriv(theta_grid, globals.xwal[1:globals.mth1])

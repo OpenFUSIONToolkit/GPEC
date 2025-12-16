@@ -127,6 +127,7 @@ end
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
+    force_wv_symmetry:Bool = true
 end
 
 # TODO: how can we initialize the splines to not be nothings?

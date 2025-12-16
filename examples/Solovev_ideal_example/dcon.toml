@@ -39,42 +39,7 @@ ucrit = 1e3                   # Maximum fraction of solutions allowed before re-
 
 use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
 
-[VACUUM_CONTROL]
-mth = 480
-lsymz = true
-checkd = false
-check1 = false
-check2 = false
-checke = false
-checks = false
-wall = false
-lkplt = 0
-lkdis = false
-ieig = 0
-iloop = 0
-lpsub = 1
-nloop = 128
-nloopr = 0
-nphil = 3
-nphse = 1
-xofsl = 0
-ntloop = 32
-aloop = 0.01
-bloop = 1.6
-dloop = 0.5
-rloop = 1.0
-deloop = 0.001
-mx = 21
-mz = 21
-nph = 0
-nxlpin = 6
-nzlpin = 11
-epslp = 0.02
-xlpmin = 0.7
-xlpmax = 2.7
-zlpmin = -1.5
-zlpmax = 1.5
-linterior = 2
+force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
 
 [WALL]
 ishape = 6

@@ -206,7 +206,7 @@ end
 Compute the vacuum response matrix using provided vacuum inputs. This is a placeholder for the Julia conversion of the
 fortran mscvac function. It will return the relevant arrays, wv, grri, and xzpts.
 """
-function compute_vacuum_response(settings::VacuumSettingsType, vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwal_flag::Bool, folder::String=".")
+function compute_vacuum_response(wall_settings::WallShapeSettings, vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwal_flag::Bool, folder::String=".")
 
     globals = build_vacuum_globals(
         mtheta_vac,
@@ -214,7 +214,7 @@ function compute_vacuum_response(settings::VacuumSettingsType, vac_inputs::Vacuu
         wall_flag,
         farwal_flag,
         kernelsign,
-        settings,
+        wall_settings,
         vac_inputs
     )
 
@@ -224,8 +224,6 @@ function compute_vacuum_response(settings::VacuumSettingsType, vac_inputs::Vacuu
     # Call funint
 
     vaccal!(globals, settings)
-
-    # do the main conditional ieig logic
 
     # copy vacuum response matrix to output and return
     wv = zeros(ComplexF64, mpert, mpert)

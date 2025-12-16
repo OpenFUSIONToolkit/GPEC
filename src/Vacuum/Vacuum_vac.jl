@@ -10,7 +10,7 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 
-function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
+function vaccal!(globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
 
     # Initialization
     globals.xwal[1] = 0.0
@@ -37,14 +37,14 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # Apply wall boundary conditions
     # ----------------------------------------------------------
     # TODO: does this need to get called more than once? Currently calling it three separate times
-    globals.xwal, globals.zwal = wwall(settings, globals)
+    globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, false, globals, settings)
+    kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, false, globals, wall_settings)
 
     # Enforce periodic boundary conditions
     for i = 1:globals.mth2
@@ -64,7 +64,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
         grpw_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, settings)
+        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall_settings)
         
         fouran!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fouran!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -75,7 +75,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         j1, j2 = 2, 1
         ksgn = 2*j2 - 3
         grwp_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, settings)
+        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, wall_settings)
 
         fouran!(grwp_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fouran!(grwp_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -86,7 +86,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
         grww_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, settings)
+        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall_settings)
 
         fouran!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fouran!(grww_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -103,9 +103,9 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
 
     # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
-    if (abs(globals.n) <= 1e-5) && (!globals.farwal) && (settings.vacdat.ishape <= 10)
+    if (abs(globals.n) <= 1e-5) && (!globals.farwal) && (wall_settings.ishape <= 10)
         for i in 1:mth12, j in 1:mth12
-            grdgre[i, j] += settings.vacdat.cn0
+            grdgre[i, j] += wall_settings.cn0
         end
     end
 
@@ -122,7 +122,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     grri .= grdgre \ grri
 
     # TODO: I am not sure why we recall wwall here again? This is the third time...
-    globals.xwal, globals.zwal = wwall(settings, globals)
+    globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
@@ -137,11 +137,26 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     vacmat  .= arr .+ aii
     vacmti .= air .- ari
 
+    # force symmetry
+    # todo pass dcon_control force_wv_symmetry flag here through vac_inputs
+    lsymz = true
+    if lsymz
+        for l1 in 1:jmax1
+            for l2 in l1:jmax1
+                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
+                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
+                rmatr[l1, l2]  = 0.5 * (rmatr[l1, l2]  + rmatr[l2, l1])
+            end
+        end
+    end
+
+
     # Not sure why setup_arrays has to get called again here either
-    setuparrays!(globals, settings)
+    setuparrays!(globals, wall_settings)
     
     # Fortran check2 data dump
-    if settings.check2
+    # todo clean up our own wall/plasma geometry outputs instead
+    if false
         open("julia_vaccal_arrays.out", "w") do io
             println(io, "I, xp, zp, xw, zw, xpp, zpp, xwp, zwp =")
             # Derivatives (xplap, etc.) are not readily available here yet.
@@ -176,14 +191,14 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grdgre`: Gradient Green's function matrix
 - `gren`: Green's function matrix
 """
-function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, globals::VacuumGlobalsType, settings::VacuumSettingsType)
+function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
 
     dth = globals.dth
     mth = globals.mth
     mth1 = globals.mth1
     ak0i = 0.0
     jres = 1
-    ishape = settings.vacdat.ishape
+    ishape = wall_settings.ishape
     N_obs = length(xobs)
     the = LinRange(0, mth*dth, mth+1)
     
