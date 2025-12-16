@@ -39,16 +39,6 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # TODO: does this need to get called more than once? Currently calling it three separate times
     globals.xwal, globals.zwal = wwall(settings, globals)
 
-    open("./xpla_zpla_julia.out", "w") do io
-        println(io, "# index\t xpla\t zpla")
-        n = max(length(globals.xpla), length(globals.zpla))
-        for i in 1:n
-            xv = i <= length(globals.xpla) ? globals.xpla[i] : NaN
-            zv = i <= length(globals.zpla) ? globals.zpla[i] : NaN
-            println(io, "$(i)\t$(xv)\t$(zv)")
-        end
-    end
-
     # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------

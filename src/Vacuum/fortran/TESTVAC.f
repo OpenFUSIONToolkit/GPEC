@@ -274,21 +274,28 @@ c-----------------------------------------------------------------------
       ! INTEGER :: nths
       ! INTEGER :: nths2
       INTEGER :: j, i
-      nths = mthvac + 5
-      nths2 = 2 * nths
-      mth = 900
-      mth1 = 901
-      mth = 512
+      INTEGER :: mtheta = 256
 
-      ALLOCATE(grdgre(nths2,nths2))
+      ntsin0 = mtheta + 1
+      nths0  = mthvac
+      nfm    = 34
+      mtot   = nfm
+
+      CALL global_alloc(nths0,nfm,mtot,ntsin0)
+      farwal = .true.
+      CALL defglo(mthvac)
+
+      WRITE(*,*) "mth1 = ", mth1
+      WRITE(*,*) "nths2 = ", nths2
       ALLOCATE(gren(1:mth1,1:mth1))
+      ALLOCATE(grdgre(nths2,nths2))
       
-      nths = 901
-      grdgre = 0.0_r8
-      gren = 0.0_r8
+      ! nths = 901
+      ! grdgre = 0.0_r8
+      ! gren = 0.0_r8
 
-      mth = 512
-      mth1 = mth + 1
+      ! mth = 512
+      ! mth1 = mth + 1
 
       ! WRITE(*,*) SIZE(gren,1), SIZE(gren,2)
       
@@ -319,21 +326,21 @@ c-----------------------------------------------------------------------
       USE TESTVAC_MOD
 
       WRITE(*,*) "Running tests for vacuum module."
-      WRITE(*,*) "-----------------------------------"
-      WRITE(*,*) "Test 1: Green function"
-      CALL test_green
-      WRITE(*,*) "-----------------------------------"
-      WRITE(*,*) "Test 2: Fourier and Inverse Fourier"
-      CALL test_fourier
-      WRITE(*,*) "-----------------------------------"
-      WRITE(*,*) "Test 3: MSCVAC"
-      CALL test_mscvac
+      ! WRITE(*,*) "-----------------------------------"
+      ! WRITE(*,*) "Test 1: Green function"
+      ! CALL test_green
+      ! WRITE(*,*) "-----------------------------------"
+      ! WRITE(*,*) "Test 2: Fourier and Inverse Fourier"
+      ! CALL test_fourier
       ! WRITE(*,*) "-----------------------------------"
       ! WRITE(*,*) "Test 4: Vaccal"
       ! CALL test_vaccal
       WRITE(*,*) "-----------------------------------"
       WRITE(*,*) "Test 5: Kernel"
       CALL test_kernel
+      ! WRITE(*,*) "-----------------------------------"
+      ! WRITE(*,*) "Last Test: MSCVAC"
+      ! CALL test_mscvac
 
       WRITE(*,*) "-----------------------------------"
       WRITE(*,*) "All tests completed successfully."

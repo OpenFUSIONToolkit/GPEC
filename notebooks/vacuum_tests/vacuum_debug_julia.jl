@@ -151,3 +151,30 @@ catch e
     end
     println()
 end
+
+#---------------------------------------------------------------
+#  Print a small portion of the output matrices for inspection
+#---------------------------------------------------------------
+
+# Debug: Check what's in the result matrices
+println("===== RESULT DIAGNOSTICS =====")
+println("grdgre exists: $(isdefined(Main, :grdgre))")
+println("gren exists: $(isdefined(Main, :gren))")
+println()
+
+if isdefined(Main, :grdgre) && isdefined(Main, :gren)
+    println("grdgre size: $(size(grdgre))")
+    println("gren size: $(size(gren))")
+    println()
+
+    println("gren first 5x5:")
+    display(gren[1:min(5,size(gren,1)), 1:min(5,size(gren,2))])
+    
+    println("grdgre first 5x5:")
+    display(grdgre[1:min(5,size(grdgre,1)), 1:min(5,size(grdgre,2))])
+    println()
+    
+else
+    println("ERROR: Result matrices not defined!")
+    println("Make sure to run the kernel execution cell first.")
+end
