@@ -47,15 +47,19 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
         vac_inputs.mtheta = ctrl.mthvac
+        vac_inputs.force_wv_symmetry = ctrl.force_wv_symmetry
 
         vac_inputs.farwal_flag = true
         vac_inputs.kernelsign = -1.0
         # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
         VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
             wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        
+        println("WV from Fortran")
+        display(wv_block)
 
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, complex_flag, wall_flag, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, wall_flag, intr.dir_path)
         error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
         vac_inputs.kernelsign = 1.0

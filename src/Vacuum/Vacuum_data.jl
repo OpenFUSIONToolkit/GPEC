@@ -37,6 +37,7 @@ Holds plasma boundary and mode data as provided from DCON or equivalent upstream
     mtheta::Int = 1
     farwal_flag::Bool = false
     kernelsign::Float64 = 1.0
+    force_wv_symmetry::Bool = true
 end
 
 """
