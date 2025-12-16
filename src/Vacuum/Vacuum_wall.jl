@@ -329,7 +329,7 @@ end
     return x array and z array for length mth1.
         
 """
-function wwall(vac_set::WallShapeSettings, vac_glob::VacuumGlobalsType)
+function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings)
 
     mth = vac_glob.mth
     mth1 = vac_glob.mth1

@@ -21,104 +21,69 @@ Holds plasma boundary and mode data as provided from DCON or equivalent upstream
 - `n`: The toroidal mode number. Paper: n.
 - `qa`: Safety factor at the plasma boundary.
 - `mtheta_in`: Number of poloidal angles in the input boundary arrays.
+- `farwal_flag`: Boolean flag indicating if the conducting wall is at infinity.
+- `kernelsign`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations.
 """
-struct VacuumInputType
-    r::Vector{Float64}
-    z::Vector{Float64}
-    delta::Vector{Float64}
-    mlow::Int
-    mhigh::Int
-    n::Int
-    qa::Float64
-    mtheta_in::Int
+@kwdef mutable struct VacuumInputType
+    r::Vector{Float64} = Float64[]
+    z::Vector{Float64} = Float64[]
+    delta::Vector{Float64} = Float64[]
+    mlow::Int = 0
+    mhigh::Int = 0
+    mpert::Int = 0
+    n::Int = 0
+    qa::Float64 = 0.0
+    mtheta_eq::Int = 1
+    mtheta::Int = 1
+    farwal_flag::Bool = false
+    kernelsign::Float64 = 1.0
 end
 
-#################################
-# Vacuum Globals Struct         #
-#################################
-
 """
-    struct VacuumGlobalsType
+    struct PlasmaGeometry
 
-Holds all derived, static, and globally shared parameters for a vacuum calculation.
-This struct contains only values that are computed once at initialization and are
-immutable/thread-safe for the duration of a run. Anything set directly by user input
-(namelist/TOML) lives in `VacuumSettingsType`.
+FILL THIS IN LATER
 
 # Fields
 
-## Grid Parameters
-- `mth`: Number of poloidal grid points (theta grid), derived from input/settings.
-- `mth1`: `mth + 1` (theta grid plus periodic point).
-- `mth2`: `mth + 2` (theta grid plus periodic and one extra point).
-- `nfm`: Number of Fourier modes (often equals `mpert` from settings).
-- `mtot`: Total number of modes (may be equal to `nfm`).
-
-## Mode Indices (Lagrange/Fourier Basis)
-- `lmin`: Lower indices for basis modes (length `jmax1`).
-- `lmax`: Upper indices for basis modes (length `jmax1`).
-
-## Plasma Geometry (Derived)
 - `xinf`: Plasma surface R (theta grid, length `mth1`).
 - `zinf`: Plasma surface Z (theta grid, length `mth1`).
 - `delta`: Surface offset or Shafranov shift (length `mth1`).
 - `xplap`: dR/dtheta at plasma surface (computed from `xinf`).
 - `zplap`: dZ/dtheta at plasma surface (computed from `zinf`).
+- FILL THE REST IN LATER
+"""
+@kwdef struct PlasmaGeometry
+    xpla::Vector{Float64}
+    zpla::Vector{Float64}
+    delta::Vector{Float64}
+    xplap::Vector{Float64}
+    zplap::Vector{Float64}
 
-## Physical Derived Parameters
-- `qa1`: Safety factor at plasma boundary (copied from DCON or computed).
-- `ga1`: Geometric factor, e.g., R*Bphi or similar (from geometry).
-- `fa1`: Poloidal flux normalization (from geometry).
+    cnqd::Vector{Float64}
+    snqd::Vector{Float64}
+    sinlt::Matrix{Float64}
+    coslt::Matrix{Float64}
+    snlth::Matrix{Float64}
+    cslth::Matrix{Float64}
+end
 
-## Wall Geometry (if present, derived from input/settings)
+"""
+    struct WallGeometry
+
+FILL THIS IN LATER
+
+# Fields
 - `xwal`: Wall R coordinates (length `mth1` or `mth2`).
 - `zwal`: Wall Z coordinates (length `mth1` or `mth2`).
 - `xwalp`: dR/dtheta at wall (computed).
 - `zwalp`: dZ/dtheta at wall (computed).
-
-## Miscellaneous Derived/Initialization Values
-- `dth`: Poloidal angle step (`2π/mth`).
-- `wall`: Wall present/enabled (from settings, but may be recomputed).
-- `farwal`: "Far wall" logic, set by geometry checks.
-- `kernelsign`: Sign for kernel; +1 or -1 (set by main routine, default +1).
 """
-@kwdef mutable struct VacuumGlobalsType
-    n::Int      = 1
-    mth::Int    = 512
-    mth1::Int   = 513
-    mth2::Int   = 514
-    nfm::Int    = 0
-    mtot::Int   = 0
-
-    lmin::Vector{Int} = Int[]
-    lmax::Vector{Int} = Int[]
-
-    xpla::Vector{Float64} = Float64[]
-    zpla::Vector{Float64} = Float64[]
-    delta::Vector{Float64} = Float64[]
-    xplap::Vector{Float64} = Float64[]
-    zplap::Vector{Float64} = Float64[]
-
-    qa1::Float64 = 0.0
-    ga1::Float64 = 0.0
-    fa1::Float64 = 0.0
-
+@kwdef struct WallGeometry
     xwal::Vector{Float64} = Float64[]
     zwal::Vector{Float64} = Float64[]
     xwalp::Vector{Float64} = Float64[]
     zwalp::Vector{Float64} = Float64[]
-
-    dth::Float64    = 0.0
-    wall::Bool      = true
-    farwal::Bool    = true
-    kernelsign::Float64 = 1.0
-
-    cnqd::Vector{Float64} = Float64[]
-    snqd::Vector{Float64} = Float64[]
-    sinlt::Matrix{Float64} = Array{Float64,2}(undef,0,0)
-    coslt::Matrix{Float64} = Array{Float64,2}(undef,0,0)
-    snlth::Matrix{Float64} = Array{Float64,2}(undef,0,0)
-    cslth::Matrix{Float64} = Array{Float64,2}(undef,0,0)
 end
 
 #############################################

@@ -46,33 +46,34 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr)
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
+        vac_inputs.mtheta = ctrl.mthvac
 
-        farwal_flag = true
-        kernelsignin = -1.0
+        vac_inputs.farwal_flag = true
+        vac_inputs.kernelsign = -1.0
         # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, complex_flag, wall_flag, intr.dir_path)
         error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
-        kernelsignin = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        vac_inputs.kernelsign = 1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
         if ctrl.wv_farwall_flag
             wv_temp .= wv_block
         end
 
-        farwal_flag = false
-        kernelsignin = -1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        vac_inputs.farwal_flag = false
+        vac_inputs.kernelsign = -1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
-        kernelsignin = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        vac_inputs.kernelsign = 1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
         if ctrl.wv_farwall_flag
             wv_block .= wv_temp
@@ -205,15 +206,16 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
-    return VacuumMod.VacuumInputType(
-        reverse(r),
-        reverse(z),
-        reverse(delta),
-        n,
-        intr.mhigh,
-        intr.mlow,
-        qa,
-        equil.config.control.mtheta
+    return VacuumMod.VacuumInputType(;
+        r = reverse(r),
+        z = reverse(z),
+        delta = reverse(delta),
+        mhigh = intr.mhigh,
+        mlow = intr.mlow,
+        mpert = intr.mpert,
+        n = n,
+        qa = qa,
+        mtheta_eq = equil.config.control.mtheta
     )
 end
 

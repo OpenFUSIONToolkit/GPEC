@@ -10,7 +10,7 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 
-function vaccal!(globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
+function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
 
     # Initialization
     globals.xwal[1] = 0.0
@@ -64,7 +64,7 @@ function vaccal!(globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
         grpw_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall_settings)
+        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, wall_settings)
         
         fouran!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fouran!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -191,7 +191,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grdgre`: Gradient Green's function matrix
 - `gren`: Green's function matrix
 """
-function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, globals::VacuumGlobalsType, wall_settings::WallShapeSettings)
+function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, inputs::VacuumInputType, wall_settings::WallShapeSettings)
 
     dth = globals.dth
     mth = globals.mth

@@ -206,30 +206,20 @@ end
 Compute the vacuum response matrix using provided vacuum inputs. This is a placeholder for the Julia conversion of the
 fortran mscvac function. It will return the relevant arrays, wv, grri, and xzpts.
 """
-function compute_vacuum_response(wall_settings::WallShapeSettings, vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwal_flag::Bool, folder::String=".")
+function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::VacuumInputType, complex_flag::Bool, wall_flag::Bool, folder::String=".")
 
-    globals = build_vacuum_globals(
-        mtheta_vac,
-        mpert,
-        wall_flag,
-        farwal_flag,
-        kernelsign,
-        wall_settings,
-        vac_inputs
-    )
-
-    # Set up plasma and wall position arrays (`arrays` function in Fortran)
-    setuparrays!(globals, wall_settings)
+    # Initialize plasma and wall surfaces
+    plasma_surf = initialize_plasma_surface(inputs)
+    wall = initialize_wall(inputs, wall_settings)
 
     # Call funint
 
-    vaccal!(globals, wall_settings)
+    vaccal!(plasma_surf, wall, wall_settings)
 
     # copy vacuum response matrix to output and return
-    wv = zeros(ComplexF64, mpert, mpert)
-    grri = zeros(Float64, 2 * (mtheta_vac + 5), mpert * 2)
-    xzpts = zeros(Float64, mtheta_vac + 5, 4)
-
+    wv = zeros(ComplexF64, inputs.mpert, inputs.mpert)
+    grri = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * inputs.mpert)
+    xzpts = zeros(Float64, inputs.mtheta + 5, 4)
     return wv, grri, xzpts
 end
 end
