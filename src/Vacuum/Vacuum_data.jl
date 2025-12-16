@@ -306,33 +306,6 @@ Diagnostics and output control parameters. (Paper Table: "diags")
     linterior::Int = 2
 end
 
-"""
-    struct Sprk
-
-Spark and Feedback type variables. (Paper Table: "sprk")
-
-Note: Under Development.
-"""
-@kwdef mutable struct Sprk
-    nminus::Int = 0
-    nplus::Int = 0
-    mphi::Int = 16
-    lwrt11::Int = 0
-    civ::Float64 = 0.0
-    sp2sgn1::Int = 1
-    sp2sgn2::Int = 1
-    sp2sgn3::Int = 1
-    sp2sgn4::Int = 1
-    sp2sgn5::Int = 1
-    sp3sgn1::Int = -1
-    sp3sgn2::Int = -1
-    sp3sgn3::Int = -1
-    sp3sgn4::Int = 1
-    sp3sgn5::Int = 1
-    lff::Int = 0
-    ff::Float64 = 1.6
-    fv::Vector{Float64} = [1.6 for i in 1:34]
-end
 
 """
     struct VacuumSettingsType
@@ -344,7 +317,6 @@ Fortran input namelist group. This struct is the canonical place for all user-in
 - `vacdat`: Wall and physics parameters.
 - `shape`: Plasma and wall geometry parameters.
 - `diagns`: Diagnostics and output control.
-- `sprk`: Miscellaneous spark/advanced features.
 - `old_version`: Using old version of vacuum if it's true.
 """
 @kwdef mutable struct VacuumSettingsType
@@ -352,6 +324,5 @@ Fortran input namelist group. This struct is the canonical place for all user-in
     vacdat::Vacdat = Vacdat()
     shape::Shape = Shape()
     diagns::Diagns = Diagns()
-    sprk::Sprk = Sprk()
     old_version::Bool = false
 end

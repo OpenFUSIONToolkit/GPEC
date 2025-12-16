@@ -15,7 +15,6 @@ function Main(path::String="./")
     vacuum_settings.vacdat = Vacdat(; (Symbol(k) => v for (k, v) in inputs["VACDAT"])...)
     vacuum_settings.shape = Shape(; (Symbol(k) => v for (k, v) in inputs["SHAPE"])...)
     vacuum_settings.diagns = Diagns(; (Symbol(k) => v for (k, v) in inputs["DIAGNS"])...)
-    vacuum_settings.sprk = Sprk(; (Symbol(k) => v for (k, v) in inputs["SPRK"])...)
 
 
     # Set up variables
