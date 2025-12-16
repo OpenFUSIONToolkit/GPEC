@@ -36,13 +36,8 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # ----------------------------------------------------------
     # Apply wall boundary conditions
     # ----------------------------------------------------------
+    # TODO: does this need to get called more than once? Currently calling it three separate times
     globals.xwal, globals.zwal = wwall(settings, globals)
-
-    # ----------------------------------------------------------
-    # Plasma–Plasma block
-    # ----------------------------------------------------------
-    j1, j2 = 1, 1
-    ksgn = 2*j2 - 3
 
     open("./xpla_zpla_julia.out", "w") do io
         println(io, "# index\t xpla\t zpla")
@@ -54,6 +49,11 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         end
     end
 
+    # ----------------------------------------------------------
+    # Plasma–Plasma block
+    # ----------------------------------------------------------
+    j1, j2 = 1, 1
+    ksgn = 2*j2 - 3
     kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, false, globals, settings)
 
     # Enforce periodic boundary conditions
@@ -70,6 +70,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
+        error("Haven't set up walls yet")
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
         grpw_block = similar(grdgre) # This should be grpp or a new matrix
@@ -110,6 +111,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         )
     end
 
+    # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
     if (abs(globals.n) <= 1e-5) && (!globals.farwal) && (settings.vacdat.ishape <= 10)
         for i in 1:mth12, j in 1:mth12
@@ -129,22 +131,24 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
     grri .= grdgre \ grri
 
-    # I am not sure why we recall wwall here
+    # TODO: I am not sure why we recall wwall here again? This is the third time...
     globals.xwal, globals.zwal = wwall(settings, globals)
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    # Perform inverse Fourier transforms to get final response matrices (eq. 115-118 of Chance 2007)
+    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
     foranv!(arr, grri, cslth, 0, 0)
     foranv!(aii, grri, snlth, 0, jmax1)
     foranv!(ari, grri, snlth, 0, 0)
     foranv!(air, grri, cslth, 0, jmax1)
 
-    # Form final vacuum response matrix (eq. 114 of Chance 2007)
+    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
+    # TODO: just make this vacmat = arr .+ aii + im * (air .- ari) and get rid of complex_flag?
     vacmat  .= arr .+ aii
     vacmti .= air .- ari
 
     # Not sure why setup_arrays has to get called again here either
+    setuparrays!(globals, settings)
     
     # Fortran check2 data dump
     if settings.check2
@@ -159,8 +163,6 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
             end
         end
     end
-
-    delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth = setuparrays!(globals, settings)
 end
 
 """
