@@ -54,11 +54,11 @@ FILL THIS IN LATER
 - FILL THE REST IN LATER
 """
 @kwdef struct PlasmaGeometry
-    xpla::Vector{Float64}
-    zpla::Vector{Float64}
+    x::Vector{Float64}
+    z::Vector{Float64}
     delta::Vector{Float64}
-    xplap::Vector{Float64}
-    zplap::Vector{Float64}
+    dx_dtheta::Vector{Float64}
+    dz_dtheta::Vector{Float64}
 
     cnqd::Vector{Float64}
     snqd::Vector{Float64}
@@ -80,10 +80,10 @@ FILL THIS IN LATER
 - `zwalp`: dZ/dtheta at wall (computed).
 """
 @kwdef struct WallGeometry
-    xwal::Vector{Float64} = Float64[]
-    zwal::Vector{Float64} = Float64[]
-    xwalp::Vector{Float64} = Float64[]
-    zwalp::Vector{Float64} = Float64[]
+    x::Vector{Float64} = Float64[]
+    z::Vector{Float64} = Float64[]
+    dx_dtheta::Vector{Float64} = Float64[]
+    dz_dtheta::Vector{Float64} = Float64[]
 end
 
 #############################################
