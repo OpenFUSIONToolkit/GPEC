@@ -1,5 +1,5 @@
 """
-    struct VacuumInputType
+    struct VacuumInput
 
 Holds plasma boundary and mode data as provided from DCON or equivalent upstream code.
 
@@ -14,7 +14,7 @@ Holds plasma boundary and mode data as provided from DCON or equivalent upstream
 - `farwal_flag`: Boolean flag indicating if the conducting wall is at infinity.
 - `kernelsign`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations.
 """
-@kwdef mutable struct VacuumInputType
+@kwdef mutable struct VacuumInput
     r::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
     delta::Vector{Float64} = Float64[]

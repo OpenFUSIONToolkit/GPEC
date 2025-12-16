@@ -10,7 +10,7 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 
-function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
+function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
 
     # Initialization
     factpi  = 2π
@@ -190,7 +190,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `gradgreensfunction`: Gradient Green's function matrix
 - `greensfunction`: Green's function matrix
 """
-function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInputType, wall_settings::WallShapeSettings)
+function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     mth = inputs.mtheta
     mth1 = inputs.mtheta + 1

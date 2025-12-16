@@ -210,7 +210,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
-    return VacuumMod.VacuumInputType(;
+    return VacuumMod.VacuumInput(;
         r = reverse(r),
         z = reverse(z),
         delta = reverse(delta),
