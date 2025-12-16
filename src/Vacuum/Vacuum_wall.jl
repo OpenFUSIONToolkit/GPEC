@@ -346,14 +346,14 @@ function wwall(vac_set::VacuumSettingsType, vac_glob::VacuumGlobalsType)
     tw = vac_set.vacdat.tw
 
     ishape = vac_set.vacdat.ishape
-    a = vac_set.shape.a
-    b = vac_set.shape.b
-    abulg = vac_set.shape.abulg
-    bbulg = vac_set.shape.bbulg
-    tbulg = vac_set.shape.tbulg
-    xma = vac_set.shape.xma
-    zma = vac_set.shape.zma
-    isph = vac_set.shape.isph
+    a = vac_set.wall.a
+    b = vac_set.wall.b
+    abulg = vac_set.wall.abulg
+    bbulg = vac_set.wall.bbulg
+    tbulg = vac_set.wall.tbulg
+    xma = vac_set.wall.xma
+    zma = vac_set.wall.zma
+    isph = vac_set.wall.isph
 
     leqarcw = vac_set.modes.leqarcw
 

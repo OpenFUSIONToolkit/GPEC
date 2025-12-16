@@ -28,7 +28,7 @@ function build_vacuum_globals(
     zinf = interp_to_new_grid(input.z, mthvac)
     delta = interp_to_new_grid(input.delta, mthvac)
 
-    farwal = farwal || (settings.shape.a >= 10.)
+    farwal = farwal || (settings.wall.a >= 10.)
 
     return VacuumGlobalsType(
         n=input.n,

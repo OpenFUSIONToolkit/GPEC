@@ -126,30 +126,9 @@ end
 #############################################
 
 """
-    struct Modes
+    struct WallShape
 
-Numerical and input control parameters for grid and harmonics.
-(Paper Table: "modes")
-
-- `mth` : Even integer. Number of grid points used for the calculation. The values of 
-  the needed quantities on these points are interpolated from those gotten from 
-  the plasma information in `mp0`, `mp1`, `vacin`, `invacuum`, or equivalent.
-- `xiin`: Array. Input Fourier modes of xi_l(edge). See `ieig` in Sec. diags.
-- `lsymz`: .true. Symmetrizes the vacuum matrix.
-- `leqarcw`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
-  the wall is very close to the plasma. See `ishape=6` option.
-"""
-@kwdef mutable struct Modes
-    mth::Int = 480
-    xiin::Vector{Int} = [0, 0, 0, 0, 0, 0, 0, 1, 0]
-    lsymz::Bool = true
-    leqarcw::Int = 1
-end
-
-"""
-    struct Vacdat
-
-Parameters for vacuum wall and geometry. (Paper Table: "vacdat")
+Parameters for vacuum wall and geometry.
 
 - `ishape`: Integer. Options for the wall shape.
     * `< 0`: Spherical topology.
@@ -184,30 +163,9 @@ Parameters for vacuum wall and geometry. (Paper Table: "vacdat")
 - `delg`: Non-integer. Size of arrows for the eddy current plots. Integer part is length of shaft and decimal part is size of the head.
 - `delfac`: Controls grid size to calculate derivatives in `spark` type calculations.
 - `cn0`: Constant added to the cal K matrix to make it nonsingular for n=0 modes.
-"""
-@kwdef mutable struct Vacdat
-    ishape::Int = 6
-    aw::Float64 = 0.05
-    bw::Float64 = 1.5
-    cw::Float64 = 0.0
-    dw::Float64 = 0.5
-    tw::Float64 = 0.05
-    nsing::Int = 500
-    epsq::Float64 = 1e-05
-    noutv::Int = 37
-    idgt::Int = 6
-    idot::Int = 0
-    idsk::Int = 0
-    delg::Float64 = 15.01
-    delfac::Float64 = 0.001
-    cn0::Int = 1
-end
 
-"""
-    struct Shape
-
-Plasma and wall geometric parameters. (Paper Table: "shape")
-
+- `leqarcw`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
+  the wall is very close to the plasma. See `ishape=6` option.
 - `ipshp`: 0 gets the plasma boundary and safety factor, qedge, etc. from input files. 1 ignores input data files, sets qedge = qain. Shape of plasma is dee-shaped centered at `xpl`, radius `apl`, elongation `bpl`, and triangularity `dpl`. The straight-line coordinate variable delta(theta) is set to zero.
 - `isph` : 0 all vacuum R values are positive, 1 is not.
 - `inside` : 
@@ -223,8 +181,26 @@ Plasma and wall geometric parameters. (Paper Table: "shape")
 - `bbulg` (beta_b): Subtending half-angle of the extent of the bulge.
 - `tbulg` (tau_b): Inverse roundedness of the bulge corners.
 - `xma` : shifting major radius point.
+
 """
-@kwdef mutable struct Shape
+@kwdef mutable struct WallShape
+    ishape::Int = 6
+    aw::Float64 = 0.05
+    bw::Float64 = 1.5
+    cw::Float64 = 0.0
+    dw::Float64 = 0.5
+    tw::Float64 = 0.05
+    nsing::Int = 500
+    epsq::Float64 = 1e-05
+    noutv::Int = 37
+    idgt::Int = 6
+    idot::Int = 0
+    idsk::Int = 0
+    delg::Float64 = 15.01
+    delfac::Float64 = 0.001
+    cn0::Int = 1
+
+    leqarcw::Int = 1
     ipshp::Int = 0
     isph::Int = 0
     inside::Int = 0
@@ -244,9 +220,14 @@ Plasma and wall geometric parameters. (Paper Table: "shape")
 end
 
 """
-    struct Diagns
+    struct Vacuum_Control
 
-Diagnostics and output control parameters. (Paper Table: "diags")
+Vacuum calculation and output options
+
+- `mth` : Even integer. Number of grid points used for the calculation. The values of 
+  the needed quantities on these points are interpolated from those gotten from 
+  the plasma information in `mp0`, `mp1`, `vacin`, `invacuum`, or equivalent.
+- `lsymz`: .true. Symmetrizes the vacuum matrix.
 
 - `lkdis`: Logical. Turns on the eddy current calculations. Calls `subroutine kdis`.
 - `ieig`: Integer. Options for getting the surface eigenfunctions xi(l).
@@ -277,7 +258,9 @@ Diagnostics and output control parameters. (Paper Table: "diags")
 - `zlpmin`, `zlpmax`: Z grid bounds for field evaluation.
 - `linterior`: Field logic (0 = exterior, 1 = interior).
 """
-@kwdef mutable struct Diagns
+@kwdef mutable struct Vacuum_Control
+    mth::Int = 480
+    lsymz::Bool = true
     lkdis::Bool = false
     ieig::Int = 0
     iloop::Int = 0
@@ -313,16 +296,10 @@ end
 Holds all user-configurable namelist (TOML) options for the vacuum solver, grouped by
 Fortran input namelist group. This struct is the canonical place for all user-input fields.
 
-- `modes`: Numerical discretization and symmetry options.
-- `vacdat`: Wall and physics parameters.
-- `shape`: Plasma and wall geometry parameters.
-- `diagns`: Diagnostics and output control.
-- `old_version`: Using old version of vacuum if it's true.
+- `wall`: Plasma and wall geometry parameters.
+- `control`: Vacuum calculation and output options.
 """
 @kwdef mutable struct VacuumSettingsType
-    modes::Modes = Modes()
-    vacdat::Vacdat = Vacdat()
-    shape::Shape = Shape()
-    diagns::Diagns = Diagns()
-    old_version::Bool = false
+    wall::WallShape = WallShape()
+    control::Vacuum_Control = Vacuum_Control()
 end
