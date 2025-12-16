@@ -210,11 +210,11 @@ function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::Vacuu
 
     # Initialize plasma and wall surfaces
     plasma_surf = initialize_plasma_surface(inputs)
-    wall = initialize_wall(inputs, wall_settings)
-
+    # wall = initialize_wall(inputs, wall_settings)
+    wall = WallGeometry()  # Placeholder, fill in later
     # Call funint
 
-    vaccal!(plasma_surf, wall, wall_settings)
+    vaccal!(inputs, plasma_surf, wall, wall_settings)
 
     # copy vacuum response matrix to output and return
     wv = zeros(ComplexF64, inputs.mpert, inputs.mpert)

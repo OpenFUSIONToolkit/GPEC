@@ -13,50 +13,48 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
 function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
 
     # Initialization
-    globals.xwal[1] = 0.0
-    globals.zwal[1] = 0.0
     factpi  = 2π
-    jmax    = 2*globals.lmax[1] + 1
-    jmax1   = globals.lmax[1] - globals.lmin[1] + 1
-    lmax1   = globals.lmax[1] + 1
-    ln      = globals.lmin[1]
-    lx      = globals.lmax[1]
+    jmax    = 2*inputs.mhigh + 1
+    jmax1   = inputs.mpert
+    lmax1   = inputs.mhigh + 1
+    ln      = inputs.mlow
+    lx      = inputs.mhigh
     jdel    = 8
-    nq      = globals.n * globals.qa1
-    tmth    = 2 * globals.mth
+    nq      = inputs.n * inputs.qa
+    tmth    = 2 * inputs.mtheta
     mthsq   = tmth * tmth
     lmth    = tmth * 2 * jmax1
-    j1v     = globals.nfm
-    j2v     = globals.nfm
+    j1v     = inputs.mpert
+    j2v     = inputs.mpert
 
-    grri = zeros(Float64, 2 * (globals.mth + 5), 2 * globals.mtot)
-    grdgre = zeros(Float64, 2 * (globals.mth + 5), 2 * (globals.mth + 5))
-    grpp = zeros(Float64, 2 * (globals.mth + 5), 2 * (globals.mth + 5))
+    grri = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * inputs.mpert)
+    grdgre = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * (inputs.mtheta + 5))
+    grpp = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * (inputs.mtheta + 5))
 
     # ----------------------------------------------------------
     # Apply wall boundary conditions
     # ----------------------------------------------------------
     # TODO: does this need to get called more than once? Currently calling it three separate times
-    globals.xwal, globals.zwal = wwall(wall_settings, globals)
+    # globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, false, globals, wall_settings)
+    kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs, wall_settings)
 
     # Enforce periodic boundary conditions
-    for i = 1:globals.mth2
-        grpp[i,globals.mth1] = grpp[i,1]
-        grpp[i,globals.mth2] = grpp[i,2]
+    for i = 1:inputs.mtheta + 2
+        grpp[i,inputs.mtheta + 1] = grpp[i,1]
+        grpp[i,inputs.mtheta + 2] = grpp[i,2]
     end
 
     # Fourier transform plasma-plasma block
-    fouran!(grri, grpp, cslth, 0, 0, lmin, lmax, mth)
-    fouran!(grri, grpp, snlth, 0, jmax1, lmin, lmax, mth)
+    fouran!(grri, grpp, plasma_surf.cslth, 0, 0, inputs.mlow, inputs.mhigh, inputs.mtheta)
+    fouran!(grri, grpp, plasma_surf.snlth, 0, inputs.mpert, inputs.mlow, inputs.mhigh, inputs.mtheta)
 
-    if !globals.farwal
+    if !inputs.farwal_flag
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
@@ -97,23 +95,23 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         assemble_vacuum_matrix!(
             vacmat, vacmti, vacmatu, vacmtiu,
             grwp, grpw_block, grwp_block, grww_block,
-            mth, jmax1, ln, lx, factpi
+            mth, jmax1, ln, lx, 2π
         )
     end
 
     # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
-    if (abs(globals.n) <= 1e-5) && (!globals.farwal) && (wall_settings.ishape <= 10)
+    if (abs(inputs.n) <= 1e-5) && (!inputs.farwal_flag) && (wall_settings.ishape <= 10)
         for i in 1:mth12, j in 1:mth12
             grdgre[i, j] += wall_settings.cn0
         end
     end
 
     # Only needed for mutual inductance with the wall calculations
-    if globals.kernelsign < 0
-        grdgre .*= globals.kernelsign
+    if inputs.kernelsign < 0
+        grdgre .*= inputs.kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:2 * (globals.mth + 5)
+        for i in 1:2 * (inputs.mtheta + 5)
             grdgre[i, i] += 2.0
         end
     end
@@ -122,37 +120,38 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     grri .= grdgre \ grri
 
     # TODO: I am not sure why we recall wwall here again? This is the third time...
-    globals.xwal, globals.zwal = wwall(wall_settings, globals)
+    # globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    foranv!(arr, grri, cslth, 0, 0)
-    foranv!(aii, grri, snlth, 0, jmax1)
-    foranv!(ari, grri, snlth, 0, 0)
-    foranv!(air, grri, cslth, 0, jmax1)
+    arr = zeros(jmax1, jmax1)
+    aii = zeros(jmax1, jmax1)
+    ari = zeros(jmax1, jmax1)
+    air = zeros(jmax1, jmax1)
+    foranv!(arr, grri, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mlow, inputs.mhigh)
+    foranv!(aii, grri, plasma_surf.snlth, 0, inputs.mpert, inputs.mtheta, inputs.mlow, inputs.mhigh)
+    foranv!(ari, grri, plasma_surf.snlth, 0, 0, inputs.mtheta, inputs.mlow, inputs.mhigh)
+    foranv!(air, grri, plasma_surf.cslth, 0, inputs.mpert, inputs.mtheta, inputs.mlow, inputs.mhigh)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     # TODO: just make this vacmat = arr .+ aii + im * (air .- ari) and get rid of complex_flag?
+    vacmat = zeros(jmax1, jmax1)
+    vacmti = zeros(jmax1, jmax1)
     vacmat  .= arr .+ aii
     vacmti .= air .- ari
 
-    # force symmetry
-    # todo pass dcon_control force_wv_symmetry flag here through vac_inputs
-    lsymz = true
-    if lsymz
+    # Force symmetry of response matrix
+    if inputs.force_wv_symmetry
         for l1 in 1:jmax1
             for l2 in l1:jmax1
                 vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
                 vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-                rmatr[l1, l2]  = 0.5 * (rmatr[l1, l2]  + rmatr[l2, l1])
             end
         end
     end
 
-
-    # Not sure why setup_arrays has to get called again here either
-    setuparrays!(globals, wall_settings)
+    # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
     
     # Fortran check2 data dump
     # todo clean up our own wall/plasma geometry outputs instead
@@ -193,9 +192,9 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 """
 function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, inputs::VacuumInputType, wall_settings::WallShapeSettings)
 
-    dth = globals.dth
-    mth = globals.mth
-    mth1 = globals.mth1
+    mth = inputs.mtheta
+    mth1 = inputs.mtheta + 1
+    dth = 2π / mth
     ak0i = 0.0
     jres = 1
     ishape = wall_settings.ishape
@@ -329,7 +328,7 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
                 # aval is 𝒥 ∇'𝒢ⁿ∇'ℒ, bval is 2pi𝒢ⁿ. aval0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
                 xtp=xpr[ic]  # Fixed: () to []
                 ztp=zpr[ic]  # Fixed: () to []
-                G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,globals.n,usechancebugs=false)
+                G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,inputs.n,usechancebugs=false)
 
                 # 4.8 simpson integral. 4 for odd, 2 for even, and 1 for others.
                 wsimpb=wsimpb2
@@ -394,7 +393,7 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
                     ztp = Interpolations.gradient(itp_z, tgaus0)[1]
 
                     # 6.4 call green function
-                    G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,globals.n,usechancebugs=false)
+                    G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,inputs.n,usechancebugs=false)
 
                     # 6.5 add logarithm on G (not 𝒢_n). Chance eq.(75)
                     # iops = 1
@@ -502,8 +501,7 @@ end
       gll(l2,l1) : output matrix updated in-place
 """
 function foranv!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64},
-                 m00::Int, l00::Int, mth::Int, lmin::Int, lmax::Int,
-                 dth::Float64)
+                 m00::Int, l00::Int, mth::Int, lmin::Int, lmax::Int)
 
     jmax1 = lmax - lmin + 1
 
@@ -515,6 +513,7 @@ function foranv!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}
     end
 
     # Main accumulation (note: gll[l2, l1], not gll[l1, l2])
+    dth = 2π / mth
     for l1 in 1:jmax1
         for l2 in 1:jmax1
             for i in 1:mth
@@ -549,12 +548,12 @@ function fouran!(
     cs::Matrix{Float64},
     m00::Int,
     l00::Int,
-    lmin::Vector{Int},
-    lmax::Vector{Int},
+    lmin::Int,
+    lmax::Int,
     mth::Int
 )
     # Compute jmax1 like Fortran
-    jmax1 = lmax[1] - lmin[1] + 1
+    jmax1 = lmax - lmin + 1
 
     # Zero out relevant gil block
     for l1 in 1:jmax1
@@ -565,7 +564,7 @@ function fouran!(
 
     # Accumulate with ll offset (critical to match Fortran)
     for l1 in 1:jmax1
-        ll = l1 - 1 + lmin[1]
+        ll = l1 - 1 + lmin
         for j in 1:mth
             for i in 1:mth
                 gil[m00 + i, l00 + l1] += cs[j, l1] * gij[i, j]

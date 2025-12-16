@@ -47,6 +47,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
         vac_inputs.mtheta = ctrl.mthvac
+        vac_inputs.force_wv_symmetry = ctrl.force_wv_symmetry
 
         vac_inputs.farwal_flag = true
         vac_inputs.kernelsign = -1.0
