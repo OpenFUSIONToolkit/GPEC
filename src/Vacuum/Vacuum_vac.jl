@@ -9,9 +9,9 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
 function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
 
     # Initialization
-    grri = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * inputs.mpert)
-    grdgre = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * (inputs.mtheta + 5))
-    grpp = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * (inputs.mtheta + 5))
+    grri = zeros(2 * inputs.mtheta, 2 * inputs.mpert)
+    grdgre = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
+    grpp = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
 
     # ----------------------------------------------------------
     # Apply wall boundary conditions
@@ -25,12 +25,6 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
     kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs, wall_settings)
-
-    # Enforce periodic boundary conditions
-    for i = 1:inputs.mtheta + 2
-        grpp[i,inputs.mtheta + 1] = grpp[i,1]
-        grpp[i,inputs.mtheta + 2] = grpp[i,2]
-    end
 
     # Fourier transform plasma-plasma block
     fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mpert)
@@ -93,7 +87,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     if inputs.kernelsign < 0
         grdgre .*= inputs.kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:2 * (inputs.mtheta + 5)
+        for i in 1:2 * inputs.mtheta
             grdgre[i, i] += 2.0
         end
     end
