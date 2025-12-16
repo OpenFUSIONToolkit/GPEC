@@ -37,11 +37,10 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine vaccal
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       integer tmth
 
       REAL(r8), DIMENSION(2) :: summ
@@ -618,7 +617,6 @@ c-----------------------------------------------------------------------
       SUBROUTINE kernel(xobs,zobs,xsce,zsce,grdgre,gren,
      $     j1,j2,isgn,iopw,iops,ischk)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       IMPLICIT NONE
 
       REAL(r8), DIMENSION(:), INTENT(IN) :: xobs,zobs,xsce,zsce
@@ -904,7 +902,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine mateig ( zvec, work, work1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -951,7 +948,6 @@ c-----------------------------------------------------------------------
       subroutine mateig2 ( zvec, nd,msiz, zwk,work0,work,work1, l1,l2,
      $     ff1,lcone, jobid1, nout1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1012,7 +1008,7 @@ c-----------------------------------------------------------------------
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       dimension the(nths)
 c-----------------------------------------------------------------------
 c     format statements.
@@ -1095,7 +1091,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine wwall(nqnqnq,xwal1,zwal1)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1677,7 +1672,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine d3dwall ( xwall, ywall, mthh, iomod, iotty1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1735,7 +1729,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine d3dvesl(r0,z0,a0,e0,ar,az,nval,zst,r,z,npts,ier)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1818,7 +1811,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine eqarcw ( xin, zin, xout, zout, ell, thgr, thlag, mw1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1868,7 +1860,6 @@ c-----------------------------------------------------------------------
       subroutine gatonorm ( vacin, gatovac_, nd, rgato_,mfel_,mth_,
      $     qa1_,twopi_ )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1902,7 +1893,6 @@ c-----------------------------------------------------------------------
       subroutine adjustb(betin,betout,a_,bw_,cw_,dw_,xmaj_,plrad_,
      $   ishape_)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 c-----------------------------------------------------------------------
@@ -1932,7 +1922,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fouran ( gij, gil, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1971,7 +1960,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine foranv ( gil, gll, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2007,11 +1995,10 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine foura2 ( gij,m01,m02, gil, m00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       dimension gij(nths2,nths2), gil(nths,nths)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2054,7 +2041,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fanal ( fth, nt, flc,fls, l1,l2, pi,ddt )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2092,11 +2078,10 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fanal1 ( gi,ndi1,ndi2,mi1, gor,goi,ndo1,ndo2 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       dimension gi(ndi1,ndi2), gor(ndo1,ndo2), goi(ndo1,ndo2)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2140,12 +2125,11 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine felang ( gij, gil, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
       data izcal / 0 /
-      real nq
+      REAL(r8) nq
       dimension gij(nths,nths), gil(nths2,nfm2), cs(*)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2210,12 +2194,11 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine felanv ( gil, gll, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
       data izcal / 0 /
-      real nq
+      REAL(r8) nq
       dimension gil(nths2,nfm2), gll(nfm,nfm), cs(*)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2284,7 +2267,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fotofi ( vin,vout, scnlth, wrk1, wrk2, iopsc )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2312,7 +2294,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine orchek ( wrkr, wrki, wrkrt, wrkit, wrko1,wrko2 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2369,7 +2350,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine tmat ( sil, tll, iop )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 

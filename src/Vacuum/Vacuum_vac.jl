@@ -183,34 +183,16 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
     mth1 = globals.mth1
     ak0i = 0.0
     jres = 1
-    ishape = settings.vacdat.ishape
+    ishape = settings.wall.ishape
     N_obs = length(xobs)
-    the = LinRange(0, mth*dth, mth+1)
+    the = LinRange(0, mth*dth, mth)
     
     if N_obs != length(zobs) || N_obs != length(xsce) || N_obs != length(zsce)
         error("Length of input arrays (xobs, zobs, xsce, zsce) are different. All length should be the same")
     end
 
-    if globals.mth1 != N_obs
-        @warn "globals.mth (=$mth) is different with input array length (=$N_obs). Update global parameters"
-
-        globals.mth = N_obs - 1
-        globals.mth1 = N_obs
-        globals.dth = 2 * π / (N_obs) 
-
-        mth = globals.mth
-        mth1 = globals.mth1
-        dth = globals.dth
-        the = LinRange(0, mth*dth, mth+1)
-    end
-
-
-
-
     # matrix output gren is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
-    
-
 
     # 1. definition for solving parameters
     wsimpb1=1*dth/3
@@ -258,21 +240,12 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
     # xpr = [spline1d_deriv(the, xsce, θ) for θ in thetas]
     # zpr = [spline1d_deriv(the, zsce, θ) for θ in thetas]
 
-    interp_type = BSpline(Cubic(Line()))
-    grid_type = OnGrid() 
+    # Using Interpolations.jl, we can create periodic cubic splines
+    itp_x = cubic_spline_interpolation(the, xsce)
+    itp_z = cubic_spline_interpolation(the, zsce)
 
-    itp_x = interpolate(xsce, interp_type, grid_type)
-    itp_z = interpolate(zsce, interp_type, grid_type)
-
-    itp_x_scaled_nonperiodic = scale(itp_x, the)
-    itp_z_scaled_nonperiodic = scale(itp_z, the)
-
-    itp_x_scaled = Interpolations.extrapolate(itp_x_scaled_nonperiodic, Interpolations.Periodic())
-    itp_z_scaled = Interpolations.extrapolate(itp_z_scaled_nonperiodic, Interpolations.Periodic())
-
-    gradients_x = (t -> Interpolations.gradient(itp_x_scaled, t)).(the)
-    gradients_z = (t -> Interpolations.gradient(itp_z_scaled, t)).(the)
-
+    gradients_x = (t -> Interpolations.gradient(itp_x, t)).(the)
+    gradients_z = (t -> Interpolations.gradient(itp_z, t)).(the)
     xpr = first.(gradients_x) # d x / d theta
     zpr = first.(gradients_z) # d z / d theta
 
@@ -400,10 +373,10 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
                     tgaus0 = mod(tgaus0, 2π)
 
                     # 6.3 get X, X', Z, Z' for gaussian point
-                    xt = itp_x_scaled(tgaus0)
-                    xtp = Interpolations.gradient(itp_x_scaled, tgaus0)[1]
-                    zt = itp_z_scaled(tgaus0)
-                    ztp = Interpolations.gradient(itp_z_scaled, tgaus0)[1]
+                    xt = itp_x(tgaus0)
+                    xtp = Interpolations.gradient(itp_x, tgaus0)[1]
+                    zt = itp_z(tgaus0)
+                    ztp = Interpolations.gradient(itp_z, tgaus0)[1]
 
                     # 6.4 call green function
                     G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,globals.n,usechancebugs=false)
