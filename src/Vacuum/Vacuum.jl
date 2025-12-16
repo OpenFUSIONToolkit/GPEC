@@ -10,6 +10,7 @@ include("Vacuum_wall.jl")
 
 export mscvac, set_dcon_params, VacuumInputType, compute_vacuum_response
 export kernel!
+export VacuumSettingsType, Vacuum_Control, WallShape
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -205,16 +206,8 @@ end
 Compute the vacuum response matrix using provided vacuum inputs. This is a placeholder for the Julia conversion of the
 fortran mscvac function. It will return the relevant arrays, wv, grri, and xzpts.
 """
-function compute_vacuum_response(vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwal_flag::Bool, folder::String=".")
+function compute_vacuum_response(settings::VacuumSettingsType, vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwal_flag::Bool, folder::String=".")
 
-    # Parse vac.toml input file and prepare globals
-    inputs = TOML.parsefile(joinpath(folder, "vac.toml"))
-    settings = VacuumSettingsType()
-    settings.modes = Modes(; (Symbol(k) => v for (k, v) in inputs["MODES"])...)
-    settings.vacdat = Vacdat(; (Symbol(k) => v for (k, v) in inputs["VACDAT"])...)
-    settings.shape = Shape(; (Symbol(k) => v for (k, v) in inputs["SHAPE"])...)
-    settings.diagns = Diagns(; (Symbol(k) => v for (k, v) in inputs["DIAGNS"])...)
-    settings.sprk = Sprk(; (Symbol(k) => v for (k, v) in inputs["SPRK"])...)
     globals = build_vacuum_globals(
         mtheta_vac,
         mpert,

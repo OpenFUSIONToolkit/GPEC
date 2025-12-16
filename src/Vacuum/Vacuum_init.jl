@@ -38,7 +38,7 @@ function build_vacuum_globals(
         end
     end
 
-    farwal = farwal || (settings.shape.a >= 10.)
+    farwal = farwal || (settings.wall.a >= 10.)
 
     return VacuumGlobalsType(
         n=input.n,
