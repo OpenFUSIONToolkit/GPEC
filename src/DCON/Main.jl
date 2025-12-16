@@ -10,10 +10,9 @@ function Main(path::String="./")
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
-    vacuum_settings = VacuumSettingsType()
-    vacuum_settings.control = Vacuum_Control(; (Symbol(k) => v for (k, v) in inputs["VACUUM_CONTROL"])...)
-    vacuum_settings.wall = WallShape(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
- 
+    vacuum_settings = VacuumMod.VacuumSettingsType()
+    vacuum_settings.control = VacuumMod.Vacuum_Control(; (Symbol(k) => v for (k, v) in inputs["VACUUM_CONTROL"])...)
+    vacuum_settings.wall = VacuumMod.WallShape(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
 
     # Set up variables
     # TODO: dcon_kin_threads logic?

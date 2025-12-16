@@ -261,6 +261,10 @@ Vacuum calculation and output options
 @kwdef mutable struct Vacuum_Control
     mth::Int = 480
     lsymz::Bool = true
+
+    checkd::Bool = false
+	checke::Bool = false
+
     lkdis::Bool = false
     ieig::Int = 0
     iloop::Int = 0

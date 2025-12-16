@@ -10,6 +10,7 @@ include("Vacuum_wall.jl")
 
 export mscvac, set_dcon_params, VacuumInputType, compute_vacuum_response
 export kernel!
+export VacuumSettingsType, Vacuum_Control, WallShape
 
 # ======================================================================
 # Legacy fortran vacuum module interface
