@@ -52,6 +52,11 @@ println("  Line 4 (zsce): $(length(zsce)) values")
 params = parse_number_line(lines[5])
 println("  Line 5 (params): $(length(params)) values")
 
+xobs = xobs[1:mth]
+zobs = zobs[1:mth]
+xsce = xsce[1:mth]
+zsce = zsce[1:mth]
+
 println("\n✓ Successfully parsed all data!")
 println("\nData summary:")
 println("  xobs: $(length(xobs)) points, range [$(minimum(xobs)), $(maximum(xobs))]")
@@ -136,10 +141,10 @@ try
     )
     
     println("✓ Kernel function executed successfully!")
-    println()
-    println("Result statistics:")
-    println("  grdgre: min=$(minimum(grdgre)), max=$(maximum(grdgre)), mean=$(sum(grdgre)/length(grdgre))")
-    println("  gren: min=$(minimum(gren)), max=$(maximum(gren)), mean=$(sum(gren)/length(gren))")
+    # println()
+    # println("Result statistics:")
+    # println("  grdgre: min=$(minimum(grdgre)), max=$(maximum(grdgre)), mean=$(sum(grdgre)/length(grdgre))")
+    # println("  gren: min=$(minimum(gren)), max=$(maximum(gren)), mean=$(sum(gren)/length(gren))")
     
 catch e
     println("✗ Error running kernel function.")
@@ -159,11 +164,15 @@ end
 
 # Debug: Check what's in the result matrices
 println("===== RESULT DIAGNOSTICS =====")
-println("grdgre exists: $(isdefined(Main, :grdgre))")
-println("gren exists: $(isdefined(Main, :gren))")
-println()
+# println("grdgre exists: $(isdefined(Main, :grdgre))")
+# println("gren exists: $(isdefined(Main, :gren))")
+# println()
 
 if isdefined(Main, :grdgre) && isdefined(Main, :gren)
+
+    writedlm("gren_output.txt", gren)
+    writedlm("grdgre_output.txt", grdgre)
+
     println("grdgre size: $(size(grdgre))")
     println("gren size: $(size(gren))")
     println()

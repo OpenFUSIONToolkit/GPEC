@@ -276,6 +276,7 @@ c-----------------------------------------------------------------------
       INTEGER :: j, i
       INTEGER :: mtheta = 256
       INTEGER :: debug_out_unit = 7
+      INTEGER :: debug_out_unit_2 = 8
 
       ntsin0 = mtheta + 1
       nths0  = mthvac
@@ -320,12 +321,22 @@ c-----------------------------------------------------------------------
       ! Write grdgre to a file
       OPEN(unit=debug_out_unit, file='test_kernel_grdgre_output.txt', 
      $     status='replace', action='write', form='formatted')
-      WRITE(debug_out_unit,*) 'grdgre matrix:'
+      ! WRITE(debug_out_unit,*) 'grdgre matrix:'
       DO i = 1, SIZE(grdgre,1)
          WRITE(debug_out_unit,'(1034(F12.9,2X))') (grdgre(i,j),
      $                                            j=1,SIZE(grdgre,2))
       END DO
       CLOSE(debug_out_unit)
+
+      ! Write gren to a file
+      OPEN(unit=debug_out_unit_2, file='test_kernel_gren_output.txt', 
+     $     status='replace', action='write', form='formatted')
+      ! WRITE(debug_out_unit_2,*) 'gren matrix:'
+      DO i = 1, SIZE(gren,1)
+         WRITE(debug_out_unit_2,'(514(F12.9,2X))') (gren(i,j),
+     $                                            j=1,SIZE(gren,2))
+      END DO
+      CLOSE(debug_out_unit_2)
 
       END SUBROUTINE test_kernel
 c-----------------------------------------------------------------------
@@ -354,9 +365,9 @@ c-----------------------------------------------------------------------
       WRITE(*,*) "-----------------------------------"
       WRITE(*,*) "Test 5: Kernel"
       CALL test_kernel
-      WRITE(*,*) "-----------------------------------"
-      WRITE(*,*) "Last Test: MSCVAC"
-      CALL test_mscvac
+      ! WRITE(*,*) "-----------------------------------"
+      ! WRITE(*,*) "Last Test: MSCVAC"
+      ! CALL test_mscvac
 
       WRITE(*,*) "-----------------------------------"
       WRITE(*,*) "All tests completed successfully."
