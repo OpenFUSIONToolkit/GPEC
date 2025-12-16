@@ -1,3 +1,16 @@
+"""
+    initialize_plasma_surface(inputs::VacuumInput) -> PlasmaGeometry
+
+Initialize the plasma surface geometry based on the provided vacuum inputs. This
+function performs some of the functionality within `readahg`, `arrays`, and `funint`
+in the original Fortran VACUUM code. It returns a `PlasmaGeometry` struct containing
+the necessary plasma surface data for vacuum calculations.
+
+First, we interpolate the input plasma boundary arrays onto the mthvac grid. Then, we compute
+the derivatives of the plasma boundary with respect to the poloidal angle θ using
+periodic cubic spline differentiation. Finally, we compute the trigonometric basis functions
+needed for the fourier calculations later in the code.
+"""
 function initialize_plasma_surface(inputs::VacuumInput)
 
     # Interpolate arrays from input onto mthvac grid (in readahg in the Fortran)
@@ -50,8 +63,14 @@ function initialize_plasma_surface(inputs::VacuumInput)
     )
 end
 
-function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
+"""
+    initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings) -> WallGeometry
 
+Initialize the wall geometry based on the provided vacuum inputs and wall shape settings. This performs a similar
+functionality to portions of the `arrays` function in the original Fortran VACUUM code. It returns a `WallGeometry`
+struct containing the necessary wall surface data for vacuum calculations.
+"""
+function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
 
    # All of these arrays are of length mtheta with θ = [0, 1)
     mtheta = inputs.mtheta
