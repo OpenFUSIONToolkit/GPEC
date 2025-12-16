@@ -1,13 +1,3 @@
-# Vacuum_data.jl
-# This file defines the data structures for the Vacuum module in Julia.
-#
-# Field comments below are excerpted and paraphrased from the official documentation
-# and paper tables. For each field, the "paper equivalent" and/or precise meaning is noted.
-
-##############################
-# Vacuum DCON Input Struct   #
-##############################
-
 """
     struct VacuumInputType
 
