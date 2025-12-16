@@ -85,7 +85,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall[1:inputs.mtheta])
 
     return WallGeometry(
-        is_closed_toroidal
+        is_closed_toroidal,
         x_wall,
         z_wall,
         dx_dtheta,
