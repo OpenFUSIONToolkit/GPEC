@@ -140,7 +140,7 @@ c-----------------------------------------------------------------------
       IMPLICIT NONE
 
       !INTEGER, PARAMETER :: r8 = SELECTED_REAL_KIND(15, 307)
-      INTEGER, PARAMETER :: mthvac = 900
+      INTEGER, PARAMETER :: mthvac = 512
       INTEGER :: mtheta = 200
       INTEGER :: i, j
       INTEGER :: complex_flag = 1
@@ -275,6 +275,8 @@ c-----------------------------------------------------------------------
       ! INTEGER :: nths2
       INTEGER :: j, i
       INTEGER :: mtheta = 256
+      INTEGER :: debug_out_unit = 7
+      INTEGER :: debug_out_unit_2 = 8
 
       ntsin0 = mtheta + 1
       nths0  = mthvac
@@ -285,31 +287,56 @@ c-----------------------------------------------------------------------
       farwal = .true.
       CALL defglo(mthvac)
 
-      WRITE(*,*) "mth1 = ", mth1
-      WRITE(*,*) "nths2 = ", nths2
+      ! WRITE(*,*) "mth1 = ", mth1
+      ! WRITE(*,*) "nths2 = ", nths2
+
+      
       ALLOCATE(gren(1:mth1,1:mth1))
       ALLOCATE(grdgre(nths2,nths2))
-      
-      ! nths = 901
-      ! grdgre = 0.0_r8
-      ! gren = 0.0_r8
-
-      ! mth = 512
-      ! mth1 = mth + 1
-
-      ! WRITE(*,*) SIZE(gren,1), SIZE(gren,2)
+      ! Write out the size of the allocated arrays
+      WRITE(*,*) "gren size: ", SIZE(gren,1), SIZE(gren,2)
+      WRITE(*,*) "grdgre size: ", SIZE(grdgre,1), SIZE(grdgre,2)
       
       CALL kernel(xobs, zobs, xsce, zsce, grdgre, gren,
      $            j1, j2, isgn, iopw, iops, ischk)
 
       WRITE(*,*) 'gren(1:5,1:5) matrix:'
       DO i = 1, 5
-         WRITE(*,'(5(F12.6,2X))') (gren(i,j), j=1,5)
+         WRITE(*,'(5(F12.9,2X))') (gren(i,j), j=1,5)
       END DO
       WRITE(*,*) 'grdgre(1:5,1:5) matrix:'
       DO i = 1, 5
-         WRITE(*,'(5(F12.6,2X))') (grdgre(i,j), j=1,5)
+         WRITE(*,'(5(F12.9,2X))') (grdgre(i,j), j=1,5)
       END DO
+      ! Do the same thing but for the last 5x5 block
+      WRITE(*,*) 'gren(last 5x5) matrix:'
+      DO i = mth1-4, mth1
+         WRITE(*,'(5(F12.9,2X))') (gren(i,j), j=mth1-4,mth1)
+      END DO
+      WRITE(*,*) 'grdgre(last 5x5) matrix:'
+      DO i = nths2-4, nths2
+         WRITE(*,'(5(F12.9,2X))') (grdgre(i,j), j=nths2-4,nths2)
+      END DO
+
+      ! Write grdgre to a file
+      OPEN(unit=debug_out_unit, file='test_kernel_grdgre_output.txt', 
+     $     status='replace', action='write', form='formatted')
+      ! WRITE(debug_out_unit,*) 'grdgre matrix:'
+      DO i = 1, SIZE(grdgre,1)
+         WRITE(debug_out_unit,'(1034(F12.9,2X))') (grdgre(i,j),
+     $                                            j=1,SIZE(grdgre,2))
+      END DO
+      CLOSE(debug_out_unit)
+
+      ! Write gren to a file
+      OPEN(unit=debug_out_unit_2, file='test_kernel_gren_output.txt', 
+     $     status='replace', action='write', form='formatted')
+      ! WRITE(debug_out_unit_2,*) 'gren matrix:'
+      DO i = 1, SIZE(gren,1)
+         WRITE(debug_out_unit_2,'(514(F12.9,2X))') (gren(i,j),
+     $                                            j=1,SIZE(gren,2))
+      END DO
+      CLOSE(debug_out_unit_2)
 
       END SUBROUTINE test_kernel
 c-----------------------------------------------------------------------

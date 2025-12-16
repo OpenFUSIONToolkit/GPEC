@@ -1,4 +1,5 @@
 using DelimitedFiles
+using Printf
 using LinearAlgebra
 push!(LOAD_PATH, joinpath(@__DIR__, "../.."))
 using JPEC
@@ -51,6 +52,11 @@ println("  Line 4 (zsce): $(length(zsce)) values")
 params = parse_number_line(lines[5])
 println("  Line 5 (params): $(length(params)) values")
 
+xobs = xobs[1:mth]
+zobs = zobs[1:mth]
+xsce = xsce[1:mth]
+zsce = zsce[1:mth]
+
 println("\n✓ Successfully parsed all data!")
 println("\nData summary:")
 println("  xobs: $(length(xobs)) points, range [$(minimum(xobs)), $(maximum(xobs))]")
@@ -95,7 +101,7 @@ println("Data validation passed!")
 println()
 
 # Initialize output matrices
-grdgre = zeros(Float64, nobs, nsrc)
+grdgre = zeros(Float64, 2*nobs, 2*nsrc)
 gren = zeros(Float64, nobs, nsrc)
 
 # Use parameters loaded from input file
@@ -129,20 +135,20 @@ println("  gren: $(size(gren))")
 try
     JPEC.VacuumMod.kernel!(
         grdgre, gren, 
-        xobs, zobs, 
-        xsce, zsce, 
+        xobs[1:mth], zobs[1:mth], 
+        xsce[1:mth], zsce[1:mth], 
         j1, j2, isgn, iopw, iops, wall_flag, globals, settings
     )
     
     println("✓ Kernel function executed successfully!")
-    println()
-    println("Result statistics:")
-    println("  grdgre: min=$(minimum(grdgre)), max=$(maximum(grdgre)), mean=$(sum(grdgre)/length(grdgre))")
-    println("  gren: min=$(minimum(gren)), max=$(maximum(gren)), mean=$(sum(gren)/length(gren))")
+    # println()
+    # println("Result statistics:")
+    # println("  grdgre: min=$(minimum(grdgre)), max=$(maximum(grdgre)), mean=$(sum(grdgre)/length(grdgre))")
+    # println("  gren: min=$(minimum(gren)), max=$(maximum(gren)), mean=$(sum(gren)/length(gren))")
     
 catch e
-    println("✗ Error running kernel function:")
-    println(e)
+    println("✗ Error running kernel function.")
+    # println(e)
     println()
     println("Stack trace:")
     for (exc, bt) in Base.catch_stack()
@@ -158,20 +164,38 @@ end
 
 # Debug: Check what's in the result matrices
 println("===== RESULT DIAGNOSTICS =====")
-println("grdgre exists: $(isdefined(Main, :grdgre))")
-println("gren exists: $(isdefined(Main, :gren))")
-println()
+# println("grdgre exists: $(isdefined(Main, :grdgre))")
+# println("gren exists: $(isdefined(Main, :gren))")
+# println()
 
 if isdefined(Main, :grdgre) && isdefined(Main, :gren)
+
+    writedlm("gren_output.txt", gren)
+    writedlm("grdgre_output.txt", grdgre)
+
     println("grdgre size: $(size(grdgre))")
     println("gren size: $(size(gren))")
     println()
 
     println("gren first 5x5:")
-    display(gren[1:min(5,size(gren,1)), 1:min(5,size(gren,2))])
-    
+    # display(gren[1:min(5,size(gren,1)), 1:min(5,size(gren,2))])
+    for i in 1:min(5,size(gren,1))
+        for j in 1:min(5,size(gren,2))
+            @printf("%12.9f  ", gren[i,j])
+        end
+        println()
+    end
+    println()
     println("grdgre first 5x5:")
-    display(grdgre[1:min(5,size(grdgre,1)), 1:min(5,size(grdgre,2))])
+    for i in 1:min(5,size(grdgre,1))
+        for j in 1:min(5,size(grdgre,2))
+            @printf("%12.9f  ", grdgre[i,j])
+        end
+        println()
+    end
+    
+    # println("grdgre first 5x5:")
+    # display(grdgre[1:min(5,size(grdgre,1)), 1:min(5,size(grdgre,2))])
     println()
     
 else

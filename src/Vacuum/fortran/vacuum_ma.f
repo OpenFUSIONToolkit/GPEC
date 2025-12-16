@@ -527,7 +527,7 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine make_bltobp
       USE vglobal_mod
-      IMPLICIT REAL (a-h,o-z)
+      IMPLICIT REAL(r8) (a-h,o-z)
 
       ! DIMENSION chlagdy(nths,nfm)
       DIMENSION thmgr(nths), z1tmp(nths), z2tmp(nths)
@@ -995,7 +995,7 @@ c-----------------------------------------------------------------------
       DIMENSION blr(*),bli(*),xsce(*),zsce(*),xscp(*),zscp(*)
       DIMENSION creal(nths,nfm), cimag(nths,nfm)
       DIMENSION chir(5,ndimlp), chii(5,ndimlp), rgdl(ndimlp)
-      REAL nq
+      REAL(r8) nq
 
       factpi = twopi
       jmax1 = lmax(1) - lmin(1) + 1
