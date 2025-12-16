@@ -28,6 +28,16 @@ function build_vacuum_globals(
     zinf = interp_to_new_grid(input.z, mthvac)
     delta = interp_to_new_grid(input.delta, mthvac)
 
+    open("xpla_zpla_julia.out", "w") do io
+        println(io, "# index\t xpla\t zpla")
+        n = max(length(xinf), length(zinf))
+        for i in 1:n
+            xv = i <= length(xinf) ? xinf[i] : NaN
+            zv = i <= length(zinf) ? zinf[i] : NaN
+            println(io, "$(i)\t$(xv)\t$(zv)")
+        end
+    end
+
     farwal = farwal || (settings.shape.a >= 10.)
 
     return VacuumGlobalsType(

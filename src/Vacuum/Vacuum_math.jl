@@ -208,17 +208,27 @@ been unified into a single function with optional parameters for offsets.
 - `vecout::Vector{Float64}` : The resampled output array with first and second points repeated (length `mtheta + 2`).
 """
 function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
+
+    # Initialize
     mtheta_in = length(vecin)
-    # TODO: I think ext is only needed for periodicity - can just use Periodic BC on spline?
-    # itp = scale(interpolate(ext, BSpline(Cubic(Periodic(OnGrid())))), x_in)
-    ext = [vecin; vecin[1:2]]
-    x_in = range(0, 1, length=mtheta_in+2)
-    itp = CubicSplineInterpolation(x_in, ext)
-    vecout = zeros(mtheta+2)
+    vecout = similar(vecin, mtheta + 2)
+
+    # If mthin == mth, just copy and add periodic entries
+    if mtheta == mtheta_in
+        vecout[1:mth] .= vecin
+        vecout[mtheta+1] = vecout[1]
+        vecout[mtheta+2] = vecout[2]
+        return vecout
+    end
+
+    # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
+    θin = range(0.0, 1.0; length=mtheta_in)
+    itp = cubic_spline_interpolation(θin, vecin)
+
+    # Interpolate to new grid with optional offsets
     for i in 1:mtheta
-        ai = (i-1) + dx1
-        x = ai / mtheta + dx0 / mtheta_in
-        x = x % 1.0  # This is for periodicity.
+        x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
+        x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
         vecout[i] = itp(x)
     end
     vecout[mtheta+1] = vecout[1]
