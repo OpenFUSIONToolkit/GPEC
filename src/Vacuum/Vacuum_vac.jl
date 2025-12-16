@@ -135,13 +135,9 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, inputs.mpert, inputs.mtheta, inputs.mlow, inputs.mhigh)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    # TODO: just make this vacmat = arr .+ aii + im * (air .- ari) and get rid of complex_flag?
-    vacmat = zeros(jmax1, jmax1)
-    vacmti = zeros(jmax1, jmax1)
-    vacmat  .= arr .+ aii
-    vacmti .= air .- ari
-
-    # Force symmetry of response matrix
+    vacmat = arr .+ aii
+    vacmti = air .- ari
+    # Force symmetry of response matrix if desired
     if inputs.force_wv_symmetry
         for l1 in 1:jmax1
             for l2 in l1:jmax1
@@ -150,6 +146,10 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
             end
         end
     end
+    wv = complex.(vacmat, vacmti)
+
+    println("WV from Julia")
+    display(wv)
 
     # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
     

@@ -206,7 +206,7 @@ end
 Compute the vacuum response matrix using provided vacuum inputs. This is a placeholder for the Julia conversion of the
 fortran mscvac function. It will return the relevant arrays, wv, grri, and xzpts.
 """
-function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::VacuumInputType, complex_flag::Bool, wall_flag::Bool, folder::String=".")
+function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::VacuumInputType, wall_flag::Bool, folder::String=".")
 
     # Initialize plasma and wall surfaces
     plasma_surf = initialize_plasma_surface(inputs)
