@@ -335,7 +335,7 @@ end
 
 
 """
-    Pn_minus_half(s, n)
+    Pn_minus_half_old(s, n)
 
 Compute the Legendre function of the first kind of order -1/2, Pⁿ_{-1/2}(s), recursively using Chance's equations (47)-(50).
 
@@ -371,8 +371,13 @@ end
 # Green function eq.(36)~(42). replacing green (verified)
 #############################################################
 
+function Pn_minus_half(s::Real, n::Int)
+    # This is a temporary alias. The new implementation should be added here.
+    return Pn_minus_half_old(s, n)
+end
+
 """
-    green(xs, zs, xt, zt, xtp, ztp, n)
+    green(xs, zs, xt, zt, xtp, ztp, n; usechancebugs=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry.
 
@@ -381,13 +386,14 @@ Compute the Green's function and related quantities for axisymmetric geometry.
 - `xt`, `zt`: Source point coordinates (X',Z')(Float64)
 - `xtp`, `ztp`: Derivatives ∂X'/∂θ, ∂Z'/∂θ (Float64)
 - `n`: Mode number (Int)
+- `usechancebugs::Bool`: Flag to use the 'old' buggy version for comparison.
 
 # Returns
 - `aval`:   𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
 - `aval0`:  1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
 - `bval`:   2π𝒢ⁿ(θ,θ′) — Green's function value
 """
-function green(xs, zs, xt, zt, xtp, ztp, n)
+function green(xs, zs, xt, zt, xtp, ztp, n; usechancebugs::Bool=false)
 
     xs2 = xs^2
     xt2 = xt^2
@@ -406,11 +412,10 @@ function green(xs, zs, xt, zt, xtp, ztp, n)
 
     # Chance eq.(42) 𝘴 = s
     s = (xs2 + xt2 + ζ2) / R2
-    println("s: ",s)
     
     # Legendre functions for 
     # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pp 
-    if old_flag
+    if usechancebugs
         legendre = Pn_minus_half_old(s, n)
     else
         legendre = Pn_minus_half(s, n)
@@ -451,7 +456,7 @@ function green(xs, zs, xt, zt, xtp, ztp, n)
     dG_dZ0 = 1/(R5)* ζ * ((xs2 + xt2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
     aval0 = -xt * (ztp * dG_dX0 - xtp * dG_dZ0)
 
-    return aval, aval0, bval
+    return G, aval, aval0, bval
 end
 
 #############################################################

@@ -54,7 +54,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         end
     end
 
-    kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, 0)
+    kernel!(grdgre, grpp, globals.xpla, globals.zpla, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, false, globals, settings)
 
     # Enforce periodic boundary conditions
     for i = 1:globals.mth2
@@ -67,14 +67,13 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     fouran!(grri, grpp, snlth, 0, jmax1, lmin, lmax, mth)
 
     if !globals.farwal
-        error("Wall stuff not implemented yet, how did you get here")
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
-        grpw_block = similar(grdgre)
-        grdgre, grpw_block = kernel!(xpla, zpla, xwal, zwal, j1, j2, ksgn, 1, 1, 0)
+        grpw_block = similar(grdgre) # This should be grpp or a new matrix
+        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, settings)
         
         fouran!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fouran!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -84,19 +83,19 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         # ----------------------------------------------------------
         j1, j2 = 2, 1
         ksgn = 2*j2 - 3
-        grwpw_block = similar(grdgre)
-        grdgre, grwpw_block = kernel!(xwal, zwal, xpla, zpla, j1, j2, ksgn, 1, 1, 0)
+        grwp_block = similar(grdgre) # This should be grpp or a new matrix
+        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, settings)
 
-        fouran!(grwpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fouran!(grwpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
+        fouran!(grwp_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
+        fouran!(grwp_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
 
         # ----------------------------------------------------------
         # Wall–Wall block
         # ----------------------------------------------------------
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
-        grww_block = similar(grdgre)
-        grdgre, grww_block = kernel!(xwal, zwal, xwal, zwal, j1, j2, ksgn, 1, 1, 0)
+        grww_block = similar(grdgre) # This should be grpp or a new matrix
+        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, settings)
 
         fouran!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fouran!(grww_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -106,7 +105,7 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
         # ----------------------------------------------------------
         assemble_vacuum_matrix!(
             vacmat, vacmti, vacmatu, vacmtiu,
-            grwp, grpw_block, grwpw_block, grww_block,
+            grwp, grpw_block, grwp_block, grww_block,
             mth, jmax1, ln, lx, factpi
         )
     end
@@ -146,6 +145,21 @@ function vaccal!(globals::VacuumGlobalsType, settings::VacuumSettingsType)
     vacmti .= air .- ari
 
     # Not sure why setup_arrays has to get called again here either
+    
+    # Fortran check2 data dump
+    if settings.check2
+        open("julia_vaccal_arrays.out", "w") do io
+            println(io, "I, xp, zp, xw, zw, xpp, zpp, xwp, zwp =")
+            # Derivatives (xplap, etc.) are not readily available here yet.
+            # Writing NaN as placeholders.
+            for i in 1:8:globals.mth1
+                @printf(io, "%3d %13.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n",
+                        i, globals.xpla[i], globals.zpla[i], globals.xwal[i], globals.zwal[i],
+                        NaN, NaN, NaN, NaN)
+            end
+        end
+    end
+
     delx, delz, cnqd, snqd, sinlt, coslt, snlth, cslth = setuparrays!(globals, settings)
 end
 
@@ -170,22 +184,30 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grdgre`: Gradient Green's function matrix
 - `gren`: Green's function matrix
 """
-function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, globals::VacuumGlobalsType)
+function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops, wall_flag, globals::VacuumGlobalsType, settings::VacuumSettingsType)
 
     dth = globals.dth
     mth = globals.mth
     mth1 = globals.mth1
 
+    ak0i = 0.0
+    jres = 1
+
+    ishape = settings.vacdat.ishape
+
     # matrix output gren is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
     
     the = LinRange(0, mth*dth, mth+1)
-    thetas = the
 
     # 1. definition for solving parameters
     wsimpb1=1*dth/3
     wsimpb2=2*dth/3
     wsimpb4=4*dth/3
+
+    wsimpa1=1*dth/3
+    wsimpa2=2*dth/3
+    wsimpa4=4*dth/3
 
     algdth = log(dth) # log of dth
     alg = log(2*dth)
@@ -197,29 +219,49 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
     alg1=128.0*dth*(alg-8.0/15.0)/45.0
     alg2=4.0*dth*(7.0*alg-11.0/15.0)/45.0
 
+    isph = 0 # isph needs to be initialized
+
     # 2. check singular points for conductor.
     if wall_flag == true
-        # 2.0 initialize jbot and jtop
+        # 2.0 initialize jbot and jtop, and get wall geometry from globals
         jbot=mth/2+1
         jtop=mth/2+1
+        ww1 = globals.xwal
+        ww2 = globals.zwal
         
-        # 2.1 call wall and restore points of wall in ww1, ww2
-        wwall!(mth1,ww1,ww2)
-
         # 2.2 find where sign of wall r point acrosses zero. 
         # isph means there is 0-corssing point 
         for i in 1:mth
-            if ww1[i] * ww1[i+1] ≤ zero
-                jbot = ww1[i] > zero ? i : jbot
-                jtop = ww1[i] < zero ? i + 1 : jtop
+            if ww1[i] * ww1[i+1] <= 0.0
+                jbot = ww1[i] > 0.0 ? i : jbot
+                jtop = ww1[i] < 0.0 ? i + 1 : jtop
                 isph = 1 
             end
         end
     end
 
     # 3 do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
-    xpr = [spline1d_deriv(the, xsce, θ) for θ in thetas]
-    zpr = [spline1d_deriv(the, zsce, θ) for θ in thetas]
+
+    # This doesn't work for me.. I'll use Iterpolations.jl for here temporary. WIP - Have to fix spline1d_deriv funciton in vacuum_math
+    # xpr = [spline1d_deriv(the, xsce, θ) for θ in thetas]
+    # zpr = [spline1d_deriv(the, zsce, θ) for θ in thetas]
+
+    interp_type = BSpline(Cubic(Line()))
+    grid_type = OnGrid() 
+
+    itp_x = interpolate(xsce, interp_type, grid_type)
+    itp_z = interpolate(zsce, interp_type, grid_type)
+
+    itp_x_scaled = scale(itp_x, the)
+    itp_z_scaled = scale(itp_z, the)
+
+    gradients_x = (t -> Interpolations.gradient(itp_x_scaled, t)).(the)
+    gradients_z = (t -> Interpolations.gradient(itp_z_scaled, t)).(the)
+
+    xpr = first.(gradients_x) # d x / d theta
+    zpr = first.(gradients_z) # d z / d theta
+
+
 
     # 4, begin obs loop.
     for j in 1:mth 
@@ -229,11 +271,11 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
         zs=zobs[j]  # Fixed: () to []
         thes=the[j] # theta value  # Fixed: () to []
         work = zeros(mth1)
-        aval1=zero # ∇𝒢_0
+        aval1=0.0 # ∇𝒢_0
 
         # 4.2 if the point of observation point is in negative, We cannot use green func
         # This is same for source point 
-        if xs < zero 
+        if xs < 0.0 
             if j2 == 2 
                 work[j] = 1.0  # Fixed: () to []
             end
@@ -284,7 +326,7 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
                 # aval is 𝒥 ∇'𝒢ⁿ∇'ℒ, bval is 2pi𝒢ⁿ. aval0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
                 xtp=xpr[ic]  # Fixed: () to []
                 ztp=zpr[ic]  # Fixed: () to []
-                G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,n,usechancebugs=false)
+                G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,globals.n,usechancebugs=false)
 
                 # 4.8 simpson integral. 4 for odd, 2 for even, and 1 for others.
                 wsimpb=wsimpb2
@@ -340,18 +382,16 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
                 # 6.2 for each 8 gaussian points
                 for ig in 1:8
                     tgaus0 = tgaus[ig] #i-th value of for 8 points, in theta  # Fixed: () to []
-                    tgaus0 = mod(tgaus0, twopi)
+                    tgaus0 = mod(tgaus0, 2π)
 
                     # 6.3 get X, X', Z, Z' for gaussian point
-                    spl1d2!(mth1,the,xsce,xpp,1,tgaus0,tab)
-                    xt = tab[1] # xt is X  # Fixed: () to []
-                    xtp = tab[2] # xtp is X'_θ  # Fixed: () to []
-                    spl1d2!(mth1,the,zsce,zpp,1,tgaus0,tab)
-                    zt=tab[1] # zt is Z  # Fixed: () to []
-                    ztp=tab[2] # ztp is Z'_θ  # Fixed: () to []
+                    xt = itp_x_scaled(tgaus0)
+                    xtp = Interpolations.gradient(itp_x_scaled, tgaus0)[1]
+                    zt = itp_z_scaled(tgaus0)
+                    ztp = Interpolations.gradient(itp_z_scaled, tgaus0)[1]
 
                     # 6.4 call green function
-                    G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,n,usechancebugs=false)
+                    G, aval, aval0, bval = green(xs,zs,xt,zt,xtp,ztp,globals.n,usechancebugs=false)
 
                     # 6.5 add logarithm on G (not 𝒢_n). Chance eq.(75)
                     # iops = 1
@@ -433,8 +473,8 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
         end
 
         # 4.3 Store all the datas of work in grdgre, gren
-        grdgre[(j1-1)*mth + j, (j2-1)*mth + (1:mth)] .= work[1:mth]
-        gren[j, 1:mth] ./= twopi
+        grdgre[(j1-1)*mth + j, (j2-1)*mth .+ (1:mth)] .= work[1:mth]
+        gren[j, 1:mth] ./= 2π
 
     end
 
