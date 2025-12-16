@@ -2,6 +2,30 @@ function symbolize_keys(dict::Dict{String,Any})
     return Dict(Symbol(k) => v for (k, v) in dict)
 end
 
+"""
+    EquilibriumControl
+
+A mutable struct containing control parameters for equilibrium reconstruction.
+
+## Fields
+
+  - `eq_type::String` - Type of equilibrium file ("efit", "solovev", "lar", etc.)
+  - `eq_filename::String` - Path to equilibrium input file
+  - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "other")
+  - `power_bp::Int` - Poloidal field power exponent for Jacobian
+  - `power_b::Int` - Toroidal field power exponent for Jacobian
+  - `power_r::Int` - Major radius power exponent for Jacobian
+  - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
+  - `psilow::Float64` - Lower limit of normalized flux coordinate
+  - `psihigh::Float64` - Upper limit of normalized flux coordinate
+  - `mpsi::Int` - Number of radial grid points
+  - `mtheta::Int` - Number of poloidal grid points
+  - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
+  - `etol::Float64` - Error tolerance for equilibrium solver
+  - `use_classic_splines::Bool` - Use classic spline interpolation method
+  - `input_only::Bool` - Only process input without full reconstruction
+  - `use_galgrid::Bool` - Use the same grid as galerkin method
+"""
 @kwdef mutable struct EquilibriumControl
     eq_type::String = "efit"
     eq_filename::String = "mypath"
@@ -66,6 +90,22 @@ end
     end
 end
 
+"""
+    EquilibriumOutput
+
+A mutable struct containing flags for equilibrium output options.
+
+## Fields
+
+  - `gse_flag::Bool` - Output GSE (Grad-Shafranov Equation) data
+  - `out_eq_1d::Bool` - Output 1D equilibrium profiles in text format
+  - `bin_eq_1d::Bool` - Output 1D equilibrium profiles in binary format
+  - `out_eq_2d::Bool` - Output 2D equilibrium data in text format
+  - `bin_eq_2d::Bool` - Output 2D equilibrium data in binary format
+  - `out_2d::Bool` - Output 2D flux surface data in text format
+  - `bin_2d::Bool` - Output 2D flux surface data in binary format
+  - `dump_flag::Bool` - Output diagnostic dump files
+"""
 @kwdef mutable struct EquilibriumOutput
     gse_flag::Bool = false
     out_eq_1d::Bool = false
@@ -81,7 +121,7 @@ end
     EquilibriumConfig(...)
 
 A container struct that bundles all necessary configuration settings originally specified in the equil
-fortran namelsits.
+fortran namelists.
 """
 @kwdef mutable struct EquilibriumConfig
     control::EquilibriumControl = EquilibriumControl()
@@ -90,7 +130,7 @@ end
 
 """
 Constructor that allows users to form a EquilibriumConfig struct from dictionaries
-for convinience when most of the defaults are fine.
+for convenience when most of the defaults are fine.
 """
 function EquilibriumConfig(control::Dict, output::Dict)
     construct = EquilibriumControl(; control...)
@@ -219,8 +259,8 @@ raw equilibrium data and preparing the initial splines.
 
 ## Fields
 
-  - `equil_input::EquilInput`
-    The original equilibrium input object.
+  - `config::EquilibriumConfig`
+    The equilibrium configuration object.
 
   - `sq_in`
     1D spline data versus normalized poloidal flux `psin`.
@@ -236,6 +276,7 @@ raw equilibrium data and preparing the initial splines.
     Definitions:
 
      1. `ψ(R, Z) = ψ_boundary - ψ(R, Z)`
+
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
           * 1D profiles are represented by `CubicSpline`
@@ -262,9 +303,14 @@ end
 
 A container struct for inputs to the `inverse_run` function.
 
-## Fields:
+## Fields
 
-  - `equil_input`: The original `EquilInput` object.
+  - `config::EquilibriumConfig` - The equilibrium configuration object
+  - `sq_in::Spl.CubicSpline{Float64}` - 1D spline input profile (F*Bt, Pressure, q)
+  - `rz_in::Spl.BicubicSpline` - 2D bicubic spline for (R,Z) geometry
+  - `ro::Float64` - R-coordinate of magnetic axis [m]
+  - `zo::Float64` - Z-coordinate of magnetic axis [m]
+  - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
 mutable struct InverseRunInput
     config::EquilibriumConfig
@@ -275,10 +321,68 @@ mutable struct InverseRunInput
     psio::Float64        # Total flux difference |psi_axis - psi_boundary|
 end
 
+"""
+    EquilibriumParameters
+
+A mutable struct containing computed equilibrium parameters and diagnostic flags.
+
+## Fields
+
+  - `ro::Union{Nothing,Float64}` - R-coordinate of the magnetic axis [m]
+  - `zo::Union{Nothing,Float64}` - Z-coordinate of the magnetic axis [m]
+  - `psio::Union{Nothing,Float64}` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
+  - `rsep::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma boundary [m]
+  - `zsep::Union{Nothing,Vector{Float64}}` - Z-coordinates of the plasma boundary [m]
+  - `rext::Union{Nothing,Vector{Float64}}` - R-coordinates of the plasma edge [m]
+  - `zext::Union{Nothing,Vector{Float64}}` - Z-coordinates of the plasma edge [m]
+  - `psi0::Union{Nothing,Float64}` - Normalized poloidal flux at reference location
+  - `b0::Union{Nothing,Float64}` - Total magnetic field strength at the axis [T]
+  - `q0::Union{Nothing,Float64}` - Safety factor at the axis
+  - `qmin::Union{Nothing,Float64}` - Minimum safety factor in the plasma
+  - `qmax::Union{Nothing,Float64}` - Maximum safety factor in the plasma
+  - `qa::Union{Nothing,Float64}` - Safety factor at the plasma edge
+  - `q95::Union{Nothing,Float64}` - Safety factor at 95% flux surface
+  - `qextrema_psi::Union{Nothing,Vector{Float64}}` - Normalized flux values at q extrema
+  - `qextrema_q::Union{Nothing,Vector{Float64}}` - Safety factor values at extrema
+  - `mextrema::Union{Nothing,Int}` - Number of extrema in q-profile
+  - `psi_norm::Union{Nothing,Float64}` - Normalized poloidal flux
+  - `b_norm::Union{Nothing,Float64}` - Normalized magnetic field strength
+  - `psi_axis::Union{Nothing,Float64}` - Poloidal flux at the axis
+  - `psi_boundary::Union{Nothing,Float64}` - Poloidal flux at the boundary
+  - `psi_boundary_norm::Union{Nothing,Float64}` - Normalized boundary flux
+  - `psi_axis_norm::Union{Nothing,Float64}` - Normalized axis flux
+  - `psi_boundary_offset::Union{Nothing,Float64}` - Boundary flux offset
+  - `psi_axis_offset::Union{Nothing,Float64}` - Axis flux offset
+  - `psi_boundary_sign::Union{Nothing,Int}` - Sign of boundary flux
+  - `psi_axis_sign::Union{Nothing,Int}` - Sign of axis flux
+  - `psi_boundary_zero::Union{Nothing,Bool}` - Whether boundary flux is zero
+  - `rmean::Union{Nothing,Float64}` - Mean major radius [m]
+  - `amean::Union{Nothing,Float64}` - Mean minor radius [m]
+  - `aratio::Union{Nothing,Float64}` - Aspect ratio (R0/a)
+  - `kappa::Union{Nothing,Float64}` - Plasma elongation
+  - `delta1::Union{Nothing,Float64}` - Upper triangularity
+  - `delta2::Union{Nothing,Float64}` - Lower triangularity
+  - `bt0::Union{Nothing,Float64}` - Toroidal field at axis [T]
+  - `crnt::Union{Nothing,Float64}` - Plasma current [A]
+  - `bwall::Union{Nothing,Float64}` - Toroidal field at wall [T]
+  - `verbose::Bool` - Enable verbose output
+  - `diagnose_src::Bool` - Enable source data diagnostics
+  - `diagnose_maxima::Bool` - Enable extrema diagnostics
+  - `volume::Union{Nothing,Float64}` - Plasma volume [m³]
+  - `betat::Union{Nothing,Float64}` - Toroidal beta
+  - `betan::Union{Nothing,Float64}` - Normalized beta
+  - `betaj::Union{Nothing,Float64}` - Total beta
+  - `betap1::Union{Nothing,Float64}` - Poloidal beta (definition 1)
+  - `betap2::Union{Nothing,Float64}` - Poloidal beta (definition 2)
+  - `betap3::Union{Nothing,Float64}` - Poloidal beta (definition 3)
+  - `li1::Union{Nothing,Float64}` - Internal inductance (definition 1)
+  - `li2::Union{Nothing,Float64}` - Internal inductance (definition 2)
+  - `li3::Union{Nothing,Float64}` - Internal inductance (definition 3)
+"""
 @kwdef mutable struct EquilibriumParameters
     ro::Union{Nothing,Float64} = nothing # R-coordinate of the magnetic axis [m]
     zo::Union{Nothing,Float64} = nothing # Z-coordinate of the magnetic axis [m]
-    psio::Union{Nothing,Float64} = nothing # Total flux difference |Ψ_axis - Ψ_boundary| [Weber / radian]
+    psio::Union{Nothing,Float64} = nothing # Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
     rsep::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma boundary [m]
     zsep::Union{Nothing,Vector{Float64}} = nothing # Z-coordinates of the plasma boundary [m]
     rext::Union{Nothing,Vector{Float64}} = nothing # R-coordinates of the plasma edge [m]
@@ -336,9 +440,11 @@ This object provides a complete representation of the processed plasma equilibri
 
 # Fields
 
-  - `equil_input::EquilInput`:
-    The original `EquilInput` object used for the reconstruction.
+  - `config::EquilibriumConfig`:
+    The equilibrium configuration object used for the reconstruction.
 
+  - `params::EquilibriumParameters`:
+    Computed equilibrium parameters and diagnostics.
   - `sq::CubicSpline{Float64}`:
     Final 1D profile spline.
 
@@ -371,9 +477,9 @@ This object provides a complete representation of the processed plasma equilibri
 """
 mutable struct PlasmaEquilibrium
     config::EquilibriumConfig
-    params::EquilibriumParameters       # Parameters for the equilibrium
-    sq::Spl.CubicSpline{Float64}        # Final 1D profile spline
-    rzphi::Spl.BicubicSpline   # Final 2D coordinate mapping spline
+    params::EquilibriumParameters
+    sq::Spl.CubicSpline{Float64}
+    rzphi::Spl.BicubicSpline
     eqfun::Spl.BicubicSpline
     ro::Float64
     zo::Float64

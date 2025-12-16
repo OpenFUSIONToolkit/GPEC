@@ -4,13 +4,11 @@ using LinearAlgebra
 push!(LOAD_PATH, joinpath(@__DIR__, "../.."))
 using JPEC
 mth = 512  # Number of poloidal grid points
-globals = JPEC.VacuumMod.VacuumGlobalsType(
-    mth = mth,
-    mth1 = mth + 1,
-    mth2 = mth + 2,
-    dth = 2π / mth  # Critical: theta grid spacing
+inputs = JPEC.VacuumMod.VacuumInputType(
+    mtheta=mth,
+    n=1,
 )
-settings = JPEC.VacuumMod.VacuumSettingsType()
+settings = JPEC.VacuumMod.WallShapeSettings()
 
 #---------------------------------------------------------------
 #  Read the output_data.txt file
@@ -137,7 +135,7 @@ try
         grdgre, gren, 
         xobs[1:mth], zobs[1:mth], 
         xsce[1:mth], zsce[1:mth], 
-        j1, j2, isgn, iopw, iops, wall_flag, globals, settings
+        j1, j2, isgn, iopw, iops, wall_flag, inputs, settings
     )
     
     println("✓ Kernel function executed successfully!")

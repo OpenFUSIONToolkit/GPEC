@@ -36,9 +36,6 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-
-use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
-
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
 
 [WALL]

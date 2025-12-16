@@ -1,7 +1,3 @@
-# VERY MUCH A WORK IN PROGRESS, NOTHING HERE WILL WORK YET
-# I just pulled this relevant stuff from vac_vaccal.ipynb and threw it into this file
-# and commented out the wall/debug stuff for now
-
 # Gaussian quadrature weights and points for 8-point integration
 const WGAUS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
                0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
@@ -10,26 +6,12 @@ const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.18
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 
-function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
+function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, wall_settings::WallShapeSettings)
 
     # Initialization
-    factpi  = 2π
-    jmax    = 2*inputs.mhigh + 1
-    jmax1   = inputs.mpert
-    lmax1   = inputs.mhigh + 1
-    ln      = inputs.mlow
-    lx      = inputs.mhigh
-    jdel    = 8
-    nq      = inputs.n * inputs.qa
-    tmth    = 2 * inputs.mtheta
-    mthsq   = tmth * tmth
-    lmth    = tmth * 2 * jmax1
-    j1v     = inputs.mpert
-    j2v     = inputs.mpert
-
-    grri = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * inputs.mpert)
-    grdgre = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * (inputs.mtheta + 5))
-    grpp = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * (inputs.mtheta + 5))
+    grri = zeros(2 * inputs.mtheta, 2 * inputs.mpert)
+    grdgre = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
+    grpp = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
 
     # ----------------------------------------------------------
     # Apply wall boundary conditions
@@ -51,8 +33,8 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     end
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, inputs.mlow, inputs.mhigh, inputs.mtheta)
-    fourier_transform!(grri, grpp, plasma_surf.snlth, 0, inputs.mpert, inputs.mlow, inputs.mhigh, inputs.mtheta)
+    fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mpert)
+    fourier_transform!(grri, grpp, plasma_surf.snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
 
     if !inputs.farwall_flag
         # ----------------------------------------------------------
@@ -65,7 +47,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, wall)
         
         fourier_transform!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fourier_transform!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
+        fourier_transform!(grpw_block, grdgre, snlth, 0, intr.mpert, lmin, lmax, mth)
 
         # ----------------------------------------------------------
         # Wall–Plasma block
@@ -76,7 +58,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, wall)
 
         fourier_transform!(grwp_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fourier_transform!(grwp_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
+        fourier_transform!(grwp_block, grdgre, snlth, 0, intr.mpert, lmin, lmax, mth)
 
         # ----------------------------------------------------------
         # Wall–Wall block
@@ -87,7 +69,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall)
 
         fourier_transform!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fourier_transform!(grww_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
+        fourier_transform!(grww_block, grdgre, snlth, 0, intr.mpert, lmin, lmax, mth)
 
         # ----------------------------------------------------------
         # Assemble matrices for solving
@@ -95,7 +77,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         assemble_vacuum_matrix!(
             vacmat, vacmti, vacmatu, vacmtiu,
             grwp, grpw_block, grwp_block, grww_block,
-            mth, jmax1, ln, lx, 2π
+            mth, intr.mpert, inputs.mlow, inputs.mhigh, 2π
         )
     end
 
@@ -112,7 +94,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     if inputs.kernelsign < 0
         grdgre .*= inputs.kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:2 * (inputs.mtheta + 5)
+        for i in 1:2 * inputs.mtheta
             grdgre[i, i] += 2.0
         end
     end
@@ -126,22 +108,22 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    arr = zeros(jmax1, jmax1)
-    aii = zeros(jmax1, jmax1)
-    ari = zeros(jmax1, jmax1)
-    air = zeros(jmax1, jmax1)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mlow, inputs.mhigh)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, inputs.mpert, inputs.mtheta, inputs.mlow, inputs.mhigh)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0, inputs.mtheta, inputs.mlow, inputs.mhigh)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, inputs.mpert, inputs.mtheta, inputs.mlow, inputs.mhigh)
+    arr = zeros(inputs.mpert, inputs.mpert)
+    aii = zeros(inputs.mpert, inputs.mpert)
+    ari = zeros(inputs.mpert, inputs.mpert)
+    air = zeros(inputs.mpert, inputs.mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mpert)
+    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0, inputs.mtheta, inputs.mpert)
+    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii
     vacmti = air .- ari
     # Force symmetry of response matrix if desired
     if inputs.force_wv_symmetry
-        for l1 in 1:jmax1
-            for l2 in l1:jmax1
+        for l1 in 1:inputs.mpert
+            for l2 in l1:inputs.mpert
                 vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
                 vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
             end
@@ -191,7 +173,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `gradgreensfunction`: Gradient Green's function matrix
 - `greensfunction`: Green's function matrix
 """
-function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInputType, wall_geo::WallGeometry)
+function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInput, wall_geo::WallGeometry)
 
     mth = inputs.mtheta
     mth1 = inputs.mtheta + 1
@@ -487,32 +469,29 @@ end
       using Fourier coefficients stored in cs.
     
     Inputs:
-      gil(i,l)   : input matrix of size (mth × jmax1), the Fourier-space data
-      cs(j,l)    : Fourier coefficient matrix (mth × jmax1)
+      gil(i,l)   : input matrix of size (mth × mpert), the Fourier-space data
+      cs(j,l)    : Fourier coefficient matrix (mth × mpert)
       m00, l00   : integer offsets in the gil matrix
-      lmin, lmax : define the active range of Fourier mode indices
       mth        : number of θ-grid points (dimension of gil along i)
-      dth        : grid spacing in θ
+      mpert      : number of Fourier modes
     
     Output:
       gll(l2,l1) : output matrix updated in-place
 """
 function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64},
-                 m00::Int, l00::Int, mth::Int, lmin::Int, lmax::Int)
-
-    jmax1 = lmax - lmin + 1
+                 m00::Int, l00::Int, mth::Int, mpert::Int)
 
     # Zero out gll block
-    for l1 in 1:jmax1
-        for l2 in 1:jmax1
+    for l1 in 1:mpert
+        for l2 in 1:mpert
             gll[l2, l1] = 0.0
         end
     end
 
     # Main accumulation (note: gll[l2, l1], not gll[l1, l2])
     dth = 2π / mth
-    for l1 in 1:jmax1
-        for l2 in 1:jmax1
+    for l1 in 1:mpert
+        for l2 in 1:mpert
             for i in 1:mth
                 gll[l2, l1] += dth * cs[i, l2] * gil[m00+i, l00+l1] * 2π
             end
@@ -523,7 +502,7 @@ function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, 
 end
 
 """
-    fourier_transform!(gil, gij, cs, m00, l00, lmin, lmax, mth)
+    fourier_transform!(gil, gij, cs, m00, l00, mth, mpert)
 
     Purpose:
       This routine performs a truncated Fourier transform of gij onto gil
@@ -531,11 +510,11 @@ end
     
     Inputs:
       gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
-      cs(j,l)    : Fourier coefficient matrix (mth × jmax1)
+      cs(j,l)    : Fourier coefficient matrix (mth × mpert)
       m00, l00   : integer offsets in the gil matrix
-      lmin, lmax : define the active range of Fourier mode indices
       mth        : number of θ-grid points (dimension of gij along i, j)
-    
+      mpert      : number of Fourier modes
+
     Output:
       gil(i', l') : matrix updated in-place, where i' = m00 + i and l' = l00 + l
 """
@@ -545,23 +524,19 @@ function fourier_transform!(
     cs::Matrix{Float64},
     m00::Int,
     l00::Int,
-    lmin::Int,
-    lmax::Int,
-    mth::Int
+    mth::Int,
+    mpert::Int
 )
-    # Compute jmax1 like Fortran
-    jmax1 = lmax - lmin + 1
 
     # Zero out relevant gil block
-    for l1 in 1:jmax1
+    for l1 in 1:mpert
         for i in 1:mth
             gil[m00 + i, l00 + l1] = 0.0
         end
     end
 
     # Accumulate with ll offset (critical to match Fortran)
-    for l1 in 1:jmax1
-        ll = l1 - 1 + lmin
+    for l1 in 1:mpert
         for j in 1:mth
             for i in 1:mth
                 gil[m00 + i, l00 + l1] += cs[j, l1] * gij[i, j]

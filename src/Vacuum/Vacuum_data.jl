@@ -1,17 +1,7 @@
-# Vacuum_data.jl
-# This file defines the data structures for the Vacuum module in Julia.
-#
-# Field comments below are excerpted and paraphrased from the official documentation
-# and paper tables. For each field, the "paper equivalent" and/or precise meaning is noted.
-
-##############################
-# Vacuum DCON Input Struct   #
-##############################
-
 """
-    struct VacuumInputType
+    struct VacuumInput
 
-Holds plasma boundary and mode data as provided from DCON or equivalent upstream code.
+Holds plasma boundary and mode data as provided from DCON namelist and computed quantities.
 
 - `r`: Plasma boundary R-coordinate as a function of poloidal angle.
 - `z`: Plasma boundary Z-coordinate as a function of poloidal angle.
@@ -23,8 +13,9 @@ Holds plasma boundary and mode data as provided from DCON or equivalent upstream
 - `mtheta_in`: Number of poloidal angles in the input boundary arrays.
 - `farwall_flag`: Boolean flag indicating if the conducting wall is at infinity.
 - `kernelsign`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations.
+- `force_wv_symmetry`: Boolean flag to enforce symmetry in the vacuum response matrix. Set in dcon.toml
 """
-@kwdef mutable struct VacuumInputType
+@kwdef mutable struct VacuumInput
     r::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
     delta::Vector{Float64} = Float64[]
@@ -43,16 +34,22 @@ end
 """
     struct PlasmaGeometry
 
-FILL THIS IN LATER
+Holds plasma geometry data on the mth grid for vacuum calculations. Arrays are of length `mth`,
+where `mth` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
 
-- `xinf`: Plasma surface R (theta grid, length `mth1`).
-- `zinf`: Plasma surface Z (theta grid, length `mth1`).
-- `delta`: Surface offset or Shafranov shift (length `mth1`).
-- `xplap`: dR/dtheta at plasma surface (computed from `xinf`).
-- `zplap`: dZ/dtheta at plasma surface (computed from `zinf`).
-- FILL THE REST IN LATER
+- `x`: Plasma surface R.
+- `z`: Plasma surface Z.
+- `delta`: Toroidal angle offset divided by qa (i.e. -ν/qa where ϕ = 2πζ + ν(ψ, θ)) at plasma surface.
+- `dx_dtheta`: dR/dθ at plasma surface.
+- `dz_dtheta`: dZ/dθ at plasma surface.
+- `cnqd`: cos(n * qa * delta) at plasma surface.
+- `snqd`: sin(n * qa * delta) at plasma surface.
+- `sinlt`: sin(l * θ) basis functions for poloidal modes at plasma surface.
+- `coslt`: cos(l * θ) basis functions for poloidal modes at plasma surface.
+- `snlth`: sin(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface.
+- `cslth`: cos(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface.
 """
 @kwdef struct PlasmaGeometry
     x::Vector{Float64}
@@ -60,7 +57,6 @@ FILL THIS IN LATER
     delta::Vector{Float64}
     dx_dtheta::Vector{Float64}
     dz_dtheta::Vector{Float64}
-
     cnqd::Vector{Float64}
     snqd::Vector{Float64}
     sinlt::Matrix{Float64}
@@ -72,13 +68,14 @@ end
 """
     struct WallGeometry
 
-FILL THIS IN LATER
+Holds wall geometry data for vacuum calculations. Arrays are of length `mth`,
+where `mth` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
-- `xwal`: Wall R coordinates (length `mth1` or `mth2`).
-- `zwal`: Wall Z coordinates (length `mth1` or `mth2`).
-- `xwalp`: dR/dtheta at wall (computed).
-- `zwalp`: dZ/dtheta at wall (computed).
+- `x`: Wall R coordinates
+- `z`: Wall Z coordinates
+- `dx_dtheta`: dR/dθ at wall.
+- `dz_dtheta`: dZ/dθ at wall.
 """
 @kwdef struct WallGeometry
     is_closed_toroidal::Bool = true
@@ -88,14 +85,10 @@ FILL THIS IN LATER
     dz_dtheta::Vector{Float64} = Float64[]
 end
 
-#############################################
-# Vacuum Settings (Input Namelist) Structs  #
-#############################################
-
 """
-    struct WallShape
+    struct WallShapeSettings
 
-Parameters for vacuum wall and geometry.
+Input settings for vacuum wall and geometry.
 
 - `shape` key word replacement for fortran `ishape`: Integer. Options for the wall shape.
     * `< 0`: Spherical topology.
@@ -150,7 +143,7 @@ Parameters for vacuum wall and geometry.
 - `xma` : shifting major radius point.
 
 """
-@kwdef mutable struct WallShapeSettings
+@kwdef struct WallShapeSettings
     shape::String = "conformal"
     aw::Float64 = 0.05
     bw::Float64 = 1.5

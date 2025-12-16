@@ -329,7 +329,7 @@ end
     return x array and z array for length. 
         
 """
-function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma_surf::PlasmaGeometry)
+function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_surf::PlasmaGeometry)
 
     mth = inputs.mtheta
     mth1 = inputs.mtheta + 1

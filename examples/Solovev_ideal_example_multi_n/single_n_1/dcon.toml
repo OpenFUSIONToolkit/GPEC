@@ -36,9 +36,5 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-
-use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
-
-[DCON_OUTPUT]
-write_euler_h5 = true         # Write euler.h5 (euler.bin Julia equivalent)
-fname_euler_h5 = "euler_n1.h5"
+write_outputs_to_HDF5 = true
+HDF5_filename = "euler_n1.h5"
