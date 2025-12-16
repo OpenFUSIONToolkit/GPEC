@@ -189,16 +189,36 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
     dth = globals.dth
     mth = globals.mth
     mth1 = globals.mth1
-
     ak0i = 0.0
     jres = 1
-
     ishape = settings.vacdat.ishape
+    N_obs = length(xobs)
+    the = LinRange(0, mth*dth, mth+1)
+    
+    if N_obs != length(zobs) || N_obs != length(xsce) || N_obs != length(zsce)
+        error("Length of input arrays (xobs, zobs, xsce, zsce) are different. All length should be the same")
+    end
+
+    if globals.mth1 != N_obs
+        @warn "globals.mth (=$mth) is different with input array length (=$N_obs). Update global parameters"
+
+        globals.mth = N_obs - 1
+        globals.mth1 = N_obs
+        globals.dth = 2 * π / (N_obs) 
+
+        mth = globals.mth
+        mth1 = globals.mth1
+        dth = globals.dth
+        the = LinRange(0, mth*dth, mth+1)
+    end
+
+
+
 
     # matrix output gren is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
     
-    the = LinRange(0, mth*dth, mth+1)
+
 
     # 1. definition for solving parameters
     wsimpb1=1*dth/3
@@ -252,8 +272,11 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
     itp_x = interpolate(xsce, interp_type, grid_type)
     itp_z = interpolate(zsce, interp_type, grid_type)
 
-    itp_x_scaled = scale(itp_x, the)
-    itp_z_scaled = scale(itp_z, the)
+    itp_x_scaled_nonperiodic = scale(itp_x, the)
+    itp_z_scaled_nonperiodic = scale(itp_z, the)
+
+    itp_x_scaled = Interpolations.extrapolate(itp_x_scaled_nonperiodic, Interpolations.Periodic())
+    itp_z_scaled = Interpolations.extrapolate(itp_z_scaled_nonperiodic, Interpolations.Periodic())
 
     gradients_x = (t -> Interpolations.gradient(itp_x_scaled, t)).(the)
     gradients_z = (t -> Interpolations.gradient(itp_z_scaled, t)).(the)
