@@ -478,7 +478,7 @@ function kernel!(grdgre, gren, xobs, zobs, xsce, zsce, j1, j2, isgn, iopw, iops,
             end
 
             # 7.3 minus residu value
-            work[j] -= (isgn * aval1 + residu)  # Fixed: () to []
+            work[j] = work[j] - isgn * aval1 + residu
             if j == jres
                 ak0i -= isgn * aval1
             end
