@@ -42,7 +42,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs, wall_settings)
+    kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs, wall)
 
     # Enforce periodic boundary conditions
     for i = 1:inputs.mtheta + 2
@@ -54,7 +54,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
     fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, inputs.mlow, inputs.mhigh, inputs.mtheta)
     fourier_transform!(grri, grpp, plasma_surf.snlth, 0, inputs.mpert, inputs.mlow, inputs.mhigh, inputs.mtheta)
 
-    if !inputs.farwal_flag
+    if !inputs.farwall_flag
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
@@ -62,7 +62,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
         grpw_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, wall_settings)
+        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, wall)
         
         fourier_transform!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fourier_transform!(grpw_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -73,7 +73,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         j1, j2 = 2, 1
         ksgn = 2*j2 - 3
         grwp_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, wall_settings)
+        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, wall)
 
         fourier_transform!(grwp_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fourier_transform!(grwp_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -84,7 +84,7 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
         grww_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall_settings)
+        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall)
 
         fourier_transform!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
         fourier_transform!(grww_block, grdgre, snlth, 0, jmax1, lmin, lmax, mth)
@@ -101,7 +101,8 @@ function vaccal!(inputs::VacuumInputType, plasma_surf::PlasmaGeometry, wall::Wal
 
     # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
-    if (abs(inputs.n) <= 1e-5) && (!inputs.farwal_flag) && (wall_settings.ishape <= 10)
+    if (abs(inputs.n) <= 1e-5) && (!inputs.farwall_flag) && (wall.is_closed_toroidal)
+        mth12 = inputs.farwall_flag ? inputs.mtheta : 2 * inputs.mtheta
         for i in 1:mth12, j in 1:mth12
             grdgre[i, j] += wall_settings.cn0
         end
@@ -190,14 +191,13 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `gradgreensfunction`: Gradient Green's function matrix
 - `greensfunction`: Green's function matrix
 """
-function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInputType, wall_settings::WallShapeSettings)
+function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInputType, wall_geo::WallGeometry)
 
     mth = inputs.mtheta
     mth1 = inputs.mtheta + 1
     dth = 2π / mth
     ak0i = 0.0
     jres = 1
-    ishape = wall_settings.ishape
     N_obs = length(x_obspoints)
     thetas = LinRange(0, mth*dth, mth)
     
@@ -449,7 +449,7 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
 
         # 7.2 Change resdg, resk0 according to ishape
         # resdg, resk0 ???
-        if ishape < 10 || ishape == 41 || ishape == 42
+        if wall_geo.is_closed_toroidal
             resdg=(2-j1)*(2-j2)+(j1-1)*(j2-1)
             resk0=(2-j1)*(2-j2)+(j1-3)*(j2-1)
             residue=resdg+resk0

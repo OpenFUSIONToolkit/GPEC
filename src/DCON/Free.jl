@@ -49,35 +49,38 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         vac_inputs.mtheta = ctrl.mthvac
         vac_inputs.force_wv_symmetry = ctrl.force_wv_symmetry
 
-        vac_inputs.farwal_flag = true
-        vac_inputs.kernelsign = -1.0
-        # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        # repeated calls are needed only when gpec code using mutual inductances is added
+        # vac_inputs.farwall_flag = true
+        # vac_inputs.kernelsign = -1.0
+        # # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
+        # VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+        #     wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
         
+        # vac_inputs.kernelsign = 1.0
+        # VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+        #     wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+
+        # if ctrl.wv_farwall_flag
+        #     wv_temp .= wv_block
+        # end
+
+        vac_inputs.farwall_flag = false
+        vac_inputs.kernelsign = -1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+            wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+
+        vac_inputs.kernelsign = 1.0
+        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+            wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+
         println("WV from Fortran")
         display(wv_block)
 
         # Placeholder for Julia vacuum code
         wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, wall_flag, intr.dir_path)
-        error("Debug: Made it through compute_vacuum_response in Free.jl!")
-
-        vac_inputs.kernelsign = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        if ctrl.wv_farwall_flag
-            wv_temp .= wv_block
-        end
-
-        vac_inputs.farwal_flag = false
-        vac_inputs.kernelsign = -1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        vac_inputs.kernelsign = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, vac_inputs.farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        println("WV from Fortran")
+        display(wv_block)
+        # error("Debug: Made it through compute_vacuum_response in Free.jl!")
 
         if ctrl.wv_farwall_flag
             wv_block .= wv_temp
@@ -276,12 +279,12 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             complex_flag = true
             kernelsignin = 1.0
             wall_flag = false
-            farwal_flag = false
+            farwall_flag = false
             ahg_file = "ahg2msc_dcon.out" # Deprecated
 
             # Compute vacuum matrix
             VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-                wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+                wall_flag, farwall_flag, grri, xzpts, ahg_file, intr.dir_path)
 
             # Apply singular factor scaling
             singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)

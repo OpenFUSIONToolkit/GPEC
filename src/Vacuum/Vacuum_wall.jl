@@ -335,7 +335,7 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma
     mth1 = inputs.mtheta + 1
     mth2 = inputs.mtheta + 2
 
-    farwal = inputs.farwal_flag
+    farwall = inputs.farwall_flag
     xinf = plasma_surf.x
     zinf = plasma_surf.z
 
@@ -345,7 +345,6 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma
     dw = wall_settings.dw
     tw = wall_settings.tw
 
-    ishape = wall_settings.ishape
     a = wall_settings.a
     b = wall_settings.b
     abulg = wall_settings.abulg
@@ -355,23 +354,76 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma
     zma = wall_settings.zma
     isph = wall_settings.isph
 
-    leqarcw = wall_settings.leqarcw
 
-    dth = 2.0 * π / (mth1) # (2.0*pi / (mth+1))
+    dth = 2.0 * π / (mth)
     inside = 0
 
     # --- Array Initialization --- # <--- Added section
-    xwal1 = zeros(Float64, mth2)
-    zwal1 = zeros(Float64, mth2)
-    thet = zeros(Float64, mth2)  # Used in ishape==3
+    xwal1 = zeros(Float64, mth)
+    zwal1 = zeros(Float64, mth)
+    # thet = zeros(Float64, mth)  # Used in ishape==3
 
     awsave = aw
     bwsave = bw
     insect = false
-    isph = 0 # Corresponds to Fortran's `data iplt/0/`. iplt is only used at the end, so isph=0 is initialized here.
-    iplt = 0 # <--- Added (Fortran's data iplt/0/ initialization)
+    # isph = 0 # Corresponds to Fortran's `data iplt/0/`. iplt is only used at the end, so isph=0 is initialized here.
+    # iplt = 0 # <--- Added (Fortran's data iplt/0/ initialization)
+
+    is_closed_toroidal = true
+
+    if inputs.farwall_flag
+        @info "Enforcing no-wall vacuum energy conditions"
+        # Return zeros, no wall defined
+        return xwal1, zwal1
+    end
+
+    xshift = a
+    mthalf = floor(Int, mth2 / 2) 
+    xmin, xmax, zmin, zmax = bounds(xinf, zinf, 1, mth) # Replaced Fortran loop with bounds function (same as original Julia code)
+    plrad = 0.5 * (xmax - xmin)
+    xmaj = 0.5 * (xmax + xmin)
+    zmid = 0.5 * (zmax + zmin)
+    zrad = 0.5 * (zmax - zmin)
+    scale = (zmax - zmin)
+
+    if ((xmax - xmin) / 2.0) > scale
+        scale = (xmax - xmin) / 2.0
+    end
+
+    scale = 1.0
+    aw = aw * scale
+    bw = bw * scale
+    delta1 = dw * (xinf[1] - xma)
+    
+    # TODO: Only implement closed toroidal shapes shapes and an option to read in the wall geometry from a file. 
+    # closed_toroidal_shapes = ["conformal", "elliptical", "bean", "dee", "mod-dee", "from-file"]  # from-file is 41/42 (i don't care which - just pick one for now)
+    # TODO: Remove d3d wall information (not ok to have in open source code)
+    # TODO: Remove all other options for code clarity - I only didn't because I felt bad SNU converted so much - this is the warning that it will be deleted tomorrow if you do not delete it yourself.
+    if wall_settings.shape == "conformal"
+        wcentr = xmaj
+        csmin = min(0.1, 1e-1 * minimum(view(xinf, 1:mth)))
+        for i in 1:mth
+            j = i - 1
+            if j<1
+                j = mth - j
+            end
+            k = i + 1
+            if k>mth
+                k = k - mth
+            end
+            alph = atan(xinf[k] - xinf[j], zinf[j] - zinf[k]) # Fortran's ATAN2
+            xwal1[i] = xinf[i] + a * plrad * cos(alph)
+            zwal1[i] = zinf[i] + a * plrad * sin(alph)
+            if xwal1[i] <= csmin
+                xwal1[i] = csmin
+            end
+        end
+    else
+        error("Wall shape $(wall_settings.shape) not implemented yet.")
+    end
 
 
+    #=
     # --- Shape Logic ---
     if a < -100.0
         isph = 1
@@ -401,29 +453,7 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma
         lfix = false # Initialize lfix for all paths
     end
 
-    if farwal
-        @info "No wall"
-        # Return zeros, no wall defined
-        return xwal1, zwal1
-    end
 
-    xshift = a
-    mthalf = floor(Int, mth2 / 2) 
-    xmin, xmax, zmin, zmax = bounds(xinf, zinf, 1, mth) # Replaced Fortran loop with bounds function (same as original Julia code)
-    plrad = 0.5 * (xmax - xmin)
-    xmaj = 0.5 * (xmax + xmin)
-    zmid = 0.5 * (zmax + zmin)
-    zrad = 0.5 * (zmax - zmin)
-    scale = (zmax - zmin)
-
-    if ((xmax - xmin) / 2.0) > scale
-        scale = (xmax - xmin) / 2.0
-    end
-
-    scale = 1.0
-    aw = aw * scale
-    bw = bw * scale
-    delta1 = dw * (xinf[1] - xma)
 
     # ishape=2 Elliptical shell
     if ishape == 2
@@ -829,41 +859,37 @@ function wwall(inputs::VacuumInputType, wall_settings::WallShapeSettings, plasma
 
     xmx = xma + xshift
 
+    =#
+
     # --- Cleanup ---
-    @label cleanup # Target for the `goto` from ishape=-10
-    xwal1[mth1] = xwal1[1]
-    zwal1[mth1] = zwal1[1]
-    xwal1[mth2] = xwal1[2]
-    zwal1[mth2] = zwal1[2]
-    if leqarcw == 1
+    # @label cleanup # Target for the `goto` from ishape=-10
+
+    if wall_settings.leqarcw == 1
+        error("eqarcw function not implemented yet.")
         xpp, zpp, ww1, ww2, ww3 = eqarcw( xwal1, zwal1, mth1 ) # <--- Assuming eqarcw returns values
         for i in 1:mth1
             xwal1[i] = xpp[i]
             zwal1[i] = zpp[i]
         end
     end
-    xwal = xwal1
-    zwal = zwal1
 
-    # Call to savewall(wcentr,xwal1,zwal1) from Fortran can be added here if implemented in Julia
-    # savewall(wcentr, xwal1, zwal1) 
-
-    if iplt <= 0 # <--- Fortran's if ( iplt .le. 0 ) then
-        xmx = xmaj
-        zma = 0.0
-        iplt = 1
+    h5open("wall_shape.h5", "w") do file
+        attributes(file)["x_center"] = wcentr
+        write(file, "x", xwal1)
+        write(file, "z", zwal1)
     end
 
-    if insect # <--- Added (Fortran's warning message)
-        @warn "There are at least $inside wall points in the plasma"
-        # Corresponds to Fortran's errmes call
-        # errmes("vacdat") 
-    end
+    # if iplt <= 0 # <--- Fortran's if ( iplt .le. 0 ) then
+    #     xmx = xmaj
+    #     zma = 0.0
+    #     iplt = 1
+    # end
 
-    aw = awsave # restore value of aw
-    bw = bwsave # restore value of bw
+    # if insect # <--- Added (Fortran's warning message)
+    #     @warn "There are at least $inside wall points in the plasma"
+    #     # Corresponds to Fortran's errmes call
+    #     # errmes("vacdat") 
+    # end
 
-    xwal = xwal1
-    zwal = zwal1
-    return xwal, zwal
+    return xwal1, zwal1, is_closed_toroidal
 end

@@ -42,7 +42,7 @@ use_classic_splines = false   # Use a classical cubic spline instead of tri-diag
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
 
 [WALL]
-ishape = 6
+shape = "conformal"
 aw = 0.05
 bw = 1.5
 cw = 0
@@ -58,7 +58,7 @@ delg = 15.01
 delfac = 0.001
 cn0 = 1
 
-leqarcw = 1
+leqarcw = 0
 ipshp = 0
 xpl = 100
 apl = 1

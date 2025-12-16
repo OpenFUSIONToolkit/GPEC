@@ -21,7 +21,7 @@ Holds plasma boundary and mode data as provided from DCON or equivalent upstream
 - `n`: The toroidal mode number. Paper: n.
 - `qa`: Safety factor at the plasma boundary.
 - `mtheta_in`: Number of poloidal angles in the input boundary arrays.
-- `farwal_flag`: Boolean flag indicating if the conducting wall is at infinity.
+- `farwall_flag`: Boolean flag indicating if the conducting wall is at infinity.
 - `kernelsign`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations.
 """
 @kwdef mutable struct VacuumInputType
@@ -35,7 +35,7 @@ Holds plasma boundary and mode data as provided from DCON or equivalent upstream
     qa::Float64 = 0.0
     mtheta_eq::Int = 1
     mtheta::Int = 1
-    farwal_flag::Bool = false
+    farwall_flag::Bool = false
     kernelsign::Float64 = 1.0
     force_wv_symmetry::Bool = true
 end
@@ -81,6 +81,7 @@ FILL THIS IN LATER
 - `zwalp`: dZ/dtheta at wall (computed).
 """
 @kwdef struct WallGeometry
+    is_closed_toroidal::Bool = true
     x::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
     dx_dtheta::Vector{Float64} = Float64[]
@@ -96,7 +97,7 @@ end
 
 Parameters for vacuum wall and geometry.
 
-- `ishape`: Integer. Options for the wall shape.
+- `shape` key word replacement for fortran `ishape`: Integer. Options for the wall shape.
     * `< 0`: Spherical topology.
     * `< 10`: Closed toroidal topology.
     * 2: Elliptical shell confocal to the plasma's radius and height. The radius of the shell is `a`.
@@ -150,7 +151,7 @@ Parameters for vacuum wall and geometry.
 
 """
 @kwdef mutable struct WallShapeSettings
-    ishape::Int = 6
+    shape::String = "conformal"
     aw::Float64 = 0.05
     bw::Float64 = 1.5
     cw::Float64 = 0.0

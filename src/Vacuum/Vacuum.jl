@@ -1,6 +1,7 @@
 module VacuumMod
 
 using TOML, Interpolations, SpecialFunctions, Printf, LinearAlgebra
+using HDF5
 
 include("Vacuum_data.jl")
 include("Vacuum_init.jl")
@@ -95,7 +96,7 @@ function unset_dcon_params()
 end
 
 """
-    mscvac(wv, mpert, mtheta, mthvac, complex_flag, kernelsignin, wall_flag, farwal_flag, grrio, xzptso, op_ahgfile=nothing)
+    mscvac(wv, mpert, mtheta, mthvac, complex_flag, kernelsignin, wall_flag, farwall_flag, grrio, xzptso, op_ahgfile=nothing)
 
 Compute the vacuum response matrix for magnetostatic perturbations.
 
@@ -108,7 +109,7 @@ Compute the vacuum response matrix for magnetostatic perturbations.
   - `complex_flag`: Whether to use complex arithmetic (Bool)
   - `kernelsignin`: Sign convention for vacuum kernels (Float64, typically -1.0)
   - `wall_flag`: Whether to include an externally defined wall shape (Bool)
-  - `farwal_flag`: Whether to use far-wall approximation (Bool)
+  - `farwall_flag`: Whether to use far-wall approximation (Bool)
   - `grrio`: Green's function data (Array{Float64,2})
   - `xzptso`: Source point coordinates (Array{Float64,2})
   - `op_ahgfile`: Optional communication file for when set_dcon_params is not called (String or Nothing)
@@ -136,13 +137,13 @@ wv = zeros(ComplexF64, mpert, mpert)
 complex_flag = true
 kernelsignin = -1.0
 wall_flag = false
-farwal_flag = true
+farwall_flag = true
 grrio = rand(Float64, 2 * (mthvac + 5), mpert * 2)
 xzptso = rand(Float64, mthvac + 5, 4)
 
 # Perform calculation
 mscvac(wv, mpert, mtheta, mthvac, complex_flag, kernelsignin,
-    wall_flag, farwal_flag, grrio, xzptso)
+    wall_flag, farwall_flag, grrio, xzptso)
 ```
 """
 function mscvac(
@@ -153,7 +154,7 @@ function mscvac(
     complex_flag::Bool,
     kernelsignin::Float64,
     wall_flag::Bool,
-    farwal_flag::Bool,
+    farwall_flag::Bool,
     grrio::Array{Float64,2},
     xzptso::Array{Float64,2},
     op_ahgfile::Union{Nothing,String}=nothing,
@@ -179,7 +180,7 @@ function mscvac(
                 Ref{Cint},            # complex_flag (logical)
                 Ref{Cdouble},         # kernelsignin
                 Ref{Cint},            # wall_flag (logical)
-                Ref{Cint},            # farwal_flag (logical)
+                Ref{Cint},            # farwall_flag (logical)
                 Ptr{Cdouble},         # grrio(:,:)
                 Ptr{Cdouble},         # xzptso(:,:)
                 Ptr{UInt8}),          # op_ahgfile (optional)
@@ -190,7 +191,7 @@ function mscvac(
             Ref(Int32(complex_flag)),
             Ref(kernelsignin),
             Ref(Int32(wall_flag)),
-            Ref(Int32(farwal_flag)),
+            Ref(Int32(farwall_flag)),
             pointer(grrio),
             pointer(xzptso),
             ahgfile_ptr
@@ -201,7 +202,7 @@ function mscvac(
 end
 
 """
-    compute_vacuum_response(vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwal_flag::Bool, folder::String=".")
+    compute_vacuum_response(vac_inputs::VacuumInputType, mpert::Int, mtheta_eq::Int, mtheta_vac::Int, complex_flag::Bool, kernelsign::Float64, wall_flag::Bool, farwall_flag::Bool, folder::String=".")
 
 Compute the vacuum response matrix using provided vacuum inputs. This is a placeholder for the Julia conversion of the
 fortran mscvac function. It will return the relevant arrays, wv, grri, and xzpts.

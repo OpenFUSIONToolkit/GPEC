@@ -199,13 +199,15 @@ function initialize_wall(inputs::VacuumInputType, wall_settings::WallShapeSettin
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] 
     
     # Get wall shape from wwall (these are of length mth + 2)
-    x_wall, z_wall = wwall(inputs, wall_settings, plasma_surf)
+    x_wall, z_wall, is_closed_toroidal = wwall(inputs, wall_settings, plasma_surf)
+
     # We need [1:mth1] below because these arrays are of size mth + 2 (for periodic finite differencing?) - try to remove this later
     # Wall boundary theta derivative
     dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall[1:inputs.mtheta])
     dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall[1:inputs.mtheta])
 
     return WallGeometry(
+        is_closed_toroidal
         x_wall,
         z_wall,
         dx_dtheta,
