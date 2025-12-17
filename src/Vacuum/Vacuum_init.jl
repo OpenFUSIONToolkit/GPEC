@@ -16,18 +16,25 @@ function initialize_plasma_surface(inputs::VacuumInput)
     # Interpolate arrays from input onto mthvac grid (in readahg in the Fortran)
     mtheta = inputs.mtheta
     # x_plasma = interp_to_new_grid(inputs.r, mtheta)
-    x_plasma = cubic_spline_interpolation(inputs.theta, inputs.r, extrapolation_bc=Interpolations.Periodic())(range(0, stop=2π, length=mtheta + 1)[1:end-1])
-    z_plasma = cubic_spline_interpolation(inputs.theta, inputs.z, extrapolation_bc=Interpolations.Periodic())(range(0, stop=2π, length=mtheta + 1)[1:end-1])
-    delta = cubic_spline_interpolation(inputs.theta, inputs.delta, extrapolation_bc=Interpolations.Periodic())(range(0, stop=2π, length=mtheta + 1)[1:end-1])
+    input_theta = range(0, stop=2π, length=length(inputs.r) + 1)[1:end-1] # length of input arrays without endpoint
+    
+    x_plasma_spl = cubic_spline_interpolation(input_theta, inputs.r, extrapolation_bc=Interpolations.Periodic())
+    z_plasma_spl = cubic_spline_interpolation(input_theta, inputs.z, extrapolation_bc=Interpolations.Periodic())
+
+    
+    x_plasma = x_plasma_spl(range(0, stop=2π, length=mtheta + 1)[1:end-1])
+    z_plasma = z_plasma_spl(range(0, stop=2π, length=mtheta + 1)[1:end-1])
+    delta = cubic_spline_interpolation(input_theta, inputs.delta, extrapolation_bc=Interpolations.Periodic())(range(0, stop=2π, length=mtheta + 1)[1:end-1])
     
     # Plasma boundary theta derivative (this is semi-working)
     # All of these arrays are of length mth with θ = [0, 1)
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
     # xplap = periodic_cubic_deriv(theta_grid, x_plasma)
     # zplap = periodic_cubic_deriv(theta_grid, z_plasma)
-    dx_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, x_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
-    dz_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, z_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
-
+    # dx_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, x_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
+    # dz_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, z_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
+    dx_plasma_dtheta = first.(Interpolations.gradient.(Ref(x_plasma_spl), theta_grid))
+    dz_plasma_dtheta = first.(Interpolations.gradient.(Ref(z_plasma_spl), theta_grid))
     # Trigonometric basis arrays
     cos_nqdelta = zeros(mtheta)
     sin_nqdelta = zeros(mtheta)
@@ -84,8 +91,16 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     # We need [1:mth1] below because these arrays are of size mth + 2 (for periodic finite differencing?) - try to remove this later
     # Wall boundary theta derivative
-    dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall[1:inputs.mtheta])
-    dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall[1:inputs.mtheta])
+    # dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall[1:inputs.mtheta])
+    # dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall[1:inputs.mtheta])
+
+    input_theta = range(0, stop=2π, length=length(x_wall) + 1)[1:end-1] # length of input arrays without endpoint
+
+    x_wall_spl = cubic_spline_interpolation(input_theta, x_wall[1:inputs.mtheta], extrapolation_bc=Interpolations.Periodic())
+    z_wall_spl = cubic_spline_interpolation(input_theta, z_wall[1:inputs.mtheta], extrapolation_bc=Interpolations.Periodic())
+    dx_dtheta = first.(Interpolations.gradient.(Ref(x_wall_spl), theta_grid))
+    dz_dtheta = first.(Interpolations.gradient.(Ref(z_wall_spl), theta_grid))
+
 
     return WallGeometry(
         is_closed_toroidal,

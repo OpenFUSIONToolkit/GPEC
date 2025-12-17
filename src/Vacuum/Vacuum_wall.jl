@@ -374,7 +374,7 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
     if inputs.farwall_flag
         @info "Enforcing no-wall vacuum energy conditions"
         # Return zeros, no wall defined
-        return xwal1, zwal1
+        return xwal1, zwal1, is_closed_toroidal
     end
 
     xshift = a
