@@ -182,14 +182,6 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
 
-    # Save results
-    @info "Saving wall shape to 'wall_shape.h5'."
-    h5open("wall_shape.h5", "w") do file
-        attributes(file)["x_center"] = wcentr
-        write(file, "x", x_wall)
-        write(file, "z", z_wall)
-    end
-
     # Compute wall derivatives
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
     dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall)
