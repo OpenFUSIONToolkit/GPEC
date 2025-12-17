@@ -468,21 +468,12 @@ function fourier_inverse_transform!(
     )
 
     # Zero out gll block
-    for l1 in 1:mpert
-        for l2 in 1:mpert
-            gll[l2, l1] = 0.0
-        end
-    end
+    fill!(view(gll, 1:mpert, 1:mpert), 0.0)
 
-    # Main accumulation (note: gll[l2, l1], not gll[l1, l2])
+    # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
+    # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
     dth = 2π / mth
-    for l1 in 1:mpert
-        for l2 in 1:mpert
-            gll[l2, l1] = dth * sum(cs[i, l2] * gil[m00 + i, l00 + l1] for i in 1:mth) * 2π
-        end
-    end
-
-    return gll
+    mul!(gll, cs', view(gil, m00+1:m00+mth, l00+1:l00+mpert), 2π * dth, 0.0)
 end
 
 """
@@ -513,20 +504,12 @@ function fourier_transform!(
 )
 
     # Zero out relevant gil block
-    for l1 in 1:mpert
-        for i in 1:mth
-            gil[m00 + i, l00 + l1] = 0.0
-        end
-    end
+    fill!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), 0.0)
 
-    # Accumulate with ll offset (critical to match Fortran)
-    for l1 in 1:mpert
-        for j in 1:mth
-            for i in 1:mth
-                gil[m00 + i, l00 + l1] += cs[j, l1] * gij[i, j]
-            end
-        end
-    end
+    # Accumulate Fourier transform via matrix multiply: gil = gij * cs
+    # This computes: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    mul!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), gij, cs)
+
 end
 
 function assemble_vacuum_matrix!(
