@@ -54,7 +54,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         display(wv_block)
 
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(wall_settings, vac_inputs, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
         println("WV from Julia")
         display(wv_block)
 
