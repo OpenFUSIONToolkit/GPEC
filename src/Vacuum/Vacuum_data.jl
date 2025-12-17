@@ -91,36 +91,19 @@ end
 
 Input settings for vacuum wall and geometry.
 
-- `shape` key word replacement for fortran `ishape`: Integer. Options for the wall shape.
-    * `< 0`: Spherical topology.
-    * `< 10`: Closed toroidal topology.
-    * 2: Elliptical shell confocal to the plasma's radius and height. The radius of the shell is `a`.
-    * 4: Modified dee-shaped wall independent of plasma geometry with triangularity `dw`, squareness(?), and 2nd harmonic of `zwal` in `aw` and `tw`. Centered at `cw`, radius `a`, and elongation `bw`.
-    * 5: Dee-shaped wall scaled to the radius and geometric center of the plasma. Offset of `cw`. Other variables as option 4.
-    * 6: Conforming shell at distance `a * p_rad`. Best for a close fitting shell.
-    * 7: Enclosing bean-shaped wall.
-    * 8: Wall of DIII-D.
-    * `< 20`: Solid conductors not linking plasma.
-    * 11: Dee-shaped conductor.
-    * 12: Solid bean-shaped conductor on right.
-    * 13: Solid bean-shaped conductor on left.
-    * `< 30`: Toroidal conductor with a toroidally symmetric gap, geometry correlated to plasma.
-    * 21: Shell scaled to plasma. Gap on inner side.
-    * 24: Shell scaled to plasma. Gap on outer side.
-    * `< 40`: Toroidal conductor with a toroidally symmetric gap, geometry independent of plasma.
-    * 31: Shell independent of plasma. Gap on inner side.
-    * 34: Shell independent of plasma. Gap on outer side.
-- `aw` (a_w): Half-thickness of the shell.
-- `bw` (b_w): Elongation of the shell.
-- `cw` (c_w): Offset of the center of the shell from the major radius, X_{maj}.
-- `dw` (delta_w): Triangularity of shell.
-- `tw` (tau_w): Sharpness of the corners of the shell. Try 0.05 as a good initial value.
-- `nsing`: Not referenced.
-- `epsq`: Not referenced.
-
-- `leqarcw`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
-  the wall is very close to the plasma. See `ishape=6` option.
-- `a` (a): Usually the distance of the shell from the plasma in units of the plasma radius p_{rad} at the outer side. If a geq 10, the wall is assumed to be at infty.
+- `shape` : String selecting wall shape. Options are:
+    - "nowall": No wall.
+    - "dee": Dee-shaped wall.
+    - "moddee": Modified Dee-shaped wall.
+    - "custom": Custom wall shape provided in wall_geo.dat. TODO: Describe file format here.
+- `a` : The distance of the shell from the plasma in units of major radius (conformal), or minor radius parameter (others).
+- `aw` : Half-thickness of the shell.
+- `bw` : Elongation of the shell.
+- `cw` : Offset of the center of the shell from the major radius.
+- `dw` : Triangularity of shell.
+- `tw` : Sharpness of the corners of the shell. Try 0.05 as a good initial value.
+- `equal_arc_wall`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
+  the wall is very close to the plasma.
 """
 @kwdef mutable struct WallShapeSettings 
 
@@ -128,21 +111,13 @@ Input settings for vacuum wall and geometry.
     shape::String = "nowall"
     
     # Standard geometric parameters for Dee/Mod-Dee
+    a::Float64 = 0.3
     aw::Float64 = 0.05
     bw::Float64 = 1.5
     cw::Float64 = 0.0
     dw::Float64 = 0.5
     tw::Float64 = 0.05
     
-    # Scale and center
-    a::Float64 = 1.2    # Distance or scaling factor
-    xma::Float64 = 1.0
-    zma::Float64 = 0.0
-    
     # Algorithmic options
-    leqarcw::Int = 1    # Re-parameterization flag
-    
-    # Numerical controls (Keep only if used in Green's function integration)
-    nsing::Int = 500
-    epsq::Float64 = 1e-05
+    equal_arc_wall::bool = true
 end

@@ -40,13 +40,10 @@ force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
 
 [WALL]
 shape = "conformal"
+a = 0.2415
 aw = 0.05
 bw = 1.5
 cw = 0
 dw = 0.5
 tw = 0.05
-nsing = 500
-epsq = 1e-5
-
-leqarcw = 0
-a = 0.2415
+equal_arc_wall = false
