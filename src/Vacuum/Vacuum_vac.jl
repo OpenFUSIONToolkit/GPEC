@@ -12,77 +12,45 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
     grri = zeros(2 * mtheta, 2 * mpert)
     grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
-    grpp = zeros(2 * mtheta, 2 * mtheta)
+    greenfunction_temp = zeros(mtheta, mtheta)
 
-    # ----------------------------------------------------------
     # Plasma–Plasma block
-    # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grad_greenfunction_mat, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs)
-
-    # TODO: remove this I think? Can't test right now since the full runthrough is broken. This should have been removed when mtheta+5 was removed
-    # Enforce periodic boundary conditions
-    for i = 1:mtheta + 2
-        grpp[i,mtheta + 1] = grpp[i,1]
-        grpp[i,mtheta + 2] = grpp[i,2]
-    end
+    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, inputs)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, mtheta, mpert)
-    fourier_transform!(grri, grpp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0, mtheta, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
 
     if !wall.nowall
-        # ----------------------------------------------------------
+        error("Don't come in here")
         # Plasma–Wall block
-        # ----------------------------------------------------------
-        error("Haven't set up walls yet")
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
-        grpw_block = zeros(2 * mtheta, 2 * mtheta)
-        kernel!(grad_greenfunction_mat, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
+        # fill!(greenfunction_temp, 0.0)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
 
-        fourier_transform!(grpw_block, grad_greenfunction_mat, cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grpw_block, grad_greenfunction_mat, snlth, 0, mpert, mtheta, mpert)
-
-        # ----------------------------------------------------------
-        # Wall–Plasma block
-        # ----------------------------------------------------------
-        j1, j2 = 2, 1
-        ksgn = 2*j2 - 3
-        grwp_block = similar(grad_greenfunction_mat) # This should be grpp or a new matrix
-        kernel!(grad_greenfunction_mat, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs)
-
-        fourier_transform!(grwp_block, grad_greenfunction_mat, cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grwp_block, grad_greenfunction_mat, snlth, 0, mpert, mtheta, mpert)
-
-        # ----------------------------------------------------------
         # Wall–Wall block
-        # ----------------------------------------------------------
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
-        grww_block = similar(grad_greenfunction_mat) # This should be grpp or a new matrix
-        kernel!(grad_greenfunction_mat, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
 
-        fourier_transform!(grww_block, grad_greenfunction_mat, cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grww_block, grad_greenfunction_mat, snlth, 0, mpert, mtheta, mpert)
+        # Wall–Plasma block
+        j1, j2 = 2, 1
+        ksgn = 2*j2 - 3
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 0, inputs; xwall=wall.x, zwall=wall.z)
 
-        # ----------------------------------------------------------
-        # Assemble matrices for solving
-        # ----------------------------------------------------------
-        assemble_vacuum_matrix!(
-            vacmat, vacmti, vacmatu, vacmtiu,
-            grwp, grpw_block, grwp_block, grww_block,
-            mth, mpert, inputs.mlow, inputs.mhigh, 2π
-        )
+        # Fourier transform wall blocks into grri
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
     end
 
-    # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
     cn0 = 1.0 # expose to user if anyone ever actually tries to use this
     if (abs(n) <= 1e-5) && (!wall.nowall) && (wall.is_closed_toroidal)
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
-        mth12 = farwall_flag ? mtheta : 2 * mtheta
+        mth12 = wall.nowall ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
             grad_greenfunction_mat[i, j] += cn0
         end
@@ -125,15 +93,11 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
             end
         end
     end
-    wv = complex.(vacmat, vacmti)
-
-    println("WV from Julia")
-    display(wv)
 
     # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
 
     # TODO: add our own wall/plasma geometry outputs if desired
-    return wv, grri
+    return complex.(vacmat, vacmti), grri
 end
 
 """
@@ -154,14 +118,13 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `isgn`: Sign parameter
 - `iopw`: Wall option (0=inactive, 1=active)
 - `iops`: Log singularity correction option
-- `wallflag`: Check option for conductor position (ischk)
 - `params`: Dictionary containing simulation parameters
 
 # Returns
 - `grad_greenfunction_mat`: Gradient Green's function matrix
 - `greenfunction_mat`: Green's function matrix
 """
-function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput)
+function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, inputs::VacuumInput; xwall::Union{Nothing, Vector{Float64}}=nothing, zwall::Union{Nothing, Vector{Float64}}=nothing)
 
     mtheta = inputs.mtheta
     mth1 = inputs.mtheta + 1
@@ -199,16 +162,15 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     has_zero_crossing = false # has_zero_crossing needs to be initialized
 
     # check singular points for conductor.
-    if wallflag
+    if xwall !== nothing && zwall !== nothing
         # 2.0 initialize jbot and jtop, and get wall geometry from globals
-        jbot=mtheta/2+1
-        jtop=mtheta/2+1
-        ww1 = globals.xwal
-        ww2 = globals.zwal
+        jbot = jtop = mtheta/2+1
+        ww1 = xwall
+        ww2 = zwall
         
         # 2.2 find where sign of wall r point acrosses zero.
         # has_zero_crossing means there is 0-crossing point
-        for i in 1:mtheta
+        for i in 1:mtheta-1 # TODO: should this be mtheta-1 or add a special case for the last point?
             if ww1[i] * ww1[i+1] <= 0.0
                 jbot = ww1[i] > 0.0 ? i : jbot
                 jtop = ww1[i] < 0.0 ? i + 1 : jtop
@@ -402,10 +364,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 greenfunction_mat[j,js3] += G_n_nonsingular * A0
                 greenfunction_mat[j,js4] += G_n_nonsingular * A1_plus
                 greenfunction_mat[j,js5] += G_n_nonsingular * A2_plus
-
             end
         end
-
 
         # Set residue based on logic similar to Table I of Chance 1997
         if j1 == j2
@@ -440,9 +400,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         # Store all the datas of work in grdgre, gren
         grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work[1:mtheta]
         greenfunction_mat[j, 1:mtheta] ./= 2π
-
     end
-
 end
 
 """
