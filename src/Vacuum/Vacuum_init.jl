@@ -25,29 +25,29 @@ function initialize_plasma_surface(inputs::VacuumInput)
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
     # xplap = periodic_cubic_deriv(theta_grid, x_plasma)
     # zplap = periodic_cubic_deriv(theta_grid, z_plasma)
-    xplap = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, x_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
-    zplap = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, z_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
+    dx_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, x_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
+    dz_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, z_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
 
     # Trigonometric basis arrays
-    cnqd = zeros(mtheta)
-    snqd = zeros(mtheta)
-    sinlt = zeros(mtheta, inputs.mpert)
-    coslt = zeros(mtheta, inputs.mpert)
-    snlth = zeros(mtheta, inputs.mpert)
-    cslth = zeros(mtheta, inputs.mpert)
+    cos_nqdelta = zeros(mtheta)
+    sin_nqdelta = zeros(mtheta)
+    sin_mstheta = zeros(mtheta, inputs.mpert)
+    cos_mstheta = zeros(mtheta, inputs.mpert)
+    sin_mstheta_arg = zeros(mtheta, inputs.mpert)
+    cos_mstheta_arg = zeros(mtheta, inputs.mpert)
     for is in 1:mtheta
         theta = (is-1) * 2π / mtheta
-        znqd = inputs.n * inputs.qa * delta[is]
-        cnqd[is] = cos(znqd)
-        snqd[is] = sin(znqd)
+        nqdelta = inputs.n * inputs.qa * delta[is]
+        cos_nqdelta[is] = cos(nqdelta)
+        sin_nqdelta[is] = sin(nqdelta)
         for l1 in 1:inputs.mpert
-            ll = inputs.mlow - 1 + l1
-            elth = ll * theta
-            elthnq = ll * theta + znqd
-            sinlt[is,l1] = sin(elth)
-            coslt[is,l1] = cos(elth)
-            snlth[is,l1] = sin(elthnq)
-            cslth[is,l1] = cos(elthnq)
+            mi = inputs.mlow - 1 + l1
+            mitheta = mi * theta
+            mitheta_arg = mi * theta + nqdelta
+            sin_mstheta[is,l1] = sin(mitheta)
+            cos_mstheta[is,l1] = cos(mitheta)
+            sin_mstheta_arg[is,l1] = sin(mitheta_arg)
+            cos_mstheta_arg[is,l1] = cos(mitheta_arg)
         end
     end
 
@@ -55,14 +55,14 @@ function initialize_plasma_surface(inputs::VacuumInput)
         x_plasma,
         z_plasma,
         delta,
-        xplap,
-        zplap,
-        cnqd,
-        snqd,
-        sinlt,
-        coslt,
-        snlth,
-        cslth
+        dx_plasma_dtheta,
+        dz_plasma_dtheta,
+        cos_nqdelta,
+        sin_nqdelta,
+        sin_mstheta,
+        cos_mstheta,
+        sin_mstheta_arg,
+        cos_mstheta_arg
     )
 end
 
