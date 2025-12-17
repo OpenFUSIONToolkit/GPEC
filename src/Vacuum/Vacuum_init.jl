@@ -35,28 +35,29 @@ function initialize_plasma_surface(inputs::VacuumInput)
     # dz_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, z_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
     dx_plasma_dtheta = first.(Interpolations.gradient.(Ref(x_plasma_spl), theta_grid))
     dz_plasma_dtheta = first.(Interpolations.gradient.(Ref(z_plasma_spl), theta_grid))
+
     # Trigonometric basis arrays
-    cos_nqdelta = zeros(mtheta)
-    sin_nqdelta = zeros(mtheta)
-    sin_mstheta = zeros(mtheta, inputs.mpert)
-    cos_mstheta = zeros(mtheta, inputs.mpert)
-    sin_mstheta_arg = zeros(mtheta, inputs.mpert)
-    cos_mstheta_arg = zeros(mtheta, inputs.mpert)
-    for is in 1:mtheta
-        theta = (is-1) * 2π / mtheta
-        nqdelta = inputs.n * inputs.qa * delta[is]
-        cos_nqdelta[is] = cos(nqdelta)
-        sin_nqdelta[is] = sin(nqdelta)
-        for l1 in 1:inputs.mpert
-            mi = inputs.mlow - 1 + l1
-            mitheta = mi * theta
-            mitheta_arg = mi * theta + nqdelta
-            sin_mstheta[is,l1] = sin(mitheta)
-            cos_mstheta[is,l1] = cos(mitheta)
-            sin_mstheta_arg[is,l1] = sin(mitheta_arg)
-            cos_mstheta_arg[is,l1] = cos(mitheta_arg)
-        end
-    end
+    # Compute n*q*δ phase term for each poloidal angle
+    nqdelta = inputs.n .* inputs.qa .* delta
+    
+    # Basis functions for the phase factor
+    cos_nqdelta = cos.(nqdelta)
+    sin_nqdelta = sin.(nqdelta)
+    
+    # Mode numbers: m = mlow, mlow+1, ..., mlow+mpert-1
+    mode_numbers = (inputs.mlow-1) .+ (1:inputs.mpert)'  # Row vector for broadcasting
+    
+    # Outer product: theta_grid (column) × mode_numbers (row) → (mtheta × mpert) matrix
+    mitheta = theta_grid * mode_numbers  # Broadcasting: m*θ for all combinations
+    
+    # Compute basis functions without phase (pure harmonics)
+    sin_mstheta = sin.(mitheta)
+    cos_mstheta = cos.(mitheta)
+    
+    # Add phase factor: m*θ + n*q*δ (broadcast nqdelta column-wise across modes)
+    mitheta_arg = mitheta .+ nqdelta
+    sin_mstheta_arg = sin.(mitheta_arg)
+    cos_mstheta_arg = cos.(mitheta_arg)
 
     return PlasmaGeometry(
         x_plasma,
