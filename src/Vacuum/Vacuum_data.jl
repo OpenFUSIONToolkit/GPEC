@@ -143,37 +143,80 @@ Input settings for vacuum wall and geometry.
 - `xma` : shifting major radius point.
 
 """
-@kwdef struct WallShapeSettings
-    shape::String = "conformal"
+@kwdef mutable struct WallShapeSettings
+    # shape::String = "conformal"
+    # aw::Float64 = 0.05
+    # bw::Float64 = 1.5
+    # cw::Float64 = 0.0
+    # dw::Float64 = 0.5
+    # tw::Float64 = 0.05
+    # # nsing::Int = 500
+    # epsq::Float64 = 1e-05
+    # noutv::Int = 37
+    # idgt::Int = 6
+    # idot::Int = 0
+    # idsk::Int = 0
+    # delg::Float64 = 15.01
+    # delfac::Float64 = 0.001
+
+    # leqarcw::Int = 1
+    # ipshp::Int = 0
+    # isph::Int = 0
+    # inside::Int = 0
+    # xpl::Float64 = 100.0
+    # apl::Float64 = 1.0
+    # a::Float64 = 20.0
+    # b::Float64 = 170.0
+    # bpl::Float64 = 1.0
+    # dpl::Float64 = 0.0
+    # r::Float64 = 1.0
+    # abulg::Float64 = 0.932
+    # bbulg::Float64 = 17.0
+    # tbulg::Float64 = 0.02
+    # qain::Float64 = 2.5
+    # xma::Float64 = 1.0
+    # zma::Float64 = 0.0
+
+    # TODO : I think above variables are not necessary if we throw away ishape routine. Below is what i want to recommend -JBCho 
+
+    # Core shape selection
+    shape::Symbol = :conformal
+    
+    # Standard geometric parameters for Dee/Mod-Dee
     aw::Float64 = 0.05
     bw::Float64 = 1.5
     cw::Float64 = 0.0
     dw::Float64 = 0.5
     tw::Float64 = 0.05
-    nsing::Int = 500
-    epsq::Float64 = 1e-05
-    noutv::Int = 37
-    idgt::Int = 6
-    idot::Int = 0
-    idsk::Int = 0
-    delg::Float64 = 15.01
-    delfac::Float64 = 0.001
-
-    leqarcw::Int = 1
-    ipshp::Int = 0
-    isph::Int = 0
-    inside::Int = 0
-    xpl::Float64 = 100.0
-    apl::Float64 = 1.0
-    a::Float64 = 20.0
-    b::Float64 = 170.0
-    bpl::Float64 = 1.0
-    dpl::Float64 = 0.0
-    r::Float64 = 1.0
-    abulg::Float64 = 0.932
-    bbulg::Float64 = 17.0
-    tbulg::Float64 = 0.02
-    qain::Float64 = 2.5
+    
+    # Scale and center
+    a::Float64 = 1.2    # Distance or scaling factor
     xma::Float64 = 1.0
     zma::Float64 = 0.0
+    
+    # Algorithmic options
+    leqarcw::Int = 1    # Re-parameterization flag
+    
+    # Numerical controls (Keep only if used in Green's function integration)
+    nsing::Int = 500
+    epsq::Float64 = 1e-05
+
+    function WallShapeSettings(shape, aw, bw, cw, dw, tw, a, xma, zma, leqarcw, nsing, epsq)
+        allowed = [:conformal, :elliptical, :dee, :mod_dee, :from_file]
+        if !(shape in allowed)
+            throw(ArgumentError("Invalid shape: :$shape. Must be one of $allowed"))
+        end
+        new(shape, aw, bw, cw, dw, tw, a, xma, zma, leqarcw, nsing, epsq)
+    end
+
+end
+
+function Base.setproperty!(obj::WallShapeSettings, sym::Symbol, val)
+    if sym == :shape
+        allowed = [:conformal, :elliptical, :dee, :mod_dee, :from_file]
+        if !(val in allowed)
+            throw(ArgumentError("Invalid shape: :$val. Must be one of $allowed"))
+        end
+    end
+    setfield!(obj, sym, val)
 end
