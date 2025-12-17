@@ -10,8 +10,11 @@ function Main(path::String="./")
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
-    wall_settings = VacuumMod.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
-
+    if "WALL" in keys(inputs)
+        wall_settings = VacuumMod.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+    else
+        wall_settings = VacuumMod.WallShapeSettings()
+    end
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
