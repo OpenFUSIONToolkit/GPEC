@@ -10,13 +10,8 @@
 #
 # Green's Function & Legendre Kernel:
 #   - green(xs, zs, xt, zt, n)     : Green's function (green)
-#   - Pn_minus_half_1997(s, n)          : Legendre function of the first kind, order -1/2 (aleg_old)
-#   - Pn_minus_half_2007(s, n)          : Updated Legendre function for certain regimes (aleg, not yet implemented)
-#
-# Matrix Operations:
-#   - A * B                        : Matrix multiplication (mult, matmul1, matmul3)
-#   - eigen(A).values              : Eigenvalues (eigen)
-#   - eigen(A).vectors             : Eigenvectors (eigen)
+#   - Pn_minus_half_1997(s, n)     : Legendre function of the first kind, order -1/2 (aleg_old)
+#   - Pn_minus_half_2007(s, n)     : Updated Legendre function for certain regimes (aleg, not yet implemented)
 #
 # Integration & Differentiation:
 #   - cumtrapz(y, dx)              : Cumulative trapezoidal integration (indef4)
@@ -395,14 +390,14 @@ Compute the Green's function and related quantities for axisymmetric geometry.
 - `x_source`, `z_source`: Source point coordinates (X',Z')(Float64)
 - `xtp`, `ztp`: Derivatives ∂X'/∂θ, ∂Z'/∂θ (Float64)
 - `n`: Mode number (Int)
-- `usechancebugs::Bool`: Flag to use the 'old' buggy version for comparison.
+- `uselegacygreenfunction::Bool`: Flag to use the the 1997 version of the Legendre function (default true)
 
 # Returns
 - `G_n`:   2π𝒢ⁿ(θ,θ′) — Green's function value
 - `coupling_n`:   𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
 - `coupling_0`:  1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
+function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=true)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2

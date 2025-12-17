@@ -12,25 +12,25 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
     grri = zeros(2 * mtheta, 2 * mpert)
     grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
-    grpp = zeros(2 * mtheta, 2 * mtheta)
+    greenfunction_work = zeros(mtheta, mtheta)
 
     # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grad_greenfunction_mat, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs)
+    kernel!(grad_greenfunction_mat, greenfunction_work, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs)
 
     # TODO: remove this I think? Can't test right now since the full runthrough is broken. This should have been removed when mtheta+5 was removed
     # Enforce periodic boundary conditions
     for i = 1:mtheta + 2
-        grpp[i,mtheta + 1] = grpp[i,1]
-        grpp[i,mtheta + 2] = grpp[i,2]
+        greenfunction_work[i,mtheta + 1] = greenfunction_work[i,1]
+        greenfunction_work[i,mtheta + 2] = greenfunction_work[i,2]
     end
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, mtheta, mpert)
-    fourier_transform!(grri, grpp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
+    fourier_transform!(grri, greenfunction_work, plasma_surf.cslth, 0, 0, mtheta, mpert)
+    fourier_transform!(grri, greenfunction_work, plasma_surf.snlth, 0, mpert, mtheta, mpert)
 
     if !wall.nowall
         # ----------------------------------------------------------
@@ -163,7 +163,6 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput)
 
     mtheta = inputs.mtheta
-    mth1 = inputs.mtheta + 1
     dtheta = 2π / mtheta
     ak0i = 0.0
     jres = 1
@@ -236,7 +235,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         x_obs=x_obspoints[j] #observation point
         z_obs=z_obspoints[j]
         theta_obs=theta_grid[j] # theta value
-        work = zeros(mth1)
+        work = zeros(mtheta)
         
         # if the point of observation point is in negative, We cannot use green func
         # This is same for source point
@@ -273,8 +272,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
             # 4.5 get source point index(ic) theta(theta), X(xt), and Z(zt)
             ic = i + j + istart - 1
-            if ic ≥ mth1
-                ic = ic - mtheta
+            if ic ≥ mtheta
+                ic = ic - mtheta + 1
             end
             # theta_source=(ic-1)*dtheta
             x_source=x_sourcepoints[ic]
@@ -289,11 +288,10 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 continue
             end
 
-            # calc X'_θ (xtp) and Z'_θ (ztp) and call green function
+            # Call green function
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            xtp=dx_dtheta[ic]
-            ztp=dz_dtheta[ic]
-            G_n, coupling_n, coupling_0 = green(x_obs,z_obs,x_source,z_source,xtp,ztp,inputs.n,uselegacygreenfunction=true)
+            G_n, coupling_n, coupling_0 = green(x_obs,z_obs,x_source,z_source,
+                                               dx_dtheta[ic],dz_dtheta[ic],inputs.n)
 
             # simpson integral. 4 for odd, 2 for even, and 1 for others.
             simpson_b=simpson_b2
@@ -315,9 +313,9 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             # work : simpson integral for coupling_n (𝒥 ∇'𝒢ⁿ∇'ℒ)
             # gren : log singularity values accumulated. simpson integral for G_n
             # aval1 : aval1
-            work[ic]=work[ic]+isgn*coupling_n*simpson_a
-            greenfunction_mat[j,ic]=greenfunction_mat[j,ic]+G_n*simpson_b # integral of G_n (log singularity)
-            aval1 = aval1 + coupling_0 * simpson_a
+            work[ic] += isgn*coupling_n*simpson_a
+            greenfunction_mat[j,ic] += G_n*simpson_b # integral of G_n (log singularity)
+            aval1 += coupling_0 * simpson_a
         
         end
         

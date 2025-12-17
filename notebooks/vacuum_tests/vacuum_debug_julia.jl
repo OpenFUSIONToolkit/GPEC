@@ -9,7 +9,7 @@ inputs = JPEC.VacuumMod.VacuumInput(
     mtheta=mth,
     n=1,
 )
-settings = JPEC.VacuumMod.WallGeometry()
+# settings = JPEC.VacuumMod.WallGeometry()
 
 #---------------------------------------------------------------
 #  Read the output_data.txt file
@@ -136,7 +136,7 @@ try
         grdgre, gren, 
         xobs[1:mth], zobs[1:mth], 
         xsce[1:mth], zsce[1:mth], 
-        j1, j2, isgn, iopw, iops, wall_flag, inputs, settings
+        j1, j2, isgn, iopw, iops, wall_flag, inputs, #settings
     )
     
     println("✓ Kernel function executed successfully!")
@@ -227,7 +227,7 @@ if do_profile
             xobs[1:mth], zobs[1:mth],
             xsce[1:mth], zsce[1:mth],
             j1, j2, isgn, iopw, iops, wall_flag,
-            inputs, settings
+            inputs, #settings
         )
     catch e
         println("Warm-up failed: ", e)
@@ -241,7 +241,7 @@ if do_profile
             xobs[1:mth], zobs[1:mth],
             xsce[1:mth], zsce[1:mth],
             j1, j2, isgn, iopw, iops, wall_flag,
-            inputs, settings
+            inputs, #settings
         )
     end
 
@@ -253,7 +253,7 @@ if do_profile
                 xobs[1:mth], zobs[1:mth],
                 xsce[1:mth], zsce[1:mth],
                 j1, j2, isgn, iopw, iops, wall_flag,
-                inputs, settings
+                inputs, #settings
             )
         end
     end
