@@ -84,7 +84,10 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     @assert(wall_settings.shape in ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"],
         "Invalid wall shape: $(wall_settings.shape). Must be one of: nowall, conformal, elliptical, dee, mod_dee, from_file")
+    
+    # Basic wall flags
     nowall = wall_settings.shape == "nowall"
+    is_closed_toroidal = true
 
    # All of these arrays are of length mtheta with θ = [0, 1)
     mtheta = inputs.mtheta
@@ -98,7 +101,6 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     # Output wall coordinate arrays
     x_wall = zeros(Float64, mtheta)
     z_wall = zeros(Float64, mtheta)    
-    is_closed_toroidal = true
 
     # Common geometric parameters
     xmin = minimum(x_plasma)
