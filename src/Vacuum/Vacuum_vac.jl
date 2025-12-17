@@ -1,8 +1,8 @@
 # Gaussian quadrature weights and points for 8-point integration
-const WGAUS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
+const GAUSSIANWEIGHTS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
                0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
 
-const XGAUS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
+const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 
@@ -137,7 +137,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
     
     # Fortran check2 data dump
-    # todo clean up our own wall/plasma geometry outputs instead
+    # TODO: clean up our own wall/plasma geometry outputs instead
     if false
         open("julia_vaccal_arrays.out", "w") do io
             println(io, "I, xp, zp, xw, zw, xpp, zpp, xwp, zwp =")
@@ -159,7 +159,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 
 # Arguments
 - `xobs`: Observer x coordinates
-- `zobs`: Observer z coordinates  
+- `zobs`: Observer z coordinates
 - `xsource`: Source x coordinates
 - `zsource`: Source z coordinates
 - `j1, j2`: Boundary condition indices
@@ -175,13 +175,13 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 """
 function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInput, wall_geo::WallGeometry)
 
-    mth = inputs.mtheta
+    mtheta = inputs.mtheta
     mth1 = inputs.mtheta + 1
-    dth = 2π / mth
+    dtheta = 2π / mtheta
     ak0i = 0.0
     jres = 1
     N_obs = length(x_obspoints)
-    thetas = LinRange(0, mth*dth, mth)
+    theta_grid = LinRange(0, mtheta*dtheta, mtheta)
     
     if N_obs != length(z_obspoints) || N_obs != length(x_sourcepoints) || N_obs != length(z_sourcepoints)
         error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
@@ -191,73 +191,68 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
 
     # 1. definition for solving parameters
-    wsimpb1=1*dth/3
-    wsimpb2=2*dth/3
-    wsimpb4=4*dth/3
+    simpson_b1=1*dtheta/3
+    simpson_b2=2*dtheta/3
+    simpson_b4=4*dtheta/3
 
-    wsimpa1=1*dth/3
-    wsimpa2=2*dth/3
-    wsimpa4=4*dth/3
+    simpson_a1=1*dtheta/3
+    simpson_a2=2*dtheta/3
+    simpson_a4=4*dtheta/3
 
-    algdth = log(dth) # log of dth
-    alg = log(2*dth)
-
-    slog1m = 3*dth*(algdth-1/3)
+    
+    slog1m = 3*dtheta*(log(dtheta)-1/3)
     slog1p = slog1m
+    
+    log2dtheta = log(2*dtheta)
+    log_correction_0=16.0*dtheta*(log2dtheta-68.0/15.0)/15.0
+    log_correction_1=128.0*dtheta*(log2dtheta-8.0/15.0)/45.0
+    log_correction_2=4.0*dtheta*(7.0*log2dtheta-11.0/15.0)/45.0
 
-    alg0=16.0*dth*(alg-68.0/15.0)/15.0
-    alg1=128.0*dth*(alg-8.0/15.0)/45.0
-    alg2=4.0*dth*(7.0*alg-11.0/15.0)/45.0
-
-    isph = 0 # isph needs to be initialized
+    has_zero_crossing = false # has_zero_crossing needs to be initialized
 
     # 2. check singular points for conductor.
-    if wallflag == true
+    if wallflag
         # 2.0 initialize jbot and jtop, and get wall geometry from globals
-        jbot=mth/2+1
-        jtop=mth/2+1
+        jbot=mtheta/2+1
+        jtop=mtheta/2+1
         ww1 = globals.xwal
         ww2 = globals.zwal
         
-        # 2.2 find where sign of wall r point acrosses zero. 
-        # isph means there is 0-corssing point 
-        for i in 1:mth
+        # 2.2 find where sign of wall r point acrosses zero.
+        # has_zero_crossing means there is 0-crossing point
+        for i in 1:mtheta
             if ww1[i] * ww1[i+1] <= 0.0
                 jbot = ww1[i] > 0.0 ? i : jbot
                 jtop = ww1[i] < 0.0 ? i + 1 : jtop
-                isph = 1 
+                has_zero_crossing = true
             end
         end
     end
 
     # 3 do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
 
-    # This doesn't work for me.. I'll use Iterpolations.jl for here temporary. WIP - Have to fix spline1d_deriv funciton in vacuum_math
-    # xpr = [spline1d_deriv(the, xsource, θ) for θ in thetas]
-    # zpr = [spline1d_deriv(the, zsce, θ) for θ in thetas]
+    # Using interpolations.jl for now seemes ok
+    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints)
+    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints)
 
-    # Using Interpolations.jl, we can create periodic cubic splines
-    itp_x = cubic_spline_interpolation(thetas, x_sourcepoints)
-    itp_z = cubic_spline_interpolation(thetas, z_sourcepoints)
-
-    gradients_x = (t -> Interpolations.gradient(itp_x, t)).(thetas)
-    gradients_z = (t -> Interpolations.gradient(itp_z, t)).(thetas)
-    xpr = first.(gradients_x) # d x / d theta
-    zpr = first.(gradients_z) # d z / d theta
+    gradients_x = (t -> Interpolations.gradient(spline_x, t)).(theta_grid)
+    gradients_z = (t -> Interpolations.gradient(spline_z, t)).(theta_grid)
+    dx_dtheta = first.(gradients_x) # d x / d theta
+    dz_dtheta = first.(gradients_z) # d z / d theta
 
 
 
     # 4, begin obs loop.
-    for j in 1:mth 
+    for j in 1:mtheta
 
         # 4.1 initialize variable
-        x_obs=x_obspoints[j] #observation point  
+        x_obs=x_obspoints[j] #observation point
         z_obs=z_obspoints[j]
-        theta_obs=thetas[j] # theta value  
+        theta_obs=theta_grid[j] # theta value
         work = zeros(mth1)
         
         # 4.2 if the point of observation point is in negative, We cannot use green func
-        # This is same for source point 
+        # This is same for source point
         if x_obs < 0.0
             if j2 == 2
                 work[j] = 1.0
@@ -269,7 +264,7 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
         iend = 2 # end point of integration
         aval1=0.0 # ∇𝒢_0
         # if wall crossing zero and wall is source, iend set.
-        if isph == 1 && j2 == 2
+        if has_zero_crossing && j2 == 2
             if jbot - j == 1
                 iend = 3
             elseif jbot - j == 0
@@ -283,108 +278,108 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
         istart = 4 - iend # starting point of integration
 
         # 4-3 on mth. then mths is equals to mtheta+3 ??? I'm not sure
-        mth_source=mth-(istart+iend-1) 
+        mth_source=mtheta-(istart+iend-1)
 
         
-        # 4.4 loop for source point 
+        # 4.4 loop for source point
         for i in 1:mth_source
 
             # 4.5 get source point index(ic) theta(theta), X(xt), and Z(zt)
             ic = i + j + istart - 1
             if ic ≥ mth1
-                ic = ic - mth
+                ic = ic - mtheta
             end
-            theta_source=(ic-1)*dth 
-            x_source=x_sourcepoints[ic]  
-            z_source=z_sourcepoints[ic]  
+            theta_source=(ic-1)*dtheta
+            x_source=x_sourcepoints[ic]
+            z_source=z_sourcepoints[ic]
 
             # 4.6 if source point is in negative, we cannot use green function
             # & if source point(ic) and obs point (j) is same, it's singular
-            if x_source < 0 
-                continue 
+            if x_source < 0
+                continue
             end
-            if ic == j 
-                continue 
+            if ic == j
+                continue
             end
 
             # 4.7 calc X'_θ (xtp) and Z'_θ (ztp) and call green function
             # aval is 𝒥 ∇'𝒢ⁿ∇'ℒ, bval is 2pi𝒢ⁿ. aval0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            xtp=xpr[ic]  
-            ztp=zpr[ic]  
+            xtp=dx_dtheta[ic]
+            ztp=dz_dtheta[ic]
             G, aval, aval0, bval = green(x_obs,z_obs,x_source,z_source,xtp,ztp,inputs.n,usechancebugs=false)
 
             # 4.8 simpson integral. 4 for odd, 2 for even, and 1 for others.
-            wsimpb=wsimpb2
-            if (i÷2)*2 == i  # Fixed: / to ÷ for integer division
-                wsimpb=wsimpb4
+            simpson_b=simpson_b2
+            if (i÷2)*2 == i
+                simpson_b=simpson_b4
             end
             if (i == 1)||(i == mth_source)
-                wsimpb=wsimpb1
+                simpson_b=simpson_b1
             end
-            wsimpa=wsimpa2
-            if (i÷2)*2 == i  # Fixed: / to ÷ for integer division
-                wsimpa=wsimpa4
+            simpson_a=simpson_a2
+            if (i÷2)*2 == i
+                simpson_a=simpson_a4
             end
             if (i == 1)||(i == mth_source)
-                wsimpa=wsimpa1
+                simpson_a=simpson_a1
             end
 
             # 4.9 work and gren
             # work : simpson integral for aval(𝒥 ∇'𝒢ⁿ∇'ℒ)
             # gren : log singularity values accumulated. simpson integral for bval
             # aval1 : aval1
-            work[ic]=work[ic]+isgn*aval*wsimpa  
-            greensfunction[j,ic]=greensfunction[j,ic]+bval*wsimpb # integral of bval (log singularity)  
-            aval1 = aval1 + aval0 * wsimpa
+            work[ic]=work[ic]+isgn*aval*simpson_a
+            greensfunction[j,ic]=greensfunction[j,ic]+bval*simpson_b # integral of bval (log singularity)
+            aval1 = aval1 + aval0 * simpson_a
         
         end
         
         # 5.1 if it's plasma/plsama, wall/wall and in negative wall point, skip loop
         # obs : j1 = 1(plasma), wall(2)
         # src : j1 = 1(plasma), wall(2)
-        if (j1+j2) != 2 && isph == 1 && j > jbot && j < jtop
+        if (j1+j2) != 2 && has_zero_crossing && j > jbot && j < jtop
             continue
         end
 
         # 5.2 Get js
         # js2 : j - iend + 1
-        js1=mod(j-iend+mth-1,mth)+1
-        js2=mod(j-iend+mth,mth)+1
-        js3=mod(j-iend+mth+1,mth)+1
-        js4=mod(j-iend+mth+2,mth)+1
-        js5=mod(j-iend+mth+3,mth)+1
+        js1=mod(j-iend+mtheta-1,mtheta)+1
+        js2=mod(j-iend+mtheta,mtheta)+1
+        js3=mod(j-iend+mtheta+1,mtheta)+1
+        js4=mod(j-iend+mtheta+2,mtheta)+1
+        js5=mod(j-iend+mtheta+3,mtheta)+1
 
         # 6 Singular points when source point and obs point are the same
-        # 6.1 integration each left and right
+        # 6.1 integration each left and right by gaussian quadrature
         for ilr in [1,2]
-            xl = theta_obs + (2*ilr-iend-2)*dth
-            xu = xl + 2 * dth
-            agaus = (xu + xl)/2
-            bgaus = (xu - xl)/2
-            tgaus = agaus .+ XGAUS .* bgaus # tgaus is 8 point gauss points, since xgauss is for only [-1,1]  # Fixed: xgaus to XGAUS
+            gauss_xleft = theta_obs + (2*ilr-iend-2)*dtheta
+            gauss_xright = gauss_xleft + 2 * dtheta
+            gauss_xavg = (gauss_xright + gauss_xleft)/2
+            gauss_halfdifference = (gauss_xright - gauss_xleft)/2
+            tgaus = gauss_xavg .+ GAUSSIANPOINTS .* gauss_halfdifference # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
             # 6.2 for each 8 gaussian points
             for ig in 1:8
-                tgaus0 = tgaus[ig] #i-th value of for 8 points, in theta  
+                tgaus0 = tgaus[ig] #i-th value of for 8 points, in theta
                 tgaus0 = mod(tgaus0, 2π)
 
                 # 6.3 get X, X', Z, Z' for gaussian point
-                xt = itp_x(tgaus0)
-                xtp = Interpolations.gradient(itp_x, tgaus0)[1]
-                zt = itp_z(tgaus0)
-                ztp = Interpolations.gradient(itp_z, tgaus0)[1]
+                xt = spline_x(tgaus0)
+                xtp = Interpolations.gradient(spline_x, tgaus0)[1]
+                zt = spline_z(tgaus0)
+                ztp = Interpolations.gradient(spline_z, tgaus0)[1]
 
                 # 6.4 call green function
                 G, aval, aval0, bval = green(x_obs,z_obs,xt,zt,xtp,ztp,inputs.n,usechancebugs=false)
 
                 # 6.5 add logarithm on G (not 𝒢_n). Chance eq.(75)
                 # iops = 1
-                bval = G + iops * log((theta_obs-tgaus[ig])^2)/x_obs  
+                bval = G + iops * log((theta_obs-tgaus[ig])^2)/x_obs
 
-                # 6.6 calc wgaus. bgaus refers Δ in theta. wgaus is weight for each 8 points
-                wgbg=WGAUS[ig]*bgaus  # Fixed: wgaus() to WGAUS[]
+                # 6.6 calc GAUSSIANWEIGHTS. GAUSSIANWEIGHTS contains gaussian quadrature weights for each 8 points
+                wgbg=GAUSSIANWEIGHTS[ig]*gauss_halfdifference
 
                 # 6.7 calc pgaus. below Chance eq.(77)
-                pgaus=(tgaus[ig]-theta_obs-(2-iend)*dth)/dth  
+                pgaus=(tgaus[ig]-theta_obs-(2-iend)*dtheta)/dtheta
                 pgaus2=pgaus*pgaus
                 amm = (pgaus2-1)*pgaus*(pgaus-2)/24.0 *wgbg
                 am = -(pgaus-1)*pgaus*(pgaus2-4)/6.0 *wgbg
@@ -393,29 +388,29 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
                 app = (pgaus2-1)*pgaus*(pgaus+2)/24.0 *wgbg
 
                 # 6.8 add up in work
-                work[js1] += isgn * aval * amm  
-                work[js2] += isgn * aval * am  
-                work[js3] += isgn * aval * a0  
-                work[js4] += isgn * aval * ap  
-                work[js5] += isgn * aval * app  
+                work[js1] += isgn * aval * amm
+                work[js2] += isgn * aval * am
+                work[js3] += isgn * aval * a0
+                work[js4] += isgn * aval * ap
+                work[js5] += isgn * aval * app
 
                 # 6.9 minus diverging value
-                work[j] -= isgn * aval0 * wgbg  
+                work[j] -= isgn * aval0 * wgbg
                 if j == jres
                     ak0i -= isgn * aval0 * wgbg
                 end
                 
                 # 6.10 skip when plasma, no skip when considering wall
-                if iopw == 0  # Fixed: opw to iopw
+                if iopw == 0
                     continue
                 end
 
                 # 6.11 if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up bval value
-                greensfunction[j,js1] += bval * amm  
-                greensfunction[j,js2] += bval * am  
-                greensfunction[j,js3] += bval * a0  
-                greensfunction[j,js4] += bval * ap  
-                greensfunction[j,js5] += bval * app  
+                greensfunction[j,js1] += bval * amm
+                greensfunction[j,js2] += bval * am
+                greensfunction[j,js3] += bval * a0
+                greensfunction[j,js4] += bval * ap
+                greensfunction[j,js5] += bval * app
 
             end
         end
@@ -423,7 +418,7 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
 
         # 7. Residue
         # 7.1 Set default residue
-        if j1 == j2 
+        if j1 == j2
             residue = 2.0
         else
             residue = 0.0
@@ -446,16 +441,16 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
 
         # 8.1 Only when plasma/plasma, log singularity activate. (S1)
         if iops == 1 && iopw != 0
-            greensfunction[j,js1] -= alg2 / x_obs
-            greensfunction[j,js2] -= alg1 / x_obs
-            greensfunction[j,js3] -= alg0 / x_obs
-            greensfunction[j,js4] -= alg1/x_obs
-            greensfunction[j,js5] -= alg2/x_obs
+            greensfunction[j,js1] -= log_correction_2 / x_obs
+            greensfunction[j,js2] -= log_correction_1 / x_obs
+            greensfunction[j,js3] -= log_correction_0 / x_obs
+            greensfunction[j,js4] -= log_correction_1/x_obs
+            greensfunction[j,js5] -= log_correction_2/x_obs
         end
 
         # 4.3 Store all the datas of work in grdgre, gren
-        gradgreensfunction[(j1-1)*mth + j, (j2-1)*mth .+ (1:mth)] .= work[1:mth]
-        greensfunction[j, 1:mth] ./= 2π
+        gradgreensfunction[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work[1:mtheta]
+        greensfunction[j, 1:mtheta] ./= 2π
 
     end
 
@@ -545,7 +540,7 @@ function fourier_transform!(
     end
 end
 
-function assemble_vacuum_matrix!(    
+function assemble_vacuum_matrix!(
     vacmat, vacmti, vacmatu, vacmtiu,
     grwp, grpw, grwpw, grww,
     mth, jmax1, ln, lx, factpi

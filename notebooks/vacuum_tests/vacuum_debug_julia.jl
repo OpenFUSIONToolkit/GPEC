@@ -4,11 +4,11 @@ using LinearAlgebra
 push!(LOAD_PATH, joinpath(@__DIR__, "../.."))
 using JPEC
 mth = 512  # Number of poloidal grid points
-inputs = JPEC.VacuumMod.VacuumInputType(
+inputs = JPEC.VacuumMod.VacuumInput(
     mtheta=mth,
     n=1,
 )
-settings = JPEC.VacuumMod.WallShapeSettings()
+settings = JPEC.VacuumMod.WallGeometry()
 
 #---------------------------------------------------------------
 #  Read the output_data.txt file
