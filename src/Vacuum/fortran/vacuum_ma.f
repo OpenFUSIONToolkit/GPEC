@@ -38,7 +38,8 @@ c-----------------------------------------------------------------------
       REAL(r8) :: kernelsignin
       integer mpert,mtheta,mthvac
       complex(r8) wv(mpert,mpert)
-      integer, intent(in) :: complex_flag_in,wall_flag_in,farwall_flag_in
+      integer, intent(in) :: complex_flag_in,wall_flag_in,
+     $                                             farwall_flag_in
       ! logical, intent(in) :: complex_flag,wall_flag,farwall_flag
       logical :: complex_flag, wall_flag, farwall_flag
       REAL(r8) :: grrio(2*(mthvac+5),mpert*2),xzptso(mthvac+5,4)
