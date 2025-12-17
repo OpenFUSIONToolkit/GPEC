@@ -11,7 +11,6 @@ Holds plasma boundary and mode data as provided from DCON namelist and computed 
 - `n`: The toroidal mode number. Paper: n.
 - `qa`: Safety factor at the plasma boundary.
 - `mtheta_in`: Number of poloidal angles in the input boundary arrays.
-- `farwall_flag`: Boolean flag indicating if the conducting wall is at infinity.
 - `kernelsign`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations.
 - `force_wv_symmetry`: Boolean flag to enforce symmetry in the vacuum response matrix. Set in dcon.toml
 """
@@ -26,10 +25,8 @@ Holds plasma boundary and mode data as provided from DCON namelist and computed 
     qa::Float64 = 0.0
     mtheta_eq::Int = 1
     mtheta::Int = 1
-    farwall_flag::Bool = false
     kernelsign::Float64 = 1.0
     force_wv_symmetry::Bool = true
-    cn0::Float64 = 1.0
 end
 
 """
@@ -73,12 +70,15 @@ Holds wall geometry data for vacuum calculations. Arrays are of length `mth`,
 where `mth` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
+- `nowall`: Boolean flag indicating if there is no wall.
+- `is_closed_toroidal`: Boolean flag indicating if the wall is a closed toroidal surface.
 - `x`: Wall R coordinates
 - `z`: Wall Z coordinates
 - `dx_dtheta`: dR/dθ at wall.
 - `dz_dtheta`: dZ/dθ at wall.
 """
 @kwdef struct WallGeometry
+    nowall::Bool = true
     is_closed_toroidal::Bool = true
     x::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
@@ -117,70 +117,15 @@ Input settings for vacuum wall and geometry.
 - `tw` (tau_w): Sharpness of the corners of the shell. Try 0.05 as a good initial value.
 - `nsing`: Not referenced.
 - `epsq`: Not referenced.
-- `noutv`: Number of grid points for the eddy current plots.
-- `idgt`: Not referenced now. Used to be approx. number of digits accuracy in the Gaussian elimination used in the calculation. A value of idgt=6 is usually sufficient.
-- `idot`: Not referenced.
-- `idsk`: Not referenced.
-- `delg`: Non-integer. Size of arrows for the eddy current plots. Integer part is length of shaft and decimal part is size of the head.
-- `delfac`: Controls grid size to calculate derivatives in `spark` type calculations.
 
 - `leqarcw`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
   the wall is very close to the plasma. See `ishape=6` option.
-- `ipshp`: 0 gets the plasma boundary and safety factor, qedge, etc. from input files. 1 ignores input data files, sets qedge = qain. Shape of plasma is dee-shaped centered at `xpl`, radius `apl`, elongation `bpl`, and triangularity `dpl`. The straight-line coordinate variable delta(theta) is set to zero.
-- `isph` : 0 all vacuum R values are positive, 1 is not.
-- `inside` : 
-- `xpl`: Plasma center R coordinate.
-- `apl`: Plasma minor radius.
-- `bpl`: Plasma elongation.
-- `dpl`: Plasma triangularity.
-- `qain`: Input value for qedge when `ipshp = 1`.
-- `r`: Not referenced.
 - `a` (a): Usually the distance of the shell from the plasma in units of the plasma radius p_{rad} at the outer side. If a geq 10, the wall is assumed to be at infty.
-- `b` (beta): Subtending half-angle of the shell in degrees.
-- `abulg` (a_b): The size of the bulge along the major radius, normalized to the mean plasma radius.
-- `bbulg` (beta_b): Subtending half-angle of the extent of the bulge.
-- `tbulg` (tau_b): Inverse roundedness of the bulge corners.
-- `xma` : shifting major radius point.
-
 """
-@kwdef mutable struct WallShapeSettings
-    # shape::String = "conformal"
-    # aw::Float64 = 0.05
-    # bw::Float64 = 1.5
-    # cw::Float64 = 0.0
-    # dw::Float64 = 0.5
-    # tw::Float64 = 0.05
-    # # nsing::Int = 500
-    # epsq::Float64 = 1e-05
-    # noutv::Int = 37
-    # idgt::Int = 6
-    # idot::Int = 0
-    # idsk::Int = 0
-    # delg::Float64 = 15.01
-    # delfac::Float64 = 0.001
-
-    # leqarcw::Int = 1
-    # ipshp::Int = 0
-    # isph::Int = 0
-    # inside::Int = 0
-    # xpl::Float64 = 100.0
-    # apl::Float64 = 1.0
-    # a::Float64 = 20.0
-    # b::Float64 = 170.0
-    # bpl::Float64 = 1.0
-    # dpl::Float64 = 0.0
-    # r::Float64 = 1.0
-    # abulg::Float64 = 0.932
-    # bbulg::Float64 = 17.0
-    # tbulg::Float64 = 0.02
-    # qain::Float64 = 2.5
-    # xma::Float64 = 1.0
-    # zma::Float64 = 0.0
-
-    # TODO : I think above variables are not necessary if we throw away ishape routine. Below is what i want to recommend -JBCho 
+@kwdef mutable struct WallShapeSettings 
 
     # Core shape selection
-    shape::Symbol = :conformal
+    shape::String = "nowall"
     
     # Standard geometric parameters for Dee/Mod-Dee
     aw::Float64 = 0.05
@@ -200,23 +145,4 @@ Input settings for vacuum wall and geometry.
     # Numerical controls (Keep only if used in Green's function integration)
     nsing::Int = 500
     epsq::Float64 = 1e-05
-
-    function WallShapeSettings(shape, aw, bw, cw, dw, tw, a, xma, zma, leqarcw, nsing, epsq)
-        allowed = [:conformal, :elliptical, :dee, :mod_dee, :from_file]
-        if !(shape in allowed)
-            throw(ArgumentError("Invalid shape: :$shape. Must be one of $allowed"))
-        end
-        new(shape, aw, bw, cw, dw, tw, a, xma, zma, leqarcw, nsing, epsq)
-    end
-
-end
-
-function Base.setproperty!(obj::WallShapeSettings, sym::Symbol, val)
-    if sym == :shape
-        allowed = [:conformal, :elliptical, :dee, :mod_dee, :from_file]
-        if !(val in allowed)
-            throw(ArgumentError("Invalid shape: :$val. Must be one of $allowed"))
-        end
-    end
-    setfield!(obj, sym, val)
 end

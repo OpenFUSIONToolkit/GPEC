@@ -37,7 +37,6 @@ crossover = 1e-2              # Fractional distance from rational q at which tol
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
-wv_cn0 = 1                    # Constant added to the cal K matrix to make it nonsingular for n=0 modes.
 
 [WALL]
 shape = "conformal"
@@ -48,23 +47,6 @@ dw = 0.5
 tw = 0.05
 nsing = 500
 epsq = 1e-5
-noutv = 37
-idgt = 6
-idot = 0
-idsk = 0
-delg = 15.01
-delfac = 0.001
 
 leqarcw = 0
-ipshp = 0
-xpl = 100
-apl = 1
 a = 0.2415
-b = 170
-bpl = 1
-dpl = 0
-r = 1
-abulg = 0.932
-bbulg = 17.0
-tbulg = 0.02
-qain = 2.5

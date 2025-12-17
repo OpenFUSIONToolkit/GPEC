@@ -9,23 +9,17 @@ const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.5255324099163
 function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry)
 
     # Initialization
-    (; mtheta, mpert, farwall_flag, n, cn0, kernelsign, force_wv_symmetry) = inputs
+    (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
     grri = zeros(2 * mtheta, 2 * mpert)
     grdgre = zeros(2 * mtheta, 2 * mtheta)
     grpp = zeros(2 * mtheta, 2 * mtheta)
-
-    # ----------------------------------------------------------
-    # Apply wall boundary conditions
-    # ----------------------------------------------------------
-    # TODO: does this need to get called more than once? Currently calling it three separate times
-    # globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs, wall)
+    kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs)
 
     # TODO: remove this I think? Can't test right now since the full runthrough is broken. This should have been removed when mtheta+5 was removed
     # Enforce periodic boundary conditions
@@ -38,7 +32,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, mtheta, mpert)
     fourier_transform!(grri, grpp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
 
-    if !farwall_flag
+    if !wall.nowall
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
@@ -46,7 +40,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
         grpw_block = zeros(2 * mtheta, 2 * mtheta)
-        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs, wall)
+        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
 
         fourier_transform!(grpw_block, grdgre, cslth, 0, 0, mtheta, mpert)
         fourier_transform!(grpw_block, grdgre, snlth, 0, mpert, mtheta, mpert)
@@ -57,7 +51,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         j1, j2 = 2, 1
         ksgn = 2*j2 - 3
         grwp_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs, wall)
+        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs)
 
         fourier_transform!(grwp_block, grdgre, cslth, 0, 0, mtheta, mpert)
         fourier_transform!(grwp_block, grdgre, snlth, 0, mpert, mtheta, mpert)
@@ -68,7 +62,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
         grww_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs, wall)
+        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
 
         fourier_transform!(grww_block, grdgre, cslth, 0, 0, mtheta, mpert)
         fourier_transform!(grww_block, grdgre, snlth, 0, mpert, mtheta, mpert)
@@ -85,7 +79,9 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
 
     # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
-    if (abs(n) <= 1e-5) && (!farwall_flag) && (wall.is_closed_toroidal)
+    cn0 = 1.0 # expose to user if anyone ever actually tries to use this
+    if (abs(n) <= 1e-5) && (!wall.nowall) && (wall.is_closed_toroidal)
+        @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = farwall_flag ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
             grdgre[i, j] += cn0
@@ -103,9 +99,6 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
 
     # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
     grri .= grdgre \ grri
-
-    # TODO: I am not sure why we recall wwall here again? This is the third time...
-    # globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
@@ -146,6 +139,10 @@ end
 
 Compute kernels of integral equation for Laplace's equation for a torus.
 
+    ** WARNING: This kernel only supports closed toroidal walls currently. 
+        The residue calculation needs to be updated for open walls. **
+
+
 # Arguments
 - `x_obspoints`: Observer x coordinates
 - `z_obspoints`: Observer z coordinates
@@ -162,7 +159,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `grad_greenfunction_mat`: Gradient Green's function matrix
 - `greenfunction_mat`: Green's function matrix
 """
-function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput, wall_geo::WallGeometry)
+function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput)
 
     mtheta = inputs.mtheta
     mth1 = inputs.mtheta + 1
@@ -179,7 +176,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     # matrix output greensfunction is accumulated in grwp of vaccal.
     # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
 
-    # 1. definition for solving parameters
+    # definition for solving parameters
     simpson_b1=1*dtheta/3
     simpson_b2=2*dtheta/3
     simpson_b4=4*dtheta/3
@@ -199,7 +196,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
     has_zero_crossing = false # has_zero_crossing needs to be initialized
 
-    # 2. check singular points for conductor.
+    # check singular points for conductor.
     if wallflag
         # 2.0 initialize jbot and jtop, and get wall geometry from globals
         jbot=mtheta/2+1
@@ -218,7 +215,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         end
     end
 
-    # 3 do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
+    # do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
 
     # Using interpolations.jl for now seemes ok
     spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints, extrapolation_bc=Interpolations.Periodic())
@@ -231,16 +228,16 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
 
 
-    # 4, begin obs loop.
+    # observer loop
     for j in 1:mtheta
 
-        # 4.1 initialize variable
+        # initialize variable
         x_obs=x_obspoints[j] #observation point
         z_obs=z_obspoints[j]
         theta_obs=theta_grid[j] # theta value
         work = zeros(mth1)
         
-        # 4.2 if the point of observation point is in negative, We cannot use green func
+        # if the point of observation point is in negative, We cannot use green func
         # This is same for source point
         if x_obs < 0.0
             if j2 == 2
@@ -249,7 +246,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             continue
         end
             
-        # 4.3 set istart and iend
+        # set istart and iend
         iend = 2 # end point of integration
         aval1=0.0 # ∇𝒢_0
         # if wall crossing zero and wall is source, iend set.
@@ -270,7 +267,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         mth_source=mtheta-(istart+iend-1)
 
         
-        # 4.4 loop for source point
+        # loop for source point
         for i in 1:mth_source
 
             # 4.5 get source point index(ic) theta(theta), X(xt), and Z(zt)
@@ -282,7 +279,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             x_source=x_sourcepoints[ic]
             z_source=z_sourcepoints[ic]
 
-            # 4.6 if source point is in negative, we cannot use green function
+            # if source point is in negative, we cannot use green function
             # & if source point(ic) and obs point (j) is same, it's singular
             if x_source < 0
                 continue
@@ -291,13 +288,13 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 continue
             end
 
-            # 4.7 calc X'_θ (xtp) and Z'_θ (ztp) and call green function
+            # calc X'_θ (xtp) and Z'_θ (ztp) and call green function
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
             xtp=dx_dtheta[ic]
             ztp=dz_dtheta[ic]
             G_n, coupling_n, coupling_0 = green(x_obs,z_obs,x_source,z_source,xtp,ztp,inputs.n,uselegacygreenfunction=true)
 
-            # 4.8 simpson integral. 4 for odd, 2 for even, and 1 for others.
+            # simpson integral. 4 for odd, 2 for even, and 1 for others.
             simpson_b=simpson_b2
             if (i÷2)*2 == i
                 simpson_b=simpson_b4
@@ -313,7 +310,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 simpson_a=simpson_a1
             end
 
-            # 4.9 work and gren
+            # work and gren
             # work : simpson integral for coupling_n (𝒥 ∇'𝒢ⁿ∇'ℒ)
             # gren : log singularity values accumulated. simpson integral for G_n
             # aval1 : aval1
@@ -323,51 +320,50 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         
         end
         
-        # 5.1 if it's plasma/plsama, wall/wall and in negative wall point, skip loop
+        # if it's plasma/plsama, wall/wall and in negative wall point, skip loop
         # obs : j1 = 1(plasma), wall(2)
         # src : j1 = 1(plasma), wall(2)
         if (j1+j2) != 2 && has_zero_crossing && j > jbot && j < jtop
             continue
         end
 
-        # 5.2 Get js
-        # js2 : j - iend + 1
+        # Get js
         js1=mod(j-iend+mtheta-1,mtheta)+1
         js2=mod(j-iend+mtheta,mtheta)+1
         js3=mod(j-iend+mtheta+1,mtheta)+1
         js4=mod(j-iend+mtheta+2,mtheta)+1
         js5=mod(j-iend+mtheta+3,mtheta)+1
 
-        # 6 Singular points when source point and obs point are the same
-        # 6.1 integration each left and right by gaussian quadrature
+        # Singular points when source point and obs point are the same
+        # integration each left and right by gaussian quadrature
         for ilr in [1,2]
             gauss_xleft = theta_obs + (2*ilr-iend-2)*dtheta
             gauss_xright = gauss_xleft + 2 * dtheta
             gauss_xavg = (gauss_xright + gauss_xleft)/2
             gauss_halfdifference = (gauss_xright - gauss_xleft)/2
             tgaus = gauss_xavg .+ GAUSSIANPOINTS .* gauss_halfdifference # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
-            # 6.2 for each of 8 gaussian points
+            # for each of 8 gaussian points
             for ig in 1:8
                 tgaus0 = tgaus[ig] #i-th value of for 8 points, in theta
                 tgaus0 = mod(tgaus0, 2π)
 
-                # 6.3 get X, X', Z, Z' for gaussian point
+                # get X, X', Z, Z' for gaussian point
                 xt = spline_x(tgaus0)
                 xtp = Interpolations.gradient(spline_x, tgaus0)[1]
                 zt = spline_z(tgaus0)
                 ztp = Interpolations.gradient(spline_z, tgaus0)[1]
 
-                # 6.4 call green function
+                # call green function
                 G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,inputs.n,uselegacygreenfunction=true)
 
-                # 6.5 add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
+                # add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
                 # iops = 1
                 G_n_nonsingular = G_n + iops * log((theta_obs-tgaus[ig])^2)/x_obs
 
-                # 6.6 calc GAUSSIANWEIGHTS. GAUSSIANWEIGHTS contains gaussian quadrature weights for each 8 points
+                # calc GAUSSIANWEIGHTS. GAUSSIANWEIGHTS contains gaussian quadrature weights for each 8 points
                 wgbg=GAUSSIANWEIGHTS[ig]*gauss_halfdifference
 
-                # 6.7 calc pgaus. below Chance eq.(77)
+                # calc pgaus. below Chance eq.(77)
                 # All are the noted index, times (wgbg)/(2 pgaus)
                 # A0 has no extra factor
                 # A1 has an extra factor of (pgaus +/- 1)
@@ -380,25 +376,25 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 A2_plus  = (pgaus2-1)*pgaus*(pgaus+2)/24.0 * wgbg
                 A2_minus = (pgaus2-1)*pgaus*(pgaus-2)/24.0 * wgbg
 
-                # 6.8 add up in work
+                # add up in work
                 work[js1] += isgn * coupling_n * A2_minus
                 work[js2] += isgn * coupling_n * A1_minus
                 work[js3] += isgn * coupling_n * A0
                 work[js4] += isgn * coupling_n * A1_plus
                 work[js5] += isgn * coupling_n * A2_plus
 
-                # 6.9 minus diverging value
+                # minus diverging value
                 work[j] -= isgn * coupling_0 * wgbg
                 if j == jres
                     ak0i -= isgn * coupling_0 * wgbg
                 end
                 
-                # 6.10 skip when plasma, no skip when considering wall
+                # skip when plasma, no skip when considering wall
                 if iopw == 0
                     continue
                 end
 
-                # 6.11 if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up G_n_nonsingular value
+                # if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up G_n_nonsingular value
                 greenfunction_mat[j,js1] += G_n_nonsingular * A2_minus
                 greenfunction_mat[j,js2] += G_n_nonsingular * A1_minus
                 greenfunction_mat[j,js3] += G_n_nonsingular * A0
@@ -409,30 +405,28 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         end
 
 
-        # 7. Residue
-        # 7.1 Set default residue
+        # Set residue based on logic similar to Table I of Chance 1997
         if j1 == j2
             residue = 2.0
         else
             residue = 0.0
         end
-
-        # 7.2 Change resdg, resk0 according to ishape
-        # Table I of Chance 1997 ?
-        if wall_geo.is_closed_toroidal
+        # Would need to pass in wall geometry to generalize this to open walls
+        is_closed_toroidal = true
+        if is_closed_toroidal
             residue_diagonal=(2-j1)*(2-j2)+(j1-1)*(j2-1)
             residue_k0=(2-j1)*(2-j2)+(j1-3)*(j2-1)
             residue=residue_diagonal+residue_k0
         end
 
-        # 7.3 minus residue value
+        # minus residue value
         work[j] = work[j] - isgn * aval1 + residue
         if j == jres
             ak0i -= isgn * aval1
         end
 
 
-        # 8.1 Only when plasma/plasma, log singularity activate. (S1)
+        # Only when plasma/plasma, log singularity activate. (S1)
         if iops == 1 && iopw != 0
             greenfunction_mat[j,js1] -= log_correction_2 / x_obs
             greenfunction_mat[j,js2] -= log_correction_1 / x_obs
@@ -441,7 +435,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             greenfunction_mat[j,js5] -= log_correction_2/x_obs
         end
 
-        # 4.3 Store all the datas of work in grdgre, gren
+        # Store all the datas of work in grdgre, gren
         grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work[1:mtheta]
         greenfunction_mat[j, 1:mtheta] ./= 2π
 
@@ -477,21 +471,12 @@ function fourier_inverse_transform!(
     )
 
     # Zero out gll block
-    for l1 in 1:mpert
-        for l2 in 1:mpert
-            gll[l2, l1] = 0.0
-        end
-    end
+    fill!(view(gll, 1:mpert, 1:mpert), 0.0)
 
-    # Main accumulation (note: gll[l2, l1], not gll[l1, l2])
+    # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
+    # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
     dth = 2π / mth
-    for l1 in 1:mpert
-        for l2 in 1:mpert
-            gll[l2, l1] = dth * sum(cs[i, l2] * gil[m00 + i, l00 + l1] for i in 1:mth) * 2π
-        end
-    end
-
-    return gll
+    mul!(gll, cs', view(gil, m00+1:m00+mth, l00+1:l00+mpert), 2π * dth, 0.0)
 end
 
 """
@@ -522,20 +507,12 @@ function fourier_transform!(
 )
 
     # Zero out relevant gil block
-    for l1 in 1:mpert
-        for i in 1:mth
-            gil[m00 + i, l00 + l1] = 0.0
-        end
-    end
+    fill!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), 0.0)
 
-    # Accumulate with ll offset (critical to match Fortran)
-    for l1 in 1:mpert
-        for j in 1:mth
-            for i in 1:mth
-                gil[m00 + i, l00 + l1] += cs[j, l1] * gij[i, j]
-            end
-        end
-    end
+    # Accumulate Fourier transform via matrix multiply: gil = gij * cs
+    # This computes: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    mul!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), gij, cs)
+
 end
 
 function assemble_vacuum_matrix!(
