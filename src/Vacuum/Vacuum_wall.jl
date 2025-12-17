@@ -161,7 +161,6 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
     mth1 = inputs.mtheta + 1
     mth2 = inputs.mtheta + 2
 
-    farwall = inputs.farwall_flag
     xinf = plasma_surf.x
     zinf = plasma_surf.z
 
@@ -172,13 +171,13 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
     tw = wall_settings.tw
 
     a = wall_settings.a
-    b = wall_settings.b
-    abulg = wall_settings.abulg
-    bbulg = wall_settings.bbulg
-    tbulg = wall_settings.tbulg
+    # b = wall_settings.b
+    # abulg = wall_settings.abulg
+    # bbulg = wall_settings.bbulg
+    # tbulg = wall_settings.tbulg
     xma = wall_settings.xma
-    zma = wall_settings.zma
-    isph = wall_settings.isph
+    # zma = wall_settings.zma
+    # isph = wall_settings.isph
 
 
     dth = 2.0 * π / (mth)
@@ -189,9 +188,9 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
     zwal1 = zeros(Float64, mth)
     # thet = zeros(Float64, mth)  # Used in ishape==3
 
-    awsave = aw
-    bwsave = bw
-    insect = false
+    # awsave = aw
+    # bwsave = bw
+    # insect = false
     # isph = 0 # Corresponds to Fortran's `data iplt/0/`. iplt is only used at the end, so isph=0 is initialized here.
     # iplt = 0 # <--- Added (Fortran's data iplt/0/ initialization)
 
@@ -331,6 +330,18 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
         write(file, "x", xwal1)
         write(file, "z", zwal1)
     end
+
+    # if iplt <= 0 # <--- Fortran's if ( iplt .le. 0 ) then
+    #     xmx = xmaj
+    #     zma = 0.0
+    #     iplt = 1
+    # end
+
+    # if insect # <--- Added (Fortran's warning message)
+    #     @warn "There are at least $inside wall points in the plasma"
+    #     # Corresponds to Fortran's errmes call
+    #     # errmes("vacdat") 
+    # end
 
     return xwal1, zwal1, is_closed_toroidal
 end
