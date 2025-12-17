@@ -1,6 +1,7 @@
 using DelimitedFiles
 using Printf
 using LinearAlgebra
+using Profile
 push!(LOAD_PATH, joinpath(@__DIR__, "../.."))
 using JPEC
 mth = 512  # Number of poloidal grid points
@@ -34,34 +35,34 @@ if length(lines) < 5
     error("Expected 5 lines in output_data.txt, but found only $(length(lines)) lines!")
 end
 
-println("\nParsing data from first 5 lines:")
+# println("\nParsing data from first 5 lines:")
 xobs = parse_number_line(lines[1])
-println("  Line 1 (xobs): $(length(xobs)) values")
+# println("  Line 1 (xobs): $(length(xobs)) values")
 
 zobs = parse_number_line(lines[2])
-println("  Line 2 (zobs): $(length(zobs)) values")
+# println("  Line 2 (zobs): $(length(zobs)) values")
 
 xsce = parse_number_line(lines[3])
-println("  Line 3 (xsce): $(length(xsce)) values")
+# println("  Line 3 (xsce): $(length(xsce)) values")
 
 zsce = parse_number_line(lines[4])
-println("  Line 4 (zsce): $(length(zsce)) values")
+# println("  Line 4 (zsce): $(length(zsce)) values")
 
 params = parse_number_line(lines[5])
-println("  Line 5 (params): $(length(params)) values")
+# println("  Line 5 (params): $(length(params)) values")
 
 xobs = xobs[1:mth]
 zobs = zobs[1:mth]
 xsce = xsce[1:mth]
 zsce = zsce[1:mth]
 
-println("\n✓ Successfully parsed all data!")
-println("\nData summary:")
-println("  xobs: $(length(xobs)) points, range [$(minimum(xobs)), $(maximum(xobs))]")
-println("  zobs: $(length(zobs)) points, range [$(minimum(zobs)), $(maximum(zobs))]")
-println("  xsce: $(length(xsce)) points, range [$(minimum(xsce)), $(maximum(xsce))]")
-println("  zsce: $(length(zsce)) points, range [$(minimum(zsce)), $(maximum(zsce))]")
-println("  params: $(params)")
+# println("\n✓ Successfully parsed all data!")
+# println("\nData summary:")
+# println("  xobs: $(length(xobs)) points, range [$(minimum(xobs)), $(maximum(xobs))]")
+# println("  zobs: $(length(zobs)) points, range [$(minimum(zobs)), $(maximum(zobs))]")
+# println("  xsce: $(length(xsce)) points, range [$(minimum(xsce)), $(maximum(xsce))]")
+# println("  zsce: $(length(zsce)) points, range [$(minimum(zsce)), $(maximum(zsce))]")
+# println("  params: $(params)")
 
 # Extract kernel function parameters
 j1_input = Int(params[1])
@@ -71,13 +72,13 @@ iopw_input = Int(params[4])
 iops_input = Int(params[5])
 wall_flag_input = params[6] != 0  # Convert to boolean
 
-println("\nKernel parameters:")
-println("  j1 = $j1_input")
-println("  j2 = $j2_input")
-println("  isgn = $isgn_input")
-println("  iopw = $iopw_input")
-println("  iops = $iops_input")
-println("  wall_flag = $wall_flag_input")
+# println("\nKernel parameters:")
+# println("  j1 = $j1_input")
+# println("  j2 = $j2_input")
+# println("  isgn = $isgn_input")
+# println("  iopw = $iopw_input")
+# println("  iops = $iops_input")
+# println("  wall_flag = $wall_flag_input")
 
 #---------------------------------------------------------------
 #  Set up Kernel Function Parameters
@@ -200,3 +201,112 @@ else
     println("ERROR: Result matrices not defined!")
     println("Make sure to run the kernel execution cell first.")
 end
+
+#---------------------------------------------------------------
+#  Profile kernel! performance
+#---------------------------------------------------------------
+
+# Toggle profiling; set to false to skip
+do_profile = false
+
+if do_profile
+    println("===== PROFILING kernel! =====")
+    # Clear any prior profiling data
+    Profile.clear()
+    # Increase buffer size and adjust sampling delay (Julia 1.11 compatible)
+    try
+        Profile.init(10^8, 0.005)  # (buffer size, delay in seconds)
+    catch
+        # If init signature differs, continue with defaults
+    end
+
+    # Warm-up run to compile and avoid JIT in profile
+    try
+        JPEC.VacuumMod.kernel!(
+            grdgre, gren,
+            xobs[1:mth], zobs[1:mth],
+            xsce[1:mth], zsce[1:mth],
+            j1, j2, isgn, iopw, iops, wall_flag,
+            inputs, settings
+        )
+    catch e
+        println("Warm-up failed: ", e)
+    end
+
+    # Collect profile across multiple iterations to gather samples
+    n_profile_iters = 20
+    @profile for _ in 1:n_profile_iters
+        JPEC.VacuumMod.kernel!(
+            grdgre, gren,
+            xobs[1:mth], zobs[1:mth],
+            xsce[1:mth], zsce[1:mth],
+            j1, j2, isgn, iopw, iops, wall_flag,
+            inputs, settings
+        )
+    end
+
+    # Also record wall-clock timing for reference
+    total_time = @elapsed begin
+        for _ in 1:n_profile_iters
+            JPEC.VacuumMod.kernel!(
+                grdgre, gren,
+                xobs[1:mth], zobs[1:mth],
+                xsce[1:mth], zsce[1:mth],
+                j1, j2, isgn, iopw, iops, wall_flag,
+                inputs, settings
+            )
+        end
+    end
+
+    # Print a concise summary to stdout
+    println("\n===== Profile summary (top frames) =====")
+    try
+        # Print using default signature (Julia 1.11 compatible)
+        Profile.print()
+    catch e
+        println("Profile.print failed: ", e)
+    end
+
+    # Save a longer summary to file
+    try
+        open(joinpath(@__DIR__, "profile_summary.txt"), "w") do io
+            println(io, "kernel! profiling summary")
+            println(io, "mth=$mth, iters=$n_profile_iters, total_time=$(round(total_time, digits=6)) s, avg=$(round(total_time/n_profile_iters, digits=6)) s/iter")
+            println(io)
+            # Use default print signature without kwargs
+            Profile.print(io, groupby=:task, sortedby=:time)
+        end
+        println("Saved detailed profile to: ", joinpath(@__DIR__, "profile_summary.txt"))
+    catch e
+        println("Failed to write profile_summary.txt: ", e)
+    end
+
+        # # Generate an HTML flamegraph/profile (StatProfilerHTML)
+        # try
+        #     # Try to import; if absent, activate project root and add it
+        #     try
+        #         import StatProfilerHTML
+        #     catch
+        #         # Ensure we add to the project at repo root
+        #         Base.require(Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg"))
+        #         local Pkg = Base.loaded_modules[Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg")]
+        #         Pkg.activate(joinpath(@__DIR__, "../.."))
+        #         Pkg.add(name="StatProfilerHTML")
+        #         import StatProfilerHTML
+        #     end
+
+        #     # Create HTML profile in this folder
+        #     outpath = joinpath(@__DIR__, "profile.html")
+        #     try
+        #         StatProfilerHTML.statprofilehtml(outpath)
+        #     catch
+        #         # Fallback to default path if method signature differs
+        #         StatProfilerHTML.statprofilehtml()
+        #         outpath = abspath("profile.html")
+        #     end
+        #     println("Saved HTML profile to: ", outpath)
+        # catch e
+        #     println("Failed to generate HTML profile: ", e)
+        # end
+end
+

@@ -11,7 +11,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     # Initialization
     (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
     grri = zeros(2 * mtheta, 2 * mpert)
-    grdgre = zeros(2 * mtheta, 2 * mtheta)
+    grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
     grpp = zeros(2 * mtheta, 2 * mtheta)
 
     # ----------------------------------------------------------
@@ -19,7 +19,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     # ----------------------------------------------------------
     j1, j2 = 1, 1
     ksgn = 2*j2 - 3
-    kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs)
+    kernel!(grad_greenfunction_mat, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs)
 
     # TODO: remove this I think? Can't test right now since the full runthrough is broken. This should have been removed when mtheta+5 was removed
     # Enforce periodic boundary conditions
@@ -40,32 +40,32 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
         grpw_block = zeros(2 * mtheta, 2 * mtheta)
-        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
+        kernel!(grad_greenfunction_mat, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
 
-        fourier_transform!(grpw_block, grdgre, cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grpw_block, grdgre, snlth, 0, mpert, mtheta, mpert)
+        fourier_transform!(grpw_block, grad_greenfunction_mat, cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grpw_block, grad_greenfunction_mat, snlth, 0, mpert, mtheta, mpert)
 
         # ----------------------------------------------------------
         # Wall–Plasma block
         # ----------------------------------------------------------
         j1, j2 = 2, 1
         ksgn = 2*j2 - 3
-        grwp_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs)
+        grwp_block = similar(grad_greenfunction_mat) # This should be grpp or a new matrix
+        kernel!(grad_greenfunction_mat, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs)
 
-        fourier_transform!(grwp_block, grdgre, cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grwp_block, grdgre, snlth, 0, mpert, mtheta, mpert)
+        fourier_transform!(grwp_block, grad_greenfunction_mat, cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grwp_block, grad_greenfunction_mat, snlth, 0, mpert, mtheta, mpert)
 
         # ----------------------------------------------------------
         # Wall–Wall block
         # ----------------------------------------------------------
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
-        grww_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
+        grww_block = similar(grad_greenfunction_mat) # This should be grpp or a new matrix
+        kernel!(grad_greenfunction_mat, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs)
 
-        fourier_transform!(grww_block, grdgre, cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grww_block, grdgre, snlth, 0, mpert, mtheta, mpert)
+        fourier_transform!(grww_block, grad_greenfunction_mat, cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grww_block, grad_greenfunction_mat, snlth, 0, mpert, mtheta, mpert)
 
         # ----------------------------------------------------------
         # Assemble matrices for solving
@@ -84,21 +84,22 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = farwall_flag ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
-            grdgre[i, j] += cn0
+            grad_greenfunction_mat[i, j] += cn0
         end
     end
 
     # Only needed for mutual inductance with the wall calculations
     if kernelsign < 0
-        grdgre .*= kernelsign
+        grad_greenfunction_mat .*= kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
         for i in 1:2 * mtheta
-            grdgre[i, i] += 2.0
+            grad_greenfunction_mat[i, i] += 2.0
         end
     end
 
     # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
-    grri .= grdgre \ grri
+    # TODO: this is for plasma only! Need to invert the full matrix if walls
+    grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
@@ -132,10 +133,11 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
 
     # TODO: add our own wall/plasma geometry outputs if desired
+    return wv, grri
 end
 
 """
-    kernel(xobs, zobs, xsource, zsce, j1, j2, isgn, iopw, iops, ischk, params)
+    kernel(x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, ischk, params)
 
 Compute kernels of integral equation for Laplace's equation for a torus.
 
@@ -144,10 +146,10 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 
 
 # Arguments
-- `xobs`: Observer x coordinates
-- `zobs`: Observer z coordinates
-- `xsource`: Source x coordinates
-- `zsource`: Source z coordinates
+- `x_obspoints`: Observer x coordinates
+- `z_obspoints`: Observer z coordinates
+- `x_sourcepoints`: Source x coordinates
+- `z_sourcepoints`: Source z coordinates
 - `j1, j2`: Boundary condition indices
 - `isgn`: Sign parameter
 - `iopw`: Wall option (0=inactive, 1=active)
@@ -156,8 +158,8 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `params`: Dictionary containing simulation parameters
 
 # Returns
-- `gradgreensfunction`: Gradient Green's function matrix
-- `greensfunction`: Green's function matrix
+- `grad_greenfunction_mat`: Gradient Green's function matrix
+- `greenfunction_mat`: Green's function matrix
 """
 function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput)
 
