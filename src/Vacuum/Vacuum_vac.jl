@@ -172,8 +172,9 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         
         # 2.2 find where sign of wall r point acrosses zero.
         # has_zero_crossing means there is 0-crossing point
-        for i in 1:mtheta-1 # TODO: should this be mtheta-1 or add a special case for the last point?
-            if ww1[i] * ww1[i+1] <= 0.0
+        for i in 1:mtheta
+            next_i = i == mtheta ? 1 : i + 1
+            if ww1[i] * ww1[next_i] <= 0.0
                 jbot = ww1[i] > 0.0 ? i : jbot
                 jtop = ww1[i] < 0.0 ? i + 1 : jtop
                 has_zero_crossing = true
