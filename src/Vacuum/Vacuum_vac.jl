@@ -9,9 +9,10 @@ const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.5255324099163
 function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry)
 
     # Initialization
-    grri = zeros(2 * inputs.mtheta, 2 * inputs.mpert)
-    grdgre = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
-    grpp = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
+    (; mtheta, mpert, farwall_flag, n, cn0, kernelsign, force_wv_symmetry) = inputs
+    grri = zeros(2 * mtheta, 2 * mpert)
+    grdgre = zeros(2 * mtheta, 2 * mtheta)
+    grpp = zeros(2 * mtheta, 2 * mtheta)
 
     # ----------------------------------------------------------
     # Apply wall boundary conditions
@@ -26,28 +27,29 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     ksgn = 2*j2 - 3
     kernel!(grdgre, grpp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, false, inputs, wall)
 
+    # TODO: remove this I think? Can't test right now since the full runthrough is broken. This should have been removed when mtheta+5 was removed
     # Enforce periodic boundary conditions
-    for i = 1:inputs.mtheta + 2
-        grpp[i,inputs.mtheta + 1] = grpp[i,1]
-        grpp[i,inputs.mtheta + 2] = grpp[i,2]
+    for i = 1:mtheta + 2
+        grpp[i,mtheta + 1] = grpp[i,1]
+        grpp[i,mtheta + 2] = grpp[i,2]
     end
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mpert)
-    fourier_transform!(grri, grpp, plasma_surf.snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
+    fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, mtheta, mpert)
+    fourier_transform!(grri, grpp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
 
-    if !inputs.farwall_flag
+    if !farwall_flag
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
         error("Haven't set up walls yet")
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
-        grpw_block = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
+        grpw_block = zeros(2 * mtheta, 2 * mtheta)
         kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs, wall)
-        
-        fourier_transform!(grpw_block, grdgre, cslth, 0, 0, inputs.mtheta, inputs.mpert)
-        fourier_transform!(grpw_block, grdgre, snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
+
+        fourier_transform!(grpw_block, grdgre, cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grpw_block, grdgre, snlth, 0, mpert, mtheta, mpert)
 
         # ----------------------------------------------------------
         # Wall–Plasma block
@@ -57,8 +59,8 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         grwp_block = similar(grdgre) # This should be grpp or a new matrix
         kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs, wall)
 
-        fourier_transform!(grwp_block, grdgre, cslth, 0, 0, inputs.mtheta, inputs.mpert)
-        fourier_transform!(grwp_block, grdgre, snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
+        fourier_transform!(grwp_block, grdgre, cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grwp_block, grdgre, snlth, 0, mpert, mtheta, mpert)
 
         # ----------------------------------------------------------
         # Wall–Wall block
@@ -68,8 +70,8 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         grww_block = similar(grdgre) # This should be grpp or a new matrix
         kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs, wall)
 
-        fourier_transform!(grww_block, grdgre, cslth, 0, 0, inputs.mtheta, inputs.mpert)
-        fourier_transform!(grww_block, grdgre, snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
+        fourier_transform!(grww_block, grdgre, cslth, 0, 0, mtheta, mpert)
+        fourier_transform!(grww_block, grdgre, snlth, 0, mpert, mtheta, mpert)
 
         # ----------------------------------------------------------
         # Assemble matrices for solving
@@ -77,24 +79,24 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         assemble_vacuum_matrix!(
             vacmat, vacmti, vacmatu, vacmtiu,
             grwp, grpw_block, grwp_block, grww_block,
-            mth, intr.mpert, inputs.mlow, inputs.mhigh, 2π
+            mth, mpert, inputs.mlow, inputs.mhigh, 2π
         )
     end
 
     # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
-    if (abs(inputs.n) <= 1e-5) && (!inputs.farwall_flag) && (wall.is_closed_toroidal)
-        mth12 = inputs.farwall_flag ? inputs.mtheta : 2 * inputs.mtheta
+    if (abs(n) <= 1e-5) && (!farwall_flag) && (wall.is_closed_toroidal)
+        mth12 = farwall_flag ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
-            grdgre[i, j] += inputs.cn0
+            grdgre[i, j] += cn0
         end
     end
 
     # Only needed for mutual inductance with the wall calculations
-    if inputs.kernelsign < 0
-        grdgre .*= inputs.kernelsign
+    if kernelsign < 0
+        grdgre .*= kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:2 * inputs.mtheta
+        for i in 1:2 * mtheta
             grdgre[i, i] += 2.0
         end
     end
@@ -108,22 +110,22 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    arr = zeros(inputs.mpert, inputs.mpert)
-    aii = zeros(inputs.mpert, inputs.mpert)
-    ari = zeros(inputs.mpert, inputs.mpert)
-    air = zeros(inputs.mpert, inputs.mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0, inputs.mtheta, inputs.mpert)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0, inputs.mtheta, inputs.mpert)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
+    arr = zeros(mpert, mpert)
+    aii = zeros(mpert, mpert)
+    ari = zeros(mpert, mpert)
+    air = zeros(mpert, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0, mtheta, mpert)
+    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert, mtheta, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0, mtheta, mpert)
+    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert, mtheta, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii
     vacmti = air .- ari
     # Force symmetry of response matrix if desired
-    if inputs.force_wv_symmetry
-        for l1 in 1:inputs.mpert
-            for l2 in l1:inputs.mpert
+    if force_wv_symmetry
+        for l1 in 1:mpert
+            for l2 in l1:mpert
                 vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
                 vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
             end
@@ -135,21 +137,8 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     display(wv)
 
     # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
-    
-    # Fortran check2 data dump
-    # TODO: clean up our own wall/plasma geometry outputs instead
-    if false
-        open("julia_vaccal_arrays.out", "w") do io
-            println(io, "I, xp, zp, xw, zw, xpp, zpp, xwp, zwp =")
-            # Derivatives (xplap, etc.) are not readily available here yet.
-            # Writing NaN as placeholders.
-            for i in 1:8:globals.mth1
-                @printf(io, "%3d %13.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n",
-                        i, globals.xpla[i], globals.zpla[i], globals.xwal[i], globals.zwal[i],
-                        NaN, NaN, NaN, NaN)
-            end
-        end
-    end
+
+    # TODO: add our own wall/plasma geometry outputs if desired
 end
 
 """
