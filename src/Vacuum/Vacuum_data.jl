@@ -27,7 +27,6 @@ Holds plasma boundary and mode data as provided from DCON namelist and computed 
     mtheta::Int = 1
     kernelsign::Float64 = 1.0
     force_wv_symmetry::Bool = true
-    cn0::Float64 = 1.0
 end
 
 """
