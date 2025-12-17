@@ -43,11 +43,11 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         error("Haven't set up walls yet")
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
-        grpw_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, wall)
+        grpw_block = zeros(2 * inputs.mtheta, 2 * inputs.mtheta)
+        kernel!(grdgre, grpw_block, globals.xpla, globals.zpla, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs, wall)
         
-        fourier_transform!(grpw_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fourier_transform!(grpw_block, grdgre, snlth, 0, intr.mpert, lmin, lmax, mth)
+        fourier_transform!(grpw_block, grdgre, cslth, 0, 0, inputs.mtheta, inputs.mpert)
+        fourier_transform!(grpw_block, grdgre, snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
 
         # ----------------------------------------------------------
         # Wall–Plasma block
@@ -55,10 +55,10 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         j1, j2 = 2, 1
         ksgn = 2*j2 - 3
         grwp_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, globals, wall)
+        kernel!(grdgre, grwp_block, globals.xwal, globals.zwal, globals.xpla, globals.zpla, j1, j2, ksgn, 1, 1, true, inputs, wall)
 
-        fourier_transform!(grwp_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fourier_transform!(grwp_block, grdgre, snlth, 0, intr.mpert, lmin, lmax, mth)
+        fourier_transform!(grwp_block, grdgre, cslth, 0, 0, inputs.mtheta, inputs.mpert)
+        fourier_transform!(grwp_block, grdgre, snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
 
         # ----------------------------------------------------------
         # Wall–Wall block
@@ -66,10 +66,10 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         j1, j2 = 2, 2
         ksgn = 2*j2 - 3
         grww_block = similar(grdgre) # This should be grpp or a new matrix
-        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, globals, wall)
+        kernel!(grdgre, grww_block, globals.xwal, globals.zwal, globals.xwal, globals.zwal, j1, j2, ksgn, 1, 1, true, inputs, wall)
 
-        fourier_transform!(grww_block, grdgre, cslth, 0, 0, lmin, lmax, mth)
-        fourier_transform!(grww_block, grdgre, snlth, 0, intr.mpert, lmin, lmax, mth)
+        fourier_transform!(grww_block, grdgre, cslth, 0, 0, inputs.mtheta, inputs.mpert)
+        fourier_transform!(grww_block, grdgre, snlth, 0, inputs.mpert, inputs.mtheta, inputs.mpert)
 
         # ----------------------------------------------------------
         # Assemble matrices for solving
@@ -461,7 +461,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 end
 
 """
-    fourier_inverse!(gll, gil, cs, m00, l00, mth, lmin, lmax, dth)
+    fourier_inverse_transform!(gll, gil, cs, m00, l00, mth, lmin, lmax, dth)
 
     Purpose:
       This routine performs the inverse Fourier transform of gil onto gll
@@ -477,8 +477,15 @@ end
     Output:
       gll(l2,l1) : output matrix updated in-place
 """
-function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64},
-                 m00::Int, l00::Int, mth::Int, mpert::Int)
+function fourier_inverse_transform!(
+    gll::Matrix{Float64}, 
+    gil::Matrix{Float64}, 
+    cs::Matrix{Float64},
+    m00::Int, 
+    l00::Int, 
+    mth::Int, 
+    mpert::Int
+    )
 
     # Zero out gll block
     for l1 in 1:mpert
@@ -491,9 +498,7 @@ function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, 
     dth = 2π / mth
     for l1 in 1:mpert
         for l2 in 1:mpert
-            for i in 1:mth
-                gll[l2, l1] += dth * cs[i, l2] * gil[m00+i, l00+l1] * 2π
-            end
+            gll[l2, l1] = dth * sum(cs[i, l2] * gil[m00 + i, l00 + l1] for i in 1:mth) * 2π
         end
     end
 
@@ -600,8 +605,8 @@ function assemble_vacuum_matrix!(
     """
     
     # Dimensions
-    nrows = 2 * mth * jmax1
-    ncols = 2 * mth * jmax1
+    # nrows = 2 * mth * jmax1
+    # ncols = 2 * mth * jmax1
 
     # Reset all vacuum matrices
     vacmat  .= 0.0

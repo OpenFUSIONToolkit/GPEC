@@ -321,13 +321,13 @@ function ellipe_old(m1)
 end
 
 
-# Chance eq.(49) (original)
+# Chance 2007 eq.(49) (original)
 function P0_minus_half(s)
     m1 = 2 / (s + 1)
     return 2 / π * sqrt(m1) * ellipk_old(m1)
 end
 
-# Chance eq.(50) (original)
+# Chance 2007 eq.(50) (original)
 # This is the case where the paper has a typo, the -1/4 exponent is written in the paper as +1/2
 function P0_plus_half(s)
     m1 = (s + sqrt(s^2 - 1))^(-2)
@@ -335,7 +335,7 @@ function P0_plus_half(s)
 end
 
 
-# Chance eq.(48) (original)
+# Chance 2007 eq.(48) (original)
 function P1_minus_half(s)
     return 0.5 / ((s^2 - 1)^0.5) * (P0_plus_half(s) - s * P0_minus_half(s))
 end
@@ -368,7 +368,7 @@ function Pn_minus_half_1997(s::Real, n::Int)
 
     # n ≥ 1
     for i in 1:n
-        # Chance eq.(47)
+        # Chance 2007 eq.(47)
         P[i+2] = -2 * i * s / sqrt(s^2 - 1) * P[i+1] - (i - 0.5)^2 * P[i]
     end
 
@@ -386,19 +386,19 @@ function Pn_minus_half_2007(s::Real, n::Int)
 end
 
 """
-    green(xs, zs, xt, zt, xtp, ztp, n; usechancebugs=false)
+    green(x_obs, z_obs, x_source, z_source, xtp, ztp, n; usechancebugs=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry.
 
 # Arguments
-- `xs`, `zs`: Observation point coordinates (X,Z) (Float64)
-- `xt`, `zt`: Source point coordinates (X',Z')(Float64)
+- `x_obs`, `z_obs`: Observation point coordinates (X,Z) (Float64)
+- `x_source`, `z_source`: Source point coordinates (X',Z')(Float64)
 - `xtp`, `ztp`: Derivatives ∂X'/∂θ, ∂Z'/∂θ (Float64)
 - `n`: Mode number (Int)
 - `usechancebugs::Bool`: Flag to use the 'old' buggy version for comparison.
 
 # Returns
-- `G`:   2π𝒢ⁿ(θ,θ′) — Green's function value
+- `G_n`:   2π𝒢ⁿ(θ,θ′) — Green's function value
 - `coupling_n`:   𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
 - `coupling_0`:  1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
 """
@@ -413,17 +413,17 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     ρ2 = x_minus2 + ζ2
 
-    # Chance eq.(41) ℛ = R
+    # Chance 2007 eq.(41) ℛ = R
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4) 
     R = sqrt(R2)
     R5 = R4 * R
 
-    # Chance eq.(42) 𝘴 = s
+    # Chance 2007 eq.(42) 𝘴 = s
     s = (x_obs2 + x_source2 + ζ2) / R2
     
     # Legendre functions for 
-    # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pp 
+    # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1 
     if uselegacygreenfunction
         legendre = Pn_minus_half_1997(s, n)
     else
@@ -432,72 +432,69 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     p0 = legendre[1]
     p1 = legendre[2]
-    pp = legendre[end]
+    pnp1 = legendre[end]
     pn = legendre[end-1]
 
-    # Chance eq.(40) 2π𝒢ⁿ = G
+    # Chance 2007 eq.(40) 2π𝒢ⁿ = G_n
     gg = 2 * sqrt(π) * gamma(0.5 - n) / R
-    G = gg * pn
+    G_n = gg * pn
 
-    # Chance eq.(44)
+    # Chance 2007 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
     grad_gg = gg / R4 /2π
 
     # ∂Gⁿ/∂X' = dG_dX
-    aval1 = (n * (x_obs2 + x_source2 + ζ2)*(x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
-    aval2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pp 
-    dG_dX = grad_gg * (aval1 + aval2) / x_source
+    xterm1 = (n * (x_obs2 + x_source2 + ζ2)*(x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
+    xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1 
+    dG_dX = grad_gg * (xterm1 + xterm2) / x_source
     
     # ∂Gⁿ/∂Z' = dG_dZ
-    aval3 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
-    aval4 = 4.0 * x_multiple * pp
-    dG_dZ = grad_gg * (aval3 + aval4) * ζ
+    zterm1 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
+    zterm2 = 4.0 * x_multiple * pnp1
+    dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
     
-    # Chance eq.(51) 
+    # Chance 2007 eq.(51) 
     # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
     # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
-
-    # bval. 2π𝒢ⁿ = bval
-    bval = G
 
     # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ 
     dG_dX0 = 1/(R5*x_source) * ((2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source2*(x_source2-x_obs2+ζ2) * p0 ) 
     dG_dZ0 = 1/(R5)* ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
     coupling_0 = -x_source * (dz_dtheta * dG_dX0 - dx_dtheta * dG_dZ0)
 
-    return G, coupling_n, coupling_0
+    return G_n, coupling_n, coupling_0
 end
 
-#############################################################
-# Inverse Fourier transform
-#############################################################
-"""
-    gll = foranv(gil, cs, dth, twopi; m00=0, l00=0, jmax1=nothing, mth=nothing)
+# #############################################################
+# # Inverse Fourier transform
+# #############################################################
+# """
+#     gll = foranv(gil, cs, dth, twopi; m00=0, l00=0, jmax1=nothing, mth=nothing)
 
-Inverse Fourier transform from theta grid to Fourier (l) space.
-- gil: θ-grid matrix (size ≥ m00+mth, l00+jmax1)
-- cs:  transformation matrix (nths, jmax1)
-- dth: grid spacing (Float64)
-- m00, l00: starting indices (Fortran offset, usually 0)
-- jmax1: number of Fourier modes
-- mth: number of theta points
+# Inverse Fourier transform from theta grid to Fourier (l) space.
+# - gil: θ-grid matrix (size ≥ m00+mth, l00+jmax1)
+# - cs:  transformation matrix (nths, jmax1)
+# - dth: grid spacing (Float64)
+# - m00, l00: starting indices (Fortran offset, usually 0)
+# - jmax1: number of Fourier modes
+# - mth: number of theta points
 
-Returns gll: (jmax1, jmax1) matrix.
-"""
-function foranv(gil, cs, dth ; jmax1=size(cs,2)) 
-    gll = zeros(eltype(gil), jmax1, jmax1)
-    mth=size(cs,1)
-    for l1 in 1:jmax1
-        for l2 in 1:jmax1
-            acc = zero(eltype(gil))
-            for i in 1:mth
-                acc += dth * cs[i, l2] * gil[m00 + i, l00 + l1] * 2π
-            end
-            gll[l2, l1] = acc
-        end
-    end
-    return gll
-end
+# Returns gll: (jmax1, jmax1) matrix.
+# """
+# function foranv(gil::Matrix{T}, cs, dth; jmax1=size(cs,2)) where {T}
+#     gll = zeros(T, jmax1, jmax1)
+#     mth=size(cs,1)
+#     for l1 in 1:jmax1
+#         for l2 in 1:jmax1
+#             acc = zero(eltype(gil))
+#             for i in 1:mth
+#                 acc += dth * cs[i, l2] * gil[m00 + i, l00 + l1] * 2π
+#             end
+#             gll[l2, l1] = acc
+#         end
+#     end
+#     return gll
+# end
 
 #############################################################
 # Utilities
