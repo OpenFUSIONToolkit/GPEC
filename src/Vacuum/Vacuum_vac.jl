@@ -9,7 +9,7 @@ const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.5255324099163
 function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry)
 
     # Initialization
-    (; mtheta, mpert, farwall_flag, n, cn0, kernelsign, force_wv_symmetry) = inputs
+    (; mtheta, mpert, n, cn0, kernelsign, force_wv_symmetry) = inputs
     grri = zeros(2 * mtheta, 2 * mpert)
     grdgre = zeros(2 * mtheta, 2 * mtheta)
     grpp = zeros(2 * mtheta, 2 * mtheta)
@@ -38,7 +38,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     fourier_transform!(grri, grpp, plasma_surf.cslth, 0, 0, mtheta, mpert)
     fourier_transform!(grri, grpp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
 
-    if !farwall_flag
+    if !wall.nowall
         # ----------------------------------------------------------
         # Plasma–Wall block
         # ----------------------------------------------------------
@@ -85,7 +85,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
 
     # TODO: is this getting kept?
     # Add cn0 to make grdgre nonsingular for n=0 modes
-    if (abs(n) <= 1e-5) && (!farwall_flag) && (wall.is_closed_toroidal)
+    if (abs(n) <= 1e-5) && (!wall.nowall) && (wall.is_closed_toroidal)
         mth12 = farwall_flag ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
             grdgre[i, j] += cn0

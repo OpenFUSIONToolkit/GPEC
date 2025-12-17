@@ -82,6 +82,10 @@ struct containing the necessary wall surface data for vacuum calculations.
 """
 function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
 
+    @assert(wall_settings.shape in ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"],
+        "Invalid wall shape: $(wall_settings.shape). Must be one of: nowall, conformal, elliptical, dee, mod_dee, from_file")
+    nowall = wall_settings.shape == "nowall"
+
    # All of these arrays are of length mtheta with θ = [0, 1)
     mtheta = inputs.mtheta
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] 
@@ -103,6 +107,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
 
     return WallGeometry(
+        nowall,
         is_closed_toroidal,
         x_wall,
         z_wall,

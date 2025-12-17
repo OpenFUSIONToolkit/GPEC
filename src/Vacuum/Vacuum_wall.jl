@@ -177,7 +177,7 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
     zwal1 = zeros(Float64, mth)
     
     is_closed_toroidal = true
-    if inputs.farwall_flag
+    if wall_settings.shape == "nowall"
         return xwal1, zwal1, is_closed_toroidal
     end
 
@@ -190,7 +190,7 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
     (; aw, bw, cw, dw, tw, a) = wall_settings
     wcentr = 0.0 # Initialize
 
-    if wall_settings.shape == :conformal
+    if wall_settings.shape == "conformal"
         wcentr = xmaj
         csmin = min(0.1, 0.1 * minimum(xinf))
         for i in 1:mth
@@ -202,7 +202,7 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
             zwal1[i] = zinf[i] + a * plrad * sin(alph)
         end
 
-    elseif wall_settings.shape == :elliptical
+    elseif wall_settings.shape == "elliptical"
         # Only calculate these if elliptical
         zrad = 0.5 * (zmax - zmin)
         zh = sqrt(abs(zrad^2 - plrad^2))
@@ -215,7 +215,7 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
             zwal1[i] = -bw_eff * a * sin(the)
         end
 
-    elseif wall_settings.shape == :dee
+    elseif wall_settings.shape == "dee"
         wcentr = xmaj + cw * plrad
         for i in 1:mth
             the = (i - 1) * (2π / mth)
@@ -223,7 +223,7 @@ function wwall(inputs::VacuumInput, wall_settings::WallShapeSettings, plasma_sur
             zwal1[i] = -bw * plrad * (1.0 + a - cw) * sin(the + tw * sin(2.0*the)) - aw * plrad * sin(2.0*the)
         end
 
-    elseif wall_settings.shape == :mod_dee
+    elseif wall_settings.shape == "mod_dee"
         wcentr = cw
         for i in 1:mth
             the = (i - 1) * (2π / mth)

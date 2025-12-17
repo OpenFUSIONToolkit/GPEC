@@ -12,8 +12,6 @@ Check if normalize is ever false, currently always true, and if not, remove rela
 """
 function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::VacuumMod.WallShapeSettings)
 
-    # TODO: it looks like vac_memory is always true - remove all ahg things and just assume true?
-    vac_memory = true
     # TODO: this is always true in fortran - just get rid of it?
     normalize = true
     # Flags used within VACUUM
@@ -46,44 +44,20 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
-        vac_inputs.mtheta = ctrl.mthvac
-        vac_inputs.force_wv_symmetry = ctrl.force_wv_symmetry
 
-        # repeated calls are needed only when gpec code using mutual inductances is added
-        # vac_inputs.farwall_flag = true
-        # vac_inputs.kernelsign = -1.0
-        # # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
-        # VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-        #     wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-        
-        # vac_inputs.kernelsign = 1.0
-        # VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-        #     wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        # if ctrl.wv_farwall_flag
-        #     wv_temp .= wv_block
-        # end
-
-        vac_inputs.farwall_flag = false
-        vac_inputs.kernelsign = -1.0
+        farwall_flag = wall_settings.shape == "nowall" ? true : false
         VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+            wall_flag, farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
-        vac_inputs.kernelsign = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        # TODO: can add the repeated calls w/ nowall/kernelsignin when gpec code using mutual inductances is added
 
         println("WV from Fortran")
         display(wv_block)
 
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, wall_flag, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, intr.dir_path)
         println("WV from Julia")
         display(wv_block)
-
-        if ctrl.wv_farwall_flag
-            wv_block .= wv_temp
-        end
 
         # Scale vacuum matrix by singfac = (m - n*qlim)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
@@ -95,9 +69,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Store block in full wv matrix
         @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
-        if vac_memory
-            VacuumMod.unset_dcon_params()
-        end
+        VacuumMod.unset_dcon_params()
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -222,7 +194,9 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         n = n,
         qa = qa,
         mtheta_eq = equil.config.control.mtheta,
-        cn0 = ctrl.wv_cn0
+        cn0 = ctrl.wv_cn0,
+        mtheta = ctrl.mthvac,
+        force_wv_symmetry = ctrl.force_wv_symmetry
     )
 end
 
