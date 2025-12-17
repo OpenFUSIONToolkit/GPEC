@@ -9,7 +9,7 @@ using OrdinaryDiffEq
 using HDF5
 import ..Equilibrium
 import ..Spl
-import ..VacuumMod
+import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
 

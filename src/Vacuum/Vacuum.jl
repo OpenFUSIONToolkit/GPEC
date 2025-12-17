@@ -1,4 +1,4 @@
-module VacuumMod
+module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, Printf, LinearAlgebra
 using HDF5
