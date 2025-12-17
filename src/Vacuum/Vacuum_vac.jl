@@ -198,7 +198,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         x_obs=x_obspoints[j] #observation point
         z_obs=z_obspoints[j]
         theta_obs=theta_grid[j] # theta value
-        work = zeros(mtheta+1)
+        work = zeros(mtheta)
         
         # if the point of observation point is in negative, We cannot use green func
         # This is same for source point
