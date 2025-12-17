@@ -46,4 +46,4 @@ bw = 1.5                      # Elongation.
 cw = 0                        # Offset of the center of the wall from the major radius.
 dw = 0.5                      # Triangularity
 tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
-equal_arc_wall = false        # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
+equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
