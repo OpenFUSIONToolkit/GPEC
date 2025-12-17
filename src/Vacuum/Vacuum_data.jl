@@ -94,15 +94,15 @@ Input settings for vacuum wall and geometry.
 - `shape` : String selecting wall shape. Options are:
     - "nowall": No wall.
     - "dee": Dee-shaped wall.
-    - "moddee": Modified Dee-shaped wall.
+    - "mod_dee": Modified Dee-shaped wall.
     - "custom": Custom wall shape provided in wall_geo.dat. TODO: Describe file format here.
-- `a` : The distance of the shell from the plasma in units of major radius (conformal), or minor radius parameter (others).
-- `aw` : Half-thickness of the shell.
-- `bw` : Elongation of the shell.
-- `cw` : Offset of the center of the shell from the major radius.
-- `dw` : Triangularity of shell.
-- `tw` : Sharpness of the corners of the shell. Try 0.05 as a good initial value.
-- `equal_arc_wall`: 1 turns on equal arcs distribution of the nodes on the shell. Best results unless
+- `a` : The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
+- `aw` : Half-thickness.
+- `bw` : Elongation.
+- `cw` : Offset of the center of the wall from the major radius.
+- `dw` : Triangularity.
+- `tw` : Sharpness of the corners of the wall. Try 0.05 as a good initial value.
+- `equal_arc_wall`: Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless
   the wall is very close to the plasma.
 """
 @kwdef mutable struct WallShapeSettings 
