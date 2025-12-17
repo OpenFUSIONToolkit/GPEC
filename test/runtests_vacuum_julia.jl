@@ -68,6 +68,6 @@
     catch e
         @test false
         @error "mscvac failed: $e"
-    end ㅇ
+    end
 
 end
