@@ -1,5 +1,7 @@
 @testset "Test Vacuum Julia" begin
 
+    using JPEC
+
     mth = 512
     nobs = 512
     nsrc = 512
