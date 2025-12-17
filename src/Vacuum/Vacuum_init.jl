@@ -15,26 +15,28 @@ function initialize_plasma_surface(inputs::VacuumInput)
 
     # Interpolate arrays from input onto mthvac grid (in readahg in the Fortran)
     mtheta = inputs.mtheta
-    # x_plasma = interp_to_new_grid(inputs.r, mtheta)
-    input_theta = range(0, stop=2π, length=length(inputs.r) + 1)[1:end-1] # length of input arrays without endpoint
+    x_plasma = interp_to_new_grid(inputs.r, mtheta)
+    z_plasma = interp_to_new_grid(inputs.z, mtheta)
+    delta = interp_to_new_grid(inputs.delta, mtheta)
+    # input_theta = range(0, stop=2π, length=length(inputs.r) + 1)[1:end-1] # length of input arrays without endpoint
     
-    x_plasma_spl = cubic_spline_interpolation(input_theta, inputs.r, extrapolation_bc=Interpolations.Periodic())
-    z_plasma_spl = cubic_spline_interpolation(input_theta, inputs.z, extrapolation_bc=Interpolations.Periodic())
+    # x_plasma_spl = cubic_spline_interpolation(input_theta, inputs.r, extrapolation_bc=Interpolations.Periodic())
+    # z_plasma_spl = cubic_spline_interpolation(input_theta, inputs.z, extrapolation_bc=Interpolations.Periodic())
 
     
-    x_plasma = x_plasma_spl(range(0, stop=2π, length=mtheta + 1)[1:end-1])
-    z_plasma = z_plasma_spl(range(0, stop=2π, length=mtheta + 1)[1:end-1])
-    delta = cubic_spline_interpolation(input_theta, inputs.delta, extrapolation_bc=Interpolations.Periodic())(range(0, stop=2π, length=mtheta + 1)[1:end-1])
+    # x_plasma = x_plasma_spl(range(0, stop=2π, length=mtheta + 1)[1:end-1])
+    # z_plasma = z_plasma_spl(range(0, stop=2π, length=mtheta + 1)[1:end-1])
+    # delta = cubic_spline_interpolation(input_theta, inputs.delta, extrapolation_bc=Interpolations.Periodic())(range(0, stop=2π, length=mtheta + 1)[1:end-1])
     
     # Plasma boundary theta derivative (this is semi-working)
     # All of these arrays are of length mth with θ = [0, 1)
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
-    # xplap = periodic_cubic_deriv(theta_grid, x_plasma)
-    # zplap = periodic_cubic_deriv(theta_grid, z_plasma)
+    dx_plasma_dtheta = periodic_cubic_deriv(theta_grid, x_plasma)
+    dz_plasma_dtheta = periodic_cubic_deriv(theta_grid, z_plasma)
     # dx_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, x_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
     # dz_plasma_dtheta = (t -> Interpolations.gradient(cubic_spline_interpolation(theta_grid, z_plasma, extrapolation_bc=Interpolations.Periodic()), t)).(theta_grid)
-    dx_plasma_dtheta = first.(Interpolations.gradient.(Ref(x_plasma_spl), theta_grid))
-    dz_plasma_dtheta = first.(Interpolations.gradient.(Ref(z_plasma_spl), theta_grid))
+    # dx_plasma_dtheta = first.(Interpolations.gradient.(Ref(x_plasma_spl), theta_grid))
+    # dz_plasma_dtheta = first.(Interpolations.gradient.(Ref(z_plasma_spl), theta_grid))
     # Trigonometric basis arrays
     cos_nqdelta = zeros(mtheta)
     sin_nqdelta = zeros(mtheta)

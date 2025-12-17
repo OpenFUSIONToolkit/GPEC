@@ -30,28 +30,28 @@
 #############################################################
 
 # export spline1d, spline1d_deriv, lagrange1d, search, green
-export lagrange1d, green
+export spline1d, spline1d_deriv, periodic_cubic_deriv, lagrange1d, green
 
-#############################################################
+# ############################################################
 # Cubic spline and derivatives for line 1d array and return point value, 
 # replacing spl1d1, spl1d2
-#############################################################
-# function spline1d(x, y, xq)
-#     itp = CubicSplineInterpolation(x, y)
-#     return itp(xq)
-# end
+# ############################################################
+function spline1d(x, y, xq)
+    itp = CubicSplineInterpolation(x, y)
+    return itp(xq)
+end
 
-# function spline1d_deriv(x, y, xq)
-#     itp = CubicSplineInterpolation(x, y)
-#     return Interpolations.gradient(itp, xq)
-# end
+function spline1d_deriv(x, y, xq)
+    itp = CubicSplineInterpolation(x, y)
+    return Interpolations.gradient(itp, xq)
+end
 
-# # Returns the array of derivatives at all x points, I think this acts like difspl
-# # in the Fortran but need to check/consolidate spline routines later
-# function periodic_cubic_deriv(theta, vals)
-#     itp = scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
-#     return first.(Interpolations.gradient.(Ref(itp), theta))
-# end
+# Returns the array of derivatives at all x points, I think this acts like difspl
+# in the Fortran but need to check/consolidate spline routines later
+function periodic_cubic_deriv(theta, vals)
+    itp = scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
+    return first.(Interpolations.gradient.(Ref(itp), theta))
+end
 
 #############################################################
 # lagrange spline for line 1d array, return point value and its derivative
@@ -188,49 +188,49 @@ end
 #     return fin  
 # end
 
-# #############################################################
-# # cubic spline for periodic 1d datas and return array
-# # replacing transdx, transdxx, trans
-# #############################################################
-# """
-#     interp_to_new_grid(vecin, mtheta; dx0=0.0, dx1=0.0)
+#############################################################
+# cubic spline for periodic 1d datas and return array
+# replacing transdx, transdxx, trans
+#############################################################
+"""
+    interp_to_new_grid(vecin, mtheta; dx0=0.0, dx1=0.0)
 
-# Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
-# This is a Fortran conversion of the functions `trans`, `transdx` and `transdxx`, which have now
-# been unified into a single function with optional parameters for offsets.
+Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
+This is a Fortran conversion of the functions `trans`, `transdx` and `transdxx`, which have now
+been unified into a single function with optional parameters for offsets.
 
-# # Parameters
-# - `vecin::Vector{Float64}` : Input array to be resampled.
-# - `mtheta::Int`            : Desired length of the output array.
-# - `dx0::Float64`           : Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mthin`).
-# - `dx1::Float64`           : Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`).
+# Parameters
+- `vecin::Vector{Float64}` : Input array to be resampled.
+- `mtheta::Int`            : Desired length of the output array.
+- `dx0::Float64`           : Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mthin`).
+- `dx1::Float64`           : Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`).
 
-# # Returns
-# - `vecout::Vector{Float64}` : The resampled output array with first and second points repeated (length `mtheta + 2`).
-# """
-# function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
+# Returns
+- `vecout::Vector{Float64}` : The resampled output array with first and second points repeated (length `mtheta + 2`).
+"""
+function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
 
-#     # Initialize
-#     mtheta_in = length(vecin)
+    # Initialize
+    mtheta_in = length(vecin)
 
-#     # If mthin == mth, just return the input vector
-#     if mtheta == mtheta_in
-#         return vecin
-#     end
+    # If mthin == mth, just return the input vector
+    if mtheta == mtheta_in
+        return vecin
+    end
 
-#     # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
-#     θin = range(0.0, 1.0; length=mtheta_in)
-#     itp = cubic_spline_interpolation(θin, vecin)
+    # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
+    θin = range(0.0, 1.0; length=mtheta_in)
+    itp = cubic_spline_interpolation(θin, vecin)
 
-#     # Interpolate to new grid with optional offsets
-#     vecout = zeros(mtheta)
-#     for i in 1:mtheta
-#         x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
-#         x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
-#         vecout[i] = itp(x)
-#     end
-#     return vecout
-# end
+    # Interpolate to new grid with optional offsets
+    vecout = zeros(mtheta)
+    for i in 1:mtheta
+        x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
+        x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
+        vecout[i] = itp(x)
+    end
+    return vecout
+end
 
 # #############################################################
 # # Searching index , replacing search, serachx

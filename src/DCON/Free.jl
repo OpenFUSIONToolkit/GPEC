@@ -64,7 +64,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         #     wv_temp .= wv_block
         # end
 
-        vac_inputs.farwall_flag = false
+        vac_inputs.farwall_flag = true
         vac_inputs.kernelsign = -1.0
         VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
             wall_flag, vac_inputs.farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)

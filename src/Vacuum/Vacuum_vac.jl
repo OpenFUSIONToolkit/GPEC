@@ -142,15 +142,15 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
 end
 
 """
-    kernel(xobs, zobs, xsource, zsce, j1, j2, isgn, iopw, iops, ischk, params)
+    kernel(x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, ischk, params)
 
 Compute kernels of integral equation for Laplace's equation for a torus.
 
 # Arguments
-- `xobs`: Observer x coordinates
-- `zobs`: Observer z coordinates
-- `xsource`: Source x coordinates
-- `zsource`: Source z coordinates
+- `x_obspoints`: Observer x coordinates
+- `z_obspoints`: Observer z coordinates
+- `x_sourcepoints`: Source x coordinates
+- `z_sourcepoints`: Source z coordinates
 - `j1, j2`: Boundary condition indices
 - `isgn`: Sign parameter
 - `iopw`: Wall option (0=inactive, 1=active)
@@ -159,8 +159,8 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `params`: Dictionary containing simulation parameters
 
 # Returns
-- `gradgreensfunction`: Gradient Green's function matrix
-- `greensfunction`: Green's function matrix
+- `grad_greenfunction_mat`: Gradient Green's function matrix
+- `greenfunction_mat`: Green's function matrix
 """
 function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput, wall_geo::WallGeometry)
 
