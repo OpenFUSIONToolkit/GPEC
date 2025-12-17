@@ -1,14 +1,12 @@
 module Vacuum
 
-using TOML, Interpolations, SpecialFunctions, Printf, LinearAlgebra
-using HDF5
+using TOML, Interpolations, SpecialFunctions, LinearAlgebra
 
-include("Vacuum_data.jl")
-include("Vacuum_init.jl")
-include("Vacuum_vac.jl")
-include("Vacuum_math.jl")
+include("VacuumStructs.jl")
+include("VacuumInternals.jl")
 
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
+export compute_vacuum_field
 export kernel!
 export WallShapeSettings
 
@@ -201,21 +199,104 @@ function mscvac(
 end
 
 """
-    compute_vacuum_response(wall_settings::WallShapeSettings, vac_inputs::VacuumInput, folder::String=".")
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 Compute the vacuum response matrix using provided vacuum inputs. This is a placeholder for the Julia conversion of the
 fortran mscvac function. It will return the relevant arrays, wv, grri, and xzpts.
 """
-function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::VacuumInput, folder::String=".")
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-    # Initialize plasma and wall surfaces
+    # Initialization and allocations
+    (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
+    grri = zeros(2 * mtheta, 2 * mpert)
+    grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
+    greenfunction_temp = zeros(mtheta, mtheta)
 
-    # Call funint
+    # Plasma–Plasma block
+    j1, j2 = 1, 1
+    ksgn = 2*j2 - 3
+    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, inputs)
 
-    # Compute vacuum response matrix
-    wv, grri = vaccal!(inputs, plasma_surf, wall)
+    # Fourier transform plasma-plasma block
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0, mtheta, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
+
+    if !wall.nowall
+        @warn "Vacuum response calculations with wall are not 100% accurate yet."
+        # Plasma–Wall block
+        j1, j2 = 1, 2
+        ksgn = 2*j2 - 3
+        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
+
+        # Wall–Wall block
+        j1, j2 = 2, 2
+        ksgn = 2*j2 - 3
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
+
+        # Wall–Plasma block
+        j1, j2 = 2, 1
+        ksgn = 2*j2 - 3
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 0, inputs; xwall=wall.x, zwall=wall.z)
+
+        # Fourier transform wall blocks into grri
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert, mtheta, mpert)
+    end
+
+    # Add cn0 to make grdgre nonsingular for n=0 modes
+    cn0 = 1.0 # expose to user if anyone ever actually tries to use this
+    if (abs(n) <= 1e-5) && (!wall.nowall) && (wall.is_closed_toroidal)
+        @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
+        mth12 = wall.nowall ? mtheta : 2 * mtheta
+        for i in 1:mth12, j in 1:mth12
+            grad_greenfunction_mat[i, j] += cn0
+        end
+    end
+
+    # Only needed for mutual inductance with the wall calculations
+    if kernelsign < 0
+        grad_greenfunction_mat .*= kernelsign
+        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
+        for i in 1:2 * mtheta
+            grad_greenfunction_mat[i, i] += 2.0
+        end
+    end
+
+    # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
+    # If plasma only, lower blocks will be empty
+    if wall.nowall
+        grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+    else
+        grri .= grad_greenfunction_mat \ grri
+    end
+
+    # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
+
+    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
+    arr = zeros(mpert, mpert)
+    aii = zeros(mpert, mpert)
+    ari = zeros(mpert, mpert)
+    air = zeros(mpert, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0, mtheta, mpert)
+    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert, mtheta, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0, mtheta, mpert)
+    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert, mtheta, mpert)
+
+    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
+    vacmat = arr .+ aii
+    vacmti = air .- ari
+    # Force symmetry of response matrix if desired
+    if force_wv_symmetry
+        for l1 in 1:mpert
+            for l2 in l1:mpert
+                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
+                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
+            end
+        end
+    end
+    wv = complex.(vacmat, vacmti)
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
@@ -224,5 +305,57 @@ function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::Vacuu
     xzpts[:, 3] .= wall.x
     xzpts[:, 4] .= wall.z
     return wv, grri, xzpts
+end
+
+"""
+    compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, 
+           Bn::Vector{<:Number}, R_grid::AbstractVector, Z_grid::AbstractVector)
+
+Calculates the perturbed magnetic field in the vacuum region resulting from a normal
+magnetic field perturbation (`Bn`) at the plasma surface. Replaces `mscfld` from Fortran.
+
+This function orchestrates the vacuum field calculation by:
+1. Calling `vaccal!` to compute the vacuum response kernel (`grri`).
+2. Defining a grid of points (`R_grid`, `Z_grid`) where the field is to be calculated.
+3. Calling `_pickup_field` to compute the magnetic field components on that grid using the kernel
+   and the source perturbation `Bn`.
+
+# Arguments
+- `inputs::VacuumInput`: Struct containing vacuum calculation parameters (n, mpert, etc.).
+- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry and basis functions.
+- `wall::WallGeometry`: Struct with wall geometry.
+- `Bn::Vector{<:Number}`: Complex vector of Fourier harmonics of the normal magnetic field
+  perturbation at the plasma surface, `B_n = B_n_real + i*B_n_imag`. Length must be `mpert`.
+- `R_grid::AbstractVector`: Vector of R coordinates for the output field grid.
+- `Z_grid::AbstractVector`: Vector of Z coordinates for the output field grid.
+
+# Returns
+- `B_R::Matrix{ComplexF64}`: The R-component of the magnetic field on the grid.
+- `B_Z::Matrix{ComplexF64}`: The Z-component of the magnetic field on the grid.
+- `B_phi::Matrix{ComplexF64}`: The toroidal component of the magnetic field on the grid.
+- `grid_info::Matrix{Int}`: Information about the grid points (1=inside plasma, 0=outside).
+"""
+function compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, 
+                Bn::Vector{<:Number}, R_grid::AbstractVector, Z_grid::AbstractVector)
+
+    # 1. Call vaccal! to get the inverted Green's function matrix
+    # The Fortran version calls the whole chain (ent33 -> vaccal), 
+    # here we assume vaccal! provides what we need.
+    wv, grri = vaccal!(inputs, plasma_surf, wall)
+
+    # Separate real and imaginary parts of the source perturbation
+    Bn_real = real.(Bn)
+    Bn_imag = imag.(Bn)
+
+    # 2. Define grid and parameters for pickup routine
+    nx = length(R_grid)
+    nz = length(Z_grid)
+    
+    # 3. Call the field pickup routine
+    B_R, B_Z, B_phi, grid_info = _pickup_field(
+        inputs, plasma_surf, grri, Bn_real, Bn_imag, R_grid, Z_grid
+    )
+
+    return B_R, B_Z, B_phi, grid_info
 end
 end
