@@ -119,5 +119,5 @@ Input settings for vacuum wall and geometry.
     tw::Float64 = 0.05
     
     # Algorithmic options
-    equal_arc_wall::bool = true
+    equal_arc_wall::Bool = true
 end
