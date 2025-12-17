@@ -2,44 +2,21 @@
 # Julia Numerical Utilities: Function Summary & Fortran Mapping
 #
 # Interpolation & Smoothing:
-#   - spline1d(x, y, xq)           : Cubic spline interpolation (spl1d1)
-#   - spline1d_deriv(x, y, xq)     : Cubic spline derivative (spl1d2)
+#   - periodic_cubic_deriv(theta, vals) : Periodic cubic spline derivative (difspl)
 #   - lagrange1d(x, y, xq)         : Lagrange interpolation (lagp, lagpe4, lag)
-#   - smooth(y, w)                 : Moving average smoothing (smooth, smooth0)
-#   - shift(y, nshift)             : Periodic array shift (shft)
 #
 # Green's Function & Legendre Kernel:
 #   - green(xs, zs, xt, zt, n)     : Green's function (green)
 #   - Pn_minus_half_1997(s, n)     : Legendre function of the first kind, order -1/2 (aleg_old)
 #   - Pn_minus_half_2007(s, n)     : Updated Legendre function for certain regimes (aleg, not yet implemented)
-#
-# Integration & Differentiation:
-#   - cumtrapz(y, dx)              : Cumulative trapezoidal integration (indef4)
-#   - atan(y, x)                   : Two-argument arctangent (atan2m)
-#
+##
 # Utility Functions:
-#   - search(xbar, x)              : Interval search (search, searchx)
 #   - interp_to_new_grid(vecin, mtheta; dx0, dx1)  : Periodic cubic spline resampling (trans, transdx, transdxx)
 #
 # All functions use Julia built-in or standard package features for clarity and efficiency.
 #############################################################
 
-# export spline1d, spline1d_deriv, lagrange1d, search, green
-export spline1d, spline1d_deriv, periodic_cubic_deriv, lagrange1d, green
-
-# ############################################################
-# Cubic spline and derivatives for line 1d array and return point value, 
-# replacing spl1d1, spl1d2
-# ############################################################
-function spline1d(x, y, xq)
-    itp = CubicSplineInterpolation(x, y)
-    return itp(xq)
-end
-
-function spline1d_deriv(x, y, xq)
-    itp = CubicSplineInterpolation(x, y)
-    return Interpolations.gradient(itp, xq)
-end
+export periodic_cubic_deriv, lagrange1d, green
 
 # Returns the array of derivatives at all x points, I think this acts like difspl
 # in the Fortran but need to check/consolidate spline routines later
@@ -148,41 +125,6 @@ function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x
     return f, df # Return value and derivative
 end
 
-# #############################################################
-# # smoothing array, replacing smooth0, smooth
-# #############################################################
-# function smooth(y::Vector{Float64}, w::Int)
-#     n = length(y)
-#     y_smooth = similar(y)
-#     for i in 1:n
-#         i1 = max(1, i - div(w,2))
-#         i2 = min(n, i + div(w,2))
-#         y_smooth[i] = mean(y[i1:i2])
-#     end
-#     return y_smooth
-# end
-
-# #############################################################
-# # shift array, replacing shift
-# #############################################################
-# function shift(y::Vector, nshift::Int)
-#     n = length(y)
-#     nshift = mod(nshift, n)
-#     return vcat(y[end-nshift+1:end], y[1:end-nshift])
-# end
-
-# #############################################################
-# # cumtrapz integration for same intervals
-# # replacing indef4
-# #############################################################
-# function cumtrapz(y::Vector{Float64}, dx::Float64)  
-#     fin = zero(y)  
-#     for i in eachindex(y)[2:end]  
-#         fin[i] = fin[i-1] + (y[i-1] + y[i]) * dx / 2  
-#     end  
-#     return fin  
-# end
-
 #############################################################
 # cubic spline for periodic 1d datas and return array
 # replacing transdx, transdxx, trans
@@ -227,33 +169,10 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
     return vecout
 end
 
-# #############################################################
-# # Searching index , replacing search, serachx
-# #############################################################
-# """
-#     search(xbar, x::AbstractVector{<:Real})
-
-# Returns the 1-based index of the interval in the sorted array `x` to which `xbar` belongs.
-# - Returns 0 if xbar < x[1].
-# - Returns length(x)-1 if xbar ≥ x[end].
-# - Otherwise, returns i such that x[i] ≤ xbar < x[i+1].
-# """
-# function search(xbar, x::AbstractVector{<:Real})
-#     n = length(x)
-#     idx = searchsortedfirst(x, xbar)
-#     if xbar < x[1]
-#         return 0
-#     elseif xbar >= x[end]
-#         return n-1
-#     else
-#         return idx - 1
-#     end
-# end
 
 #############################################################
 # Legendre function of the first kind eq.(47)~(50) , replacing aleg. (verified)
 #############################################################
-
 
 """
     This function is different from elliptic integral K(k). Be careful.
