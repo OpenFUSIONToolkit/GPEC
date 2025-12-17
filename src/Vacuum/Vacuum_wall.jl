@@ -93,7 +93,7 @@ function form_wall(mtheta, wall_settings::WallShapeSettings, plasma_surf::Plasma
     z_wall = zeros(Float64, mtheta)    
     is_closed_toroidal = true
     if wall_settings.shape == "nowall"
-        return xwal1, zwal1, is_closed_toroidal
+        return x_wall, z_wall, is_closed_toroidal
     end
 
     # Common geometric parameters

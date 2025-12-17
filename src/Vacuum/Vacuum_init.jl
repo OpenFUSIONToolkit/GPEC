@@ -91,7 +91,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] 
     
     # Get wall shape from form_wall
-    x_wall, z_wall, is_closed_toroidal = form_wall(inputs.farwall_flag, mtheta, wall_settings, plasma_surf)
+    x_wall, z_wall, is_closed_toroidal = form_wall(mtheta, wall_settings, plasma_surf)
 
     input_theta = range(0, stop=2π, length=length(x_wall) + 1)[1:end-1] # length of input arrays without endpoint
 
