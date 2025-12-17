@@ -10,7 +10,8 @@
 #
 # Green's Function & Legendre Kernel:
 #   - green(xs, zs, xt, zt, n)     : Green's function (green)
-#   - Pn_minus_half(s, n)          : Legendre function of the first kind, order -1/2 (aleg)
+#   - Pn_minus_half_1997(s, n)          : Legendre function of the first kind, order -1/2 (aleg_old)
+#   - Pn_minus_half_2007(s, n)          : Updated Legendre function for certain regimes (aleg, not yet implemented)
 #
 # Matrix Operations:
 #   - A * B                        : Matrix multiplication (mult, matmul1, matmul3)
@@ -321,28 +322,30 @@ end
 
 
 # Chance eq.(49) (original)
-function P0_minus_half_old(s)
+function P0_minus_half(s)
     m1 = 2 / (s + 1)
     return 2 / π * sqrt(m1) * ellipk_old(m1)
 end
 
 # Chance eq.(50) (original)
-function P0_plus_half_old(s)
+# This is the case where the paper has a typo, the -1/4 exponent is written in the paper as +1/2
+function P0_plus_half(s)
     m1 = (s + sqrt(s^2 - 1))^(-2)
-    return 2 / π * m1^(-1/4) * ellipe_old(m1)
+    return 2 / π * m1^(-1/4) * ellipe_old(m1) # This is correct
 end
 
 
 # Chance eq.(48) (original)
-function P1_minus_half_old(s)
-    return 0.5 / ((s^2 - 1)^0.5) * (P0_plus_half_old(s) - s * P0_minus_half_old(s))
+function P1_minus_half(s)
+    return 0.5 / ((s^2 - 1)^0.5) * (P0_plus_half(s) - s * P0_minus_half(s))
 end
 
 
 """
-    Pn_minus_half_old(s, n)
+    Pn_minus_half_1997(s, n)
 
 Compute the Legendre function of the first kind of order -1/2, Pⁿ_{-1/2}(s), recursively using Chance's equations (47)-(50).
+The implementation follows the original fortran code. The paper equation 50 is incorrect, the exponent should be -1/4 instead of +1/2.
 
 # Arguments
 - `s::Real` : Legendre function parameter (s > 1)
@@ -351,14 +354,14 @@ Compute the Legendre function of the first kind of order -1/2, Pⁿ_{-1/2}(s), r
 # Returns
 - `P[end]` :  Value of P_{-1/2}^{0~n+1}(s)
 """
-function Pn_minus_half_old(s::Real, n::Int)
+function Pn_minus_half_1997(s::Real, n::Int)
 
     #initialize
     P = zeros(n + 2)
 
     # n = 0
-    P[1] = P0_minus_half_old(s)
-    P[2] = P1_minus_half_old(s)
+    P[1] = P0_minus_half(s)
+    P[2] = P1_minus_half(s)
     if n == 0
         return P
     end
@@ -376,9 +379,10 @@ end
 # Green function eq.(36)~(42). replacing green (verified)
 #############################################################
 
-function Pn_minus_half(s::Real, n::Int)
+function Pn_minus_half_2007(s::Real, n::Int)
+    @error "2007 paper implementation of Pn_minus_half is not yet complete. Use old version."
     # This is a temporary alias. The new implementation should be added here.
-    return Pn_minus_half_old(s, n)
+    return Pn_minus_half_1997(s, n)
 end
 
 """
@@ -394,17 +398,17 @@ Compute the Green's function and related quantities for axisymmetric geometry.
 - `usechancebugs::Bool`: Flag to use the 'old' buggy version for comparison.
 
 # Returns
-- `aval`:   𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
-- `aval0`:  1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
-- `bval`:   2π𝒢ⁿ(θ,θ′) — Green's function value
+- `G`:   2π𝒢ⁿ(θ,θ′) — Green's function value
+- `coupling_n`:   𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
+- `coupling_0`:  1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
 """
-function green(xs, zs, xt, zt, xtp, ztp, n; usechancebugs::Bool=false)
+function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
 
-    xs2 = xs^2
-    xt2 = xt^2
-    x_minus2 = (xs - xt)^2
-    x_multiple = xs * xt
-    ζ = (zs - zt)
+    x_obs2 = x_obs^2
+    x_source2 = x_source^2
+    x_minus2 = (x_obs - x_source)^2
+    x_multiple = x_obs * x_source
+    ζ = (z_obs - z_source)
     ζ2 = ζ^2
 
     ρ2 = x_minus2 + ζ2
@@ -416,14 +420,14 @@ function green(xs, zs, xt, zt, xtp, ztp, n; usechancebugs::Bool=false)
     R5 = R4 * R
 
     # Chance eq.(42) 𝘴 = s
-    s = (xs2 + xt2 + ζ2) / R2
+    s = (x_obs2 + x_source2 + ζ2) / R2
     
     # Legendre functions for 
     # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pp 
-    if usechancebugs
-        legendre = Pn_minus_half_old(s, n)
+    if uselegacygreenfunction
+        legendre = Pn_minus_half_1997(s, n)
     else
-        legendre = Pn_minus_half(s, n)
+        legendre = Pn_minus_half_2007(s, n)
     end
 
     p0 = legendre[1]
@@ -439,29 +443,29 @@ function green(xs, zs, xt, zt, xtp, ztp, n; usechancebugs::Bool=false)
     grad_gg = gg / R4 /2π
 
     # ∂Gⁿ/∂X' = dG_dX
-    aval1 = (n * (xs2 + xt2 + ζ2)*(xs2 - xt2 + ζ2) - xt2*(xt2-xs2+ζ2)) * pn
-    aval2 = (2.0 * xt * xs * (xs2-xt2+ζ2)) * pp 
-    dG_dX = grad_gg * (aval1 + aval2) / xt
+    aval1 = (n * (x_obs2 + x_source2 + ζ2)*(x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
+    aval2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pp 
+    dG_dX = grad_gg * (aval1 + aval2) / x_source
     
     # ∂Gⁿ/∂Z' = dG_dZ
-    aval3 = (2.0 * n + 1.0) * (xs2 + xt2 + ζ2) * pn
+    aval3 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
     aval4 = 4.0 * x_multiple * pp
     dG_dZ = grad_gg * (aval3 + aval4) * ζ
     
     # Chance eq.(51) 
     # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
     # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
-    aval = -xt * (ztp * dG_dX - xtp * dG_dZ)
+    coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
     # bval. 2π𝒢ⁿ = bval
     bval = G
 
     # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ 
-    dG_dX0 = 1/(R5*xt) * ((2.0 * xt * xs * (xs2-xt2+ζ2)) * p1 - xt2*(xt2-xs2+ζ2) * p0 ) 
-    dG_dZ0 = 1/(R5)* ζ * ((xs2 + xt2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
-    aval0 = -xt * (ztp * dG_dX0 - xtp * dG_dZ0)
+    dG_dX0 = 1/(R5*x_source) * ((2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source2*(x_source2-x_obs2+ζ2) * p0 ) 
+    dG_dZ0 = 1/(R5)* ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
+    coupling_0 = -x_source * (dz_dtheta * dG_dX0 - dx_dtheta * dG_dZ0)
 
-    return G, aval, aval0, bval
+    return G, coupling_n, coupling_0
 end
 
 #############################################################

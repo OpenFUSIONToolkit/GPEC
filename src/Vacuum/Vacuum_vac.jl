@@ -173,7 +173,7 @@ Compute kernels of integral equation for Laplace's equation for a torus.
 - `gradgreensfunction`: Gradient Green's function matrix
 - `greensfunction`: Green's function matrix
 """
-function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, wallflag, inputs::VacuumInput, wall_geo::WallGeometry)
+function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, wallflag::Bool, inputs::VacuumInput, wall_geo::WallGeometry)
 
     mtheta = inputs.mtheta
     mth1 = inputs.mtheta + 1
@@ -289,7 +289,7 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
             if ic ≥ mth1
                 ic = ic - mtheta
             end
-            theta_source=(ic-1)*dtheta
+            # theta_source=(ic-1)*dtheta
             x_source=x_sourcepoints[ic]
             z_source=z_sourcepoints[ic]
 
@@ -303,10 +303,10 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
             end
 
             # 4.7 calc X'_θ (xtp) and Z'_θ (ztp) and call green function
-            # aval is 𝒥 ∇'𝒢ⁿ∇'ℒ, bval is 2pi𝒢ⁿ. aval0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
+            # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
             xtp=dx_dtheta[ic]
             ztp=dz_dtheta[ic]
-            G, aval, aval0, bval = green(x_obs,z_obs,x_source,z_source,xtp,ztp,inputs.n,usechancebugs=false)
+            G_n, coupling_n, coupling_0 = green(x_obs,z_obs,x_source,z_source,xtp,ztp,inputs.n,uselegacygreenfunction=true)
 
             # 4.8 simpson integral. 4 for odd, 2 for even, and 1 for others.
             simpson_b=simpson_b2
@@ -325,12 +325,12 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
             end
 
             # 4.9 work and gren
-            # work : simpson integral for aval(𝒥 ∇'𝒢ⁿ∇'ℒ)
-            # gren : log singularity values accumulated. simpson integral for bval
+            # work : simpson integral for coupling_n (𝒥 ∇'𝒢ⁿ∇'ℒ)
+            # gren : log singularity values accumulated. simpson integral for G_n
             # aval1 : aval1
-            work[ic]=work[ic]+isgn*aval*simpson_a
-            greensfunction[j,ic]=greensfunction[j,ic]+bval*simpson_b # integral of bval (log singularity)
-            aval1 = aval1 + aval0 * simpson_a
+            work[ic]=work[ic]+isgn*coupling_n*simpson_a
+            greenfunction_mat[j,ic]=greenfunction_mat[j,ic]+G_n*simpson_b # integral of G_n (log singularity)
+            aval1 = aval1 + coupling_0 * simpson_a
         
         end
         
@@ -357,7 +357,7 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
             gauss_xavg = (gauss_xright + gauss_xleft)/2
             gauss_halfdifference = (gauss_xright - gauss_xleft)/2
             tgaus = gauss_xavg .+ GAUSSIANPOINTS .* gauss_halfdifference # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
-            # 6.2 for each 8 gaussian points
+            # 6.2 for each of 8 gaussian points
             for ig in 1:8
                 tgaus0 = tgaus[ig] #i-th value of for 8 points, in theta
                 tgaus0 = mod(tgaus0, 2π)
@@ -369,35 +369,39 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
                 ztp = Interpolations.gradient(spline_z, tgaus0)[1]
 
                 # 6.4 call green function
-                G, aval, aval0, bval = green(x_obs,z_obs,xt,zt,xtp,ztp,inputs.n,usechancebugs=false)
+                G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,inputs.n,uselegacygreenfunction=true)
 
-                # 6.5 add logarithm on G (not 𝒢_n). Chance eq.(75)
+                # 6.5 add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
                 # iops = 1
-                bval = G + iops * log((theta_obs-tgaus[ig])^2)/x_obs
+                G_n_nonsingular = G_n + iops * log((theta_obs-tgaus[ig])^2)/x_obs
 
                 # 6.6 calc GAUSSIANWEIGHTS. GAUSSIANWEIGHTS contains gaussian quadrature weights for each 8 points
                 wgbg=GAUSSIANWEIGHTS[ig]*gauss_halfdifference
 
                 # 6.7 calc pgaus. below Chance eq.(77)
+                # All are the noted index, times (wgbg)/(2 pgaus)
+                # A0 has no extra factor
+                # A1 has an extra factor of (pgaus +/- 1)
+                # A2 has an extra factor of (pgaus +/- 2)
                 pgaus=(tgaus[ig]-theta_obs-(2-iend)*dtheta)/dtheta
                 pgaus2=pgaus*pgaus
-                amm = (pgaus2-1)*pgaus*(pgaus-2)/24.0 *wgbg
-                am = -(pgaus-1)*pgaus*(pgaus2-4)/6.0 *wgbg
-                a0 = (pgaus2-1)*(pgaus2-4)/4.0 *wgbg
-                ap = -(pgaus+1)*pgaus*(pgaus2-4)/6.0 *wgbg
-                app = (pgaus2-1)*pgaus*(pgaus+2)/24.0 *wgbg
+                A0 = (pgaus2-1)*(pgaus2-4)/4.0 * wgbg
+                A1_plus  = -(pgaus+1)*pgaus*(pgaus2-4)/6.0 * wgbg
+                A1_minus = -(pgaus-1)*pgaus*(pgaus2-4)/6.0 * wgbg
+                A2_plus  = (pgaus2-1)*pgaus*(pgaus+2)/24.0 * wgbg
+                A2_minus = (pgaus2-1)*pgaus*(pgaus-2)/24.0 * wgbg
 
                 # 6.8 add up in work
-                work[js1] += isgn * aval * amm
-                work[js2] += isgn * aval * am
-                work[js3] += isgn * aval * a0
-                work[js4] += isgn * aval * ap
-                work[js5] += isgn * aval * app
+                work[js1] += isgn * coupling_n * A2_minus
+                work[js2] += isgn * coupling_n * A1_minus
+                work[js3] += isgn * coupling_n * A0
+                work[js4] += isgn * coupling_n * A1_plus
+                work[js5] += isgn * coupling_n * A2_plus
 
                 # 6.9 minus diverging value
-                work[j] -= isgn * aval0 * wgbg
+                work[j] -= isgn * coupling_0 * wgbg
                 if j == jres
-                    ak0i -= isgn * aval0 * wgbg
+                    ak0i -= isgn * coupling_0 * wgbg
                 end
                 
                 # 6.10 skip when plasma, no skip when considering wall
@@ -405,12 +409,12 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
                     continue
                 end
 
-                # 6.11 if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up bval value
-                greensfunction[j,js1] += bval * amm
-                greensfunction[j,js2] += bval * am
-                greensfunction[j,js3] += bval * a0
-                greensfunction[j,js4] += bval * ap
-                greensfunction[j,js5] += bval * app
+                # 6.11 if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up G_n_nonsingular value
+                greenfunction_mat[j,js1] += G_n_nonsingular * A2_minus
+                greenfunction_mat[j,js2] += G_n_nonsingular * A1_minus
+                greenfunction_mat[j,js3] += G_n_nonsingular * A0
+                greenfunction_mat[j,js4] += G_n_nonsingular * A1_plus
+                greenfunction_mat[j,js5] += G_n_nonsingular * A2_plus
 
             end
         end
@@ -425,11 +429,11 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
         end
 
         # 7.2 Change resdg, resk0 according to ishape
-        # resdg, resk0 ???
+        # Table I of Chance 1997 ?
         if wall_geo.is_closed_toroidal
-            resdg=(2-j1)*(2-j2)+(j1-1)*(j2-1)
-            resk0=(2-j1)*(2-j2)+(j1-3)*(j2-1)
-            residue=resdg+resk0
+            residue_diagonal=(2-j1)*(2-j2)+(j1-1)*(j2-1)
+            residue_k0=(2-j1)*(2-j2)+(j1-3)*(j2-1)
+            residue=residue_diagonal+residue_k0
         end
 
         # 7.3 minus residue value
@@ -441,16 +445,16 @@ function kernel!(gradgreensfunction, greensfunction, x_obspoints, z_obspoints, x
 
         # 8.1 Only when plasma/plasma, log singularity activate. (S1)
         if iops == 1 && iopw != 0
-            greensfunction[j,js1] -= log_correction_2 / x_obs
-            greensfunction[j,js2] -= log_correction_1 / x_obs
-            greensfunction[j,js3] -= log_correction_0 / x_obs
-            greensfunction[j,js4] -= log_correction_1/x_obs
-            greensfunction[j,js5] -= log_correction_2/x_obs
+            greenfunction_mat[j,js1] -= log_correction_2 / x_obs
+            greenfunction_mat[j,js2] -= log_correction_1 / x_obs
+            greenfunction_mat[j,js3] -= log_correction_0 / x_obs
+            greenfunction_mat[j,js4] -= log_correction_1/x_obs
+            greenfunction_mat[j,js5] -= log_correction_2/x_obs
         end
 
         # 4.3 Store all the datas of work in grdgre, gren
-        gradgreensfunction[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work[1:mtheta]
-        greensfunction[j, 1:mtheta] ./= 2π
+        grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work[1:mtheta]
+        greenfunction_mat[j, 1:mtheta] ./= 2π
 
     end
 
