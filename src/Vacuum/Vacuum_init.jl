@@ -90,13 +90,8 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     mtheta = inputs.mtheta
     theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] 
     
-    # Get wall shape from wwall (TODO: this needs to be updated for size mtheta arrays)
-    x_wall, z_wall, is_closed_toroidal = wwall(inputs, wall_settings, plasma_surf)
-
-    # We need [1:mth1] below because these arrays are of size mth + 2 (for periodic finite differencing?) - try to remove this later
-    # Wall boundary theta derivative
-    # dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall[1:inputs.mtheta])
-    # dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall[1:inputs.mtheta])
+    # Get wall shape from form_wall
+    x_wall, z_wall, is_closed_toroidal = form_wall(inputs.farwall_flag, mtheta, wall_settings, plasma_surf)
 
     input_theta = range(0, stop=2π, length=length(x_wall) + 1)[1:end-1] # length of input arrays without endpoint
 
