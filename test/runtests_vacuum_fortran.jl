@@ -7,7 +7,7 @@
         deltain = rand(Float64, lmax - lmin + 1)
 
         @info "Testing set_dcon_params…"
-        JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+        JPEC.Vacuum.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
         @info "set_dcon_params OK!"
 
         @info "Testing mscvac…"
@@ -25,7 +25,7 @@
 
         # print wall_flag value
         @info "wall_flag value: $wall_flag"
-        JPEC.VacuumMod.mscvac(
+        JPEC.Vacuum.mscvac(
             wv, mpert, mtheta, mthvac,
             complex_flag, kernelsignin,
             wall_flag, farwall_flag,

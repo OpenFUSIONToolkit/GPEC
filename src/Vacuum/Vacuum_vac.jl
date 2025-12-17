@@ -24,11 +24,10 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
 
     if !wall.nowall
-        error("Don't come in here")
+        @warn "Vacuum response calculations with wall are not 100% accurate yet."
         # Plasma–Wall block
         j1, j2 = 1, 2
         ksgn = 2*j2 - 3
-        # fill!(greenfunction_temp, 0.0)
         kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
 
         # Wall–Wall block
@@ -42,8 +41,8 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 0, inputs; xwall=wall.x, zwall=wall.z)
 
         # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0, mtheta, mpert)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -65,9 +64,13 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
         end
     end
 
-    # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
-    # TODO: this is for plasma only! Need to invert the full matrix if walls
-    grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+    # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
+    # If plasma only, lower blocks will be empty
+    if wall.nowall
+        grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+    else
+        grri .= grad_greenfunction_mat \ grri
+    end
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
@@ -601,50 +604,4 @@ function assemble_vacuum_matrix!(
     end
 
     return nothing
-end
-
-# I think this is doing what gelimb was doing in the Fortran?
-function solve_vacuum!(
-    vacmat, vacmti, vacmatu, vacmtiu,
-    rhs, chi,
-    use_updown::Bool=false, use_symmetry::Bool=false
-)
-    """
-    Solve the vacuum matrix equation for the Fourier coefficients.
-
-    Parameters
-    ----------
-    vacmat, vacmti, vacmatu, vacmtiu : Arrays
-        Vacuum matrices (preassembled).
-    rhs : Vector
-        Right-hand side vector (plasma boundary conditions).
-    chi : Vector (preallocated)
-        Output solution vector (vacuum potential coefficients).
-    use_updown : Bool
-        If true, use the up–down symmetric version.
-    use_symmetry : Bool
-        If true, use the toroidal symmetry version.
-
-    Returns
-    -------
-    chi : updated in place
-    """
-
-    # Select which matrix to use based on flags
-    mat = vacmat
-    if use_updown && use_symmetry
-        mat = vacmtiu
-    elseif use_updown
-        mat = vacmatu
-    elseif use_symmetry
-        mat = vacmti
-    end
-
-    # Solve system: mat * chi = rhs
-    try
-        chi .= mat \ rhs
-    catch err
-        @warn "Vacuum solve failed, using fallback (zeros)" exception=(err, catch_backtrace())
-        chi .= 0.0
-    end
 end

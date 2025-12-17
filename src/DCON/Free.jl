@@ -10,7 +10,7 @@ and data dumping.
 ### TODOs
 Check if normalize is ever false, currently always true, and if not, remove related logic
 """
-function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::VacuumMod.WallShapeSettings)
+function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::Vacuum.WallShapeSettings)
 
     # TODO: this is always true in fortran - just get rid of it?
     normalize = true
@@ -45,7 +45,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.xzpts, 0.0)
 
         farwall_flag = wall_settings.shape == "nowall" ? true : false
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
+        Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
             wall_flag, farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
         # TODO: can add the repeated calls w/ nowall/kernelsignin when gpec code using mutual inductances is added
@@ -54,7 +54,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         display(wv_block)
 
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = VacuumMod.compute_vacuum_response(wall_settings, vac_inputs, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(wall_settings, vac_inputs, intr.dir_path)
         println("WV from Julia")
         display(wv_block)
 
@@ -68,7 +68,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Store block in full wv matrix
         @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
-        VacuumMod.unset_dcon_params()
+        Vacuum.unset_dcon_params()
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -179,11 +179,11 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     end
 
     # Pass all required values to VACUUM
-    VacuumMod.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
+    Vacuum.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
         reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
-    return VacuumMod.VacuumInput(;
+    return Vacuum.VacuumInput(;
         r = reverse(r),
         z = reverse(z),
         delta = reverse(delta),
@@ -255,7 +255,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             ahg_file = "ahg2msc_dcon.out" # Deprecated
 
             # Compute vacuum matrix
-            VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
                 wall_flag, farwall_flag, grri, xzpts, ahg_file, intr.dir_path)
 
             # Apply singular factor scaling
@@ -269,7 +269,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
             # Free VACUUM memory
-            VacuumMod.unset_dcon_params()
+            Vacuum.unset_dcon_params()
         end
     end
 

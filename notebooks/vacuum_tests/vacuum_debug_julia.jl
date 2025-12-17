@@ -5,11 +5,11 @@ using Profile
 push!(LOAD_PATH, joinpath(@__DIR__, "../.."))
 using JPEC
 mth = 512  # Number of poloidal grid points
-inputs = JPEC.VacuumMod.VacuumInput(
+inputs = JPEC.Vacuum.VacuumInput(
     mtheta=mth,
     n=1,
 )
-# settings = JPEC.VacuumMod.WallGeometry()
+# settings = JPEC.Vacuum.WallGeometry()
 
 #---------------------------------------------------------------
 #  Read the output_data.txt file
@@ -132,7 +132,7 @@ println("  gren: $(size(gren))")
 # Run the kernel function
 # Note: This may fail if additional setup/initialization is required
 try
-    JPEC.VacuumMod.kernel!(
+    JPEC.Vacuum.kernel!(
         grdgre, gren, 
         xobs[1:mth], zobs[1:mth], 
         xsce[1:mth], zsce[1:mth], 
@@ -222,7 +222,7 @@ if do_profile
 
     # Warm-up run to compile and avoid JIT in profile
     try
-        JPEC.VacuumMod.kernel!(
+        JPEC.Vacuum.kernel!(
             grdgre, gren,
             xobs[1:mth], zobs[1:mth],
             xsce[1:mth], zsce[1:mth],
@@ -236,7 +236,7 @@ if do_profile
     # Collect profile across multiple iterations to gather samples
     n_profile_iters = 20
     @profile for _ in 1:n_profile_iters
-        JPEC.VacuumMod.kernel!(
+        JPEC.Vacuum.kernel!(
             grdgre, gren,
             xobs[1:mth], zobs[1:mth],
             xsce[1:mth], zsce[1:mth],
@@ -248,7 +248,7 @@ if do_profile
     # Also record wall-clock timing for reference
     total_time = @elapsed begin
         for _ in 1:n_profile_iters
-            JPEC.VacuumMod.kernel!(
+            JPEC.Vacuum.kernel!(
                 grdgre, gren,
                 xobs[1:mth], zobs[1:mth],
                 xsce[1:mth], zsce[1:mth],

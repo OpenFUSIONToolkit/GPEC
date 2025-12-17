@@ -39,14 +39,11 @@ singfac_min = 1e-4            # Fractional distance from rational q at which ide
 ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
 
 [WALL]
-shape = "conformal"
+shape = "nowall"
 aw = 0.05
 bw = 1.5
 cw = 0
 dw = 0.5
 tw = 0.05
-nsing = 500
-epsq = 1e-5
-
-leqarcw = 0
+equal_arc_wall = 0
 a = 0.2415
