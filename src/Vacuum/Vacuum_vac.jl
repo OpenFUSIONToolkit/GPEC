@@ -15,12 +15,6 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     grpp = zeros(2 * mtheta, 2 * mtheta)
 
     # ----------------------------------------------------------
-    # Apply wall boundary conditions
-    # ----------------------------------------------------------
-    # TODO: does this need to get called more than once? Currently calling it three separate times
-    # globals.xwal, globals.zwal = wwall(wall_settings, globals)
-
-    # ----------------------------------------------------------
     # Plasma–Plasma block
     # ----------------------------------------------------------
     j1, j2 = 1, 1
@@ -103,9 +97,6 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
 
     # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
     grri .= grdgre \ grri
-
-    # TODO: I am not sure why we recall wwall here again? This is the third time...
-    # globals.xwal, globals.zwal = wwall(wall_settings, globals)
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
