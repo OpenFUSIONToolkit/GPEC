@@ -194,7 +194,6 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         n = n,
         qa = qa,
         mtheta_eq = equil.config.control.mtheta,
-        cn0 = ctrl.wv_cn0,
         mtheta = ctrl.mthvac,
         force_wv_symmetry = ctrl.force_wv_symmetry
     )
