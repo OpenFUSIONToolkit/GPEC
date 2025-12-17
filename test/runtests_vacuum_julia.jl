@@ -9,11 +9,11 @@
     gren = zeros(Float64, nobs, nsrc)
 
     try
-        inputs = JPEC.VacuumMod.VacuumInput(
+        inputs = JPEC.Vacuum.VacuumInput(
         mtheta=mth,
         n=1,
         )
-        settings = JPEC.VacuumMod.WallGeometry()
+        settings = JPEC.Vacuum.WallGeometry()
         data_file = joinpath(@__DIR__, "test_data/vacuum_data.txt")
         lines = readlines(data_file)
 
@@ -51,7 +51,7 @@
         #  Set up Kernel Function Parameters
         #---------------------------------------------------------------
         try
-            JPEC.VacuumMod.kernel!(
+            JPEC.Vacuum.kernel!(
                 grdgre, gren, 
                 xobs[1:mth], zobs[1:mth], 
                 xsce[1:mth], zsce[1:mth], 

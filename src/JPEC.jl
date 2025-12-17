@@ -10,8 +10,8 @@ import .Equilibrium as Equilibrium
 export Equilibrium
 
 include("Vacuum/Vacuum.jl")
-import .VacuumMod as VacuumMod
-export VacuumMod
+import .Vacuum as Vacuum
+export Vacuum
 
 include("DCON/DCON.jl")
 import .DCON as DCON

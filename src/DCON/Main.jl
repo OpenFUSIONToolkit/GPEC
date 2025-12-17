@@ -11,9 +11,9 @@ function Main(path::String="./")
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
-        wall_settings = VacuumMod.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
     else
-        wall_settings = VacuumMod.WallShapeSettings()
+        wall_settings = Vacuum.WallShapeSettings()
     end
     # Set up variables
     # TODO: dcon_kin_threads logic?
