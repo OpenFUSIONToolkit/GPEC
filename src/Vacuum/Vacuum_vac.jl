@@ -98,7 +98,8 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     end
 
     # Invert the plasma response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
-    grri .= grdgre \ grri
+    # TODO: this is for plasma only! Need to invert the full matrix if walls
+    grri[1:mtheta, :] .= grdgre[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
