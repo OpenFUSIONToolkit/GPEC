@@ -7,7 +7,6 @@ include("Vacuum_data.jl")
 include("Vacuum_init.jl")
 include("Vacuum_vac.jl")
 include("Vacuum_math.jl")
-include("Vacuum_wall.jl")
 
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
 export kernel!
@@ -215,12 +214,15 @@ function compute_vacuum_response(wall_settings::WallShapeSettings, inputs::Vacuu
 
     # Call funint
 
-    vaccal!(inputs, plasma_surf, wall)
+    # Compute vacuum response matrix
+    wv, grri = vaccal!(inputs, plasma_surf, wall)
 
-    # copy vacuum response matrix to output and return
-    wv = zeros(ComplexF64, inputs.mpert, inputs.mpert)
-    grri = zeros(Float64, 2 * (inputs.mtheta + 5), 2 * inputs.mpert)
-    xzpts = zeros(Float64, inputs.mtheta + 5, 4)
+    # Create xzpts array
+    xzpts = zeros(Float64, inputs.mtheta, 4)
+    xzpts[:, 1] .= plasma_surf.x_plasma
+    xzpts[:, 2] .= plasma_surf.z_plasma
+    xzpts[:, 3] .= wall.x_wall
+    xzpts[:, 4] .= wall.z_wall
     return wv, grri, xzpts
 end
 end

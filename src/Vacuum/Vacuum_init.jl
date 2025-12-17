@@ -153,16 +153,16 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
 
     elseif wall_settings.shape == :from_file
-        @info "Loading wall shape from external file 'wall_geo.in'."
-        # Load wall geometry from external file "wall_geo.in"
+        @info "Loading wall shape from external file 'wall_geo.dat' (**OPTION IS UNDER CONSTRUCTION**)."
+        # Load wall geometry from external file "wall_geo.dat"
         wcentr = 0.0
-        open("wall_geo.in", "r") do io
+        open("wall_geo.dat", "r") do io
             npots0 = parse(Int, readline(io))  # Number of points in file
             wcentr = parse(Float64, readline(io)) 
             readline(io) # Skip header/comment line
 
             if npots0 < mtheta
-                @error "ERROR: wall_geo.in contains fewer points ($npots0) than mtheta ($mtheta)."
+                @error "ERROR: wall_geo.dat contains fewer points ($npots0) than mtheta ($mtheta)."
                 error("Wall geometry file size mismatch")
             end
 
@@ -178,7 +178,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     end
 
     # Optional: Re-parameterization
-    if wall_settings.ldistribute_to_equal_arc_grid == 1
+    if wall_settings.equal_arc_wall
         x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
 

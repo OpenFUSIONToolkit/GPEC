@@ -133,6 +133,7 @@ function vaccal!(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeo
     # There was an extra arrays call here in the Fortran - do we need any functionality from it here?
 
     # TODO: add our own wall/plasma geometry outputs if desired
+    return wv, grri
 end
 
 """
