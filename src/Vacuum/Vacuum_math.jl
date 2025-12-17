@@ -29,28 +29,29 @@
 # All functions use Julia built-in or standard package features for clarity and efficiency.
 #############################################################
 
-export spline1d, spline1d_deriv, lagrange1d, search, green
+# export spline1d, spline1d_deriv, lagrange1d, search, green
+export lagrange1d, green
 
 #############################################################
 # Cubic spline and derivatives for line 1d array and return point value, 
 # replacing spl1d1, spl1d2
 #############################################################
-function spline1d(x, y, xq)
-    itp = CubicSplineInterpolation(x, y)
-    return itp(xq)
-end
+# function spline1d(x, y, xq)
+#     itp = CubicSplineInterpolation(x, y)
+#     return itp(xq)
+# end
 
-function spline1d_deriv(x, y, xq)
-    itp = CubicSplineInterpolation(x, y)
-    return Interpolations.gradient(itp, xq)
-end
+# function spline1d_deriv(x, y, xq)
+#     itp = CubicSplineInterpolation(x, y)
+#     return Interpolations.gradient(itp, xq)
+# end
 
-# Returns the array of derivatives at all x points, I think this acts like difspl
-# in the Fortran but need to check/consolidate spline routines later
-function periodic_cubic_deriv(theta, vals)
-    itp = scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
-    return first.(Interpolations.gradient.(Ref(itp), theta))
-end
+# # Returns the array of derivatives at all x points, I think this acts like difspl
+# # in the Fortran but need to check/consolidate spline routines later
+# function periodic_cubic_deriv(theta, vals)
+#     itp = scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
+#     return first.(Interpolations.gradient.(Ref(itp), theta))
+# end
 
 #############################################################
 # lagrange spline for line 1d array, return point value and its derivative
@@ -67,7 +68,7 @@ This function performs Lagrange interpolation and optionally computes its deriva
 - `m::Int`: Number of interpolation points.
 - `nl::Int`: Number of points to use for the local interpolation (degree of polynomial + 1).
 - `x::Float64`: The x-value at which to evaluate the interpolated function and/or its derivative.
--  `iop::Float64`: Flag (0 = value only, 1 = value and derivative)
+- `iop::Float64`: Flag (0 = value only, 1 = value and derivative)
 
 # Returns
 - `f::Float64`: The interpolated function value at `x`
@@ -152,108 +153,107 @@ function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x
     return f, df # Return value and derivative
 end
 
-#############################################################
-# smoothing array, replacing smooth0, smooth
-#############################################################
-function smooth(y::Vector{Float64}, w::Int)
-    n = length(y)
-    y_smooth = similar(y)
-    for i in 1:n
-        i1 = max(1, i - div(w,2))
-        i2 = min(n, i + div(w,2))
-        y_smooth[i] = mean(y[i1:i2])
-    end
-    return y_smooth
-end
+# #############################################################
+# # smoothing array, replacing smooth0, smooth
+# #############################################################
+# function smooth(y::Vector{Float64}, w::Int)
+#     n = length(y)
+#     y_smooth = similar(y)
+#     for i in 1:n
+#         i1 = max(1, i - div(w,2))
+#         i2 = min(n, i + div(w,2))
+#         y_smooth[i] = mean(y[i1:i2])
+#     end
+#     return y_smooth
+# end
 
-#############################################################
-# shift array, replacing shift
-#############################################################
-function shift(y::Vector, nshift::Int)
-    n = length(y)
-    nshift = mod(nshift, n)
-    return vcat(y[end-nshift+1:end], y[1:end-nshift])
-end
+# #############################################################
+# # shift array, replacing shift
+# #############################################################
+# function shift(y::Vector, nshift::Int)
+#     n = length(y)
+#     nshift = mod(nshift, n)
+#     return vcat(y[end-nshift+1:end], y[1:end-nshift])
+# end
 
-#############################################################
-# cumtrapz integration for same intervals
-# replacing indef4
-#############################################################
-function cumtrapz(y::Vector{Float64}, dx::Float64)
-    n = length(y)
-    fin = zeros(n)
-    for i in 2:n
-        fin[i] = fin[i-1] + (y[i-1] + y[i]) * dx / 2
-    end
-    return fin
-end
+# #############################################################
+# # cumtrapz integration for same intervals
+# # replacing indef4
+# #############################################################
+# function cumtrapz(y::Vector{Float64}, dx::Float64)  
+#     fin = zero(y)  
+#     for i in eachindex(y)[2:end]  
+#         fin[i] = fin[i-1] + (y[i-1] + y[i]) * dx / 2  
+#     end  
+#     return fin  
+# end
 
-#############################################################
-# cubic spline for periodic 1d datas and return array
-# replacing transdx, transdxx, trans
-#############################################################
-"""
-    interp_to_new_grid(vecin, mtheta; dx0=0.0, dx1=0.0)
+# #############################################################
+# # cubic spline for periodic 1d datas and return array
+# # replacing transdx, transdxx, trans
+# #############################################################
+# """
+#     interp_to_new_grid(vecin, mtheta; dx0=0.0, dx1=0.0)
 
-Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
-This is a Fortran conversion of the functions `trans`, `transdx` and `transdxx`, which have now
-been unified into a single function with optional parameters for offsets.
+# Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
+# This is a Fortran conversion of the functions `trans`, `transdx` and `transdxx`, which have now
+# been unified into a single function with optional parameters for offsets.
 
-# Parameters
-- `vecin::Vector{Float64}` : Input array to be resampled.
-- `mtheta::Int`            : Desired length of the output array.
-- `dx0::Float64`           : Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mthin`).
-- `dx1::Float64`           : Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`).
+# # Parameters
+# - `vecin::Vector{Float64}` : Input array to be resampled.
+# - `mtheta::Int`            : Desired length of the output array.
+# - `dx0::Float64`           : Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mthin`).
+# - `dx1::Float64`           : Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`).
 
-# Returns
-- `vecout::Vector{Float64}` : The resampled output array with first and second points repeated (length `mtheta + 2`).
-"""
-function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
+# # Returns
+# - `vecout::Vector{Float64}` : The resampled output array with first and second points repeated (length `mtheta + 2`).
+# """
+# function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
 
-    # Initialize
-    mtheta_in = length(vecin)
+#     # Initialize
+#     mtheta_in = length(vecin)
 
-    # If mthin == mth, just return the input vector
-    if mtheta == mtheta_in
-        return vecin
-    end
+#     # If mthin == mth, just return the input vector
+#     if mtheta == mtheta_in
+#         return vecin
+#     end
 
-    # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
-    θin = range(0.0, 1.0; length=mtheta_in)
-    itp = cubic_spline_interpolation(θin, vecin)
+#     # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
+#     θin = range(0.0, 1.0; length=mtheta_in)
+#     itp = cubic_spline_interpolation(θin, vecin)
 
-    # Interpolate to new grid with optional offsets
-    vecout = zeros(mtheta)
-    for i in 1:mtheta
-        x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
-        x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
-        vecout[i] = itp(x)
-    end
-    return vecout
-end
+#     # Interpolate to new grid with optional offsets
+#     vecout = zeros(mtheta)
+#     for i in 1:mtheta
+#         x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
+#         x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
+#         vecout[i] = itp(x)
+#     end
+#     return vecout
+# end
 
-#############################################################
-# Searching index , replacing search, serachx
-#############################################################
-"""
-    search(xbar, x::AbstractVector{<:Real})
+# #############################################################
+# # Searching index , replacing search, serachx
+# #############################################################
+# """
+#     search(xbar, x::AbstractVector{<:Real})
 
-Returns the 1-based index of the interval in the sorted array `x` to which `xbar` belongs.
-- Returns 0 if xbar < x[1].
-- Returns length(x)-1 if xbar ≥ x[end].
-- Otherwise, returns i such that x[i] ≤ xbar < x[i+1].
-"""
-function search(xbar, x::AbstractVector{<:Real})
-    n = length(x)
-    idx = searchsortedfirst(x, xbar)
-    if xbar < x[1]
-        return 0
-    elseif xbar >= x[end]
-        return n-1
-    else
-        return idx - 1
-    end
-end
+# Returns the 1-based index of the interval in the sorted array `x` to which `xbar` belongs.
+# - Returns 0 if xbar < x[1].
+# - Returns length(x)-1 if xbar ≥ x[end].
+# - Otherwise, returns i such that x[i] ≤ xbar < x[i+1].
+# """
+# function search(xbar, x::AbstractVector{<:Real})
+#     n = length(x)
+#     idx = searchsortedfirst(x, xbar)
+#     if xbar < x[1]
+#         return 0
+#     elseif xbar >= x[end]
+#         return n-1
+#     else
+#         return idx - 1
+#     end
+# end
 
 #############################################################
 # Legendre function of the first kind eq.(47)~(50) , replacing aleg. (verified)
@@ -265,7 +265,7 @@ end
 
 Returns : K(1-m1)
 """
-function ellipk_old(m1)
+function elliptic_integral_k(m1)
 
     if m1 < 0.0 || m1 > 1.0
         throw(DomainError(m1, "Input `m1` must be in the range (0, 1]."))
@@ -296,7 +296,7 @@ end
 
 Returns : E(1-m1)
 """
-function ellipe_old(m1)
+function elliptic_integral_e(m1)
 
     if m1 < 0.0 || m1 > 1.0
         throw(DomainError(m1, "Input `x1` must be in the range (0, 1]."))
@@ -321,21 +321,21 @@ function ellipe_old(m1)
 end
 
 
-# Chance 2007 eq.(49) (original)
+# Chance 1997 eq.(49) (original)
 function P0_minus_half(s)
     m1 = 2 / (s + 1)
-    return 2 / π * sqrt(m1) * ellipk_old(m1)
+    return 2 / π * sqrt(m1) * elliptic_integral_k(m1)
 end
 
-# Chance 2007 eq.(50) (original)
+# Chance 1997 eq.(50) (original)
 # This is the case where the paper has a typo, the -1/4 exponent is written in the paper as +1/2
 function P0_plus_half(s)
     m1 = (s + sqrt(s^2 - 1))^(-2)
-    return 2 / π * m1^(-1/4) * ellipe_old(m1) # This is correct
+    return 2 / π * m1^(-1/4) * elliptic_integral_e(m1) # This is correct
 end
 
 
-# Chance 2007 eq.(48) (original)
+# Chance 1997 eq.(48) (original)
 function P1_minus_half(s)
     return 0.5 / ((s^2 - 1)^0.5) * (P0_plus_half(s) - s * P0_minus_half(s))
 end
@@ -368,7 +368,7 @@ function Pn_minus_half_1997(s::Real, n::Int)
 
     # n ≥ 1
     for i in 1:n
-        # Chance 2007 eq.(47)
+        # Chance 1997 eq.(47)
         P[i+2] = -2 * i * s / sqrt(s^2 - 1) * P[i+1] - (i - 0.5)^2 * P[i]
     end
 
@@ -413,13 +413,13 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     ρ2 = x_minus2 + ζ2
 
-    # Chance 2007 eq.(41) ℛ = R
+    # Chance 1997 eq.(41) ℛ = R
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4) 
     R = sqrt(R2)
     R5 = R4 * R
 
-    # Chance 2007 eq.(42) 𝘴 = s
+    # Chance 1997 eq.(42) 𝘴 = s
     s = (x_obs2 + x_source2 + ζ2) / R2
     
     # Legendre functions for 
@@ -435,11 +435,11 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     pnp1 = legendre[end]
     pn = legendre[end-1]
 
-    # Chance 2007 eq.(40) 2π𝒢ⁿ = G_n
+    # Chance 1997 eq.(40) 2π𝒢ⁿ = G_n
     gg = 2 * sqrt(π) * gamma(0.5 - n) / R
     G_n = gg * pn
 
-    # Chance 2007 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
+    # Chance 1997 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
     grad_gg = gg / R4 /2π
 
     # ∂Gⁿ/∂X' = dG_dX
@@ -452,7 +452,7 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     zterm2 = 4.0 * x_multiple * pnp1
     dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
     
-    # Chance 2007 eq.(51) 
+    # Chance 1997 eq.(51) 
     # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
     # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
@@ -463,287 +463,4 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     coupling_0 = -x_source * (dz_dtheta * dG_dX0 - dx_dtheta * dG_dZ0)
 
     return G_n, coupling_n, coupling_0
-end
-
-# #############################################################
-# # Inverse Fourier transform
-# #############################################################
-# """
-#     gll = foranv(gil, cs, dth, twopi; m00=0, l00=0, jmax1=nothing, mth=nothing)
-
-# Inverse Fourier transform from theta grid to Fourier (l) space.
-# - gil: θ-grid matrix (size ≥ m00+mth, l00+jmax1)
-# - cs:  transformation matrix (nths, jmax1)
-# - dth: grid spacing (Float64)
-# - m00, l00: starting indices (Fortran offset, usually 0)
-# - jmax1: number of Fourier modes
-# - mth: number of theta points
-
-# Returns gll: (jmax1, jmax1) matrix.
-# """
-# function foranv(gil::Matrix{T}, cs, dth; jmax1=size(cs,2)) where {T}
-#     gll = zeros(T, jmax1, jmax1)
-#     mth=size(cs,1)
-#     for l1 in 1:jmax1
-#         for l2 in 1:jmax1
-#             acc = zero(eltype(gil))
-#             for i in 1:mth
-#                 acc += dth * cs[i, l2] * gil[m00 + i, l00 + l1] * 2π
-#             end
-#             gll[l2, l1] = acc
-#         end
-#     end
-#     return gll
-# end
-
-#############################################################
-# Utilities
-#############################################################
-
-const architecture = Sys.ARCH;
-const cpu_name = Sys.CPU_NAME;
-const threads = Sys.CPU_THREADS;
-const username = Sys.username();
-
-
-#############################################################
-# Additional spline functions for vacuum structure
-#############################################################
-function spl1d1!(n::Int, x::Vector{Float64}, f::Vector{Float64}, w::Vector{Float64}, 
-                 iop::Vector{Int}, ij::Int, a::Vector{Float64}, b::Vector{Float64}, c::Vector{Float64})
-    
-    zz, oz, tz, sz = 0.0, 1.0, 3.0, 6.0
-    
-    # Check minimum size requirement
-    if n < 4
-        println("spl1d1: Results incorrect because n<4.")
-        return
-    end
-    
-    k = n - 1
-    a[2] = -(x[2] - x[1]) / sz
-    b[2] = (x[3] - x[1]) / tz
-    w[ij+1] = (f[2*ij+1] - f[ij+1]) / (x[3] - x[2]) - (f[ij+1] - f[1]) / (x[2] - x[1])
-    
-    # Main loop for tridiagonal system setup
-    if n > 3
-        for i = 3:k
-            m = (i-1) * ij + 1
-            j1 = m + ij
-            j2 = m - ij
-            con = (x[i+1] - x[i-1]) / tz
-            don = (x[i] - x[i-1]) / sz
-            b[i] = con - (don^2) / b[i-1]
-            e = (f[j1] - f[m]) / (x[i+1] - x[i]) - (f[m] - f[j2]) / (x[i] - x[i-1])
-            w[m] = e - (don * w[j2]) / b[i-1]
-            a[i] = -(don * a[i-1]) / b[i-1]
-        end
-    end
-    
-    k1 = (n-2) * ij + 1
-    c[n-1] = -((x[n] - x[n-1]) / sz) / b[n-1]
-    w[k1] = w[k1] / b[n-1]
-    a[n-1] = a[n-1] / b[n-1]
-    k2 = k - 1
-    
-    # Backward substitution
-    if n > 3
-        for i = 2:k2
-            j = n - i
-            con = (x[j+1] - x[j]) / sz
-            a[j] = (a[j] - con * a[j+1]) / b[j]
-            c[j] = -(con * c[j+1]) / b[j]
-            k3 = (j-1) * ij + 1
-            m = k3 + ij
-            w[k3] = (w[k3] - con * w[m]) / b[j]
-        end
-    end
-    
-    k4 = (n-1) * ij + 1
-    
-    # Boundary condition handling
-    if iop[1] != 5
-        c1 = w[1]
-        if iop[2] != 5
-            c2 = w[k4]
-        else
-            # Right boundary condition processing
-            if n >= 4
-                b1 = x[n] - x[n-3]
-                b2 = x[n] - x[n-2]  
-                b3 = x[n] - x[n-1]
-                b4 = x[n-1] - x[n-3]
-                b5 = x[n-1] - x[n-2]
-                b6 = x[n-2] - x[n-3]
-                l1 = k4 - ij
-                l2 = l1 - ij
-                l3 = l2 - ij
-                w[k4] = -b2*b3*f[l3]/(b6*b4*b1) + b1*b3*f[l2]/(b6*b5*b2) - 
-                        b1*b2*f[l1]/(b4*b5*b3) + f[k4]*(oz/b1+oz/b2+oz/b3)
-            end
-            c2 = w[k4]
-        end
-    else
-        # Left boundary condition processing
-        if n >= 4
-            a1 = x[1] - x[2]
-            a2 = x[1] - x[3]
-            a3 = x[1] - x[4]
-            a4 = x[2] - x[3]
-            a5 = x[2] - x[4]
-            a6 = x[3] - x[4]
-            w[1] = f[1]*(oz/a1+oz/a2+oz/a3) - a2*a3*f[ij+1]/(a1*a4*a5) + 
-                   a1*a3*f[2*ij+1]/(a2*a4*a6) - a1*a2*f[3*ij+1]/(a3*a5*a6)
-        end
-        c1 = w[1]
-        
-        if iop[2] != 5
-            c2 = w[k4]
-        else
-            if n >= 4
-                b1 = x[n] - x[n-3]
-                b2 = x[n] - x[n-2]
-                b3 = x[n] - x[n-1]
-                b4 = x[n-1] - x[n-3]
-                b5 = x[n-1] - x[n-2]
-                b6 = x[n-2] - x[n-3]
-                l1 = k4 - ij
-                l2 = l1 - ij
-                l3 = l2 - ij
-                w[k4] = -b2*b3*f[l3]/(b6*b4*b1) + b1*b3*f[l2]/(b6*b5*b2) - 
-                        b1*b2*f[l1]/(b4*b5*b3) + f[k4]*(oz/b1+oz/b2+oz/b3)
-            end
-            c2 = w[k4]
-        end
-    end
-    
-    # Process boundary conditions
-    for i = 1:k
-        m = (i-1) * ij + 1
-        
-        # Left boundary conditions
-        bob = zz
-        if iop[1] == 1
-            if i == 1
-                a[1] = -oz
-                c[1] = zz
-            end
-        elseif iop[1] == 2
-            if i == 1
-                a[1] = -oz
-                c[1] = zz
-                w[1] = zz
-            elseif i == 2
-                bob = -c1
-            end
-        elseif iop[1] == 3 || iop[1] == 5
-            if i == 1
-                a[1] = -(x[2] - x[1]) / tz
-                c[1] = zz
-                w[1] = -c1 + (f[ij+1] - f[1]) / (x[2] - x[1])
-            elseif i == 2
-                bob = (x[2] - x[1]) / sz
-            end
-        elseif iop[1] == 4
-            if i == 1
-                a[1] = -oz
-                c[1] = oz
-                w[1] = zz
-            end
-        end
-        
-        # Right boundary conditions
-        bill = zz
-        if iop[2] == 1
-            if i == 1
-                a[n] = zz
-                c[n] = -oz
-            end
-        elseif iop[2] == 2
-            if i == 1
-                a[n] = zz
-                c[n] = -oz
-                w[k4] = zz
-            elseif i == k
-                bill = -c2
-            end
-        elseif iop[2] == 3 || iop[2] == 5
-            if i == 1
-                a[n] = zz
-                c[n] = (x[n-1] - x[n]) / tz
-                w[k4] = c2 - (f[k4] - f[k4-ij]) / (x[n] - x[n-1])
-            elseif i == k
-                bill = (x[n] - x[n-1]) / sz
-            end
-        elseif iop[2] == 4
-            if i == 1
-                a[n] = zz
-                c[n] = (x[n-1] + x[1] - x[n] - x[2]) / tz
-                w[k4] = (f[ij+1] - f[1]) / (x[2] - x[1]) - (f[k4] - f[k4-ij]) / (x[n] - x[n-1])
-            elseif i == 2
-                bill = (x[2] - x[1]) / sz
-            elseif i == k
-                bill = (x[n] - x[n-1]) / sz
-            end
-        end
-        
-        # Apply boundary modifications
-        if i > 1
-            w[1] = w[1] - bob * w[m]
-            w[k4] = w[k4] - bill * w[m]
-            a[1] = a[1] - bob * a[i]
-            a[n] = a[n] - bill * a[i]
-            c[1] = c[1] - bob * c[i]
-            c[n] = c[n] - bill * c[i]
-        end
-    end
-    
-    # Solve final system
-    con = a[1] * c[n] - c[1] * a[n]
-    d1 = -w[1]
-    d2 = -w[k4]
-    w[1] = (d1 * c[n] - c[1] * d2) / con
-    w[k4] = (a[1] * d2 - d1 * a[n]) / con
-    
-    for i = 2:k
-        m = (i-1) * ij + 1
-        w[m] = w[m] + a[i] * w[1] + c[i] * w[k4]
-    end
-    
-    return
-end
-
-
-function spl1d2!(n::Int, x::Vector{Float64}, f::Vector{Float64}, w::Vector{Float64}, 
-                 ij::Int, y::Float64, tab::Vector{Float64})
-    
-    wz, sz = 2.0, 6.0
-    mflag = 0
-    
-    # Find interval
-    if y <= x[1]
-        i = 1
-    elseif y >= x[n]
-        i = n - 1
-    else
-        i = search(y, x, n, 1, mflag)
-    end
-    
-    mi = (i-1) * ij + 1
-    k1 = mi + ij
-    flk = x[i+1] - x[i]
-    
-    # Calculate spline value and derivatives
-    a = (w[mi] * (x[i+1] - y)^3 + w[k1] * (y - x[i])^3) / (sz * flk)
-    b = (f[k1]/flk - w[k1]*flk/sz) * (y - x[i])
-    c = (f[mi]/flk - flk*w[mi]/sz) * (x[i+1] - y)
-    tab[1] = a + b + c
-    
-    a = (w[k1] * (y - x[i])^2 - w[mi] * (x[i+1] - y)^2) / (wz * flk)
-    b = (f[k1] - f[mi]) / flk
-    c = flk * (w[mi] - w[k1]) / sz
-    tab[2] = a + b + c
-    tab[3] = (w[mi] * (x[i+1] - y) + w[k1] * (y - x[i])) / flk
-    
-    return
 end

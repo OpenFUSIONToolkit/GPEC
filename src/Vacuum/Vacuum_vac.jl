@@ -232,8 +232,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     # 3 do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
 
     # Using interpolations.jl for now seemes ok
-    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints)
-    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints)
+    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints, extrapolation_bc=Interpolations.Periodic())
+    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints, extrapolation_bc=Interpolations.Periodic())
 
     gradients_x = (t -> Interpolations.gradient(spline_x, t)).(theta_grid)
     gradients_z = (t -> Interpolations.gradient(spline_z, t)).(theta_grid)
