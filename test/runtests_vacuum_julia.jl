@@ -1,6 +1,8 @@
 @testset "Test Vacuum Julia" begin
 
     mth = 512
+    nobs = 512
+    nsrc = 512
     grdgre = zeros(Float64, 2*nobs, 2*nsrc)
     gren = zeros(Float64, nobs, nsrc)
 
@@ -68,6 +70,6 @@
     catch e
         @test false
         @error "mscvac failed: $e"
-    end ㅇ
+    end
 
 end
