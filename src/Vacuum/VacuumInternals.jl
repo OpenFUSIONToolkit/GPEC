@@ -652,7 +652,7 @@ function Pn_minus_half_1997(s::Real, n::Int)
 end
 
 function Pn_minus_half_2007(s::Real, n::Int)
-    @error "2007 paper implementation of Pn_minus_half is not yet complete. Use old version."
+    @warn "2007 paper implementation of Pn_minus_half is not yet complete. Use old version."
     # This is a temporary alias. The new implementation should be added here.
     return Pn_minus_half_1997(s, n)
 end

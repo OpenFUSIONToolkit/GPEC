@@ -348,7 +348,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     end
 
     # Optional: Re-parameterization
-    if wall_settings.equal_arc_wall
+    if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
 
