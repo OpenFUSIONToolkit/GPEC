@@ -723,7 +723,7 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     return G_n, coupling_n, coupling_0
 end
 
-# Helper functions for mscfld
+# Helper functions for compute_vacuum_field
 
 """
     _pickup_field(inputs, plasma_surf, grri, Bn_real, Bn_imag, R_grid, Z_grid)
