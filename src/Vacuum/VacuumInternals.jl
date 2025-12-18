@@ -23,12 +23,9 @@ The residue calculation needs to be updated for open walls.**
 - `z_sourcepoints`: Source z coordinates (Z coordinates)
 - `j1`: Boundary condition index for observer (1=plasma, 2=wall)
 - `j2`: Boundary condition index for source (1=plasma, 2=wall)
-- `isgn`: Sign parameter for kernel computation
 - `iopw`: Wall option (0=inactive, 1=active)
-- `iops`: Log singularity correction option (1=active, 0=inactive)
-- `inputs`: VacuumInput struct containing simulation parameters (mtheta, n, etc.)
-- `xwall`: Wall R coordinates (optional, required if j2=2)
-- `zwall`: Wall Z coordinates (optional, required if j2=2)
+- `n`: Toroidal mode number
+
 
 # Returns
 
@@ -40,21 +37,21 @@ Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
 - Uses Gaussian quadrature near singular points for improved accuracy
 - Implements analytical singularity removal following Chance 1997
 """
-function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, isgn::Int, iopw::Int, iops::Int, inputs::VacuumInput; xwall::Union{Nothing, Vector{Float64}}=nothing, zwall::Union{Nothing, Vector{Float64}}=nothing)
+function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, iopw::Int, n::Int)
 
-    mtheta = inputs.mtheta
+    # These used to be function arguments, but can just set inside here based on j1/j2
+    isgn = 2 * j2 - 3
+    iops = (j1 == 1 && j2 == 1) ? 1 : 0 # only equal to 1 for plasma/plasma block
+
+    mtheta = length(x_obspoints)
     dtheta = 2π / mtheta
     ak0i = 0.0
     jres = 1
-    N_obs = length(x_obspoints)
-    theta_grid = LinRange(0, mtheta*dtheta, mtheta)
-    
-    if N_obs != length(z_obspoints) || N_obs != length(x_sourcepoints) || N_obs != length(z_sourcepoints)
+    theta_grid = range(start=0; length=mtheta, step=dtheta)
+
+    if mtheta != length(z_obspoints) || mtheta != length(x_sourcepoints) || mtheta != length(z_sourcepoints)
         error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
     end
-
-    # matrix output greensfunction is accumulated in grwp of vaccal.
-    # While grwp is 𝒢 befor fourier transform, grri is fourier transformed 𝒢
 
     # definition for solving parameters
     simpson_b1=1*dtheta/3
@@ -64,7 +61,6 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     simpson_a1=1*dtheta/3
     simpson_a2=2*dtheta/3
     simpson_a4=4*dtheta/3
-
     
     slog1m = 3*dtheta*(log(dtheta)-1/3)
     slog1p = slog1m
@@ -74,22 +70,20 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     log_correction_1=128.0*dtheta*(log2dtheta-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log2dtheta-11.0/15.0)/45.0
 
-    has_zero_crossing = false # has_zero_crossing needs to be initialized
-
-    # check singular points for conductor.
-    if xwall !== nothing && zwall !== nothing
-        # 2.0 initialize jbot and jtop, and get wall geometry from globals
+    has_zero_crossing = false
+    # See if the conductor surface needs to be checked for singular points
+    if j1 == 2 || j2 == 2
+        # Initialize jbot and jtop, and figure out wall geometry based on which block we are in
         jbot = jtop = mtheta/2+1
-        ww1 = xwall
-        ww2 = zwall
+        xwall = j2 == 2 ? x_sourcepoints : x_obspoints
         
-        # 2.2 find where sign of wall r point acrosses zero.
+        # Find where sign of wall x point acrosses zero.
         # has_zero_crossing means there is 0-crossing point
         for i in 1:mtheta
             next_i = i == mtheta ? 1 : i + 1
-            if ww1[i] * ww1[next_i] <= 0.0
-                jbot = ww1[i] > 0.0 ? i : jbot
-                jtop = ww1[i] < 0.0 ? i + 1 : jtop
+            if xwall[i] * xwall[next_i] <= 0.0
+                jbot = xwall[i] > 0.0 ? i : jbot
+                jtop = xwall[i] < 0.0 ? i + 1 : jtop
                 has_zero_crossing = true
             end
         end
@@ -106,11 +100,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     dx_dtheta = first.(gradients_x) # d x / d theta
     dz_dtheta = first.(gradients_z) # d z / d theta
 
-
-
     # observer loop
     for j in 1:mtheta
-
         # initialize variable
         x_obs=x_obspoints[j] #observation point
         z_obs=z_obspoints[j]
@@ -146,7 +137,6 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         # 4-3 on mth. then mths is equals to mtheta+3 ??? I'm not sure
         mth_source=mtheta-(istart+iend-1)
 
-        
         # loop for source point
         for i in 1:mth_source
 
@@ -171,7 +161,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             # Call green function
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
             G_n, coupling_n, coupling_0 = green(x_obs,z_obs,x_source,z_source,
-                                               dx_dtheta[ic],dz_dtheta[ic],inputs.n)
+                                               dx_dtheta[ic],dz_dtheta[ic],n)
 
             # simpson integral. 4 for odd, 2 for even, and 1 for others.
             simpson_b=simpson_b2
@@ -196,10 +186,9 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             work[ic] += isgn*coupling_n*simpson_a
             greenfunction_mat[j,ic] += G_n*simpson_b # integral of G_n (log singularity)
             aval1 += coupling_0 * simpson_a
-        
         end
         
-        # if it's plasma/plsama, wall/wall and in negative wall point, skip loop
+        # if it's plasma/plasma, wall/wall and in negative wall point, skip loop
         # obs : j1 = 1(plasma), wall(2)
         # src : j1 = 1(plasma), wall(2)
         if (j1+j2) != 2 && has_zero_crossing && j > jbot && j < jtop
@@ -233,7 +222,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 ztp = Interpolations.gradient(spline_z, tgaus0)[1]
 
                 # call green function
-                G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,inputs.n,uselegacygreenfunction=true)
+                G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,n,uselegacygreenfunction=true)
 
                 # add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
                 # iops = 1
@@ -283,11 +272,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         end
 
         # Set residue based on logic similar to Table I of Chance 1997
-        if j1 == j2
-            residue = 2.0
-        else
-            residue = 0.0
-        end
+        residue = (j1 == 2) ? 2.0 : 0.0
         # Would need to pass in wall geometry to generalize this to open walls
         is_closed_toroidal = true
         if is_closed_toroidal
@@ -302,7 +287,6 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             ak0i -= isgn * aval1
         end
 
-
         # Only when plasma/plasma, log singularity activate. (S1)
         if iops == 1 && iopw != 0
             greenfunction_mat[j,js1] -= log_correction_2 / x_obs
@@ -313,87 +297,70 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         end
 
         # Store all the datas of work in grdgre, gren
-        grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work[1:mtheta]
+        grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work
         greenfunction_mat[j, 1:mtheta] ./= 2π
     end
 end
 
 """
-    fourier_inverse_transform!(gll, gil, cs, m00, l00, mth, mpert)
+    fourier_inverse_transform!(gll, gil, cs, m00, l00)
 
 Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coefficients stored in `cs`.
 
 # Arguments
 
 - `gll`: Output matrix (mpert × mpert) updated in-place
-- `gil`: Input matrix (mth × mpert) containing Fourier-space data
-- `cs`: Fourier coefficient matrix (mth × mpert)
+- `gil`: Input matrix (mtheta × mpert) containing Fourier-space data
+- `cs`: Fourier coefficient matrix (mtheta × mpert)
 - `m00`: Integer offset in the gil matrix (row offset)
 - `l00`: Integer offset in the gil matrix (column offset)
-- `mth`: Number of θ-grid points (dimension of gil along first axis)
-- `mpert`: Number of Fourier modes
 
 # Notes
 
 - Computes: `gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]`
-- The result is an inverse Fourier transform from physical space to mode space
+- Performs the same function as fouranv in the Fortran code.
+
+# Returns
+
+-  gll(l2,l1) : output matrix updated in-place (mpert × mpert)
 """
-function fourier_inverse_transform!(
-    gll::Matrix{Float64}, 
-    gil::Matrix{Float64}, 
-    cs::Matrix{Float64},
-    m00::Int, 
-    l00::Int, 
-    mth::Int, 
-    mpert::Int
-    )
+function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
     # Zero out gll block
+    mtheta, mpert = size(cs)
     fill!(view(gll, 1:mpert, 1:mpert), 0.0)
 
     # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
     # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
-    dth = 2π / mth
-    mul!(gll, cs', view(gil, m00+1:m00+mth, l00+1:l00+mpert), 2π * dth, 0.0)
+    dth = 2π / mtheta
+    mul!(gll, cs', view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 2π * dth, 0.0)
 end
 
 """
     fourier_transform!(gil, gij, cs, m00, l00, mth, mpert)
 
-Perform a truncated Fourier transform of `gij` onto `gil` using Fourier coefficients stored in `cs`.
+    Purpose:
+      This routine performs a truncated Fourier transform of gij onto gil
+      using Fourier coefficients stored in cs.
+    
+    Inputs:
+      gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
+      cs(j,l)    : Fourier coefficient matrix (mth × mpert)
+      m00, l00   : integer offsets in the gil matrix
+      mth        : number of θ-grid points (dimension of gij along i, j)
+      mpert      : number of Fourier modes
 
-# Arguments
-
-- `gil`: Output matrix updated in-place, where i' = m00 + i and l' = l00 + l
-- `gij`: Input matrix (mth × mth) containing physical-space data
-- `cs`: Fourier coefficient matrix (mth × mpert)
-- `m00`: Integer offset in the gil matrix (row offset)
-- `l00`: Integer offset in the gil matrix (column offset)
-- `mth`: Number of θ-grid points (dimension of gij along both axes)
-- `mpert`: Number of Fourier modes
-
-# Notes
-
-- Computes: `gil[i, l] = Σ_j gij[i, j] * cs[j, l]`
-- The result is a Fourier transform from physical space to mode space
+    Output:
+      gil(i', l') : output matrix updated in-place (mth × mpert), where i' = m00 + i and l' = l00 + l
 """
-function fourier_transform!(
-    gil::Matrix{Float64},
-    gij::Matrix{Float64},
-    cs::Matrix{Float64},
-    m00::Int,
-    l00::Int,
-    mth::Int,
-    mpert::Int
-)
+function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
     # Zero out relevant gil block
-    fill!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), 0.0)
+    mtheta, mpert = size(cs)
+    fill!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 0.0)
 
-    # Accumulate Fourier transform via matrix multiply: gil = gij * cs
-    # This computes: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
-    mul!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), gij, cs)
-
+    # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    mul!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), gij, cs)
 end
 
 # Returns the array of derivatives at all x points, I think this acts like difspl
