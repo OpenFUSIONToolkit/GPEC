@@ -291,75 +291,57 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 end
 
 """
-    fourier_inverse_transform!(gll, gil, cs, m00, l00, mth, lmin, lmax, dth)
+    fourier_inverse_transform!(gll, gil, cs, m00, l00)
 
     Purpose:
       This routine performs the inverse Fourier transform of gil onto gll
-      using Fourier coefficients stored in cs.
+      using Fourier coefficients stored in cs. Performs the same function
+      as fouranv in the Fortran code.
     
     Inputs:
       gil(i,l)   : input matrix of size (mth × mpert), the Fourier-space data
       cs(j,l)    : Fourier coefficient matrix (mth × mpert)
       m00, l00   : integer offsets in the gil matrix
-      mth        : number of θ-grid points (dimension of gil along i)
-      mpert      : number of Fourier modes
     
     Output:
-      gll(l2,l1) : output matrix updated in-place
+      gll(l2,l1) : output matrix updated in-place (mpert × mpert)
 """
-function fourier_inverse_transform!(
-    gll::Matrix{Float64}, 
-    gil::Matrix{Float64}, 
-    cs::Matrix{Float64},
-    m00::Int, 
-    l00::Int, 
-    mth::Int, 
-    mpert::Int
-    )
+function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
     # Zero out gll block
+    mtheta, mpert = size(cs)
     fill!(view(gll, 1:mpert, 1:mpert), 0.0)
 
     # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
     # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
-    dth = 2π / mth
-    mul!(gll, cs', view(gil, m00+1:m00+mth, l00+1:l00+mpert), 2π * dth, 0.0)
+    dth = 2π / mtheta
+    mul!(gll, cs', view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 2π * dth, 0.0)
 end
 
 """
-    fourier_transform!(gil, gij, cs, m00, l00, mth, mpert)
+    fourier_transform!(gil, gij, cs, m00, l00)
 
     Purpose:
       This routine performs a truncated Fourier transform of gij onto gil
-      using Fourier coefficients stored in cs.
+      using Fourier coefficients stored in cs. Performs the same function
+      as fouran in the Fortran code.
     
     Inputs:
       gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
       cs(j,l)    : Fourier coefficient matrix (mth × mpert)
       m00, l00   : integer offsets in the gil matrix
-      mth        : number of θ-grid points (dimension of gij along i, j)
-      mpert      : number of Fourier modes
 
     Output:
-      gil(i', l') : matrix updated in-place, where i' = m00 + i and l' = l00 + l
+      gil(i', l') : output matrix updated in-place (mth × mpert), where i' = m00 + i and l' = l00 + l
 """
-function fourier_transform!(
-    gil::Matrix{Float64},
-    gij::Matrix{Float64},
-    cs::Matrix{Float64},
-    m00::Int,
-    l00::Int,
-    mth::Int,
-    mpert::Int
-)
+function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
     # Zero out relevant gil block
-    fill!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), 0.0)
+    mtheta, mpert = size(cs)
+    fill!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 0.0)
 
-    # Accumulate Fourier transform via matrix multiply: gil = gij * cs
-    # This computes: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
-    mul!(view(gil, m00+1:m00+mth, l00+1:l00+mpert), gij, cs)
-
+    # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    mul!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), gij, cs)
 end
 
 # Returns the array of derivatives at all x points, I think this acts like difspl
