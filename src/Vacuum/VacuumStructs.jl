@@ -1,18 +1,22 @@
 """
-    struct VacuumInput
+    VacuumInput
 
-Holds plasma boundary and mode data as provided from DCON namelist and computed quantities.
+Struct holding plasma boundary and mode data as provided from DCON namelist and computed quantities.
 
-- `r`: Plasma boundary R-coordinate as a function of poloidal angle.
-- `z`: Plasma boundary Z-coordinate as a function of poloidal angle.
-- `delta`: -dphi/qa; 0 for coordinate systems using machine angle (e.g., PEST basis).
-- `mlow`: Lower poloidal mode number for spectral representation.
-- `mhigh`: Upper poloidal mode number for spectral representation.
-- `n`: The toroidal mode number. Paper: n.
-- `qa`: Safety factor at the plasma boundary.
-- `mtheta_in`: Number of poloidal angles in the input boundary arrays.
-- `kernelsign`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations.
-- `force_wv_symmetry`: Boolean flag to enforce symmetry in the vacuum response matrix. Set in dcon.toml
+# Fields
+
+- `r::Vector{Float64}`: Plasma boundary R-coordinate as a function of poloidal angle
+- `z::Vector{Float64}`: Plasma boundary Z-coordinate as a function of poloidal angle
+- `delta::Vector{Float64}`: Toroidal angle offset: -dφ/qa; 0 for coordinate systems using machine angle (e.g., PEST basis)
+- `mlow::Int`: Lower poloidal mode number for spectral representation
+- `mhigh::Int`: Upper poloidal mode number for spectral representation
+- `mpert::Int`: Number of perturbation modes (mhigh - mlow + 1)
+- `n::Int`: The toroidal mode number
+- `qa::Float64`: Safety factor at the plasma boundary
+- `mtheta_eq::Int`: Number of poloidal angles in the input equilibrium boundary arrays
+- `mtheta::Int`: Number of poloidal grid points for vacuum calculations
+- `kernelsign::Float64`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations
+- `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
 """
 @kwdef mutable struct VacuumInput
     r::Vector{Float64} = Float64[]
@@ -30,24 +34,25 @@ Holds plasma boundary and mode data as provided from DCON namelist and computed 
 end
 
 """
-    struct PlasmaGeometry
+    PlasmaGeometry
 
-Holds plasma geometry data on the mth grid for vacuum calculations. Arrays are of length `mth`,
-where `mth` is the number of poloidal grid points and θ ∈ [0, 1).
+Struct holding plasma geometry data on the mtheta grid for vacuum calculations. 
+
+Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
 
-- `x`: Plasma surface R.
-- `z`: Plasma surface Z.
-- `delta`: Toroidal angle offset divided by qa (i.e. -ν/qa where ϕ = 2πζ + ν(ψ, θ)) at plasma surface.
-- `dx_dtheta`: dR/dθ at plasma surface.
-- `dz_dtheta`: dZ/dθ at plasma surface.
-- `cnqd`: cos(n * qa * delta) at plasma surface.
-- `snqd`: sin(n * qa * delta) at plasma surface.
-- `sinlt`: sin(l * θ) basis functions for poloidal modes at plasma surface.
-- `coslt`: cos(l * θ) basis functions for poloidal modes at plasma surface.
-- `snlth`: sin(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface.
-- `cslth`: cos(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface.
+- `x::Vector{Float64}`: Plasma surface R-coordinate
+- `z::Vector{Float64}`: Plasma surface Z-coordinate
+- `delta::Vector{Float64}`: Toroidal angle offset divided by qa (i.e., -ν/qa where ϕ = 2πζ + ν(ψ, θ)) at plasma surface
+- `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
+- `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
+- `cnqd::Vector{Float64}`: cos(n * qa * delta) at plasma surface
+- `snqd::Vector{Float64}`: sin(n * qa * delta) at plasma surface
+- `sinlt::Matrix{Float64}`: sin(l * θ) basis functions for poloidal modes at plasma surface
+- `coslt::Matrix{Float64}`: cos(l * θ) basis functions for poloidal modes at plasma surface
+- `snlth::Matrix{Float64}`: sin(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface
+- `cslth::Matrix{Float64}`: cos(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
@@ -64,18 +69,20 @@ struct PlasmaGeometry
 end
 
 """
-    struct WallGeometry
+    WallGeometry
 
-Holds wall geometry data for vacuum calculations. Arrays are of length `mth`,
-where `mth` is the number of poloidal grid points and θ ∈ [0, 1).
+Struct holding wall geometry data for vacuum calculations. 
+
+Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
-- `nowall`: Boolean flag indicating if there is no wall.
-- `is_closed_toroidal`: Boolean flag indicating if the wall is a closed toroidal surface.
-- `x`: Wall R coordinates
-- `z`: Wall Z coordinates
-- `dx_dtheta`: dR/dθ at wall.
-- `dz_dtheta`: dZ/dθ at wall.
+
+- `nowall::Bool`: Boolean flag indicating if there is no wall
+- `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
+- `x::Vector{Float64}`: Wall R-coordinates
+- `z::Vector{Float64}`: Wall Z-coordinates
+- `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at wall
+- `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at wall
 """
 @kwdef struct WallGeometry
     nowall::Bool = true
@@ -87,23 +94,27 @@ where `mth` is the number of poloidal grid points and θ ∈ [0, 1).
 end
 
 """
-    struct WallShapeSettings
+    WallShapeSettings
 
-Input settings for vacuum wall and geometry.
+Struct containing input settings for vacuum wall geometry.
 
-- `shape` : String selecting wall shape. Options are:
-    - "nowall": No wall.
-    - "dee": Dee-shaped wall.
-    - "mod_dee": Modified Dee-shaped wall.
-    - "custom": Custom wall shape provided in wall_geo.dat. TODO: Describe file format here.
-- `a` : The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
-- `aw` : Half-thickness.
-- `bw` : Elongation.
-- `cw` : Offset of the center of the wall from the major radius.
-- `dw` : Triangularity.
-- `tw` : Sharpness of the corners of the wall. Try 0.05 as a good initial value.
-- `equal_arc_wall`: Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless
-  the wall is very close to the plasma.
+# Fields
+
+- `shape::String`: String selecting wall shape. Options are:
+  - `"nowall"`: No wall
+  - `"conformal"`: Wall conformal to plasma surface at distance `a`
+  - `"elliptical"`: Elliptical wall
+  - `"dee"`: Dee-shaped wall
+  - `"mod_dee"`: Modified Dee-shaped wall
+  - `"from_file"`: Custom wall shape from wall_geo.dat file
+- `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
+- `aw::Float64`: Half-thickness parameter for Dee-shaped walls
+- `bw::Float64`: Elongation parameter for wall shapes
+- `cw::Float64`: Offset of the center of the wall from the major radius
+- `dw::Float64`: Triangularity parameter for wall shapes
+- `tw::Float64`: Sharpness of the corners of the wall (try 0.05 as initial value)
+- `equal_arc_wall::Bool`: Flag to enforce equal arc length distribution of nodes on the wall 
+  (recommended unless wall is very close to plasma)
 """
 @kwdef struct WallShapeSettings 
 
@@ -125,19 +136,30 @@ end
 """
     initialize_plasma_surface(inputs::VacuumInput) -> PlasmaGeometry
 
-Initialize the plasma surface geometry based on the provided vacuum inputs. This
-function performs some of the functionality within `readahg`, `arrays`, and `funint`
-in the original Fortran VACUUM code. It returns a `PlasmaGeometry` struct containing
+Initialize the plasma surface geometry based on the provided vacuum inputs. 
+
+This function performs functionality from `readahg`, `arrays`, and `funint` in the 
+original Fortran VACUUM code. It returns a `PlasmaGeometry` struct containing
 the necessary plasma surface data for vacuum calculations.
 
-First, we interpolate the input plasma boundary arrays onto the mthvac grid. Then, we compute
-the derivatives of the plasma boundary with respect to the poloidal angle θ using
-periodic cubic spline differentiation. Finally, we compute the trigonometric basis functions
-needed for the fourier calculations later in the code.
+# Process
+
+1. Interpolate the input plasma boundary arrays onto the mtheta grid
+2. Compute derivatives of the plasma boundary with respect to poloidal angle θ 
+   using periodic cubic spline differentiation
+3. Compute trigonometric basis functions needed for Fourier calculations
+
+# Arguments
+
+- `inputs::VacuumInput`: Struct containing plasma boundary data and calculation parameters
+
+# Returns
+
+- `PlasmaGeometry`: Struct containing plasma surface coordinates, derivatives, and basis functions
 """
 function initialize_plasma_surface(inputs::VacuumInput)
 
-    # Interpolate arrays from input onto mthvac grid (in readahg in the Fortran)
+    # Interpolate arrays from input onto mtheta grid (from readahg in the Fortran)
     mtheta = inputs.mtheta
     x_plasma = interp_to_new_grid(inputs.r, mtheta)
     z_plasma = interp_to_new_grid(inputs.z, mtheta)
@@ -191,9 +213,26 @@ end
 """
     initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings) -> WallGeometry
 
-Initialize the wall geometry based on the provided vacuum inputs and wall shape settings. This performs a similar
-functionality to portions of the `arrays` function in the original Fortran VACUUM code. It returns a `WallGeometry`
-struct containing the necessary wall surface data for vacuum calculations.
+Initialize the wall geometry based on the provided vacuum inputs and wall shape settings. 
+
+This performs functionality similar to portions of the `arrays` function in the original 
+Fortran VACUUM code. It returns a `WallGeometry` struct containing the necessary wall 
+surface data for vacuum calculations.
+
+# Arguments
+
+- `inputs::VacuumInput`: Struct containing vacuum calculation parameters
+- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry (used for reference)
+- `wall_settings::WallShapeSettings`: Struct specifying wall shape and parameters
+
+# Returns
+
+- `WallGeometry`: Struct containing wall surface coordinates and derivatives
+
+# Notes
+
+- Supports multiple wall shapes: nowall, conformal, elliptical, dee, mod_dee, from_file
+- Optionally redistributes wall points to equal arc length spacing if `equal_arc_wall=true`
 """
 function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
 
@@ -328,21 +367,29 @@ end
 """
     distribute_to_equal_arc_grid(xin, zin, mw1)
 
-This function performs arc length re-parameterization of a 2D curve. It takes an
-input curve defined by `(xin, zin)` coordinates and re-samples it such that
-the new points `(xout, zout)` are equally spaced in arc length.
+Perform arc length re-parameterization of a 2D curve. 
+
+Takes an input curve defined by `(xin, zin)` coordinates and re-samples it such that
+the new points `(xout, zout)` are equally spaced in arc length along the curve.
 
 # Arguments
-- `xin::AbstractVector{Float64}`: Array of x-coordinates of the input curve.
-- `zin::AbstractVector{Float64}`: Array of z-coordinates of the input curve.
-- `mw1::Int`: Number of points in the input and output curves.
+
+- `xin::Vector{Float64}`: Array of x-coordinates of the input curve
+- `zin::Vector{Float64}`: Array of z-coordinates of the input curve
+- `mw1::Int`: Number of points in the input and output curves
 
 # Returns
-- `xout::Vector{Float64}`: Array of x-coordinates of the arc-length re-parameterized curve.
-- `zout::Vector{Float64}`: Array of z-coordinates of the arc-length re-parameterized curve.
-- `ell::Vector{Float64}`: Array of cumulative arc lengths for the input curve.
-- `thgr::Vector{Float64}`: Array of re-parameterized 'theta' values corresponding to equal arc lengths.
-- `thlag::Vector{Float64}`: Array of normalized 'theta' values for the input curve (0 to 1).
+
+- `xout::Vector{Float64}`: Array of x-coordinates of the arc-length re-parameterized curve
+- `zout::Vector{Float64}`: Array of z-coordinates of the arc-length re-parameterized curve
+- `ell::Vector{Float64}`: Array of cumulative arc lengths for the input curve
+- `thgr::Vector{Float64}`: Array of re-parameterized 'theta' values corresponding to equal arc lengths
+- `thlag::Vector{Float64}`: Array of normalized 'theta' values for the input curve (0 to 1)
+
+# Notes
+
+- Uses Lagrange interpolation for calculating arc length and resampling
+- Ensures uniform spacing in arc length for improved numerical stability
 """
 function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}, mw1::Int)
     # Temporary arrays for interpolation and arc-length calculation
