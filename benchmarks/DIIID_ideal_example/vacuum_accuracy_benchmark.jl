@@ -102,8 +102,8 @@ if benchmark_m
     println("="^60)
 
     # Define range of mhigh values to test
-    mhigh_values = [8, 16, 32]
-    mhigh_reference = 64  # High resolution reference
+    mhigh_values = [8, 16, 24, 32] # 48 runs into memory errors on macbooks
+    mhigh_reference = 32  # High resolution reference
 
     # Store results for Julia vs Fortran comparison
     relative_errors_jf_m = Float64[]

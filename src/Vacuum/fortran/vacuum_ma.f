@@ -46,7 +46,7 @@ c-----------------------------------------------------------------------
 
       complex(r8), parameter :: ifac=(0,1)
       dimension xi(nfm), xii(nfm), xilnq(nfm), xiilnq(nfm)
-      character(128), intent(in), optional :: op_ahgfile
+      character(len=*), intent(in), optional :: op_ahgfile
 
       if (present(op_ahgfile)) then
          ahgfile = trim(op_ahgfile)

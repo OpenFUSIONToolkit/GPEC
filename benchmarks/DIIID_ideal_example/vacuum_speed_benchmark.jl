@@ -18,7 +18,7 @@ benchmark_m = false
 
 if benchmark_n
     # Define range of n values to test
-    n_values = [1, 2, 3, 5, 10, 15, 20, 30, 50]
+    n_values = [1, 2, 4, 8, 16, 32, 64]
 
     # Store results
     fortran_times = Float64[]
@@ -40,9 +40,9 @@ if benchmark_n
                                     n_test, vac_inputs.qa, vac_inputs.r, 
                                     vac_inputs.z, vac_inputs.delta)
         
-        b_fortran = @benchmark samples=10 seconds=1 JPEC.Vacuum.mscvac($wv_block, $mpert, $mtheta_eq, $mthvac, 
-                                                $complex_flag, $kernelsign, $wall_flag, 
-                                                $farwall_flag, $grri, $xzpts, $ahg_file, "../../examples/DIIID_ideal_example")
+        b_fortran = @benchmark JPEC.Vacuum.mscvac($wv_block, $mpert, $mtheta_eq, $mthvac,
+                                                $complex_flag, $kernelsign, $wall_flag,
+                                                $farwall_flag, $grri, $xzpts, $ahg_file, "../../examples/DIIID_ideal_example") samples=10 seconds=1
         
         push!(fortran_times, median(b_fortran).time / 1e9)
         push!(fortran_stdevtimes, std(b_fortran).time / 1e9)
@@ -55,7 +55,7 @@ if benchmark_n
         vac_inputs_test = deepcopy(vac_inputs)
         vac_inputs_test.n = n_test
         
-        b_julia = @benchmark samples=10 seconds=1 JPEC.Vacuum.compute_vacuum_response($vac_inputs_test, $wall_settings)
+        b_julia = @benchmark JPEC.Vacuum.compute_vacuum_response($vac_inputs_test, $wall_settings) samples=10 seconds=1
         
         push!(julia_times, median(b_julia).time / 1e9)
         push!(julia_stdevtimes, std(b_julia).time / 1e9)
