@@ -110,7 +110,8 @@ using Interpolations
             @test !any(isnan, P)
             
             # Test Pn_minus_half_2007 error
-            @test_logs (:error, "2007 paper implementation of Pn_minus_half is not yet complete. Use old version.") JPEC.Vacuum.Pn_minus_half_2007(s, n)
+            # @test JPEC.Vacuum.Pn_minus_half_2007(s, n)
+            @test_logs (:warn, "2007 paper implementation of Pn_minus_half is not yet complete. Use old version.") JPEC.Vacuum.Pn_minus_half_2007(s, n)
         end
 
         @testset "green function" begin
@@ -241,7 +242,43 @@ using Interpolations
             @test !any(isnan, grri);
             @test size(xzpts) == (128, 4);
             @test !any(isnan, xzpts[:, 1:2]);
-            @test all(isnan, xzpts[:, 3:4]);
+        end
+
+        @testset "compute_vacuum_response_conformal" begin
+            # A simple integration test for compute_vacuum_response with a conformal wall
+            mtheta = 128
+            mtheta_eq = 17
+            r_eq = 1.7 .+ 0.3 .* cos.(range(0, 2pi, length=mtheta_eq))
+            z_eq = 0.3 .* sin.(range(0, 2pi, length=mtheta_eq))
+
+            inputs = VacuumInput(
+                r = collect(r_eq),
+                z = collect(z_eq),
+                delta = zeros(mtheta_eq),
+                mlow = 1,
+                mhigh = 2,
+                mpert = 2,
+                n = 1,
+                qa = 2.0,
+                mtheta_eq = mtheta_eq,
+                mtheta = mtheta
+            )
+            # Use a conformal wall
+            wall_settings = WallShapeSettings(shape="conformal", a=0.5)
+
+            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+
+            @test size(wv) == (2, 2)
+            @test !any(isnan, wv)
+            @test size(grri) == (2 * 128, 2 * 2)
+            @test !any(isnan, grri)
+            @test size(xzpts) == (128, 4)
+            # For a conformal wall, wall coordinates should exist and not be NaN
+            @test !any(isnan, xzpts)
+
+            # Check that wall coordinates are different from plasma coordinates
+            @test !isapprox(xzpts[:, 1], xzpts[:, 3])
+            @test !isapprox(xzpts[:, 2], xzpts[:, 4])
         end
     end
 

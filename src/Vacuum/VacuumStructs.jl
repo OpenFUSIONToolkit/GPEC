@@ -172,27 +172,35 @@ function initialize_plasma_surface(inputs::VacuumInput)
     dx_plasma_dtheta = periodic_cubic_deriv(theta_grid, x_plasma)
     dz_plasma_dtheta = periodic_cubic_deriv(theta_grid, z_plasma)
     # Trigonometric basis arrays
-    # Compute n*q*δ phase term for each poloidal angle
+    # Pre-allocate output arrays
+    cos_nqdelta = zeros(mtheta)
+    sin_nqdelta = zeros(mtheta)
+    sin_mstheta = zeros(mtheta, inputs.mpert)
+    cos_mstheta = zeros(mtheta, inputs.mpert)
+    sin_mstheta_arg = zeros(mtheta, inputs.mpert)
+    cos_mstheta_arg = zeros(mtheta, inputs.mpert)
+
+    # Calculate n*q*delta phase term
     nqdelta = inputs.n .* inputs.qa .* delta
-    
-    # Basis functions for the phase factor
-    cos_nqdelta = cos.(nqdelta)
-    sin_nqdelta = sin.(nqdelta)
-    
-    # Mode numbers: m = mlow, mlow+1, ..., mlow+mpert-1
-    mode_numbers = (inputs.mlow-1) .+ (1:inputs.mpert)'  # Row vector for broadcasting
-    
-    # Outer product: theta_grid (column) × mode_numbers (row) → (mtheta × mpert) matrix
-    mitheta = theta_grid * mode_numbers  # Broadcasting: m*θ for all combinations
-    
-    # Compute basis functions without phase (pure harmonics)
-    sin_mstheta = sin.(mitheta)
-    cos_mstheta = cos.(mitheta)
-    
-    # Add phase factor: m*θ + n*q*δ (broadcast nqdelta column-wise across modes)
-    mitheta_arg = mitheta .+ nqdelta
-    sin_mstheta_arg = sin.(mitheta_arg)
-    cos_mstheta_arg = cos.(mitheta_arg)
+    cos_nqdelta .= cos.(nqdelta)
+    sin_nqdelta .= sin.(nqdelta)
+
+    # Fuse loop for trigonometric basis functions to improve cache efficiency
+    # and avoid intermediate array allocations.
+    mlow = inputs.mlow
+    mpert = inputs.mpert
+    for l in 1:mpert
+        mode_val = mlow + l - 1
+        for i in 1:mtheta
+            m_theta = theta_grid[i] * mode_val
+            nqdelta_val = nqdelta[i]
+
+            cos_mstheta[i, l] = cos(m_theta)
+            sin_mstheta[i, l] = sin(m_theta)
+            cos_mstheta_arg[i, l] = cos(m_theta + nqdelta_val)
+            sin_mstheta_arg[i, l] = sin(m_theta + nqdelta_val)
+        end
+    end
 
     return PlasmaGeometry(
         x_plasma,
