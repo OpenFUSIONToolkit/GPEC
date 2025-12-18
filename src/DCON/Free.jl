@@ -59,27 +59,14 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
 
-        Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-            wall_flag, farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        # TODO: can add the repeated calls w/ nowall/kernelsignin when gpec code using mutual inductances is added
-
-        println("WV from Fortran")
-        display(wv_block)
-
-        # @save "wall_settings.jld2" wall_settings
-        # @save "vac_inputs.jld2" vac_inputs
-        # println("dir_path = $(intr.dir_path)")
-        # Placeholder for Julia vacuum code
+        # Compute vacuum energy matrix
         wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
-        println("WV from Julia")
-        display(wv_block)
 
         # Scale vacuum matrix by singfac = (m - n*qlim)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
-        for ipert in 1:intr.mpert
-            wv_block[ipert, :] .*= singfac[ipert]
-            wv_block[:, ipert] .*= singfac[ipert]
+        @inbounds for ipert in 1:intr.mpert
+            @views wv_block[ipert, :] .*= singfac[ipert]
+            @views wv_block[:, ipert] .*= singfac[ipert]
         end
 
         # Store block in full wv matrix

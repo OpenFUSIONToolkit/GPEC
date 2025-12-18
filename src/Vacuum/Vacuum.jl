@@ -1,6 +1,6 @@
 module Vacuum
 
-using TOML, Interpolations, SpecialFunctions, LinearAlgebra
+using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")
@@ -243,7 +243,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
 
     !wall.nowall && begin
-        @warn "Vacuum response calculations with wall are not 100% accurate yet."
+        @warn "Vacuum response calculations with wall are open-beta and still being benchmarked for accuracy."
         # Plasma–Wall block
         j1, j2 = 1, 2
         kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, 0, n)

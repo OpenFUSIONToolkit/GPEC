@@ -278,7 +278,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         @info "Using no wall"
     elseif wall_settings.shape == "conformal"
         dx = a * r_minor
-        @info "Calculating conformal wall shape $dx m from plasma surface." 
+        @info "Calculating conformal wall shape $((@sprintf "%.2e" dx)) m from plasma surface." 
         wcentr = r_major
         csmin = min(0.1, 0.1 * minimum(x_plasma))
         for i in 1:mtheta
@@ -291,7 +291,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
 
     elseif wall_settings.shape == "elliptical"
-        @info "Calculating elliptical wall shape with a = $a."
+        @info "Calculating elliptical wall shape with a = $((@sprintf "%.2e" a)) m."
         wcentr = r_major
 
         zrad = 0.5 * (zmax - zmin)
@@ -306,8 +306,8 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
 
     elseif wall_settings.shape == "dee"
-        @info "Calculating dee-shaped wall with R = $wcentr + $r_minor * (1.0 + $a - $cw) * cos(θ + $dw * sin(θ)), Z = -$bw * $r_minor * (1.0 + $a - $cw) * sin(θ + $tw * sin(2θ)) - $aw * $r_minor * sin(2θ)."
         wcentr = r_major + cw * r_minor
+        @info "Calculating dee-shaped wall with R = $((@sprintf "%.2e" wcentr)) + $((@sprintf "%.2e" r_minor)) * (1.0 + $((@sprintf "%.2e" a)) - $((@sprintf "%.2e" cw))) * cos(θ + $((@sprintf "%.2e" dw)) * sin(θ)), Z = -$((@sprintf "%.2e" bw)) * $((@sprintf "%.2e" r_minor)) * (1.0 + $((@sprintf "%.2e" a)) - $((@sprintf "%.2e" cw))) * sin(θ + $((@sprintf "%.2e" tw)) * sin(2θ)) - $((@sprintf "%.2e" aw)) * $((@sprintf "%.2e" r_minor)) * sin(2θ)."
         for i in 1:mtheta
             the = (i - 1) * (2π / mtheta)
             x_wall[i] = wcentr + r_minor * (1.0 + a - cw) * cos(the + dw * sin(the))
@@ -315,7 +315,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
 
     elseif wall_settings.shape == "mod_dee"
-        @info "Calculating modified dee-shaped wall with R = $cw + $a * cos(θ + $dw * sin(θ)), Z = -$bw * $a * sin(θ + $tw * sin(2θ)) - $aw * sin(2θ)."
+        @info "Calculating modified dee-shaped wall with R = $((@sprintf "%.2e" cw)) + $((@sprintf "%.2e" a)) * cos(θ + $((@sprintf "%.2e" dw)) * sin(θ)), Z = -$((@sprintf "%.2e" bw)) * $((@sprintf "%.2e" a)) * sin(θ + $((@sprintf "%.2e" tw)) * sin(2θ)) - $((@sprintf "%.2e" aw)) * sin(2θ)."
         wcentr = cw
         for i in 1:mtheta
             the = (i - 1) * (2π / mtheta)
