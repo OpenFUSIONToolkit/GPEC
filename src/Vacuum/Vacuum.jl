@@ -283,7 +283,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
     else
         grri .= grad_greenfunction_mat \ grri
     end
@@ -316,10 +316,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
-    xzpts[:, 1] .= plasma_surf.x
-    xzpts[:, 2] .= plasma_surf.z
-    xzpts[:, 3] .= wall.x
-    xzpts[:, 4] .= wall.z
+    @views xzpts[:, 1] .= plasma_surf.x
+    @views xzpts[:, 2] .= plasma_surf.z
+    @views xzpts[:, 3] .= wall.x
+    @views xzpts[:, 4] .= wall.z
     return wv, grri, xzpts
 end
 

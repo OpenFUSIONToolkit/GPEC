@@ -289,8 +289,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         end
 
         # Store all the datas of work in grdgre, gren
-        grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work
-        greenfunction_mat[j, 1:mtheta] ./= 2π
+        @views grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work
+        @views greenfunction_mat[j, 1:mtheta] ./= 2π
     end
 end
 
