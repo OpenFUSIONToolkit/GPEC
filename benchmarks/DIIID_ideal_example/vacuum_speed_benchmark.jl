@@ -40,7 +40,7 @@ if benchmark_n
                                     n_test, vac_inputs.qa, vac_inputs.r, 
                                     vac_inputs.z, vac_inputs.delta)
         
-        b_fortran = @benchmark JPEC.Vacuum.mscvac($wv_block, $mpert, $mtheta_eq, $mthvac, 
+        b_fortran = @benchmark samples=10 seconds=1 JPEC.Vacuum.mscvac($wv_block, $mpert, $mtheta_eq, $mthvac, 
                                                 $complex_flag, $kernelsign, $wall_flag, 
                                                 $farwall_flag, $grri, $xzpts, $ahg_file, "../../examples/DIIID_ideal_example")
         
@@ -55,7 +55,7 @@ if benchmark_n
         vac_inputs_test = deepcopy(vac_inputs)
         vac_inputs_test.n = n_test
         
-        b_julia = @benchmark JPEC.Vacuum.compute_vacuum_response($vac_inputs_test, $wall_settings)
+        b_julia = @benchmark samples=10 seconds=1 JPEC.Vacuum.compute_vacuum_response($vac_inputs_test, $wall_settings)
         
         push!(julia_times, median(b_julia).time / 1e9)
         push!(julia_stdevtimes, std(b_julia).time / 1e9)
