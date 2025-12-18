@@ -386,7 +386,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ifix::Int = 0
     index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)
     sing_flag::Vector{Bool} = falses(numunorms_init)
-    zeroed_idx::Vector{Vector{Int}} = Vector{Vector{Int}}(undef, numunorms_init)
+    zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
 
