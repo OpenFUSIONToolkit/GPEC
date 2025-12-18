@@ -13,8 +13,8 @@ Pkg.activate("../.."); using JPEC
                 vac_inputs, wall_settings,
                 n, ipert_n, psifac) = benchmark_inputs
 
-benchmark_n = false
-benchmark_m = true
+benchmark_n = true
+benchmark_m = false
 
 if benchmark_n
     # Define range of n values to test
@@ -42,7 +42,7 @@ if benchmark_n
         
         b_fortran = @benchmark JPEC.Vacuum.mscvac($wv_block, $mpert, $mtheta_eq, $mthvac, 
                                                 $complex_flag, $kernelsign, $wall_flag, 
-                                                $farwall_flag, $grri, $xzpts, $ahg_file, $dir_path)
+                                                $farwall_flag, $grri, $xzpts, $ahg_file, "../../examples/DIIID_ideal_example")
         
         push!(fortran_times, median(b_fortran).time / 1e9)
         push!(fortran_stdevtimes, std(b_fortran).time / 1e9)
@@ -85,7 +85,7 @@ end
 
 if benchmark_m
     # Define range of mhigh values to test
-    mhigh_values = [16, 32, 48]
+    mhigh_values = [8, 16, 32] # 48 runs into memory errors on macbooks
 
     # Store results
     fortran_mhigh_times = Float64[]
@@ -112,7 +112,7 @@ if benchmark_m
         
         b_fortran = @benchmark JPEC.Vacuum.mscvac($wv_block, $mpert_test, $mtheta_eq, $mthvac, 
                                                 $complex_flag, $kernelsign, $wall_flag, 
-                                                $farwall_flag, $grri, $xzpts, $ahg_file, $dir_path)
+                                                $farwall_flag, $grri, $xzpts, $ahg_file, "../../examples/DIIID_ideal_example")
         
         push!(fortran_mhigh_times, median(b_fortran).time / 1e9)
         push!(fortran_mhigh_stdevtimes, std(b_fortran).time / 1e9)
