@@ -109,11 +109,11 @@ function Main(path::String="./")
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             println("Run parameters:")
-            println("   q0 = $(equil.params.q0), qmin = $(equil.params.qmin), qmax = $(equil.params.qmax), q95 = $(equil.params.q95)")
-            println("   set_psilim_via_dmlim = $(ctrl.set_psilim_via_dmlim), dmlim = $(ctrl.dmlim), qlim = $(intr.qlim), psilim = $(intr.psilim)")
-            println("   betat = $(equil.params.betat), betan = $(equil.params.betan), betap1 = $(equil.params.betap1)")
-            println("   mlow = $(intr.mlow), mhigh = $(intr.mhigh), mpert = $(intr.mpert), mband = $(intr.mband)")
-            println("   nlow = $(intr.nlow), nhigh = $(intr.nhigh), npert = $(intr.npert)")
+            println("   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))")
+            println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
+            println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
+            println("   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))")
+            println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
         end
 
         # Compute metric tensor
@@ -172,7 +172,7 @@ function Main(path::String="./")
 
     end_time = time() - start_time
     println("----------------------------------")
-    println("Run time: $end_time seconds")
+    println("Run time: $(@sprintf("%.3e", end_time)) seconds") 
     println("Normal termination.")
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
