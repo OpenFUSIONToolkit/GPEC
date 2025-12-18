@@ -45,6 +45,20 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.xzpts, 0.0)
 
         farwall_flag = wall_settings.shape == "nowall" ? true : false
+
+        # Output data for unit testing and benchmarking
+        if intr.debug_settings.output_benchmark_data
+            @info "Outputting top level vacuum debug data for n = $n"
+            benchmark_inputs = VacuumBenchmarkInputs(
+                    wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, 
+                    complex_flag, vac_inputs.kernelsign, wall_flag,
+                    farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
+                    vac_inputs, wall_settings,
+                    n, ipert_n, intr.psilim
+            )
+            @save "vacuum_response_inputs.jld2" benchmark_inputs
+        end
+
         Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
             wall_flag, farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
@@ -53,8 +67,11 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         println("WV from Fortran")
         display(wv_block)
 
+        # @save "wall_settings.jld2" wall_settings
+        # @save "vac_inputs.jld2" vac_inputs
+        # println("dir_path = $(intr.dir_path)")
         # Placeholder for Julia vacuum code
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(wall_settings, vac_inputs, intr.dir_path)
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
         println("WV from Julia")
         display(wv_block)
 

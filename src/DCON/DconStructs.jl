@@ -42,6 +42,19 @@ A mutable struct containing data for singular surfaces in the plasma stability a
 end
 
 """
+DebugSettings
+
+A mutable struct containing settings for debugging and benchmarking output.
+
+## Fields
+
+  - `output_benchmark_data::Bool` - Flag to output benchmark data for comparison between codes
+"""
+@kwdef mutable struct DebugSettings
+    output_benchmark_data::Bool = false
+end
+
+"""
     DconInternal
 
 A mutable struct holding internal state variables for stability calculations.
@@ -94,6 +107,7 @@ A mutable struct holding internal state variables for stability calculations.
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
+    debug_settings::DebugSettings = DebugSettings()
 end
 
 """
@@ -110,7 +124,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mer_flag::Bool` - Enable Mercier stability criterion
   - `fft_flag::Bool` - Enable Fourier transform analysis
-  - `mthvac::Int` - Number of vacuum poloidal grid points
+  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
@@ -239,21 +253,21 @@ FourFitVars(mpert::Int) = FourFitVars(; mpert)
     VacuumData
 
 A struct containing relevant data from the vacuum calculation.
-Populated in `Free.jl`
+Populated in `Free.jl`.
 
 ## Fields
 
-  - `mthvac::Int` - Number of vacuum poloidal grid points
-  - `mpert::Int` - Number of poloidal modes
-  - `numpert_total::Int` - Total number of modes (mpert × npert)
-  - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
-  - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
-  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
-  - `ep::Vector{ComplexF64}` - Plasma eigenvalues
-  - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
-  - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-  - `grri::Array{Float64, 2}` - Green's function radial integrals (2×(mthvac+5) × 2×mpert)
-  - `xzpts::Array{Float64, 2}` - X-Z coordinate points on plasma boundary (mthvac+5 × 4)
+- `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+- `mpert::Int` - Number of poloidal modes
+- `numpert_total::Int` - Total number of modes (mpert × npert)
+- `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
+- `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
+- `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+- `ep::Vector{ComplexF64}` - Plasma eigenvalues
+- `ev::Vector{ComplexF64}` - Vacuum eigenvalues
+- `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+- `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
+- `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
     mthvac::Int
@@ -390,3 +404,61 @@ end
 
 # Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+
+# Below here are debug output structs used for benchmarking and unit testing
+
+
+
+
+"""
+    VacuumBenchmarkInputs
+
+A struct to hold all inputs required for vacuum benchmarking between Fortran and Julia implementations.
+
+## Fields
+
+- `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
+- `mpert::Int` - Number of poloidal modes
+- `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
+- `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
+- `complex_flag::Bool` - Flag indicating if complex arithmetic is used
+- `kernelsign::Float64` - Sign of the kernel for vacuum calculation
+- `wall_flag::Bool` - Flag indicating presence of wall
+- `farwall_flag::Bool` - Flag indicating presence of far wall
+- `grri::Matrix{Float64}` - Green's function response matrix
+- `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
+- `ahg_file::String` - Filename for AHG data
+- `dir_path::String` - Directory path for input/output files
+- `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
+- `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
+- `n::Int` - Toroidal mode number
+- `ipert_n::Int` - Index of perturbed toroidal mode
+- `psifac::Float64` - Normalized flux coordinate
+"""
+@kwdef struct VacuumBenchmarkInputs
+    # Vacuum computation parameters
+    wv_block::Matrix{ComplexF64}
+    mpert::Int
+    mtheta_eq::Int
+    mthvac::Int
+    complex_flag::Bool
+    kernelsign::Float64
+    wall_flag::Bool
+    farwall_flag::Bool
+    grri::Matrix{Float64}
+    xzpts::Matrix{Float64}
+    ahg_file::String
+    dir_path::String
+    
+    # VacuumInput struct for Julia code
+    vac_inputs::Vacuum.VacuumInput
+    
+    # Wall settings
+    wall_settings::Vacuum.WallShapeSettings
+    
+    # Additional context
+    n::Int
+    ipert_n::Int
+    psifac::Float64
+end
