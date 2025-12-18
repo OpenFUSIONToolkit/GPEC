@@ -49,6 +49,9 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     jres = 1
     theta_grid = range(start=0; length=mtheta, step=dtheta)
 
+    # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
+    fill!(greenfunction_mat, 0.0)
+
     if mtheta != length(z_obspoints) || mtheta != length(x_sourcepoints) || mtheta != length(z_sourcepoints)
         error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
     end
