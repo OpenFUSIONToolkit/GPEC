@@ -144,7 +144,7 @@ function initialize_plasma_surface(inputs::VacuumInput)
     delta = interp_to_new_grid(inputs.delta, mtheta)
     # Plasma boundary theta derivative (this is semi-working)
     # All of these arrays are of length mth with θ = [0, 1)
-    theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
+    theta_grid = range(start=0, length=mtheta, step=2π/mtheta)
     dx_plasma_dtheta = periodic_cubic_deriv(theta_grid, x_plasma)
     dz_plasma_dtheta = periodic_cubic_deriv(theta_grid, z_plasma)
     # Trigonometric basis arrays
@@ -206,7 +206,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
    # All of these arrays are of length mtheta with θ = [0, 1)
     mtheta = inputs.mtheta
-    theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] 
+    theta_grid = range(start=0, length=mtheta, step=2π/mtheta)
     
     # Get wall shape from form_wall
     # Plasma surface coordinates

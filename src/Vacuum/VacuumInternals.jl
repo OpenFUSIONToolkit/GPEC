@@ -36,7 +36,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     ak0i = 0.0
     jres = 1
     N_obs = length(x_obspoints)
-    theta_grid = LinRange(0, mtheta*dtheta, mtheta)
+    theta_grid = range(start=0; length=mtheta, step=dtheta)
     
     if N_obs != length(z_obspoints) || N_obs != length(x_sourcepoints) || N_obs != length(z_sourcepoints)
         error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
