@@ -212,7 +212,7 @@ using Interpolations
 
     # ----------------------------------------------------------------------
     @testset "Vacuum.jl - High Level" begin
-        @testset "compute_vacuum_response" begin
+        @testset "compute_vacuum_response_nowall" begin
             # A simple integration test for compute_vacuum_response
             mtheta = 128
             mtheta_eq = 17
@@ -235,12 +235,13 @@ using Interpolations
 
             wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
 
-            @test size(wv) == (2, 2)
-            @test !any(isnan, wv)
-            @test size(grri) == (2 * 128, 2 * 2)
-            @test !any(isnan, grri)
-            @test size(xzpts) == (128, 4)
-            @test !any(isnan, xzpts)
+            @test size(wv) == (2, 2);
+            @test !any(isnan, wv);
+            @test size(grri) == (2 * 128, 2 * 2);
+            @test !any(isnan, grri);
+            @test size(xzpts) == (128, 4);
+            @test !any(isnan, xzpts[:, 1:2]);
+            @test all(isnan, xzpts[:, 3:4]);
         end
     end
 
