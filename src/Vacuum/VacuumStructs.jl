@@ -106,8 +106,7 @@ Struct containing input settings for vacuum wall geometry.
   - `"elliptical"`: Elliptical wall
   - `"dee"`: Dee-shaped wall
   - `"mod_dee"`: Modified Dee-shaped wall
-  - `"from_file"`: Custom wall shape from wall_geo.dat file
-- `filename` : Union{String, Missing}`: Path to the wall geometry file (used when shape="from_file").
+  - `"filepath"`: Custom wall shape from the file you specify
 - `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
 - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
 - `bw::Float64`: Elongation parameter for wall shapes
@@ -121,7 +120,6 @@ Struct containing input settings for vacuum wall geometry.
 
     # Core shape selection
     shape::String = "nowall"
-    filename::Union{String, Missing} = missing
     
     # Standard geometric parameters for Dee/Mod-Dee
     a::Float64 = 0.3
@@ -245,9 +243,6 @@ surface data for vacuum calculations.
 - Optionally redistributes wall points to equal arc length spacing if `equal_arc_wall=true`
 """
 function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
-
-    @assert(wall_settings.shape in ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"],
-        "Invalid wall shape: $(wall_settings.shape). Must be one of: nowall, conformal, elliptical, dee, mod_dee, from_file")
     
     # Basic wall flags
     nowall = wall_settings.shape == "nowall"
@@ -328,20 +323,20 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
             z_wall[i] = -bw * a * sin(the + tw * sin(2.0*the)) - aw * sin(2.0*the)
         end
 
-    elseif wall_settings.shape == :from_file
-        # Load wall geometry from external file "wall_geo.dat"
-        filename = coalesce(wall_settings.filename, "wall_geo.dat")
-        @info "Loading wall shape from external file '$filename' (**OPTION IS UNDER CONSTRUCTION**)."
+    else
+        filepath = wall_settings.shape
+        if !isfile(filepath)  # Returns true if path exists and is a file
+            @error "ERROR: Wall geometry file $filepath does not exist.
+            Please set the wall shape parameter to a valid file path or a built-in shape (nowall, conformal, elliptical, dee, mod_dee)."
 
         wcentr = 0.0
-        open(filename, "r") do io
+        open(wall_settings.shape, "r") do io
             npots0 = parse(Int, readline(io))  # Number of points in file
             wcentr = parse(Float64, readline(io)) 
             readline(io) # Skip header/comment line
 
             if npots0 < mtheta
                 @error "ERROR: $filename contains fewer points ($npots0) than mtheta ($mtheta)."
-                error("Wall geometry file size mismatch")
             end
 
             for i in 1:mtheta
@@ -351,8 +346,6 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
                 z_wall[i] = parse(Float64, line[3])
             end
         end
-    else
-        error("Wall shape '$(wall_settings.shape)' is not implemented.")
     end
 
     # Optional: Re-parameterization
