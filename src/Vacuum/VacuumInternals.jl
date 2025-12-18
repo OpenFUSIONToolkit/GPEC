@@ -6,24 +6,36 @@ const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.5255324099163
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 """
-    kernel(x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, ischk, params)
+    kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, inputs; xwall=nothing, zwall=nothing)
 
-Compute kernels of integral equation for Laplace's equation for a torus.
+Compute kernels of integral equation for Laplace's equation in a torus.
 
-    ** WARNING: This kernel only supports closed toroidal walls currently. 
-        The residue calculation needs to be updated for open walls. **
-
+**WARNING: This kernel only supports closed toroidal walls currently. 
+The residue calculation needs to be updated for open walls.**
 
 # Arguments
-- `grad_greenfunction_mat`: Gradient Green's function matrix, updated in-place
-- `greenfunction_mat`: Green's function matrix, updated in-place
-- `x_obspoints`: Observer x coordinates
-- `z_obspoints`: Observer z coordinates
-- `x_sourcepoints`: Source x coordinates
-- `z_sourcepoints`: Source z coordinates
-- `j1, j2`: Row, column block indices in the full matrix (1,1 = plasma/plasma, 1,2 = plasma/wall, etc)
+
+- `grad_greenfunction_mat`: Gradient Green's function matrix (output)
+- `greenfunction_mat`: Green's function matrix (output)
+- `x_obspoints`: Observer x coordinates (R coordinates)
+- `z_obspoints`: Observer z coordinates (Z coordinates)
+- `x_sourcepoints`: Source x coordinates (R coordinates)
+- `z_sourcepoints`: Source z coordinates (Z coordinates)
+- `j1`: Boundary condition index for observer (1=plasma, 2=wall)
+- `j2`: Boundary condition index for source (1=plasma, 2=wall)
 - `iopw`: Wall option (0=inactive, 1=active)
 - `n`: Toroidal mode number
+
+
+# Returns
+
+Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
+
+# Notes
+
+- Uses Simpson's rule for integration away from singular points
+- Uses Gaussian quadrature near singular points for improved accuracy
+- Implements analytical singularity removal following Chance 1997
 """
 function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, iopw::Int, n::Int)
 
@@ -293,18 +305,24 @@ end
 """
     fourier_inverse_transform!(gll, gil, cs, m00, l00)
 
-    Purpose:
-      This routine performs the inverse Fourier transform of gil onto gll
-      using Fourier coefficients stored in cs. Performs the same function
-      as fouranv in the Fortran code.
-    
-    Inputs:
-      gil(i,l)   : input matrix of size (mth × mpert), the Fourier-space data
-      cs(j,l)    : Fourier coefficient matrix (mth × mpert)
-      m00, l00   : integer offsets in the gil matrix
-    
-    Output:
-      gll(l2,l1) : output matrix updated in-place (mpert × mpert)
+Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coefficients stored in `cs`.
+
+# Arguments
+
+- `gll`: Output matrix (mpert × mpert) updated in-place
+- `gil`: Input matrix (mtheta × mpert) containing Fourier-space data
+- `cs`: Fourier coefficient matrix (mtheta × mpert)
+- `m00`: Integer offset in the gil matrix (row offset)
+- `l00`: Integer offset in the gil matrix (column offset)
+
+# Notes
+
+- Computes: `gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]`
+- Performs the same function as fouranv in the Fortran code.
+
+# Returns
+
+-  gll(l2,l1) : output matrix updated in-place (mpert × mpert)
 """
 function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
@@ -319,17 +337,18 @@ function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, 
 end
 
 """
-    fourier_transform!(gil, gij, cs, m00, l00)
+    fourier_transform!(gil, gij, cs, m00, l00, mth, mpert)
 
     Purpose:
       This routine performs a truncated Fourier transform of gij onto gil
-      using Fourier coefficients stored in cs. Performs the same function
-      as fouran in the Fortran code.
+      using Fourier coefficients stored in cs.
     
     Inputs:
       gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
       cs(j,l)    : Fourier coefficient matrix (mth × mpert)
       m00, l00   : integer offsets in the gil matrix
+      mth        : number of θ-grid points (dimension of gij along i, j)
+      mpert      : number of Fourier modes
 
     Output:
       gil(i', l') : output matrix updated in-place (mth × mpert), where i' = m00 + i and l' = l00 + l
@@ -354,21 +373,27 @@ end
 """
     lagrange1d(ax, af, m, nl, x, iop)
 
-This function performs Lagrange interpolation and optionally computes its derivative.
-Replaces lagp, lagpe4, lag from Fortran code.
+Perform Lagrange interpolation and optionally compute its derivative.
+Replaces `lagp`, `lagpe4`, and `lag` from Fortran code.
 
 # Arguments
-- `ax::AbstractVector{Float64}`: Array of x-coordinates for the interpolation points.
-- `af::AbstractVector{Float64}`: Array of y-coordinates (function values) for the interpolation points.
-- `m::Int`: Number of interpolation points.
-- `nl::Int`: Number of points to use for the local interpolation (degree of polynomial + 1).
-- `x::Float64`: The x-value at which to evaluate the interpolated function and/or its derivative.
-- `iop::Float64`: Flag (0 = value only, 1 = value and derivative)
+
+- `ax::Vector{Float64}`: Array of x-coordinates for the interpolation points
+- `af::Vector{Float64}`: Array of y-coordinates (function values) for the interpolation points
+- `m::Int`: Number of interpolation points
+- `nl::Int`: Number of points to use for the local interpolation (polynomial degree + 1)
+- `x::Float64`: The x-value at which to evaluate the interpolated function and/or its derivative
+- `iop::Int`: Flag controlling output (0 = value only, 1 = value and derivative)
 
 # Returns
-- `f::Float64`: The interpolated function value at `x`
-- `df::Float64`: The interpolated function derivative at `x` 
 
+- `f::Float64`: The interpolated function value at `x`
+- `df::Float64`: The interpolated function derivative at `x` (0.0 if iop=0)
+
+# Notes
+
+- Uses local Lagrange interpolation with `nl` points centered around `x`
+- Automatically adjusts interpolation window to stay within array bounds
 """
 function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x::Float64, iop::Int)
 
@@ -452,24 +477,33 @@ end
     interp_to_new_grid(vecin, mtheta; dx0=0.0, dx1=0.0)
 
 Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
-This is a Fortran conversion of the functions `trans`, `transdx` and `transdxx`, which have now
-been unified into a single function with optional parameters for offsets.
 
-# Parameters
-- `vecin::Vector{Float64}` : Input array to be resampled.
-- `mtheta::Int`            : Desired length of the output array.
-- `dx0::Float64`           : Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mthin`).
-- `dx1::Float64`           : Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`).
+This function unifies the Fortran functions `trans`, `transdx`, and `transdxx` into a single 
+function with optional offset parameters.
+
+# Arguments
+
+- `vecin::Vector{Float64}`: Input array to be resampled
+- `mtheta::Int`: Desired length of the output array
+- `dx0::Float64`: Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mtheta_in`)
+- `dx1::Float64`: Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`)
 
 # Returns
-- `vecout::Vector{Float64}` : The resampled output array with first and second points repeated (length `mtheta + 2`).
+
+- `vecout::Vector{Float64}`: The resampled output array (length `mtheta`)
+
+# Notes
+
+- If `mtheta == length(vecin)`, returns the input vector unchanged
+- Uses periodic cubic spline interpolation for resampling
+- Input grid is normalized to [0, 1] for interpolation
 """
 function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
 
     # Initialize
     mtheta_in = length(vecin)
 
-    # If mthin == mth, just return the input vector
+    # If mtheta == mtheta_in, just return the input vector
     if mtheta == mtheta_in
         return vecin
     end
@@ -576,15 +610,25 @@ end
 """
     Pn_minus_half_1997(s, n)
 
-Compute the Legendre function of the first kind of order -1/2, Pⁿ_{-1/2}(s), recursively using Chance's equations (47)-(50).
-The implementation follows the original fortran code. The paper equation 50 is incorrect, the exponent should be -1/4 instead of +1/2.
+Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s), 
+recursively using Chance 1997 equations (47)-(50).
+
+The implementation follows the original Fortran code. Note: equation (50) in the paper 
+has a typo where the exponent should be -1/4 instead of +1/2.
 
 # Arguments
-- `s::Real` : Legendre function parameter (s > 1)
-- `n::Int`  : Maximum order n (n ≥ 0)
+
+- `s::Real`: Legendre function parameter (s > 1)
+- `n::Int`: Maximum order n (n ≥ 0)
 
 # Returns
-- `P[end]` :  Value of P_{-1/2}^{0~n+1}(s)
+
+- `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
+
+# Notes
+
+- Uses recursive relation from Chance 1997 eq. (47)
+- Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
 
@@ -614,22 +658,33 @@ function Pn_minus_half_2007(s::Real, n::Int)
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, xtp, ztp, n; usechancebugs=false)
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=true)
 
 Compute the Green's function and related quantities for axisymmetric geometry
-according to eq.s (36)-(42) of Chance 1997. Replaces green from Fortran code.
+according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
 
 # Arguments
-- `x_obs`, `z_obs`: Observation point coordinates (X,Z) (Float64)
-- `x_source`, `z_source`: Source point coordinates (X',Z')(Float64)
-- `xtp`, `ztp`: Derivatives ∂X'/∂θ, ∂Z'/∂θ (Float64)
-- `n`: Mode number (Int)
-- `uselegacygreenfunction::Bool`: Flag to use the the 1997 version of the Legendre function (default true)
+
+- `x_obs`: Observation point R-coordinate (Float64)
+- `z_obs`: Observation point Z-coordinate (Float64)
+- `x_source`: Source point R-coordinate (Float64)
+- `z_source`: Source point Z-coordinate (Float64)
+- `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
+- `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
+- `n`: Toroidal mode number (Int)
+- `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default true)
 
 # Returns
-- `G_n`:   2π𝒢ⁿ(θ,θ′) — Green's function value
-- `coupling_n`:   𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
-- `coupling_0`:  1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
+
+- `G_n`: 2π𝒢ⁿ(θ,θ′) — Green's function value
+- `coupling_n`: 𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
+- `coupling_0`: 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
+
+# Notes
+
+- Uses Legendre functions P^n_{-1/2}(s) computed via elliptic integrals
+- Implements analytical derivatives from Chance 1997 equations
+- The coupling terms include the Jacobian factor from the coordinate transformation
 """
 function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=true)
 
@@ -699,9 +754,33 @@ end
 """
     _pickup_field(inputs, plasma_surf, grri, Bn_real, Bn_imag, R_grid, Z_grid)
 
-Internal function to calculate the magnetic field on a specified grid.
-This is a Julia version of the Fortran `pickup` routine. It uses finite differencing
-of the magnetic scalar potential `chi` to find the field components.
+Calculate the magnetic field on a specified grid using finite differencing
+of the magnetic scalar potential `chi`.
+
+This is the Julia version of the Fortran `pickup` routine. It computes the vacuum 
+magnetic field perturbation at a set of grid points given the plasma surface perturbation.
+
+# Arguments
+
+- `inputs::VacuumInput`: Struct containing vacuum calculation parameters
+- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry and basis functions
+- `grri::Matrix{Float64}`: Inverted Green's function response matrix from vaccal!
+- `Bn_real::Vector{Float64}`: Real part of normal field Fourier harmonics at plasma surface
+- `Bn_imag::Vector{Float64}`: Imaginary part of normal field Fourier harmonics at plasma surface
+- `R_grid::AbstractVector`: R-coordinates for output field evaluation
+- `Z_grid::AbstractVector`: Z-coordinates for output field evaluation
+
+# Returns
+
+- `B_R::Matrix{ComplexF64}`: R-component of magnetic field on grid (nx × nz)
+- `B_Z::Matrix{ComplexF64}`: Z-component of magnetic field on grid (nx × nz)
+- `B_phi::Matrix{ComplexF64}`: Toroidal component of magnetic field on grid (nx × nz)
+- `grid_info::Matrix{Int}`: Grid point classification (1=inside plasma, 0=outside)
+
+# Notes
+
+- Uses 5-point finite difference stencil for computing field from potential
+- Field components computed as: B_R = -∂χ/∂R, B_Z = -∂χ/∂Z, B_φ = inχ/R
 """
 function _pickup_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, grri::Matrix{Float64},
                        Bn_real::Vector{Float64}, Bn_imag::Vector{Float64}, 
@@ -790,8 +869,23 @@ end
 """
     _create_pickup_grid(R_grid, Z_grid)
 
-Creates a flattened 1D list of (R, Z) coordinates from 2D grid vectors.
-This is a Julia version of the Fortran `loops` subroutine.
+Create a flattened 1D list of (R, Z) coordinates from 2D grid vectors.
+
+This is the Julia version of the Fortran `loops` subroutine.
+
+# Arguments
+
+- `R_grid::AbstractVector`: Vector of R-coordinates defining the grid
+- `Z_grid::AbstractVector`: Vector of Z-coordinates defining the grid
+
+# Returns
+
+- `R_points::Vector{Float64}`: Flattened array of R-coordinates (length nx*nz)
+- `Z_points::Vector{Float64}`: Flattened array of Z-coordinates (length nx*nz)
+
+# Notes
+
+- Grid points are ordered as: [(R[1],Z[1]), (R[1],Z[2]), ..., (R[1],Z[nz]), (R[2],Z[1]), ...]
 """
 function _create_pickup_grid(R_grid::AbstractVector, Z_grid::AbstractVector)
     nx = length(R_grid)
@@ -812,8 +906,31 @@ end
 """
     _calculate_potential_chi(R_obs, Z_obs, inputs, plasma_surf, grri, Bn_real, Bn_imag)
 
-Calculates the magnetic scalar potential chi at a single observation point (R_obs, Z_obs).
-This is a Julia version of the Fortran `chi` subroutine.
+Calculate the magnetic scalar potential chi at a single observation point (R_obs, Z_obs).
+
+This is the Julia version of the Fortran `chi` subroutine. The potential is computed
+by integrating the Green's function response with the source perturbation at the plasma surface.
+
+# Arguments
+
+- `R_obs::Float64`: R-coordinate of observation point
+- `Z_obs::Float64`: Z-coordinate of observation point
+- `inputs::VacuumInput`: Struct containing vacuum calculation parameters
+- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry
+- `grri::Matrix{Float64}`: Inverted Green's function response matrix
+- `Bn_real::Vector{Float64}`: Real part of normal field Fourier harmonics
+- `Bn_imag::Vector{Float64}`: Imaginary part of normal field Fourier harmonics
+
+# Returns
+
+- `chi_real::Float64`: Real part of the magnetic scalar potential at (R_obs, Z_obs)
+- `chi_imag::Float64`: Imaginary part of the magnetic scalar potential at (R_obs, Z_obs)
+
+# Notes
+
+- The potential is computed via Fourier series over poloidal modes
+- Includes coupling term from Green's function derivative
+- Factor of -0.5 * dtheta applied from Fortran convention
 """
 function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
                                   inputs::VacuumInput, plasma_surf::PlasmaGeometry,
