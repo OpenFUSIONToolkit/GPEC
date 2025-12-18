@@ -34,7 +34,6 @@
    delg = 15.01
    delfac = 0.001
    cn0 = 1
-   use_legacy_greens_function = .TRUE.
 /
 &SHAPE
    ipshp = 0
