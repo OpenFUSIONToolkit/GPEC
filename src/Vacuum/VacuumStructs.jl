@@ -107,6 +107,7 @@ Struct containing input settings for vacuum wall geometry.
   - `"dee"`: Dee-shaped wall
   - `"mod_dee"`: Modified Dee-shaped wall
   - `"from_file"`: Custom wall shape from wall_geo.dat file
+- `filename` : Union{String, Missing}`: Path to the wall geometry file (used when shape="from_file").
 - `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
 - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
 - `bw::Float64`: Elongation parameter for wall shapes
@@ -120,6 +121,7 @@ Struct containing input settings for vacuum wall geometry.
 
     # Core shape selection
     shape::String = "nowall"
+    filename::Union{String, Missing} = missing
     
     # Standard geometric parameters for Dee/Mod-Dee
     a::Float64 = 0.3
@@ -319,16 +321,18 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
 
     elseif wall_settings.shape == :from_file
-        @info "Loading wall shape from external file 'wall_geo.dat' (**OPTION IS UNDER CONSTRUCTION**)."
         # Load wall geometry from external file "wall_geo.dat"
+        filename = coalesce(wall_settings.filename, "wall_geo.dat")
+        @info "Loading wall shape from external file '$filename' (**OPTION IS UNDER CONSTRUCTION**)."
+
         wcentr = 0.0
-        open("wall_geo.dat", "r") do io
+        open(filename, "r") do io
             npots0 = parse(Int, readline(io))  # Number of points in file
             wcentr = parse(Float64, readline(io)) 
             readline(io) # Skip header/comment line
 
             if npots0 < mtheta
-                @error "ERROR: wall_geo.dat contains fewer points ($npots0) than mtheta ($mtheta)."
+                @error "ERROR: $filename contains fewer points ($npots0) than mtheta ($mtheta)."
                 error("Wall geometry file size mismatch")
             end
 
