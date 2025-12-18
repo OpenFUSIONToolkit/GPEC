@@ -325,19 +325,16 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     else
         filepath = wall_settings.shape
-        if !isfile(filepath)  # Returns true if path exists and is a file
-            @error "ERROR: Wall geometry file $filepath does not exist.
+        !isfile(filepath) && @error "ERROR: Wall geometry file $filepath does not exist.
             Please set the wall shape parameter to a valid file path or a built-in shape (nowall, conformal, elliptical, dee, mod_dee)."
 
         wcentr = 0.0
         open(wall_settings.shape, "r") do io
             npots0 = parse(Int, readline(io))  # Number of points in file
-            wcentr = parse(Float64, readline(io)) 
+            wcentr = parse(Float64, readline(io))
             readline(io) # Skip header/comment line
 
-            if npots0 < mtheta
-                @error "ERROR: $filename contains fewer points ($npots0) than mtheta ($mtheta)."
-            end
+            (npots0 < mtheta) && @error "ERROR: $filename contains fewer points ($npots0) than mtheta ($mtheta)."
 
             for i in 1:mtheta
                 line = split(readline(io))

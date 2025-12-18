@@ -242,7 +242,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
     fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
 
-    if !wall.nowall
+    !wall.nowall && begin
         @warn "Vacuum response calculations with wall are not 100% accurate yet."
         # Plasma–Wall block
         j1, j2 = 1, 2
@@ -263,7 +263,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
     cn0 = 1.0 # expose to user if anyone ever actually tries to use this
-    if (abs(n) <= 1e-5) && (!wall.nowall) && (wall.is_closed_toroidal)
+    (abs(n) <= 1e-5 && !wall.nowall && wall.is_closed_toroidal) && begin
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = wall.nowall ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
@@ -272,7 +272,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     end
 
     # Only needed for mutual inductance with the wall calculations
-    if kernelsign < 0
+    (kernelsign < 0) && begin
         grad_greenfunction_mat .*= kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
         for i in 1:2 * mtheta
@@ -304,7 +304,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     vacmat = arr .+ aii
     vacmti = air .- ari
     # Force symmetry of response matrix if desired
-    if force_wv_symmetry
+    force_wv_symmetry && begin
         for l1 in 1:mpert
             for l2 in l1:mpert
                 vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])

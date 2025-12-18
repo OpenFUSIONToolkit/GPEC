@@ -76,7 +76,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         # Initialize jbot and jtop, and figure out wall geometry based on which block we are in
         jbot = jtop = mtheta/2+1
         xwall = j2 == 2 ? x_sourcepoints : x_obspoints
-        
+
         # Find where sign of wall x point acrosses zero.
         # has_zero_crossing means there is 0-crossing point
         for i in 1:mtheta
@@ -111,9 +111,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         # if the point of observation point is in negative, We cannot use green func
         # This is same for source point
         if x_obs < 0.0
-            if j2 == 2
-                work[j] = 1.0
-            end
+            (j2 == 2) && (work[j] = 1.0)
             continue
         end
             
@@ -151,12 +149,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
             # if source point is in negative, we cannot use green function
             # & if source point(ic) and obs point (j) is same, it's singular
-            if x_source < 0
-                continue
-            end
-            if ic == j
-                continue
-            end
+            (x_source < 0 || ic == j) && continue
 
             # Call green function
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
@@ -258,9 +251,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 end
                 
                 # skip when plasma, no skip when considering wall
-                if iopw == 0
-                    continue
-                end
+                (iopw == 0) && continue
 
                 # if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up G_n_nonsingular value
                 greenfunction_mat[j,js1] += G_n_nonsingular * A2_minus
@@ -434,36 +425,24 @@ function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x
     for i in nll:nlr
         alag = 1.0
         for j in nll:nlr
-            if i == j
-                continue
-            end
+            (i == j) && continue
             alag *= (x - ax[j]) / (ax[i] - ax[j])
         end
         f += alag * af[i]
     end
 
     # --- Error fix: Use the 'iop' argument ---
-    if iop == 0
-        return f, df # df is returned as 0.0
-    end
+    (iop == 0) && return f, df # df is returned as 0.0
 
     # Compute derivative df
     for i in nll:nlr
         slag = 0.0
         for id in nll:nlr
-            if id == i
-                continue
-            end
+            (id == i) && continue
             alag = 1.0
             for j in nll:nlr
-                if j == i
-                    continue
-                end
-                if j != id
-                    alag *= (x - ax[j]) / (ax[i] - ax[j])
-                else
-                    alag /= (ax[i] - ax[id])
-                end
+                (j == i) && continue
+                alag *= (j != id) ? ((x - ax[j]) / (ax[i] - ax[j])) : (1.0 / (ax[i] - ax[id]))
             end
             slag += alag
         end
@@ -534,9 +513,7 @@ Returns : K(1-m1)
 """
 function elliptic_integral_k(m1)
 
-    if m1 < 0.0 || m1 > 1.0
-        throw(DomainError(m1, "Input `m1` must be in the range (0, 1]."))
-    end
+    (m1 < 0.0 || m1 > 1.0) && throw(DomainError(m1, "Input `m1` must be in the range (0, 1]."))
     log_m1 = log(m1)
 
     ak0 = 1.38629436112
@@ -565,9 +542,7 @@ Returns : E(1-m1)
 """
 function elliptic_integral_e(m1)
 
-    if m1 < 0.0 || m1 > 1.0
-        throw(DomainError(m1, "Input `x1` must be in the range (0, 1]."))
-    end
+    (m1 < 0.0 || m1 > 1.0) && throw(DomainError(m1, "Input `x1` must be in the range (0, 1]."))
     log_x1 = log(m1)
 
     ae1=0.44325141463
