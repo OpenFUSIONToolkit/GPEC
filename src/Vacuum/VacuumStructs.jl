@@ -159,7 +159,7 @@ the necessary plasma surface data for vacuum calculations.
 """
 function initialize_plasma_surface(inputs::VacuumInput)
 
-    # Interpolate arrays from input onto mthvac grid (in readahg in the Fortran)
+    # Interpolate arrays from input onto mtheta grid (from readahg in the Fortran)
     mtheta = inputs.mtheta
     x_plasma = interp_to_new_grid(inputs.r, mtheta)
     z_plasma = interp_to_new_grid(inputs.z, mtheta)
