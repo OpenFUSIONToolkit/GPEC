@@ -15,6 +15,12 @@ function Main(path::String="./")
     else
         wall_settings = Vacuum.WallShapeSettings()
     end
+    if "DEBUG" in keys(inputs)
+        debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+    else
+        debug_settings = DebugSettings()
+    end
+    intr.debug_settings = debug_settings
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?

@@ -42,6 +42,19 @@ A mutable struct containing data for singular surfaces in the plasma stability a
 end
 
 """
+DebugSettings
+
+A mutable struct containing settings for debugging and benchmarking output.
+
+## Fields
+
+  - `output_benchmark_data::Bool` - Flag to output benchmark data for comparison between codes
+"""
+@kwdef mutable struct DebugSettings
+    output_benchmark_data::Bool = false
+end
+
+"""
     DconInternal
 
 A mutable struct holding internal state variables for stability calculations.
@@ -94,6 +107,7 @@ A mutable struct holding internal state variables for stability calculations.
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
+    debug_settings::DebugSettings = DebugSettings()
 end
 
 """
@@ -390,3 +404,60 @@ end
 
 # Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+
+# Below here are debug output structs used for benchmarking and unit testing
+
+
+
+
+"""
+VacuumBenchmarkInputs
+
+A struct to hold all inputs required for vacuum benchmarking between Fortran and Julia implementations.
+
+## Fields
+  - `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
+  - `mpert::Int` - Number of poloidal modes
+  - `mtheta_eq::Int` - Number of poloidal grid points in equilibrium
+  - `mthvac::Int` - Number of poloidal grid points in vacuum
+  - `complex_flag::Bool` - Flag indicating if complex arithmetic is used
+  - `kernelsign::Float64` - Sign of the kernel for vacuum calculation
+  - `wall_flag::Bool` - Flag indicating presence of wall
+  - `farwall_flag::Bool` - Flag indicating presence of far wall
+  - `grri::Matrix{Float64}` - Green's function radial integrals
+  - `xzpts::Matrix{Float64}` - X-Z coordinate points on plasma boundary
+  - `ahg_file::String` - Filename for AHG data
+  - `dir_path::String` - Directory path for input/output files
+  - `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia code
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
+  - `n::Int` - Toroidal mode number
+  - `ipert_n::Int` - Index of perturbed toroidal mode
+  - `psifac::Float64` - Normalized flux coordinate
+"""
+@kwdef struct VacuumBenchmarkInputs
+    # Vacuum computation parameters
+    wv_block::Matrix{ComplexF64}
+    mpert::Int
+    mtheta_eq::Int
+    mthvac::Int
+    complex_flag::Bool
+    kernelsign::Float64
+    wall_flag::Bool
+    farwall_flag::Bool
+    grri::Matrix{Float64}
+    xzpts::Matrix{Float64}
+    ahg_file::String
+    dir_path::String
+    
+    # VacuumInput struct for Julia code
+    vac_inputs::Vacuum.VacuumInput
+    
+    # Wall settings
+    wall_settings::Vacuum.WallShapeSettings
+    
+    # Additional context
+    n::Int
+    ipert_n::Int
+    psifac::Float64
+end

@@ -45,15 +45,20 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.xzpts, 0.0)
 
         farwall_flag = wall_settings.shape == "nowall" ? true : false
-        benchmark_inputs = VacuumBenchmarkInputs(
-                wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
-                wall_flag, farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
-                vac_inputs, wall_settings,
-                n, ipert_n, intr.psilim
-        )
 
-        @save "benchmark_inputs_fortran.jld2" benchmark_inputs
-        
+        # Output data for unit testing and benchmarking
+        if intr.debug_settings.output_benchmark_data
+            @info "Outputting top level vacuum debug data for n = $n"
+            benchmark_inputs = VacuumBenchmarkInputs(
+                    wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, 
+                    complex_flag, vac_inputs.kernelsign, wall_flag,
+                    farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
+                    vac_inputs, wall_settings,
+                    n, ipert_n, intr.psilim
+            )
+            @save "vacuum_response_inputs.jld2" benchmark_inputs
+        end
+
         Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, vac_inputs.kernelsign,
             wall_flag, farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
 
@@ -338,57 +343,4 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     end
 
     return tot_eigvals[1]
-end
-
-struct VacuumBenchmarkInputs
-    # Vacuum computation parameters
-    wv_block::Matrix{ComplexF64}
-    mpert::Int
-    mtheta_eq::Int
-    mthvac::Int
-    complex_flag::Bool
-    kernelsign::Float64
-    wall_flag::Bool
-    farwall_flag::Bool
-    grri::Matrix{Float64}
-    xzpts::Matrix{Float64}
-    ahg_file::String
-    dir_path::String
-    
-    # VacuumInput struct for Julia code
-    vac_inputs::Vacuum.VacuumInput
-    
-    # Wall settings
-    wall_settings::Vacuum.WallShapeSettings
-    
-    # Additional context
-    n::Int
-    ipert_n::Int
-    psifac::Float64
-end
-
-function write_vacuum_benchmark(inputs::VacuumBenchmarkInputs, filename::String)
-    # Save binary data with JLD2
-    jldsave(filename * ".jld2";
-        wv_block = inputs.wv_block,
-        grri = inputs.grri,
-        xzpts = inputs.xzpts,
-        vac_inputs = inputs.vac_inputs,
-        wall_settings = inputs.wall_settings,
-        mpert = inputs.mpert,
-        mtheta_eq = inputs.mtheta_eq,
-        mthvac = inputs.mthvac,
-        complex_flag = inputs.complex_flag,
-        kernelsign = inputs.kernelsign,
-        wall_flag = inputs.wall_flag,
-        farwall_flag = inputs.farwall_flag,
-        ahg_file = inputs.ahg_file,
-        dir_path = inputs.dir_path,
-        n = inputs.n,
-        ipert_n = inputs.ipert_n,
-        psifac = inputs.psifac
-    )
-
-    println("Wrote benchmark inputs to:")
-    println("  $(filename).jld2")
 end
