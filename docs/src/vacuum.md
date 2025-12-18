@@ -129,6 +129,5 @@ wv, grri, xzpts = JPEC.Vacuum.compute_vacuum_response(inputs, wall_settings)
 
 - Requires proper initialization of DCON parameters before using the Fortran interface
 - The pure Julia implementation (`compute_vacuum_response`) provides equivalent functionality
-- Wall calculations are supported but may have reduced accuracy compared to no-wall cases
 - For n=0 modes with closed walls, automatic regularization is applied
 

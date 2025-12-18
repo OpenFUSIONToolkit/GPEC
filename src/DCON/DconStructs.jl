@@ -266,8 +266,8 @@ Populated in `Free.jl`.
 - `ep::Vector{ComplexF64}` - Plasma eigenvalues
 - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
 - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-- `grri::Array{Float64, 2}` - Green's function response matrix (2×(mthvac+5) × 2×mpert)
-- `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac+5 × 4)
+- `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
+- `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
     mthvac::Int
