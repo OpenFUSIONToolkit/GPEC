@@ -216,8 +216,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Plasma–Plasma block
     j1, j2 = 1, 1
-    ksgn = 2*j2 - 3
-    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 1, inputs)
+    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
 
     # Fourier transform plasma-plasma block
     fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0, mtheta, mpert)
@@ -227,18 +226,15 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         @warn "Vacuum response calculations with wall are not 100% accurate yet."
         # Plasma–Wall block
         j1, j2 = 1, 2
-        ksgn = 2*j2 - 3
-        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, 0, n)
 
         # Wall–Wall block
         j1, j2 = 2, 2
-        ksgn = 2*j2 - 3
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, ksgn, 0, 0, inputs; xwall=wall.x, zwall=wall.z)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, 0, n)
 
         # Wall–Plasma block
         j1, j2 = 2, 1
-        ksgn = 2*j2 - 3
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, ksgn, 1, 0, inputs; xwall=wall.x, zwall=wall.z)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
 
         # Fourier transform wall blocks into grri
         fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0, mtheta, mpert)
