@@ -48,7 +48,7 @@ jobs:
             - Performance considerations
             - Test coverage
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful but not unnecessarily verbose in your feedback.
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful but not unnecessarily verbose in your feedback. Be neutral and objective, avoiding exaggerated praise. For positive feedback, it suffices to say one sentence like  "This will be useful for X reason". Do not use positive adjectives stronger than "useful" or "good". If you find flaws, do not worry about hurting feelings; just point them out clearly and suggest improvements.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 
