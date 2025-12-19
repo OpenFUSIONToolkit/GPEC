@@ -1,14 +1,16 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize]
+  # pull_request:
+  #   types: [opened, synchronize]
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"
     #   - "src/**/*.tsx"
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
+  pull_request_review:
+    types: [submitted]
 
 jobs:
   claude-review:
@@ -44,10 +46,9 @@ jobs:
             - Code quality and best practices
             - Potential bugs or issues
             - Performance considerations
-            - Security concerns
             - Test coverage
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful but not unnecessarily verbose in your feedback. Be neutral and objective, avoiding exaggerated praise. For positive feedback, it suffices to say one sentence like  "This will be useful for X reason". Do not use positive adjectives stronger than "useful" or "good". If you find flaws, do not worry about hurting feelings; just point them out clearly and suggest improvements.
 
             Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
 

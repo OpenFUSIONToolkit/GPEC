@@ -37,11 +37,10 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine vaccal
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       integer tmth
 
       REAL(r8), DIMENSION(2) :: summ
@@ -129,9 +128,9 @@ c-----------------------------------------------------------------------
       call kernel(xpla,zpla,xpla,zpla,grdgre,grwp,j1,j2,ksgn,1,1,0)
       if ( checkd .and. (lfele .eq. 0) ) then
          call matwrtn ( grwp,nths,nths,1,1,mth,mth,16,8,
-     $        "grwp at 1,1", outmod, iotty )
+     $        "grwp at 1,1", outmod, iotty )         
          call matwrtn ( grdgre,nths2,nths2,1,1,mth,mth,mth,mth,
-     $        "grdgre at 1,1", outmod, iotty )
+     $        "grdgre at 1,1", outmod, iotty ) 
       endif
       do i = 1, mth2
          grwp(i,mth1) = grwp(i,1)
@@ -225,9 +224,9 @@ c-----------------------------------------------------------------------
       endif
       if ( checkd .and. (lfele .eq. 0) ) then
          call matwrtn ( grwp,nths,nths,1,1,mth,mth,16,8,
-     $        "grwp at end", outmod, iotty )
+     $        "grwp at end", outmod, iotty )         
          call matwrtn ( grdgre,nths2,nths2,1,1,mth12,mth12,16,8,
-     $        "grdgre at end", outmod, iotty )
+     $        "grdgre at end", outmod, iotty )   
       endif
       write ( iotty,  '(/,
      $     "Sum of first COLUMN in each block of GRDGRE:",/)')
@@ -288,7 +287,7 @@ c-----------------------------------------------------------------------
       write ( outmod,8050 ) ier
       write ( iotty, 8050 ) ier
       if ( lspark .ne. 0 ) then
-         write ( iodsk, 8312 )
+         write ( iodsk, 8312 ) 
          write ( iodsk, 8311 ) jmax1, mth12
          do jwdsk = 1, lmax2
             write ( iodsk, 8313 ) ( grri(iwdsk,jwdsk),iwdsk=1,mth12 )
@@ -405,7 +404,7 @@ c-----------------------------------------------------------------------
          do j1 = 1, jmax1
             do j2 = 1, jmax1
                vacmat(j1,j2) = arr(j1,j2) + aii(j1,j2)
-               vacmti(j1,j2) = air(j1,j2) - ari(j1,j2)
+               vacmti(j1,j2) = air(j1,j2) - ari(j1,j2) 
             enddo
          enddo
       endif
@@ -427,11 +426,11 @@ c-----------------------------------------------------------------------
          call gatonorm ( vacmat, gatovac, nfm, rgato,mfel,mth,
      $        qa1,twopi )
          call matwrtn ( gatovac,nfm,nfm,ln,ln,jmax1,jmax1,8,8,
-     $        "GATOVAC", outmod,iotty )
+     $        "GATOVAC", outmod,iotty )      
       endif
       if ( check1 )
      $     call msctimer ( outmod, "end of vacmat" )
-      if ( lgato .eq. 2 )  then
+      if ( lgato .eq. 2 )  then 
          call orchek ( air, ari, rmatr, rmati, work, work1 )
          do j1 = 1, jmax1
             do j2 = 1, jmax1
@@ -457,7 +456,7 @@ c-----------------------------------------------------------------------
          call gatonorm ( rmatr, gatovac, nfm, rgato,mfel,mth,
      $        qa1,twopi )
          call matwrtn ( gatovac,nfm,nfm,1,1,mfel,mfel,8,8,
-     $        "GATOVAC", outmod,iotty )
+     $        "GATOVAC", outmod,iotty )      
       endif
       deallocate(arr,ari,air,aii)
       write ( outmod, 500 ) n,q, nj,mj,lj
@@ -576,7 +575,7 @@ c-----------------------------------------------------------------------
          call zop (iovac,"vacout",len,ndsk,iiff,999)
          lgivup=1
          call zwr(iovac,rmatr,mtots,1,lgivup,999)
-         call zcl ( iovac, 999 )
+         call zcl ( iovac, 999 ) 
       else
          j12 = 1
          do j2 = 1, jmax1
@@ -618,7 +617,6 @@ c-----------------------------------------------------------------------
       SUBROUTINE kernel(xobs,zobs,xsce,zsce,grdgre,gren,
      $     j1,j2,isgn,iopw,iops,ischk)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       IMPLICIT NONE
 
       REAL(r8), DIMENSION(:), INTENT(IN) :: xobs,zobs,xsce,zsce
@@ -655,6 +653,27 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     initialize.
 c-----------------------------------------------------------------------
+      INTEGER :: unit
+      CHARACTER(len=20) :: filename
+
+      IF(.FALSE.) THEN
+
+         filename = 'output_kernel_run_data.txt'
+         OPEN(UNIT=unit, FILE=filename, STATUS='UNKNOWN')
+
+         WRITE(unit, '(A)') 'xobs, zobs, xsce, zsce, j1, j2,' //
+     $     'isgn, iopw, iops, ischk'
+         WRITE(unit, *) xobs
+         WRITE(unit, *) zobs
+         WRITE(unit, *) xsce
+         WRITE(unit, *) zsce
+         WRITE(unit, *) j1, j2,
+     $      isgn, iopw, iops, ischk
+
+         CLOSE(unit)
+         STOP
+      ENDIF
+
       DO i=1,nths
          xpp(i)=0
          zpp(i)=0
@@ -667,6 +686,10 @@ c-----------------------------------------------------------------------
       jres=1
       isph = 0
       mthm=mth-1
+      ! WRITE(*,*) "mth1 =",mth1
+      ! WRITE(*,*) "nths =",nths
+      ! WRITE(*,*) "size of gren array =",SIZE(gren,1),SIZE(gren,2)
+      ! WRITE(*,*) "ZEROING GREN ARRAY"
       gren(1:mth1,1:mth1)=0
       the(1:mth1)=(/(i,i=0,mth)/)*dth
 c-----------------------------------------------------------------------
@@ -675,7 +698,7 @@ c-----------------------------------------------------------------------
       IF(lfele /= 0)THEN
          wsimpb1=dth/two
          wsimpb2=dth
-         wsimpb4=dth
+         wsimpb4=dth 
       ELSE
          wsimpb1=dth/three
          wsimpb2=two*dth/three
@@ -721,6 +744,7 @@ c-----------------------------------------------------------------------
          CALL spl1d2(mth1,the,zsce,zpp,1,theta,tab)
          zpr(i)=tab(2)
       ENDDO
+      ! WRITE(*,*) "BEGIN LOOP OVER INTERVALS"
 c-----------------------------------------------------------------------
 c     begin loop over intervals.
 c-----------------------------------------------------------------------
@@ -878,7 +902,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine mateig ( zvec, work, work1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -925,7 +948,6 @@ c-----------------------------------------------------------------------
       subroutine mateig2 ( zvec, nd,msiz, zwk,work0,work,work1, l1,l2,
      $     ff1,lcone, jobid1, nout1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -986,7 +1008,7 @@ c-----------------------------------------------------------------------
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       dimension the(nths)
 c-----------------------------------------------------------------------
 c     format statements.
@@ -1069,7 +1091,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine wwall(nqnqnq,xwal1,zwal1)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1651,7 +1672,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine d3dwall ( xwall, ywall, mthh, iomod, iotty1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1709,7 +1729,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine d3dvesl(r0,z0,a0,e0,ar,az,nval,zst,r,z,npts,ier)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1792,7 +1811,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine eqarcw ( xin, zin, xout, zout, ell, thgr, thlag, mw1 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1842,7 +1860,6 @@ c-----------------------------------------------------------------------
       subroutine gatonorm ( vacin, gatovac_, nd, rgato_,mfel_,mth_,
      $     qa1_,twopi_ )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1876,7 +1893,6 @@ c-----------------------------------------------------------------------
       subroutine adjustb(betin,betout,a_,bw_,cw_,dw_,xmaj_,plrad_,
      $   ishape_)
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 c-----------------------------------------------------------------------
@@ -1906,7 +1922,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fouran ( gij, gil, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1945,7 +1960,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine foranv ( gil, gll, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -1981,11 +1995,10 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine foura2 ( gij,m01,m02, gil, m00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       dimension gij(nths2,nths2), gil(nths,nths)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2028,7 +2041,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fanal ( fth, nt, flc,fls, l1,l2, pi,ddt )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2066,11 +2078,10 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fanal1 ( gi,ndi1,ndi2,mi1, gor,goi,ndo1,ndo2 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
-      real nq
+      REAL(r8) nq
       dimension gi(ndi1,ndi2), gor(ndo1,ndo2), goi(ndo1,ndo2)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2088,7 +2099,7 @@ c-----------------------------------------------------------------------
          do l2 = 1, jmax1
             ll2 = l2 - 1 + lmin(1)
             do i = 1, mth
-               elth = ll2*(i-1)*dth
+               elth = ll2*(i-1)*dth 
                gor(l1,l2) = gor(l1,l2)
      $              + cos(elth) * gi(mi1+i,l1)
      $              + sin(elth) * gi(mi1+i,jmax1+l1)
@@ -2114,12 +2125,11 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine felang ( gij, gil, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
       data izcal / 0 /
-      real nq
+      REAL(r8) nq
       dimension gij(nths,nths), gil(nths2,nfm2), cs(*)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2184,12 +2194,11 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine felanv ( gil, gll, cs, m00,l00 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
       data izcal / 0 /
-      real nq
+      REAL(r8) nq
       dimension gil(nths2,nfm2), gll(nfm,nfm), cs(*)
 c-----------------------------------------------------------------------
 c     computations.
@@ -2199,8 +2208,8 @@ c-----------------------------------------------------------------------
       zwt1 = 0.5 * dth * znorm
       zwt2 = dth * znorm
       zws1 = dth * znorm /3.0
-      zws2 = 2.0 * zws1
-      zws4 = 2.0 * zws2
+      zws2 = 2.0 * zws1 
+      zws4 = 2.0 * zws2 
       nzdel = ndfel
       nzdel1 = nzdel + 1
       q = qa1
@@ -2235,7 +2244,7 @@ c-----------------------------------------------------------------------
                   if ( jth1 .ne. mth ) then
                      gll(l1,l2) = gll(l1,l2) +
      $                    zwt * gil(m00+jth1,l00+l2) * cs(jth1) * twopi
-                  else
+                  else 
                      gll(l1,l2) = gll(l1,l2)
      $                    + zwt * gil(m00+1,l00+l2) * cs(jth1) * twopi
                   endif
@@ -2258,7 +2267,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine fotofi ( vin,vout, scnlth, wrk1, wrk2, iopsc )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2269,7 +2277,7 @@ c     computations.
 c-----------------------------------------------------------------------
       jmax1 = lmax(1) - lmin(1) + 1
       call tmat ( scnlth, wrk1, iopsc )
-      call matmul3 ( wrk1, vin, nfm,nfm, mfel,jmax1,jmax1, wrk2,nfm )
+      call matmul3 ( wrk1, vin, nfm,nfm, mfel,jmax1,jmax1, wrk2,nfm ) 
       call mtrans ( wrk1, nfm, nfm )
       call matmul3 ( wrk2, wrk1, nfm,nfm, mfel,jmax1,mfel, vout,nfm )
 c-----------------------------------------------------------------------
@@ -2286,7 +2294,6 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine orchek ( wrkr, wrki, wrkrt, wrkit, wrko1,wrko2 )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2336,14 +2343,13 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     subprogram 21. tmat.
 c     calculates the matrix for transforming from Fourier to finite
-c     elements.
+c     elements. 
 c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     declarations.
 c-----------------------------------------------------------------------
       subroutine tmat ( sil, tll, iop )
       USE vglobal_mod
-      USE vglobal_mod, ONLY: r8
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
 
@@ -2356,7 +2362,7 @@ c-----------------------------------------------------------------------
       pi = pye
       do i = 1, nfm
          do j = 1, nfm
-            tll(i,j) = 0.0
+            tll(i,j) = 0.0 
          end do
       end do
       if ( iop .eq. 0 ) then

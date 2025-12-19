@@ -6,6 +6,8 @@ zero crossings of the critical eigenvalue which indicate instability. This acts 
 outer wrapper for `check_for_zero_crossings!` since our in-memory integration allow
 this to be done post-integration rather than during like the Fortran. We update
 the `crit_store` in `odet` in place, and return the total number of zero crossings found.
+If the W inverse matrix was non-Hermitian beyond tolerance at any integration steps,
+a warning is printed with the total count.
 
 """
 function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium)
@@ -13,19 +15,29 @@ function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.Plasma
     # Initialization
     resize!(odet.crit_store, odet.step)
     nzero = 0
+    nonherm_count = 0
 
     # Loop over integration steps, computing crit/checking for zero crossings
     for istep in 1:odet.step
-        zero_cross = check_for_zero_crossings!(odet, equil.sq, istep)
+        zero_cross, nonherm = check_for_zero_crossings!(odet, equil.sq, istep)
         if zero_cross
             nzero += 1
         end
+        if nonherm
+            nonherm_count += 1
+        end
     end
+
+    # Print warning if W⁻¹ was non-Hermitian at any steps
+    if nonherm_count > 0
+        @warn "W inverse matrix was non-Hermitian beyond tolerance at $nonherm_count integration step(s)"
+    end
+
     return nzero
 end
 
 """
-    check_for_zero_crossings!(crit_store, odet, sq, istep) -> zero_cross
+    check_for_zero_crossings!(crit_store, odet, sq, istep) -> zero_cross, nonherm
 
 Check if the critical eigenvalue (`crit`), i.e. the smallest eigenvalue of W⁻¹, changed
 signs between a given integration step `istep` and the previous step. We first compute
@@ -41,6 +53,11 @@ can do it post-integration rather than during and don't directly handle file out
   - `sq::Spl.CubicSpline`: Spline object containing equilibrium profiles
   - `istep::Int`: Current integration step index
 
+### Returns
+
+  - `zero_cross::Bool`: True if a physical zero crossing was detected
+  - `nonherm::Bool`: True if W⁻¹ was non-Hermitian beyond tolerance
+
 """
 function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64}, istep::Int)
 
@@ -48,7 +65,8 @@ function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64},
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
     dVdpsi = Spl.spline_eval!(sq, psi)[3]
-    odet.crit_store[istep] = compute_smallest_eigenvalue(u) * dVdpsi^2
+    crit_val, nonherm = compute_smallest_eigenvalue(u)
+    odet.crit_store[istep] = crit_val * dVdpsi^2
 
     # Check for zero crossing via change in sign of crit between current and previous step
     zero_cross = false
@@ -60,17 +78,18 @@ function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64},
         psi_mid = psi - fac * (psi - odet.psi_store[istep - 1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep - 1]))
         dVdpsi = Spl.spline_eval!(sq, psi_mid)[3]
-        crit_mid = compute_smallest_eigenvalue(u_mid) * dVdpsi^2
+        crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
+        crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
             zero_cross = true
             println("Zero crossing detected at psi = $psi_mid, q = $q_mid")
         end
     end
-    return zero_cross
+    return zero_cross, nonherm
 end
 
 """
-    compute_smallest_eigenvalue(u) -> crit
+    compute_smallest_eigenvalue(u) -> crit, nonherm
 
 Form the inverse plasma response matrix W⁻¹ using the solution matrix `u` and
 returns its minimum eigenvalue by magnitude. Performs the same function as
@@ -87,6 +106,7 @@ construction but may accumulate numerical noise during integration.
 ### Returns
 
   - `crit::Float64`: the computed scaled critical eigenvalue
+  - `nonherm::Bool`: true if W⁻¹ was non-Hermitian beyond tolerance (> 1e-3)
 
 """
 function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
@@ -101,12 +121,12 @@ function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
     # NOT produce identical results to taking the Hermitian part as done here unless is exactly Hermitian.
     # Check to make sure W is at least close to Hermitian before enforcing it
     nonherm_error = norm(0.5 * (wp_inverse - adjoint(wp_inverse))) / norm(0.5 * (wp_inverse + adjoint(wp_inverse)))
-    if nonherm_error > 1e-3
-        @warn "Computed W inverse matrix is not Hermitian within tolerance: $nonherm_error"
-    end
+    nonherm = nonherm_error > 1e-3
+
     # Enforce that W is Hermitian
     hermitianpart!(wp_inverse) # Overwrites W⁻¹ with (W⁻¹ + (W⁻¹)') / 2
 
     # Compute eigenvalues and return the smallest
-    return findmin(abs, eigvals!(Hermitian(wp_inverse)))[1]
+    crit = findmin(abs, eigvals!(Hermitian(wp_inverse)))[1]
+    return crit, nonherm
 end

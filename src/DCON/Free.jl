@@ -10,10 +10,8 @@ and data dumping.
 ### TODOs
 Check if normalize is ever false, currently always true, and if not, remove related logic
 """
-function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::Vacuum.WallShapeSettings)
 
-    # TODO: it looks like vac_memory is always true - remove all ahg things and just assume true?
-    vac_memory = true
     # TODO: this is always true in fortran - just get rid of it?
     normalize = true
     # Flags used within VACUUM
@@ -27,7 +25,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    wv_temp = zeros(ComplexF64, intr.mpert, intr.mpert)
 
     # Evaluate dV/dpsi at the plasma edge
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
@@ -43,50 +40,39 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         n = ipert_n - 1 + intr.nlow
         
         # Set VACUUM run parameters and boundary shape
-        set_vacuum_inputs(intr.psilim, n, equil, intr)
+        vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
 
-        farwal_flag = true
-        kernelsignin = -1.0
-        # TODO: make this a ! function, it modifies wv, grri, and xzpts in place (but only wv is used)
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
+        farwall_flag = wall_settings.shape == "nowall" ? true : false
 
-        kernelsignin = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        if ctrl.wv_farwall_flag
-            wv_temp .= wv_block
+        # Output data for unit testing and benchmarking
+        if intr.debug_settings.output_benchmark_data
+            @info "Outputting top level vacuum debug data for n = $n"
+            benchmark_inputs = VacuumBenchmarkInputs(
+                    wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, 
+                    complex_flag, vac_inputs.kernelsign, wall_flag,
+                    farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
+                    vac_inputs, wall_settings,
+                    n, ipert_n, intr.psilim
+            )
+            @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
 
-        farwal_flag = false
-        kernelsignin = -1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        kernelsignin = 1.0
-        VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-            wall_flag, farwal_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path)
-
-        if ctrl.wv_farwall_flag
-            wv_block .= wv_temp
-        end
+        # Compute vacuum energy matrix
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
 
         # Scale vacuum matrix by singfac = (m - n*qlim)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
-        for ipert in 1:intr.mpert
-            wv_block[ipert, :] .*= singfac[ipert]
-            wv_block[:, ipert] .*= singfac[ipert]
+        @inbounds for ipert in 1:intr.mpert
+            @views wv_block[ipert, :] .*= singfac[ipert]
+            @views wv_block[:, ipert] .*= singfac[ipert]
         end
 
         # Store block in full wv matrix
         @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
-        if vac_memory
-            VacuumMod.unset_dcon_params()
-        end
+        Vacuum.unset_dcon_params()
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -146,8 +132,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Write energies to screen
     if ctrl.verbose
-        println("   Energies: plasma = ", real(vac.ep[1]), ", vacuum = ", real(vac.ev[1]),
-            ", real = ", real(vac.et[1]), ", imaginary = ", imag(vac.et[1]))
+        println("Least Stable Eigenmode Energies:")
+        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))
+        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))
+        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))
     end
 
     return vac
@@ -167,7 +155,7 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `intr`: Internal DCON parameters (DconInternal)
 
 """
-function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
@@ -197,8 +185,23 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     end
 
     # Pass all required values to VACUUM
-    VacuumMod.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
+    Vacuum.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
         reverse(r), reverse(z), reverse(delta))
+
+    # For input to the Julia vacuum code
+    return Vacuum.VacuumInput(;
+        r = reverse(r),
+        z = reverse(z),
+        delta = reverse(delta),
+        mhigh = intr.mhigh,
+        mlow = intr.mlow,
+        mpert = intr.mpert,
+        n = n,
+        qa = qa,
+        mtheta_eq = equil.config.control.mtheta,
+        mtheta = ctrl.mthvac,
+        force_wv_symmetry = ctrl.force_wv_symmetry
+    )
 end
 
 """
@@ -254,12 +257,12 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             complex_flag = true
             kernelsignin = 1.0
             wall_flag = false
-            farwal_flag = false
+            farwall_flag = false
             ahg_file = "ahg2msc_dcon.out" # Deprecated
 
             # Compute vacuum matrix
-            VacuumMod.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-                wall_flag, farwal_flag, grri, xzpts, ahg_file, intr.dir_path)
+            Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+                wall_flag, farwall_flag, grri, xzpts, ahg_file, intr.dir_path)
 
             # Apply singular factor scaling
             singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
@@ -272,7 +275,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
             # Free VACUUM memory
-            VacuumMod.unset_dcon_params()
+            Vacuum.unset_dcon_params()
         end
     end
 

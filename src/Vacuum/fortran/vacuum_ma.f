@@ -29,7 +29,7 @@ c-----------------------------------------------------------------------
 c     declarations.
 c-----------------------------------------------------------------------
       subroutine mscvac(wv,mpert,mtheta,mthvac,complex_flag_in,
-     $     kernelsignin,wall_flag_in,farwal_flag_in,grrio,
+     $     kernelsignin,wall_flag_in,farwall_flag_in,grrio,
      $     xzptso,op_ahgfile)
       USE vglobal_mod
       implicit real(r8) (a-h,o-z)
@@ -38,14 +38,15 @@ c-----------------------------------------------------------------------
       REAL(r8) :: kernelsignin
       integer mpert,mtheta,mthvac
       complex(r8) wv(mpert,mpert)
-      integer, intent(in) :: complex_flag_in,wall_flag_in,farwal_flag_in
-      ! logical, intent(in) :: complex_flag,wall_flag,farwal_flag
-      logical :: complex_flag, wall_flag, farwal_flag
+      integer, intent(in) :: complex_flag_in,wall_flag_in,
+     $                                             farwall_flag_in
+      ! logical, intent(in) :: complex_flag,wall_flag,farwall_flag
+      logical :: complex_flag, wall_flag, farwall_flag
       REAL(r8) :: grrio(2*(mthvac+5),mpert*2),xzptso(mthvac+5,4)
 
       complex(r8), parameter :: ifac=(0,1)
       dimension xi(nfm), xii(nfm), xilnq(nfm), xiilnq(nfm)
-      character(128), intent(in), optional :: op_ahgfile
+      character(len=*), intent(in), optional :: op_ahgfile
 
       if (present(op_ahgfile)) then
          ahgfile = trim(op_ahgfile)
@@ -65,10 +66,10 @@ c-----------------------------------------------------------------------
          wall_flag = .FALSE.
       end if
 
-      if (farwal_flag_in == 1) then
-         farwal_flag = .TRUE.
+      if (farwall_flag_in == 1) then
+         farwall_flag = .TRUE.
       else
-         farwal_flag = .FALSE.
+         farwall_flag = .FALSE.
       end if
 
 c-----------------------------------------------------------------------
@@ -91,10 +92,9 @@ c-----------------------------------------------------------------------
       nths0=mthvac
       nfm=mpert
       mtot=mpert
-
       call global_alloc(nths0,nfm,mtot,ntsin0)
       farwal=.false.
-      IF (farwal_flag) farwal=.true.
+      IF (farwall_flag) farwal=.true.
 c-----------------------------------------------------------------------
 c     initialization.
 c-----------------------------------------------------------------------
@@ -502,7 +502,7 @@ c-----------------------------------------------------------------------
          zork1(i+2) = dlenth(i)
       enddo
       zork1(1) = dlenth(mth-1)
-      zork1(2) = dlenth(mth)
+      zork1(2) = dlenth(mth) 
       zork1(mth3) = dlenth(1)
       zork1(mth4) = dlenth(2)
       zork1(mth5) = dlenth(3)
@@ -528,7 +528,7 @@ c     declarations.
 c-----------------------------------------------------------------------
       subroutine make_bltobp
       USE vglobal_mod
-      IMPLICIT REAL (a-h,o-z)
+      IMPLICIT REAL(r8) (a-h,o-z)
 
       ! DIMENSION chlagdy(nths,nfm)
       DIMENSION thmgr(nths), z1tmp(nths), z2tmp(nths)
@@ -860,9 +860,9 @@ c-----------------------------------------------------------------------
              cwrkr(nsew,i) = 0.0
              cwrki(nsew,i) = 0.0
            end do
-
+           
            isg = 1
-
+           
            call chi ( xwal,zwal,xwalp,zwalp,isg,chiwc,chiws, ns,0,
      $          cwrkr,cwrki,nsew, blr,bli,rwall )
 
@@ -996,7 +996,7 @@ c-----------------------------------------------------------------------
       DIMENSION blr(*),bli(*),xsce(*),zsce(*),xscp(*),zscp(*)
       DIMENSION creal(nths,nfm), cimag(nths,nfm)
       DIMENSION chir(5,ndimlp), chii(5,ndimlp), rgdl(ndimlp)
-      REAL nq
+      REAL(r8) nq
 
       factpi = twopi
       jmax1 = lmax(1) - lmin(1) + 1

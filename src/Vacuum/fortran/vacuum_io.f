@@ -59,18 +59,18 @@ c-----------------------------------------------------------------------
       USE vglobal_mod
       implicit real(r8) (a-h,o-z)
       implicit integer (i-n)
-
+      
       logical, save :: warned = .false.
 
       character(8) under
       data under / "--------" /
       namelist / modes  / mfel,m,mth,n,mdiv,lsymz,lfunin,xiin,
      .     leqarcw, lpest1, lnova, ladj, ldcon, lgato, lrgato, lspark,
-     $     ismth, lzio, mp0,mp1
+     $     ismth, lzio, mp0, mp1
       namelist / debugs / checkd, checke, check1, check2, checks,
      $     wall, lkplt, verbose_timer_output
       namelist / vacdat / ishape,aw,bw,cw,dw,tw,nsing,epsq,noutv,delg,
-     .     idgt, idot, delfac, idsk, cn0
+     .     idgt, idot, delfac, idsk, cn0, use_legacy_greens_function
       namelist / diagns / lkdis, ieig, iloop,
      $     nloop,nloopr,
      .     lpsub, nphil, nphse, mx, mz, nph, xofsl,
@@ -116,7 +116,7 @@ c-----------------------------------------------------------------------
      $        "  > Vacuum code overriding r",r," from vac.in, to be",0
          r=0.0
          warned = .true.
-      endif
+      endif 
 c-----------------------------------------------------------------------
 c     subsidiary computations.
 c-----------------------------------------------------------------------
@@ -208,76 +208,10 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     defaults.
 c-----------------------------------------------------------------------
-      lcdf = 0
       do i = 1, mth2
          delta(i) = 0.0
-         xjacob(i) = 0.0
       enddo
       r = sqrt(r2)
-c-----------------------------------------------------------------------
-c     gato inputs.
-c-----------------------------------------------------------------------
-      if ( lrgato .eq. 1 ) then
-         lzio = 0
-         dx0 = 0.5
-         call readvacin ( mfel,rgato,ndum2,ngato,qa1,xinf,zinf,
-     $        delta, vecin, xigr_,xigi_, mth,mth1,mth2, ndfel,dx0,
-     $        ieig, outmod, iotty )
-         call wrtout ( mfel, xigr_, "xigr", 1, mfel )
-         l11 = lmin(1)
-         l22 = lmax(1)
-         call fanal ( xigr_, mfel, xirc, xirs, l11,l22, pye,-0.5_8 )
-         call fanal ( xigi_, mfel, xiic, xiis, l11,l22, pye,-0.5_8 )
-         llnn = l22 - l11 + 1
-         call vecwrt ( llnn, xirc, "xirc(l)", 1, llnn, outmod,0 )
-         call vecwrt ( llnn, xirs, "xirs(l)", 1, llnn, outmod,0 )
-         call vecwrt ( llnn, xiic, "xiic(l)", 1, llnn, outmod,0 )
-         call vecwrt ( llnn, xiis, "xiis(l)", 1, llnn, outmod,0 )
-         dth = twopi / mth
-         n = ngato
-         do ii = 1, mth+1
-            delta(ii) = 0.0
-         enddo
-         write ( outmod, '(/,"******* DELTA set to 0.0 ******" )' )
-         write ( iotty, 701 ) mfel,rgato,ndum2,ngato, ga1,fa1,qa1
-         write ( outmod,701 ) mfel,rgato,ndum2,ngato, ga1,fa1,qa1
-      endif
-c-----------------------------------------------------------------------
-c     more gato computations.
-c-----------------------------------------------------------------------
-      if ( lgato .ne. 0 ) then
-         if ( lgato .eq. 1 ) then
-            lfele = 1
-            lmin(1) = 1
-            lmax(1) = mfel
-         endif
-         if (  lrgato .eq. 0 )
-     $        call adjustm ( mth, mfel, mth1,mth2, ndfel, iotty,outmod )
-         dth = twopi/mth
-         write ( outmod, '(/,5x, "mth, mfel, ndfel, dth = ",
-     $        3i5, 1pe13.5 )' ) mth, mfel, ndfel, dth
-         write ( iotty,  '(/,5x, "mth, mfel, ndfel, dth = ",
-     $        3i5, 1pe13.5 )' ) mth, mfel, ndfel, dth
-      endif
-c-----------------------------------------------------------------------
-c     more computations.
-c-----------------------------------------------------------------------
-      if ( ladj .eq. 1 ) then
-         read ( 50, 601 ) mthin1,lmin(1),lmax(1),nadj, qa1
-         mthin = mthin1 - 1
-         mthin2 = mthin1 + 1
-         n = nadj
-         write ( iotty, 602 ) mthin,lmin(1),lmax(1),nadj, ga1,fa1,qa1
-         write ( outmod,602 ) mthin,lmin(1),lmax(1),nadj, ga1,fa1,qa1
-         read ( 50,605 ) ( vecin(i), i=1,mthin1 )
-         call trans ( vecin,mthin, xinf,mth )
-         read ( 50,605 ) ( vecin(i), i = 1,mthin1 )
-         call trans ( vecin,mthin, zinf,mth )
-         read ( 50,605 ) ( vecin(i), i = 1,mthin1 )
-         call trans ( vecin,mthin, delta,mth )
-         close (50)
-         go to 1111
-      endif
 c-----------------------------------------------------------------------
 c     dcon inputs.
 c-----------------------------------------------------------------------
@@ -314,139 +248,9 @@ c
          write ( outmod,5702 ) mthin,lmin(1),lmax(1),n, qa1
          go to 1111
       endif
-c-----------------------------------------------------------------------
-c     more computations.
-c-----------------------------------------------------------------------
-      if ( lzio .eq. 1 ) then
-         r=0
-         lgivup=1
-         nadres = 1
-         call zrd(iomode,real(ntitle(1),r8),43,nadres,lgivup,999)
-         write ( outmod, 9000 )   ntitle,dat
-         lj = 0
-         zma = 0.0
-         write ( iodsk, 8011 ) nosurf,mthin, lj,mj,nj, xzero, r,
-     $        upsiln, xma, zma
-         r2     = r * r
-         r4     = r2 * r2
-         r6     = r4 * r2
-         mthin1 = mthin + 1
-         mthin2 = mthin + 2
-      endif
-c-----------------------------------------------------------------------
-c     more computations.
-c-----------------------------------------------------------------------
-      if ( lzio .eq. 1 ) then
-         nadres = 50
-         call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-         write ( iodsk, 8021 ) ( vecin(i), i = 1, mthin2 )
-         call trans ( vecin,mthin, xinf,mth )
-         nadres = nadres + mthin2
-         call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-         write ( iodsk, 8021 ) ( vecin(i), i = 1, mthin2 )
-         call trans ( vecin,mthin, zinf,mth )
-         length = ntsin * nsf
-         ladres = 50 + 2*mthin2 + nosurf
-         nadres = ladres + (nosurf-1)*ntsin
-         lgivup = 1
-         call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-         write ( iodsk, 8021 ) ( vecin(i), i = 1, mthin2 )
-         call trans ( vecin,mthin, grpssq,mth )
-         if ( .not. lpest1 ) then
-            nadres = nadres + 8*length
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            write ( iodsk, 8021 ) ( vecin(i), i = 1, mthin2 )
-            call trans ( vecin,mthin, xjacob,mth )
-            length = ntsin * nsf
-            ladres = 50 + 2*mthin2 + nosurf
-            nadres = ladres + (nosurf-1)*ntsin + 10*length
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            write ( iodsk, 8021 ) ( vecin(i), i = 1, mthin2 )
-            call trans ( vecin,mthin, delta,mth )
-         endif
-c-----------------------------------------------------------------------
-c     more computations.
-c-----------------------------------------------------------------------
-         if ( lpest1 ) then
-            do i = 1, mth2
-               xjacob(i) = upsiln * xinf(i)**2 / ( twopi*r )
-            enddo
-         endif
-c-----------------------------------------------------------------------
-c     more computations.
-c-----------------------------------------------------------------------
-         nadres = 50
-         nadres = nadres + nosurf*3 - 1
-         call zrd(outmap1,qa1,1,nadres,lgivup,999)
-         nadres = nadres + nosurf*2
-         call zrd(outmap1,ga1,1,nadres,lgivup,999)
-         nadres = nadres + nosurf*2
-         call zrd(outmap1,fa1,1,nadres,lgivup,999)
-         write ( outmod,9600 ) mp1, qa1, fa1, ga1
-         write ( iotty, 9600 ) mp1, qa1, fa1, ga1
-         write ( iodsk, 8031 ) qa1, ga1, fa1
-c-----------------------------------------------------------------------
-c     nova inputs.
-c-----------------------------------------------------------------------
-         if ( lnova ) then
-            length = ntsin * nsf
-            ladres = 50 + 2*mthin2 + nosurf
-            nadres = ladres + (nosurf-1)*ntsin
-            lgivup = 1
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            call trans ( vecin,mthin, grpssq,mth )
-            nadres=nadres+length
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            call trans ( vecin,mthin, xsq,mth )
-            nadres=nadres+5*length
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            call trans ( vecin,mthin, gpsdth,mth )
-            nadres=nadres+length
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            call trans ( vecin,mthin, xsqdth,mth )
-            nadres=nadres+length
-            call zrd(iomode,vecin(1),mthin2,nadres,lgivup,999)
-            call trans ( vecin,mthin, xjacob,mth )
-            mthd2p1=mth/2+1
-            do i=1,mthd2p1
-               xsdtxs(i)=xsqdth(i)/xsq(i)
-               gpdtgp(i)=gpsdth(i)/grpssq(i)
-               xjdtxj(i)=0.5*(mj*xsdtxs(i)-nj*gpdtgp(i))
-               xjacob(mth2-i)=xjacob(i)
-               xjdtxj(mth2-i)=-xjdtxj(i)
-               delta(mth2-i)=-delta(i)
-            enddo
-            xjdtxj(1)=0.
-            xjdtxj(mthd2p1)=0.
-            delta(1)=0.
-            delta(mthd2p1)=0.
-         endif
-         call zcl ( outmap1, 999 )
-         call zcl ( iomode, 999 )
-      endif
-c-----------------------------------------------------------------------
-c     more computations.
-c-----------------------------------------------------------------------
+
  1111 continue
-      if ( ipshp .eq. 1 ) then
-         qa1  = qain
-         rgato = xpl
-         write ( outmod, 111 ) ipshp, qa1
-         write ( iotty,  111 ) ipshp, qa1
-         do i = 1, mth2
-            theta = (i-1) * dth
-            xinf(i) = xpl + apl * cos(theta+dpl*sin(theta))
-            zinf(i) =     - bpl* apl * sin(theta)
-            delta(i) = 0.0
-            xjacob(i) = 0.0
-         enddo
-      endif
-      write ( outmod,9500 ) nsf0, ntsin0, nths0, nfm, mtot,
-     $     r, upsiln, mthin, nosurf
-      write ( iotty,9500 ) nsf0, ntsin0, nths0, nfm, mtot,
-     $     r, upsiln, mthin, nosurf
       do i = 1, mth1
-         zerov(i) = 0.0
          thgr(i) = (i-1)*dth
       enddo
 

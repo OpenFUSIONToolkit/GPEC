@@ -43,7 +43,7 @@ wv = zeros(ComplexF64, mpert, mpert)
 complex_flag = true     # Use complex arithmetic
 kernelsignin = -1.0    # Kernel sign
 wall_flag = false      # Include wall effects
-farwal_flag = true     # Far wall approximation
+farwall_flag = true     # Far wall approximation
 
 # Geometry and source data
 grrio = rand(Float64, 2*(mthvac+5), mpert*2)  # Geometry data
@@ -53,7 +53,7 @@ xzptso = rand(Float64, mthvac+5, 4)           # Source points
 JPEC.VacuumMod.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
-    wall_flag, farwal_flag,
+    wall_flag, farwall_flag,
     grrio, xzptso
 )
 
@@ -88,7 +88,7 @@ heatmap(angle.(wv),
 ```julia
 # Enable wall calculations
 wall_flag = true
-farwal_flag = false  # Do not use far wall approximation
+farwall_flag = false  # Do not use far wall approximation
 
 # Additional wall parameters might be needed
 # (specific implementation depends on geometry)
@@ -96,7 +96,7 @@ farwal_flag = false  # Do not use far wall approximation
 JPEC.VacuumMod.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
-    wall_flag, farwal_flag,
+    wall_flag, farwall_flag,
     grrio, xzptso
 )
 ```
@@ -168,6 +168,6 @@ using BenchmarkTools
 
 @time JPEC.VacuumMod.mscvac(wv, mpert, mtheta, mthvac,
                            complex_flag, kernelsignin,
-                           wall_flag, farwal_flag,
+                           wall_flag, farwall_flag,
                            grrio, xzptso)
 ```

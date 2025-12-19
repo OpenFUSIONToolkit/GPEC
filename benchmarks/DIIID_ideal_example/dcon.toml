@@ -36,3 +36,6 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
+
+[DEBUG]
+output_benchmark_data = true      # Output benchmark data for comparison between codes
