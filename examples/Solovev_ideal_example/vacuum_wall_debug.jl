@@ -10,12 +10,26 @@ Pkg.activate("$(@__DIR__)/../.."); using JPEC
                 vac_inputs, wall_settings,
                 n, ipert_n, psifac) = benchmark_inputs
 
+
+use_wall_arg = true
+
 # Lower mpert to be managable for testing
 mlow = -2
 mhigh = 2
 mpert = mhigh-mlow+1
 
 wv_block = zeros(ComplexF64, mpert, mpert)
+
+
+# make a new wall settings object
+if !use_wall_arg
+    wall_flag = false
+    farwall_flag = true
+    wall_settings = JPEC.Vacuum.WallShapeSettings(shape="nowall", a=wall_settings.a, aw=wall_settings.aw, 
+                                                    bw=wall_settings.bw, cw=wall_settings.cw, 
+                                                    dw=wall_settings.dw, tw=wall_settings.tw,
+                                                    equal_arc_wall=wall_settings.equal_arc_wall)
+end
 
 
 JPEC.Vacuum.set_dcon_params(mtheta_eq, mlow, mhigh, 

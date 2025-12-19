@@ -142,7 +142,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
             # 4.5 get source point index(ic) theta(theta), X(xt), and Z(zt)
             ic = i + j + istart - 1
-            if ic ≥ mtheta + 1
+            if ic > mtheta
                 ic = ic - mtheta
             end
             # theta_source=(ic-1)*dtheta
@@ -719,10 +719,9 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
     # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ 
-    dG_dX0 = 1/(R5*x_source) * ((2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source2*(x_source2-x_obs2+ζ2) * p0 ) 
-    dG_dZ0 = 1/(R5)* ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
-    coupling_0 = -x_source * (dz_dtheta * dG_dX0 - dx_dtheta * dG_dZ0)
-
+    dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source*(x_source2-x_obs2+ζ2) * p0 ) 
+    dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
+    coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5
     return G_n, coupling_n, coupling_0
 end
 
