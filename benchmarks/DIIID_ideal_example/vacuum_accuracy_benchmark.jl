@@ -3,9 +3,9 @@ using Pkg
 using Plots
 using LinearAlgebra
 
-Pkg.activate("../.."); using JPEC
+Pkg.activate("$(@__DIR__)/../.."); using JPEC
 
-@load "benchmark_inputs.jld2" benchmark_inputs
+@load "$(@__DIR__)/../../examples/DIIID-like_ideal_example/benchmark_inputs.jld2" benchmark_inputs
 
 (; wv_block, mpert, mtheta_eq, mthvac, complex_flag, kernelsign,
                 wall_flag, farwall_flag, grri, xzpts, ahg_file, dir_path,
@@ -25,7 +25,7 @@ function compute_accuracy_metrics(wv_test::Matrix, wv_ref::Matrix)
 end
 
 benchmark_n = true
-benchmark_m = true
+benchmark_m = false
 
 if benchmark_n
     println("="^60)
@@ -33,8 +33,7 @@ if benchmark_n
     println("="^60)
 
     # Define range of n values to test
-    n_values = [1, 2, 4, 8, 16, 32, 64]
-
+    n_values = range(1,15, step=1)
     # Store results for Julia vs Fortran comparison
     relative_errors_jf = Float64[]
     max_errors_jf = Float64[]
@@ -52,7 +51,7 @@ if benchmark_n
         wv_block_fortran = copy(wv_block)
         JPEC.Vacuum.mscvac(wv_block_fortran, mpert, mtheta_eq, mthvac,
                           complex_flag, kernelsign, wall_flag,
-                          farwall_flag, grri, xzpts, ahg_file, "../../examples/DIIID_ideal_example")
+                          farwall_flag, grri, xzpts)
 
         JPEC.Vacuum.unset_dcon_params()
 
@@ -131,7 +130,7 @@ if benchmark_m
     grri_ref = zeros(Float64, 2 * (mthvac + 5), 2 * mpert_ref)
     JPEC.Vacuum.mscvac(wv_block_ref_fortran_m, mpert_ref, mtheta_eq, mthvac,
                        complex_flag, kernelsign, wall_flag,
-                       farwall_flag, grri_ref, xzpts, ahg_file, "../../examples/DIIID_ideal_example")
+                       farwall_flag, grri_ref, xzpts, ahg_file, "$(@__DIR__)/../../examples/DIIID-like_ideal_example")
     JPEC.Vacuum.unset_dcon_params()
 
     println("Reference solutions computed.\n")
@@ -151,7 +150,7 @@ if benchmark_m
         grri_test = zeros(Float64, 2 * (mthvac + 5), 2 * mpert_test)
         JPEC.Vacuum.mscvac(wv_block_fortran_m, mpert_test, mtheta_eq, mthvac,
                           complex_flag, kernelsign, wall_flag,
-                          farwall_flag, grri_test, xzpts, ahg_file, "../../examples/DIIID_ideal_example")
+                          farwall_flag, grri_test, xzpts, ahg_file, "$(@__DIR__)/../../examples/DIIID-like_ideal_example")
 
         JPEC.Vacuum.unset_dcon_params()
 
