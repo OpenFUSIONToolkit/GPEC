@@ -217,7 +217,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 ztp = Interpolations.gradient(spline_z, tgaus0)[1]
 
                 # call green function
-                G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,n,uselegacygreenfunction=true)
+                G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,n)
 
                 # add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
                 # iops = 1
@@ -628,14 +628,291 @@ function Pn_minus_half_1997(s::Real, n::Int)
     return P
 end
 
-function Pn_minus_half_2007(s::Real, n::Int)
-    @warn "2007 paper implementation of Pn_minus_half is not yet complete. Use old version."
-    # This is a temporary alias. The new implementation should be added here.
-    return Pn_minus_half_1997(s, n)
+"""
+    elliptic_integrals_bulirsch(m1; error=1e-8, maxit=10)
+
+Compute complete elliptic integrals K(m1) and E(m1) using Bulirsch's algorithm.
+This is the Julia equivalent of the Fortran `ek3` subroutine.
+
+# Arguments
+- `m1::Float64`: Complementary parameter (1 - k²), where k is the elliptic modulus
+- `error::Float64`: Convergence tolerance (default 1e-8)
+- `maxit::Int`: Maximum iterations (default 10)
+
+# Returns
+- `K::Float64`: Complete elliptic integral of the first kind K(m1)
+- `E::Float64`: Complete elliptic integral of the second kind E(m1)
+- `convergence::Float64`: Convergence metric
+- `iterations::Int`: Number of iterations performed
+
+# Notes
+- Based on Bulirsch's method as described in Numerical Recipes
+- Precision is approximately error²
+- Reference: JCP 221 (2007) 330-348
+"""
+function elliptic_integrals_bulirsch(m1::Float64; error::Float64=1e-8, maxit::Int=10)
+
+    # Check valid input
+    if m1 <= 0.0 || m1 > 1.0
+        throw(DomainError(m1, "Input m1 must be in range (0, 1]"))
+    end
+
+    # Initialize for K and E calculation
+    pp = 1.0
+    aa = 1.0
+    bb1 = 1.0      # for K
+    bb2 = abs(m1)  # for E
+
+    qcval = sqrt(abs(m1))
+    aval0 = aa
+    bval1 = bb1
+    bval2 = bb2
+    pval0 = pp
+
+    eval = qcval
+    emval = 1.0
+
+    # Initialize based on pval0 > 0
+    if pval0 > 0.0
+        pval = sqrt(pval0)
+        aval1 = aval0
+        aval2 = aval0
+        bval1 = bval1 / pval
+        bval2 = bval2 / pval
+    else
+        fval = qcval * qcval
+        tval = 1.0 - fval
+        gval = 1.0 - pval0
+        fval = fval - pval0
+        qval1 = tval * (bval1 - aval0 * pval0)
+        qval2 = tval * (bval2 - aval0 * pval0)
+
+        pval = sqrt(fval / gval)
+        aval1 = (aval0 - bval1) / gval
+        aval2 = (aval0 - bval2) / gval
+        bval1 = aval1 * pval - qval1 / (gval * gval * pval)
+        bval2 = aval2 * pval - qval2 / (gval * gval * pval)
+    end
+
+    # Iterate until convergence
+    kounter = 0
+    sval = 0.0
+
+    while kounter < maxit
+        kounter += 1
+
+        hval1 = aval1
+        hval2 = aval2
+        aval1 = aval1 + bval1 / pval
+        aval2 = aval2 + bval2 / pval
+        rval = eval / pval
+        bval1 = bval1 + hval1 * rval
+        bval1 = bval1 + bval1
+        bval2 = bval2 + hval2 * rval
+        bval2 = bval2 + bval2
+        pval = rval + pval
+
+        sval = emval
+        emval = qcval + emval
+
+        if abs(sval - qcval) <= sval * error
+            break
+        end
+
+        qcval = sqrt(eval)
+        qcval = qcval + qcval
+        eval = qcval * emval
+    end
+
+    # Calculate convergence metric
+    snorm = (sval != 0.0) ? sval * sval : 1.0
+    convergence = (sval - qcval)^2 / snorm
+    convergence = max(convergence, 1.0e-100)
+
+    # Calculate final K and E values
+    K = π/2 * (bval1 + aval1 * emval) / (emval * (emval + pval))
+    E = π/2 * (bval2 + aval2 * emval) / (emval * (emval + pval))
+
+    return K, E, convergence, kounter
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=true)
+    Pn_minus_half_2007(s, n)
+
+Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s),
+using methods from Chance J. Comp. Phys 221 (2007) 330-348.
+
+This implementation uses:
+1. Bulirsch's algorithm for elliptic integrals (more accurate than polynomial approximations)
+2. Gaussian integration for large mode numbers (n*rhohat >= 0.1) where rhohat = 1/√(2*y*w)
+3. Upward recurrence for small mode numbers
+
+# Arguments
+- `s::Real`: Legendre function parameter (s > 1)
+- `n::Int`: Maximum order n (n ≥ 0)
+
+# Returns
+- `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
+
+# Notes
+- This version is more accurate than Pn_minus_half_1997 for large n
+- Expected to diverge from 1997 version at large nloc
+- Reference: JCP 221 (2007) 330-348
+"""
+function Pn_minus_half_2007(s::Real, n::Int)
+
+    # Constants
+    sqpi = sqrt(π)
+    pii = 2.0 / π
+    sqtwo = sqrt(2.0)
+
+    # Initialize output array
+    P = zeros(n + 2)
+
+    # Preliminary computations
+    xxq = s * s
+    ysq = xxq - 1.0
+    y = sqrt(ysq)
+    w = s + y
+
+    # rhohat parameter for determining integration method
+    rhohatsq = 1.0 / (2.0 * y * w)
+    rhohat = sqrt(rhohatsq)
+
+    # Compute m1 = 1/w (complementary parameter for elliptic integrals)
+    m1 = 1.0 / w
+    m1sq = m1 * m1
+    m1sqrt = sqrt(m1)      # m1^(1/4)
+    m1sqrti = sqrt(w)      # m1^(-1/4)
+
+    # Compute elliptic integrals using Bulirsch algorithm
+    K, E, conv, iters = elliptic_integrals_bulirsch(m1sq, error=1e-8, maxit=10)
+
+    # Base cases: P^0 and P^1
+    pn = pii * m1sqrt * K
+    pnp = pii * m1sqrti * E
+
+    P[1] = pn  # P^0_{-1/2}
+    pp = (pnp - s * pn) / (2.0 * y)
+    P[2] = pp  # P^1_{-1/2}
+
+    # Use Gaussian integration if n*rhohat >= 0.1
+    if n * rhohat >= 0.1
+        # 32-point Gaussian quadrature weights
+        wg32 = [
+            0.007018610009470096600, 0.016274394730905670605,
+            0.025392065309262059456, 0.034273862913021433103,
+            0.042835898022226680657, 0.050998059262376176196,
+            0.058684093478535547145, 0.065822222776361846838,
+            0.072345794108848506225, 0.078193895787070306472,
+            0.083311924226946755222, 0.087652093004403811143,
+            0.091173878695763884713, 0.093844399080804565639,
+            0.095638720079274859419, 0.096540088514727800567,
+            0.096540088514727800567, 0.095638720079274859419,
+            0.093844399080804565639, 0.091173878695763884713,
+            0.087652093004403811143, 0.083311924226946755222,
+            0.078193895787070306472, 0.072345794108848506225,
+            0.065822222776361846838, 0.058684093478535547145,
+            0.050998059262376176196, 0.042835898022226680657,
+            0.034273862913021433103, 0.025392065309262059456,
+            0.016274394730905670605, 0.007018610009470096600
+        ]
+
+        # 32-point Gaussian quadrature abscissae
+        xg32 = [
+            -0.997263861849481563545, -0.985611511545268335400,
+            -0.964762255587506430774, -0.934906075937739689171,
+            -0.896321155766052123965, -0.849367613732569970134,
+            -0.794483795967942406963, -0.732182118740289680387,
+            -0.663044266930215200975, -0.587715757240762329041,
+            -0.506899908932229390024, -0.421351276130635345364,
+            -0.331868602282127649780, -0.239287362252137074545,
+            -0.144471961582796493485, -0.048307665687738316235,
+             0.048307665687738316235,  0.144471961582796493485,
+             0.239287362252137074545,  0.331868602282127649780,
+             0.421351276130635345364,  0.506899908932229390024,
+             0.587715757240762329041,  0.663044266930215200975,
+             0.732182118740289680387,  0.794483795967942406963,
+             0.849367613732569970134,  0.896321155766052123965,
+             0.934906075937739689171,  0.964762255587506430774,
+             0.985611511545268335400,  0.997263861849481563545
+        ]
+
+        # Integration limits
+        xl = 0.0
+        xu = 5.0
+
+        # Transform to integration interval
+        agaus = 0.5 * (xu + xl)
+        bgaus = 0.5 * (xu - xl)
+
+        # Calculate integrals for P^n and P^{n+1}
+        gint = 0.0
+        gintp = 0.0
+
+        for ig in 1:32
+            tg0 = agaus + xg32[ig] * bgaus
+            tg02 = tg0 * tg0
+            tg1 = tg02 / (2.0 * n)
+            tg1p = tg02 / (2.0 * n + 2.0)
+            sinhtg1 = sinh(tg1)
+            sinhtg1p = sinh(tg1p)
+            sinhtg12 = sinhtg1 * sinhtg1
+            sinhtg12p = sinhtg1p * sinhtg1p
+            dnom = s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12)
+            dnomp = s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p)
+            dnom = sqrt(dnom)
+            dnomp = sqrt(dnomp)
+            anumr = tg0 * exp(-tg02)
+            gint += wg32[ig] * anumr / dnom
+            gintp += wg32[ig] * anumr / dnomp
+        end
+
+        gint *= bgaus
+        gintp *= bgaus
+
+        # Calculate coefficients
+        pcoef = sqrt((s - 1.0) / (s + 1.0))
+
+        # Gamma functions: Gamma[1/2 - n] and Gamma[1/2 - (n+1)]
+        gamn = sqpi
+        gamp = -2.0 * sqpi
+
+        if n != 0
+            # Compute Gamma[1/2 - n] = sqpi / product(-(i-1) - 0.5 for i in 1:n)
+            gamn = sqpi / prod(-(i - 1) - 0.5 for i in 1:n)
+            gamp = -gamn / (n + 0.5)
+        end
+
+        # Final Legendre function values
+        gint = sqtwo * pcoef^n * gint / (n * sqpi * gamn)
+        gintp = sqtwo * pcoef^(n + 1) * gintp / ((n + 1.0) * sqpi * gamp)
+
+        P[end-1] = gint   # P^n_{-1/2}
+        P[end] = gintp    # P^{n+1}_{-1/2}
+
+    else
+        # Use upward recurrence for small n*rhohat < 0.1
+        if n == 0
+            return P
+        end
+
+        for i in 1:n
+            ak02 = 0.5 - i
+            pm = pn
+            pn = pp
+            pp = -2.0 * i * s * pn / y - ak02 * ak02 * pm
+        end
+
+        P[end-1] = pn   # P^n_{-1/2}
+        P[end] = pp     # P^{n+1}_{-1/2}
+    end
+
+    return P
+end
+
+"""
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
@@ -649,7 +926,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
 - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
 - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
 - `n`: Toroidal mode number (Int)
-- `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default true)
+- `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
 
 # Returns
 
@@ -662,8 +939,9 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
 - Uses Legendre functions P^n_{-1/2}(s) computed via elliptic integrals
 - Implements analytical derivatives from Chance 1997 equations
 - The coupling terms include the Jacobian factor from the coordinate transformation
+- By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=true)
+function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2
