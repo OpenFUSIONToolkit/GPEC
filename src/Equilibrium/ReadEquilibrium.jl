@@ -348,11 +348,11 @@ function read_chease(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        sq_in = Spl.spline_setup(xs, fs; bctype="extrap")
+        sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
         Spl.spline_integrate!(sq_in)
         fs_copy = copy(sq_in.fs)
         fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.spline_setup(sq_in._xs, fs_copy; bctype="extrap")
+        sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
 
         # --- Setup parameters ---
         mtau = ntnova
