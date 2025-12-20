@@ -1,3 +1,5 @@
+import DifferentialEquations
+
 """
     lar_init_conditions(rmin, sigma_type, params)
 
@@ -127,7 +129,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     p = lar_input
 
     prob = ODEProblem(dydr, y0, tspan, p)
-    sol = solve(prob, Rosenbrock23(; autodiff=AutoFiniteDiff()); reltol=1e-6, abstol=1e-8, maxiters=10000)
+
+    sol = solve(prob, Rosenbrock23(; autodiff=DifferentialEquations.AutoFiniteDiff()); reltol=1e-6, abstol=1e-8, maxiters=10000)
 
     r_arr = sol.t
     y_mat = hcat(sol.u...)'
