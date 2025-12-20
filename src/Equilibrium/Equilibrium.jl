@@ -21,7 +21,7 @@ export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutp
 const mu0 = 4π * 1e-7
 
 """
-    setup_equilibrium(equil_input::EquilInput)
+    setup_equilibrium(eq_config::EquilibriumConfig)
 
 The main public API for the `Equilibrium` module. It orchestrates the entire
 process of reading an equilibrium file, running the appropriate solver, and
@@ -29,7 +29,7 @@ returning the final processed `PlasmaEquilibrium` object.
 
 ## Arguments:
 
-  - `equil_input`: An `EquilInput` object containing all necessary setup parameters.
+  - `eq_config`: An `EquilibriumConfig` object containing all necessary setup parameters.
 
 ## Returns:
 
