@@ -391,7 +391,7 @@ function read_chease(config::EquilibriumConfig)
         ys = range(0, 2π; length=mtau) |> collect
 
         # Setup bicubic spline with periodic boundary conditions
-        rz_in = Spl.bicube_setup(xs, ys, fs; bctypex="extrap", bctypey="periodic")
+        rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
 
         if diagnostics
             # --- Print first 5 and last 5 entries of each slice ---
