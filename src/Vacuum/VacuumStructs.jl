@@ -84,7 +84,7 @@ Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid poi
 - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at wall
 - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at wall
 """
-@kwdef struct WallGeometry
+@kwdef mutable struct WallGeometry
     nowall::Bool = true
     is_closed_toroidal::Bool = true
     x::Vector{Float64} = Float64[]
@@ -116,7 +116,7 @@ Struct containing input settings for vacuum wall geometry.
 - `equal_arc_wall::Bool`: Flag to enforce equal arc length distribution of nodes on the wall 
   (recommended unless wall is very close to plasma)
 """
-@kwdef struct WallShapeSettings 
+@kwdef mutable struct WallShapeSettings 
 
     # Core shape selection
     shape::String = "nowall"
