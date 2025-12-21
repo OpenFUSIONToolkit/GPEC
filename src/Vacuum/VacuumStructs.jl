@@ -106,7 +106,7 @@ Struct containing input settings for vacuum wall geometry.
   - `"elliptical"`: Elliptical wall
   - `"dee"`: Dee-shaped wall
   - `"mod_dee"`: Modified Dee-shaped wall
-  - `"filepath"`: Custom wall shape from the file you specify
+  - `"your_file_path"`: Custom wall shape from the file you specify
 - `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
 - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
 - `bw::Float64`: Elongation parameter for wall shapes
@@ -325,6 +325,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     else
         filepath = wall_settings.shape
+        @info "Loading wall geometry from $(filepath)"
         !isfile(filepath) && @error "ERROR: Wall geometry file $filepath does not exist.
             Please set the wall shape parameter to a valid file path or a built-in shape (nowall, conformal, elliptical, dee, mod_dee)."
 
