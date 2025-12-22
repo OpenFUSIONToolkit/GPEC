@@ -203,7 +203,7 @@ if benchmark_m
              yscale=:log10,
              minorgrid=true,
              framestyle=:box)
-    plot!(p4, fortran_conv_plot,
+    plot!(p4, mhigh_values, fortran_conv_plot,
          label="Fortran (vs mhigh=$mhigh_reference)",
          marker=:square,
          linewidth=2)
