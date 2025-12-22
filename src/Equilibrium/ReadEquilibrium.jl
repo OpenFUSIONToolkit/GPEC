@@ -146,24 +146,23 @@ function read_chease2(config::EquilibriumConfig)
     nsym = parse(Int, header_parts[3])
     
     # --- Parse axx (FORMAT 20: 1E22.15) ---
-    axx = parse(Float64, split(lines[2])[1])
-
+    axx = parse(Float64, split(lines[2])[1])   # RBOXLEN - compuational box lenth
     # --- Pre-allocate Arrays ---
-    zcpr = zeros(npsi1 - 1)
-    zcppr = zeros(npsi1)
-    zq = zeros(npsi1)
-    zdq = zeros(npsi1)
-    ztmf = zeros(npsi1)
-    ztp = zeros(npsi1)
-    zfb = zeros(npsi1)
-    zfbp = zeros(npsi1)
-    zpsi = zeros(npsi1)
-    zpsim = zeros(npsi1 - 1)
+    zcpr = zeros(npsi1 - 1) # Don't know.. no in EQDSK
+    zcppr = zeros(npsi1) # dP/dψ .
+    zq = zeros(npsi1) # q(ψ)
+    zdq = zeros(npsi1) # Don't know.. no in EQDSK
+    ztmf = zeros(npsi1) # F (T in chease) # Don't know.. no in EQDSK
+    ztp = zeros(npsi1) # dF/dψ (T' in chease) # Don't know.. no in EQDSK
+    zfb = zeros(npsi1) # normazlied F(ψ)/q(ψ)
+    zfbp = zeros(npsi1) # Don't know.. no in EQDSK
+    zpsi = zeros(npsi1) # ψ Poloidal flux
+    zpsim = zeros(npsi1 - 1) # ψ mid
 
-    zrcp = zeros(ntnova + 3, npsi1)
-    zzcp = zeros(ntnova + 3, npsi1)
-    zjacm = zeros(ntnova + 3, npsi1)
-    zjac = zeros(ntnova + 3, npsi1)
+    zrcp = zeros(ntnova + 3, npsi1) # normalized R
+    zzcp = zeros(ntnova + 3, npsi1) # normalized Z
+    zjacm = zeros(ntnova + 3, npsi1) # 𝒥(Jacobian)
+    zjac = zeros(ntnova + 3, npsi1) # 𝒥(Jacobian
 
     # --- Helper to parse 5E22.15 data per line ---
     function parse_floats(lines_range)
@@ -219,7 +218,6 @@ function read_chease2(config::EquilibriumConfig)
     load_matrix!(zzcp)
     load_matrix!(zjacm)
     load_matrix!(zjac)
-
     println("--> Parsed from header:  ntnova = $ntnova, npsi1 = $npsi1, nsym = $nsym")
 
     # --- Apply Normalization ---
@@ -252,9 +250,9 @@ function read_chease2(config::EquilibriumConfig)
 
     # Construct fs matrix: (npsi1 rows, 4 columns)
     fs = zeros(npsi1, 4)
-    fs[:, 1] .= zq .* zfb
-    fs[:, 2] .= zcppr
-    fs[:, 3] .= zq
+    fs[:, 1] .= zq .* zfb # normalized T(F)
+    fs[:, 2] .= zcppr # normalized Pressure
+    fs[:, 3] .= zq # q profile
     # Fit spline with extrapolation boundary condition (bctype = 3)
     sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
     # --- Integrate pressure ---
