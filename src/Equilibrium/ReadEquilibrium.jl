@@ -120,14 +120,14 @@ function read_efit(config::EquilibriumConfig)
 end
 
 """
-    _read_chease2(equil_in)
+    read_chease2(config)
 
 Parses a chease2 file, creates initial 1D and 2D splines, finds magnetic axis, and bundles
 them into a `InverseRunInput` object.
 
 ## Arguments:
 
-  - `equil_in`: The `EquilInput` object containing the filename and parameters.
+  - `config`: The `EquilibriumConfig` object containing the filename and parameters.
 
 ## Returns:
 
@@ -136,13 +136,15 @@ them into a `InverseRunInput` object.
 function read_chease2(config::EquilibriumConfig)
     println("--> Reading CHEASE file: $(config.control.eq_filename)")
     lines = readlines(config.control.eq_filename)
+    R0EXP = config.control.r0exp
+    B0EXP = config.control.b0exp
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])
     ntnova = parse(Int, header_parts[1])
     npsi1 = parse(Int, header_parts[2])
     nsym = parse(Int, header_parts[3])
-
+    
     # --- Parse axx (FORMAT 20: 1E22.15) ---
     axx = parse(Float64, split(lines[2])[1])
 
@@ -220,12 +222,34 @@ function read_chease2(config::EquilibriumConfig)
 
     println("--> Parsed from header:  ntnova = $ntnova, npsi1 = $npsi1, nsym = $nsym")
 
+    # --- Apply Normalization ---
+    # Scale geometry
+    zrcp .*= R0EXP
+    zzcp .*= R0EXP
+
+    # Scale flux
+    # Psi_phys = Psi_norm * R0^2 * B0
+    psio_norm = zpsi[end] - zpsi[1]
+    psio = psio_norm * R0EXP^2 * B0EXP
+
+    # Scale Toroidal Field Function F
+    # F_phys = F_norm * R0 * B0
+    zfb .*= (R0EXP * B0EXP)
+
+    # Scale Pressure Gradient P'
+    # We want integrated pressure to be mu0 * P_phys
+    # mu0 * P_phys = P_norm * B0^2
+    # P' needs to scale such that Integral(P' * dPsi) scales by B0^2
+    # dPsi scales by R0^2 * B0
+    # So P' must scale by B0 / R0^2
+    zcppr .*= (B0EXP / R0EXP^2)
+
     # Number of spline intervals
     ma = npsi1 - 1
-    # Total ψ range for normalization
-    psio = zpsi[end] - zpsi[1]
+
     # Normalize ψ to [0, 1]
-    xs = (zpsi .- zpsi[1]) ./ psio
+    xs = (zpsi .- zpsi[1]) ./ psio_norm # Use normalized range for x axis [0,1]
+
     # Construct fs matrix: (npsi1 rows, 4 columns)
     fs = zeros(npsi1, 4)
     fs[:, 1] .= zq .* zfb
@@ -238,20 +262,23 @@ function read_chease2(config::EquilibriumConfig)
     # Make a writable copy of the fs array
     fs_copy = copy(sq_in.fs)
     # Normalize pressure integral column (2nd column)
+    # Multiply by psio (physical) to get physical integral
     fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
     # Refit spline using the modified fs_copy
     sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
-    ro = zrcp[1, 1]
-    zo = zzcp[1, 1]
+    poloidal_start = 3
+    poloidal_stop = ntnova + 3
+    ro = zrcp[poloidal_start, 1] # Already scaled
+    zo = zzcp[poloidal_start, 1] # Already scaled
     ys = range(0, 2π; length=mtau) |> collect
     # Allocate and fill fs array (radial × poloidal × 2 quantities)
     fs = zeros(length(xs), length(ys), 2)
-    fs[:, :, 1] .= transpose(zrcp[1:ntnova+1, :])
-    fs[:, :, 2] .= transpose(zzcp[1:ntnova+1, :])
-
+    # CHEASE includes 2 ghost points at the start (wrap-around); drop them.
+    fs[:, :, 1] .= transpose(zrcp[poloidal_start:poloidal_stop, :])
+    fs[:, :, 2] .= transpose(zzcp[poloidal_start:poloidal_stop, :])
 
     # Setup bicubic spline with periodic boundary conditions
     rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
