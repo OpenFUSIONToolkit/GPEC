@@ -336,3 +336,248 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
 
     return ffit
 end
+
+"""
+    make_kinetic_matrix(equil, intr, ctrl, metric, ffit) -> FourFitVars
+
+Computes kinetic damping matrices and extends FourFitVars with kinetic terms.
+Implements Fortran fourfit_kinetic_matrix method 0 (lines 983-1275).
+
+# Algorithm
+1. Loop over radial grid (psi) in parallel
+2. For each psi, sum kinetic contributions over all ell values
+3. Call compute_tpsi_matrices() for ions/electrons
+4. Apply normalization factors (kinfac1, kinfac2) with optional tanh smoothing
+5. Evaluate ideal matrices (A,B,C,D,E,H,F) from existing splines
+6. Add kinetic terms to create modified matrices (non-Hermitian!)
+7. Factor modified A using LU decomposition
+8. Compute 11 composite matrices for ODE solver
+9. Fit all matrices to cubic splines in psi
+
+# Modifications from Ideal MHD
+- A matrix becomes non-Hermitian → use LU instead of Cholesky
+- New composite matrices needed for kinetic ODE formulation
+
+# Returns
+Modified `ffit` with populated kinetic matrix splines
+"""
+function make_kinetic_matrix(
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::DconInternal,
+    ctrl::DconControl,
+    metric::MetricData,
+    ffit::FourFitVars
+) :: FourFitVars
+
+    # Extract parameters
+    mpsi = metric.mpsi
+    chi1 = 2π * equil.psio
+    nl = ctrl.kinetic.nl
+
+    # Determine particle type flag
+    ft = if ctrl.passing_flag && ctrl.trapped_flag
+        "f"  # full distribution
+    elseif ctrl.trapped_flag
+        "t"  # trapped only
+    elseif ctrl.passing_flag
+        "p"  # passing only
+    else
+        error("Kinetic calculations require passing_flag and/or trapped_flag")
+    end
+
+    # Allocate flat storage arrays (for spline fitting)
+    kwmats_flat = [zeros(ComplexF64, mpsi, intr.numpert_total^2) for _ in 1:6]
+    ktmats_flat = [zeros(ComplexF64, mpsi, intr.numpert_total^2) for _ in 1:6]
+
+    akmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    bkmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    ckmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    f0mats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    pmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    paats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    kkmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    kkaats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    r1mats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    r2mats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    r3mats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    gaats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+
+    # Parallel loop over radial surfaces (matches Fortran OMP PARALLEL DO)
+    Threads.@threads for ipsi in 1:mpsi
+        psifac = metric.xs[ipsi]
+
+        # Accumulate kinetic contributions over ell (sequential per thread)
+        kwmat_sum = zeros(ComplexF64, intr.mpert, intr.mpert, 6)
+        ktmat_sum = zeros(ComplexF64, intr.mpert, intr.mpert, 6)
+
+        for ell in -nl:nl
+            # Ions
+            if ctrl.ion_flag
+                kwmat_l, _ = compute_tpsi_matrices(
+                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                    is_electron=false, particle_type=ft*"wmm"
+                )
+                _, ktmat_l = compute_tpsi_matrices(
+                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                    is_electron=false, particle_type=ft*"tmm"
+                )
+                kwmat_sum .+= kwmat_l
+                ktmat_sum .+= ktmat_l
+            end
+
+            # Electrons
+            if ctrl.electron_flag
+                kwmat_l, _ = compute_tpsi_matrices(
+                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                    is_electron=true, particle_type=ft*"wmm"
+                )
+                _, ktmat_l = compute_tpsi_matrices(
+                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                    is_electron=true, particle_type=ft*"tmm"
+                )
+                kwmat_sum .+= kwmat_l
+                ktmat_sum .+= ktmat_l
+            end
+        end
+
+        # Apply normalization and optional tanh smoothing
+        if ctrl.ktanh_flag
+            factor = (1.0 + tanh((psifac - ctrl.ktc) * ctrl.ktw))
+            kwmat_sum .*= ctrl.kinfac1 * factor
+            ktmat_sum .*= ctrl.kinfac2 * factor
+        else
+            kwmat_sum .*= ctrl.kinfac1
+            ktmat_sum .*= ctrl.kinfac2
+        end
+
+        # Store raw kinetic matrices (for diagnostics)
+        for i in 1:6
+            kwmats_flat[i][ipsi, :] = vec(kwmat_sum[:, :, i])
+            ktmats_flat[i][ipsi, :] = vec(ktmat_sum[:, :, i])
+        end
+
+        # Evaluate ideal MHD matrices at this psi
+        amat_ideal = reshape(Spl.spline_eval!(ffit.amats, psifac), intr.numpert_total, intr.numpert_total)
+        bmat_ideal = reshape(Spl.spline_eval!(ffit.bmats, psifac), intr.numpert_total, intr.numpert_total)
+        cmat_ideal = reshape(Spl.spline_eval!(ffit.cmats, psifac), intr.numpert_total, intr.numpert_total)
+        dmat_ideal = reshape(Spl.spline_eval!(ffit.dmats, psifac), intr.numpert_total, intr.numpert_total)
+        emat_ideal = reshape(Spl.spline_eval!(ffit.emats, psifac), intr.numpert_total, intr.numpert_total)
+        hmat_ideal = reshape(Spl.spline_eval!(ffit.hmats, psifac), intr.numpert_total, intr.numpert_total)
+        dbat = copy(dmat_ideal)  # Copy for later use
+        ebat = copy(emat_ideal)
+        fmat = reshape(Spl.spline_eval!(ffit.fmats_lower, psifac), intr.numpert_total, intr.numpert_total)
+
+        # Add kinetic contributions to ideal matrices
+        amat = amat_ideal .+ kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1]
+        bmat = bmat_ideal .+ kwmat_sum[:, :, 2] .+ ktmat_sum[:, :, 2]
+        cmat = cmat_ideal .+ kwmat_sum[:, :, 3] .+ ktmat_sum[:, :, 3]
+        dmat = dmat_ideal .+ kwmat_sum[:, :, 4] .+ ktmat_sum[:, :, 4]
+        emat = emat_ideal .+ kwmat_sum[:, :, 5] .+ ktmat_sum[:, :, 5]
+        hmat = hmat_ideal .+ kwmat_sum[:, :, 6] .+ ktmat_sum[:, :, 6]
+
+        # Compute auxiliary matrices
+        caat = cmat .- 2.0 .* ktmat_sum[:, :, 3]
+        b1mat = im .* dbat
+
+        # Factor non-Hermitian A matrix (CRITICAL: use LU, not Cholesky!)
+        amat_lu = lu(amat)
+
+        # Compute composite kinetic matrices (Fortran lines 1184-1265)
+
+        # f0mat = F - D† * A⁻¹ * D
+        temp1 = amat_lu \ dbat
+        f0mat = fmat .- adjoint(dbat) * temp1
+
+        # Compute U = I - (A⁻¹)†
+        temp2 = copy(amat)
+        temp2 = amat_lu \ temp2  # Should be ≈ I
+        aamat = adjoint(temp2)
+        umat = I - aamat
+
+        # bkmat = K_w2 + K_t2 + i*χ₁/(2πn) * (K_w1 + K_t1)
+        bkmat = kwmat_sum[:, :, 2] .+ ktmat_sum[:, :, 2] .+
+                im * chi1 / (2π * ctrl.nn_low) .* (kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1])
+
+        # bkaat = K_w2 - K_t2 + i*χ₁/(2πn) * (K_w1 + K_t1)
+        bkaat = kwmat_sum[:, :, 2] .- ktmat_sum[:, :, 2] .+
+                im * chi1 / (2π * ctrl.nn_low) .* (kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1])
+
+        # pmat = B₁† * A⁻¹ * B_k
+        temp2 = amat_lu \ bkmat
+        pmat = adjoint(b1mat) * temp2
+
+        # paat = B_kaa† * A⁻¹ * B₁ - i*χ₁/(2πn) * U * B₁
+        temp2 = amat_lu \ b1mat
+        paat = adjoint(bkaat) * temp2 .- im * chi1 / (2π * ctrl.nn_low) .* (umat * b1mat)
+        paat = adjoint(paat)
+
+        # r1mat (complex expression from Fortran lines 1213-1217)
+        temp1 = kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1]
+        temp2 = amat_lu \ bkmat
+        r1mat = kwmat_sum[:, :, 4] .+ ktmat_sum[:, :, 4] .-
+                (chi1 / (2π * ctrl.nn_low))^2 .* adjoint(temp1) .+
+                im * chi1 / (2π * ctrl.nn_low) .* adjoint(bkaat) .-
+                im * chi1 / (2π * ctrl.nn_low) .* (aamat * bkmat) .-
+                adjoint(bkaat) * temp2
+
+        # kkmat = E_b - B₁† * A⁻¹ * C
+        temp1 = amat_lu \ cmat
+        kkmat = ebat .- adjoint(b1mat) * temp1
+
+        # kkaat = E_b† - C_aa† * A⁻¹ * B₁
+        temp1 = amat_lu \ b1mat
+        kkaat = adjoint(ebat) .- adjoint(caat) * temp1
+
+        # r2mat
+        temp1 = kwmat_sum[:, :, 5] .+ ktmat_sum[:, :, 5] .-
+                im * chi1 / (2π * ctrl.nn_low) .* (kwmat_sum[:, :, 3] .+ ktmat_sum[:, :, 3])
+        temp2 = amat_lu \ cmat
+        r2mat = temp1 .+ im * chi1 / (2π * ctrl.nn_low) .* (umat * cmat) .-
+                adjoint(bkaat) * temp2
+
+        # r3mat
+        temp1 = kwmat_sum[:, :, 5] .- ktmat_sum[:, :, 5] .-
+                im * chi1 / (2π * ctrl.nn_low) .* (kwmat_sum[:, :, 3] .- ktmat_sum[:, :, 3])
+        temp2 = amat_lu \ bkmat
+        r3mat = adjoint(temp1) .- adjoint(caat) * temp2
+
+        # gaat = H - C_aa† * A⁻¹ * C
+        temp2 = amat_lu \ cmat
+        gaat = hmat .- adjoint(caat) * temp2
+
+        # Store to flat arrays
+        akmats_flat[ipsi, :] = vec(amat)
+        bkmats_flat[ipsi, :] = vec(bmat)
+        ckmats_flat[ipsi, :] = vec(cmat)
+        f0mats_flat[ipsi, :] = vec(f0mat)
+        pmats_flat[ipsi, :] = vec(pmat)
+        paats_flat[ipsi, :] = vec(paat)
+        kkmats_flat[ipsi, :] = vec(kkmat)
+        kkaats_flat[ipsi, :] = vec(kkaat)
+        r1mats_flat[ipsi, :] = vec(r1mat)
+        r2mats_flat[ipsi, :] = vec(r2mat)
+        r3mats_flat[ipsi, :] = vec(r3mat)
+        gaats_flat[ipsi, :] = vec(gaat)
+    end
+
+    # Fit all matrices to cubic splines
+    for i in 1:6
+        ffit.kwmats[i] = Spl.CubicSpline(metric.xs, kwmats_flat[i]; bctype="extrap")
+        ffit.ktmats[i] = Spl.CubicSpline(metric.xs, ktmats_flat[i]; bctype="extrap")
+    end
+
+    ffit.akmats = Spl.CubicSpline(metric.xs, akmats_flat; bctype="extrap")
+    ffit.bkmats = Spl.CubicSpline(metric.xs, bkmats_flat; bctype="extrap")
+    ffit.ckmats = Spl.CubicSpline(metric.xs, ckmats_flat; bctype="extrap")
+    ffit.f0mats = Spl.CubicSpline(metric.xs, f0mats_flat; bctype="extrap")
+    ffit.pmats = Spl.CubicSpline(metric.xs, pmats_flat; bctype="extrap")
+    ffit.paats = Spl.CubicSpline(metric.xs, paats_flat; bctype="extrap")
+    ffit.kkmats = Spl.CubicSpline(metric.xs, kkmats_flat; bctype="extrap")
+    ffit.kkaats = Spl.CubicSpline(metric.xs, kkaats_flat; bctype="extrap")
+    ffit.r1mats = Spl.CubicSpline(metric.xs, r1mats_flat; bctype="extrap")
+    ffit.r2mats = Spl.CubicSpline(metric.xs, r2mats_flat; bctype="extrap")
+    ffit.r3mats = Spl.CubicSpline(metric.xs, r3mats_flat; bctype="extrap")
+    ffit.gaats = Spl.CubicSpline(metric.xs, gaats_flat; bctype="extrap")
+
+    return ffit
+end

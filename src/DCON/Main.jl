@@ -127,7 +127,10 @@ function Main(path::String="./")
         ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
-            error("kin_flag not implemented yet")
+            if ctrl.verbose
+                println("   Computing Kinetic Damping Matrices")
+            end
+            ffit = make_kinetic_matrix(equil, intr, ctrl, metric, ffit)
         end
         sing_scan!(intr, ctrl, equil, ffit)
         if ctrl.kin_flag

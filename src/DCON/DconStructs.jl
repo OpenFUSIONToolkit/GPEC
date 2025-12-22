@@ -55,6 +55,22 @@ A mutable struct containing settings for debugging and benchmarking output.
 end
 
 """
+    KineticParams
+
+Minimal parameters for kinetic damping calculations.
+
+## Fields
+
+  - `nl::Int` - Number of parallel wave numbers (loop runs -nl:nl)
+
+Future fields will be added as real kinetic physics is implemented
+(e.g., ion/electron mass, charge, distribution parameters, etc.)
+"""
+@kwdef mutable struct KineticParams
+    nl::Int = 10  # Default: -10 to +10 ell values
+end
+
+"""
     DconInternal
 
 A mutable struct holding internal state variables for stability calculations.
@@ -170,6 +186,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `kinetic::KineticParams` - Kinetic damping parameters (separate struct for organization)
 """
 @kwdef mutable struct DconControl
     verbose::Bool = true
@@ -225,6 +242,9 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
+
+    # Kinetic parameters (separate struct for organization)
+    kinetic::KineticParams = KineticParams()
 end
 
 @kwdef mutable struct FourFitVars
@@ -241,6 +261,24 @@ end
     fmats_lower::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
     kmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
     gmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+
+    # Kinetic matrices (only allocated if kin_flag=true)
+    kwmats::Vector{Spl.CubicSpline{ComplexF64}} = [Spl.empty_CubicSpline(ComplexF64) for _ in 1:6]
+    ktmats::Vector{Spl.CubicSpline{ComplexF64}} = [Spl.empty_CubicSpline(ComplexF64) for _ in 1:6]
+
+    # Composite kinetic matrices (used by ODE solver)
+    akmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    bkmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    ckmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    f0mats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    pmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    paats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    kkmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    kkaats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    r1mats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    r2mats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    r3mats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    gaats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)

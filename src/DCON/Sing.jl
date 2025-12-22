@@ -707,18 +707,28 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
-    # kinetic stuff - skip for now
-    if false #(TODO: kin_flag)
-        error("kin_flag not implemented yet")
+    # Evaluate matrix splines at the current psi value
+    if ctrl.kin_flag
+        # Evaluate kinetic matrices (infrastructure ready, ODE formulation not yet implemented)
+        Spl.spline_eval!(odet.amat, ffit.akmats, psieval)
+        Spl.spline_eval!(odet.bmat, ffit.bkmats, psieval)
+        Spl.spline_eval!(odet.cmat, ffit.ckmats, psieval)
+        Spl.spline_eval!(odet.fmat_lower, ffit.f0mats, psieval)
+        Spl.spline_eval!(odet.kmat, ffit.kkmats, psieval)
+        Spl.spline_eval!(odet.gmat, ffit.gaats, psieval)
+
+        # TODO: Kinetic ODE formulation differs from ideal MHD
+        # Will need pmats, paats, r1mats, r2mats, r3mats, kkaats for complete implementation
+        error("Kinetic ODE integration not yet implemented - matrix infrastructure ready")
     else
-        # Evaluate matrix splines at the current psi value
+        # Evaluate ideal MHD matrix splines at the current psi value
         Spl.spline_eval!(odet.amat, ffit.amats, psieval)
         Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
         Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
         Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
         Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
         Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
-        
+
         # Form full matrices from flat representations
         # TODO: make these block diagonal for multi-n?
         amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
@@ -735,10 +745,8 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         ldiv!(odet.Afact, cmat)
     end
 
-    # Compute du
-    if false #(TODO: kin_flag)
-        error("kin_flag not implemented yet")
-    else
+    # Compute du (ideal MHD formulation)
+    if !ctrl.kin_flag
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         du1 .= u2 .* odet.singfac_vec
@@ -754,6 +762,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
         du1 .*= odet.singfac_vec
     end
+    # Note: kinetic case handled above with error message
 
     # ud[1] = Ξ'_Ψ
     @views odet.ud[:, :, 1] .= du1
