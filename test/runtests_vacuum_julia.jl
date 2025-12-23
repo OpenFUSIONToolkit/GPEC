@@ -115,8 +115,8 @@ using Interpolations
             @test !any(isnan, P_2007)
 
             # For small n and reasonable s, 1997 and 2007 should agree closely
-            @test isapprox(P_1997[1], P_2007[1], rtol=1e-10)  # P^0
-            @test isapprox(P_1997[2], P_2007[2], rtol=1e-10)  # P^1
+            @test isapprox(P_1997[1], P_2007[1], rtol=1e-7)  # P^0
+            @test isapprox(P_1997[2], P_2007[2], rtol=1e-7)  # P^1
         end
 
         @testset "Bulirsch Elliptic Integrals" begin

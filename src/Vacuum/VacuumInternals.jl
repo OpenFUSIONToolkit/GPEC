@@ -826,7 +826,7 @@ function Pn_minus_half_2007(s::Real, n::Int)
     m1sqrti = sqrt(w)      # m1^(-1/4)
 
     # Compute elliptic integrals using Bulirsch algorithm
-    K, E, conv, iters = elliptic_integrals_bulirsch(m1sq, error=1e-8, maxit=10)
+    K, E, conv, iters = elliptic_integrals_bulirsch(m1sq, error=1e-15, maxit=20)
 
     # Base cases: P^0 and P^1
     pn = pii * m1sqrt * K
