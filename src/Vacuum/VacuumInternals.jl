@@ -6,7 +6,7 @@ const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.5255324099163
                 0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
 
 # 32-point Gaussian quadrature abscissae (used for Pn_minus_half_2007 function when nρ̂>0.1)
-const GAUSSIANWIGHTS32 = [
+const GAUSSIANWEIGHTS32 = [
     0.007018610009470096600, 0.016274394730905670605,
     0.025392065309262059456, 0.034273862913021433103,
     0.042835898022226680657, 0.050998059262376176196,
@@ -865,8 +865,8 @@ function Pn_minus_half_2007(s::Real, n::Int)
             dnom = sqrt(dnom)
             dnomp = sqrt(dnomp)
             anumr = tg0 * exp(-tg02)
-            gint += GAUSSIANWIGHTS32[ig] * anumr / dnom
-            gintp += GAUSSIANWIGHTS32[ig] * anumr / dnomp
+            gint += GAUSSIANWEIGHTS32[ig] * anumr / dnom
+            gintp += GAUSSIANWEIGHTS32[ig] * anumr / dnomp
         end
 
         gint *= bgaus
