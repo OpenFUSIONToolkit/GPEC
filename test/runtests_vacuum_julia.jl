@@ -105,13 +105,33 @@ using Interpolations
         @testset "Legendre Functions (Pn_minus_half)" begin
             s = 1.5
             n = 3
-            P = JPEC.Vacuum.Pn_minus_half_1997(s, n)
-            @test length(P) == n + 2
-            @test !any(isnan, P)
-            
-            # Test Pn_minus_half_2007 error
-            # @test JPEC.Vacuum.Pn_minus_half_2007(s, n)
-            @test_logs (:warn, "2007 paper implementation of Pn_minus_half is not yet complete. Use old version.") JPEC.Vacuum.Pn_minus_half_2007(s, n)
+            P_1997 = JPEC.Vacuum.Pn_minus_half_1997(s, n)
+            @test length(P_1997) == n + 2
+            @test !any(isnan, P_1997)
+
+            # Test Pn_minus_half_2007 implementation
+            P_2007 = JPEC.Vacuum.Pn_minus_half_2007(s, n)
+            @test length(P_2007) == n + 2
+            @test !any(isnan, P_2007)
+
+            # For small n and reasonable s, 1997 and 2007 should agree closely
+            @test isapprox(P_1997[1], P_2007[1], rtol=1e-7)  # P^0
+            @test isapprox(P_1997[2], P_2007[2], rtol=1e-7)  # P^1
+        end
+
+        @testset "Bulirsch Elliptic Integrals" begin
+            # Test the new Bulirsch algorithm
+            m1 = 0.5
+            K, E, conv, iters = JPEC.Vacuum.elliptic_integrals_bulirsch(m1)
+            @test K isa Float64
+            @test E isa Float64
+            @test !isnan(K)
+            @test !isnan(E)
+            @test conv < 1e-10  # Should converge well
+
+            # Test domain error
+            @test_throws DomainError JPEC.Vacuum.elliptic_integrals_bulirsch(-0.1)
+            @test_throws DomainError JPEC.Vacuum.elliptic_integrals_bulirsch(1.5)
         end
 
         @testset "green function" begin
