@@ -250,7 +250,6 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
    # All of these arrays are of length mtheta with θ = [0, 1)
     mtheta = inputs.mtheta
-    theta_grid = range(start=0, length=mtheta, step=2π/mtheta)
     
     # Get wall shape from form_wall
     # Plasma surface coordinates
@@ -280,13 +279,13 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         dx = a * r_minor
         @info "Calculating conformal wall shape $((@sprintf "%.2e" dx)) m from plasma surface." 
         wcentr = r_major
-        csmin = min(0.1, 0.1 * minimum(x_plasma))
+        centerstack_min  = min(0.01, 0.1 * minimum(x_plasma))  # Avoid wall crossing R=0 axis
         for i in 1:mtheta
-            j = (i == 1) ? mtheta : i - 1
-            k = (i == mtheta) ? 1 : i + 1
+            j = mod1(i - 1, mtheta)
+            k = mod1(i + 1, mtheta)
             # Normal vector calculation
             alph = atan(x_plasma[k] - x_plasma[j], z_plasma[j] - z_plasma[k])
-            x_wall[i] = max(csmin, x_plasma[i] + a * r_minor * cos(alph))
+            x_wall[i] = max(centerstack_min , x_plasma[i] + a * r_minor * cos(alph))
             z_wall[i] = z_plasma[i] + a * r_minor * sin(alph)
         end
 
@@ -347,6 +346,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     # Optional: Re-parameterization
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
+        @info "Re-distributing wall points to equal arc length spacing"
         x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
 
@@ -393,31 +393,40 @@ the new points `(xout, zout)` are equally spaced in arc length along the curve.
 - Uses Lagrange interpolation for calculating arc length and resampling
 - Ensures uniform spacing in arc length for improved numerical stability
 """
-function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}, mw1::Int)
-    # Temporary arrays for interpolation and arc-length calculation
-    thlag = zeros(Float64, mw1) # Normalized input parameter [0, 1]
-    ell   = zeros(Float64, mw1) # Cumulative arc length
-    thgr  = zeros(Float64, mw1) # New parameter distribution for equal spacing
-    xout  = zeros(Float64, mw1) # Uniformly spaced R-coordinates
-    zout  = zeros(Float64, mw1) # Uniformly spaced Z-coordinates
+function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}, mtheta::Int)
 
-    # Define initial normalized parameter thlag
-    dt = 1.0 / (mw1 - 1)
-    for iw in 1:mw1
-        thlag[iw] = dt * (iw - 1)
-    end
+    # Temporary arrays for interpolation and arc-length calculation
+    theta_in = zeros(Float64, mtheta) # Normalized input parameter [0, 1)
+    theta_out  = zeros(Float64, mtheta) # New parameter distribution for equal spacing
+    xout  = zeros(Float64, mtheta) # Uniformly spaced R-coordinates
+    zout  = zeros(Float64, mtheta) # Uniformly spaced Z-coordinates
+
+    # Define initial normalized parameter theta_in
+    dt = 1.0 / mtheta
+    theta_in .= range(start=0, length=mtheta, step=dt) # θ ∈ [0, 1)
+    # we need a closed loop for arc length calculation
+    mtheta2 = mtheta + 2
+    xin2 = vcat(xin, xin[1:2])
+    zin2 = vcat(zin, zin[1:2])
+    theta_in2 = vcat(theta_in, [1.0, 1.0 + dt])
+    ell   = zeros(Float64, mtheta+1) # Cumulative arc length of closed loop
+
 
     # Calculate cumulative arc length using numerical integration
     # We use a mid-point derivative approximation to find the path length
-    ell[1] = 0.0 
-    for iw in 2:mw1
+    for iw in 2:mtheta+1
         # Evaluate derivative at the midpoint of the interval
-        thet = (thlag[iw] + thlag[iw - 1]) / 2.0
+        theta = (theta_in2[iw] + theta_in2[iw - 1]) / 2.0
         
         # Calculate dx/dt and dz/dt using Lagrange interpolation (order 3)
-        _, d_xin = lagrange1d(thlag, xin, mw1, 3, thet, 1)
-        _, d_zin = lagrange1d(thlag, zin, mw1, 3, thet, 1)
-        
+        if iw == 2
+            println("Debug info for arc length calculation:")
+            println("dt = $dt, theta_in[end] = $(theta_in[end])")
+            print(mtheta, 3, theta, 1)
+        end
+        _, d_xin = lagrange1d(theta_in2, xin2, mtheta2, 3, theta, 1)
+        _, d_zin = lagrange1d(theta_in2, zin2, mtheta2, 3, theta, 1)
+
         # Instantaneous speed (ds/dt)
         ds_dt = sqrt(d_xin^2 + d_zin^2)
         
@@ -426,27 +435,21 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     end
 
     # Re-parameterize based on equal arc-length segments
-    total_length = ell[mw1]
-    ds_uniform = total_length / (mw1 - 1)
-    
-    for i in 1:mw1
-        target_s = ds_uniform * (i - 1)
-        # Find the value of 'thlag' that corresponds to the target arc length 's'
-        f_th, _ = lagrange1d(ell, thlag, mw1, 3, target_s, 0)
-        thgr[i] = f_th
+    ell_targets = range(0, step=ell[end]/mtheta, length=mtheta) # [0, Length) for open loop result
+    for i in 2:mtheta
+        # Find the value of 'theta_in' that corresponds to the target arc length 's'
+        f_th, _ = lagrange1d(ell, theta_in, mtheta, 3, ell_targets[i], 0)
+        theta_out[i] = f_th
     end
 
-    # Compute final output coordinates (xout, zout)
-    for i in 1:mw1
-        t_target = thgr[i]
-        
-        # Interpolate the original (x,z) data at the new parameter points
-        f_x, _ = lagrange1d(thlag, xin, mw1, 3, t_target, 0)
-        f_z, _ = lagrange1d(thlag, zin, mw1, 3, t_target, 0)
+    # Interpolate the original (x,z) data at the new parameter points to get (xout, zout)
+    for i in 1:mtheta
+        f_x, _ = lagrange1d(theta_in, xin, mtheta, 3, theta_out[i], 0)
+        f_z, _ = lagrange1d(theta_in, zin, mtheta, 3, theta_out[i], 0)
         
         xout[i] = f_x
         zout[i] = f_z
     end
     
-    return xout, zout, ell, thgr, thlag
+    return xout, zout, ell, theta_out, theta_in
 end
