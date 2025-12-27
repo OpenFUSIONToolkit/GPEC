@@ -419,11 +419,6 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
         theta = (theta_in2[iw] + theta_in2[iw - 1]) / 2.0
         
         # Calculate dx/dt and dz/dt using Lagrange interpolation (order 3)
-        if iw == 2
-            println("Debug info for arc length calculation:")
-            println("dt = $dt, theta_in[end] = $(theta_in[end])")
-            print(mtheta, 3, theta, 1)
-        end
         _, d_xin = lagrange1d(theta_in2, xin2, mtheta2, 3, theta, 1)
         _, d_zin = lagrange1d(theta_in2, zin2, mtheta2, 3, theta, 1)
 
