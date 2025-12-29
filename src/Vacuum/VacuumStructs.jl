@@ -347,6 +347,9 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     # Optional: Re-parameterization
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         @info "Re-distributing wall points to equal arc length spacing"
+        if !is_closed_toroidal
+            @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
+        end
         x_wall, z_wall, _, theta_grid, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
         theta_grid .= theta_grid .* (2π)  # Scale to [0, 2π) - irregular spacing
         fx_of_theta = interpolate((theta_grid,), x_wall, Gridded(Linear()))

@@ -70,16 +70,9 @@ using Interpolations
             @test !any(isnan, wall_geo.x)
         end
 
-        @testset "distribute_to_equal_arc_grid" begin
-            xin = [1.0, 2.0, 3.0, 4.0]
-            zin = [0.0, 0.0, 0.0, 0.0]
-            mw1 = 4
-            xout, zout, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin, zin, mw1)
-            @test isapprox(xout, [1.0, 2.0, 3.0, 4.0], atol=1e-9)
-            @test isapprox(zout, [0.0, 0.0, 0.0, 0.0], atol=1e-9)
-            
-            # A simple circle
-            theta = range(0, 2pi, length=10)
+        @testset "distribute_to_equal_arc_grid" begin            
+            # A simple circle (note the function assumes periodic shapes with open loop endpoints)
+            theta = range(0, step=2pi/10, length=10)
             xin_circ = cos.(theta)
             zin_circ = sin.(theta)
             xout_circ, zout_circ, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin_circ, zin_circ, 10)
