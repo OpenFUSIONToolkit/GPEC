@@ -347,13 +347,18 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     # Optional: Re-parameterization
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         @info "Re-distributing wall points to equal arc length spacing"
-        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
+        x_wall, z_wall, _, theta_grid, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
+        theta_grid .= theta_grid .* (2π)  # Scale to [0, 2π) - irregular spacing
+        fx_of_theta = interpolate((theta_grid,), x_wall, Gridded(Linear()))
+        dx_dtheta = only.(Interpolations.gradient.(Ref(fx_of_theta), theta_grid))
+        fz_of_theta = interpolate((theta_grid,), z_wall, Gridded(Linear()))
+        dz_dtheta = only.(Interpolations.gradient.(Ref(fz_of_theta), theta_grid))
+    else
+        # used regular theta grid spacing to build wall
+        theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
+        dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall)
+        dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall)
     end
-
-    # Compute wall derivatives
-    theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
-    dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall)
-    dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall)
 
     # Trigonometric basis arrays
     return WallGeometry(
@@ -405,22 +410,21 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     dt = 1.0 / mtheta
     theta_in .= range(start=0, length=mtheta, step=dt) # θ ∈ [0, 1)
     # we need a closed loop for arc length calculation
-    mtheta2 = mtheta + 2
-    xin2 = vcat(xin, xin[1:2])
-    zin2 = vcat(zin, zin[1:2])
-    theta_in2 = vcat(theta_in, [1.0, 1.0 + dt])
-    ell   = zeros(Float64, mtheta+1) # Cumulative arc length of closed loop
-
+    mtheta1 = mtheta + 1
+    xin1 = vcat(xin, xin[1])
+    zin1 = vcat(zin, zin[1])
+    theta_in1 = vcat(theta_in, [1.0])
+    ell   = zeros(Float64, mtheta1) # Cumulative arc length of closed loop
 
     # Calculate cumulative arc length using numerical integration
     # We use a mid-point derivative approximation to find the path length
-    for iw in 2:mtheta+1
+    for iw in 2:mtheta1
         # Evaluate derivative at the midpoint of the interval
-        theta = (theta_in2[iw] + theta_in2[iw - 1]) / 2.0
+        theta = (theta_in1[iw] + theta_in1[iw - 1]) / 2.0
         
         # Calculate dx/dt and dz/dt using Lagrange interpolation (order 3)
-        _, d_xin = lagrange1d(theta_in2, xin2, mtheta2, 3, theta, 1)
-        _, d_zin = lagrange1d(theta_in2, zin2, mtheta2, 3, theta, 1)
+        _, d_xin = lagrange1d(theta_in1, xin1, mtheta1, 3, theta, 1)
+        _, d_zin = lagrange1d(theta_in1, zin1, mtheta1, 3, theta, 1)
 
         # Instantaneous speed (ds/dt)
         ds_dt = sqrt(d_xin^2 + d_zin^2)
@@ -430,21 +434,21 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     end
 
     # Re-parameterize based on equal arc-length segments
-    ell_targets = range(0, step=ell[end]/mtheta, length=mtheta) # [0, Length) for open loop result
+    ell_targets = collect(range(0, step=ell[end]/mtheta, length=mtheta)) # [0, Length) for open loop result
     for i in 2:mtheta
         # Find the value of 'theta_in' that corresponds to the target arc length 's'
-        f_th, _ = lagrange1d(ell, theta_in, mtheta, 3, ell_targets[i], 0)
+        f_th, _ = lagrange1d(ell, theta_in1, mtheta1, 3, ell_targets[i], 0)
         theta_out[i] = f_th
     end
 
     # Interpolate the original (x,z) data at the new parameter points to get (xout, zout)
+    # Chance interpolates in theta_out to get xin, zin but this introduces small errors in arc lengths
     for i in 1:mtheta
-        f_x, _ = lagrange1d(theta_in, xin, mtheta, 3, theta_out[i], 0)
-        f_z, _ = lagrange1d(theta_in, zin, mtheta, 3, theta_out[i], 0)
-        
+        f_x, _ = lagrange1d(ell, xin1, mtheta1, 3, ell_targets[i], 0)
+        f_z, _ = lagrange1d(ell, zin1, mtheta1, 3, ell_targets[i], 0)
         xout[i] = f_x
         zout[i] = f_z
     end
-    
+        
     return xout, zout, ell, theta_out, theta_in
 end
