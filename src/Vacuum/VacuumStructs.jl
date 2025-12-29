@@ -279,7 +279,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         dx = a * r_minor
         @info "Calculating conformal wall shape $((@sprintf "%.2e" dx)) m from plasma surface." 
         wcentr = r_major
-        centerstack_min  = min(0.01, 0.1 * minimum(x_plasma))  # Avoid wall crossing R=0 axis
+        centerstack_min  = min(0.1, 0.1 * minimum(x_plasma))  # Avoid wall crossing R=0 axis
         for i in 1:mtheta
             j = mod1(i - 1, mtheta)
             k = mod1(i + 1, mtheta)
