@@ -89,27 +89,6 @@ A mutable struct containing control parameters for equilibrium reconstruction.
 end
 
 """
-    EquilibriumOutput
-
-A mutable struct containing flags for equilibrium output options.
-
-## Fields
-
-  - `gse_flag::Bool` - Output GSE (Grad-Shafranov Equation) data
-  - `out_eq_1d::Bool` - Output 1D equilibrium profiles in text format
-  - `bin_eq_1d::Bool` - Output 1D equilibrium profiles in binary format
-  - `out_eq_2d::Bool` - Output 2D equilibrium data in text format
-  - `out_2d::Bool` - Output 2D flux surface data in text format
-"""
-@kwdef mutable struct EquilibriumOutput
-    gse_flag::Bool = false
-    out_eq_1d::Bool = false
-    bin_eq_1d::Bool = false
-    out_eq_2d::Bool = false
-    out_2d::Bool = false
-end
-
-"""
     EquilibriumConfig(...)
 
 A container struct that bundles all necessary configuration settings originally specified in the equil
@@ -117,17 +96,6 @@ fortran namelists.
 """
 @kwdef mutable struct EquilibriumConfig
     control::EquilibriumControl = EquilibriumControl()
-    output::EquilibriumOutput = EquilibriumOutput()
-end
-
-"""
-Constructor that allows users to form a EquilibriumConfig struct from dictionaries
-for convenience when most of the defaults are fine.
-"""
-function EquilibriumConfig(control::Dict, output::Dict)
-    construct = EquilibriumControl(; control...)
-    outstruct = EquilibriumOutput(; output...)
-    return EquilibriumConfig(; control=construct, output=outstruct)
 end
 
 """
@@ -142,31 +110,25 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
         error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
     end
 
-    # Separate control and output parameters based on field names
+    # Filter to only control parameters
     control_fields = Set(String.(fieldnames(EquilibriumControl)))
-    output_fields = Set(String.(fieldnames(EquilibriumOutput)))
-
     control_data = Dict{String,Any}()
-    output_data = Dict{String,Any}()
 
     for (k, v) in equil_dict
         if k in control_fields
             control_data[k] = v
-        elseif k in output_fields
-            output_data[k] = v
         else
             @warn "Unknown equilibrium parameter: $k"
         end
     end
 
-    # Construct validated structs
+    # Construct validated struct
     control = EquilibriumControl(; symbolize_keys(control_data)...)
     if !isabspath(control.eq_filename)
         control.eq_filename = normpath(joinpath(base_path, control.eq_filename))
     end
-    output = EquilibriumOutput(; symbolize_keys(output_data)...)
 
-    return EquilibriumConfig(; control=control, output=output)
+    return EquilibriumConfig(; control=control)
 end
 
 """
@@ -180,7 +142,6 @@ function EquilibriumConfig(path::String)
 
     # Extract EQUIL_CONTROL with default fallback
     control_data = get(raw, "EQUIL_CONTROL", Dict())
-    output_data = get(raw, "EQUIL_OUTPUT", Dict())
 
     # Check for required fields in control_data
     required_keys = ("eq_filename", "eq_type")
@@ -190,14 +151,13 @@ function EquilibriumConfig(path::String)
         error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missing, ", "))")
     end
 
-    # Construct validated structs
+    # Construct validated struct
     control = EquilibriumControl(; symbolize_keys(control_data)...)
     if !isabspath(control.eq_filename)
         control.eq_filename = normpath(joinpath(dirname(path), control.eq_filename))
     end
-    output = EquilibriumOutput(; symbolize_keys(output_data)...)
 
-    return EquilibriumConfig(; control=control, output=output)
+    return EquilibriumConfig(; control=control)
 end
 
 """

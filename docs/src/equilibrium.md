@@ -35,7 +35,6 @@ Modules = [JPEC.Equilibrium]
 	provided).
 - `EquilibriumControl` — low-level control parameters (grid, jacobian
 	type, tolerances, etc.).
-- `EquilibriumOutput` — options controlling what output is written.
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).

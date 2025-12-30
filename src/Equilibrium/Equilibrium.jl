@@ -15,7 +15,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutput, PlasmaEquilibrium, EquilibriumParameters
+export setup_equilibrium, EquilibriumConfig, EquilibriumControl, PlasmaEquilibrium, EquilibriumParameters
 
 # --- Constants ---
 const mu0 = 4π * 1e-7

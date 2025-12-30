@@ -14,11 +14,6 @@ newq0 = 0                    # Override q(0)
 etol = 1e-7                  # Reconstruction tolerance
 input_only = false           # Quit after input read
 
-gse_flag = false           # Output G-S equation accuracy diagnostics
-out_eq_1d = false          # ASCII output of 1D eq data
-bin_eq_1d = false          # Binary output of 1D eq data
-out_eq_2d = false          # ASCII output of 2D eq data
-out_2d = false             # ASCII output of processed 2D data
 
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
