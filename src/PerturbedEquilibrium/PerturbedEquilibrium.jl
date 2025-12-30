@@ -3,14 +3,19 @@ module PerturbedEquilibrium
 # Imports
 using HDF5
 using Printf
+using LinearAlgebra
+using Statistics
 
 # Import parent modules
 import ..Equilibrium
-import ..DCON: OdeState
+import ..DCON
+import ..DCON: OdeState, VacuumData, DconInternal
+import ..Vacuum
 import DelimitedFiles: readdlm
 
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
+include("ResponseMatrices.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("ModeOutput.jl")
@@ -30,6 +35,8 @@ export write_outputs_to_HDF5
     compute_perturbed_equilibrium(
         equil::Equilibrium.PlasmaEquilibrium,
         dcon_results::OdeState,
+        vac_data::Union{VacuumData, Nothing},
+        dcon_intr::DconInternal,
         ctrl::PerturbedEquilibriumControl,
         intr::PerturbedEquilibriumInternal
     )::PerturbedEquilibriumState
@@ -42,6 +49,8 @@ coupling metrics.
 ## Arguments
   - `equil`: Equilibrium solution from Equilibrium module
   - `dcon_results`: Stability calculation results from DCON module
+  - `vac_data`: Vacuum response data from DCON free boundary calculation
+  - `dcon_intr`: DCON internal state with mode information
   - `ctrl`: Control parameters from TOML configuration
   - `intr`: Internal state variables
 
@@ -57,6 +66,8 @@ coupling metrics.
 function compute_perturbed_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
     dcon_results::OdeState,
+    vac_data::Union{VacuumData, Nothing},
+    dcon_intr::DCON.DconInternal,
     ctrl::PerturbedEquilibriumControl,
     intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
@@ -74,7 +85,11 @@ function compute_perturbed_equilibrium(
 
     # Step 2: Compute plasma response
     if ctrl.compute_response
-        compute_plasma_response!(state, equil, dcon_results, intr, ctrl)
+        if vac_data === nothing
+            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in DCON_CONTROL."
+        else
+            compute_plasma_response!(state, equil, dcon_results, vac_data, dcon_intr, intr, ctrl)
+        end
     end
 
     # Step 3: Compute singular coupling metrics
