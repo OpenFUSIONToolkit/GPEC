@@ -1,3 +1,50 @@
+[Equilibrium]
+eq_type = "sol"             # Type of the input 2D equilibrium file
+eq_filename = "sol.toml"  # path to equilibrium file
+jac_type = "pest"          # Coordinate system (hamada, pest, boozer, equal_arc)
+power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
+power_b = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
+power_r = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
+grid_type = "ldp"            # Radial grid packing
+psilow = 1e-4                # Min psi (normalized)
+psihigh = 0.99999              # Max psi (normalized)
+mpsi = 128                   # Radial grid intervals
+mtheta = 256                 # Poloidal grid intervals
+newq0 = 0                    # Override q(0)
+etol = 1e-7                  # Reconstruction tolerance
+use_classic_splines = false  # Use classical spline (vs. tri-diagonal)
+input_only = false           # Quit after input read
+
+gse_flag = false           # Output G-S equation accuracy diagnostics
+out_eq_1d = false          # ASCII output of 1D eq data
+bin_eq_1d = false          # Binary output of 1D eq data
+out_eq_2d = false          # ASCII output of 2D eq data
+bin_eq_2d = true           # Binary output of 2D eq data (used by GPEC)
+out_2d = false             # ASCII output of processed 2D data
+bin_2d = false             # Binary output of processed 2D data
+dump_flag = false          # Binary dump of equilibrium data
+
+[WALL]
+shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
+a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
+aw = 0.05                     # Half-thickness of the wall.
+bw = 1.5                      # Elongation.
+cw = 0                        # Offset of the center of the wall from the major radius.
+dw = 0.5                      # Triangularity
+tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
+equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
+
+# [PerturbedEquilibrium]
+# # Uncomment this section to enable perturbed equilibrium calculations
+# forcing_data_file = "forcing.dat"      # Path to forcing data (n, m, real, imag)
+# forcing_data_format = "ascii"          # "ascii" or "hdf5"
+# fixed_boundary = false                 # Fixed boundary flag
+# output_eigenmodes = true               # Output mode fields as b-fields
+# compute_response = true                # Compute plasma response
+# compute_singular_coupling = true       # Compute singular coupling metrics
+# verbose = true                         # Enable verbose logging
+# write_outputs_to_HDF5 = true           # Write outputs to HDF5
+
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
 mat_flag = true               # Construct coefficient matrices for diagnostic purposes
@@ -36,51 +83,4 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
-
-[WALL]
-shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
-a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
-aw = 0.05                     # Half-thickness of the wall.
-bw = 1.5                      # Elongation.
-cw = 0                        # Offset of the center of the wall from the major radius.
-dw = 0.5                      # Triangularity
-tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
-equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
-
-# [PerturbedEquilibrium]
-# # Uncomment this section to enable perturbed equilibrium calculations
-# forcing_data_file = "forcing.dat"      # Path to forcing data (n, m, real, imag)
-# forcing_data_format = "ascii"          # "ascii" or "hdf5"
-# fixed_boundary = false                 # Fixed boundary flag
-# output_eigenmodes = true               # Output mode fields as b-fields
-# compute_response = true                # Compute plasma response
-# compute_singular_coupling = true       # Compute singular coupling metrics
-# verbose = true                         # Enable verbose logging
-# write_outputs_to_HDF5 = true           # Write outputs to HDF5
-
-[Equilibrium]
-eq_type = "sol"             # Type of the input 2D equilibrium file
-eq_filename = "sol.toml"  # path to equilibrium file
-jac_type = "pest"          # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
-power_b = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
-power_r = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
-grid_type = "ldp"            # Radial grid packing
-psilow = 1e-4                # Min psi (normalized)
-psihigh = 0.99999              # Max psi (normalized)
-mpsi = 128                   # Radial grid intervals
-mtheta = 256                 # Poloidal grid intervals
-newq0 = 0                    # Override q(0)
-etol = 1e-7                  # Reconstruction tolerance
-use_classic_splines = false  # Use classical spline (vs. tri-diagonal)
-input_only = false           # Quit after input read
-
-gse_flag = false           # Output G-S equation accuracy diagnostics
-out_eq_1d = false          # ASCII output of 1D eq data
-bin_eq_1d = false          # Binary output of 1D eq data
-out_eq_2d = false          # ASCII output of 2D eq data
-bin_eq_2d = true           # Binary output of 2D eq data (used by GPEC)
-out_2d = false             # ASCII output of processed 2D data
-bin_2d = false             # Binary output of processed 2D data
-dump_flag = false          # Binary dump of equilibrium data
+force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
