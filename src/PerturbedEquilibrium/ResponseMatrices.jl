@@ -39,35 +39,40 @@ function build_flux_matrix(
 
     numpert_total = intr.numpert_total
 
-    # Extract eigenmode solutions at plasma boundary (last radial step)
-    # u_store dimensions: [numpert_total, numpert_total, 2, numsteps]
-    # The last index (numsteps) gives radial location
-    # The second-to-last index (2) gives normal and parallel components
-    boundary_step = dcon_results.step  # Last integrated step
-
-    # TODO: Full implementation requires:
-    # 1. Extract boundary displacement: u_boundary = u_store[:, :, :, boundary_step]
-    # 2. Convert displacement to surface current using plasma properties
-    # 3. Apply Green's function (grri) to get vacuum flux response
-    # 4. The result should be flux[i,j] = vacuum flux of mode i from eigenmode j
+    # The flux matrix relates eigenmode boundary displacements to vacuum poloidal flux.
+    # In GPEC: flxmats[:,i] = bwp_mn (boundary normal field) for eigenmode i
     #
-    # For now, use vacuum energy matrix as proxy for flux coupling
-    # wv relates modes through vacuum energy: E_vac = u† · wv · u
-    # This approximation captures mode coupling but not the correct physics
+    # In DCON, the vacuum response is encoded in:
+    # - vac.wt: eigenvectors of total energy matrix (wp + wv)
+    # - vac.wv: vacuum energy matrix, which relates boundary flux to vacuum energy
+    # - The vacuum energy is: E_vac[i,j] = (1/2μ₀) ∫ B_i · B_j dV
+    #
+    # Physical interpretation:
+    # - wv[i,j] represents the vacuum energy coupling between modes i and j
+    # - wt[:,k] are the eigenvectors representing actual plasma eigenmodes
+    # - The flux matrix should project the eigenmode basis onto the Fourier mode basis
+    #
+    # Improved approximation:
+    # Use wt (eigenvectors) to construct flux matrix in eigenmode basis
+    # flxmats[:,k] ≈ wv * wt[:,k]
+    # This represents the vacuum flux response to eigenmode k
 
     flxmats = zeros(ComplexF64, numpert_total, numpert_total)
 
-    # Use vacuum energy matrix as temporary placeholder
-    # This has the right structure (mode coupling) but wrong physics
-    if size(vac_data.wv, 1) == numpert_total && size(vac_data.wv, 2) == numpert_total
-        # wv is the vacuum energy matrix, use it as a proxy for flux coupling
-        flxmats .= vac_data.wv
-    else
-        # If sizes don't match, use identity
-        for i in 1:numpert_total
-            flxmats[i, i] = 1.0 + 0.0im
-        end
+    # Build flux matrix by projecting eigenmodes through vacuum coupling
+    # For each eigenmode k, compute the vacuum flux response
+    for k in 1:numpert_total
+        # The vacuum response to eigenmode k is given by wv * wt[:,k]
+        # This represents how eigenmode k couples to all Fourier modes through vacuum
+        flxmats[:, k] = vac_data.wv * vac_data.wt[:, k]
     end
+
+    # NOTE: This is an improved approximation but still not the full GPEC implementation.
+    # Full implementation would require:
+    # 1. Extract boundary displacement ξ from u_store at boundary (step = dcon_results.step)
+    # 2. Compute normal magnetic field: B_ψ = i*(dΨ/dρ)*(m - n*q)*ξ_ψ
+    # 3. This requires computing singfac = (m - n*q) at the boundary
+    # 4. The result would be the actual boundary normal field for each eigenmode
 
     return flxmats
 end
@@ -146,49 +151,80 @@ function calc_surface_inductance(
     mpert = intr.mpert
     npert = intr.npert
 
-    # TODO: Proper implementation requires:
-    # 1. Extract relevant Green's function components for each (m,n) mode pair
-    # 2. Integrate Green's function over poloidal angle to get inductance
-    # 3. Account for both normal and parallel current components
-    # 4. Result should be L_surf[i,j] = inductance between modes i and j
+    # Surface inductance relates surface current to vacuum magnetic flux.
+    # In GPEC: surf_indmats = hermitianize(flxmats / kaxmats)
+    # where kaxmats is the surface current matrix computed from chi_mn and che_mn
     #
-    # For now, construct approximate surface inductance from grri diagonal
-    # This captures self-inductance but not mutual inductance
+    # LIMITATION: DCON only computes one Green's function (grri with kernelsign=1.0)
+    # Full GPEC needs both:
+    # - grri (kernelsign=-1) for interior potential chi
+    # - grre (kernelsign=+1) for exterior potential che
+    # - kax = (chi - che) / μ₀ is the surface current
+    #
+    # Improved approximation:
+    # Use the Green's function matrix structure to build a physically motivated
+    # surface inductance matrix. The grri matrix has dimensions [2*(mthvac+5), 2*mpert]
+    # where the factor of 2 accounts for real/imaginary parts of complex numbers.
+    #
+    # Strategy:
+    # 1. Extract the magnitude of Green's function response for each mode
+    # 2. Build a diagonal-dominant surface inductance matrix
+    # 3. Scale by physical constants (μ₀, geometric factors)
 
     surf_ind = zeros(ComplexF64, numpert_total, numpert_total)
 
-    # grri is [2*(mthvac+5), 2*mpert]
-    # Extract diagonal elements as approximation for self-inductance
-    n_modes = min(mpert, size(grri, 2) ÷ 2)
+    # Physical constant
+    μ₀ = 4π * 1e-7
 
-    for i in 1:n_modes
-        for n_idx in 1:npert
-            mode_idx = (n_idx - 1) * mpert + i
-            if mode_idx <= numpert_total
-                # Use average of grri diagonal for this mode as self-inductance
-                # This is a rough approximation
-                if i <= size(grri, 2) ÷ 2
-                    surf_ind[mode_idx, mode_idx] = mean(grri[:, i]) + 0.0im
-                else
-                    surf_ind[mode_idx, mode_idx] = 1.0 + 0.0im
+    # Extract mode coupling from grri structure
+    # grri[theta_index, mode_index] relates theta point to Fourier mode
+    # Average over theta to get mode-averaged Green's function
+
+    n_theta = size(grri, 1) ÷ 2  # Divide by 2 since complex stored as real pairs
+    n_modes_grri = size(grri, 2) ÷ 2  # Divide by 2 for real/imag pairs
+
+    # For each Fourier mode pair (i,j), compute inductance from Green's function
+    for i in 1:min(mpert, n_modes_grri)
+        for j in 1:min(mpert, n_modes_grri)
+            # Extract real and imaginary components from grri
+            # grri stores complex as [real1, imag1, real2, imag2, ...]
+            idx_i_real = 2*i - 1
+            idx_i_imag = 2*i
+            idx_j_real = 2*j - 1
+            idx_j_imag = 2*j
+
+            # Compute cross-correlation of Green's functions over theta
+            correlation = 0.0 + 0.0im
+            for k in 1:n_theta
+                # Reconstruct complex Green's function values
+                G_i = grri[k, idx_i_real] + 1im * grri[k, idx_i_imag]
+                G_j = grri[k, idx_j_real] + 1im * grri[k, idx_j_imag]
+                correlation += G_i * conj(G_j)
+            end
+            correlation /= n_theta  # Average over theta
+
+            # Map to all toroidal modes n
+            for n_idx in 1:npert
+                mode_idx_i = (n_idx - 1) * mpert + i
+                mode_idx_j = (n_idx - 1) * mpert + j
+                if mode_idx_i <= numpert_total && mode_idx_j <= numpert_total
+                    # Surface inductance scales with Green's function correlation
+                    # Include μ₀ for correct physical units
+                    surf_ind[mode_idx_i, mode_idx_j] = μ₀ * correlation
                 end
             end
         end
     end
 
-    # Add small off-diagonal coupling (physical systems have mode coupling)
-    for i in 1:numpert_total
-        for j in 1:numpert_total
-            if i != j && abs(surf_ind[i,i]) > 0 && abs(surf_ind[j,j]) > 0
-                # Add 10% coupling between adjacent modes
-                m_i = (i - 1) % mpert + intr.mlow
-                m_j = (j - 1) % mpert + intr.mlow
-                if abs(m_i - m_j) == 1
-                    surf_ind[i,j] = 0.1 * sqrt(abs(surf_ind[i,i] * surf_ind[j,j])) + 0.0im
-                end
-            end
-        end
-    end
+    # Hermitianize to ensure physical inductance matrix
+    surf_ind = 0.5 * (surf_ind + surf_ind')
+
+    # NOTE: This is an improved approximation but still not the full GPEC implementation.
+    # Full implementation would require:
+    # 1. Computing both grri (kernelsign=-1) and grre (kernelsign=+1)
+    # 2. Building kaxmats from chi_mn = G_interior * bwp and che_mn = G_exterior * bwp
+    # 3. Computing surf_indmats = hermitianize(flxmats / kaxmats)
+    # This would require two vacuum calculations with different kernel signs.
 
     return surf_ind
 end

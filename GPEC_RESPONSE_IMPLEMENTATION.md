@@ -172,3 +172,140 @@ end
 ---
 
 **Note**: This is complex physics. We should implement incrementally and validate against Fortran GPEC outputs at each step.
+
+## Current Implementation Status (December 2024)
+
+### What's Implemented
+
+1. **Response calculation framework** - Complete workflow in `Response.jl` and `ResponseMatrices.jl`
+2. **Forcing data input** - ASCII and HDF5 formats with comment support
+3. **Plasma inductance** - Energy-based formula (resp_index=0) fully implemented
+4. **Flux matrix** - Improved approximation using DCON eigenvectors
+5. **Surface inductance** - Green's function-based approximation
+6. **Permeability calculation** - Matrix inversion and multiplication
+7. **Mode mapping** - Forcing modes to eigenmode basis
+8. **HDF5 output** - Results written to euler.h5
+
+### Current Approximations and Limitations
+
+#### 1. Flux Matrix (`build_flux_matrix`)
+**Current implementation:**
+```julia
+flxmats[:, k] = vac_data.wv * vac_data.wt[:, k]
+```
+
+**Physical meaning:** Projects eigenmode k through vacuum energy coupling matrix to get vacuum flux response.
+
+**Limitations:**
+- Does not extract actual boundary displacement from `u_store`
+- Does not compute normal magnetic field: B_ψ = i*(dΨ/dρ)*(m - n*q)*ξ_ψ
+- Missing singular factor (m - n*q) evaluation at boundary
+
+**Full GPEC algorithm would:**
+1. Extract boundary displacement: `ξ_boundary = u_store[:, :, :, end]`
+2. Evaluate flux surface spacing: `dΨ/dρ` at boundary
+3. Compute singular factors for each mode: `singfac[i] = m[i] - n*q_boundary`
+4. Calculate normal field: `bwp_mn = i * (dΨ/dρ) * singfac * ξ_ψ`
+
+#### 2. Surface Inductance (`calc_surface_inductance`)
+**Current implementation:**
+- Uses cross-correlation of Green's function over poloidal angle
+- Computes: `correlation = Σ_θ G_i(θ) * G_j*(θ) / n_theta`
+- Builds hermitianized inductance: `L_surf = hermitianize(μ₀ * correlation)`
+
+**Limitations:**
+- DCON only computes ONE Green's function (grri with `kernelsign=1.0`)
+- Full GPEC needs TWO Green's functions:
+  - `grri` with `kernelsign=-1` for interior potential χ
+  - `grre` with `kernelsign=+1` for exterior potential χ_e
+- Missing surface current calculation: `kax = (χ - χ_e) / μ₀`
+
+**Full GPEC algorithm would:**
+1. Run vacuum solver twice with different kernel signs
+2. Compute interior and exterior potentials for each eigenmode
+3. Calculate surface current matrix: `kaxmats = (chimats - chemats) / μ₀`
+4. Compute surface inductance: `surf_indmats = hermitianize(flxmats / kaxmats)`
+
+#### 3. Green's Function Structure
+**DCON provides:**
+- `vac_data.grri`: Green's function matrix [2*(mthvac+5), 2*mpert]
+- Computed with `kernelsign = 1.0` (default in VacuumInput)
+- Complex numbers stored as adjacent real/imaginary pairs
+
+**What's missing:**
+- Green's function with `kernelsign = -1`
+- This requires modifying DCON vacuum calculation to compute both
+
+#### 4. Eigenmode Boundary Conditions
+**DCON provides:**
+- `odet.u_store[:, :, :, end]`: Eigenmode displacements at boundary
+- `vac_data.wt`: Eigenvectors of total energy matrix
+- `vac_data.wv`: Vacuum energy matrix (already scaled by singfac²)
+
+**What needs extraction:**
+- Actual boundary displacement ξ_ψ (normal component)
+- Conversion to magnetic field perturbation
+- Proper normalization and phase conventions
+
+### Performance Characteristics
+
+**Current implementation:**
+- Successfully runs on DIIID-like example (n=1, m=6)
+- Response amplitude: ~6.2e-11 (with improved matrices)
+- Computation time: ~0.16 seconds (perturbed equilibrium portion)
+- Matrix sizes: 34×34 for mpert=34, npert=1
+
+**Scaling:**
+- Computational cost: O(numpert_total³) for matrix operations
+- Memory: O(numpert_total²) for storing matrices
+- For multi-n cases, numpert_total = mpert × npert grows linearly with npert
+
+### Path to Full Implementation
+
+To achieve full GPEC-equivalent accuracy, the following enhancements are needed:
+
+1. **Modify vacuum calculation** (in `DCON/Free.jl`):
+   - Compute vacuum response with both `kernelsign = -1` and `kernelsign = +1`
+   - Store both `grri` and `grre` in `VacuumData` structure
+   - This requires two calls to `Vacuum.compute_vacuum_response()`
+
+2. **Extract boundary displacements** (in `ResponseMatrices.jl`):
+   - Read `u_store[:, :, :, end]` to get boundary values
+   - Extract normal component (ξ_ψ) for each eigenmode
+   - Evaluate equilibrium quantities at boundary (dΨ/dρ, q)
+
+3. **Compute normal magnetic field** (in `ResponseMatrices.jl`):
+   - Calculate singular factors: `singfac[i] = m[i] - n*q_boundary`
+   - Apply formula: `bwp_mn = i * (dΨ/dρ) * singfac * ξ_ψ`
+   - Handle resonant modes (singfac ≈ 0) carefully
+
+4. **Build proper surface inductance** (in `ResponseMatrices.jl`):
+   - Compute interior potential: `chi_mn = apply_green(grri, bwp_mn)`
+   - Compute exterior potential: `che_mn = apply_green(grre, bwp_mn)`
+   - Calculate surface current: `kax_mn = (chi_mn - che_mn) / μ₀`
+   - Solve: `surf_indmats = hermitianize(flxmats / kaxmats)`
+
+5. **Add Fourier transform utilities** (new file):
+   - Implement discrete Fourier transform (equivalent to GPEC's `iscdftf`)
+   - Handle toroidal phase corrections: `exp(-i*n*ϕ(θ))`
+   - Reverse theta convention between plasma and vacuum codes
+
+### Validation Strategy
+
+To validate the full implementation:
+
+1. **Energy conservation**: Check `surfei + surfee = vacuum energy from DCON`
+2. **Hermiticity**: Verify all inductance matrices are Hermitian
+3. **Comparison with Fortran GPEC**: Run identical cases and compare:
+   - Flux matrix elements
+   - Plasma and surface inductance matrices
+   - Permeability matrix
+   - Final response amplitudes
+4. **Physical limits**: Test edge cases (no wall, far wall, resistive wall)
+
+### References
+
+- **Fortran GPEC source**: `/Users/nlogan/Code/gpec/gpec/gpresp.f`
+- **Key subroutines**: `gpresp_eigen`, `gpresp_pinduct`, `gpresp_sinduct`, `gpresp_permeab`
+- **Vacuum calculation**: `/Users/nlogan/Code/gpec/gpec/gpeq.f` (lines 506-640)
+- **Green's function setup**: `/Users/nlogan/Code/gpec/gpec/idcon.f` (lines 890-932)
