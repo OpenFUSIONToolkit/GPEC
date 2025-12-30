@@ -64,6 +64,16 @@ function main(args::Vector{String}=String[])
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
     end
+    # Early exit if user only requested equilibrium setup
+    if equil.config.force_termination
+        end_time = time() - start_time
+        println("\n" * "="^60)
+        println("Equilibrium setup complete (force_termination = true).")
+        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
+        println("Normal termination.")
+        println("="^60)
+        return
+    end
 
 
     if "Wall" in keys(inputs)
@@ -226,6 +236,17 @@ function main(args::Vector{String}=String[])
             println("Writing saved data to $(ctrl.HDF5_filename)")
         end
         write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
+    end
+
+    # Early exit if user only requested force-free states
+    if ctrl.force_termination
+        end_time = time() - start_time
+        println("\n" * "="^60)
+        println("Force-free states complete (force_termination = true).")
+        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
+        println("Normal termination.")
+        println("="^60)
+        return
     end
 
     # Check for PerturbedEquilibrium section and run if present

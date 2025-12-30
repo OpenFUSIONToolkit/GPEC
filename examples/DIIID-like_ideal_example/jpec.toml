@@ -12,8 +12,7 @@ mpsi = 128                   # Radial grid intervals
 mtheta = 256                 # Poloidal grid intervals
 newq0 = 0                    # Override q(0)
 etol = 1e-7                  # Reconstruction tolerance
-input_only = false           # Quit after input read
-
+force_termination = false           # Quit after input read
 
 [Wall]
 shape = "nowall"

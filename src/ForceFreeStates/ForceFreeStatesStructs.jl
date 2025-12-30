@@ -170,6 +170,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -225,6 +226,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
+    force_termination::Bool = false
 end
 
 @kwdef mutable struct FourFitVars

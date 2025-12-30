@@ -23,7 +23,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
-  - `input_only::Bool` - Only process input without full reconstruction
+  - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
 @kwdef mutable struct EquilibriumConfig
@@ -44,7 +44,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     newq0::Int = 0
     etol::Float64 = 1e-7
 
-    input_only::Bool = false
+    force_termination::Bool = false
     use_galgrid::Bool = true
 
     """
@@ -52,7 +52,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     """
     function EquilibriumConfig(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
         grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
-        input_only, use_galgrid)
+        force_termination, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -85,7 +85,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         end
         return new(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
             grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
-            input_only, use_galgrid)
+            force_termination, use_galgrid)
     end
 end
 
