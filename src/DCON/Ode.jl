@@ -298,7 +298,7 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Advance differential equation to next singular surface or edge
     rtol = compute_tols(ctrl, intr, odet) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (odet.psifac, odet.psimax), (ctrl, equil, ffit, intr, odet))
-    sol = solve(prob, Tsit5(); reltol=rtol, callback=cb)
+    sol = solve(prob, BS5(); reltol=rtol, callback=cb)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
     # Update u and psifac with the solution at the end of the interval
