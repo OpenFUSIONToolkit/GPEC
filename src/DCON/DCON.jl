@@ -17,7 +17,6 @@ import StaticArrays: @MVector, @MMatrix
 
 # Include all necessary files
 include("DconStructs.jl")
-include("Main.jl")
 include("Mercier.jl")
 include("Ode.jl")
 include("Sing.jl")
