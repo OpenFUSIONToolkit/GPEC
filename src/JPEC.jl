@@ -52,7 +52,7 @@ function main(args::Vector{String}=String[])
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates_CONTROL"])...)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
         wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
@@ -265,7 +265,7 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
 
         # Store input parameters
         for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
-            out_h5["input/ForceFreeStates_CONTROL/$key"] = val
+            out_h5["input/ForceFreeStates/$key"] = val
         end
         for (key, val) in zip(fieldnames(Equilibrium.EquilibriumControl), getfield.(Ref(equil.config.control), fieldnames(Equilibrium.EquilibriumControl)))
             out_h5["input/EQUIL_CONTROL/$key"] = val

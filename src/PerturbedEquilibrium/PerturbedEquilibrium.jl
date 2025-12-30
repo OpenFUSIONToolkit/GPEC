@@ -86,7 +86,7 @@ function compute_perturbed_equilibrium(
     # Step 2: Compute plasma response
     if ctrl.compute_response
         if vac_data === nothing
-            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in ForceFreeStates_CONTROL."
+            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
             compute_plasma_response!(state, equil, dcon_results, vac_data, ffs_intr, intr, ctrl)
         end
