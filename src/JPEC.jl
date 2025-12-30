@@ -26,13 +26,6 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
-include("Main.jl")
-export Main
-
-include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
-import .PerturbedEquilibrium as PerturbedEquilibrium
-export PerturbedEquilibrium
-
 include(joinpath(@__DIR__, "..", "deps", "build_helpers.jl"))
 export build_fortran, build_spline_fortran, build_vacuum_fortran
 
@@ -41,10 +34,10 @@ using TOML
 using Printf
 using HDF5
 
-# Import DCON types and functions needed for main
-using .DCON: DconInternal, DconControl, DebugSettings, VacuumData, OdeState
-using .DCON: sing_lim!, sing_find!, mercier_scan!, sing_scan!, ode_run, free_run!
-using .DCON: make_metric, make_matrix
+# Import ForceFreeStates types and functions needed for main
+using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
+using .ForceFreeStates: sing_lim!, sing_find!, mercier_scan!, sing_scan!, ode_run, free_run!
+using .ForceFreeStates: make_metric, make_matrix
 
 function main(args::Vector{String}=String[])
     # Parse command line arguments
@@ -57,9 +50,9 @@ function main(args::Vector{String}=String[])
     start_time = time()
 
     # Read input data and set up data structures
-    intr = DconInternal(; dir_path=path)
+    intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
-    ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
         wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
@@ -253,7 +246,7 @@ function main(args::Vector{String}=String[])
 end
 
 """
-    write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState)
+    write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState)
 
 Helper function to write the HDF5 output file with relevant run and equilibrium parameters.
 This combines the functionality of several pieces of the Fortran code in `ode_output.f`,
@@ -266,13 +259,13 @@ vacuum data if `vac_flag` is true.
 Combine spline unpacking if possible, too many extra lines
 
 """
-function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
+function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
         # Store input parameters
-        for (key, val) in zip(fieldnames(DconControl), getfield.(Ref(ctrl), fieldnames(DconControl)))
-            out_h5["input/DCON_CONTROL/$key"] = val
+        for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
+            out_h5["input/ForceFreeStates_CONTROL/$key"] = val
         end
         for (key, val) in zip(fieldnames(Equilibrium.EquilibriumControl), getfield.(Ref(equil.config.control), fieldnames(Equilibrium.EquilibriumControl)))
             out_h5["input/EQUIL_CONTROL/$key"] = val
