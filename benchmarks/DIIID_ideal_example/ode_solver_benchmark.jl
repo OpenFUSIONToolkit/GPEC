@@ -127,8 +127,9 @@ function run_benchmark(solver, solver_name::String, tol_values, equil, ffit, int
             # Run benchmark (3 samples to get statistics)
             times = Float64[]
             nsteps = 0
+            odet = nothing  # Declare outside loop
 
-            for i in 1:3
+            for i in 1:5 #1:3
                 ctrl_test = deepcopy(ctrl)
                 intr_test = deepcopy(intr)
 
@@ -145,8 +146,10 @@ function run_benchmark(solver, solver_name::String, tol_values, equil, ffit, int
                 "time_mean" => mean(times),
                 "time_std" => std(times),
                 "steps" => nsteps,
+                "psi" => odet.psi_store * 1.0,
                 "success" => true
             )
+            println("psi grids $(length(odet.psi_store)): ", odet.psi_store[1:5], " ... ", odet.psi_store[end-4:end])
 
             println("    ✓ Steps: $nsteps, Time: $(@sprintf("%.3f", results[tol]["time_mean"])) ± $(@sprintf("%.3f", results[tol]["time_std"])) s")
 
@@ -156,6 +159,7 @@ function run_benchmark(solver, solver_name::String, tol_values, equil, ffit, int
                 "time_mean" => NaN,
                 "time_std" => NaN,
                 "steps" => NaN,
+                "psi" => [],
                 "success" => false,
                 "error" => string(e)
             )
@@ -172,35 +176,25 @@ function main()
     println("Example: DIIID-like ideal case")
     println("="^70)
 
-    # Load equilibrium and setup
-    println("\nLoading equilibrium and initializing...")
-    equil = Equilibrium.setup_equilibrium("equil.toml")
-
-    # Setup DCON
-    ctrl = DCON.DconControl("dcon.toml")
-
-    # Initialize vacuum and DCON structures
-    wv, grri, xzpts = JPEC.Vacuum.mscvac()
-    ffit = DCON.fourfit(ctrl, equil)
-    intr = DCON.dcon_init(ctrl, equil, wv, grri, xzpts)
-
-    # Save templates for making copies
-    ctrl_template = deepcopy(ctrl)
-    intr_template = deepcopy(intr)
+    # Load equilibrium and setup DCON
+    result = DCON.Main("../../examples/DIIID-like_ideal_example/")
+    ctrl_template = deepcopy(result.ctrl)
+    intr_template = deepcopy(result.intr)
+    equil = result.equil
+    ffit = result.ffit
 
     # Define solvers to test
     solvers = [
         (Tsit5(), "Tsit5"),
-        (AutoTsit5(Rosenbrock23()), "AutoTsit5"),
+        # (AutoTsit5(Rosenbrock23(autodiff=false)), "AutoTsit5"),  # Hangs
         (Vern6(), "Vern6"),
-        (Vern7(), "Vern7"),
         (Vern8(), "Vern8"),
         (DP5(), "DP5"),
         (BS5(), "BS5")
     ]
 
     # Tolerance values to scan
-    tol_values = [1e-3, 1e-4, 1e-5, 1e-6, 1e-8]
+    tol_values = [1e-4, 1e-5, 1e-6, 1e-7]
 
     # Run benchmarks
     all_results = Dict{String, Any}()
@@ -225,6 +219,7 @@ function main()
     println("\n" * "="^70)
     println("Benchmark complete!")
     println("="^70)
+    return all_results
 end
 
 """
@@ -255,8 +250,8 @@ function generate_plots(results, tol_values)
         end
     end
 
-    savefig(p1, "ode_benchmark_steps_vs_tolerance.png")
-    println("  ✓ Saved: ode_benchmark_steps_vs_tolerance.png")
+    savefig(p1, "ode_benchmark_steps_vs_tolerance.pdf")
+    println("  ✓ Saved: ode_benchmark_steps_vs_tolerance.pdf")
 
     # Plot 2: Timing vs Tolerance (with error ribbons)
     p2 = plot(
@@ -275,16 +270,18 @@ function generate_plots(results, tol_values)
         times = [get(solver_results[tol], "time_mean", NaN) for tol in tol_values]
         errors = [get(solver_results[tol], "time_std", NaN) for tol in tol_values]
         valid_idx = .!isnan.(times)
+        valid_times = times[valid_idx]
+        valid_std = [min(isnan(e) ? 0.0 : e, 0.9 * t) for (e, t) in zip(errors[valid_idx], valid_times)]
         if any(valid_idx)
-            plot!(p2, tol_values[valid_idx], times[valid_idx],
-                  ribbon=errors[valid_idx],
+            plot!(p2, tol_values[valid_idx], valid_times,
+                  ribbon=valid_std,
                   marker=:circle, label=solver_name, linewidth=2,
                   fillalpha=0.2)
         end
     end
 
-    savefig(p2, "ode_benchmark_timing_vs_tolerance.png")
-    println("  ✓ Saved: ode_benchmark_timing_vs_tolerance.png")
+    savefig(p2, "ode_benchmark_timing_vs_tolerance.pdf")
+    println("  ✓ Saved: ode_benchmark_timing_vs_tolerance.pdf")
 
     # Plot 3: Efficiency (Time vs Steps), colored by tolerance
     p3 = plot(
@@ -312,8 +309,27 @@ function generate_plots(results, tol_values)
         end
     end
 
-    savefig(p3, "ode_benchmark_efficiency.png")
-    println("  ✓ Saved: ode_benchmark_efficiency.png")
+    savefig(p3, "ode_benchmark_efficiency.pdf")
+    println("  ✓ Saved: ode_benchmark_efficiency.pdf")
+
+    ppsi = plot(xlabel="Normalized Index", ylabel="Poloidal Flux (ψ)")
+    linestyle = [:solid, :dash, :dot, :dashdot, :dashdotdot]
+    for (solver_name, solver_results) in results
+        color = :auto
+        for (i, tol) in enumerate(tol_values)
+            if haskey(solver_results, tol) && solver_results[tol]["success"]
+                psi = solver_results[tol]["psi"]
+                x = range(0, 1, length=length(psi))
+                plot!(ppsi, x, psi, label="$solver_name (tol=$(tol))", linestyle=linestyle[i], color=color)
+            end
+            if i == 1
+                color = current().series_list[end][:linecolor]
+            end
+        end
+    end
+    savefig(ppsi, "ode_benchmark_psi_grids.pdf")
+    println("  ✓ Saved: ode_benchmark_psi_grids.pdf")
+
 end
 
 """
@@ -326,7 +342,7 @@ function print_summary(results, tol_values)
     println("BENCHMARK SUMMARY")
     println("="^70)
 
-    for (solver_name, solver_results) in sort(collect(results))
+    for (solver_name, solver_results) in collect(results) #sort(collect(results))
         println("\n$solver_name:")
         println("  " * "-"^66)
         println("  Tolerance  | Steps | Time (s) | Success")
@@ -345,4 +361,4 @@ function print_summary(results, tol_values)
 end
 
 # Run the benchmark
-main()
+all_results = main()
