@@ -42,6 +42,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Set VACUUM run parameters and boundary shape
         vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
         fill!(vac.grri, 0.0)
+        fill!(vac.grre, 0.0)
         fill!(vac.xzpts, 0.0)
 
         farwall_flag = wall_settings.shape == "nowall" ? true : false
@@ -59,8 +60,8 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
 
-        # Compute vacuum energy matrix
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
+        # Compute vacuum energy matrix and both Green's functions
+        wv_block, vac.grri, vac.grre, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
 
         # Scale vacuum matrix by singfac = (m - n*qlim)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)

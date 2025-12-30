@@ -199,38 +199,59 @@ function mscvac(
 end
 
 """
+    apply_kernelsign!(grad_greenfunction_mat, kernelsign, mtheta)
+
+Apply kernelsign transformation to Green's function matrix.
+For kernelsign < 0 (interior potential), multiply by -1 and add 2 to diagonal.
+"""
+function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::Float64, mtheta::Int)
+    if kernelsign < 0
+        grad_greenfunction_mat .*= kernelsign
+        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
+        for i in 1:2 * mtheta
+            grad_greenfunction_mat[i, i] += 2.0
+        end
+    end
+    return nothing
+end
+
+"""
     compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-Compute the vacuum response matrix using provided vacuum inputs. 
+Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
 
-This is the pure Julia implementation that replaces the Fortran `mscvac` function. 
-It returns the relevant arrays: `wv`, `grri`, and `xzpts`.
+This is the pure Julia implementation that replaces the Fortran `mscvac` function.
+It computes both interior (grri) and exterior (grre) Green's functions for GPEC response calculations.
 
 # Arguments
 
-- `inputs::VacuumInput`: Struct containing vacuum calculation parameters including mode numbers, 
+- `inputs::VacuumInput`: Struct containing vacuum calculation parameters including mode numbers,
   grid resolution, toroidal mode number, and plasma boundary information.
 - `wall_settings::WallShapeSettings`: Struct specifying the wall geometry configuration.
 
 # Returns
 
 - `wv`: Complex vacuum response matrix (mpert × mpert) relating plasma perturbations to vacuum response
-- `grri`: Green's function response matrix (2*mtheta × 2*mpert) in Fourier space
+- `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
+- `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
 - `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
 
 # Notes
 
-- This function initializes the plasma surface and wall geometry internally
+- This function computes both Green's functions to enable proper surface inductance calculations
 - The vacuum response includes plasma-plasma and plasma-wall coupling effects
 - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     # Initialization and allocations
-    (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
+    (; mtheta, mpert, n, force_wv_symmetry) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
-    grri = zeros(2 * mtheta, 2 * mpert)
+
+    # Allocate arrays for both Green's functions
+    grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
+    grre = zeros(2 * mtheta, 2 * mpert)  # Exterior (kernelsign=+1)
     grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
     greenfunction_temp = zeros(mtheta, mtheta)
 
@@ -239,8 +260,11 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
 
     # Fourier transform plasma-plasma block
+    # Populate both grri and grre with the same right-hand side
     fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
     fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+    fourier_transform!(grre, greenfunction_temp, plasma_surf.cslth, 0, 0)
+    fourier_transform!(grre, greenfunction_temp, plasma_surf.snlth, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -255,9 +279,11 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         j1, j2 = 2, 1
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
 
-        # Fourier transform wall blocks into grri
+        # Fourier transform wall blocks into both grri and grre
         fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
         fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
+        fourier_transform!(grre, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
+        fourier_transform!(grre, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -270,21 +296,26 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         end
     end
 
-    # Only needed for mutual inductance with the wall calculations
-    (kernelsign < 0) && begin
-        grad_greenfunction_mat .*= kernelsign
-        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:2 * mtheta
-            grad_greenfunction_mat[i, i] += 2.0
-        end
-    end
+    # Compute both Green's functions with different kernel signs
+    # grri: interior potential (kernelsign=-1)
+    # grre: exterior potential (kernelsign=+1)
 
-    # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
+    # Make copies for each kernelsign
+    grad_greenfunction_mat_interior = copy(grad_greenfunction_mat)
+    grad_greenfunction_mat_exterior = copy(grad_greenfunction_mat)
+
+    # Apply kernelsign transformations
+    apply_kernelsign!(grad_greenfunction_mat_interior, -1.0, mtheta)  # Interior
+    apply_kernelsign!(grad_greenfunction_mat_exterior, +1.0, mtheta)  # Exterior (no-op)
+
+    # Invert the vacuum response system for both cases
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        @views grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grri[1:mtheta, :] .= grad_greenfunction_mat_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grre[1:mtheta, :] .= grad_greenfunction_mat_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
     else
-        grri .= grad_greenfunction_mat \ grri
+        grri .= grad_greenfunction_mat_interior \ grri
+        grre .= grad_greenfunction_mat_exterior \ grre
     end
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
@@ -319,7 +350,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     @views xzpts[:, 2] .= plasma_surf.z
     @views xzpts[:, 3] .= wall.x
     @views xzpts[:, 4] .= wall.z
-    return wv, grri, xzpts
+    return wv, grri, grre, xzpts
 end
 
 """

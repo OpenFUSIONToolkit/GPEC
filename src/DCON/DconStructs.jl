@@ -283,7 +283,8 @@ Populated in `Free.jl`.
 
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays
     # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)  # Interior Green's function (kernelsign=-1)
+    grre::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)  # Exterior Green's function (kernelsign=+1)
     xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac + 5, 4)
 end
 

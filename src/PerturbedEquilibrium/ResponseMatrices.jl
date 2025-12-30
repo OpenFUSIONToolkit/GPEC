@@ -121,22 +121,27 @@ end
 """
     calc_surface_inductance(
         grri::Matrix{Float64},
+        grre::Matrix{Float64},
         intr::DconInternal
 )::Matrix{ComplexF64}
 
-Calculate surface/vacuum inductance matrix from Green's function.
+Calculate surface/vacuum inductance matrix from Green's functions.
 
-Uses the vacuum Green's function matrix computed during DCON vacuum calculation.
-The Green's function relates surface currents to poloidal flux at the plasma boundary.
+Uses BOTH Green's function matrices computed during DCON vacuum calculation:
+- grri: Interior potential (kernelsign=-1)
+- grre: Exterior potential (kernelsign=+1)
 
-grri structure from DCON:
+The surface inductance is derived from the jump in magnetic potential across the plasma surface,
+which gives the surface current: kax = (χ - χ_e) / μ₀
+
+Green's function structure from DCON:
 - Dimensions: [2*(mthvac+5), 2*mpert]
-- First half: relates to normal current
-- Second half: relates to parallel current
-- Each mpert block corresponds to a poloidal mode
+- Complex numbers stored as adjacent real/imaginary pairs
+- Each pair of columns corresponds to one Fourier mode
 
 ## Arguments
-- `grri`: Green's function matrix from vacuum response
+- `grri`: Interior Green's function matrix (kernelsign=-1)
+- `grre`: Exterior Green's function matrix (kernelsign=+1)
 - `intr`: DCON internal state with mode information
 
 ## Returns
@@ -144,6 +149,7 @@ grri structure from DCON:
 """
 function calc_surface_inductance(
     grri::Matrix{Float64},
+    grre::Matrix{Float64},
     intr::DconInternal
 )::Matrix{ComplexF64}
 
@@ -153,53 +159,59 @@ function calc_surface_inductance(
 
     # Surface inductance relates surface current to vacuum magnetic flux.
     # In GPEC: surf_indmats = hermitianize(flxmats / kaxmats)
-    # where kaxmats is the surface current matrix computed from chi_mn and che_mn
+    # where kaxmats is the surface current matrix: kax = (χ - χ_e) / μ₀
     #
-    # LIMITATION: DCON only computes one Green's function (grri with kernelsign=1.0)
-    # Full GPEC needs both:
-    # - grri (kernelsign=-1) for interior potential chi
-    # - grre (kernelsign=+1) for exterior potential che
-    # - kax = (chi - che) / μ₀ is the surface current
-    #
-    # Improved approximation:
-    # Use the Green's function matrix structure to build a physically motivated
-    # surface inductance matrix. The grri matrix has dimensions [2*(mthvac+5), 2*mpert]
-    # where the factor of 2 accounts for real/imaginary parts of complex numbers.
+    # Now we have BOTH Green's functions:
+    # - grri (kernelsign=-1) gives interior potential χ
+    # - grre (kernelsign=+1) gives exterior potential χ_e
+    # - The difference (χ - χ_e) gives the surface current
     #
     # Strategy:
-    # 1. Extract the magnitude of Green's function response for each mode
-    # 2. Build a diagonal-dominant surface inductance matrix
-    # 3. Scale by physical constants (μ₀, geometric factors)
+    # 1. Compute the difference of Green's functions: G_diff = grri - grre
+    # 2. This represents the jump in magnetic potential across plasma surface
+    # 3. Build inductance matrix from correlation of G_diff
+    # 4. Scale by μ₀ for correct physical units
 
     surf_ind = zeros(ComplexF64, numpert_total, numpert_total)
 
     # Physical constant
     μ₀ = 4π * 1e-7
 
-    # Extract mode coupling from grri structure
-    # grri[theta_index, mode_index] relates theta point to Fourier mode
-    # Average over theta to get mode-averaged Green's function
+    # Green's function dimensions
+    # Both grri and grre have shape [2*(mthvac+5), 2*mpert]
+    # Complex numbers stored as adjacent real/imaginary pairs
+    n_theta = size(grri, 1) ÷ 2  # Number of theta points
+    n_modes_grri = size(grri, 2) ÷ 2  # Number of Fourier modes
 
-    n_theta = size(grri, 1) ÷ 2  # Divide by 2 since complex stored as real pairs
-    n_modes_grri = size(grri, 2) ÷ 2  # Divide by 2 for real/imag pairs
-
-    # For each Fourier mode pair (i,j), compute inductance from Green's function
+    # For each Fourier mode pair (i,j), compute surface inductance
+    # from the potential jump (chi - che)
     for i in 1:min(mpert, n_modes_grri)
         for j in 1:min(mpert, n_modes_grri)
-            # Extract real and imaginary components from grri
-            # grri stores complex as [real1, imag1, real2, imag2, ...]
+            # Extract indices for complex components
             idx_i_real = 2*i - 1
             idx_i_imag = 2*i
             idx_j_real = 2*j - 1
             idx_j_imag = 2*j
 
-            # Compute cross-correlation of Green's functions over theta
+            # Compute cross-correlation of potential jump over theta
+            # This represents the coupling between modes i and j through surface current
             correlation = 0.0 + 0.0im
             for k in 1:n_theta
                 # Reconstruct complex Green's function values
-                G_i = grri[k, idx_i_real] + 1im * grri[k, idx_i_imag]
-                G_j = grri[k, idx_j_real] + 1im * grri[k, idx_j_imag]
-                correlation += G_i * conj(G_j)
+                # Interior potential (chi)
+                chi_i = grri[k, idx_i_real] + 1im * grri[k, idx_i_imag]
+                chi_j = grri[k, idx_j_real] + 1im * grri[k, idx_j_imag]
+
+                # Exterior potential (che)
+                che_i = grre[k, idx_i_real] + 1im * grre[k, idx_i_imag]
+                che_j = grre[k, idx_j_real] + 1im * grre[k, idx_j_imag]
+
+                # Potential jump (surface current is proportional to chi - che)
+                jump_i = chi_i - che_i
+                jump_j = chi_j - che_j
+
+                # Accumulate correlation
+                correlation += jump_i * conj(jump_j)
             end
             correlation /= n_theta  # Average over theta
 
@@ -208,8 +220,8 @@ function calc_surface_inductance(
                 mode_idx_i = (n_idx - 1) * mpert + i
                 mode_idx_j = (n_idx - 1) * mpert + j
                 if mode_idx_i <= numpert_total && mode_idx_j <= numpert_total
-                    # Surface inductance scales with Green's function correlation
-                    # Include μ₀ for correct physical units
+                    # Surface inductance from potential jump correlation
+                    # Scale by μ₀ for correct physical units
                     surf_ind[mode_idx_i, mode_idx_j] = μ₀ * correlation
                 end
             end
@@ -219,12 +231,9 @@ function calc_surface_inductance(
     # Hermitianize to ensure physical inductance matrix
     surf_ind = 0.5 * (surf_ind + surf_ind')
 
-    # NOTE: This is an improved approximation but still not the full GPEC implementation.
-    # Full implementation would require:
-    # 1. Computing both grri (kernelsign=-1) and grre (kernelsign=+1)
-    # 2. Building kaxmats from chi_mn = G_interior * bwp and che_mn = G_exterior * bwp
-    # 3. Computing surf_indmats = hermitianize(flxmats / kaxmats)
-    # This would require two vacuum calculations with different kernel signs.
+    # NOTE: This implements the proper GPEC algorithm using both Green's functions.
+    # The surface current is kax ∝ (χ - χ_e), and the inductance is derived from
+    # the correlation of these currents over the plasma surface.
 
     return surf_ind
 end

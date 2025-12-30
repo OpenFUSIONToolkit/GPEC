@@ -15,7 +15,6 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
 - `qa::Float64`: Safety factor at the plasma boundary
 - `mtheta_eq::Int`: Number of poloidal angles in the input equilibrium boundary arrays
 - `mtheta::Int`: Number of poloidal grid points for vacuum calculations
-- `kernelsign::Float64`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations
 - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
 """
 @kwdef mutable struct VacuumInput
@@ -29,8 +28,8 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
     qa::Float64 = 0.0
     mtheta_eq::Int = 1
     mtheta::Int = 1
-    kernelsign::Float64 = 1.0
     force_wv_symmetry::Bool = true
+    # NOTE: kernelsign parameter deprecated - compute_vacuum_response now computes both grri and grre
 end
 
 """
