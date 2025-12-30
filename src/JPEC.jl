@@ -18,6 +18,10 @@ include("DCON/DCON.jl")
 import .DCON as DCON
 export DCON
 
+include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
+import .PerturbedEquilibrium as PerturbedEquilibrium
+export PerturbedEquilibrium
+
 include(joinpath(@__DIR__, "..", "deps", "build_helpers.jl"))
 export build_fortran, build_spline_fortran, build_vacuum_fortran
 
@@ -31,7 +35,7 @@ using .DCON: DconInternal, DconControl, DebugSettings, VacuumData, OdeState
 using .DCON: sing_lim!, sing_find!, mercier_scan!, sing_scan!, ode_run, free_run!
 using .DCON: make_metric, make_matrix
 
-@main function main(args::Vector{String}=String[])
+function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
@@ -43,8 +47,7 @@ using .DCON: make_metric, make_matrix
 
     # Read input data and set up data structures
     intr = DconInternal(; dir_path=path)
-    # TODO: leaving DCON_CONTROL as a part of the toml file, eventually can combine equil, gpec, etc. into one input file?
-    inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
+    inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
@@ -207,10 +210,32 @@ using .DCON: make_metric, make_matrix
         write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
     end
 
+    # Check for PerturbedEquilibrium section and run if present
+    if "PerturbedEquilibrium" in keys(inputs)
+        pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(;
+            (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
+        )
+        pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
+
+        # Run perturbed equilibrium calculations
+        pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
+            equil, odet, pe_ctrl, pe_intr
+        )
+
+        # Write perturbed equilibrium outputs to same HDF5 file
+        if pe_ctrl.write_outputs_to_HDF5
+            output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
+            PerturbedEquilibrium.write_outputs_to_HDF5(
+                pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
+            )
+        end
+    end
+
     end_time = time() - start_time
-    println("----------------------------------")
+    println("\n" * "="^60)
     println("Run time: $(@sprintf("%.3e", end_time)) seconds")
     println("Normal termination.")
+    println("="^60)
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 end
@@ -353,5 +378,12 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 end
 
 export main
+
+# When run as a script, execute main with command line arguments
+if abspath(PROGRAM_FILE) == @__FILE__
+    # Parse command line arguments
+    path = length(ARGS) >= 1 ? ARGS[1] : "./"
+    main([path])
+end
 
 end # module JPEC

@@ -47,3 +47,14 @@ cw = 0                        # Offset of the center of the wall from the major 
 dw = 0.5                      # Triangularity
 tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
 equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
+
+# [PerturbedEquilibrium]
+# # Uncomment this section to enable perturbed equilibrium calculations
+# forcing_data_file = "forcing.dat"      # Path to forcing data (n, m, real, imag)
+# forcing_data_format = "ascii"          # "ascii" or "hdf5"
+# fixed_boundary = false                 # Fixed boundary flag
+# output_eigenmodes = true               # Output mode fields as b-fields
+# compute_response = true                # Compute plasma response
+# compute_singular_coupling = true       # Compute singular coupling metrics
+# verbose = true                         # Enable verbose logging
+# write_outputs_to_HDF5 = true           # Write outputs to HDF5
