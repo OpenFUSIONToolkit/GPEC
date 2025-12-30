@@ -1,5 +1,5 @@
 """
-    free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+    free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
 Compute the free boundary energies using VACUUM. Performs the same function as `free_run`
 in the Fortran code, except now all data is passed in memory instead of via files. This
@@ -10,7 +10,7 @@ and data dumping.
 ### TODOs
 Check if normalize is ever false, currently always true, and if not, remove related logic
 """
-function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::Vacuum.WallShapeSettings)
+function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, wall_settings::Vacuum.WallShapeSettings)
 
     # TODO: this is always true in fortran - just get rid of it?
     normalize = true
@@ -73,7 +73,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Store block in full wv matrix
         @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
-        Vacuum.unset_dcon_params()
+        Vacuum.unset_surface_params()
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -143,7 +143,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 end
 
 """
-    set_vacuum_inputs(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    set_vacuum_inputs(psifac::Float64, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
 Prepare and write the necessary parameters and boundary shape to VACUUM for computing the vacuum response matrix.
 Performs the same function as `free_write_msc` in the Fortran code, except we will always use in-memory communication.
@@ -153,10 +153,10 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `psifac`: Flux surface value at the plasma boundary (Float64)
   - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
-  - `intr`: Internal DCON parameters (DconInternal)
+  - `intr`: Internal DCON parameters (ForceFreeStatesInternal)
 
 """
-function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
+function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
@@ -186,7 +186,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     end
 
     # Pass all required values to VACUUM
-    Vacuum.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
+    Vacuum.set_surface_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
         reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
@@ -206,13 +206,13 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
 end
 
 """
-    free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
 Compute a spline of vacuum response matrices over the range of psi from 'ctrl.psi_edge' to
 `intr.qlim`. This is used for fast evaluation of wt during `ode_record_edge`. Performs the
 same function as `free_wvmats` in the Fortran code.
 """
-function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
@@ -276,7 +276,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
 
             # Free VACUUM memory
-            Vacuum.unset_dcon_params()
+            Vacuum.unset_surface_params()
         end
     end
 
@@ -284,7 +284,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
 end
 
 """
-    free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, odet::OdeState) -> ComplexF64
+    free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState) -> ComplexF64
 
 Compute total complex energy eigenvalue (total1). This is a trimmed down version of `free_run`
 that only computes the total energy eigenvalue for the mode unstable mode, used in `ode_record_edge_dW`
@@ -292,7 +292,7 @@ which calls this function at each step in the psiedge -> psilim region of integr
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
 wv matrix spline to `free_compute_wv_spline` and pass it in `odet`.wvmat_spline.
 """
-function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, odet::OdeState)
+function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
     normalize = true
 

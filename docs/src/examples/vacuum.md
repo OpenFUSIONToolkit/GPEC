@@ -4,14 +4,14 @@ This page demonstrates the usage of the Vacuum module for magnetostatic calculat
 
 ## Basic Vacuum Field Calculation
 
-### Setting up DCON Parameters
+### Setting up Surface Parameters
 
-The vacuum module requires initialization with DCON (Displacement CONtinuum) parameters:
+The vacuum module requires initialization with surface parameters:
 
 ```julia
 using JPEC
 
-# Define DCON parameters
+# Define surface parameters
 mthin = Int32(4)     # Number of theta points
 lmin = Int32(1)      # Minimum poloidal mode number
 lmax = Int32(4)      # Maximum poloidal mode number
@@ -24,8 +24,8 @@ xin = rand(Float64, n_modes)      # Radial coordinates
 zin = rand(Float64, n_modes)      # Vertical coordinates
 deltain = rand(Float64, n_modes)  # Displacement data
 
-# Initialize DCON interface
-JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+# Initialize surface parameters interface
+JPEC.VacuumMod.set_surface_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 ```
 
 ### Vacuum Matrix Calculation
@@ -137,7 +137,7 @@ println("Most unstable eigenvalue: ", eigenvals[max_growth_idx])
 # xin, zin, deltain = process_boundary_data(boundary_data)
 
 # 4. Perform vacuum calculation
-# JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+# JPEC.VacuumMod.set_surface_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 # ... vacuum calculation ...
 
 # 5. Analyze stability
@@ -148,7 +148,7 @@ println("Most unstable eigenvalue: ", eigenvals[max_growth_idx])
 
 ### Common Issues
 
-1. **Initialization Error**: Ensure `set_dcon_params` is called before `mscvac`
+1. **Initialization Error**: Ensure `set_surface_params` is called before `mscvac`
 2. **Memory Issues**: Large `mtheta`/`mthvac` values require significant memory
 3. **Convergence**: Check that geometry arrays are properly normalized
 4. **Complex Arithmetic**: Ensure `complex_flag=true` for stability analysis

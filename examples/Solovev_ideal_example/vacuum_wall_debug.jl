@@ -32,7 +32,7 @@ if !use_wall_arg
 end
 
 
-JPEC.Vacuum.set_dcon_params(mtheta_eq, mlow, mhigh, 
+JPEC.Vacuum.set_surface_params(mtheta_eq, mlow, mhigh, 
                                     n, vac_inputs.qa, vac_inputs.r, 
                                     vac_inputs.z, vac_inputs.delta)
         
@@ -40,7 +40,7 @@ wv_fortran = JPEC.Vacuum.mscvac(wv_block, mpert, mtheta_eq, mthvac,
                          complex_flag, kernelsign, wall_flag, 
                          farwall_flag, grri, xzpts, ahg_file, "$(@__DIR__)")
 
-JPEC.Vacuum.unset_dcon_params()
+JPEC.Vacuum.unset_surface_params()
 
 # Now deepcopy the julia vac_inputs and set the new ms
 vac_inputs = deepcopy(vac_inputs)

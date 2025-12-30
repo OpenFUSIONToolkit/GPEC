@@ -127,7 +127,7 @@ end
         equil::Equilibrium.PlasmaEquilibrium,
         dcon_results::OdeState,
         vac_data::VacuumData,
-        dcon_intr::DconInternal,
+        ffs_intr::ForceFreeStatesInternal,
         intr::PerturbedEquilibriumInternal,
         ctrl::PerturbedEquilibriumControl
     )
@@ -146,7 +146,7 @@ function compute_plasma_response!(
     equil::Equilibrium.PlasmaEquilibrium,
     dcon_results::OdeState,
     vac_data::VacuumData,
-    dcon_intr::DconInternal,
+    ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl
 )
@@ -158,7 +158,7 @@ function compute_plasma_response!(
     if ctrl.verbose
         println("  Building flux matrix from eigenmodes")
     end
-    flux_matrix = build_flux_matrix(dcon_results, vac_data, dcon_intr)
+    flux_matrix = build_flux_matrix(dcon_results, vac_data, ffs_intr)
 
     # Step 2: Calculate plasma inductance matrix
     if ctrl.verbose
@@ -170,7 +170,7 @@ function compute_plasma_response!(
     if ctrl.verbose
         println("  Calculating surface inductance from Green's functions")
     end
-    surface_inductance = calc_surface_inductance(vac_data.grri, vac_data.grre, dcon_intr)
+    surface_inductance = calc_surface_inductance(vac_data.grri, vac_data.grre, ffs_intr)
 
     # Step 4: Calculate permeability matrix
     if ctrl.verbose
@@ -186,7 +186,7 @@ function compute_plasma_response!(
         println("  Mapping forcing modes to eigenmode basis")
         println("    Number of forcing modes: $(length(intr.forcing_modes))")
     end
-    forcing_vector = map_forcing_to_eigenmodes(intr.forcing_modes, dcon_intr)
+    forcing_vector = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
 
     # Step 6: Compute plasma response
     if ctrl.verbose

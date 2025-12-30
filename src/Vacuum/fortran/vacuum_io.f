@@ -508,14 +508,14 @@ c-----------------------------------------------------------------------
       end
 
 c-----------------------------------------------------------------------
-c     subprogram 7. set_dcon_params.
+c     subprogram 7. set_surface_params.
 c     In memory io for DCON
 c     Speedup over original ascii io (readahg) for multiple calls
 c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     declarations.
 c-----------------------------------------------------------------------
-      subroutine set_dcon_params ( mthin,lmin,lmax,nnin,qa1in,xin,
+      subroutine set_surface_params ( mthin,lmin,lmax,nnin,qa1in,xin,
      $     zin, deltain )
       USE vglobal_mod, ONLY: r8
       use vglobal_mod, only: dcon_set, mth_dcon, lmin_dcon,lmax_dcon,
@@ -528,7 +528,7 @@ c     computations.
 c-----------------------------------------------------------------------
       mthin1 = mthin + 1
       mthin5 = mthin1 + 4
-      if(dcon_set) call unset_dcon_params
+      if(dcon_set) call unset_surface_params
       allocate(x_dcon(mthin5), z_dcon(mthin5), delta_dcon(mthin5))
       mth_dcon = mthin
       lmin_dcon = lmin
@@ -553,13 +553,13 @@ c-----------------------------------------------------------------------
       end
 
 c-----------------------------------------------------------------------
-c     subprogram 8. unset_dcon_params.
+c     subprogram 8. unset_surface_params.
 c     Tell vacuum to ignore in-memory dcon params and read ascii values
 c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     declarations.
 c-----------------------------------------------------------------------
-      subroutine unset_dcon_params
+      subroutine unset_surface_params
       use vglobal_mod, only: dcon_set, x_dcon, z_dcon, delta_dcon
 c-----------------------------------------------------------------------
 c     computations.

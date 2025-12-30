@@ -8,8 +8,8 @@ using Statistics
 
 # Import parent modules
 import ..Equilibrium
-import ..DCON
-import ..DCON: OdeState, VacuumData, DconInternal
+import ..ForceFreeStates
+import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
 import ..Vacuum
 import DelimitedFiles: readdlm
 
@@ -36,7 +36,7 @@ export write_outputs_to_HDF5
         equil::Equilibrium.PlasmaEquilibrium,
         dcon_results::OdeState,
         vac_data::Union{VacuumData, Nothing},
-        dcon_intr::DconInternal,
+        ffs_intr::ForceFreeStatesInternal,
         ctrl::PerturbedEquilibriumControl,
         intr::PerturbedEquilibriumInternal
     )::PerturbedEquilibriumState
@@ -48,9 +48,9 @@ coupling metrics.
 
 ## Arguments
   - `equil`: Equilibrium solution from Equilibrium module
-  - `dcon_results`: Stability calculation results from DCON module
-  - `vac_data`: Vacuum response data from DCON free boundary calculation
-  - `dcon_intr`: DCON internal state with mode information
+  - `dcon_results`: Stability calculation results from ForceFreeStates module
+  - `vac_data`: Vacuum response data from ForceFreeStates free boundary calculation
+  - `ffs_intr`: ForceFreeStates internal state with mode information
   - `ctrl`: Control parameters from TOML configuration
   - `intr`: Internal state variables
 
@@ -67,7 +67,7 @@ function compute_perturbed_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
     dcon_results::OdeState,
     vac_data::Union{VacuumData, Nothing},
-    dcon_intr::DCON.DconInternal,
+    ffs_intr::ForceFreeStates.ForceFreeStatesInternal,
     ctrl::PerturbedEquilibriumControl,
     intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
@@ -86,9 +86,9 @@ function compute_perturbed_equilibrium(
     # Step 2: Compute plasma response
     if ctrl.compute_response
         if vac_data === nothing
-            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in DCON_CONTROL."
+            @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in ForceFreeStates_CONTROL."
         else
-            compute_plasma_response!(state, equil, dcon_results, vac_data, dcon_intr, intr, ctrl)
+            compute_plasma_response!(state, equil, dcon_results, vac_data, ffs_intr, intr, ctrl)
         end
     end
 

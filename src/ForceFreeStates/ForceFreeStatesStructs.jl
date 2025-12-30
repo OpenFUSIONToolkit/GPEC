@@ -55,7 +55,7 @@ A mutable struct containing settings for debugging and benchmarking output.
 end
 
 """
-    DconInternal
+    ForceFreeStatesInternal
 
 A mutable struct holding internal state variables for stability calculations.
 
@@ -84,7 +84,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
 """
-@kwdef mutable struct DconInternal
+@kwdef mutable struct ForceFreeStatesInternal
     dir_path::String = ""
     mlow::Int = 0
     mhigh::Int = 0
@@ -111,7 +111,7 @@ A mutable struct holding internal state variables for stability calculations.
 end
 
 """
-    DconControl
+    ForceFreeStatesControl
 
 A mutable struct containing control parameters for stability analysis, set by the user in dcon.toml.
 
@@ -171,7 +171,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
 """
-@kwdef mutable struct DconControl
+@kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
     bal_flag::Bool = false
     mat_flag::Bool = false

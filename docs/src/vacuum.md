@@ -7,7 +7,7 @@ Refactored/interfaced from/with VACUUM by M.S. Chance.
 
 The module includes:
 
-- Interface to Fortran vacuum field calculations (`mscvac`, `set_dcon_params`)
+- Interface to Fortran vacuum field calculations (`mscvac`, `set_surface_params`)
 - Pure Julia implementation of vacuum response calculations (`compute_vacuum_response`, `compute_vacuum_field`)
 - Support for various wall geometries and configurations
 
@@ -35,9 +35,9 @@ Modules = [JPEC.Vacuum]
 
 ## Functions
 
-### set_dcon_params
+### set_surface_params
 ```@docs
-JPEC.Vacuum.set_dcon_params
+JPEC.Vacuum.set_surface_params
 ```
 
 ### mscvac
@@ -62,15 +62,15 @@ JPEC.Vacuum.compute_vacuum_field
 ```julia
 using JPEC
 
-# Set DCON parameters
+# Set surface parameters
 mtheta, lmin, lmax, nnin = Int32(4), Int32(1), Int32(4), Int32(2)
 qa1in = 1.23
 xin = rand(Float64, lmax - lmin + 1)
 zin = rand(Float64, lmax - lmin + 1)
 deltain = rand(Float64, lmax - lmin + 1)
 
-# Initialize DCON interface
-JPEC.Vacuum.set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+# Initialize surface parameters interface
+JPEC.Vacuum.set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
 # Set up vacuum calculation parameters
 mpert = 5
@@ -127,7 +127,7 @@ wv, grri, xzpts = JPEC.Vacuum.compute_vacuum_response(inputs, wall_settings)
 
 ## Notes
 
-- Requires proper initialization of DCON parameters before using the Fortran interface
+- Requires proper initialization of surface parameters before using the Fortran interface
 - The pure Julia implementation (`compute_vacuum_response`) provides equivalent functionality
 - For n=0 modes with closed walls, automatic regularization is applied
 

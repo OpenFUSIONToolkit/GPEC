@@ -1,4 +1,4 @@
-module DCON
+module ForceFreeStates
 
 # All imports and includes for the DCON module
 using LinearAlgebra
@@ -16,7 +16,7 @@ using Printf
 import StaticArrays: @MVector, @MMatrix
 
 # Include all necessary files
-include("DconStructs.jl")
+include("ForceFreeStatesStructs.jl")
 include("Mercier.jl")
 include("Ode.jl")
 include("Sing.jl")

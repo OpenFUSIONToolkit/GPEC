@@ -9,7 +9,7 @@ Uses DCON eigenmode solutions and vacuum response data.
     build_flux_matrix(
         dcon_results::OdeState,
         vac_data::VacuumData,
-        intr::DconInternal
+        intr::ForceFreeStatesInternal
     )::Matrix{ComplexF64}
 
 Build vacuum poloidal flux matrix from DCON eigenmode solutions.
@@ -34,7 +34,7 @@ The flux matrix relates eigenmode displacements to vacuum poloidal flux:
 function build_flux_matrix(
     dcon_results::OdeState,
     vac_data::VacuumData,
-    intr::DconInternal
+    intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
     numpert_total = intr.numpert_total
@@ -122,7 +122,7 @@ end
     calc_surface_inductance(
         grri::Matrix{Float64},
         grre::Matrix{Float64},
-        intr::DconInternal
+        intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
 Calculate surface/vacuum inductance matrix from Green's functions.
@@ -150,7 +150,7 @@ Green's function structure from DCON:
 function calc_surface_inductance(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
-    intr::DconInternal
+    intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
     numpert_total = intr.numpert_total
@@ -279,7 +279,7 @@ end
 """
     map_forcing_to_eigenmodes(
         forcing_modes::Vector{ForcingMode},
-        intr::DconInternal
+        intr::ForceFreeStatesInternal
     )::Vector{ComplexF64}
 
 Map external forcing modes to eigenmode basis.
@@ -296,7 +296,7 @@ and creates a forcing vector in that basis.
 """
 function map_forcing_to_eigenmodes(
     forcing_modes::Vector{ForcingMode},
-    intr::DconInternal
+    intr::ForceFreeStatesInternal
 )::Vector{ComplexF64}
 
     numpert_total = intr.mpert * intr.npert

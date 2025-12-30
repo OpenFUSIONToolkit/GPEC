@@ -14,9 +14,20 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
-include("DCON/DCON.jl")
-import .DCON as DCON
-export DCON
+include("ForceFreeStates/ForceFreeStates.jl")
+import .ForceFreeStates as ForceFreeStates
+export ForceFreeStates
+
+include("ForcingTerms/ForcingTerms.jl")
+import .ForcingTerms as ForcingTerms
+export ForcingTerms
+
+include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
+import .PerturbedEquilibrium as PerturbedEquilibrium
+export PerturbedEquilibrium
+
+include("Main.jl")
+export Main
 
 include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
