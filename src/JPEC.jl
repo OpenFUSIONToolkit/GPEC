@@ -64,8 +64,8 @@ function main(args::Vector{String}=String[])
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
     end
-    if "WALL" in keys(inputs)
-        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+    if "Wall" in keys(inputs)
+        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     else
         wall_settings = Vacuum.WallShapeSettings()
     end

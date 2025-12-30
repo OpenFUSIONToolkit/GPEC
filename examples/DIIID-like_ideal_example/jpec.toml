@@ -24,7 +24,7 @@ out_2d = false             # ASCII output of processed 2D data
 bin_2d = false             # Binary output of processed 2D data
 dump_flag = false          # Binary dump of equilibrium data
 
-[WALL]
+[Wall]
 shape = "nowall"
 aw = 0.05
 bw = 1.5

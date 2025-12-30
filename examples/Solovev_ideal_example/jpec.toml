@@ -24,7 +24,7 @@ out_2d = false             # ASCII output of processed 2D data
 bin_2d = false             # Binary output of processed 2D data
 dump_flag = false          # Binary dump of equilibrium data
 
-[WALL]
+[Wall]
 shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
 a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
 aw = 0.05                     # Half-thickness of the wall.
