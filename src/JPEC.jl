@@ -53,7 +53,17 @@ function main(args::Vector{String}=String[])
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
+
+    # Set up equilibrium from jpec.toml or fallback to equil.toml if it exists
+    if "Equilibrium" in keys(inputs)
+        eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
+        equil = Equilibrium.setup_equilibrium(eq_config)
+    elseif isfile(joinpath(intr.dir_path, "equil.toml"))
+        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in jpec.toml"
+        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
+    else
+        error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
+    end
     if "WALL" in keys(inputs)
         wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
     else

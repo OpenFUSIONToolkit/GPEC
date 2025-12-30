@@ -139,10 +139,50 @@ function EquilibriumConfig(control::Dict, output::Dict)
 end
 
 """
+Outer constructor for EquilibriumConfig from a parsed TOML dictionary
+"""
+function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
+    # Check for required fields
+    required_keys = ("eq_filename", "eq_type")
+    missingkeys = filter(k -> !haskey(equil_dict, k), required_keys)
+
+    if !isempty(missingkeys)
+        error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
+    end
+
+    # Separate control and output parameters based on field names
+    control_fields = Set(String.(fieldnames(EquilibriumControl)))
+    output_fields = Set(String.(fieldnames(EquilibriumOutput)))
+
+    control_data = Dict{String,Any}()
+    output_data = Dict{String,Any}()
+
+    for (k, v) in equil_dict
+        if k in control_fields
+            control_data[k] = v
+        elseif k in output_fields
+            output_data[k] = v
+        else
+            @warn "Unknown equilibrium parameter: $k"
+        end
+    end
+
+    # Construct validated structs
+    control = EquilibriumControl(; symbolize_keys(control_data)...)
+    if !isabspath(control.eq_filename)
+        control.eq_filename = normpath(joinpath(base_path, control.eq_filename))
+    end
+    output = EquilibriumOutput(; symbolize_keys(output_data)...)
+
+    return EquilibriumConfig(; control=control, output=output)
+end
+
+"""
 Outer constructor for EquilibriumConfig that enables a toml file
     interface for specifying the configuration settings
+
+DEPRECATED: Use [Equilibrium] section in jpec.toml instead
 """
-# if this also have default, then conflicts with @kwdef mutable struct EquilibriumConfig.
 function EquilibriumConfig(path::String)
     raw = TOML.parsefile(path)
 
