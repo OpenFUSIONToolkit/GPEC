@@ -8,6 +8,7 @@ default(markersize=2)
 
 Pkg.activate("$(@__DIR__)/../.."); using JPEC
 
+# this requires you to have run the Solovev_ideal_example first to generate the benchmark inputs
 @load "$(@__DIR__)/../../examples/Solovev_ideal_example/vacuum_response_inputs.jld2" benchmark_inputs
 
 (; wv_block, mpert, mtheta_eq, mthvac, complex_flag, kernelsign,

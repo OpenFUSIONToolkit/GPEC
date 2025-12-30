@@ -5,6 +5,7 @@ using LinearAlgebra
 
 Pkg.activate("$(@__DIR__)/../.."); using JPEC
 
+# this requires you to have run the DIIID-like_ideal_example first to generate the benchmark inputs
 @load "$(@__DIR__)/../../examples/DIIID-like_ideal_example/benchmark_inputs.jld2" benchmark_inputs
 
 (; wv_block, mpert, mtheta_eq, mthvac, complex_flag, kernelsign,

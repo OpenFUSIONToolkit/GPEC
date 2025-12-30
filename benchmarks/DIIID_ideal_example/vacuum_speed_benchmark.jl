@@ -6,7 +6,8 @@ using Plots
 
 Pkg.activate("../.."); using JPEC
 
-@load "benchmark_inputs.jld2" benchmark_inputs
+# this requires you to have run the DIIID-like_ideal_example first to generate the benchmark inputs
+@load "$(@__DIR__)/../../examples/DIIID-like_ideal_example/benchmark_inputs.jld2" benchmark_inputs
 
 (; wv_block, mpert, mtheta_eq, mthvac, complex_flag, kernelsign,
                 wall_flag, farwall_flag, grri, xzpts, ahg_file, dir_path,
