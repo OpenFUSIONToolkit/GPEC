@@ -1,23 +1,23 @@
 """
-    sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
+    sing_scan!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
 
 Scan all singular surfaces and calculate asymptotic vmat and mmat matrices
 and Mericer criterion. Performs the same function as `sing_scan` in the Fortran code.
 """
-function sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
+function sing_scan!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
     for ising in 1:intr.msing
         sing_vmat!(intr, ctrl, equil, ffit, ising)
     end
 end
 
 """
-    sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
+    sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
 Locate singular rational q-surfaces (q = m/nn) using a bisection method
 between extrema of the q-profile, and store their properties in `intr.sing`.
 Performs the same function as `sing_find` in the Fortran code.
 """
-function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
+function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
     # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
@@ -73,7 +73,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 end
 
 """
-    sing_lim!(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
 Compute and set integration ψ, q, and q' limits by handling cases where user truncates
 before the last singular surface. Performs a similar function to `sing_lim`
@@ -91,7 +91,7 @@ If `qlim < qmax`, a Newton iteration is performed to find the corresponding
 Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
 or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
 """
-function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium)
+function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
@@ -142,7 +142,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 end
 
 """
-    sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+    sing_vmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
 Calculate asymptotic vmat and mmat matrices and Mercier criterion for
 singular surface `ising`. Performs the same function as `sing_vmat` in the Fortran code.
@@ -157,7 +157,7 @@ the 2016 Glasser DCON paper for the mathematical details.
 
 Check logic on typing of di
 """
-function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+function sing_vmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
     # Allocations
     singp = intr.sing[ising]
@@ -233,7 +233,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 end
 
 """
-    sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+    sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
 Calculate asymptotic mmat matrix for singular surface `ising`. Performs the same
 function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
@@ -262,7 +262,7 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
     # Initial allocations
     singp = intr.sing[ising]
@@ -510,7 +510,7 @@ See equation 47 in the Glass 2016 DCON paper. Identical to the Fortran
   - `singp::SingType`: The singular surface data structure containing all relevant matrices and parameters.
   - `k::Int`: The current order in the power series expansion.
 """
-function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
+function sing_solve!(singp::SingType, intr::ForceFreeStatesInternal, k::Int)
     # TODO: rename this solver_higher_order_vmat?
     # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
@@ -575,7 +575,7 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
 end
 
 """
-    sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+    sing_get_ua(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
 
 Compute the asymptotic series solution for a given singular surface.
 Fills and returns `ua` with the asymptotic solution vmat computed in
@@ -583,7 +583,7 @@ Fills and returns `ua` with the asymptotic solution vmat computed in
 2016 DCON paper. Performs the same function as `sing_get_ua` in the
 Fortran code.
 """
-function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+function sing_get_ua(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
 
     singp = intr.sing[odet.ising]
     r1 = singp.r1
@@ -621,13 +621,13 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 end
 
 """
-    sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+    sing_get_ca(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
 
 Compute the asymptotic expansion coefficients according to equation
 50 in Glasser 2016 DCON paper. Performs the same function as
 `sing_get_ca` in the Fortran code.
 """
-function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+function sing_get_ca(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
 
     ua = sing_get_ua(ctrl, intr, odet)
 
@@ -656,7 +656,7 @@ end
     sing_der!(
         du::Array{ComplexF64,3},
         u::Array{ComplexF64,3},
-        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState},
+        params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState},
         psieval::Float64
     )
 
@@ -683,7 +683,7 @@ more simplistic code with similar performance.
 
   - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
-  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState}`: Tuple of relevant structs
+  - `params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
 
 ### TODOs
@@ -691,8 +691,8 @@ more simplistic code with similar performance.
 Implement kin_flag functionality
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
-    params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,DconInternal,OdeState},
+    params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
+        FourFitVars,ForceFreeStatesInternal,OdeState},
     psieval::Float64)
 
     # Unpack structs and initialize

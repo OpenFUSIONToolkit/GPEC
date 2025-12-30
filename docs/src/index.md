@@ -46,7 +46,7 @@ To assist with release note compilation, please follow the commit message format
 ```
 CODE - TAG - Detailed message
 ```
-where CODE is EQUIL, DCON, VAC, etc. and TAGs are descriptors like WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc.
+where CODE is Equil, ForceFreeStates, Vacuum, etc. and TAGs are descriptors like WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc.
 
 Additionally, please see [this](https://docs.google.com/document/d/1XAOTz1IV8ErZAAk-iSuEuddNOLB5XcoVZsAbPKRUUuA) google doc for more details on using the GitHub.
 

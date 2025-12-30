@@ -44,7 +44,7 @@ if benchmark_n
         println("Testing n = $n_test")
 
         # Compute Fortran solution
-        JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh,
+        JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh,
                                     n_test, vac_inputs.qa, vac_inputs.r,
                                     vac_inputs.z, vac_inputs.delta)
 
@@ -53,7 +53,7 @@ if benchmark_n
                           complex_flag, kernelsign, wall_flag,
                           farwall_flag, grri, xzpts)
 
-        JPEC.Vacuum.unset_dcon_params()
+        JPEC.Vacuum.unset_surface_params()
 
         # Compute Julia solution
         vac_inputs_test = deepcopy(vac_inputs)
@@ -123,7 +123,7 @@ if benchmark_m
 
     # Fortran reference
     mpert_ref = mhigh_reference - vac_inputs.mlow
-    JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, mhigh_reference,
+    JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, mhigh_reference,
                                 1, vac_inputs.qa, vac_inputs.r,
                                 vac_inputs.z, vac_inputs.delta)
     wv_block_ref_fortran_m = zeros(ComplexF64, mpert_ref, mpert_ref)
@@ -131,7 +131,7 @@ if benchmark_m
     JPEC.Vacuum.mscvac(wv_block_ref_fortran_m, mpert_ref, mtheta_eq, mthvac,
                        complex_flag, kernelsign, wall_flag,
                        farwall_flag, grri_ref, xzpts, ahg_file, "$(@__DIR__)/../../examples/DIIID-like_ideal_example")
-    JPEC.Vacuum.unset_dcon_params()
+    JPEC.Vacuum.unset_surface_params()
 
     println("Reference solutions computed.\n")
 
@@ -142,7 +142,7 @@ if benchmark_m
         mpert_test = mhigh_test - vac_inputs.mlow
 
         # Compute Fortran solution
-        JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, mhigh_test,
+        JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, mhigh_test,
                                     1, vac_inputs.qa, vac_inputs.r,
                                     vac_inputs.z, vac_inputs.delta)
 
@@ -152,7 +152,7 @@ if benchmark_m
                           complex_flag, kernelsign, wall_flag,
                           farwall_flag, grri_test, xzpts, ahg_file, "$(@__DIR__)/../../examples/DIIID-like_ideal_example")
 
-        JPEC.Vacuum.unset_dcon_params()
+        JPEC.Vacuum.unset_surface_params()
 
         # Compute Julia solution
         vac_inputs_test_m = deepcopy(vac_inputs)

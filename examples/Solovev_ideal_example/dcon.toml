@@ -1,4 +1,4 @@
-[DCON_CONTROL]
+[ForceFreeStates_CONTROL]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
 mat_flag = true               # Construct coefficient matrices for diagnostic purposes
 ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)

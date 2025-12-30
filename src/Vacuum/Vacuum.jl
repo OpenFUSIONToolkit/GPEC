@@ -5,7 +5,7 @@ using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")
 
-export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
+export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
@@ -18,7 +18,7 @@ const libdir = joinpath(@__DIR__, "..", "..", "deps")
 const libvac = joinpath(libdir, "libvac")
 
 """
-    set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+    set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
 Initialize DCON parameters for vacuum field calculations.
 
@@ -48,14 +48,14 @@ xin = rand(Float64, n_modes)
 zin = rand(Float64, n_modes)
 deltain = rand(Float64, n_modes)
 
-set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 ```
 """
-function set_dcon_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::Integer,
+function set_surface_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::Integer,
     qa1in::Float64,
     xin::Vector{Float64}, zin::Vector{Float64}, deltain::Vector{Float64})
 
-    return ccall((:set_dcon_params_, libvac),
+    return ccall((:set_surface_params_, libvac),
         Nothing,
         (Ref{Cint}, Ref{Cint}, Ref{Cint}, Ref{Cint},
             Ref{Cdouble},
@@ -66,30 +66,30 @@ function set_dcon_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::In
 end
 
 """
-    unset_dcon_params()
+    unset_surface_params()
 
-Unset DCON parameters previously set by `set_dcon_params`.
+Unset DCON parameters previously set by `set_surface_params`.
 
 This subroutine deallocates in-memory arrays (`x_dcon`, `z_dcon`, and `delta_dcon`)
 and resets the internal DCON state for future vacuum calculations.
 
 # Notes
 
-- Must be called after `set_dcon_params` if you want to reset the DCON memory.
+- Must be called after `set_surface_params` if you want to reset the surface data memory.
 - No arguments are required.
 
 # Example
 
 ```julia
 # Set parameters
-set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
-# Reset DCON parameters
-unset_dcon_params()
+# Reset surface parameters
+unset_surface_params()
 ```
 """
-function unset_dcon_params()
-    ccall((:unset_dcon_params_, libvac), Nothing, ())
+function unset_surface_params()
+    ccall((:unset_surface_params_, libvac), Nothing, ())
 end
 
 """
@@ -109,7 +109,7 @@ Compute the vacuum response matrix for magnetostatic perturbations.
 - `farwall_flag`: Whether to use far-wall approximation (Bool)
 - `grrio`: Green's function data (Array{Float64,2})
 - `xzptso`: Source point coordinates (Array{Float64,2})
-- `op_ahgfile`: Optional communication file for when set_dcon_params is not called (String or Nothing)
+- `op_ahgfile`: Optional communication file for when set_surface_params is not called (String or Nothing)
 
 # Returns
 
@@ -118,13 +118,13 @@ Compute the vacuum response matrix for magnetostatic perturbations.
 
 # Note
 
-Requires prior initialization with `set_dcon_params()` before calling this function.
+Requires prior initialization with `set_surface_params()` before calling this function.
 
 # Examples
 
 ```julia
 # Initialize parameters first
-set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
 # Set up vacuum calculation
 mpert = 5

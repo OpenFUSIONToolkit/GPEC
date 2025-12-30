@@ -36,7 +36,7 @@ if benchmark_n
         println("Benchmarking n = $n_test")
         
         # Benchmark Fortran version
-        JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh, 
+        JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh, 
                                     n_test, vac_inputs.qa, vac_inputs.r, 
                                     vac_inputs.z, vac_inputs.delta)
         
@@ -49,7 +49,7 @@ if benchmark_n
         push!(fortran_allocs, median(b_fortran).allocs)
         push!(fortran_memory, median(b_fortran).memory / 1e6)
         
-        JPEC.Vacuum.unset_dcon_params()
+        JPEC.Vacuum.unset_surface_params()
         
         # Benchmark Julia version
         vac_inputs_test = deepcopy(vac_inputs)
@@ -106,7 +106,7 @@ if benchmark_m
         mpert_test = mhigh_test - vac_inputs.mlow
         
         # Benchmark Fortran version
-        JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, mhigh_test, 
+        JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, mhigh_test, 
                                     1, vac_inputs.qa, vac_inputs.r, 
                                     vac_inputs.z, vac_inputs.delta)
         
@@ -119,7 +119,7 @@ if benchmark_m
         push!(fortran_mhigh_allocs, median(b_fortran).allocs)
         push!(fortran_mhigh_memory, median(b_fortran).memory / 1e6)
         
-        JPEC.Vacuum.unset_dcon_params()
+        JPEC.Vacuum.unset_surface_params()
         
         # Benchmark Julia version
         vac_inputs_test = deepcopy(vac_inputs)

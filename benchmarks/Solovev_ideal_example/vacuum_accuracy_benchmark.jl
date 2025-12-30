@@ -48,7 +48,7 @@ if benchmark_n
         println("Testing n = $n_test")
 
         # Compute Fortran solution
-        JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh,
+        JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh,
                                     n_test, vac_inputs.qa, vac_inputs.r,
                                     vac_inputs.z, vac_inputs.delta)
 
@@ -57,7 +57,7 @@ if benchmark_n
                           complex_flag, kernelsign, wall_flag,
                           farwall_flag, grri, xzpts)
 
-        JPEC.Vacuum.unset_dcon_params()
+        JPEC.Vacuum.unset_surface_params()
 
         # Compute Julia solution
         vac_inputs_test = deepcopy(vac_inputs)
@@ -122,7 +122,7 @@ if benchmark_a
         println("Testing a = $a_test")
 
         # Compute Fortran solution
-        JPEC.Vacuum.set_dcon_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh,
+        JPEC.Vacuum.set_surface_params(mtheta_eq, vac_inputs.mlow, vac_inputs.mhigh,
                                     vac_inputs.n, vac_inputs.qa, vac_inputs.r,
                                     vac_inputs.z, vac_inputs.delta)
 
@@ -136,7 +136,7 @@ if benchmark_a
                           complex_flag, kernelsign, wall_flag,
                           farwall_flag, grri, xzpts)
 
-        JPEC.Vacuum.unset_dcon_params()
+        JPEC.Vacuum.unset_surface_params()
 
         # Compute Julia solution
         new_wall = JPEC.Vacuum.WallShapeSettings(

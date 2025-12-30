@@ -6,9 +6,9 @@
         zin = rand(Float64, lmax - lmin + 1)
         deltain = rand(Float64, lmax - lmin + 1)
 
-        @info "Testing set_dcon_params…"
-        JPEC.Vacuum.set_dcon_params(mtheta_in, lmin, lmax, nnin, qa1in, xin, zin, deltain)
-        @info "set_dcon_params OK!"
+        @info "Testing set_surface_params…"
+        JPEC.Vacuum.set_surface_params(mtheta_in, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+        @info "set_surface_params OK!"
 
         @info "Testing mscvac…"
         mpert = 5

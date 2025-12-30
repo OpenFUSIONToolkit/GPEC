@@ -78,8 +78,8 @@ JPEC consists of four main modules, each organized in `src/`:
    - `Vacuum_math.jl` - Mathematical utilities
    - `fortran/` - Legacy Fortran code compiled to shared library
 
-4. **DCON** (`src/DCON/`) - Stability analysis
-   - `DconStructs.jl` - Core data structures
+4. **ForceFreeStates** (`src/ForceFreeStates/`) - Stability analysis
+   - `ForceFreeStatesStructs.jl` - Core data structures
    - `Main.jl` - Main entry points
    - `Ode.jl` - ODE solver for stability equations
    - `Sing.jl` - Singular point handling
@@ -126,13 +126,13 @@ CODE - TAG - Detailed message
 ```
 
 Where:
-- CODE: Module name (EQUIL, DCON, VAC, VACUUM, etc.)
+- CODE: Module name (EQUIL, ForceFreeStates, VAC, VACUUM, etc.)
 - TAG: Type descriptor (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc.)
 
 Examples:
 - `VAC - WIP - Converting vaccal wall code to Julia`
 - `EQUIL - BUG FIX - Fixed separatrix finding for high kappa`
-- `DCON - NEW FEATURE - Added Mercier criterion calculation`
+- `ForceFreeStates - NEW FEATURE - Added Mercier criterion calculation`
 
 This format is used for compiling release notes, so tags should be human-readable and descriptive.
 

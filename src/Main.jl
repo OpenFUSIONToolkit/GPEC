@@ -1,3 +1,16 @@
+using TOML
+using Printf
+using LinearAlgebra
+using HDF5
+
+# Import necessary submodules
+import .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, OdeState, VacuumData, FourFitVars
+import .ForceFreeStates: sing_lim!, sing_find!, sing_scan!, mercier_scan!, make_metric, make_matrix
+import .ForceFreeStates: ode_run, free_run!
+import .Equilibrium
+import .Vacuum
+import .Spl
+
 function Main(path::String="./")
 
     println("DCON START")
@@ -5,10 +18,10 @@ function Main(path::String="./")
     start_time = time()
 
     # Read input data and set up data structures
-    intr = DconInternal(; dir_path=path)
-    # TODO: leaving DCON_CONTROL as a part of the toml file, eventually can combine equil, gpec, etc. into one input file?
+    intr = ForceFreeStatesInternal(; dir_path=path)
+    # TODO: leaving ForceFreeStates_CONTROL as a part of the toml file, eventually can combine equil, gpec, etc. into one input file?
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
-    ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
         wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
@@ -61,7 +74,7 @@ function Main(path::String="./")
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
-        error("Either nn_low or nn_high must be set in DCON_CONTROL (both are 0)")
+        error("Either nn_low or nn_high must be set in ForceFreeStates_CONTROL (both are 0)")
     elseif ctrl.nn_low == 0
         ctrl.nn_low = ctrl.nn_high
     elseif ctrl.nn_high == 0
@@ -179,7 +192,7 @@ function Main(path::String="./")
 end
 
 """
-    write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState)
+    write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState)
 
 Helper function to write the HDF5 output file with relevant run and equilibrium parameters.
 This combines the functionality of several pieces of the Fortran code in `ode_output.f`,
@@ -192,13 +205,13 @@ vacuum data if `vac_flag` is true.
 Combine spline unpacking if possible, too many extra lines
 
 """
-function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
+function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
         # Store input parameters
-        for (key, val) in zip(fieldnames(DconControl), getfield.(Ref(ctrl), fieldnames(DconControl)))
-            out_h5["input/DCON_CONTROL/$key"] = val
+        for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
+            out_h5["input/ForceFreeStates_CONTROL/$key"] = val
         end
         for (key, val) in zip(fieldnames(Equilibrium.EquilibriumControl), getfield.(Ref(equil.config.control), fieldnames(Equilibrium.EquilibriumControl)))
             out_h5["input/EQUIL_CONTROL/$key"] = val
@@ -206,7 +219,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         # TODO: assuming EQUIL_OUTPUT is going to be deprecated
         # TODO: should we store the equilibrium? difficult since it could be a gfile, sol.in, etc.
         # TODO: if we do one input file, can just pass that in instead and loop easily since its parsed
-        # as a dict already (for (k, v) in inputs["DCON_CONTROL"]...). We have to do this since custom structs
+        # as a dict already (for (k, v) in inputs["ForceFreeStates_CONTROL"]...). We have to do this since custom structs
         # don't inherently have an iterator by default
 
         # Write derived run parameters
