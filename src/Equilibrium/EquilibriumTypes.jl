@@ -22,7 +22,6 @@ A mutable struct containing control parameters for equilibrium reconstruction.
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
-  - `use_classic_splines::Bool` - Use classic spline interpolation method
   - `input_only::Bool` - Only process input without full reconstruction
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
@@ -43,7 +42,6 @@ A mutable struct containing control parameters for equilibrium reconstruction.
 
     newq0::Int = 0
     etol::Float64 = 1e-7
-    use_classic_splines::Bool = false
 
     input_only::Bool = false
     use_galgrid::Bool = true
@@ -52,7 +50,7 @@ A mutable struct containing control parameters for equilibrium reconstruction.
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumControl(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
-        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
+        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
         input_only, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
@@ -85,7 +83,7 @@ A mutable struct containing control parameters for equilibrium reconstruction.
             error("Cannot recognize jac_type = $(jac_type)")
         end
         return new(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
-            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
+            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
             input_only, use_galgrid)
     end
 end
@@ -101,20 +99,14 @@ A mutable struct containing flags for equilibrium output options.
   - `out_eq_1d::Bool` - Output 1D equilibrium profiles in text format
   - `bin_eq_1d::Bool` - Output 1D equilibrium profiles in binary format
   - `out_eq_2d::Bool` - Output 2D equilibrium data in text format
-  - `bin_eq_2d::Bool` - Output 2D equilibrium data in binary format
   - `out_2d::Bool` - Output 2D flux surface data in text format
-  - `bin_2d::Bool` - Output 2D flux surface data in binary format
-  - `dump_flag::Bool` - Output diagnostic dump files
 """
 @kwdef mutable struct EquilibriumOutput
     gse_flag::Bool = false
     out_eq_1d::Bool = false
     bin_eq_1d::Bool = false
     out_eq_2d::Bool = false
-    bin_eq_2d::Bool = true
     out_2d::Bool = false
-    bin_2d::Bool = false
-    dump_flag::Bool = false
 end
 
 """

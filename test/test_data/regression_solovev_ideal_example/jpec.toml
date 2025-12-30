@@ -12,17 +12,13 @@ mpsi = 16                   # Radial grid intervals
 mtheta = 256                 # Poloidal grid intervals
 newq0 = 0                    # Override q(0)
 etol = 1e-7                  # Reconstruction tolerance
-use_classic_splines = false  # Use classical spline (vs. tri-diagonal)
 input_only = false           # Quit after input read
 
 gse_flag = false           # Output G-S equation accuracy diagnostics
 out_eq_1d = false          # ASCII output of 1D eq data
 bin_eq_1d = false          # Binary output of 1D eq data
 out_eq_2d = false          # ASCII output of 2D eq data
-bin_eq_2d = true           # Binary output of 2D eq data (used by GPEC)
 out_2d = false             # ASCII output of processed 2D data
-bin_2d = false             # Binary output of processed 2D data
-dump_flag = false          # Binary dump of equilibrium data
 
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
