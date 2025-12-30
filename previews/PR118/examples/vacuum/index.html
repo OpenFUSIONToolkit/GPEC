@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Vacuum Examples · JPEC.jl</title><meta name="title" content="Vacuum Examples · JPEC.jl"/><meta property="og:title" content="Vacuum Examples · JPEC.jl"/><meta property="twitter:title" content="Vacuum Examples · JPEC.jl"/><meta name="description" content="Documentation for JPEC.jl."/><meta property="og:description" content="Documentation for JPEC.jl."/><meta property="twitter:description" content="Documentation for JPEC.jl."/><meta property="og:url" content="https://OpenFUSIONToolkit.github.io/JPEC/examples/vacuum/"/><meta property="twitter:url" content="https://OpenFUSIONToolkit.github.io/JPEC/examples/vacuum/"/><link rel="canonical" href="https://OpenFUSIONToolkit.github.io/JPEC/examples/vacuum/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">JPEC.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../../set_up/">Setup</a></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../splines/">Splines</a></li><li><a class="tocitem" href="../../vacuum/">Vacuum</a></li><li><a class="tocitem" href="../../equilibrium/">Equilibrium</a></li></ul></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../splines/">Spline Examples</a></li><li class="is-active"><a class="tocitem" href>Vacuum Examples</a><ul class="internal"><li><a class="tocitem" href="#Basic-Vacuum-Field-Calculation"><span>Basic Vacuum Field Calculation</span></a></li><li><a class="tocitem" href="#Advanced-Usage"><span>Advanced Usage</span></a></li><li><a class="tocitem" href="#Troubleshooting"><span>Troubleshooting</span></a></li></ul></li><li><a class="tocitem" href="../equilibrium/">Equilibrium Examples</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Vacuum Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Vacuum Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC/blob/develop/docs/src/examples/vacuum.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Vacuum-Examples"><a class="docs-heading-anchor" href="#Vacuum-Examples">Vacuum Examples</a><a id="Vacuum-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Vacuum-Examples" title="Permalink"></a></h1><p>This page demonstrates the usage of the Vacuum module for magnetostatic calculations.</p><h2 id="Basic-Vacuum-Field-Calculation"><a class="docs-heading-anchor" href="#Basic-Vacuum-Field-Calculation">Basic Vacuum Field Calculation</a><a id="Basic-Vacuum-Field-Calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Vacuum-Field-Calculation" title="Permalink"></a></h2><h3 id="Setting-up-Surface-Parameters"><a class="docs-heading-anchor" href="#Setting-up-Surface-Parameters">Setting up Surface Parameters</a><a id="Setting-up-Surface-Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-up-Surface-Parameters" title="Permalink"></a></h3><p>The vacuum module requires initialization with surface parameters:</p><pre><code class="language-julia hljs">using JPEC
+
+# Define surface parameters
+mthin = Int32(4)     # Number of theta points
+lmin = Int32(1)      # Minimum poloidal mode number
+lmax = Int32(4)      # Maximum poloidal mode number
+nnin = Int32(2)      # Toroidal mode number
+qa1in = 1.23         # Safety factor parameter
+
+# Create geometry arrays
+n_modes = lmax - lmin + 1
+xin = rand(Float64, n_modes)      # Radial coordinates
+zin = rand(Float64, n_modes)      # Vertical coordinates
+deltain = rand(Float64, n_modes)  # Displacement data
+
+# Initialize surface parameters interface
+JPEC.VacuumMod.set_surface_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)</code></pre><h3 id="Vacuum-Matrix-Calculation"><a class="docs-heading-anchor" href="#Vacuum-Matrix-Calculation">Vacuum Matrix Calculation</a><a id="Vacuum-Matrix-Calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Vacuum-Matrix-Calculation" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Set up vacuum calculation parameters
+mpert = 5              # Number of perturbation modes
+mtheta = 256           # Number of theta points for plasma
+mthvac = 256           # Number of theta points for vacuum
+
+# Initialize result matrix
+wv = zeros(ComplexF64, mpert, mpert)
+
+# Calculation flags
+complex_flag = true     # Use complex arithmetic
+kernelsignin = -1.0    # Kernel sign
+wall_flag = false      # Include wall effects
+farwall_flag = true     # Far wall approximation
+
+# Geometry and source data
+grrio = rand(Float64, 2*(mthvac+5), mpert*2)  # Geometry data
+xzptso = rand(Float64, mthvac+5, 4)           # Source points
+
+# Perform vacuum matrix calculation
+JPEC.VacuumMod.mscvac(
+    wv, mpert, mtheta, mthvac,
+    complex_flag, kernelsignin,
+    wall_flag, farwall_flag,
+    grrio, xzptso
+)
+
+println(&quot;Vacuum matrix calculation completed&quot;)
+println(&quot;Result matrix dimensions: &quot;, size(wv))</code></pre><h3 id="Analyzing-Results"><a class="docs-heading-anchor" href="#Analyzing-Results">Analyzing Results</a><a id="Analyzing-Results-1"></a><a class="docs-heading-anchor-permalink" href="#Analyzing-Results" title="Permalink"></a></h3><pre><code class="language-julia hljs">using Plots
+
+# Plot magnitude of vacuum matrix elements
+heatmap(abs.(wv),
+        title=&quot;Vacuum Matrix |W| Elements&quot;,
+        xlabel=&quot;Mode j&quot;,
+        ylabel=&quot;Mode i&quot;,
+        color=:plasma)
+
+# Plot phase information
+heatmap(angle.(wv),
+        title=&quot;Vacuum Matrix Phase&quot;,
+        xlabel=&quot;Mode j&quot;,
+        ylabel=&quot;Mode i&quot;,
+        color=:phase)</code></pre><h2 id="Advanced-Usage"><a class="docs-heading-anchor" href="#Advanced-Usage">Advanced Usage</a><a id="Advanced-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Usage" title="Permalink"></a></h2><h3 id="Including-Wall-Effects"><a class="docs-heading-anchor" href="#Including-Wall-Effects">Including Wall Effects</a><a id="Including-Wall-Effects-1"></a><a class="docs-heading-anchor-permalink" href="#Including-Wall-Effects" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Enable wall calculations
+wall_flag = true
+farwall_flag = false  # Do not use far wall approximation
+
+# Additional wall parameters might be needed
+# (specific implementation depends on geometry)
+
+JPEC.VacuumMod.mscvac(
+    wv, mpert, mtheta, mthvac,
+    complex_flag, kernelsignin,
+    wall_flag, farwall_flag,
+    grrio, xzptso
+)</code></pre><h3 id="Multi-mode-Analysis"><a class="docs-heading-anchor" href="#Multi-mode-Analysis">Multi-mode Analysis</a><a id="Multi-mode-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Multi-mode-Analysis" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Analyze eigenvalues of vacuum matrix
+using LinearAlgebra
+
+eigenvals = eigvals(wv)
+eigenvecs = eigvecs(wv)
+
+# Plot eigenvalue spectrum
+scatter(real.(eigenvals), imag.(eigenvals),
+        title=&quot;Vacuum Matrix Eigenvalues&quot;,
+        xlabel=&quot;Real part&quot;,
+        ylabel=&quot;Imaginary part&quot;,
+        legend=false)
+
+# Identify most unstable mode
+max_growth_idx = argmax(imag.(eigenvals))
+println(&quot;Most unstable eigenvalue: &quot;, eigenvals[max_growth_idx])</code></pre><h3 id="Coupling-with-Equilibrium-Data"><a class="docs-heading-anchor" href="#Coupling-with-Equilibrium-Data">Coupling with Equilibrium Data</a><a id="Coupling-with-Equilibrium-Data-1"></a><a class="docs-heading-anchor-permalink" href="#Coupling-with-Equilibrium-Data" title="Permalink"></a></h3><pre><code class="language-julia hljs"># This example shows how vacuum calculations integrate with equilibrium
+
+# 1. Set up equilibrium (using spline example from equilibrium page)
+# ... equilibrium setup code ...
+
+# 2. Extract boundary data for vacuum calculation
+# boundary_data = extract_boundary(psi_spline, flux_surface)
+
+# 3. Convert to DCON format
+# xin, zin, deltain = process_boundary_data(boundary_data)
+
+# 4. Perform vacuum calculation
+# JPEC.VacuumMod.set_surface_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+# ... vacuum calculation ...
+
+# 5. Analyze stability
+# stability_analysis(wv, eigenvals)</code></pre><h2 id="Troubleshooting"><a class="docs-heading-anchor" href="#Troubleshooting">Troubleshooting</a><a id="Troubleshooting-1"></a><a class="docs-heading-anchor-permalink" href="#Troubleshooting" title="Permalink"></a></h2><h3 id="Common-Issues"><a class="docs-heading-anchor" href="#Common-Issues">Common Issues</a><a id="Common-Issues-1"></a><a class="docs-heading-anchor-permalink" href="#Common-Issues" title="Permalink"></a></h3><ol><li><strong>Initialization Error</strong>: Ensure <code>set_surface_params</code> is called before <code>mscvac</code></li><li><strong>Memory Issues</strong>: Large <code>mtheta</code>/<code>mthvac</code> values require significant memory</li><li><strong>Convergence</strong>: Check that geometry arrays are properly normalized</li><li><strong>Complex Arithmetic</strong>: Ensure <code>complex_flag=true</code> for stability analysis</li></ol><h3 id="Performance-Optimization"><a class="docs-heading-anchor" href="#Performance-Optimization">Performance Optimization</a><a id="Performance-Optimization-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Optimization" title="Permalink"></a></h3><pre><code class="language-julia hljs"># For large problems, consider:
+# - Reducing mtheta/mthvac if possible
+# - Using real arithmetic (complex_flag=false) when appropriate
+# - Parallelization (if available in Fortran backend)
+
+# Monitor memory usage
+using Pkg
+Pkg.add(&quot;BenchmarkTools&quot;)
+using BenchmarkTools
+
+@time JPEC.VacuumMod.mscvac(wv, mpert, mtheta, mthvac,
+                           complex_flag, kernelsignin,
+                           wall_flag, farwall_flag,
+                           grrio, xzptso)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../splines/">« Spline Examples</a><a class="docs-footer-nextpage" href="../equilibrium/">Equilibrium Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 30 December 2025 17:42">Tuesday 30 December 2025</span>. Using Julia version 1.11.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
