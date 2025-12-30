@@ -1,19 +1,28 @@
 [Equilibrium]
-eq_type = "sol"             # Type of the input 2D equilibrium file
-eq_filename = "sol.toml"  # path to equilibrium file
-jac_type = "pest"          # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
-power_b = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
-power_r = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
-grid_type = "ldp"            # Radial grid packing
-psilow = 1e-4                # Min psi (normalized)
-psihigh = 0.99999              # Max psi (normalized)
-mpsi = 128                   # Radial grid intervals
-mtheta = 256                 # Poloidal grid intervals
-newq0 = 0                    # Override q(0)
-etol = 1e-7                  # Reconstruction tolerance
-force_termination = false           # Quit after input read
+eq_type = "sol"                         # Type of the input 2D equilibrium file
+eq_filename = "sol.toml"                # Path to equilibrium file
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
+power_bp = 0                            # Poloidal field power exponent for Jacobian
+power_b = 0                             # Toroidal field power exponent for Jacobian
+power_r = 0                             # Major radius power exponent for Jacobian
+grid_type = "ldp"                       # Radial grid packing type
+psilow = 1e-4                           # Lower limit of normalized flux coordinate
+psihigh = 0.99999                       # Upper limit of normalized flux coordinate
+mpsi = 128                              # Number of radial grid points
+mtheta = 256                            # Number of poloidal grid points
+newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
+etol = 1e-7                             # Error tolerance for equilibrium solver
+force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
+[Wall]
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                              # Distance from plasma (conformal) or shape parameter
+aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                                # Elongation parameter for wall shapes
+cw = 0                                  # Offset of wall center from major radius
+dw = 0.5                                # Triangularity parameter for wall shapes
+tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
