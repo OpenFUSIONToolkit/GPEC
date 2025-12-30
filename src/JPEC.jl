@@ -64,17 +64,21 @@ function main(args::Vector{String}=String[])
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
     end
+
+
     if "Wall" in keys(inputs)
         wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     else
         wall_settings = Vacuum.WallShapeSettings()
     end
+
     if "DEBUG" in keys(inputs)
         debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
         debug_settings = DebugSettings()
     end
     intr.debug_settings = debug_settings
+    
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
@@ -88,11 +92,11 @@ function main(args::Vector{String}=String[])
     end
 
     # If truncating before psihigh, reform equilibrium if desired
-    if intr.psilim != equil.config.control.psihigh && ctrl.reform_eq_with_psilim
-        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.control.psihigh)."
+    if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
+        @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.psihigh)."
         # JMH - Nik please put the logic we discussed here
         # something like ?
-        # equil.config.control.psihigh = intr.psilim
+        # equil.config.psihigh = intr.psilim
         # equil = set_up_equilibrium(equil.config)
     end
 
@@ -277,7 +281,7 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
             out_h5["input/ForceFreeStates/$key"] = val
         end
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumControl), getfield.(Ref(equil.config.control), fieldnames(Equilibrium.EquilibriumControl)))
+        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumConfig), getfield.(Ref(equil.config), fieldnames(Equilibrium.EquilibriumConfig)))
             out_h5["input/EQUIL_CONTROL/$key"] = val
         end
         # TODO: assuming EQUIL_OUTPUT is going to be deprecated

@@ -15,7 +15,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, EquilibriumControl, PlasmaEquilibrium, EquilibriumParameters
+export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -486,7 +486,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write contour data
-        h5open(joinpath(dirname(equil.config.control.eq_filename), "gsec.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.eq_filename), "gsec.h5"), "w") do file
             file["mpsi"] = mpsi
             file["mtheta"] = mtheta
             file["r"] = Float32.(r)
@@ -500,7 +500,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write xy plot data
-        h5open(joinpath(dirname(equil.config.control.eq_filename), "gse.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.eq_filename), "gse.h5"), "w") do file
             gse_data = Array{Float32,3}(undef, mpsi + 1, mtheta + 1, 7)
             for ipsi in 0:mpsi
                 for itheta in 0:mtheta
@@ -517,7 +517,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write integrated error criterion
-        h5open(joinpath(dirname(equil.config.control.eq_filename), "gsei.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.eq_filename), "gsei.h5"), "w") do file
             file["xs"] = Float32.(flux.xs)
             file["term"] = Float32.(term)
             file["totali"] = Float32.(totali)

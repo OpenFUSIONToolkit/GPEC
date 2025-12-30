@@ -96,7 +96,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
     intr.q1lim = equil.sq.fs1[end, 4]
-    intr.psilim = equil.config.control.psihigh
+    intr.psilim = equil.config.psihigh
 
     # Optionally override qlim based on dmlim
     if ctrl.set_psilim_via_dmlim
@@ -118,7 +118,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(equil.sq.fs[:, 4] .- intr.qlim))
-        jpsi = min(jpsi, equil.config.control.mpsi - 1)
+        jpsi = min(jpsi, equil.config.mpsi - 1)
 
         # Shorthand to evaluate q/q1 inside newton iteration
         qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]

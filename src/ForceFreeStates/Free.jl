@@ -51,7 +51,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
         if intr.debug_settings.output_benchmark_data
             @info "Outputting top level vacuum debug data for n = $n"
             benchmark_inputs = VacuumBenchmarkInputs(
-                    wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, 
+                    wv_block, intr.mpert, equil.config.mtheta, ctrl.mthvac,
                     complex_flag, vac_inputs.kernelsign, wall_flag,
                     farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
                     vac_inputs, wall_settings,
@@ -160,7 +160,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
-    mtheta = equil.config.control.mtheta
+    mtheta = equil.config.mtheta
     angle = zeros(Float64, mtheta + 1)
     r = zeros(Float64, mtheta + 1)
     z = zeros(Float64, mtheta + 1)
@@ -169,7 +169,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
 
     # Compute output
     qa = Spl.spline_eval!(equil.sq, psifac)[4]
-    for itheta in 1:equil.config.control.mtheta+1
+    for itheta in 1:equil.config.mtheta+1
         f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
         angle[itheta] = 2π * (theta_norm[itheta] + f[2])
@@ -186,7 +186,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     end
 
     # Pass all required values to VACUUM
-    Vacuum.set_surface_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
+    Vacuum.set_surface_params(equil.config.mtheta, intr.mlow, intr.mhigh, n, qa,
         reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
@@ -199,7 +199,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         mpert = intr.mpert,
         n = n,
         qa = qa,
-        mtheta_eq = equil.config.control.mtheta,
+        mtheta_eq = equil.config.mtheta,
         mtheta = ctrl.mthvac,
         force_wv_symmetry = ctrl.force_wv_symmetry
     )
@@ -262,7 +262,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
             ahg_file = "ahg2msc_dcon.out" # Deprecated
 
             # Compute vacuum matrix
-            Vacuum.mscvac(wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
+            Vacuum.mscvac(wv_block, intr.mpert, equil.config.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
                 wall_flag, farwall_flag, grri, xzpts, ahg_file, intr.dir_path)
 
             # Apply singular factor scaling

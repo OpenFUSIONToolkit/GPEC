@@ -3,9 +3,10 @@ function symbolize_keys(dict::Dict{String,Any})
 end
 
 """
-    EquilibriumControl
+    EquilibriumConfig(...)
 
-A mutable struct containing control parameters for equilibrium reconstruction.
+A mutable struct containing configuration parameters for equilibrium reconstruction.
+Bundles all necessary settings originally specified in the equil fortran namelists.
 
 ## Fields
 
@@ -25,7 +26,7 @@ A mutable struct containing control parameters for equilibrium reconstruction.
   - `input_only::Bool` - Only process input without full reconstruction
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
-@kwdef mutable struct EquilibriumControl
+@kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
     eq_filename::String = "mypath"
 
@@ -49,7 +50,7 @@ A mutable struct containing control parameters for equilibrium reconstruction.
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumControl(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
+    function EquilibriumConfig(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
         grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
         input_only, use_galgrid)
         if jac_type == "hamada"
@@ -89,16 +90,6 @@ A mutable struct containing control parameters for equilibrium reconstruction.
 end
 
 """
-    EquilibriumConfig(...)
-
-A container struct that bundles all necessary configuration settings originally specified in the equil
-fortran namelists.
-"""
-@kwdef mutable struct EquilibriumConfig
-    control::EquilibriumControl = EquilibriumControl()
-end
-
-"""
 Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 """
 function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
@@ -110,25 +101,25 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
         error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
     end
 
-    # Filter to only control parameters
-    control_fields = Set(String.(fieldnames(EquilibriumControl)))
-    control_data = Dict{String,Any}()
+    # Filter to only known parameters
+    config_fields = Set(String.(fieldnames(EquilibriumConfig)))
+    config_data = Dict{String,Any}()
 
     for (k, v) in equil_dict
-        if k in control_fields
-            control_data[k] = v
+        if k in config_fields
+            config_data[k] = v
         else
             @warn "Unknown equilibrium parameter: $k"
         end
     end
 
     # Construct validated struct
-    control = EquilibriumControl(; symbolize_keys(control_data)...)
-    if !isabspath(control.eq_filename)
-        control.eq_filename = normpath(joinpath(base_path, control.eq_filename))
+    config = EquilibriumConfig(; symbolize_keys(config_data)...)
+    if !isabspath(config.eq_filename)
+        config.eq_filename = normpath(joinpath(base_path, config.eq_filename))
     end
 
-    return EquilibriumConfig(; control=control)
+    return config
 end
 
 """
@@ -141,23 +132,23 @@ function EquilibriumConfig(path::String)
     raw = TOML.parsefile(path)
 
     # Extract EQUIL_CONTROL with default fallback
-    control_data = get(raw, "EQUIL_CONTROL", Dict())
+    config_data = get(raw, "EQUIL_CONTROL", Dict())
 
-    # Check for required fields in control_data
+    # Check for required fields
     required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(control_data, k), required_keys)
+    missingkeys = filter(k -> !haskey(config_data, k), required_keys)
 
     if !isempty(missingkeys)
-        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missing, ", "))")
+        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missingkeys, ", "))")
     end
 
     # Construct validated struct
-    control = EquilibriumControl(; symbolize_keys(control_data)...)
-    if !isabspath(control.eq_filename)
-        control.eq_filename = normpath(joinpath(dirname(path), control.eq_filename))
+    config = EquilibriumConfig(; symbolize_keys(config_data)...)
+    if !isabspath(config.eq_filename)
+        config.eq_filename = normpath(joinpath(dirname(path), config.eq_filename))
     end
 
-    return EquilibriumConfig(; control=control)
+    return config
 end
 
 """
