@@ -47,3 +47,13 @@ dw = 0.5
 tw = 0.05
 equal_arc_wall = 0
 a = 0.2415
+[PerturbedEquilibrium]
+# Test case: single mode n=1, m=6 with amplitude 1e-4
+forcing_data_file = "forcing.dat"
+forcing_data_format = "ascii"
+fixed_boundary = false
+output_eigenmodes = true
+compute_response = true
+compute_singular_coupling = true
+verbose = true
+write_outputs_to_HDF5 = true
