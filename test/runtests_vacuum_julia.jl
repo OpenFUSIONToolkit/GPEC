@@ -40,8 +40,9 @@ using Interpolations
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
             @test length(plasma_surf.x) == 4
             @test length(plasma_surf.z) == 4
+            @test length(plasma_surf.delta) == 4
             @test length(plasma_surf.dx_dtheta) == 4
-            @test size(plasma_surf.coslt) == (4, 1)
+            @test length(plasma_surf.dz_dtheta) == 4
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end

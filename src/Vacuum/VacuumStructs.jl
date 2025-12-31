@@ -39,7 +39,7 @@ end
 """
     PlasmaGeometry
 
-Struct holding plasma geometry data on the mtheta grid for vacuum calculations. 
+Struct holding plasma geometry data on the mtheta grid for vacuum calculations.
 
 Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
 
@@ -50,10 +50,6 @@ Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid poi
 - `delta::Vector{Float64}`: Toroidal angle offset divided by qa (i.e., -ν/qa where ϕ = 2πζ + ν(ψ, θ)) at plasma surface
 - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
 - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
-- `cnqd::Vector{Float64}`: cos(n * qa * delta) at plasma surface
-- `snqd::Vector{Float64}`: sin(n * qa * delta) at plasma surface
-- `sinlt::Matrix{Float64}`: sin(l * θ) basis functions for poloidal modes at plasma surface
-- `coslt::Matrix{Float64}`: cos(l * θ) basis functions for poloidal modes at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
@@ -61,35 +57,25 @@ struct PlasmaGeometry
     delta::Vector{Float64}
     dx_dtheta::Vector{Float64}
     dz_dtheta::Vector{Float64}
-    cnqd::Vector{Float64}
-    snqd::Vector{Float64}
-    sinlt::Matrix{Float64}
-    coslt::Matrix{Float64}
 end
 
 """
     WallGeometry
 
-Struct holding wall geometry data for vacuum calculations. 
+Struct holding wall geometry data for vacuum calculations.
 
 Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
 
 - `nowall::Bool`: Boolean flag indicating if there is no wall
-- `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
 - `x::Vector{Float64}`: Wall R-coordinates
 - `z::Vector{Float64}`: Wall Z-coordinates
-- `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at wall
-- `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at wall
 """
 @kwdef struct WallGeometry
     nowall::Bool = true
-    is_closed_toroidal::Bool = true
     x::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
-    dx_dtheta::Vector{Float64} = Float64[]
-    dz_dtheta::Vector{Float64} = Float64[]
 end
 
 """
@@ -163,41 +149,19 @@ function initialize_plasma_surface(inputs::VacuumInput)
     x_plasma = interp_to_new_grid(inputs.r, mtheta)
     z_plasma = interp_to_new_grid(inputs.z, mtheta)
     delta = interp_to_new_grid(inputs.delta, mtheta)
-    # Plasma boundary theta derivative (this is semi-working)
-    # All of these arrays are of length mth with θ = [0, 1)
+
+    # Compute derivatives of plasma boundary with respect to poloidal angle θ
+    # All of these arrays are of length mtheta with θ = [0, 1)
     theta_grid = range(start=0, length=mtheta, step=2π/mtheta)
     dx_plasma_dtheta = periodic_cubic_deriv(theta_grid, x_plasma)
     dz_plasma_dtheta = periodic_cubic_deriv(theta_grid, z_plasma)
-    # Trigonometric basis arrays
-    # Calculate n*q*delta phase term
-    nqdelta = inputs.n .* inputs.qa .* delta
-    cos_nqdelta = cos.(nqdelta)
-    sin_nqdelta = sin.(nqdelta)
-
-    # Simple harmonic basis: cos(m*θ), sin(m*θ) (no phase shift)
-    # Used for some vacuum field calculations
-    sin_mstheta = zeros(mtheta, inputs.mpert)
-    cos_mstheta = zeros(mtheta, inputs.mpert)
-
-    for l in 1:inputs.mpert
-        mode_val = inputs.mlow + l - 1
-        for i in 1:mtheta
-            m_theta = theta_grid[i] * mode_val
-            cos_mstheta[i, l] = cos(m_theta)
-            sin_mstheta[i, l] = sin(m_theta)
-        end
-    end
 
     return PlasmaGeometry(
         x_plasma,
         z_plasma,
         delta,
         dx_plasma_dtheta,
-        dz_plasma_dtheta,
-        cos_nqdelta,
-        sin_nqdelta,
-        sin_mstheta,
-        cos_mstheta
+        dz_plasma_dtheta
     )
 end
 
@@ -232,7 +196,6 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     
     # Basic wall flags
     nowall = wall_settings.shape == "nowall"
-    is_closed_toroidal = true
 
    # All of these arrays are of length mtheta with θ = [0, 1)
     mtheta = inputs.mtheta
@@ -332,31 +295,14 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     # Optional: Re-parameterization
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
-        @info "Re-distributing wall points to equal arc length spacing"
-        if !is_closed_toroidal
-            @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
-        end
-        x_wall, z_wall, _, theta_grid, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
-        theta_grid .= theta_grid .* (2π)  # Scale to [0, 2π) - irregular spacing
-        fx_of_theta = interpolate((theta_grid,), x_wall, Gridded(Linear()))
-        dx_dtheta = only.(Interpolations.gradient.(Ref(fx_of_theta), theta_grid))
-        fz_of_theta = interpolate((theta_grid,), z_wall, Gridded(Linear()))
-        dz_dtheta = only.(Interpolations.gradient.(Ref(fz_of_theta), theta_grid))
-    else
-        # used regular theta grid spacing to build wall
-        theta_grid = range(0, stop=2π, length=mtheta + 1)[1:end-1] # length mtheta without endpoint
-        dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall)
-        dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall)
+        @info "Re-distributing wall points to equal arc length spacing (assumes closed, toroidal wall)."
+        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
 
-    # Trigonometric basis arrays
     return WallGeometry(
-        nowall,
-        is_closed_toroidal,
-        x_wall,
-        z_wall,
-        dx_dtheta,
-        dz_dtheta
+        nowall=nowall,
+        x=x_wall,
+        z=z_wall
     )
 end
 
