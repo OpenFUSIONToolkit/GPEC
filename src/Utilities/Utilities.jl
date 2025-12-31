@@ -18,6 +18,7 @@ include("FourierTransforms.jl")
 # Re-export key functionality
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
+export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
 
 end # module Utilities

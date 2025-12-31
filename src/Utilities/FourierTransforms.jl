@@ -39,6 +39,7 @@ using LinearAlgebra
 
 export FourierTransform, inverse
 export compute_fourier_coefficients
+export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
 
 """
@@ -420,6 +421,254 @@ function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Real})
         @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
         return (ft.cslth * modes) .* dth
     end
+end
+
+# ==============================================================================
+# In-place transform functions for performance-critical applications
+# ==============================================================================
+
+"""
+    transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Real})
+
+In-place forward Fourier transform for real-valued theta-space data.
+
+More efficient than the allocating version `ft(data)` when called repeatedly,
+as it reuses the pre-allocated output array.
+
+# Arguments
+
+- `output::AbstractVecOrMat{ComplexF64}`: Pre-allocated output array for Fourier modes
+  - For vector input: must have length `mpert`
+  - For matrix input: must have size `(mpert, n)` where `n = size(data, 2)`
+- `ft::FourierTransform`: Fourier transform object with pre-computed coefficients
+- `data::AbstractVecOrMat{Float64}`: Real-valued data at theta points
+  - For vector: length must be `mtheta`
+  - For matrix: first dimension must be `mtheta`
+
+# Returns
+
+- `output`: The modified output array (for chaining)
+
+# Performance
+
+This function uses in-place matrix multiplication (`mul!`) to avoid allocations,
+making it suitable for tight loops and performance-critical code.
+
+# Example
+
+```julia
+ft = FourierTransform(480, 40, -20)
+
+# Pre-allocate output buffer
+modes = zeros(ComplexF64, 40)
+
+# Reuse buffer in loop
+for i in 1:1000
+    data = get_theta_data(i)
+    transform!(modes, ft, data)  # No allocations
+    process_modes(modes)
+end
+```
+"""
+function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Real})
+    if data isa AbstractVector
+        @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
+        @assert length(output) == ft.mpert "Output vector must have length mpert=$(ft.mpert)"
+
+        # Extract real and imaginary views
+        real_part = reinterpret(Float64, output)
+        real_view = @view real_part[1:2:end]    # Real components
+        imag_view = @view real_part[2:2:end]    # Imaginary components
+
+        # In-place computation: real = cslth' * data, imag = snlth' * data
+        mul!(real_view, ft.cslth', data)
+        mul!(imag_view, ft.snlth', data)
+    else
+        @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
+        @assert size(output, 1) == ft.mpert "Output matrix first dimension must be mpert=$(ft.mpert)"
+        @assert size(output, 2) == size(data, 2) "Output and input must have same number of columns"
+
+        # For matrices, we need temporary storage for real/imag parts
+        n_cols = size(data, 2)
+        real_part = similar(output, Float64, ft.mpert, n_cols)
+        imag_part = similar(output, Float64, ft.mpert, n_cols)
+
+        # In-place computation
+        mul!(real_part, ft.cslth', data)
+        mul!(imag_part, ft.snlth', data)
+
+        # Combine into complex output
+        output .= complex.(real_part, imag_part)
+    end
+
+    return output
+end
+
+"""
+    transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Complex})
+
+In-place forward Fourier transform for complex-valued theta-space data.
+
+# Arguments
+
+- `output::AbstractVecOrMat{ComplexF64}`: Pre-allocated output array for Fourier modes
+- `ft::FourierTransform`: Fourier transform object
+- `data::AbstractVecOrMat{ComplexF64}`: Complex-valued data at theta points
+
+# Returns
+
+- `output`: The modified output array
+
+# Formula
+
+For complex input `data = data_real + im*data_imag`:
+```
+Re{mode[l]} = Σᵢ (data_real[i]*cos - data_imag[i]*sin)
+Im{mode[l]} = Σᵢ (data_real[i]*sin + data_imag[i]*cos)
+```
+"""
+function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Complex})
+    if data isa AbstractVector
+        @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
+        @assert length(output) == ft.mpert "Output vector must have length mpert=$(ft.mpert)"
+
+        # Temporary storage for intermediate results
+        real_part = similar(output, Float64)
+        imag_part = similar(output, Float64)
+        temp1 = similar(output, Float64)
+        temp2 = similar(output, Float64)
+
+        # Re{mode} = cslth' * real(data) - snlth' * imag(data)
+        mul!(temp1, ft.cslth', real.(data))
+        mul!(temp2, ft.snlth', imag.(data))
+        real_part .= temp1 .- temp2
+
+        # Im{mode} = cslth' * imag(data) + snlth' * real(data)
+        mul!(temp1, ft.cslth', imag.(data))
+        mul!(temp2, ft.snlth', real.(data))
+        imag_part .= temp1 .+ temp2
+
+        output .= complex.(real_part, imag_part)
+    else
+        @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
+        @assert size(output, 1) == ft.mpert "Output matrix first dimension must be mpert=$(ft.mpert)"
+        @assert size(output, 2) == size(data, 2) "Output and input must have same number of columns"
+
+        n_cols = size(data, 2)
+        real_part = similar(output, Float64, ft.mpert, n_cols)
+        imag_part = similar(output, Float64, ft.mpert, n_cols)
+        temp1 = similar(real_part)
+        temp2 = similar(real_part)
+
+        # Re{mode} = cslth' * real(data) - snlth' * imag(data)
+        mul!(temp1, ft.cslth', real.(data))
+        mul!(temp2, ft.snlth', imag.(data))
+        real_part .= temp1 .- temp2
+
+        # Im{mode} = cslth' * imag(data) + snlth' * real(data)
+        mul!(temp1, ft.cslth', imag.(data))
+        mul!(temp2, ft.snlth', real.(data))
+        imag_part .= temp1 .+ temp2
+
+        output .= complex.(real_part, imag_part)
+    end
+
+    return output
+end
+
+"""
+    inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
+
+In-place inverse Fourier transform: mode-space → theta-space.
+
+More efficient than the allocating version `inverse(ft, modes)` when called repeatedly.
+
+# Arguments
+
+- `output::AbstractVecOrMat{ComplexF64}`: Pre-allocated output array for theta-space data
+  - For vector: must have length `mtheta`
+  - For matrix: must have size `(mtheta, n)` where `n = size(modes, 2)`
+- `ft::FourierTransform`: Fourier transform object
+- `modes::AbstractVecOrMat{ComplexF64}`: Complex Fourier mode coefficients
+  - For vector: length must be `mpert`
+  - For matrix: first dimension must be `mpert`
+
+# Returns
+
+- `output`: The modified output array (for chaining)
+
+# Formula
+
+```
+data[i] = (2π/mtheta) * Σₗ [Re{modes[l]}*cos - Im{modes[l]}*sin +
+                             im*(Re{modes[l]}*sin + Im{modes[l]}*cos)]
+```
+
+# Example
+
+```julia
+ft = FourierTransform(480, 40, -20)
+
+# Pre-allocate output buffer
+theta_data = zeros(ComplexF64, 480)
+
+# Reuse buffer in loop
+for i in 1:1000
+    modes = get_modes(i)
+    inverse_transform!(theta_data, ft, modes)  # No allocations
+    process_theta_data(theta_data)
+end
+```
+"""
+function inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
+    dth = 2π / ft.mtheta
+
+    if modes isa AbstractVector
+        @assert length(modes) == ft.mpert "Input vector must have length mpert=$(ft.mpert)"
+        @assert length(output) == ft.mtheta "Output vector must have length mtheta=$(ft.mtheta)"
+
+        # Temporary storage
+        real_part = similar(output, Float64)
+        imag_part = similar(output, Float64)
+        temp1 = similar(output, Float64)
+        temp2 = similar(output, Float64)
+
+        # Re{data} = cslth * real(modes) - snlth * imag(modes)
+        mul!(temp1, ft.cslth, real.(modes))
+        mul!(temp2, ft.snlth, imag.(modes))
+        real_part .= (temp1 .- temp2) .* dth
+
+        # Im{data} = cslth * imag(modes) + snlth * real(modes)
+        mul!(temp1, ft.cslth, imag.(modes))
+        mul!(temp2, ft.snlth, real.(modes))
+        imag_part .= (temp1 .+ temp2) .* dth
+
+        output .= complex.(real_part, imag_part)
+    else
+        @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
+        @assert size(output, 1) == ft.mtheta "Output matrix first dimension must be mtheta=$(ft.mtheta)"
+        @assert size(output, 2) == size(modes, 2) "Output and input must have same number of columns"
+
+        n_cols = size(modes, 2)
+        real_part = similar(output, Float64, ft.mtheta, n_cols)
+        imag_part = similar(output, Float64, ft.mtheta, n_cols)
+        temp1 = similar(real_part)
+        temp2 = similar(real_part)
+
+        # Re{data} = cslth * real(modes) - snlth * imag(modes)
+        mul!(temp1, ft.cslth, real.(modes))
+        mul!(temp2, ft.snlth, imag.(modes))
+        real_part .= (temp1 .- temp2) .* dth
+
+        # Im{data} = cslth * imag(modes) + snlth * real(modes)
+        mul!(temp1, ft.cslth, imag.(modes))
+        mul!(temp2, ft.snlth, real.(modes))
+        imag_part .= (temp1 .+ temp2) .* dth
+
+        output .= complex.(real_part, imag_part)
+    end
+
+    return output
 end
 
 # ==============================================================================
