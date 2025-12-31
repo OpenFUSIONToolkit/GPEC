@@ -107,6 +107,57 @@ function compute_singular_coupling_metrics!(
         println("  Total mode combinations: $numpert_total")
     end
 
+    # Pre-compute Green's functions at each singular surface
+    # These are needed for surface inductance calculations
+    if ctrl.verbose
+        println("  Computing Green's functions at singular surfaces...")
+    end
+
+    # Get vacuum calculation parameters
+    mtheta_eq = length(equil.rzphi.x1)  # Equilibrium poloidal grid size
+    mtheta = vac_data.mthvac  # Vacuum poloidal grid size
+    mlow = ffs_intr.mlow
+
+    # Perturbed equilibrium calculations always use nowall
+    # (no physical wall, only vacuum region between plasma and infinity)
+    wall_settings = Vacuum.WallShapeSettings(shape="nowall")
+
+    # For each singular surface, compute Green's functions
+    # Note: Green's functions depend on toroidal mode n, but for now we compute
+    # for the primary toroidal mode. This can be extended to store per-n Green's functions.
+    n_primary = ffs_intr.nval[1]  # Use first toroidal mode as primary
+
+    for s in 1:msing
+        sing_surf = ffs_intr.sing[s]
+
+        # Extract plasma geometry from equilibrium at this flux surface
+        vac_input = Vacuum.create_vacuum_input_at_psi(
+            equil,
+            sing_surf.psifac,
+            mtheta_eq,
+            mtheta,
+            mpert,
+            mlow,
+            n_primary
+        )
+
+        # Compute Green's functions (lightweight calculation, skips wv matrix)
+        grri, grre = Vacuum.compute_greens_functions_only(vac_input, wall_settings)
+
+        # Store in singular surface struct
+        ffs_intr.sing[s].grri = grri
+        ffs_intr.sing[s].grre = grre
+
+        if ctrl.verbose && s == 1
+            println("    Surface 1: ψ = $(sing_surf.psifac), q = $(sing_surf.q)")
+            println("      Green's function sizes: grri $(size(grri)), grre $(size(grre))")
+        end
+    end
+
+    if ctrl.verbose
+        println("  Green's functions computed and stored in singular surface structs")
+    end
+
     # Main loop: For each forcing mode (m,n) combination
     for i in 1:numpert_total
         # Extract m and n for this mode from pre-computed arrays
@@ -187,13 +238,13 @@ function compute_singular_coupling_metrics!(
             state.resonant_current[s, i] = -delcurs / im
 
             # Step 4e: Compute singular flux from current
-            # Uses surface inductance matrix at the singular surface
+            # Uses surface inductance matrix from pre-computed Green's functions
             singflx_mn = compute_singular_flux(
                 state.resonant_current[s, i],
                 vac_data,
                 ffs_intr,
-                equil,
-                sing_surf.psifac,
+                intr,
+                sing_surf,
                 resnum,
                 n_mode
             )
@@ -400,87 +451,142 @@ function compute_current_density(
 end
 
 """
-    compute_surface_inductance_at_psi(
-        equil::Equilibrium.PlasmaEquilibrium,
-        vac_data::VacuumData,
-        ffs_intr::ForceFreeStatesInternal,
-        psi::Float64
-    )::Matrix{ComplexF64}
+    apply_green_function_simple(
+        green::Matrix{Float64},
+        mode_coeffs::Vector{ComplexF64}
+    )::Vector{Float64}
 
-Compute surface inductance matrix at arbitrary flux surface.
+Apply Green's function to Fourier mode coefficients.
 
-This mimics GPEC's gpvacuum_flxsurf (gpvacuum.f line 236) which:
-1. Generates Green's functions at the specified flux surface
-2. For each mode, computes surface current from potential jump
-3. Returns inductance matrix: L_surf = flux * inv(current)
+Simplified version that extracts only plasma surface rows (first mtheta rows).
 
-## GPEC Algorithm
+## Arguments
+- `green`: Green's function matrix [2*mtheta, 2*mpert]
+- `mode_coeffs`: Complex Fourier coefficients [mpert]
 
-```fortran
-CALL mscvac(..., grri, ...)  ! Interior Green's function
-CALL mscvac(..., grre, ...)  ! Exterior Green's function
-kax = (chi - che) / mu0      ! Surface current from potential jump
-fsurf_indmats = fflxmats * inv(fkaxmats)
-```
-
-## Current Implementation
-
-Uses scaled approximation based on boundary surface inductance.
-The scaling accounts for:
-- Different flux surface area at interior vs. boundary
-- Different field strength (∝ 1/√ψ roughly)
-
-## Full Implementation (TODO)
-
-Requires computing Green's functions at arbitrary flux surface:
-1. Set up plasma boundary at psi (not psilim)
-2. Call vacuum code to get grri, grre at that surface
-3. Apply same algorithm as calc_surface_inductance()
-4. Cache results for each singular surface
+## Returns
+- Potential at plasma surface theta points [mtheta]
 """
-function compute_surface_inductance_at_psi(
-    equil::Equilibrium.PlasmaEquilibrium,
-    vac_data::VacuumData,
-    ffs_intr::ForceFreeStatesInternal,
-    psi::Float64
-)::Matrix{ComplexF64}
-    # For now, use scaled approximation from boundary inductance
-    # This captures the main physics but omits surface-specific Green's functions
+function apply_green_function_simple(
+    green::Matrix{Float64},
+    mode_coeffs::Vector{ComplexF64}
+)::Vector{Float64}
+    mtheta = size(green, 1) ÷ 2
+    mpert = length(mode_coeffs)
 
-    # Get boundary inductance (already computed)
-    # This is stored in ResponseMatrices calculation
-    # For this approximation, we'll construct a simplified version
-
-    mpert = ffs_intr.mpert
-    numpert_total = ffs_intr.numpert_total
-
-    # Scaling factor: ratio of flux surfaces
-    # L_surf(ψ) ≈ L_surf(ψ_edge) * (ψ_edge / ψ)^α
-    # where α ≈ 1 for geometric scaling
-    psi_edge = ffs_intr.psilim
-
-    if psi > 1e-10 && psi_edge > 1e-10
-        scale_factor = psi_edge / psi
-    else
-        scale_factor = 1.0
+    # Pack complex to real/imag format
+    packed = zeros(Float64, 2 * mpert)
+    for i in 1:mpert
+        packed[2*i - 1] = real(mode_coeffs[i])
+        packed[2*i] = imag(mode_coeffs[i])
     end
 
-    # Create simplified diagonal inductance matrix
-    # This assumes weak mode coupling at singular surfaces
+    # Apply Green's function (only plasma surface rows)
+    chi_theta = green[1:mtheta, :] * packed
+
+    return chi_theta
+end
+
+"""
+    compute_surface_inductance_from_greens(
+        grri::Matrix{Float64},
+        grre::Matrix{Float64},
+        ffs_intr::ForceFreeStatesInternal,
+        intr::PerturbedEquilibriumInternal
+    )::Matrix{ComplexF64}
+
+Compute surface inductance matrix from Green's functions at flux surface.
+
+This implements the full GPEC gpvacuum_flxsurf algorithm (gpvacuum.f line 299-331):
+1. For each mode, apply Green's functions to unit flux
+2. Compute surface current from potential jump: kax = (chi - che) / μ₀
+3. Fourier transform to mode space
+4. Return inductance: L_surf = flux * inv(current)
+
+## Arguments
+- `grri`: Interior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
+- `grre`: Exterior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
+- `ffs_intr`: ForceFreeStates internal state
+- `intr`: PerturbedEquilibrium internal state with mode arrays
+
+## Returns
+Surface inductance matrix [numpert_total, numpert_total]
+
+## GPEC Reference
+```fortran
+DO i=1,mpert
+   vbwp_mn=0; vbwp_mn(i)=1.0
+   chi_fun = grri * vbwp_mn
+   che_fun = grre * vbwp_mn
+   kax_fun = (chi_fun - che_fun) / mu0
+   CALL iscdftf(mfac, mpert, kax_fun, mthsurf, fkaxmats(:,i))
+ENDDO
+fsurf_indmats = fflxmats * inv(fkaxmats)
+```
+"""
+function compute_surface_inductance_from_greens(
+    grri::Matrix{Float64},
+    grre::Matrix{Float64},
+    ffs_intr::ForceFreeStatesInternal,
+    intr::PerturbedEquilibriumInternal
+)::Matrix{ComplexF64}
+    numpert_total = ffs_intr.numpert_total
+    mpert = ffs_intr.mpert
+    mtheta = size(grri, 1) ÷ 2
+
+    # Physical constant
     μ₀ = 4π * 1e-7
-    chi1 = 2π * equil.psio
 
-    # Get safety factor at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
-    q = sq_vals[4]
+    # Create Fourier transform object
+    ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
 
-    # Construct approximate surface inductance
-    # L_ij ≈ δ_ij * μ₀ * χ₁ * scaling
-    L_surf = zeros(ComplexF64, numpert_total, numpert_total)
+    # Initialize matrices
+    flux_matrix = zeros(ComplexF64, numpert_total, numpert_total)
+    current_matrix = zeros(ComplexF64, numpert_total, numpert_total)
 
+    # For each mode, compute surface current from Green's functions
     for i in 1:numpert_total
-        # Diagonal approximation with geometric scaling
-        L_surf[i, i] = μ₀ * chi1 * scale_factor
+        # Unit flux for mode i
+        vbwp_mn = zeros(ComplexF64, mpert)
+        m_mode = intr.m_modes[i]
+        n_mode = intr.n_modes[i]
+
+        # Get index in mpert range (for single toroidal mode)
+        m_idx = (i - 1) % mpert + 1
+        vbwp_mn[m_idx] = 1.0
+
+        # Apply Green's functions using same approach as ResponseMatrices.jl
+        chi_theta = Utilities.FourierTransforms.apply_green_function(grri, vbwp_mn)
+        che_theta = Utilities.FourierTransforms.apply_green_function(grre, vbwp_mn)
+
+        # Surface current from potential jump
+        kax_theta = (chi_theta .- che_theta) ./ μ₀
+
+        # Transform back to Fourier mode space
+        kax_modes = ft(kax_theta)
+
+        # Store in matrices
+        flux_matrix[1:mpert, i] = vbwp_mn
+        current_matrix[1:mpert, i] = kax_modes
+    end
+
+    # Compute surface inductance: L_surf = flux * inv(current)
+    try
+        # Regularization for numerical stability
+        regularization = 1e-10 * maximum(abs.(current_matrix))
+        current_reg = current_matrix + regularization * I
+
+        L_surf = flux_matrix * inv(current_reg)
+
+        # Hermitianize
+        L_surf = 0.5 * (L_surf + L_surf')
+    catch e
+        @warn "Surface inductance inversion failed: $e. Using diagonal approximation."
+        # Fallback: diagonal approximation
+        L_surf = zeros(ComplexF64, numpert_total, numpert_total)
+        for i in 1:numpert_total
+            L_surf[i, i] = μ₀ * 1e-6  # Small inductance
+        end
     end
 
     return L_surf
@@ -491,8 +597,8 @@ end
         current::ComplexF64,
         vac_data::VacuumData,
         ffs_intr::ForceFreeStatesInternal,
-        equil::Equilibrium.PlasmaEquilibrium,
-        psi::Float64,
+        intr::PerturbedEquilibriumInternal,
+        sing_surf::ForceFreeStates.SingType,
         mode_idx::Int,
         nn::Int
     )::ComplexF64
@@ -502,7 +608,7 @@ Compute singular flux from resonant current using surface inductance.
 Uses surface inductance matrix at the singular surface:
     Φ = L_surf * I
 
-where L_surf is computed at the flux surface psi.
+where L_surf is computed from Green's functions stored in sing_surf.
 
 ## GPEC Formula
 
@@ -511,17 +617,18 @@ fkaxmn(resnum) = singcurs(ising,i) / (twopi*nn)
 singflx_mn = MATMUL(fsurfindmats(ising,:,:), fkaxmn)
 ```
 
-## Current Implementation
+## Implementation
 
-Uses simplified surface inductance matrix computed at the flux surface.
-Full implementation requires Green's functions at that surface.
+Uses surface inductance matrix computed from pre-stored Green's functions.
+The Green's functions (grri, grre) are calculated at each singular surface
+during initialization and stored in the sing_surf struct for efficiency.
 """
 function compute_singular_flux(
     current::ComplexF64,
     vac_data::VacuumData,
     ffs_intr::ForceFreeStatesInternal,
-    equil::Equilibrium.PlasmaEquilibrium,
-    psi::Float64,
+    intr::PerturbedEquilibriumInternal,
+    sing_surf::ForceFreeStates.SingType,
     mode_idx::Int,
     nn::Int
 )::ComplexF64
@@ -536,8 +643,14 @@ function compute_singular_flux(
         return 0.0 + 0.0im
     end
 
-    # Get surface inductance at this flux surface
-    L_surf = compute_surface_inductance_at_psi(equil, vac_data, ffs_intr, psi)
+    # Compute surface inductance from stored Green's functions
+    # These were pre-computed at the singular surface location
+    L_surf = compute_surface_inductance_from_greens(
+        sing_surf.grri,
+        sing_surf.grre,
+        ffs_intr,
+        intr
+    )
 
     # Compute flux: Φ = L * I
     flux_vector = L_surf * current_vector
