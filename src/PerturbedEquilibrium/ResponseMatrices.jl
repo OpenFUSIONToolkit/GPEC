@@ -6,7 +6,146 @@ Uses DCON eigenmode solutions and vacuum response data.
 """
 
 """
+    extract_boundary_displacements(
+        equil::Equilibrium.PlasmaEquilibrium,
+        dcon_results::OdeState,
+        intr::ForceFreeStatesInternal
+    )::NamedTuple
+
+Extract eigenmode displacements and equilibrium quantities at the plasma boundary.
+
+This function extracts the data needed to compute the normal magnetic field at the
+plasma surface from DCON eigenmode solutions.
+
+## What's extracted:
+
+1. **Boundary displacement**: ξ_ψ from `u_store[:, :, 1, end]`
+   - This is the radial (normal) component of the eigenmode displacement
+   - At the last radial integration point (plasma edge)
+   - Dimensions: [numpert_total, numpert_total]
+
+2. **Flux surface spacing**: dΨ/dρ at boundary
+   - From equilibrium bicubic spline evaluation
+   - Needed to convert displacement to magnetic field
+
+3. **Safety factor**: q at boundary
+   - Used to compute singular factors (m - n*q)
+   - Identifies resonant surfaces
+
+## Arguments
+- `equil`: Equilibrium solution containing flux surfaces and q-profile
+- `dcon_results`: ODE integration results containing u_store with eigenmodes
+- `intr`: DCON internal state with boundary location (psilim)
+
+## Returns
+Named tuple with:
+- `ξ_psi_boundary`: Boundary displacement [numpert_total, numpert_total]
+- `dPsi_drho`: Flux surface spacing at boundary (scalar)
+- `q_boundary`: Safety factor at boundary (scalar)
+- `psi_boundary`: Normalized flux at boundary (scalar)
+"""
+function extract_boundary_displacements(
+    equil::Equilibrium.PlasmaEquilibrium,
+    dcon_results::OdeState,
+    intr::ForceFreeStatesInternal
+)
+    # Extract boundary displacement (normal component)
+    # u_store dimensions: [numpert_total, numpert_total, 2, numsteps]
+    # Index 1 in 3rd dimension is ξ_ψ (radial displacement)
+    # Last index in 4th dimension is the boundary
+    ξ_psi_boundary = dcon_results.u_store[:, :, 1, dcon_results.step]
+
+    # Get boundary location in normalized flux coordinates
+    psi_boundary = dcon_results.psi_store[dcon_results.step]
+
+    # Evaluate equilibrium quantities at boundary
+    # Safety factor at boundary
+    q_boundary = dcon_results.q_store[dcon_results.step]
+
+    # Flux surface spacing dΨ/dρ
+    # In DCON, ρ = √ψ where ψ is normalized poloidal flux
+    # The actual poloidal flux is Ψ = ψ * psio
+    # Therefore:
+    #   dΨ/dψ = psio
+    #   dψ/dρ = 2ρ = 2√ψ
+    #   dΨ/dρ = (dΨ/dψ) * (dψ/dρ) = psio * 2√ψ
+    dPsi_drho = equil.psio * 2.0 * sqrt(psi_boundary)
+
+    return (
+        ξ_psi_boundary = ξ_psi_boundary,
+        dPsi_drho = dPsi_drho,
+        q_boundary = q_boundary,
+        psi_boundary = psi_boundary
+    )
+end
+
+"""
+    compute_normal_magnetic_field(
+        boundary_data::NamedTuple,
+        intr::ForceFreeStatesInternal
+    )::Matrix{ComplexF64}
+
+Compute normal magnetic field at plasma boundary from eigenmode displacements.
+
+This is the key step that converts eigenmode displacements to magnetic field perturbations
+at the plasma surface. Formula from GPEC:
+
+    bwp_mn[i,j] = i * (dΨ/dρ) * (m[i] - n*q_boundary) * ξ_ψ[i,j]
+
+## Physical Interpretation:
+- ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
+- singfac[i] = m[i] - n*q: Measures distance from rational surface
+- dΨ/dρ: Converts displacement to flux perturbation
+- Factor of i: Phase relationship for oscillating fields
+
+## Arguments
+- `boundary_data`: Output from extract_boundary_displacements()
+  - ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
+  - dPsi_drho: Flux surface spacing at boundary (scalar)
+  - q_boundary: Safety factor at boundary (scalar)
+  - psi_boundary: Normalized flux at boundary (scalar)
+- `intr`: DCON internal state with mode arrays (mlow, mhigh, nlow, etc.)
+
+## Returns
+- `bwp_mn[numpert_total, numpert_total]`: Normal magnetic field matrix where bwp_mn[i,j]
+  is the normal field of Fourier mode i in response to eigenmode j
+"""
+function compute_normal_magnetic_field(
+    boundary_data::NamedTuple,
+    intr::ForceFreeStatesInternal
+)::Matrix{ComplexF64}
+
+    numpert_total = intr.numpert_total
+    bwp_mn = zeros(ComplexF64, numpert_total, numpert_total)
+
+    # Extract boundary data
+    ξ_psi = boundary_data.ξ_psi_boundary
+    dPsi_drho = boundary_data.dPsi_drho
+    q_boundary = boundary_data.q_boundary
+
+    # Compute singular factor for each Fourier mode: singfac[i] = m[i] - n*q_boundary
+    # Mode indexing: modes are ordered as (m, n) pairs
+    # Linear index i corresponds to: m = (i-1) % mpert + mlow, n = (i-1) ÷ mpert + nlow
+    singfac = zeros(Float64, numpert_total)
+    for i in 1:numpert_total
+        m_mode = (i - 1) % intr.mpert + intr.mlow
+        n_mode = (i - 1) ÷ intr.mpert + intr.nlow
+        singfac[i] = m_mode - n_mode * q_boundary
+    end
+
+    # Compute normal magnetic field: bwp_mn[i,j] = i * (dΨ/dρ) * singfac[i] * ξ_ψ[i,j]
+    for i in 1:numpert_total
+        for j in 1:numpert_total
+            bwp_mn[i, j] = 1im * dPsi_drho * singfac[i] * ξ_psi[i, j]
+        end
+    end
+
+    return bwp_mn
+end
+
+"""
     build_flux_matrix(
+        equil::Equilibrium.PlasmaEquilibrium,
         dcon_results::OdeState,
         vac_data::VacuumData,
         intr::ForceFreeStatesInternal
@@ -15,14 +154,16 @@ Uses DCON eigenmode solutions and vacuum response data.
 Build vacuum poloidal flux matrix from DCON eigenmode solutions.
 
 This extracts the vacuum flux response for each eigenmode at the plasma boundary.
-In GPEC, this comes from `bwp_mn` after calling `gpeq_sol` for each eigenmode.
+In GPEC, this comes from `bwp_mn` (boundary normal field) computed from eigenmode
+displacements.
 
 The flux matrix relates eigenmode displacements to vacuum poloidal flux:
-- Extract eigenmode displacement at plasma boundary from u_store
-- Apply Green's function to get vacuum response
-- Result is flux[mode_i, eigenmode_j]
+1. Extract eigenmode displacement at plasma boundary from u_store
+2. Compute normal magnetic field: B_ψ = i×(dΨ/dρ)×(m - n×q)×ξ_ψ
+3. Result is flux[mode_i, eigenmode_j] = bwp_mn[i,j]
 
 ## Arguments
+- `equil`: Equilibrium solution containing flux surfaces and q-profile
 - `dcon_results`: DCON ODE integration results containing eigenmodes
 - `vac_data`: Vacuum response data from free boundary calculation
 - `intr`: DCON internal state with mode information
@@ -32,47 +173,19 @@ The flux matrix relates eigenmode displacements to vacuum poloidal flux:
   vacuum flux of mode i in response to eigenmode j
 """
 function build_flux_matrix(
+    equil::Equilibrium.PlasmaEquilibrium,
     dcon_results::OdeState,
     vac_data::VacuumData,
     intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
-    numpert_total = intr.numpert_total
+    # Step 1: Extract boundary displacements and equilibrium quantities
+    boundary_data = extract_boundary_displacements(equil, dcon_results, intr)
 
-    # The flux matrix relates eigenmode boundary displacements to vacuum poloidal flux.
-    # In GPEC: flxmats[:,i] = bwp_mn (boundary normal field) for eigenmode i
-    #
-    # In DCON, the vacuum response is encoded in:
-    # - vac.wt: eigenvectors of total energy matrix (wp + wv)
-    # - vac.wv: vacuum energy matrix, which relates boundary flux to vacuum energy
-    # - The vacuum energy is: E_vac[i,j] = (1/2μ₀) ∫ B_i · B_j dV
-    #
-    # Physical interpretation:
-    # - wv[i,j] represents the vacuum energy coupling between modes i and j
-    # - wt[:,k] are the eigenvectors representing actual plasma eigenmodes
-    # - The flux matrix should project the eigenmode basis onto the Fourier mode basis
-    #
-    # Improved approximation:
-    # Use wt (eigenvectors) to construct flux matrix in eigenmode basis
-    # flxmats[:,k] ≈ wv * wt[:,k]
-    # This represents the vacuum flux response to eigenmode k
-
-    flxmats = zeros(ComplexF64, numpert_total, numpert_total)
-
-    # Build flux matrix by projecting eigenmodes through vacuum coupling
-    # For each eigenmode k, compute the vacuum flux response
-    for k in 1:numpert_total
-        # The vacuum response to eigenmode k is given by wv * wt[:,k]
-        # This represents how eigenmode k couples to all Fourier modes through vacuum
-        flxmats[:, k] = vac_data.wv * vac_data.wt[:, k]
-    end
-
-    # NOTE: This is an improved approximation but still not the full GPEC implementation.
-    # Full implementation would require:
-    # 1. Extract boundary displacement ξ from u_store at boundary (step = dcon_results.step)
-    # 2. Compute normal magnetic field: B_ψ = i*(dΨ/dρ)*(m - n*q)*ξ_ψ
-    # 3. This requires computing singfac = (m - n*q) at the boundary
-    # 4. The result would be the actual boundary normal field for each eigenmode
+    # Step 2: Compute normal magnetic field at plasma boundary
+    # This is the actual implementation of GPEC's bwp_mn calculation
+    # bwp_mn[i,j] = i * (dΨ/dρ) * (m[i] - n*q_boundary) * ξ_ψ[i,j]
+    flxmats = compute_normal_magnetic_field(boundary_data, intr)
 
     return flxmats
 end
@@ -133,6 +246,19 @@ Uses BOTH Green's function matrices computed during DCON vacuum calculation:
 
 The surface inductance is derived from the jump in magnetic potential across the plasma surface,
 which gives the surface current: kax = (χ - χ_e) / μ₀
+
+## Current Implementation:
+This version computes the correlation of Green's function potential jumps directly.
+It's a simplified approach that gives reasonable results but is not the exact GPEC algorithm.
+
+## Full GPEC Algorithm (TODO):
+The complete implementation would:
+1. Apply Green's functions to flux matrix (bwp_mn) via Fourier transforms
+2. Compute potentials: chi_mn = apply_green(grri, bwp_mn), che_mn = apply_green(grre, bwp_mn)
+3. Calculate surface current: kax_mn = (chi_mn - che_mn) / μ₀
+4. Solve: surf_indmats = hermitianize(flxmats / kaxmats)
+
+This requires implementing Fourier transform utilities to convert between mode space and theta space.
 
 Green's function structure from DCON:
 - Dimensions: [2*(mthvac+5), 2*mpert]

@@ -35,7 +35,7 @@ function compute_plasma_response!(
     if ctrl.verbose
         println("  Building flux matrix from eigenmodes")
     end
-    flux_matrix = build_flux_matrix(dcon_results, vac_data, ffs_intr)
+    flux_matrix = build_flux_matrix(equil, dcon_results, vac_data, ffs_intr)
 
     # Step 2: Calculate plasma inductance matrix
     if ctrl.verbose
