@@ -47,7 +47,7 @@ function compute_plasma_response!(
     if ctrl.verbose
         println("  Calculating surface inductance from Green's functions")
     end
-    surface_inductance = calc_surface_inductance(vac_data.grri, vac_data.grre, ffs_intr)
+    surface_inductance = calc_surface_inductance(vac_data.grri, vac_data.grre, flux_matrix, ffs_intr)
 
     # Step 4: Calculate permeability matrix
     if ctrl.verbose

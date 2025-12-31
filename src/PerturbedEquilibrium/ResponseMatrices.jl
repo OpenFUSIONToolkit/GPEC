@@ -5,6 +5,8 @@ Based on gpresp.f from GPEC, implementing resp_index=0 (energy-based inductance)
 Uses DCON eigenmode solutions and vacuum response data.
 """
 
+using FFTW
+
 """
     extract_boundary_displacements(
         equil::Equilibrium.PlasmaEquilibrium,
@@ -232,42 +234,153 @@ function calc_plasma_inductance(
 end
 
 """
+    pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+
+Pack complex mode coefficients into real/imaginary pairs for Green's function application.
+
+Converts [a+bi, c+di, ...] to [a, b, c, d, ...]
+
+## Arguments
+- `modes`: Complex Fourier mode coefficients [mpert]
+
+## Returns
+- Packed real/imaginary array [2*mpert]
+"""
+function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+    mpert = length(modes)
+    packed = zeros(Float64, 2 * mpert)
+    for i in 1:mpert
+        packed[2*i - 1] = real(modes[i])
+        packed[2*i] = imag(modes[i])
+    end
+    return packed
+end
+
+"""
+    unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+
+Unpack real/imaginary pairs back to complex coefficients.
+
+Converts [a, b, c, d, ...] to [a+bi, c+di, ...]
+
+## Arguments
+- `packed`: Real/imaginary pairs [2*mpert]
+
+## Returns
+- Complex mode coefficients [mpert]
+"""
+function unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+    mpert = length(packed) ÷ 2
+    modes = zeros(ComplexF64, mpert)
+    for i in 1:mpert
+        modes[i] = packed[2*i - 1] + 1im * packed[2*i]
+    end
+    return modes
+end
+
+"""
+    apply_green_function(
+        green::Matrix{Float64},
+        mode_coeffs::Vector{ComplexF64}
+    )::Vector{ComplexF64}
+
+Apply Green's function to Fourier mode coefficients to get potential in theta space.
+
+The Green's function matrix maps Fourier coefficients to theta-space values:
+    χ(θ) = G * b_fourier
+
+## Arguments
+- `green`: Green's function matrix [2*mtheta, 2*mpert]
+- `mode_coeffs`: Complex Fourier mode coefficients [mpert]
+
+## Returns
+- Potential values in theta space [mtheta] as complex numbers
+"""
+function apply_green_function(
+    green::Matrix{Float64},
+    mode_coeffs::Vector{ComplexF64}
+)::Vector{ComplexF64}
+    # Pack complex coefficients to real/imag format
+    packed_coeffs = pack_complex_to_realimag(mode_coeffs)
+
+    # Apply Green's function: chi_theta = green * b_fourier
+    # Only use first mtheta rows (plasma surface)
+    mtheta = size(green, 1) ÷ 2
+    chi_theta_packed = green[1:mtheta, :] * packed_coeffs
+
+    # Unpack to complex (theta values are real for the potential)
+    # Actually, the result is real values at theta points
+    chi_theta = chi_theta_packed
+
+    return chi_theta
+end
+
+"""
+    theta_to_modes(
+        theta_values::Vector{Float64},
+        mpert::Int
+    )::Vector{ComplexF64}
+
+Transform theta-space values to Fourier mode coefficients using FFT.
+
+## Arguments
+- `theta_values`: Values at theta points [mtheta]
+- `mpert`: Number of poloidal modes to extract
+
+## Returns
+- Fourier mode coefficients [mpert]
+"""
+function theta_to_modes(
+    theta_values::Vector{Float64},
+    mpert::Int
+)::Vector{ComplexF64}
+    mtheta = length(theta_values)
+
+    # Perform FFT
+    fft_result = fft(theta_values)
+
+    # Extract the requested number of modes
+    # FFT returns [0, 1, 2, ..., N/2, -N/2+1, ..., -1]
+    # We want the first mpert modes (positive frequencies)
+    modes = zeros(ComplexF64, mpert)
+    for i in 1:min(mpert, length(fft_result))
+        modes[i] = fft_result[i] / mtheta  # Normalize
+    end
+
+    return modes
+end
+
+"""
     calc_surface_inductance(
         grri::Matrix{Float64},
         grre::Matrix{Float64},
+        flux_matrix::Matrix{ComplexF64},
         intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
-Calculate surface/vacuum inductance matrix from Green's functions.
+Calculate surface/vacuum inductance matrix from Green's functions using GPEC algorithm.
 
 Uses BOTH Green's function matrices computed during DCON vacuum calculation:
 - grri: Interior potential (kernelsign=-1)
 - grre: Exterior potential (kernelsign=+1)
 
-The surface inductance is derived from the jump in magnetic potential across the plasma surface,
-which gives the surface current: kax = (χ - χ_e) / μ₀
-
-## Current Implementation:
-This version computes the correlation of Green's function potential jumps directly.
-It's a simplified approach that gives reasonable results but is not the exact GPEC algorithm.
-
-## Full GPEC Algorithm (TODO):
-The complete implementation would:
-1. Apply Green's functions to flux matrix (bwp_mn) via Fourier transforms
-2. Compute potentials: chi_mn = apply_green(grri, bwp_mn), che_mn = apply_green(grre, bwp_mn)
-3. Calculate surface current: kax_mn = (chi_mn - che_mn) / μ₀
-4. Solve: surf_indmats = hermitianize(flxmats / kaxmats)
-
-This requires implementing Fourier transform utilities to convert between mode space and theta space.
+## GPEC Algorithm:
+1. For each eigenmode, apply Green's functions to flux matrix (bwp_mn)
+2. Compute interior potential: chi_mn = grri * bwp_mn
+3. Compute exterior potential: che_mn = grre * bwp_mn
+4. Calculate surface current: kax_mn = (chi_mn - che_mn) / μ₀
+5. Transform back to mode space
+6. Solve: surf_indmats = hermitianize(flxmats * inv(kaxmats))
 
 Green's function structure from DCON:
-- Dimensions: [2*(mthvac+5), 2*mpert]
+- Dimensions: [2*mtheta, 2*mpert]
 - Complex numbers stored as adjacent real/imaginary pairs
-- Each pair of columns corresponds to one Fourier mode
+- Maps Fourier coefficients to theta-space potential values
 
 ## Arguments
 - `grri`: Interior Green's function matrix (kernelsign=-1)
 - `grre`: Exterior Green's function matrix (kernelsign=+1)
+- `flux_matrix`: Normal magnetic field matrix (bwp_mn) [numpert_total, numpert_total]
 - `intr`: DCON internal state with mode information
 
 ## Returns
@@ -276,90 +389,84 @@ Green's function structure from DCON:
 function calc_surface_inductance(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
+    flux_matrix::Matrix{ComplexF64},
     intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
 
     numpert_total = intr.numpert_total
     mpert = intr.mpert
     npert = intr.npert
-
-    # Surface inductance relates surface current to vacuum magnetic flux.
-    # In GPEC: surf_indmats = hermitianize(flxmats / kaxmats)
-    # where kaxmats is the surface current matrix: kax = (χ - χ_e) / μ₀
-    #
-    # Now we have BOTH Green's functions:
-    # - grri (kernelsign=-1) gives interior potential χ
-    # - grre (kernelsign=+1) gives exterior potential χ_e
-    # - The difference (χ - χ_e) gives the surface current
-    #
-    # Strategy:
-    # 1. Compute the difference of Green's functions: G_diff = grri - grre
-    # 2. This represents the jump in magnetic potential across plasma surface
-    # 3. Build inductance matrix from correlation of G_diff
-    # 4. Scale by μ₀ for correct physical units
-
-    surf_ind = zeros(ComplexF64, numpert_total, numpert_total)
+    mtheta = size(grri, 1) ÷ 2
 
     # Physical constant
     μ₀ = 4π * 1e-7
 
-    # Green's function dimensions
-    # Both grri and grre have shape [2*(mthvac+5), 2*mpert]
-    # Complex numbers stored as adjacent real/imaginary pairs
-    n_theta = size(grri, 1) ÷ 2  # Number of theta points
-    n_modes_grri = size(grri, 2) ÷ 2  # Number of Fourier modes
+    # Initialize matrices for surface current in mode space
+    kax_matrix = zeros(ComplexF64, numpert_total, numpert_total)
 
-    # For each Fourier mode pair (i,j), compute surface inductance
-    # from the potential jump (chi - che)
-    for i in 1:min(mpert, n_modes_grri)
-        for j in 1:min(mpert, n_modes_grri)
-            # Extract indices for complex components
-            idx_i_real = 2*i - 1
-            idx_i_imag = 2*i
-            idx_j_real = 2*j - 1
-            idx_j_imag = 2*j
-
-            # Compute cross-correlation of potential jump over theta
-            # This represents the coupling between modes i and j through surface current
-            correlation = 0.0 + 0.0im
-            for k in 1:n_theta
-                # Reconstruct complex Green's function values
-                # Interior potential (chi)
-                chi_i = grri[k, idx_i_real] + 1im * grri[k, idx_i_imag]
-                chi_j = grri[k, idx_j_real] + 1im * grri[k, idx_j_imag]
-
-                # Exterior potential (che)
-                che_i = grre[k, idx_i_real] + 1im * grre[k, idx_i_imag]
-                che_j = grre[k, idx_j_real] + 1im * grre[k, idx_j_imag]
-
-                # Potential jump (surface current is proportional to chi - che)
-                jump_i = chi_i - che_i
-                jump_j = chi_j - che_j
-
-                # Accumulate correlation
-                correlation += jump_i * conj(jump_j)
-            end
-            correlation /= n_theta  # Average over theta
-
-            # Map to all toroidal modes n
-            for n_idx in 1:npert
-                mode_idx_i = (n_idx - 1) * mpert + i
-                mode_idx_j = (n_idx - 1) * mpert + j
-                if mode_idx_i <= numpert_total && mode_idx_j <= numpert_total
-                    # Surface inductance from potential jump correlation
-                    # Scale by μ₀ for correct physical units
-                    surf_ind[mode_idx_i, mode_idx_j] = μ₀ * correlation
-                end
-            end
+    # For each eigenmode j, compute surface current in all modes
+    for j in 1:numpert_total
+        # Extract normal field for eigenmode j (only poloidal modes for this toroidal n)
+        # Assuming single toroidal mode for now (npert == 1)
+        if npert > 1
+            @warn "calc_surface_inductance: Multiple toroidal modes not yet supported, using n=1 only"
         end
+
+        # Extract poloidal mode coefficients for this eigenmode
+        # For n=1: indices 1:mpert correspond to the poloidal modes
+        mode_start = 1
+        mode_end = min(mpert, numpert_total)
+        bwp_modes = flux_matrix[mode_start:mode_end, j]
+
+        # Apply interior Green's function to get χ(θ)
+        chi_theta = apply_green_function(grri, bwp_modes)
+
+        # Apply exterior Green's function to get χ_e(θ)
+        che_theta = apply_green_function(grre, bwp_modes)
+
+        # Compute surface current in theta space: kax(θ) = (χ - χ_e) / μ₀
+        kax_theta = (chi_theta .- che_theta) ./ μ₀
+
+        # Transform back to Fourier mode space using FFT
+        kax_modes = theta_to_modes(kax_theta, mpert)
+
+        # Store in kax_matrix for this eigenmode
+        kax_matrix[mode_start:mode_end, j] = kax_modes
     end
 
-    # Hermitianize to ensure physical inductance matrix
-    surf_ind = 0.5 * (surf_ind + surf_ind')
+    # Compute surface inductance: L_surf = flxmats * inv(kaxmats)
+    # Use pseudo-inverse for numerical stability
+    try
+        # Regularization: add small diagonal term to improve conditioning
+        regularization = 1e-10 * maximum(abs.(kax_matrix))
+        kax_reg = kax_matrix + regularization * I
 
-    # NOTE: This implements the proper GPEC algorithm using both Green's functions.
-    # The surface current is kax ∝ (χ - χ_e), and the inductance is derived from
-    # the correlation of these currents over the plasma surface.
+        surf_ind = flux_matrix * inv(kax_reg)
+
+        # Hermitianize to ensure physical inductance matrix
+        surf_ind = 0.5 * (surf_ind + surf_ind')
+    catch e
+        @warn "Surface inductance inversion failed: $e. Using fallback method."
+        # Fallback: use correlation method
+        surf_ind = zeros(ComplexF64, numpert_total, numpert_total)
+        for i in 1:mpert
+            for j in 1:mpert
+                correlation = 0.0 + 0.0im
+                for k in 1:mtheta
+                    # Simple correlation of Green's function differences
+                    chi_i = grri[k, 2*i-1] + 1im * grri[k, 2*i]
+                    che_i = grre[k, 2*i-1] + 1im * grre[k, 2*i]
+                    chi_j = grri[k, 2*j-1] + 1im * grri[k, 2*j]
+                    che_j = grre[k, 2*j-1] + 1im * grre[k, 2*j]
+                    jump_i = chi_i - che_i
+                    jump_j = chi_j - che_j
+                    correlation += jump_i * conj(jump_j)
+                end
+                surf_ind[i, j] = μ₀ * correlation / mtheta
+            end
+        end
+        surf_ind = 0.5 * (surf_ind + surf_ind')
+    end
 
     return surf_ind
 end
