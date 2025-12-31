@@ -2,8 +2,8 @@ module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 
-# Import FourierTransforms utility for coefficient calculation
-using ..Utilities.FourierTransforms: compute_fourier_coefficients
+# Import FourierTransforms utility for coefficient calculation and transforms
+using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")

@@ -39,6 +39,7 @@ using LinearAlgebra
 
 export FourierTransform, inverse
 export compute_fourier_coefficients
+export fourier_transform!, fourier_inverse_transform!
 
 """
     compute_fourier_coefficients(mtheta, mpert, mlow; n=0, qa=0.0, delta=zeros(mtheta))
@@ -419,6 +420,116 @@ function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Real})
         @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
         return (ft.cslth * modes) .* dth
     end
+end
+
+# ==============================================================================
+# Low-level matrix transforms with offsets (for Vacuum module compatibility)
+# ==============================================================================
+
+"""
+    fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+
+Low-level Fourier transform with offset support for Vacuum module.
+
+Performs a truncated Fourier transform of `gij` onto `gil` using pre-computed
+Fourier coefficients `cs`, with support for block offsets in the output matrix.
+
+This is used by the Vacuum module for transforming Green's function matrices that
+have specific block structure (e.g., plasma and wall contributions packed together).
+
+# Arguments
+
+- `gil::Matrix{Float64}`: Output matrix, updated in-place at offset block
+- `gij::Matrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
+- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert), either `cslth` or `snlth`
+- `m00::Int`: Row offset in `gil` matrix (0-based indexing convention)
+- `l00::Int`: Column offset in `gil` matrix (0-based indexing convention)
+
+# Operation
+
+Computes: `gil[m00+i, l00+l] = Σⱼ gij[i, j] * cs[j, l]` for i ∈ 1:mtheta, l ∈ 1:mpert
+
+The block `gil[m00+1:m00+mtheta, l00+1:l00+mpert]` is zeroed and then filled.
+
+# Notes
+
+- This function uses 0-based offset convention (add 1 for Julia indexing)
+- The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
+- Used for packing real and imaginary parts in separate blocks of `gil`
+
+# Example
+
+```julia
+ft = FourierTransform(mtheta, mpert, mlow; n=n, qa=qa, delta=delta)
+gil = zeros(2*mtheta, 2*mpert)  # Packed real/imag structure
+gij = ... # Some theta-space data
+
+# Transform using cosine coefficients, real part block (offset 0, 0)
+fourier_transform!(gil, gij, ft.cslth, 0, 0)
+
+# Transform using sine coefficients, imaginary part block (offset 0, mpert)
+fourier_transform!(gil, gij, ft.snlth, 0, mpert)
+```
+"""
+function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+    # Zero out relevant gil block
+    mtheta, mpert = size(cs)
+    fill!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 0.0)
+
+    # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    mul!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), gij, cs)
+end
+
+"""
+    fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+
+Low-level inverse Fourier transform with offset support for Vacuum module.
+
+Performs the inverse Fourier transform of `gil` onto `gll` using pre-computed
+Fourier coefficients `cs`, with support for block offsets in the input matrix.
+
+This is used by the Vacuum module for inverse transforming Green's function matrices
+back to mode space from theta space.
+
+# Arguments
+
+- `gll::Matrix{Float64}`: Output matrix (mpert × mpert), updated in-place
+- `gil::Matrix{Float64}`: Input matrix containing Fourier-transformed data
+- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert), either `cslth` or `snlth`
+- `m00::Int`: Row offset in `gil` matrix (0-based indexing convention)
+- `l00::Int`: Column offset in `gil` matrix (0-based indexing convention)
+
+# Operation
+
+Computes: `gll[l2, l1] = (2π/mtheta) * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
+
+# Notes
+
+- The normalization factor `2π/mtheta` ensures proper Fourier series reconstruction
+- This function uses 0-based offset convention (add 1 for Julia indexing)
+- The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
+- Output `gll` is completely zeroed before computation
+
+# Example
+
+```julia
+ft = FourierTransform(mtheta, mpert, mlow; n=n, qa=qa, delta=delta)
+gil = ... # Transformed Green's function data
+arr = zeros(mpert, mpert)
+
+# Inverse transform from real part block using cosine coefficients
+fourier_inverse_transform!(arr, gil, ft.cslth, 0, 0)
+```
+"""
+function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+    # Zero out gll block
+    mtheta, mpert = size(cs)
+    fill!(view(gll, 1:mpert, 1:mpert), 0.0)
+
+    # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
+    # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
+    dth = 2π / mtheta
+    mul!(gll, cs', view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 2π * dth, 0.0)
 end
 
 end # module FourierTransforms
