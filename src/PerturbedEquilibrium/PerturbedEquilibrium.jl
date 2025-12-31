@@ -13,11 +13,14 @@ import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
 import ..Vacuum
 import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, load_forcing_data!
+import ..Utilities
+import ..Utilities.FourierTransforms
 import DelimitedFiles: readdlm
 
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
+include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("ModeOutput.jl")

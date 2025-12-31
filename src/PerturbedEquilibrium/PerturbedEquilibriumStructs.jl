@@ -74,9 +74,10 @@ Results from perturbed equilibrium calculations.
   - `total_energy::Float64` - Total perturbation energy
 """
 @kwdef mutable struct PerturbedEquilibriumState
-    # Response fields
-    xi_perturbed::Array{ComplexF64,3} = zeros(ComplexF64, 0, 0, 0)
-    b_perturbed::Array{ComplexF64,3} = zeros(ComplexF64, 0, 0, 0)
+    # Response fields in mode space [npsi, mpert] following GPEC notation
+    # NamedTuples contain (psi, theta, zeta) components in flux coordinates
+    xi_modes::Union{Nothing, NamedTuple} = nothing
+    b_modes::Union{Nothing, NamedTuple} = nothing
 
     # Singular coupling results
     coupling_coefficient::ComplexF64 = 0.0 + 0.0im
