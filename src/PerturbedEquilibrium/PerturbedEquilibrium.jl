@@ -11,6 +11,8 @@ import ..Equilibrium
 import ..ForceFreeStates
 import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
 import ..Vacuum
+import ..ForcingTerms
+import ..ForcingTerms: ForcingMode, load_forcing_data!
 import DelimitedFiles: readdlm
 
 # Include module files
@@ -81,7 +83,7 @@ function compute_perturbed_equilibrium(
     state = PerturbedEquilibriumState()
 
     # Step 1: Load forcing data
-    load_forcing_data!(intr, ctrl)
+    load_forcing_data!(intr.forcing_modes, intr.dir_path, ctrl.forcing_data_file, ctrl.forcing_data_format, ctrl.verbose)
 
     # Step 2: Compute plasma response
     if ctrl.compute_response

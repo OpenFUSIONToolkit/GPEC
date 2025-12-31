@@ -42,23 +42,6 @@ Medium Priority (defer for MWE):
 end
 
 """
-    ForcingMode
-
-Data structure for a single forcing mode.
-
-## Fields
-
-  - `n::Int` - Toroidal mode number
-  - `m::Int` - Poloidal mode number
-  - `amplitude::ComplexF64` - Complex amplitude of the forcing field
-"""
-@kwdef mutable struct ForcingMode
-    n::Int = 0
-    m::Int = 0
-    amplitude::ComplexF64 = 0.0 + 0.0im
-end
-
-"""
     PerturbedEquilibriumInternal
 
 Internal state variables for perturbed equilibrium calculations.
