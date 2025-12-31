@@ -5,6 +5,10 @@ include("Splines/Splines.jl")
 import .SplinesMod as Spl
 export SplinesMod, Spl
 
+include("Utilities/Utilities.jl")
+import .Utilities as Utilities
+export Utilities
+
 include("Equilibrium/Equilibrium.jl")
 import .Equilibrium as Equilibrium
 export Equilibrium

@@ -5,7 +5,8 @@ Based on gpresp.f from GPEC, implementing resp_index=0 (energy-based inductance)
 Uses DCON eigenmode solutions and vacuum response data.
 """
 
-using FFTW
+# Use FourierTransform utility instead of FFTW for theta ↔ mode transforms
+using ..Utilities.FourierTransforms
 
 """
     extract_boundary_displacements(
@@ -282,73 +283,44 @@ end
     apply_green_function(
         green::Matrix{Float64},
         mode_coeffs::Vector{ComplexF64}
-    )::Vector{ComplexF64}
+    )::Vector{Float64}
 
 Apply Green's function to Fourier mode coefficients to get potential in theta space.
 
 The Green's function matrix maps Fourier coefficients to theta-space values:
     χ(θ) = G * b_fourier
 
+## Green's Function Structure
+
+From DCON vacuum calculation, `green` is a real matrix [2*mtheta, 2*mpert] where:
+- Rows 1:mtheta correspond to plasma surface theta points
+- Rows mtheta+1:2*mtheta correspond to wall surface theta points (if wall present)
+- Columns are packed as [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
+
 ## Arguments
 - `green`: Green's function matrix [2*mtheta, 2*mpert]
 - `mode_coeffs`: Complex Fourier mode coefficients [mpert]
 
 ## Returns
-- Potential values in theta space [mtheta] as complex numbers
+- Potential values in theta space [mtheta] at plasma surface (real-valued)
 """
 function apply_green_function(
     green::Matrix{Float64},
     mode_coeffs::Vector{ComplexF64}
-)::Vector{ComplexF64}
-    # Pack complex coefficients to real/imag format
+)::Vector{Float64}
+    # Pack complex coefficients to real/imag format for Green's function
+    # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
     packed_coeffs = pack_complex_to_realimag(mode_coeffs)
 
     # Apply Green's function: chi_theta = green * b_fourier
-    # Only use first mtheta rows (plasma surface)
+    # Extract only plasma surface rows (first mtheta rows)
+    # Result is real-valued potential at theta points
     mtheta = size(green, 1) ÷ 2
-    chi_theta_packed = green[1:mtheta, :] * packed_coeffs
-
-    # Unpack to complex (theta values are real for the potential)
-    # Actually, the result is real values at theta points
-    chi_theta = chi_theta_packed
+    chi_theta = green[1:mtheta, :] * packed_coeffs
 
     return chi_theta
 end
 
-"""
-    theta_to_modes(
-        theta_values::Vector{Float64},
-        mpert::Int
-    )::Vector{ComplexF64}
-
-Transform theta-space values to Fourier mode coefficients using FFT.
-
-## Arguments
-- `theta_values`: Values at theta points [mtheta]
-- `mpert`: Number of poloidal modes to extract
-
-## Returns
-- Fourier mode coefficients [mpert]
-"""
-function theta_to_modes(
-    theta_values::Vector{Float64},
-    mpert::Int
-)::Vector{ComplexF64}
-    mtheta = length(theta_values)
-
-    # Perform FFT
-    fft_result = fft(theta_values)
-
-    # Extract the requested number of modes
-    # FFT returns [0, 1, 2, ..., N/2, -N/2+1, ..., -1]
-    # We want the first mpert modes (positive frequencies)
-    modes = zeros(ComplexF64, mpert)
-    for i in 1:min(mpert, length(fft_result))
-        modes[i] = fft_result[i] / mtheta  # Normalize
-    end
-
-    return modes
-end
 
 """
     calc_surface_inductance(
@@ -369,7 +341,7 @@ Uses BOTH Green's function matrices computed during DCON vacuum calculation:
 2. Compute interior potential: chi_mn = grri * bwp_mn
 3. Compute exterior potential: che_mn = grre * bwp_mn
 4. Calculate surface current: kax_mn = (chi_mn - che_mn) / μ₀
-5. Transform back to mode space
+5. Transform back to mode space using Fourier transform
 6. Solve: surf_indmats = hermitianize(flxmats * inv(kaxmats))
 
 Green's function structure from DCON:
@@ -401,6 +373,11 @@ function calc_surface_inductance(
     # Physical constant
     μ₀ = 4π * 1e-7
 
+    # Create Fourier transform object for theta ↔ mode conversions
+    # This pre-computes basis functions cos(m*θ), sin(m*θ) for efficient reuse
+    # No phase shift needed since we're working in magnetic coordinates
+    ft = FourierTransform(mtheta, mpert, intr.mlow)
+
     # Initialize matrices for surface current in mode space
     kax_matrix = zeros(ComplexF64, numpert_total, numpert_total)
 
@@ -409,7 +386,7 @@ function calc_surface_inductance(
         # Extract normal field for eigenmode j (only poloidal modes for this toroidal n)
         # Assuming single toroidal mode for now (npert == 1)
         if npert > 1
-            @warn "calc_surface_inductance: Multiple toroidal modes not yet supported, using n=1 only"
+            @warn "calc_surface_inductance: Multiple toroidal modes not yet supported, using n=1 only" maxlog=1
         end
 
         # Extract poloidal mode coefficients for this eigenmode
@@ -418,17 +395,19 @@ function calc_surface_inductance(
         mode_end = min(mpert, numpert_total)
         bwp_modes = flux_matrix[mode_start:mode_end, j]
 
-        # Apply interior Green's function to get χ(θ)
+        # Apply interior Green's function to get χ(θ) at plasma surface
         chi_theta = apply_green_function(grri, bwp_modes)
 
-        # Apply exterior Green's function to get χ_e(θ)
+        # Apply exterior Green's function to get χ_e(θ) at plasma surface
         che_theta = apply_green_function(grre, bwp_modes)
 
         # Compute surface current in theta space: kax(θ) = (χ - χ_e) / μ₀
+        # This is the jump in potential across the plasma surface
         kax_theta = (chi_theta .- che_theta) ./ μ₀
 
-        # Transform back to Fourier mode space using FFT
-        kax_modes = theta_to_modes(kax_theta, mpert)
+        # Transform back to Fourier mode space using pre-computed FourierTransform
+        # ft(data) performs forward transform: theta → modes
+        kax_modes = ft(kax_theta)
 
         # Store in kax_matrix for this eigenmode
         kax_matrix[mode_start:mode_end, j] = kax_modes

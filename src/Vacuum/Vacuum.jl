@@ -235,10 +235,13 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 - `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
 - `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
 - `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
+- `cslth`: Cosine Fourier coefficients (mtheta × mpert) for transforms
+- `snlth`: Sine Fourier coefficients (mtheta × mpert) for transforms
 
 # Notes
 
 - This function computes both Green's functions to enable proper surface inductance calculations
+- Returns pre-computed Fourier coefficient matrices for efficient theta ↔ mode transforms
 - The vacuum response includes plasma-plasma and plasma-wall coupling effects
 - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
