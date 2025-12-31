@@ -19,11 +19,42 @@ Pkg.add("JPEC")
 
 ## Quick Start
 
+### Running JPEC as a Script
+
+JPEC includes an executable script in the project root for easy command-line usage:
+
+```bash
+./jpec path/to/directory
+```
+
+This will:
+1. Read the `jpec.toml` configuration file from the specified directory
+2. Set up the equilibrium
+3. Compute force-free states (stability analysis)
+4. Optionally compute perturbed equilibrium response (if configured)
+
+If no directory is provided, JPEC will use the current directory (`./`):
+
+```bash
+./jpec
+```
+
+### Using JPEC as a Library
+
+You can also use JPEC programmatically in your own Julia code:
+
 ```julia
 using JPEC
 
-# Great question
+# Run full analysis from a directory containing jpec.toml
+JPEC.main(["path/to/directory"])
+
+# Or set up equilibrium only
+using JPEC.Equilibrium
+equil = setup_equilibrium("path/to/jpec.toml")
 ```
+
+See the [Examples](@ref) section for detailed usage examples.
 
 ## Modules
 

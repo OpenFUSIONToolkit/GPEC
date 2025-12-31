@@ -167,3 +167,71 @@ Clone it from GitHub directly to your virtual machine.
             ```
 
 ## On macOS
+
+(To be completed)
+
+## Running JPEC
+
+Once JPEC is installed and built, you can run it in two ways:
+
+### As a Command-Line Script
+
+JPEC includes an executable script (`jpec`) in the project root directory. To run JPEC on a directory containing a `jpec.toml` configuration file:
+
+```bash
+./jpec path/to/directory
+```
+
+**Example:**
+```bash
+# Run JPEC on one of the included examples
+./jpec examples/DIIID-like_ideal_example
+
+# Run in the current directory (must contain jpec.toml)
+./jpec
+```
+
+The script will:
+1. Read configuration from `jpec.toml` in the specified directory
+2. Load or generate the equilibrium based on the `[Equilibrium]` section
+3. Compute force-free states (stability analysis) based on the `[ForceFreeStates]` section
+4. If a `[PerturbedEquilibrium]` section exists, compute the plasma response to external perturbations
+5. Write output to HDF5 files as configured
+
+**Early Termination:** You can stop execution early by setting:
+- `force_termination = true` in `[Equilibrium]` to stop after equilibrium setup
+- `force_termination = true` in `[ForceFreeStates]` to stop after stability analysis (before perturbed equilibrium)
+
+### As a Julia Library
+
+You can also use JPEC programmatically in your own Julia scripts or notebooks:
+
+```julia
+using JPEC
+
+# Run the full JPEC analysis pipeline
+JPEC.main(["path/to/directory"])
+
+# Or access individual modules
+using JPEC.Equilibrium
+using JPEC.Vacuum
+using JPEC.ForceFreeStates
+
+# Set up equilibrium only
+equil = Equilibrium.setup_equilibrium("path/to/jpec.toml")
+
+# Access equilibrium data
+println("q at axis: ", equil.params.q0)
+println("Beta-N: ", equil.params.betan)
+```
+
+### Configuration Files
+
+JPEC uses TOML configuration files (`jpec.toml`) with the following main sections:
+
+- **`[Equilibrium]`**: Equilibrium solver settings (input file, grid resolution, coordinate system, etc.)
+- **`[Wall]`**: Wall geometry for vacuum calculations (shape, size, position)
+- **`[ForceFreeStates]`**: Stability analysis settings (mode numbers, tolerances, flags)
+- **`[PerturbedEquilibrium]`**: Plasma response settings (forcing data, output options)
+
+See the example directories for complete configuration file templates.

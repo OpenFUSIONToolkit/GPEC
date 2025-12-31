@@ -1,4 +1,3 @@
-#!/usr/bin/env julia
 # JPEC.jl
 module JPEC
 
@@ -418,12 +417,5 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
 end
 
 export main
-
-# When run as a script, execute main with command line arguments
-if abspath(PROGRAM_FILE) == @__FILE__
-    # Parse command line arguments
-    path = length(ARGS) >= 1 ? ARGS[1] : "./"
-    main([path])
-end
 
 end # module JPEC
