@@ -250,6 +250,15 @@ function main(args::Vector{String}=String[])
 
     # Check for PerturbedEquilibrium section and run if present
     if "PerturbedEquilibrium" in keys(inputs)
+        # Read ForcingTerms control parameters
+        if "ForcingTerms" in keys(inputs)
+            ft_ctrl = ForcingTerms.ForcingTermsControl(;
+                (Symbol(k) => v for (k, v) in inputs["ForcingTerms"])...
+            )
+        else
+            ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
+        end
+
         pe_ctrl = PerturbedEquilibrium.PerturbedEquilibriumControl(;
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
         )
@@ -258,7 +267,7 @@ function main(args::Vector{String}=String[])
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, pe_ctrl, pe_intr
+            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr
         )
 
         # Write perturbed equilibrium outputs to same HDF5 file

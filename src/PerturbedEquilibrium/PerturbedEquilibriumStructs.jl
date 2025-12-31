@@ -5,9 +5,9 @@ User-facing control parameters from TOML [PerturbedEquilibrium] section.
 
 ## Fields
 
+Note: Forcing data file settings are now in [ForcingTerms] section.
+
 High Priority (MWE):
-  - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
-  - `forcing_data_format::String` - "ascii" or "hdf5" (default: "ascii")
   - `fixed_boundary::Bool` - Fixed boundary flag (default: false)
   - `output_eigenmodes::Bool` - Output mode fields as b-fields (default: true)
   - `compute_response::Bool` - Compute plasma response (default: true)
@@ -24,8 +24,6 @@ Medium Priority (defer for MWE):
 """
 @kwdef mutable struct PerturbedEquilibriumControl
     # High Priority (MWE)
-    forcing_data_file::String = "forcing.dat"
-    forcing_data_format::String = "ascii"
     fixed_boundary::Bool = false
     output_eigenmodes::Bool = true
     compute_response::Bool = true

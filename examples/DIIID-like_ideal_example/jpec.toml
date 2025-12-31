@@ -64,9 +64,11 @@ crossover = 1e-2              # Fractional distance from rational q at which tol
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
 
-[PerturbedEquilibrium]
+[ForcingTerms]
 forcing_data_file = "forcing.dat"       # Path to forcing data file (n, m, complex amplitude)
 forcing_data_format = "ascii"           # Format of forcing data: "ascii" or "hdf5"
+
+[PerturbedEquilibrium]
 fixed_boundary = false                  # Use fixed boundary conditions
 output_eigenmodes = true                # Output eigenmode fields as b-fields
 compute_response = true                 # Compute plasma response to forcing

@@ -39,6 +39,7 @@ export write_outputs_to_HDF5
         dcon_results::OdeState,
         vac_data::Union{VacuumData, Nothing},
         ffs_intr::ForceFreeStatesInternal,
+        ft_ctrl::ForcingTerms.ForcingTermsControl,
         ctrl::PerturbedEquilibriumControl,
         intr::PerturbedEquilibriumInternal
     )::PerturbedEquilibriumState
@@ -53,7 +54,8 @@ coupling metrics.
   - `dcon_results`: Stability calculation results from ForceFreeStates module
   - `vac_data`: Vacuum response data from ForceFreeStates free boundary calculation
   - `ffs_intr`: ForceFreeStates internal state with mode information
-  - `ctrl`: Control parameters from TOML configuration
+  - `ft_ctrl`: Forcing terms control parameters from [ForcingTerms] section
+  - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
 
 ## Returns
@@ -70,6 +72,7 @@ function compute_perturbed_equilibrium(
     dcon_results::OdeState,
     vac_data::Union{VacuumData, Nothing},
     ffs_intr::ForceFreeStates.ForceFreeStatesInternal,
+    ft_ctrl::ForcingTerms.ForcingTermsControl,
     ctrl::PerturbedEquilibriumControl,
     intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
@@ -83,7 +86,7 @@ function compute_perturbed_equilibrium(
     state = PerturbedEquilibriumState()
 
     # Step 1: Load forcing data
-    load_forcing_data!(intr.forcing_modes, intr.dir_path, ctrl.forcing_data_file, ctrl.forcing_data_format, ctrl.verbose)
+    load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
 
     # Step 2: Compute plasma response
     if ctrl.compute_response

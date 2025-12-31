@@ -4,9 +4,26 @@ module ForcingTerms
 using DelimitedFiles
 using HDF5
 
-# Import types from PerturbedEquilibrium that are needed by load_forcing_data!
-# This creates a circular dependency issue, so we'll need to handle this differently
-# For now, we'll make the functions generic
+"""
+    ForcingTermsControl
+
+User-facing control parameters from TOML [ForcingTerms] section.
+
+## Fields
+
+Forcing Data:
+  - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
+  - `forcing_data_format::String` - Format of forcing data: "ascii" or "hdf5" (default: "ascii")
+
+Future: Will include Fortran coil.in parameters for external coil configurations
+"""
+Base.@kwdef mutable struct ForcingTermsControl
+    # Forcing data file settings
+    forcing_data_file::String = "forcing.dat"
+    forcing_data_format::String = "ascii"
+
+    # Future: Fortran coil.in parameters will go here
+end
 
 """
     ForcingMode
@@ -151,6 +168,6 @@ function load_forcing_hdf5!(
     end
 end
 
-export ForcingMode, load_forcing_data!
+export ForcingTermsControl, ForcingMode, load_forcing_data!
 
 end # module ForcingTerms
