@@ -208,7 +208,7 @@ function compute_singular_coupling_metrics!(
             end
 
             # Step 4g: Get interpolated field at resonant surface
-            interpbwn = interpolate_field_at_surface(dcon_results, respsi, resnum, i, equil)
+            interpbwn = interpolate_field_at_surface(dcon_results, respsi, resnum, i, equil, m_res, n_mode)
 
             # Normalize by surface area
             area = compute_surface_area(equil, sing_surf.psifac)
@@ -288,19 +288,29 @@ end
         psi::Float64,
         mode_idx::Int,
         forcing_idx::Int,
-        equil::Equilibrium.PlasmaEquilibrium
+        equil::Equilibrium.PlasmaEquilibrium,
+        m_mode::Int,
+        n_mode::Int
     )::ComplexF64
 
 Interpolate magnetic field at arbitrary flux surface.
+
+Interpolates displacement from DCON solution and converts to field using
+ideal MHD relation from flux coordinates:
+    b^ψ = i * χ₁ * (m - n*q) * ξ_ψ
+
+This matches the field reconstruction in FieldReconstruction.jl.
 """
 function interpolate_field_at_surface(
     dcon_results::OdeState,
     psi::Float64,
     mode_idx::Int,
     forcing_idx::Int,
-    equil::Equilibrium.PlasmaEquilibrium
+    equil::Equilibrium.PlasmaEquilibrium,
+    m_mode::Int,
+    n_mode::Int
 )::ComplexF64
-    # Get displacement at this surface
+    # Get displacement at this surface via interpolation
     psi_store = dcon_results.psi_store[1:dcon_results.step]
 
     idx_right = findfirst(p -> p >= psi, psi_store)
@@ -321,9 +331,18 @@ function interpolate_field_at_surface(
         xi_psi = val_left * (1.0 - weight) + val_right * weight
     end
 
-    # Convert to field using ideal MHD: b = i * χ₁ * (m - n*q) * ξ
-    # This is a simplified version - full version would use field reconstruction
-    return xi_psi  # Placeholder - needs proper conversion
+    # Get safety factor at this surface
+    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    q = sq_vals[4]
+
+    # Convert displacement to field using ideal MHD relation
+    # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ (from FieldReconstruction.jl line 304)
+    chi1 = 2π * equil.psio
+    twopi = 2π
+    singfac = m_mode - n_mode * q
+    b_psi = chi1 * singfac * twopi * im * xi_psi
+
+    return b_psi
 end
 
 """
@@ -332,22 +351,52 @@ end
         psi::Float64
     )::Float64
 
-Compute current density at given flux surface.
+Compute effective current density coefficient at given flux surface.
 
-Returns toroidal current density from equilibrium.
+This mimics GPEC's j_c calculation (gpout.f line 578):
+    j_c = χ₁² * q / (μ₀ * surface_integral)
+
+For now, uses simplified approximation. Full implementation requires
+flux surface integrals of metric quantities.
+
+## GPEC Formula
+
+```fortran
+j_c = chi1^2 * sq%f(4) / (mu0 * integral)
+```
+
+where integral involves flux surface geometric factors.
+
+## Current Approximation
+
+Uses `j_c ≈ χ₁² * q / μ₀` as simplified estimate.
+This captures the dominant scaling but omits geometric correction factors.
+
+## TODO
+
+Implement full flux surface integral:
+```julia
+integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ / (2π)
+```
+where jac is Jacobian, sqreqb involves B², |∇ψ| is flux gradient magnitude.
 """
 function compute_current_density(
     equil::Equilibrium.PlasmaEquilibrium,
     psi::Float64
 )::Float64
-    # Evaluate pressure gradient and FF' at this surface
-    # j_φ = R * p' + F*F' / (μ₀ * R)
-    # For now, use simplified estimate from equilibrium splines
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    # Physical constants
+    μ₀ = 4π * 1e-7
+    chi1 = 2π * equil.psio
 
-    # sq(7) typically contains current-related quantity in GPEC
-    # For now, return a placeholder
-    return 1.0  # TODO: Implement proper current density calculation
+    # Get safety factor at this surface
+    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    q = sq_vals[4]
+
+    # Simplified approximation: j_c ≈ χ₁² * q / μ₀
+    # Full GPEC calculation involves surface integrals
+    j_c = chi1^2 * q / μ₀
+
+    return j_c
 end
 
 """
@@ -390,17 +439,55 @@ end
 
 Compute flux surface area at given ψ.
 
-Area = ∫∫ √g dθ dζ where g is metric determinant.
-For simplified calculation, use approximate formula.
+This mimics GPEC's area calculation (gpout.f line 568):
+    area = ∫ jac * |∇ψ| dθ / (2π)
+
+## GPEC Formula
+
+```fortran
+area(ising) = ∫ jac * delpsi dθ / mthsurf
+```
+
+where:
+- jac is the Jacobian from equilibrium
+- delpsi = |∇ψ| is the flux gradient magnitude
+
+## Current Approximation
+
+Uses geometric estimate based on flux surface volume derivative:
+    A ≈ dV/dψ / (2π √ψ)
+
+This captures the major-radius-averaged flux surface area.
+More accurate calculation requires full flux surface integration.
+
+## TODO
+
+Implement full integration using equilibrium bicubic spline:
+```julia
+area = ∫₀^(2π) jac(ψ, θ) * |∇ψ|(ψ, θ) dθ / (2π)
+```
 """
 function compute_surface_area(
     equil::Equilibrium.PlasmaEquilibrium,
     psi::Float64
 )::Float64
-    # Simplified: A ≈ 4π² * R₀ * r where r = minor radius at this flux surface
-    # Proper implementation would integrate over the flux surface
-    # For now, return normalized area
-    return 1.0  # TODO: Implement proper surface area calculation
+    # Get equilibrium quantities at this surface
+    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+
+    # sq(3) contains dV/dψ (volume derivative)
+    dV_dpsi = sq_vals[3]
+
+    # Approximate area from volume derivative
+    # For a torus: dV/dψ ≈ A * 2π * √ψ (roughly)
+    # So: A ≈ dV/dψ / (2π * √ψ)
+    if psi > 1e-10
+        area = abs(dV_dpsi) / (2π * sqrt(psi))
+    else
+        # Near axis, use limiting value
+        area = abs(dV_dpsi) / (2π * 1e-5)
+    end
+
+    return area
 end
 
 """
