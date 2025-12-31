@@ -1,4 +1,47 @@
 """
+    initialize_mode_arrays!(
+        intr::PerturbedEquilibriumInternal,
+        ffs_intr::ForceFreeStatesInternal
+    )
+
+Initialize mode number arrays for convenient indexing.
+
+Pre-computes m_modes[i] and n_modes[i] for each linear index i in 1:numpert_total,
+avoiding repeated index arithmetic throughout the code.
+
+## Mode Indexing Convention
+
+For linear index i ∈ [1, numpert_total]:
+- m_modes[i] = (i-1) % mpert + mlow
+- n_modes[i] = (i-1) ÷ mpert + nlow
+
+This matches the convention used in ForceFreeStates where modes are ordered as:
+(m1,n1), (m2,n1), ..., (mpert,n1), (m1,n2), (m2,n2), ..., (mpert,npert)
+"""
+function initialize_mode_arrays!(
+    intr::PerturbedEquilibriumInternal,
+    ffs_intr::ForceFreeStatesInternal
+)
+    numpert_total = ffs_intr.numpert_total
+    mpert = ffs_intr.mpert
+    mlow = ffs_intr.mlow
+    nlow = ffs_intr.nlow
+
+    # Allocate arrays
+    intr.m_modes = zeros(Int, numpert_total)
+    intr.n_modes = zeros(Int, numpert_total)
+
+    # Fill arrays using indexing convention
+    for i in 1:numpert_total
+        m_idx = (i - 1) % mpert + 1  # 1-based index into mpert range
+        n_idx = (i - 1) ÷ mpert + 1  # 1-based index into npert range
+
+        intr.m_modes[i] = m_idx - 1 + mlow
+        intr.n_modes[i] = n_idx - 1 + nlow
+    end
+end
+
+"""
     write_outputs_to_HDF5(
         state::PerturbedEquilibriumState,
         intr::PerturbedEquilibriumInternal,
