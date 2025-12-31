@@ -86,8 +86,13 @@ function compute_fourier_coefficients(
 )
     # Validate inputs
     @assert mtheta > 0 "mtheta must be positive"
-    @assert mpert > 0 "mpert must be positive"
+    @assert mpert >= 0 "mpert must be non-negative"
     @assert length(delta) == mtheta "delta must have length mtheta"
+
+    # Handle edge case: mpert = 0 returns empty arrays
+    if mpert == 0
+        return zeros(Float64, mtheta, 0), zeros(Float64, mtheta, 0)
+    end
 
     # Uniform theta grid: [0, 2π)
     theta_grid = range(0, 2π, length=mtheta+1)[1:end-1]

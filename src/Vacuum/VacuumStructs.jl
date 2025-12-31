@@ -1,4 +1,8 @@
 """
+Vacuum structures and initialization functions.
+"""
+
+"""
     VacuumInput
 
 Struct holding plasma boundary and mode data as provided from DCON namelist and computed quantities.
@@ -50,8 +54,6 @@ Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid poi
 - `snqd::Vector{Float64}`: sin(n * qa * delta) at plasma surface
 - `sinlt::Matrix{Float64}`: sin(l * θ) basis functions for poloidal modes at plasma surface
 - `coslt::Matrix{Float64}`: cos(l * θ) basis functions for poloidal modes at plasma surface
-- `snlth::Matrix{Float64}`: sin(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface
-- `cslth::Matrix{Float64}`: cos(l * θ + n * qa * delta) basis functions for poloidal modes at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
@@ -63,8 +65,6 @@ struct PlasmaGeometry
     snqd::Vector{Float64}
     sinlt::Matrix{Float64}
     coslt::Matrix{Float64}
-    snlth::Matrix{Float64}
-    cslth::Matrix{Float64}
 end
 
 """
@@ -169,33 +169,22 @@ function initialize_plasma_surface(inputs::VacuumInput)
     dx_plasma_dtheta = periodic_cubic_deriv(theta_grid, x_plasma)
     dz_plasma_dtheta = periodic_cubic_deriv(theta_grid, z_plasma)
     # Trigonometric basis arrays
-    # Pre-allocate output arrays
-    cos_nqdelta = zeros(mtheta)
-    sin_nqdelta = zeros(mtheta)
-    sin_mstheta = zeros(mtheta, inputs.mpert)
-    cos_mstheta = zeros(mtheta, inputs.mpert)
-    sin_mstheta_arg = zeros(mtheta, inputs.mpert)
-    cos_mstheta_arg = zeros(mtheta, inputs.mpert)
-
     # Calculate n*q*delta phase term
     nqdelta = inputs.n .* inputs.qa .* delta
-    cos_nqdelta .= cos.(nqdelta)
-    sin_nqdelta .= sin.(nqdelta)
+    cos_nqdelta = cos.(nqdelta)
+    sin_nqdelta = sin.(nqdelta)
 
-    # Fuse loop for trigonometric basis functions to improve cache efficiency
-    # and avoid intermediate array allocations.
-    mlow = inputs.mlow
-    mpert = inputs.mpert
-    for l in 1:mpert
-        mode_val = mlow + l - 1
+    # Simple harmonic basis: cos(m*θ), sin(m*θ) (no phase shift)
+    # Used for some vacuum field calculations
+    sin_mstheta = zeros(mtheta, inputs.mpert)
+    cos_mstheta = zeros(mtheta, inputs.mpert)
+
+    for l in 1:inputs.mpert
+        mode_val = inputs.mlow + l - 1
         for i in 1:mtheta
             m_theta = theta_grid[i] * mode_val
-            nqdelta_val = nqdelta[i]
-
             cos_mstheta[i, l] = cos(m_theta)
             sin_mstheta[i, l] = sin(m_theta)
-            cos_mstheta_arg[i, l] = cos(m_theta + nqdelta_val)
-            sin_mstheta_arg[i, l] = sin(m_theta + nqdelta_val)
         end
     end
 
@@ -208,9 +197,7 @@ function initialize_plasma_surface(inputs::VacuumInput)
         cos_nqdelta,
         sin_nqdelta,
         sin_mstheta,
-        cos_mstheta,
-        sin_mstheta_arg,
-        cos_mstheta_arg
+        cos_mstheta
     )
 end
 

@@ -247,12 +247,14 @@ using Interpolations
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
-            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
 
             @test size(wv) == (2, 2);
             @test !any(isnan, wv);
             @test size(grri) == (2 * 128, 2 * 2);
             @test !any(isnan, grri);
+            @test size(grre) == (2 * 128, 2 * 2);
+            @test !any(isnan, grre);
             @test size(xzpts) == (128, 4);
             @test !any(isnan, xzpts[:, 1:2]);
         end
@@ -279,7 +281,7 @@ using Interpolations
             # Use a conformal wall
             wall_settings = WallShapeSettings(shape="conformal", a=0.5)
 
-            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
 
             @test size(wv) == (2, 2)
             @test !any(isnan, wv)

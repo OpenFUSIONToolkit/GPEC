@@ -271,8 +271,6 @@ Populated in `Free.jl`.
 - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
 - `grre::Array{Float64, 2}` - Exterior Green's function (2×mthvac × 2×mpert)
 - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
-- `cslth::Array{Float64, 2}` - Cosine Fourier coefficients cos(l*θ + n*q*δ) (mthvac × mpert)
-- `snlth::Array{Float64, 2}` - Sine Fourier coefficients sin(l*θ + n*q*δ) (mthvac × mpert)
 """
 @kwdef mutable struct VacuumData
     mthvac::Int
@@ -291,11 +289,6 @@ Populated in `Free.jl`.
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)  # Interior Green's function (kernelsign=-1)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)  # Exterior Green's function (kernelsign=+1)
     xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac + 5, 4)
-
-    # Pre-computed Fourier coefficient matrices for efficient theta ↔ mode transforms
-    # Same coefficients used in Vacuum module for consistency
-    cslth::Array{Float64,2} = Array{Float64}(undef, mthvac, mpert)  # cos(l*θ + n*q*δ)
-    snlth::Array{Float64,2} = Array{Float64}(undef, mthvac, mpert)  # sin(l*θ + n*q*δ)
 end
 
 VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)

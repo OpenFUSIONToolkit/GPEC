@@ -2,6 +2,9 @@ module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 
+# Import FourierTransforms utility for coefficient calculation
+using ..Utilities.FourierTransforms: compute_fourier_coefficients
+
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")
 
@@ -235,22 +238,24 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 - `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
 - `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
 - `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
-- `cslth`: Cosine Fourier coefficients (mtheta × mpert) for transforms
-- `snlth`: Sine Fourier coefficients (mtheta × mpert) for transforms
 
 # Notes
 
 - This function computes both Green's functions to enable proper surface inductance calculations
-- Returns pre-computed Fourier coefficient matrices for efficient theta ↔ mode transforms
+- Uses FourierTransforms utility internally for consistent coefficient calculation
 - The vacuum response includes plasma-plasma and plasma-wall coupling effects
 - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     # Initialization and allocations
-    (; mtheta, mpert, n, force_wv_symmetry) = inputs
+    (; mtheta, mpert, mlow, n, qa, force_wv_symmetry) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
+
+    # Compute Fourier basis coefficients using FourierTransforms utility
+    # We only need the coefficient arrays for the existing fourier_transform! functions
+    cslth, snlth = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
 
     # Allocate arrays for both Green's functions
     grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
@@ -264,10 +269,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Fourier transform plasma-plasma block
     # Populate both grri and grre with the same right-hand side
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
-    fourier_transform!(grre, greenfunction_temp, plasma_surf.cslth, 0, 0)
-    fourier_transform!(grre, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, cslth, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, snlth, 0, mpert)
+    fourier_transform!(grre, greenfunction_temp, cslth, 0, 0)
+    fourier_transform!(grre, greenfunction_temp, snlth, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -283,10 +288,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
 
         # Fourier transform wall blocks into both grri and grre
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
-        fourier_transform!(grre, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
-        fourier_transform!(grre, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, cslth, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, snlth, mtheta, mpert)
+        fourier_transform!(grre, greenfunction_temp, cslth, mtheta, 0)
+        fourier_transform!(grre, greenfunction_temp, snlth, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -328,10 +333,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert)
+    fourier_inverse_transform!(arr, grri, cslth, 0, 0)
+    fourier_inverse_transform!(aii, grri, snlth, 0, mpert)
+    fourier_inverse_transform!(ari, grri, snlth, 0, 0)
+    fourier_inverse_transform!(air, grri, cslth, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii
@@ -353,6 +358,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     @views xzpts[:, 2] .= plasma_surf.z
     @views xzpts[:, 3] .= wall.x
     @views xzpts[:, 4] .= wall.z
+
     return wv, grri, grre, xzpts
 end
 
