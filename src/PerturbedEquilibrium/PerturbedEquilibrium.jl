@@ -23,7 +23,6 @@ include("ResponseMatrices.jl")
 include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
-include("ModeOutput.jl")
 include("Utils.jl")
 
 # Export main types
