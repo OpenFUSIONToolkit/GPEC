@@ -21,6 +21,8 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `vmat::Array{ComplexF64,4}` - Power series of V matrix for asymptotic analysis
   - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
+  - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
+  - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -39,6 +41,8 @@ A mutable struct containing data for singular surfaces in the plasma stability a
     vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
     mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
     m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
+    grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
+    grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
 end
 
 """

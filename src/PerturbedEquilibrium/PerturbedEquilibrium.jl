@@ -13,11 +13,14 @@ import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
 import ..Vacuum
 import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, load_forcing_data!
+import ..Utilities
+import ..Utilities.FourierTransforms
 import DelimitedFiles: readdlm
 
 # Include module files
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
+include("FieldReconstruction.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("ModeOutput.jl")
@@ -85,6 +88,9 @@ function compute_perturbed_equilibrium(
 
     state = PerturbedEquilibriumState()
 
+    # Step 0: Initialize mode arrays for convenient indexing
+    initialize_mode_arrays!(intr, ffs_intr)
+
     # Step 1: Load forcing data
     load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
 
@@ -99,7 +105,11 @@ function compute_perturbed_equilibrium(
 
     # Step 3: Compute singular coupling metrics
     if ctrl.compute_singular_coupling
-        compute_singular_coupling_metrics!(state, equil, dcon_results, intr, ctrl)
+        if vac_data === nothing
+            @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
+        else
+            compute_singular_coupling_metrics!(state, equil, dcon_results, vac_data, ffs_intr, intr, ctrl)
+        end
     end
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)

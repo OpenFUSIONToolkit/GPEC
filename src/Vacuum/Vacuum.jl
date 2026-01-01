@@ -2,16 +2,21 @@ module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 
+# Import parent modules
+import ..Equilibrium
+
 # Import FourierTransforms utility for coefficient calculation and transforms
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")
+include("VacuumFromEquilibrium.jl")
 
 export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
+export extract_plasma_surface_at_psi, create_vacuum_input_at_psi, compute_greens_functions_only
 
 # ======================================================================
 # Legacy fortran vacuum module interface

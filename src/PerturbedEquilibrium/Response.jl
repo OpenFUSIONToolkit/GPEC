@@ -71,18 +71,24 @@ function compute_plasma_response!(
     end
     response_vector = compute_plasma_response_vector(permeability, forcing_vector)
 
-    # Step 7: Store response (for now, just store the vector)
-    # TODO: Convert response vector to physical fields (xi, b)
-    npsi = size(dcon_results.u_store, 1)  # Number of radial points
-    ntheta = 128  # Placeholder: should match equilibrium grid
-    nmodes = length(intr.forcing_modes)
+    # Step 7: Reconstruct physical fields from response in mode space
+    if ctrl.verbose
+        println("  Reconstructing physical fields from response (mode space)")
+    end
 
-    state.xi_perturbed = zeros(ComplexF64, npsi, ntheta, nmodes)
-    state.b_perturbed = zeros(ComplexF64, npsi, ntheta, nmodes)
+    xi_modes, b_modes = reconstruct_physical_fields(
+        response_vector, dcon_results, equil, ffs_intr, intr
+    )
+
+    state.xi_modes = xi_modes
+    state.b_modes = b_modes
 
     if ctrl.verbose
         println("  Response calculation complete")
         println("    Response vector size: $(length(response_vector))")
         println("    Max response amplitude: $(maximum(abs.(response_vector)))")
+        println("    Mode-space field dimensions: $(size(xi_modes.psi))")
+        println("    ξ_ψ max amplitude: $(maximum(abs.(xi_modes.psi)))")
+        println("    b^ψ max amplitude: $(maximum(abs.(b_modes.psi)))")
     end
 end
