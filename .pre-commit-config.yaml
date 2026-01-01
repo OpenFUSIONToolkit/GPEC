@@ -38,3 +38,10 @@ repos:
       - id: mixed-line-ending
         name: Fix line endings
         args: ['--fix=lf']
+
+  # Julia code formatting
+  - repo: https://github.com/domluna/JuliaFormatter.jl
+    rev: v1.0.62
+    hooks:
+      - id: julia-formatter
+        name: Format Julia code

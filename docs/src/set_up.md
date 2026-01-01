@@ -190,6 +190,9 @@ Pre-commit hooks automatically:
 # Install pre-commit (requires Python/pip)
 pip install pre-commit
 
+# Install JuliaFormatter globally (required for Julia code formatting hook)
+julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
+
 # Install the git hooks in your local repository
 cd /path/to/JPEC
 pre-commit install
