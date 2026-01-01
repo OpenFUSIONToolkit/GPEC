@@ -114,7 +114,7 @@ function compute_singular_coupling_metrics!(
     end
 
     # Get vacuum calculation parameters
-    mtheta_eq = length(equil.rzphi.x1)  # Equilibrium poloidal grid size
+    mtheta_eq = length(equil.rzphi.ys)  # Equilibrium poloidal grid size
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
 
@@ -125,7 +125,7 @@ function compute_singular_coupling_metrics!(
     # For each singular surface, compute Green's functions
     # Note: Green's functions depend on toroidal mode n, but for now we compute
     # for the primary toroidal mode. This can be extended to store per-n Green's functions.
-    n_primary = ffs_intr.nval[1]  # Use first toroidal mode as primary
+    n_primary = ffs_intr.nlow  # Use first toroidal mode as primary
 
     for s in 1:msing
         sing_surf = ffs_intr.sing[s]
@@ -383,7 +383,7 @@ function interpolate_field_at_surface(
     end
 
     # Get safety factor at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    sq_vals = Spl.spline_eval!(equil.sq, psi)
     q = sq_vals[4]
 
     # Convert displacement to field using ideal MHD relation
@@ -440,7 +440,7 @@ function compute_current_density(
     chi1 = 2π * equil.psio
 
     # Get safety factor at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    sq_vals = Spl.spline_eval!(equil.sq, psi)
     q = sq_vals[4]
 
     # Simplified approximation: j_c ≈ χ₁² * q / μ₀
@@ -700,7 +700,7 @@ function compute_surface_area(
     psi::Float64
 )::Float64
     # Get equilibrium quantities at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    sq_vals = Spl.spline_eval!(equil.sq, psi)
 
     # sq(3) contains dV/dψ (volume derivative)
     dV_dpsi = sq_vals[3]

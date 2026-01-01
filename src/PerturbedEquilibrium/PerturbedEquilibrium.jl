@@ -7,6 +7,7 @@ using LinearAlgebra
 using Statistics
 
 # Import parent modules
+import ..Spl
 import ..Equilibrium
 import ..ForceFreeStates
 import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
