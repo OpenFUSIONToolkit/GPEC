@@ -143,3 +143,4 @@ This format is used for compiling release notes, so tags should be human-readabl
 - The Vacuum module is actively being converted from Fortran to Julia (see `vacuum_julia` branch)
 - When modifying equilibrium code, remember to update diagnostic outputs (gsec.h5, gse.h5, gsei.h5)
 - The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
+- Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
