@@ -114,7 +114,7 @@ function compute_singular_coupling_metrics!(
     end
 
     # Get vacuum calculation parameters
-    mtheta_eq = length(equil.rzphi.x1)  # Equilibrium poloidal grid size
+    mtheta_eq = length(equil.rzphi.ys)  # Equilibrium poloidal grid size
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
 
@@ -125,7 +125,7 @@ function compute_singular_coupling_metrics!(
     # For each singular surface, compute Green's functions
     # Note: Green's functions depend on toroidal mode n, but for now we compute
     # for the primary toroidal mode. This can be extended to store per-n Green's functions.
-    n_primary = ffs_intr.nval[1]  # Use first toroidal mode as primary
+    n_primary = ffs_intr.nlow  # Use first toroidal mode as primary
 
     for s in 1:msing
         sing_surf = ffs_intr.sing[s]
@@ -383,7 +383,7 @@ function interpolate_field_at_surface(
     end
 
     # Get safety factor at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    sq_vals = Spl.spline_eval!(equil.sq, psi)
     q = sq_vals[4]
 
     # Convert displacement to field using ideal MHD relation
@@ -446,7 +446,7 @@ function compute_current_density(
     twopi = 2π
 
     # Get equilibrium quantities at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    sq_vals = Spl.spline_eval!(equil.sq, psi)
     F_tor = sq_vals[1]  # Toroidal field function F = R*B_tor times 2π
     q = sq_vals[4]      # Safety factor
 
@@ -471,7 +471,7 @@ function compute_current_density(
         theta = itheta / mthsurf
 
         # Evaluate bicubic spline with derivatives at (psi, theta)
-        rzphi_f, rzphi_fx, rzphi_fy = Equilibrium.Splines.bicube_deriv1!(equil.rzphi, psi, theta)
+        rzphi_f, rzphi_fx, rzphi_fy = Spl.bicube_deriv1!(equil.rzphi, psi, theta)
 
         # Extract quantities from rzphi
         # f[1] = rfac² = (R-ro)² + (Z-zo)²
@@ -632,8 +632,8 @@ function compute_surface_inductance_from_greens(
         vbwp_mn[m_idx] = 1.0
 
         # Apply Green's functions using same approach as ResponseMatrices.jl
-        chi_theta = Utilities.FourierTransforms.apply_green_function(grri, vbwp_mn)
-        che_theta = Utilities.FourierTransforms.apply_green_function(grre, vbwp_mn)
+        chi_theta = apply_green_function(grri, vbwp_mn)
+        che_theta = apply_green_function(grre, vbwp_mn)
 
         # Surface current from potential jump
         kax_theta = (chi_theta .- che_theta) ./ μ₀
@@ -647,6 +647,9 @@ function compute_surface_inductance_from_greens(
     end
 
     # Compute surface inductance: L_surf = flux * inv(current)
+    # Initialize L_surf outside try-catch for scoping
+    L_surf = zeros(ComplexF64, numpert_total, numpert_total)
+
     try
         # Regularization for numerical stability
         regularization = 1e-10 * maximum(abs.(current_matrix))
@@ -795,7 +798,7 @@ function compute_surface_area(
         theta = itheta / mthsurf
 
         # Evaluate bicubic spline with derivatives at (psi, theta)
-        rzphi_f, _, rzphi_fy = Equilibrium.Splines.bicube_deriv1!(equil.rzphi, psi, theta)
+        rzphi_f, _, rzphi_fy = Spl.bicube_deriv1!(equil.rzphi, psi, theta)
 
         # Extract quantities (fx not needed for area calculation)
         rfac = sqrt(abs(rzphi_f[1]))

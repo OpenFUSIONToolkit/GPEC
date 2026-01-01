@@ -59,7 +59,7 @@ function extract_plasma_surface_at_psi(
     zo = equil.zo
 
     # Get safety factor at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    sq_vals = Spl.spline_eval!(equil.sq, psi)
     qa = sq_vals[4]
 
     # Allocate output arrays
@@ -74,7 +74,7 @@ function extract_plasma_surface_at_psi(
         theta = itheta / mtheta_eq
 
         # Evaluate bicubic spline at (psi, theta)
-        rzphi_vals = Equilibrium.Splines.bicube_eval!(equil.rzphi, psi, theta)
+        rzphi_vals = Spl.bicube_eval!(equil.rzphi, psi, theta)
 
         # Extract values
         # rzphi_vals is the _f array which gets filled by bicube_eval!

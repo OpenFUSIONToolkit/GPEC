@@ -3,6 +3,7 @@ module Vacuum
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 
 # Import parent modules
+import ..Spl
 import ..Equilibrium
 
 # Import FourierTransforms utility for coefficient calculation and transforms

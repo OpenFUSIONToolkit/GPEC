@@ -381,6 +381,9 @@ function calc_surface_inductance(
     # Initialize matrices for surface current in mode space
     kax_matrix = zeros(ComplexF64, numpert_total, numpert_total)
 
+    # Initialize surface inductance matrix (declare outside try-catch for scoping)
+    surf_ind = zeros(ComplexF64, numpert_total, numpert_total)
+
     # For each eigenmode j, compute surface current in all modes
     for j in 1:numpert_total
         # Extract normal field for eigenmode j (only poloidal modes for this toroidal n)

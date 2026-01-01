@@ -100,12 +100,18 @@ function write_outputs_to_HDF5(
         forcing_group["amplitude_imag"] = amp_imag
 
         # Write response fields (if computed)
-        if size(state.xi_perturbed, 1) > 0
+        if !isnothing(state.xi_modes)
             response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
-            response_group["xi_perturbed_real"] = real.(state.xi_perturbed)
-            response_group["xi_perturbed_imag"] = imag.(state.xi_perturbed)
-            response_group["b_perturbed_real"] = real.(state.b_perturbed)
-            response_group["b_perturbed_imag"] = imag.(state.b_perturbed)
+            response_group["xi_psi_real"] = real.(state.xi_modes.psi)
+            response_group["xi_psi_imag"] = imag.(state.xi_modes.psi)
+            if !isnothing(state.b_modes)
+                response_group["b_psi_real"] = real.(state.b_modes.psi)
+                response_group["b_psi_imag"] = imag.(state.b_modes.psi)
+                response_group["b_theta_real"] = real.(state.b_modes.theta)
+                response_group["b_theta_imag"] = imag.(state.b_modes.theta)
+                response_group["b_zeta_real"] = real.(state.b_modes.zeta)
+                response_group["b_zeta_imag"] = imag.(state.b_modes.zeta)
+            end
         end
 
         # Write singular coupling metrics

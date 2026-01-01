@@ -76,7 +76,7 @@ function reconstruct_physical_fields(
 )
     # Get dimensions
     npsi = size(dcon_results.u_store, 4)
-    mpert = ffs_intr.numpert
+    mpert = ffs_intr.mpert
 
     # Step 1: Sum weighted eigenmode contributions to get covariant ξ_ψ in mode space
     xi_psi_modes = sum_eigenmode_contributions(
@@ -151,7 +151,7 @@ function sum_eigenmode_contributions(
     # Extract dimensions
     numpert_total = length(response_vector)
     npsi = size(dcon_results.u_store, 4)
-    mpert = ffs_intr.numpert
+    mpert = ffs_intr.mpert
 
     # Initialize output array (npsi × mpert)
     # xsp_mn in GPEC notation (covariant radial displacement)
@@ -249,8 +249,8 @@ function compute_perturbed_field_modes(
     b_zeta_modes = zeros(ComplexF64, npsi, mpert)
 
     # Get mode numbers
-    mlow = ffs_intr.modemin[1]
-    nn = ffs_intr.nval  # Toroidal mode number
+    mlow = ffs_intr.mlow
+    nn = ffs_intr.nlow  # Toroidal mode number
 
     # Normalization constant: chi1 = 2π * Ψ₀
     chi1 = 2π * equil.psio
@@ -283,9 +283,9 @@ function compute_perturbed_field_modes(
         psi_norm = dcon_results.psi_store[ipsi]
 
         # Get equilibrium quantities at this surface
-        sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi_norm)
+        sq_vals, sq_derivs = Spl.spline_deriv1!(equil.sq, psi_norm)
         q = sq_vals[4]      # Safety factor q(ψ)
-        q1 = sq_vals[5]     # Derivative q'(ψ) = dq/dψ
+        q1 = sq_derivs[4]   # Derivative q'(ψ) = dq/dψ
 
         # Compute field for each poloidal mode
         for ipert in 1:mpert
