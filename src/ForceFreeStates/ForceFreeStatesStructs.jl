@@ -228,7 +228,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
-    HDF5_filename::String = "euler.h5"
+    HDF5_filename::String = "jpec.h5"
     force_wv_symmetry::Bool = true
     force_termination::Bool = false
 end
