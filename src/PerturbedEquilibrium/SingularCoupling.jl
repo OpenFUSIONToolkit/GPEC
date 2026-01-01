@@ -743,53 +743,90 @@ end
 
 Compute flux surface area at given ψ.
 
-This mimics GPEC's area calculation (gpout.f line 568):
-    area = ∫ jac * |∇ψ| dθ / (2π)
+Implements GPEC's area calculation (gpout.f line 568):
+    area = ∫ jac * |∇ψ| dθ
+
+where the integral is computed around the flux surface.
 
 ## GPEC Formula
 
 ```fortran
-area(ising) = ∫ jac * delpsi dθ / mthsurf
+DO itheta=0,mthsurf
+   CALL bicube_eval(rzphi,respsi,theta(itheta),1)
+   rfac=SQRT(rzphi%f(1))
+   jac=rzphi%f(4)
+   w(1,1)=(1+rzphi%fy(2))*twopi**2*rfac*r(itheta)/jac
+   w(1,2)=-rzphi%fy(1)*pi*r(itheta)/(rfac*jac)
+   delpsi(itheta)=SQRT(w(1,1)**2+w(1,2)**2)
+   area(ising)=area(ising)+jac*delpsi(itheta)/mthsurf
+ENDDO
+area(ising)=area(ising)-jac*delpsi(mthsurf)/mthsurf  ! trapezoidal rule
 ```
 
-where:
-- jac is the Jacobian from equilibrium
-- delpsi = |∇ψ| is the flux gradient magnitude
+## Implementation
 
-## Current Approximation
-
-Uses geometric estimate based on flux surface volume derivative:
-    A ≈ dV/dψ / (2π √ψ)
-
-This captures the major-radius-averaged flux surface area.
-More accurate calculation requires full flux surface integration.
-
-## TODO
-
-Implement full integration using equilibrium bicubic spline:
-```julia
-area = ∫₀^(2π) jac(ψ, θ) * |∇ψ|(ψ, θ) dθ / (2π)
-```
+Uses trapezoidal rule integration around the flux surface with:
+- jac: Jacobian of flux coordinates from rzphi
+- |∇ψ|: Flux gradient magnitude (delpsi) from metric tensor
 """
 function compute_surface_area(
     equil::Equilibrium.PlasmaEquilibrium,
     psi::Float64
 )::Float64
-    # Get equilibrium quantities at this surface
-    sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
+    # Physical constants
+    twopi = 2π
 
-    # sq(3) contains dV/dψ (volume derivative)
-    dV_dpsi = sq_vals[3]
+    # Magnetic axis location
+    ro = equil.ro
+    zo = equil.zo
 
-    # Approximate area from volume derivative
-    # For a torus: dV/dψ ≈ A * 2π * √ψ (roughly)
-    # So: A ≈ dV/dψ / (2π * √ψ)
-    if psi > 1e-10
-        area = abs(dV_dpsi) / (2π * sqrt(psi))
-    else
-        # Near axis, use limiting value
-        area = abs(dV_dpsi) / (2π * 1e-5)
+    # Number of theta points for integration
+    mthsurf = length(equil.rzphi.x1) - 1
+
+    # Integrate around flux surface using trapezoidal rule
+    area = 0.0
+
+    # Storage for last point (needed for trapezoidal rule correction)
+    last_jac = 0.0
+    last_delpsi = 0.0
+
+    for itheta in 0:mthsurf
+        # Theta coordinate normalized to [0, 1]
+        theta = itheta / mthsurf
+
+        # Evaluate bicubic spline with derivatives at (psi, theta)
+        rzphi_f, _, rzphi_fy = Equilibrium.Splines.bicube_deriv1!(equil.rzphi, psi, theta)
+
+        # Extract quantities (fx not needed for area calculation)
+        rfac = sqrt(abs(rzphi_f[1]))
+        jac = rzphi_f[4]
+        deta = rzphi_f[2]
+        fy_rfac2 = rzphi_fy[1]
+        fy_deta = rzphi_fy[2]
+
+        # Compute R coordinate
+        eta = twopi * (theta + deta)
+        r = ro + rfac * cos(eta)
+
+        # Compute metric components for |∇ψ|
+        w11 = (1.0 + fy_deta) * twopi^2 * rfac * r / jac
+        w12 = -fy_rfac2 * π * r / (rfac * jac)
+
+        # Flux gradient magnitude
+        delpsi = sqrt(w11^2 + w12^2)
+
+        # Accumulate area integral (trapezoidal rule)
+        area += jac * delpsi / mthsurf
+
+        # Store last point for correction
+        if itheta == mthsurf
+            last_jac = jac
+            last_delpsi = delpsi
+        end
     end
+
+    # Trapezoidal rule end correction
+    area -= last_jac * last_delpsi / mthsurf
 
     return area
 end
