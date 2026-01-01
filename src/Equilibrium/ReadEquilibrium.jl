@@ -55,8 +55,8 @@ them into a `DirectRunInput` object.
   - A `DirectRunInput` object ready for the direct solver.
 """
 function read_efit(config::EquilibriumConfig)
-    println("--> Processing EFIT g-file: $(config.control.eq_filename)")
-    lines = readlines(config.control.eq_filename)
+    println("--> Processing EFIT g-file: $(config.eq_filename)")
+    lines = readlines(config.eq_filename)
 
     # --- Parse Header ---
     header1_parts = split(lines[1])
@@ -134,8 +134,8 @@ them into a `InverseRunInput` object.
   - A `InverseRunInput` object ready for the inverse solver.
 """
 function read_chease2(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.control.eq_filename)")
-    lines = readlines(config.control.eq_filename)
+    println("--> Reading CHEASE file: $(config.eq_filename)")
+    lines = readlines(config.eq_filename)
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])
@@ -275,9 +275,9 @@ them into a `InverseRunInput` object.
   - A `InverseRunInput` object ready for the inverse solver.
 """
 function read_chease(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.control.eq_filename)")
+    println("--> Reading CHEASE file: $(config.eq_filename)")
     diagnostics = false # Set to true to enable detailed print output
-    open(config.control.eq_filename, "r") do io
+    open(config.eq_filename, "r") do io
         # Read first 3 integers
         seekstart(io)
         read(io, UInt32)  # skip record length at start

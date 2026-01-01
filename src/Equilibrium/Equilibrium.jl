@@ -40,9 +40,9 @@ function setup_equilibrium(path::String="equil.toml")
 end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
-    @printf "Equilibrium file: %s\n" eq_config.control.eq_filename
+    @printf "Equilibrium file: %s\n" eq_config.eq_filename
 
-    eq_type = eq_config.control.eq_type
+    eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
         eq_input = read_efit(eq_config)
@@ -53,14 +53,14 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     elseif eq_type == "lar"
 
         if additional_input === nothing
-            additional_input = LargeAspectRatioConfig(eq_config.control.eq_filename)
+            additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
 
         eq_input = lar_run(eq_config, additional_input)
     elseif eq_type == "sol"
 
         if additional_input === nothing
-            additional_input = SolovevConfig(eq_config.control.eq_filename)
+            additional_input = SolovevConfig(eq_config.eq_filename)
         end
 
         eq_input = sol_run(eq_config, additional_input)

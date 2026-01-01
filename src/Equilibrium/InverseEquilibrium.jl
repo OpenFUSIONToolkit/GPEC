@@ -52,12 +52,12 @@ function equilibrium_solver(input::InverseRunInput)
     zo = input.zo
     psio = input.psio
 
-    grid_type = config.control.grid_type
-    mpsi = config.control.mpsi
-    mtheta = config.control.mtheta
-    psilow = config.control.psilow
-    psihigh = config.control.psihigh
-    newq0 = config.control.newq0
+    grid_type = config.grid_type
+    mpsi = config.mpsi
+    mtheta = config.mtheta
+    psilow = config.psilow
+    psihigh = config.psihigh
+    newq0 = config.newq0
 
     me = 3
     interp = false

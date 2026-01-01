@@ -281,7 +281,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     u0[2] = sqrt((r - ro)^2 + (z - zo)^2)
 
     bfield = DirectBField()
-    equil_input = raw_profile.config.control
+    equil_input = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio,
         equil_input.power_bp, equil_input.power_b, equil_input.power_r, bfield)
 
@@ -420,7 +420,7 @@ robustness.
 function equilibrium_solver(raw_profile::DirectRunInput)
 
     # Shorthand
-    equil_params = raw_profile.config.control
+    equil_params = raw_profile.config
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     mpsi = equil_params.mpsi
