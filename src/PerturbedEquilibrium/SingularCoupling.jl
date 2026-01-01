@@ -556,8 +556,8 @@ function compute_surface_inductance_from_greens(
         vbwp_mn[m_idx] = 1.0
 
         # Apply Green's functions using same approach as ResponseMatrices.jl
-        chi_theta = Utilities.FourierTransforms.apply_green_function(grri, vbwp_mn)
-        che_theta = Utilities.FourierTransforms.apply_green_function(grre, vbwp_mn)
+        chi_theta = apply_green_function(grri, vbwp_mn)
+        che_theta = apply_green_function(grre, vbwp_mn)
 
         # Surface current from potential jump
         kax_theta = (chi_theta .- che_theta) ./ μ₀
@@ -571,6 +571,9 @@ function compute_surface_inductance_from_greens(
     end
 
     # Compute surface inductance: L_surf = flux * inv(current)
+    # Initialize L_surf outside try-catch for scoping
+    L_surf = zeros(ComplexF64, numpert_total, numpert_total)
+
     try
         # Regularization for numerical stability
         regularization = 1e-10 * maximum(abs.(current_matrix))
