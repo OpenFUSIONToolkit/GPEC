@@ -404,32 +404,37 @@ end
 
 Compute effective current density coefficient at given flux surface.
 
-This mimics GPEC's j_c calculation (gpout.f line 578):
-    j_c = χ₁² * q / (μ₀ * surface_integral)
+Implements GPEC's j_c calculation (gpout.f line 560-578):
+    j_c = χ₁² * q / (μ₀ * integral)
 
-For now, uses simplified approximation. Full implementation requires
-flux surface integrals of metric quantities.
+where the integral is computed via flux surface integration:
+    integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ
 
 ## GPEC Formula
 
 ```fortran
-j_c = chi1^2 * sq%f(4) / (mu0 * integral)
+DO itheta=0,mthsurf
+   CALL bicube_eval(rzphi,respsi,theta(itheta),1)
+   rfac=SQRT(rzphi%f(1))
+   jac=rzphi%f(4)
+   w(1,1)=(1+rzphi%fy(2))*twopi**2*rfac*r(itheta)/jac
+   w(1,2)=-rzphi%fy(1)*pi*r(itheta)/(rfac*jac)
+   delpsi(itheta)=SQRT(w(1,1)**2+w(1,2)**2)
+   sqreqb(itheta)=(sq%f(1)**2+chi1**2*delpsi(itheta)**2)/(twopi*r(itheta))**2
+   jcfun(itheta)=sqreqb(itheta)/(delpsi(itheta)**3)
+   j_c(ising)=j_c(ising)+jac*delpsi(itheta)*jcfun(itheta)/mthsurf
+ENDDO
+j_c(ising)=j_c(ising)-jac*delpsi(mthsurf)*jcfun(mthsurf)/mthsurf  ! trapezoidal rule
+j_c(ising)=1.0/j_c(ising)*chi1**2*sq%f(4)/mu0
 ```
 
-where integral involves flux surface geometric factors.
+## Implementation
 
-## Current Approximation
-
-Uses `j_c ≈ χ₁² * q / μ₀` as simplified estimate.
-This captures the dominant scaling but omits geometric correction factors.
-
-## TODO
-
-Implement full flux surface integral:
-```julia
-integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ / (2π)
-```
-where jac is Jacobian, sqreqb involves B², |∇ψ| is flux gradient magnitude.
+Uses trapezoidal rule integration around the flux surface with metric quantities
+from the equilibrium bicubic spline (rzphi). The integrand includes:
+- jac: Jacobian of flux coordinates
+- |∇ψ|: Flux gradient magnitude (delpsi)
+- sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)²
 """
 function compute_current_density(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -438,14 +443,85 @@ function compute_current_density(
     # Physical constants
     μ₀ = 4π * 1e-7
     chi1 = 2π * equil.psio
+    twopi = 2π
 
-    # Get safety factor at this surface
+    # Get equilibrium quantities at this surface
     sq_vals = Equilibrium.Splines.spline_eval!(equil.sq, psi)
-    q = sq_vals[4]
+    F_tor = sq_vals[1]  # Toroidal field function F = R*B_tor times 2π
+    q = sq_vals[4]      # Safety factor
 
-    # Simplified approximation: j_c ≈ χ₁² * q / μ₀
-    # Full GPEC calculation involves surface integrals
-    j_c = chi1^2 * q / μ₀
+    # Magnetic axis location
+    ro = equil.ro
+    zo = equil.zo
+
+    # Number of theta points for integration
+    # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
+    mthsurf = length(equil.rzphi.x1) - 1
+
+    # Integrate around flux surface using trapezoidal rule
+    integral = 0.0
+
+    # Storage for last point (needed for trapezoidal rule correction)
+    last_jac = 0.0
+    last_delpsi = 0.0
+    last_jcfun = 0.0
+
+    for itheta in 0:mthsurf
+        # Theta coordinate normalized to [0, 1]
+        theta = itheta / mthsurf
+
+        # Evaluate bicubic spline with derivatives at (psi, theta)
+        rzphi_f, rzphi_fx, rzphi_fy = Equilibrium.Splines.bicube_deriv1!(equil.rzphi, psi, theta)
+
+        # Extract quantities from rzphi
+        # f[1] = rfac² = (R-ro)² + (Z-zo)²
+        # f[2] = deta (angle offset)
+        # f[3] = dphi (toroidal angle offset) - not needed for j_c
+        # f[4] = jac (Jacobian)
+        # fy[1] = ∂(rfac²)/∂theta
+        # fy[2] = ∂(deta)/∂theta
+
+        rfac = sqrt(abs(rzphi_f[1]))
+        jac = rzphi_f[4]
+        deta = rzphi_f[2]
+        fy_rfac2 = rzphi_fy[1]
+        fy_deta = rzphi_fy[2]
+
+        # Compute R coordinate (Z not needed for this calculation)
+        eta = twopi * (theta + deta)
+        r = ro + rfac * cos(eta)
+
+        # Compute metric components w(1,1) and w(1,2) for |∇ψ|
+        # These come from the metric tensor in flux coordinates
+        w11 = (1.0 + fy_deta) * twopi^2 * rfac * r / jac
+        w12 = -fy_rfac2 * π * r / (rfac * jac)
+
+        # Flux gradient magnitude |∇ψ|
+        delpsi = sqrt(w11^2 + w12^2)
+
+        # Magnetic field quantity: sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²
+        # F is toroidal field function (already includes factor of 2π from sq)
+        sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * r)^2
+
+        # Integrand function
+        jcfun = sqreqb / (delpsi^3)
+
+        # Accumulate integral (trapezoidal rule)
+        integral += jac * delpsi * jcfun / mthsurf
+
+        # Store last point for correction
+        if itheta == mthsurf
+            last_jac = jac
+            last_delpsi = delpsi
+            last_jcfun = jcfun
+        end
+    end
+
+    # Trapezoidal rule end correction (subtract half of last point contribution)
+    integral -= last_jac * last_delpsi * last_jcfun / mthsurf
+
+    # Final normalization: j_c = (1/integral) * χ₁² * q / μ₀
+    j_c = (1.0 / integral) * chi1^2 * q / μ₀
 
     return j_c
 end
