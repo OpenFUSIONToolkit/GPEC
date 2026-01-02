@@ -353,4 +353,77 @@ end
         @test length(odet.unorm) == numpert_total
         @test length(odet.unorm0) == numpert_total
     end
+
+    @testset "chunk_el_integration_bounds tests" begin
+        # Helper to build a minimal control and internal structs
+        ctrl = JPEC.DCON.DconControl()
+        ctrl.numsteps_init = 10
+        ctrl.numunorms_init = 5
+
+        # Case 1: No singular surfaces -> single chunk to edge
+        intr = JPEC.DCON.DconInternal(; mpert=1, numpert_total=1)
+        intr.msing = 0
+        intr.psilim = 1.0
+
+        odet = JPEC.DCON.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+
+        ctrl.singfac_min = 1e-4
+        chunks = JPEC.DCON.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 1
+        @test chunks[1].needs_crossing == false
+
+        # Case 2: One singular surface within limits -> crossing chunk then edge
+        intr = JPEC.DCON.DconInternal(; mpert=1, numpert_total=1)
+        s = JPEC.DCON.SingType()
+        s.psifac = 0.5
+        s.n = [1]
+        s.m = [1]
+        s.q1 = 2.0
+        intr.sing = [s]
+        intr.msing = 1
+        intr.psilim = 1.0
+        intr.mlow = 1
+        intr.mhigh = 1
+
+        odet = JPEC.DCON.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        ctrl.singfac_min = 1e-4
+
+        chunks = JPEC.DCON.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 2
+        @test chunks[1].needs_crossing == true
+        @test chunks[2].needs_crossing == false
+        # Ensure the first chunk ends just before the singular surface
+        @test chunks[1].psi_end < intr.sing[1].psifac
+
+        # Case 3: Multiple singular surfaces -> multiple crossing chunks
+        intr = JPEC.DCON.DconInternal(; mpert=1, numpert_total=1)
+        s1 = JPEC.DCON.SingType(psifac=0.3, n=[1], m=[1], q1=1.5)
+        s2 = JPEC.DCON.SingType(psifac=0.6, n=[1], m=[1], q1=2.5)
+        intr.sing = [s1, s2]
+        intr.msing = 2
+        intr.psilim = 1.0
+        intr.mlow = 1
+        intr.mhigh = 1
+        odet = JPEC.DCON.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        ctrl.singfac_min = 1e-6
+        chunks = JPEC.DCON.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 3
+        @test all(c.needs_crossing == true for c in chunks[1:2])
+        @test chunks[3].needs_crossing == false
+
+        # Case 4: singfac_min == 0 should disable crossing logic -> single chunk
+        intr = JPEC.DCON.DconInternal(; mpert=1, numpert_total=1)
+        intr.sing = [JPEC.DCON.SingType(psifac=0.4, n=[1], m=[1], q1=2.0)]
+        intr.msing = 1
+        intr.psilim = 1.0
+        odet = JPEC.DCON.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet.psifac = 0.0
+        ctrl.singfac_min = 0.0
+        chunks = JPEC.DCON.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test length(chunks) == 1
+        @test chunks[1].needs_crossing == false
+    end
 end
