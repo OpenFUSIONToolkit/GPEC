@@ -9,6 +9,8 @@
 .vscode
 *.DS_Store
 *.pdf
+*.png
+*.jld2
 .gitattributes
 Manifest.toml
 build.log

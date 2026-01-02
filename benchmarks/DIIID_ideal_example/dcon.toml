@@ -5,14 +5,15 @@ ode_flag = true              # Integrate ODE's for determining stability of inte
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
 
-set_psilim_via_dmlim = true               # Safety factor (q) limit determined as q_ir+dmlim...
-dmlim = 0.2                   # See sas_flag
+set_psilim_via_dmlim = true   # Safety factor (q) limit determined as q_ir+dmlim...
+dmlim = 0.2                   # See set_psilim_via_dmlim
 psiedge = 1.00                # If less then psilim, calculates dW(psi)...
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn = 1                        # Toroidal mode number
+nn_low = 1                    # Smallest toroidal mode number to include
+nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
@@ -36,6 +37,16 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
+
+[WALL]
+shape = "nowall"
+aw = 0.05
+bw = 1.5
+cw = 0
+dw = 0.5
+tw = 0.05
+equal_arc_wall = 0
+a = 0.2415
 
 [DEBUG]
 output_benchmark_data = true      # Output benchmark data for comparison between codes
