@@ -4,7 +4,116 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-JPEC (Julia Perturbed Equilibrium Code) is a work-in-progress Julia port of the Generalized Perturbed Equilibrium Code (GPEC) suite for magnetohydrodynamic (MHD) equilibrium and stability analysis in fusion plasmas. The codebase is a hybrid Julia/Fortran implementation, with active Julia development alongside legacy Fortran code that is called via ccall.
+JPEC (Julia Perturbed Equilibrium Code) is a comprehensive Julia implementation of GPEC-style (Generalized Perturbed Equilibrium Code) MHD analysis for fusion plasmas. The code performs equilibrium reconstruction, ideal MHD stability analysis, and perturbed equilibrium calculations including plasma response and singular surface coupling diagnostics.
+
+**Relationship to Fortran GPEC**: JPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "GPEC", "the Fortran code", or "the original GPEC", they are referring to this Fortran codebase. JPEC reimplements and extends GPEC's functionality in Julia with improved performance and maintainability.
+
+**Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
+
+JPEC is a hybrid Julia/Fortran implementation with active Julia development alongside legacy Fortran code called via ccall. The Fortran-to-Julia conversion is largely complete, with pure Julia implementations available for all major components.
+
+**Current Development Focus**: The `perturbed_equilibrium` branch is implementing full GPEC-style perturbed equilibrium functionality, including singular coupling analysis, island formation diagnostics, and mode-space field reconstruction.
+
+## Key References
+
+**IMPORTANT**: The papers in `docs/resources/` provide the theoretical foundation for JPEC's algorithms and should be referenced to understand what the code is doing. **Citing equations from these papers in code comments and annotations is strongly encouraged** to maintain traceability between theory and implementation.
+
+### Vacuum Module
+
+The Vacuum module implements the methods described in:
+
+- **Chance et al. (1997)**: "Vacuum calculations in azimuthally symmetric geometry"
+  - Location: `docs/resources/1997-Chance-Vacuum_calculations_in_azimuthally_symmetric_geometry.pdf`
+  - Published: Physics of Plasmas **4**, 2161 (1997)
+  - Link: https://pubs.aip.org/aip/pop/article-abstract/4/6/2161/263192
+  - Describes: Fundamental vacuum response calculation method for tokamak geometry
+
+- **Chance et al. (2007)**: "Calculation of the vacuum Green's function valid even for high toroidal mode numbers in tokamaks"
+  - Location: `docs/resources/2007-Chance-Calculation of the vacuum Green's function valid even for high toroidal mode numbers in tokamaks.pdf`
+  - Published: Physics of Plasmas **14**, 052506 (2007)
+  - Describes: Improved Green's function calculation for high-n modes
+
+### ForceFreeStates Module
+
+The ForceFreeStates module (ideal MHD stability analysis) implements methods from:
+
+- **Glasser (2016)**: "The direct criterion of Newcomb for the ideal MHD stability of an axisymmetric toroidal plasma"
+  - Location: `docs/resources/2016-Glasser-The_direct_criterion_of_Newcomb_for_the_ideal_MHD_stability_of_an_axisymmetric_toroidal_plasma.pdf`
+  - Published: Physics of Plasmas **23**, 112506 (2016)
+  - **Describes: FUNDAMENTAL PAPER - Newcomb's criterion for ideal MHD stability (current implementation)**
+
+- **Glasser (2018)**: "A Riccati solution for the ideal MHD plasma response with applications to real-time stability control"
+  - Location: `docs/resources/2018-Glasser-A Riccati solution for the ideal MHD plasma response with applications to real-time stability control.pdf`
+  - Published: Physics of Plasmas **25**, 032507 (2018)
+  - Describes: Riccati method for ideal MHD eigenvalue problem
+
+### PerturbedEquilibrium Module
+
+The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calculations from:
+
+- **Park et al. (2007a)**: "Computation of three-dimensional tokamak and spherical torus equilibria"
+  - Location: `docs/resources/2007-Park-Computation_of_three-dimensional_tokamak_and_spherical_torus_equilibria-compressed.pdf`
+  - Published: Physics of Plasmas **14**, 052110 (2007)
+  - Describes: 3D equilibrium perturbations in toroidal geometry
+
+- **Park et al. (2007b)**: "Control of Asymmetric Magnetic Perturbations in Tokamaks"
+  - Location: `docs/resources/2007-Park-Control_of_Asymmetric_Magnetic_Perturbations_in_Tokamaks.pdf`
+  - Published: Physical Review Letters **99**, 195003 (2007)
+  - Describes: Plasma response to resonant magnetic perturbations (RMP)
+
+- **Park et al. (2009)**: "Importance of plasma response to nonaxisymmetric perturbations in tokamaks"
+  - Location: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
+  - Published: Physics of Plasmas **16**, 056115 (2009)
+  - Describes: Self-consistent plasma response calculation
+
+- **Park et al. (2011)**: "Kinetic energy principle and neoclassical toroidal torque in tokamaks"
+  - Location: `docs/resources/2011-Park-Physics_of_Plasmas_Kinetic_energy_principle_and_neoclassical_toroidal_torque_in_tokamaks.pdf`
+  - Published: Physics of Plasmas **18**, 110702 (2011)
+  - Describes: Energy principle for perturbed equilibria
+
+- **Park et al. (2017)**: "Self-consistent perturbed equilibrium with neoclassical toroidal torque in tokamaks"
+  - Location: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_neoclassical_toroidal_torque_in_toka.pdf`
+  - Published: Physics of Plasmas **24**, 032505 (2017)
+  - Describes: Self-consistent coupling with neoclassical effects
+
+### Resistive DCON Module (Future Work)
+
+JPEC will eventually implement resistive MHD stability analysis based on:
+
+- **Glasser (2016)**: "Computation of resistive instabilities by matched asymptotic expansions"
+  - Location: `docs/resources/2016-Glasser-Computation_of_resistive_instabilities_by_matched_asymptotic_expansions-compressed.pdf`
+  - Published: Physics of Plasmas **23**, 072505 (2016)
+  - Describes: Resistive stability analysis and Δ' calculation via matched asymptotic expansions
+
+- **Glasser (2018)**: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"
+  - Location: `docs/resources/2018-Glasser-A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time.pdf`
+  - Published: Physics of Plasmas **25**, 032501 (2018)
+  - Describes: Fast computation of Δ' matrix for resistive stability
+
+- **Wang et al. (2020)**: "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach"
+  - Location: `docs/resources/2020-Wang-Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach.pdf`
+  - Published: Physics of Plasmas **27**, 122509 (2020)
+  - Describes: Asymptotic matching for resistive plasma response
+
+### PENTRC Module (Future Work)
+
+JPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality from the Fortran GPEC suite. This is described in:
+
+- **Logan & Park (2013)**: "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry"
+  - Location: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturbed_equilibria_with_general_tokamak_geometry.pdf`
+  - Published: Physics of Plasmas **20**, 122507 (2013)
+  - Describes: Neoclassical toroidal viscosity (NTV) in perturbed equilibria
+
+- **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
+  - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
+  - Published: PhD Thesis, Princeton University (2015)
+  - Describes: Complete PENTRC theory and implementation
+
+### Additional References
+
+- **Various (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
+  - Location: `docs/resources/2009-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
+  - Describes: Neoclassical transport theory
 
 ## Common Commands
 
@@ -21,14 +130,14 @@ julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.build()'
 julia --project=. test/runtests.jl test/runtests_spline.jl
 
 # Available test files:
-# - test/runtests_build.jl
-# - test/runtests_spline.jl
-# - test/runtests_vacuum_fortran.jl
-# - test/runtests_vacuum_julia.jl
-# - test/runtests_solovev.jl
-# - test/runtests_ode.jl
-# - test/runtests_sing.jl
-# - test/runtests_fullruns.jl
+# - test/runtests_build.jl          # Fortran build verification
+# - test/runtests_spline.jl         # Spline interpolation
+# - test/runtests_vacuum_fortran.jl # Fortran vacuum module
+# - test/runtests_vacuum_julia.jl   # Julia vacuum module
+# - test/runtests_solovev.jl        # Analytical equilibrium
+# - test/runtests_ode.jl            # ODE integration
+# - test/runtests_sing.jl           # Singular surface handling
+# - test/runtests_fullruns.jl       # End-to-end tests
 ```
 
 ### Building Documentation
@@ -36,6 +145,8 @@ julia --project=. test/runtests.jl test/runtests_spline.jl
 ```bash
 # Build documentation locally
 julia --project=. build_docs_local.jl
+
+# Documentation hosted at: https://openfusiontoolkit.github.io/JPEC/dev/
 ```
 
 ### Development with Revise
@@ -49,75 +160,239 @@ using JPEC
 
 ## Architecture
 
+### Computational Workflow
+
+JPEC follows a three-stage analysis pipeline:
+
+1. **Equilibrium** → Solve Grad-Shafranov equation, compute flux surfaces, safety factor q-profile
+2. **Stability Analysis** → Solve ideal MHD eigenvalue problem (DCON-style), identify singular surfaces
+3. **Perturbed Equilibrium** → Compute plasma response to external fields, analyze singular coupling and island formation
+
+This workflow is reflected in the modular structure and data flow.
+
 ### Module Structure
 
-JPEC consists of four main modules, each organized in `src/`:
+JPEC consists of **seven main modules** organized in `src/`:
+
+#### Foundation Modules
 
 1. **Splines** (`src/Splines/`) - Numerical interpolation library
    - `CubicSpline.jl` - 1D cubic spline interpolation
    - `BicubicSpline.jl` - 2D bicubic spline interpolation
    - `FourierSpline.jl` - Fourier-based spline interpolation
    - Supports both pure Julia and Fortran implementations (via `fortran/` subdirectory)
+   - Status: Mature, both implementations maintained for validation
 
-2. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
+2. **Utilities** (`src/Utilities/`) - Shared computational tools
+   - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
+   - Provides type-stable functor pattern for repeated transforms
+   - Used by Vacuum and PerturbedEquilibrium modules
+
+#### Core Physics Modules
+
+3. **Equilibrium** (`src/Equilibrium/`) - MHD equilibrium solvers
    - Main entry point: `setup_equilibrium(path)` or `setup_equilibrium(config)`
-   - Supports multiple equilibrium types: efit, chease, chease2, lar (Large Aspect Ratio), sol (Solovev)
-   - `EquilibriumTypes.jl` - Core data structures (`PlasmaEquilibrium`, `EquilibriumConfig`, etc.)
-   - `ReadEquilibrium.jl` - Parsing equilibrium files
-   - `DirectEquilibrium.jl` - Direct equilibrium solver
-   - `InverseEquilibrium.jl` - Inverse equilibrium solver
-   - `AnalyticEquilibrium.jl` - Analytical equilibrium solutions
+   - Supports multiple equilibrium types:
+     - `efit` - EFIT g-file format
+     - `chease`, `chease2` - CHEASE equilibrium code formats
+     - `lar` - Large Aspect Ratio analytical model
+     - `sol` - Solovev analytical equilibrium
+   - Key files:
+     - `EquilibriumTypes.jl` - Core data structures
+     - `ReadEquilibrium.jl` - Parsing equilibrium files
+     - `DirectEquilibrium.jl` - Direct Grad-Shafranov solver
+     - `InverseEquilibrium.jl` - Inverse equilibrium solver
+     - `AnalyticEquilibrium.jl` - Analytical solutions
+   - Status: Stable and feature-complete
 
-3. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations
-   - Hybrid Julia/Fortran implementation actively being converted to pure Julia
-   - Main function: `mscvac()` (Fortran) and `compute_vacuum_response()` (Julia)
-   - Fortran interface via ccall to `libvac` shared library
-   - `Vacuum_data.jl` - Data structures
-   - `Vacuum_init.jl` - Initialization routines
-   - `Vacuum_vac.jl` - Core vacuum calculation (Julia conversion in progress)
-   - `Vacuum_math.jl` - Mathematical utilities
-   - `fortran/` - Legacy Fortran code compiled to shared library
+4. **Vacuum** (`src/Vacuum/`) - Vacuum field calculations and Green's functions
+   - Computes vacuum response matrices for ideal MHD analysis
+   - Calculates both **interior** (grri) and **exterior** (grre) Green's functions
+   - Main functions:
+     - `compute_vacuum_response()` - Pure Julia implementation
+     - `mscvac()` - Legacy Fortran interface via ccall
+   - Key files:
+     - `VacuumStructs.jl` - Data structures
+     - `VacuumInternals.jl` - Core algorithms
+     - `VacuumFromEquilibrium.jl` - Integration with equilibrium data
+   - Fortran code in `src/Vacuum/fortran/`
+   - Status: **Pure Julia implementation complete and available**
 
-4. **ForceFreeStates** (`src/ForceFreeStates/`) - Stability analysis
-   - `ForceFreeStatesStructs.jl` - Core data structures
-   - `Main.jl` - Main entry points
-   - `Ode.jl` - ODE solver for stability equations
-   - `Sing.jl` - Singular point handling
-   - `Fourfit.jl` - Fourier fitting routines
-   - `FixedBoundaryStability.jl` - Fixed boundary stability analysis
-   - `Free.jl` - Free boundary stability
-   - `Mercier.jl` - Mercier stability criterion
+5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
+   - Solves ideal MHD eigenvalue problem with force-free boundary conditions
+   - Identifies singular surfaces where ξ·∇ψ = 0
+   - Key files:
+     - `ForceFreeStatesStructs.jl` - Core data structures
+     - `Ode.jl` - ODE solver for Euler-Lagrange equations
+     - `Sing.jl` - Singular point handling and layer analysis
+     - `Fourfit.jl` - Fourier fitting routines
+     - `FixedBoundaryStability.jl` - Fixed boundary analysis
+     - `Free.jl` - Free boundary stability
+     - `Mercier.jl` - Mercier stability criterion
+   - Status: Stable, core DCON functionality implemented
 
-### Fortran Integration
+#### Perturbed Equilibrium Modules
 
-The build system compiles Fortran code into shared libraries:
+6. **ForcingTerms** (`src/ForcingTerms/`) - External field specification
+   - Handles external magnetic field perturbations (coils, RMP, etc.)
+   - Supports ASCII and HDF5 forcing data formats
+   - `ForcingMode` data structure specifies amplitude and phase for each (m,n) component
+   - Status: Complete and functional
 
-- Build configuration in `deps/build.jl` and `deps/build_helpers.jl`
-- OS-specific compiler flags (macOS uses Accelerate framework, Linux uses OpenBLAS)
-- Current Fortran modules: Splines, Vacuum
-- Platform support: macOS and Linux only (Windows unsupported, use WSL)
-- Add new Fortran builds by creating `build_*_fortran()` functions in `deps/build_helpers.jl`
+7. **PerturbedEquilibrium** (`src/PerturbedEquilibrium/`) - **GPEC-style plasma response**
+   - Computes plasma response to external forcing
+   - Calculates singular coupling metrics at rational surfaces
+   - Key files:
+     - `PerturbedEquilibrium.jl` - Main entry point
+     - `PerturbedEquilibriumStructs.jl` - Data structures
+     - `ResponseMatrices.jl` - Permeability matrix calculation
+     - `FieldReconstruction.jl` - Mode-space field reconstruction
+     - `Response.jl` - Plasma response computation
+     - `SingularCoupling.jl` - **Singular surface analysis** including:
+       - Delta prime (Δ') tearing stability parameter
+       - Resonant flux and currents at rational surfaces
+       - Island half-widths and Chirikov parameters
+       - Green's functions at interior flux surfaces
+       - Surface inductance for singular surfaces
+     - `Utils.jl` - Helper functions
+   - Status: **Active development on `perturbed_equilibrium` branch**
+
+### Configuration
+
+**Unified Configuration File**: `jpec.toml`
+
+All JPEC modules are configured via a single TOML file with the following sections:
+
+- `[Equilibrium]` - Equilibrium solver settings
+- `[Wall]` - Wall geometry and vacuum region
+- `[ForceFreeStates]` - Stability analysis parameters
+- `[PerturbedEquilibrium]` - Perturbed equilibrium settings
+- `[ForcingTerms]` - External field specification
+
+Key parameters:
+- `force_termination` - Set to `true` to exit after equilibrium/stability (skip perturbed equilibrium)
+- `output_file` - Output filename (default: `jpec.h5`)
+
+Example configuration files are provided in:
+- `examples/Solovev_ideal_example/jpec.toml`
+- `examples/DIIID-like_ideal_example/jpec.toml`
+
+**Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
 
 ### Data Flow
 
-1. **Equilibrium Setup**: `setup_equilibrium()` reads equilibrium files (TOML config) → parses equilibrium data → runs solver (direct/inverse) → computes global parameters (q-profile, beta, etc.) → diagnoses Grad-Shafranov solution
-2. **Vacuum Calculations**: Initialize plasma/wall surfaces → compute vacuum response matrix → return wv, grri, xzpts arrays
-3. **Stability Analysis**: Uses equilibrium data and vacuum response to analyze MHD stability
+The complete JPEC analysis pipeline:
+
+1. **Equilibrium Setup**:
+   - `setup_equilibrium(config)` reads configuration from `jpec.toml`
+   - Parses equilibrium data (EFIT, CHEASE, or analytical)
+   - Runs Grad-Shafranov solver (direct or inverse)
+   - Computes global parameters: q-profile, pressure, current density, β
+   - Creates bicubic splines for (ψ, θ, φ) → (R, Z, Φ) mapping
+   - Outputs: `PlasmaEquilibrium` object
+
+2. **Vacuum Response**:
+   - Initialize plasma and wall surfaces from equilibrium
+   - Compute vacuum response matrices (wv, grri, grre)
+   - Calculate both interior and exterior Green's functions
+   - Available in pure Julia or via Fortran interface
+
+3. **Stability Analysis** (ForceFreeStates):
+   - Solve ideal MHD Euler-Lagrange equations via ODE integration
+   - Identify singular surfaces where q = m/n
+   - Compute Δ' at each singular surface
+   - Calculate potential and kinetic energies
+   - Check Mercier and ballooning stability criteria
+   - Outputs: Eigenmode structure ξ(ψ,θ)
+
+4. **Perturbed Equilibrium** (GPEC-style):
+   - Load external forcing data (coil fields, RMP configuration)
+   - Compute plasma response using permeability matrices
+   - Reconstruct mode-space fields (ξ_modes, b_modes)
+   - Calculate singular coupling metrics at rational surfaces:
+     - Δ' (tearing stability parameter)
+     - Island half-widths
+     - Chirikov overlap parameter
+     - Resonant flux and currents
+   - Outputs: `PerturbedEquilibriumState` with response fields and diagnostics
+
+5. **Output**:
+   - All results saved to single HDF5 file (default: `jpec.h5`)
+   - HDF5 groups: `input/`, `info/`, `equil/`, `splines/`, `locstab/`, `integration/`, `singular/`, `vacuum/`, and perturbed equilibrium data
 
 ### Key Data Structures
 
-- `PlasmaEquilibrium` - Main equilibrium container with bicubic splines (rzphi), 1D profiles (sq), and parameters
+#### Equilibrium
+- `PlasmaEquilibrium` - Main equilibrium container with bicubic splines (rzphi), 1D profiles (sq), and global parameters
 - `EquilibriumConfig` - Configuration loaded from TOML files
+
+#### Vacuum
 - `VacuumInput` - Input parameters for vacuum calculations
 - `WallShapeSettings` - Wall geometry configuration
+
+#### Stability
+- `SingType` - Singular surface data including:
+  - Rational surface location (ψ, q = m/n)
+  - Δ' (tearing stability parameter)
+  - Eigenmode structure at singular surface
+  - **NEW**: Green's functions (grri, grre) at interior singular surfaces
+  - Surface inductance
+
+#### Perturbed Equilibrium
+- `PerturbedEquilibriumControl` - User-facing TOML configuration parameters
+- `PerturbedEquilibriumInternal` - Internal state with mode arrays
+- `PerturbedEquilibriumState` - Results including:
+  - Response fields (ξ_modes, b_modes) in mode space
+  - Singular coupling matrices [msing × numpert_total]
+  - Island diagnostics (half-widths, Chirikov parameters)
+- `ForcingMode` - External forcing specification (m, n, amplitude, phase)
+
+### Module Dependencies
+
+```
+JPEC
+├── Splines (foundation)
+├── Utilities (shared tools)
+│   └── FourierTransforms
+├── Equilibrium (uses Splines)
+├── Vacuum (uses Splines, Equilibrium, Utilities)
+├── ForcingTerms (data I/O)
+├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
+└── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
+```
+
+### Fortran Integration
+
+The build system compiles Fortran code into shared libraries for performance-critical routines:
+
+- Build configuration in `deps/build.jl` and `deps/build_helpers.jl`
+- OS-specific compiler flags:
+  - macOS: Uses Accelerate framework
+  - Linux: Uses OpenBLAS
+- Current Fortran modules: Splines, Vacuum
+- Compiled libraries:
+  - `libspline.dylib` / `libspline.so`
+  - `libvac.dylib` / `libvac.so`
+- Platform support: **macOS and Linux only** (Windows unsupported, use WSL)
+- Add new Fortran builds by creating `build_*_fortran()` functions in `deps/build_helpers.jl`
+
+**Fortran-to-Julia Conversion Status**:
+- ✅ Vacuum module: Pure Julia implementation complete
+- ✅ Splines: Both implementations available for validation
+- 🔄 Both implementations maintained for testing and verification
 
 ## Git Workflow
 
 This project uses GitFlow:
+
 - Two permanent branches: `main` and `develop`
 - `main` branch updated only at release-ready stages
+- `develop` branch for integration of features
 - Feature branches off `develop`, merged back with `--no-ff`
-- Current work is on `vacuum_julia` branch
+
+**Current Development**:
+- Active branch: `perturbed_equilibrium` - Major feature implementing GPEC-style perturbed equilibrium calculations
+- Previous work: `vacuum_julia` branch (merged) - Pure Julia vacuum implementation
 
 ### Commit Message Format
 
@@ -126,20 +401,33 @@ CODE - TAG - Detailed message
 ```
 
 Where:
-- CODE: Module name (EQUIL, ForceFreeStates, VAC, VACUUM, etc.)
-- TAG: Type descriptor (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc.)
+- **CODE**: Module name (EQUIL, VAC, VACUUM, ForceFreeStates, PERTURBED EQUILIBRIUM, etc.)
+- **TAG**: Type descriptor (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.)
 
 Examples:
-- `VAC - WIP - Converting vaccal wall code to Julia`
+- `PERTURBED EQUILIBRIUM - NEW FEATURE - Implement singular coupling diagnostics`
+- `VAC - IMPROVEMENT - Add dual Green's function computation`
 - `EQUIL - BUG FIX - Fixed separatrix finding for high kappa`
-- `ForceFreeStates - NEW FEATURE - Added Mercier criterion calculation`
+- `ForceFreeStates - REFACTOR - Unified singular surface data structure`
 
 This format is used for compiling release notes, so tags should be human-readable and descriptive.
 
 ## Important Notes
 
-- Julia 1.11 is the target version
-- Tests include both Fortran and Julia implementations to ensure parity during conversion
-- The Vacuum module is actively being converted from Fortran to Julia (see `vacuum_julia` branch)
-- When modifying equilibrium code, remember to update diagnostic outputs (gsec.h5, gse.h5, gsei.h5)
-- The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
+### General
+- **Julia version**: 1.11 is the target version
+- **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
+- **Testing**: Tests include both Fortran and Julia implementations to ensure parity during conversion
+
+### Output Files
+- **Default output**: `jpec.h5` (previously `euler.h5` in older versions)
+- **Legacy diagnostic files**: When modifying equilibrium code, remember that older versions output `gsec.h5`, `gse.h5`, `gsei.h5` - these are now consolidated into `jpec.h5`
+
+### Current Development Priorities
+- **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
+- **Configuration**: All settings now in unified `jpec.toml` file
+- **Documentation**: Updated with PerturbedEquilibrium API reference at https://openfusiontoolkit.github.io/JPEC/dev/
+
+### Performance
+- Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
+- Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
