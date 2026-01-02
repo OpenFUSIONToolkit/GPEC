@@ -247,28 +247,56 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/sq/fs1/dVdpsi"] = [ForwardDiff.derivative(equil.dVdpsi_spline, psi) for psi in equil.psi_grid]
         out_h5["splines/sq/fs1/q"] = [ForwardDiff.derivative(equil.q_spline, psi) for psi in equil.psi_grid]
         out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
-        out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
-        out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
-        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, 1]
-        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, 2]
-        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, 3]
-        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, 4]
-        out_h5["splines/rzphi/fsx/rcoords"] = equil.rzphi.fsx[:, 1]
-        out_h5["splines/rzphi/fsx/offset"] = equil.rzphi.fsx[:, 2]
-        out_h5["splines/rzphi/fsx/nu"] = equil.rzphi.fsx[:, 3]
-        out_h5["splines/rzphi/fsx/jac"] = equil.rzphi.fsx[:, 4]
-        out_h5["splines/rzphi/fsy/rcoords"] = equil.rzphi.fsy[:, 1]
-        out_h5["splines/rzphi/fsy/offset"] = equil.rzphi.fsy[:, 2]
-        out_h5["splines/rzphi/fsy/nu"] = equil.rzphi.fsy[:, 3]
-        out_h5["splines/rzphi/fsy/jac"] = equil.rzphi.fsy[:, 4]
-        out_h5["splines/rzphi/fsxy/rcoords"] = equil.rzphi.fsxy[:, 1]
-        out_h5["splines/rzphi/fsxy/offset"] = equil.rzphi.fsxy[:, 2]
-        out_h5["splines/rzphi/fsxy/nu"] = equil.rzphi.fsxy[:, 3]
-        out_h5["splines/rzphi/fsxy/jac"] = equil.rzphi.fsxy[:, 4]
-        out_h5["splines/rzphi/x0"] = 0 # TODO: equil.rzphi.x0
-        out_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
-        out_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
-        out_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
+
+        # Write rzphi spline data by evaluating new splines on grid
+        out_h5["splines/rzphi/xs"] = Vector(equil.psi_grid)
+        out_h5["splines/rzphi/ys"] = Vector(equil.theta_grid)
+
+        # Evaluate splines on grid to get fs arrays
+        mpsi = length(equil.psi_grid)
+        mtheta = length(equil.theta_grid)
+        r2_fs = [equil.r2_spline(equil.psi_grid[i], equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+        eta_fs = [equil.eta_spline(equil.psi_grid[i], equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+        nu_fs = [equil.nu_spline(equil.psi_grid[i], equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+        jac_fs = [equil.jac_spline(equil.psi_grid[i], equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+
+        out_h5["splines/rzphi/fs/rcoords"] = r2_fs
+        out_h5["splines/rzphi/fs/offset"] = eta_fs
+        out_h5["splines/rzphi/fs/nu"] = nu_fs
+        out_h5["splines/rzphi/fs/jac"] = jac_fs
+
+        # Compute psi derivatives
+        r2_fsx = [ForwardDiff.derivative(p -> equil.r2_spline(p, equil.theta_grid[j]), equil.psi_grid[i]) for i in 1:mpsi, j in 1:mtheta]
+        eta_fsx = [ForwardDiff.derivative(p -> equil.eta_spline(p, equil.theta_grid[j]), equil.psi_grid[i]) for i in 1:mpsi, j in 1:mtheta]
+        nu_fsx = [ForwardDiff.derivative(p -> equil.nu_spline(p, equil.theta_grid[j]), equil.psi_grid[i]) for i in 1:mpsi, j in 1:mtheta]
+        jac_fsx = [ForwardDiff.derivative(p -> equil.jac_spline(p, equil.theta_grid[j]), equil.psi_grid[i]) for i in 1:mpsi, j in 1:mtheta]
+
+        out_h5["splines/rzphi/fsx/rcoords"] = r2_fsx
+        out_h5["splines/rzphi/fsx/offset"] = eta_fsx
+        out_h5["splines/rzphi/fsx/nu"] = nu_fsx
+        out_h5["splines/rzphi/fsx/jac"] = jac_fsx
+
+        # Compute theta derivatives
+        r2_fsy = [ForwardDiff.derivative(t -> equil.r2_spline(equil.psi_grid[i], t), equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+        eta_fsy = [ForwardDiff.derivative(t -> equil.eta_spline(equil.psi_grid[i], t), equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+        nu_fsy = [ForwardDiff.derivative(t -> equil.nu_spline(equil.psi_grid[i], t), equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+        jac_fsy = [ForwardDiff.derivative(t -> equil.jac_spline(equil.psi_grid[i], t), equil.theta_grid[j]) for i in 1:mpsi, j in 1:mtheta]
+
+        out_h5["splines/rzphi/fsy/rcoords"] = r2_fsy
+        out_h5["splines/rzphi/fsy/offset"] = eta_fsy
+        out_h5["splines/rzphi/fsy/nu"] = nu_fsy
+        out_h5["splines/rzphi/fsy/jac"] = jac_fsy
+
+        # Compute mixed derivatives (not currently used, set to zero)
+        out_h5["splines/rzphi/fsxy/rcoords"] = zeros(mpsi, mtheta)
+        out_h5["splines/rzphi/fsxy/offset"] = zeros(mpsi, mtheta)
+        out_h5["splines/rzphi/fsxy/nu"] = zeros(mpsi, mtheta)
+        out_h5["splines/rzphi/fsxy/jac"] = zeros(mpsi, mtheta)
+
+        out_h5["splines/rzphi/x0"] = 0
+        out_h5["splines/rzphi/y0"] = 0
+        out_h5["splines/rzphi/xpower"] = 0
+        out_h5["splines/rzphi/fpower"] = 0
 
         # Write local stability data
         if ctrl.mer_flag

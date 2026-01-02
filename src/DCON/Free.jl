@@ -158,7 +158,7 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
 function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
     # Allocations
-    theta_norm = Vector(equil.rzphi.ys)
+    theta_norm = Vector(equil.theta_grid)
     mtheta = equil.config.control.mtheta
     angle = zeros(Float64, mtheta + 1)
     r = zeros(Float64, mtheta + 1)
@@ -169,10 +169,13 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     # Compute output
     qa = equil.q_spline(psifac)
     for itheta in 1:equil.config.control.mtheta+1
-        f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
-        rfac[itheta] = sqrt(f[1])
-        angle[itheta] = 2π * (theta_norm[itheta] + f[2])
-        delta[itheta] = -f[3] / qa
+        r2_val = equil.r2_spline(psifac, theta_norm[itheta])
+        eta_val = equil.eta_spline(psifac, theta_norm[itheta])
+        nu_val = equil.nu_spline(psifac, theta_norm[itheta])
+
+        rfac[itheta] = sqrt(r2_val)
+        angle[itheta] = 2π * (theta_norm[itheta] + eta_val)
+        delta[itheta] = -nu_val / qa
     end
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)

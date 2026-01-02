@@ -110,41 +110,58 @@ Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext
 Performs the same function as equil_out_sep_find in the Fortran code.
 """
 function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
-    rzphi = pe.rzphi
-    mpsi = size(rzphi.fs, 1) - 1
-    mtheta = size(rzphi.fs, 2) - 1
+    mpsi = length(pe.psi_grid) - 1
+    mtheta = length(pe.theta_grid) - 1
 
-    # Allocate vector to store eta offset from rzphi
+    # Allocate vector to store eta offset
     vector = zeros(Float64, mtheta + 1)
+    psi_edge = pe.psi_grid[mpsi+1]
     for it in 0:mtheta
-        f = Spl.bicube_eval!(rzphi, rzphi.xs[mpsi+1], rzphi.ys[it+1])
-        vector[it+1] = rzphi.ys[it+1] + f[2]
+        theta_val = pe.theta_grid[it+1]
+        eta_offset = pe.eta_spline(psi_edge, theta_val)
+        vector[it+1] = theta_val + eta_offset
     end
 
-    psifac = rzphi.xs[mpsi+1]
+    psifac = psi_edge
     eta0 = 0.0
     idx = findmin(abs.(vector .- eta0))[2]
-    theta = rzphi.ys[idx]
+    theta = pe.theta_grid[idx]
     rsep = zeros(2)
 
     for iside in 1:2
         it = 0
         while true
             it += 1
-            f, _, fy = Spl.bicube_deriv1!(rzphi, psifac, theta)
-            eta = theta + f[2] - eta0
-            eta_theta = 1 + fy[2]
+            # Wrap theta to [0, 1] for periodic boundary before using
+            theta_wrapped = mod(theta, 1.0)
+
+            # Evaluate eta_spline and its derivative
+            eta_val = pe.eta_spline(psifac, theta_wrapped)
+            eta_dtheta = ForwardDiff.derivative(t -> pe.eta_spline(psifac, mod(t, 1.0)), theta_wrapped)
+
+            eta = theta_wrapped + eta_val - eta0
+            eta_theta = 1 + eta_dtheta
+            if abs(eta_theta) < 1e-14
+                # Avoid division by zero
+                break
+            end
             dtheta = -eta / eta_theta
+            if isnan(dtheta) || isinf(dtheta)
+                # Safety check for NaN/Inf
+                break
+            end
             theta += dtheta
             if abs(eta) <= 1e-10 || it > 100
                 break
             end
         end
-        f = Spl.bicube_eval!(rzphi, psifac, theta)
-        rsep[iside] = pe.ro + sqrt(f[1]) * cos(2π * (theta + f[2]))
+        theta = mod(theta, 1.0)  # Final wrap
+        r2_val = pe.r2_spline(psifac, theta)
+        eta_val = pe.eta_spline(psifac, theta)
+        rsep[iside] = pe.ro + sqrt(r2_val) * cos(2π * (theta + eta_val))
         eta0 = 0.5
         idx = findmin(abs.(vector .- eta0))[2]
-        theta = rzphi.ys[idx]
+        theta = pe.theta_grid[idx]
     end
 
     # Top and bottom separatrix locations using Newton iteration
@@ -155,19 +172,29 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     for iside in 1:2
         eta0 = (iside == 1) ? 0.0 : 0.5
         idx = findmin(abs.(vector .- eta0))[2]
-        theta = rzphi.ys[idx]
+        theta = pe.theta_grid[idx]
         rfac = 0.0
         cosfac = 0.0
         z = 0.0
+        it = 0
         while true
-            f, fx, fy, fxx, fxy, fyy = Spl.bicube_deriv2!(rzphi, psifac, theta)
-            r2, r2y, r2yy = f[1], fy[1], fyy[1]
-            eta, eta1, eta2 = f[2], fy[2], fyy[2]
+            it += 1
+            # Wrap theta to [0, 1] for periodic boundary
+            theta_wrapped = mod(theta, 1.0)
+
+            # Compute values and derivatives using ForwardDiff
+            r2 = pe.r2_spline(psifac, theta_wrapped)
+            r2y = ForwardDiff.derivative(t -> pe.r2_spline(psifac, t), theta_wrapped)
+            r2yy = ForwardDiff.derivative(t -> ForwardDiff.derivative(s -> pe.r2_spline(psifac, s), t), theta_wrapped)
+
+            eta = pe.eta_spline(psifac, theta_wrapped)
+            eta1 = ForwardDiff.derivative(t -> pe.eta_spline(psifac, t), theta_wrapped)
+            eta2 = ForwardDiff.derivative(t -> ForwardDiff.derivative(s -> pe.eta_spline(psifac, s), t), theta_wrapped)
 
             rfac = sqrt(r2)
             rfac1 = r2y / (2 * rfac)
             rfac2 = (r2yy - r2y * rfac1 / rfac) / (2 * rfac)
-            phase = 2π * (theta + eta)
+            phase = 2π * (theta_wrapped + eta)
             phase1 = 2π * (1 + eta1)
             phase2 = 2π * eta2
             cosfac = cos(phase)
@@ -175,15 +202,32 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             z = pe.zo + rfac * sinfac
             z1 = rfac * phase1 * cosfac + rfac1 * sinfac
             z2 = (2 * rfac1 * phase1 + rfac * phase2) * cosfac + (rfac2 - rfac * phase1^2) * sinfac
+            if abs(z2) < 1e-14
+                # Avoid division by zero
+                break
+            end
             dtheta = -z1 / z2
+            if isnan(dtheta) || isinf(dtheta)
+                # Safety check for NaN/Inf
+                break
+            end
             theta += dtheta
-            if abs(dtheta) < 1e-12 * abs(theta)
+            tol = max(1e-12 * abs(theta), 1e-14)
+            if abs(dtheta) < tol || it > 100
                 break
             end
         end
+        theta = mod(theta, 1.0)  # Final wrap
+        theta_wrapped = theta
+        r2 = pe.r2_spline(psifac, theta_wrapped)
+        eta = pe.eta_spline(psifac, theta_wrapped)
+        rfac = sqrt(r2)
+        phase = 2π * (theta_wrapped + eta)
+        cosfac = cos(phase)
+        sinfac = sin(phase)
         rext[iside] = pe.ro + rfac * cosfac
-        zsep[iside] = z
-        zext[iside] = z
+        zsep[iside] = pe.zo + rfac * sinfac
+        zext[iside] = zsep[iside]
     end
 
     pe.params.rsep = rsep
@@ -201,9 +245,8 @@ struct, such as rmean, amean, kappa, bt0, crnt, betat, betan, li1, etc. Performs
 the same function as equil_out_global in the Fortran code.
 """
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
-    rzphi = pe.rzphi
-    mpsi = size(rzphi.fs, 1) - 1
-    mtheta = size(rzphi.fs, 2) - 1
+    mpsi = length(pe.psi_grid) - 1
+    mtheta = length(pe.theta_grid) - 1
 
     # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
@@ -214,7 +257,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
-    dpsi = 1.0 - rzphi.xs[mpsi+1]
+    dpsi = 1.0 - pe.psi_grid[mpsi+1]
     # Use spline to evaluate F and its derivative at boundary
     F_boundary = pe.F_spline(pe.psi_grid[mpsi+1])
     F_deriv_boundary = ForwardDiff.derivative(pe.F_spline, pe.psi_grid[mpsi+1])
@@ -232,16 +275,25 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     gs1 = zeros(Float64, mtheta + 1)
     gs2 = zeros(Float64, mtheta + 1)
 
+    psi_edge = pe.psi_grid[mpsi+1]
     for itheta in 0:mtheta
-        f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[mpsi+1], rzphi.ys[itheta+1])
-        jac = f[4]
+        theta_val = pe.theta_grid[itheta+1]
+
+        # Evaluate splines and derivatives
+        r2_val = pe.r2_spline(psi_edge, theta_val)
+        eta_val = pe.eta_spline(psi_edge, theta_val)
+        jac = pe.jac_spline(psi_edge, theta_val)
+
+        r2_dtheta = ForwardDiff.derivative(t -> pe.r2_spline(psi_edge, t), theta_val)
+        eta_dtheta = ForwardDiff.derivative(t -> pe.eta_spline(psi_edge, t), theta_val)
+
         chi1 = 2π * psio / jac
         jacfac = π / jac
-        rfac = sqrt(f[1])
-        eta = 2π * (rzphi.ys[itheta+1] + f[2])
+        rfac = sqrt(r2_val)
+        eta = 2π * (theta_val + eta_val)
         r = pe.ro + rfac * cos(eta)
-        v21 = jacfac * fy[1] / (2π * rfac)
-        v22 = jacfac * (1 + fy[2]) * (2 * rfac)
+        v21 = jacfac * r2_dtheta / (2π * rfac)
+        v22 = jacfac * (1 + eta_dtheta) * (2 * rfac)
         v33 = jacfac * 2π * (r / π)
         dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
         gs1[itheta+1] = sqrt(dvsq) / (2π * r)
@@ -397,8 +449,8 @@ Performs the same function as equil_out_gse in the Fortran code.
 """
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
-    rzphi = equil.rzphi
-    mpsi, mtheta = rzphi.mx, rzphi.my
+    mpsi = length(equil.psi_grid) - 1
+    mtheta = length(equil.theta_grid) - 1
     ro, zo = equil.ro, equil.zo
     psio = equil.psio
     verbose = equil.params.verbose
@@ -415,10 +467,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
     for ipsi in 0:mpsi
+        psi_val = equil.psi_grid[ipsi+1]
         for itheta in 0:mtheta
-            rz_eval = Spl.bicube_eval!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            rfac[itheta+1] = sqrt(rz_eval[1])
-            angle[itheta+1] = 2π * (rzphi.ys[itheta+1] + rz_eval[2])
+            theta_val = equil.theta_grid[itheta+1]
+            r2_val = equil.r2_spline(psi_val, theta_val)
+            eta_val = equil.eta_spline(psi_val, theta_val)
+            rfac[itheta+1] = sqrt(r2_val)
+            angle[itheta+1] = 2π * (theta_val + eta_val)
         end
         r[ipsi+1, :] .= ro .+ rfac .* cos.(angle)
         z[ipsi+1, :] .= zo .+ rfac .* sin.(angle)
@@ -426,68 +481,97 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     flux_fs = zeros(Float64, mpsi + 1, mtheta + 1, 2)
     for ipsi in 0:mpsi
+        psi_val = equil.psi_grid[ipsi+1]
         for itheta in 0:mtheta
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            f1, f2, f4 = f[1], f[2], f[4]
+            theta_val = equil.theta_grid[itheta+1]
 
-            fy1 = rzphi._fsy[ipsi+1, itheta+1, 1]
-            fy2 = rzphi._fsy[ipsi+1, itheta+1, 2]
-            fx1 = rzphi._fsx[ipsi+1, itheta+1, 1]
-            fx2 = rzphi._fsx[ipsi+1, itheta+1, 2]
+            # Evaluate spline values
+            r2_val = equil.r2_spline(psi_val, theta_val)
+            eta_val = equil.eta_spline(psi_val, theta_val)
+            jac_val = equil.jac_spline(psi_val, theta_val)
 
-            flux_fs[ipsi+1, itheta+1, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
-            flux_fs[ipsi+1, itheta+1, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
+            # Compute derivatives using ForwardDiff
+            r2_dtheta = ForwardDiff.derivative(t -> equil.r2_spline(psi_val, t), theta_val)
+            eta_dtheta = ForwardDiff.derivative(t -> equil.eta_spline(psi_val, t), theta_val)
+            r2_dpsi = ForwardDiff.derivative(p -> equil.r2_spline(p, theta_val), psi_val)
+            eta_dpsi = ForwardDiff.derivative(p -> equil.eta_spline(p, theta_val), psi_val)
+
+            flux_fs[ipsi+1, itheta+1, 1] = r2_dtheta^2 / (4π^2 * r2_val) + (1 + eta_dtheta)^2 * 4 * r2_val
+            flux_fs[ipsi+1, itheta+1, 2] = r2_dpsi * r2_dtheta / (4π^2 * r2_val) + eta_dpsi * (1 + eta_dtheta) * 4 * r2_val
 
             for iqty in 1:2
-                flux_fs[ipsi+1, itheta+1, iqty] *= 2π * psio / f4
+                flux_fs[ipsi+1, itheta+1, iqty] *= 2π * psio / jac_val
             end
         end
     end
-    flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs; bctypex="extrap", bctypey="periodic")
+
+    # Create 2D spline for flux using Interpolations.jl
+    n_psi = length(equil.psi_grid)
+    n_theta = length(equil.theta_grid)
+    index_psi = range(1.0, Float64(n_psi), length=n_psi)
+    theta_range = range(equil.theta_grid[1], equil.theta_grid[end], length=n_theta)
+
+    flux_fs_1_itp = interpolate(flux_fs[:, :, 1], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    flux_fs_1_scaled = scale(flux_fs_1_itp, index_psi, theta_range)
+    psi_to_index_flux = interpolate((equil.psi_grid,), collect(index_psi), Gridded(Linear()))
+    flux_1_spline = NonUniformSplineWrapper2D(flux_fs_1_scaled, psi_to_index_flux)
+
+    flux_fs_2_itp = interpolate(flux_fs[:, :, 2], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    flux_fs_2_scaled = scale(flux_fs_2_itp, index_psi, theta_range)
+    flux_2_spline = NonUniformSplineWrapper2D(flux_fs_2_scaled, psi_to_index_flux)
 
     source = zeros(Float64, mpsi + 1, mtheta + 1)
     for ipsi in 0:mpsi
+        psi_val = equil.psi_grid[ipsi+1]
         for itheta in 0:mtheta
-            rz_eval = Spl.bicube_eval!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            f4 = rz_eval[4]
-            psi_val = equil.psi_grid[ipsi+1]
+            theta_val = equil.theta_grid[itheta+1]
+            jac_val = equil.jac_spline(psi_val, theta_val)
+
             # Evaluate F and P derivatives at this psi
             s1 = equil.F_values[ipsi+1]  # F*2π value
             s1p = ForwardDiff.derivative(equil.F_spline, psi_val)  # F derivative
             s2p = ForwardDiff.derivative(equil.P_spline, psi_val)  # P derivative
 
             denom = (2π * r[ipsi+1, itheta+1])^2
-            source[ipsi+1, itheta+1] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
+            source[ipsi+1, itheta+1] = jac_val / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
         end
     end
 
-    total = flux.fsx[:, :, 1] .- flux.fsy[:, :, 2] .+ source
-    error = abs.(total) ./ maximum([maximum(abs.(flux.fsx[:, :, 1])), maximum(abs.(flux.fsy[:, :, 2])), maximum(abs.(source))])
+    # Compute flux derivatives on the grid
+    flux_fsx = zeros(Float64, mpsi + 1, mtheta + 1)
+    flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1)
+    for ipsi in 0:mpsi
+        psi_val = equil.psi_grid[ipsi+1]
+        for itheta in 0:mtheta
+            theta_val = equil.theta_grid[itheta+1]
+            flux_fsx[ipsi+1, itheta+1] = ForwardDiff.derivative(p -> flux_1_spline(p, theta_val), psi_val)
+            flux_fsy[ipsi+1, itheta+1] = ForwardDiff.derivative(t -> flux_2_spline(psi_val, t), theta_val)
+        end
+    end
+
+    total = flux_fsx .- flux_fsy .+ source
+    error = abs.(total) ./ maximum([maximum(abs.(flux_fsx)), maximum(abs.(flux_fsy)), maximum(abs.(source))])
     errlog = ifelse.(error .> 0, log10.(error), 0.0)
 
     if diagnose_maxima
-        fxmax = maximum(abs.(flux.fsx[:, :, 1]))
-        fymax = maximum(abs.(flux.fsy[:, :, 2]))
+        fxmax = maximum(abs.(flux_fsx))
+        fymax = maximum(abs.(flux_fsy))
         smax = maximum(abs.(source))
         emax = maximum(abs.(error))
         lmax = maximum(errlog)
-        jmax = ind2sub(size(errlog), argmax(errlog))
+        jmax = Tuple(argmax(errlog))
         println(" fxmax = $fxmax, fymax = $fymax, smax = $smax")
-        println(" emax = $emax, lmax = $lmax, maxloc = ", jmax .- 1)
+        println(" emax = $emax, lmax = $lmax, maxloc = ", (jmax[1]-1, jmax[2]-1))
     end
 
     # Integrated error criterion
     term = zeros(Float64, mpsi + 1, 2)
     for ipsi in 0:mpsi
-        fs_matrix = zeros(Float64, mtheta + 1, 2)
-        fs_matrix[:, 1] = flux.fsx[ipsi+1, :, 1]
-        fs_matrix[:, 2] = source[ipsi+1, :]
-
-        spline = Spl.CubicSpline(Vector(flux.ys), fs_matrix; bctype="periodic")
-        Spl.spline_integrate!(spline)
-
-        term[ipsi+1, :] .= spline.fsi[end, :]
-        # spline will be automatically deallocated by finalizer
+        # Integrate from 0 to 1 (theta range) using simple average approximation
+        # For periodic boundary with uniform grid, integral ≈ mean * (theta_max - theta_min)
+        # Since theta_grid spans [0, 1], this simplifies to: mean
+        term[ipsi+1, 1] = sum(flux_fsx[ipsi+1, :]) / (mtheta + 1)
+        term[ipsi+1, 2] = sum(source[ipsi+1, :]) / (mtheta + 1)
     end
 
     totali = sum(term; dims=2)
@@ -505,8 +589,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["mtheta"] = mtheta
             file["r"] = Float32.(r)
             file["z"] = Float32.(z)
-            file["flux_fsx"] = Float32.(flux.fsx[:, :, 1])
-            file["flux_fsy"] = Float32.(flux.fsy[:, :, 2])
+            file["flux_fsx"] = Float32.(flux_fsx)
+            file["flux_fsy"] = Float32.(flux_fsy)
             file["source"] = Float32.(source)
             file["total"] = Float32.(total)
             file["error"] = Float32.(error)
@@ -518,10 +602,10 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             gse_data = Array{Float32,3}(undef, mpsi + 1, mtheta + 1, 7)
             for ipsi in 0:mpsi
                 for itheta in 0:mtheta
-                    gse_data[ipsi+1, itheta+1, 1] = Float32(flux.ys[itheta+1])
-                    gse_data[ipsi+1, itheta+1, 2] = Float32(flux.xs[ipsi+1])
-                    gse_data[ipsi+1, itheta+1, 3] = Float32(flux.fs[ipsi+1, itheta+1, 1])
-                    gse_data[ipsi+1, itheta+1, 4] = Float32(flux.fs[ipsi+1, itheta+1, 2])
+                    gse_data[ipsi+1, itheta+1, 1] = Float32(equil.theta_grid[itheta+1])
+                    gse_data[ipsi+1, itheta+1, 2] = Float32(equil.psi_grid[ipsi+1])
+                    gse_data[ipsi+1, itheta+1, 3] = Float32(flux_fs[ipsi+1, itheta+1, 1])
+                    gse_data[ipsi+1, itheta+1, 4] = Float32(flux_fs[ipsi+1, itheta+1, 2])
                     gse_data[ipsi+1, itheta+1, 5] = Float32(source[ipsi+1, itheta+1])
                     gse_data[ipsi+1, itheta+1, 6] = Float32(total[ipsi+1, itheta+1])
                     gse_data[ipsi+1, itheta+1, 7] = Float32(error[ipsi+1, itheta+1])
@@ -532,7 +616,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
         # Write integrated error criterion
         h5open(joinpath(dirname(equil.config.control.eq_filename), "gsei.h5"), "w") do file
-            file["xs"] = Float32.(flux.xs)
+            file["xs"] = Float32.(equil.psi_grid)
             file["term"] = Float32.(term)
             file["totali"] = Float32.(totali)
             file["errori"] = Float32.(errori)

@@ -61,42 +61,47 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    rzphi = equil.rzphi
-    mpsi = length(rzphi.xs)
-    mtheta = length(rzphi.ys)
+    mpsi = length(equil.psi_grid)
+    mtheta = length(equil.theta_grid)
 
     # Set coordinate grids based on the input equilibrium
-    # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
+    # The theta_grid is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= Vector(rzphi.xs)
-    metric.ys .= Vector(rzphi.ys .* 2π)
+    metric.xs .= Vector(equil.psi_grid)
+    metric.ys .= Vector(equil.theta_grid .* 2π)
 
     # Temporary array for contravariant basis vectors
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
     for ipsi in 1:mpsi
-        psi_norm = rzphi.xs[ipsi]
+        psi_norm = equil.psi_grid[ipsi]
         for jtheta in 1:mtheta
-            theta_norm = rzphi.ys[jtheta] # θ is from 0 to 1
+            theta_norm = equil.theta_grid[jtheta] # θ is from 0 to 1
 
-            # Evaluate the geometry spline to get (R,Z) and their derivatives
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
+            # Evaluate the geometry splines to get values and derivatives
+            r_coord_sq = equil.r2_spline(psi_norm, theta_norm)
+            eta_offset = equil.eta_spline(psi_norm, theta_norm)
+            nu_val = equil.nu_spline(psi_norm, theta_norm)
+            jac = equil.jac_spline(psi_norm, theta_norm)
 
-            # Extract geometric quantities from the spline data
-            # See EquilibriumAPI.txt for `rzphi` quantities
-            r_coord_sq = f[1]
-            eta_offset = f[2]
-            jac = f[4]
-            jac1 = fx[4] # ∂J/∂ψ
+            # Compute derivatives using ForwardDiff
+            r2_dpsi = ForwardDiff.derivative(p -> equil.r2_spline(p, theta_norm), psi_norm)
+            eta_dpsi = ForwardDiff.derivative(p -> equil.eta_spline(p, theta_norm), psi_norm)
+            nu_dpsi = ForwardDiff.derivative(p -> equil.nu_spline(p, theta_norm), psi_norm)
+            jac1 = ForwardDiff.derivative(p -> equil.jac_spline(p, theta_norm), psi_norm) # ∂J/∂ψ
+
+            r2_dtheta = ForwardDiff.derivative(t -> equil.r2_spline(psi_norm, t), theta_norm)
+            eta_dtheta = ForwardDiff.derivative(t -> equil.eta_spline(psi_norm, t), theta_norm)
+            nu_dtheta = ForwardDiff.derivative(t -> equil.nu_spline(psi_norm, t), theta_norm)
 
             rfac = sqrt(r_coord_sq)
             eta = 2π * (theta_norm + eta_offset)
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
             # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
-            fx1, fx2, fx3 = fx[1], fx[2], fx[3]
-            fy1, fy2, fy3 = fy[1], fy[2], fy[3]
+            fx1, fx2, fx3 = r2_dpsi, eta_dpsi, nu_dpsi
+            fy1, fy2, fy3 = r2_dtheta, eta_dtheta, nu_dtheta
 
             v[1, 1] = fx1 / (2.0 * rfac * jac)
             v[1, 2] = fx2 * 2π * rfac / jac

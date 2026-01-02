@@ -7,11 +7,8 @@ in the Fortran code.
 """
 function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
-    # Shorthand
-    rzphi = plasma_eq.rzphi
-
     # Allocate splines
-    ff_fs = zeros(length(rzphi.ys), 5)
+    ff_fs = zeros(length(plasma_eq.theta_grid), 5)
 
     # Compute surface quantities
     for ipsi in 1:length(plasma_eq.psi_grid)
@@ -25,21 +22,28 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian
-        for itheta in 1:length(rzphi.ys)
-            theta = rzphi.ys[itheta]
+        for itheta in 1:length(plasma_eq.theta_grid)
+            theta = plasma_eq.theta_grid[itheta]
 
-            # Evaluate bicubic spline at grid point
-            f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi], theta)
+            # Evaluate spline values
+            r2_val = plasma_eq.r2_spline(psi, theta)
+            eta_val = plasma_eq.eta_spline(psi, theta)
+            nu_val = plasma_eq.nu_spline(psi, theta)
+            jac = plasma_eq.jac_spline(psi, theta)
 
-            rfac = sqrt(f[1])
-            eta = 2π * (theta + f[2])
+            # Compute derivatives using ForwardDiff
+            r2_dtheta = ForwardDiff.derivative(t -> plasma_eq.r2_spline(psi, t), theta)
+            eta_dtheta = ForwardDiff.derivative(t -> plasma_eq.eta_spline(psi, t), theta)
+            nu_dtheta = ForwardDiff.derivative(t -> plasma_eq.nu_spline(psi, t), theta)
+
+            rfac = sqrt(r2_val)
+            eta = 2π * (theta + eta_val)
             r = plasma_eq.ro + rfac * cos(eta)
-            jac = f[4]  # Jacobian
 
             # Evaluate other local quantities
-            v21 = fy[1] / (2.0 * rfac * jac)
-            v22 = (1.0 + fy[2]) * 2π * rfac / jac
-            v23 = fy[3] * r / jac
+            v21 = r2_dtheta / (2.0 * rfac * jac)
+            v22 = (1.0 + eta_dtheta) * 2π * rfac / jac
+            v23 = nu_dtheta * r / jac
             v33 = 2π * r / jac
             bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
             dpsisq = (2π * r)^2 * (v21^2 + v22^2)
@@ -55,11 +59,10 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        ff = Spl.CubicSpline(Vector(rzphi.ys), ff_fs; bctype="periodic")
-
-        # Integrate quantities with respect to theta
-        Spl.spline_integrate!(ff)
-        avg = ff.fsi[end, :]
+        # Integrate quantities with respect to theta using trapezoidal rule
+        # For periodic data, we use: integral ≈ (theta_max - theta_min) * mean(data)
+        # Since theta_grid spans [0, 1], this simplifies to: mean(data)
+        avg = vec(sum(ff_fs, dims=1) / size(ff_fs, 1))
 
         # Evaluate Mercier criterion and related quantities
         term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]

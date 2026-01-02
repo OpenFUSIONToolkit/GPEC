@@ -487,13 +487,21 @@ mutable struct PlasmaEquilibrium
     dVdpsi_spline::Any  # Interpolations.jl cubic B-spline (ScaledInterpolation)
     q_spline::Any  # Interpolations.jl cubic B-spline (ScaledInterpolation)
     # Grid and node values for efficient array operations
-    psi_grid::Vector{Float64}  # Normalized psi grid points
+    psi_grid::Vector{Float64}  # Normalized psi grid points [0, 1]
+    theta_grid::Vector{Float64}  # Normalized theta grid points [0, 1]
     F_values::Vector{Float64}  # F*2π values at grid points
     P_values::Vector{Float64}  # P*μ₀ values at grid points
     dVdpsi_values::Vector{Float64}  # dV/dψ values at grid points
     q_values::Vector{Float64}  # q values at grid points
-    rzphi::Spl.BicubicSpline
-    eqfun::Spl.BicubicSpline
+    # 2D geometric splines (rzphi replacement - 4 quantities)
+    r2_spline::Any  # r² coordinate
+    eta_spline::Any  # angle offset
+    nu_spline::Any  # toroidal angle
+    jac_spline::Any  # jacobian
+    # 2D physics splines (eqfun replacement - 3 quantities)
+    modB_spline::Any  # |B| magnetic field magnitude
+    C1_spline::Any  # gyrokinetic coefficient C1
+    C2_spline::Any  # gyrokinetic coefficient C2
     ro::Float64
     zo::Float64
     psio::Float64

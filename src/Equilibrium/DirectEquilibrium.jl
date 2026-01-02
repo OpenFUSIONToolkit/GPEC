@@ -26,7 +26,7 @@ end
 """
     NonUniformSplineWrapper
 
-Wrapper for Interpolations.jl cubic B-splines on non-uniform grids.
+Wrapper for Interpolations.jl cubic B-splines on non-uniform 1D grids.
 Combines a cubic B-spline on a uniform index grid with a coordinate
 transformation from non-uniform physical coordinates to uniform indices.
 """
@@ -37,6 +37,21 @@ end
 
 # Make the wrapper callable
 (wrapper::NonUniformSplineWrapper)(psi) = wrapper.index_spline(wrapper.psi_to_index(psi))
+
+"""
+    NonUniformSplineWrapper2D
+
+Wrapper for Interpolations.jl 2D cubic B-splines with non-uniform grid in first dimension.
+- First dimension (ψ): non-uniform grid → uses coordinate transformation to uniform indices
+- Second dimension (θ): uniform grid with periodic boundary conditions
+"""
+struct NonUniformSplineWrapper2D{T1,T2}
+    index_spline::T1  # 2D cubic B-spline on uniform ψ indices × uniform θ coordinates
+    psi_to_index::T2  # Linear mapping from non-uniform ψ to uniform fractional index
+end
+
+# Make the 2D wrapper callable
+(wrapper::NonUniformSplineWrapper2D)(psi, theta) = wrapper.index_spline(wrapper.psi_to_index(psi), theta)
 
 """
     FieldLineDerivParams
@@ -550,7 +565,35 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     dVdpsi_spline = NonUniformSplineWrapper(dVdpsi_index_spline, psi_to_index)
     q_spline = NonUniformSplineWrapper(q_index_spline, psi_to_index)
 
-    # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
+    # Create 2D geometric splines for rzphi (4 quantities) using Interpolations.jl
+    # rzphi stores: [r²_coord, angle_offset, nu, jacobian]
+    #
+    # Strategy: Similar to 1D, use coordinate transformation for non-uniform ψ
+    # - ψ dimension: non-uniform → transform to uniform index space
+    # - θ dimension: uniform, periodic boundary conditions
+
+    # Create 2D interpolations: one for each of the 4 quantities
+    # Using mixed boundary conditions: Flat(OnGrid()) for ψ, Periodic(OnCell()) for θ
+    r2_itp = interpolate(rzphi_nodes[:, :, 1], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    eta_itp = interpolate(rzphi_nodes[:, :, 2], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    nu_itp = interpolate(rzphi_nodes[:, :, 3], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    jac_itp = interpolate(rzphi_nodes[:, :, 4], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+
+    # Scale θ dimension to physical coordinates [0, 1]
+    # For ψ dimension, we'll use index coordinates and apply coordinate transformation via wrapper
+    r2_scaled = scale(r2_itp, index_coords, theta_nodes)
+    eta_scaled = scale(eta_itp, index_coords, theta_nodes)
+    nu_scaled = scale(nu_itp, index_coords, theta_nodes)
+    jac_scaled = scale(jac_itp, index_coords, theta_nodes)
+
+    # Wrap with NonUniformSplineWrapper2D to handle non-uniform ψ grid
+    r2_spline = NonUniformSplineWrapper2D(r2_scaled, psi_to_index)
+    eta_spline = NonUniformSplineWrapper2D(eta_scaled, psi_to_index)
+    nu_spline = NonUniformSplineWrapper2D(nu_scaled, psi_to_index)
+    jac_spline = NonUniformSplineWrapper2D(jac_scaled, psi_to_index)
+
+    # For now, keep rzphi as Fortran for compatibility with existing code
+    # We'll create helper functions that use the new splines
     rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes; bctypex="extrap", bctypey="periodic")
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
@@ -563,21 +606,37 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         f_val = F_spline(psi_norm)
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
-            rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
-            eta = 2π * (theta_norm + f[2])
-            r = ro + rfac * cos(eta)
-            jacfac = f[4]
 
-            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) * d(rfac)/d(psi_norm)
-            v[1, 2] = fx[2] * 2π * rfac                             # 2π*rfac * d(eta)/d(psi_norm)
-            v[1, 3] = fx[3] * r                                     # r * d(phi_s)/d(psi_norm)
-            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) d(rfac)/d(theta_new)
-            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                     # 2π*rfac * d(eta)/d(theta_new)
-            v[2, 3] = fy[3] * r                                     # r * d(phi_s)/d(theta_new)
+            # Evaluate rzphi quantities and derivatives using Interpolations.jl splines
+            r2_val = r2_spline(psi_norm, theta_norm)
+            eta_offset = eta_spline(psi_norm, theta_norm)
+            nu_val = nu_spline(psi_norm, theta_norm)
+            jac_val = jac_spline(psi_norm, theta_norm)
+
+            # Compute first derivatives using ForwardDiff
+            r2_dpsi = ForwardDiff.derivative(p -> r2_spline(p, theta_norm), psi_norm)
+            eta_dpsi = ForwardDiff.derivative(p -> eta_spline(p, theta_norm), psi_norm)
+            nu_dpsi = ForwardDiff.derivative(p -> nu_spline(p, theta_norm), psi_norm)
+
+            r2_dtheta = ForwardDiff.derivative(t -> r2_spline(psi_norm, t), theta_norm)
+            eta_dtheta = ForwardDiff.derivative(t -> eta_spline(psi_norm, t), theta_norm)
+            nu_dtheta = ForwardDiff.derivative(t -> nu_spline(psi_norm, t), theta_norm)
+
+            # Reconstruct quantities as in original code
+            rfac = sqrt(max(0.0, r2_val))
+            eta = 2π * (theta_norm + eta_offset)
+            r = ro + rfac * cos(eta)
+            jacfac = jac_val
+
+            v[1, 1] = (rfac > 0) ? r2_dpsi / (2.0 * rfac) : 0.0       # 1/(2rfac) * d(rfac)/d(psi_norm)
+            v[1, 2] = eta_dpsi * 2π * rfac                            # 2π*rfac * d(eta)/d(psi_norm)
+            v[1, 3] = nu_dpsi * r                                     # r * d(phi_s)/d(psi_norm)
+            v[2, 1] = (rfac > 0) ? r2_dtheta / (2.0 * rfac) : 0.0     # 1/(2rfac) d(rfac)/d(theta_new)
+            v[2, 2] = (1.0 + eta_dtheta) * 2π * rfac                  # 2π*rfac * d(eta)/d(theta_new)
+            v[2, 3] = nu_dtheta * r                                   # r * d(phi_s)/d(theta_new)
             v33 = 2π * r
-            w11 = (jacfac != 0) ? (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac : 0.0
-            w12 = (jacfac * rfac != 0) ? -fy[1] * π * r / (rfac * jacfac) : 0.0
+            w11 = (jacfac != 0) ? (1.0 + eta_dtheta) * (2π)^2 * rfac * r / jacfac : 0.0
+            w12 = (jacfac * rfac != 0) ? -r2_dtheta * π * r / (rfac * jacfac) : 0.0
             delpsi_norm = sqrt(w11^2 + w12^2)
             modB = sqrt(((2π * psio * delpsi_norm)^2 + f_val^2) / (2π * r)^2)
 
@@ -597,9 +656,24 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; bctypex="extrap", bctypey="periodic")
+    # Create 2D splines for eqfun (3 quantities) using Interpolations.jl
+    # eqfun stores: [modB, C1_gyro, C2_gyro]
+    modB_itp = interpolate(eqfun_fs_nodes[:, :, 1], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    C1_itp = interpolate(eqfun_fs_nodes[:, :, 2], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+    C2_itp = interpolate(eqfun_fs_nodes[:, :, 3], (BSpline(Cubic(Flat(OnGrid()))), BSpline(Cubic(Periodic(OnCell())))))
+
+    modB_scaled = scale(modB_itp, index_coords, theta_nodes)
+    C1_scaled = scale(C1_itp, index_coords, theta_nodes)
+    C2_scaled = scale(C2_itp, index_coords, theta_nodes)
+
+    modB_spline = NonUniformSplineWrapper2D(modB_scaled, psi_to_index)
+    C1_spline = NonUniformSplineWrapper2D(C1_scaled, psi_to_index)
+    C2_spline = NonUniformSplineWrapper2D(C2_scaled, psi_to_index)
+
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(),
         F_spline, P_spline, dVdpsi_spline, q_spline,
-        psi_nodes, sq_nodes[:, 1], sq_nodes[:, 2], sq_nodes[:, 3], sq_nodes[:, 4],
-        rzphi, eqfun, ro, zo, psio)
+        psi_nodes, collect(theta_nodes), sq_nodes[:, 1], sq_nodes[:, 2], sq_nodes[:, 3], sq_nodes[:, 4],
+        r2_spline, eta_spline, nu_spline, jac_spline,
+        modB_spline, C1_spline, C2_spline,
+        ro, zo, psio)
 end
