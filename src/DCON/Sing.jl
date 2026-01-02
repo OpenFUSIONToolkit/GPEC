@@ -30,7 +30,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
                     singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
-                    abs(singfac) < 1e-8 && (converged = true; break)
+                    abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
 
@@ -57,7 +57,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
         end
     end
     # Sort singular surfaces by increasing ψ
-    intr.sing = sort(intr.sing, by = s -> s.psifac)
+    intr.sing = sort(intr.sing; by=s -> s.psifac)
 end
 
 """
@@ -133,7 +133,7 @@ end
     compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Calculate asymptotic vmat and mmat matrices for a singular surface.
-Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data instead of 
+Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data instead of
 mutating the `SingType` struct. This makes it clear that asymptotics are computed on-demand
 for ideal DCON and are not inherent properties of the singular surface.
 
@@ -167,7 +167,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
 
     # Compute Mercier criterion and singular power
     compute_sing_mmat!(mmat, singp, ctrl, equil, ffit, intr)
-    
+
     # TODO: My approach for the following logic is to mimic the existing code but go block by block
     # in m0mat (i.e. looping through each resonance). I think it works for 2D, probably not 3D
     # Note: We only need the transpose here because the third dimension corresponds to the bottom half of the 2N X 2N matrix
@@ -178,7 +178,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
         Matrix(vcat([transpose(mmat[r1[i], r2, :, 1]) for i in eachindex(r1)]...))
     end
 
-    alpha = eigen(m0mat).values[length(r1)+1:end] # take the M largest eigenvalues
+    alpha = eigen(m0mat).values[(length(r1)+1):end] # take the M largest eigenvalues
 
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
     power[ipert_res] .= -alpha
@@ -190,7 +190,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
         vmat[ipert, ipert, 1, 1] = 1
         vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
     end
-    
+
     # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
     # TODO: this will probably need a better generalization in 3D
     for i in eachindex(r1) # go block by block in M₀
@@ -203,15 +203,15 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
         vmat[r1_i, r1_i, 2, 1] = -(m0mat_block[1, 1] + alpha_i) / m0mat_block[1, 2]
         vmat[r1_i, r2_i, 2, 1] = -(m0mat_block[1, 1] - alpha_i) / m0mat_block[1, 2]
         det = conj(vmat[r1_i, r1_i, 1, 1]) * vmat[r1_i, r2_i, 2, 1] -
-            conj(vmat[r1_i, r2_i, 1, 1]) * vmat[r1_i, r1_i, 2, 1]
+              conj(vmat[r1_i, r2_i, 1, 1]) * vmat[r1_i, r1_i, 2, 1]
         vmat[r1_i, :, :, 1] ./= sqrt(det)
     end
 
     # Higher order solutions - need to solve iteratively
-    for k in 1:2*ctrl.sing_order
+    for k in 1:(2*ctrl.sing_order)
         solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k)
     end
-    
+
     return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
 end
 
@@ -271,7 +271,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
     for i in 2:4
-        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i], inner=intr.mpert)
+        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i]; inner=intr.mpert)
     end
     # For resonant modes mᵢ - nᵢq(ψ) = [-nᵢq', -nᵢq'', -nᵢq'''] - shift up terms by 1 index
     # Add scaling to account for hardcoding coefficients in computations below
@@ -289,13 +289,13 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
                 if ctrl.sing_order ≥ 1
                     f_lower[ipert, jpert, 2] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 2] +
-                                            singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
+                                               singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
                 end
                 if ctrl.sing_order ≥ 2
                     f_lower[ipert, jpert, 3] =
@@ -318,7 +318,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
                 end
                 if ctrl.sing_order ≥ 5
                     f_lower[ipert, jpert, 6] = 10 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 4] +
-                                            10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
+                                               10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
                 end
                 if ctrl.sing_order ≥ 6
                     f_lower[ipert, jpert, 7] = 20 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 4]
@@ -340,8 +340,8 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
         for j in 0:n
             for ipert_n in 1:intr.npert
                 for jpert_m in 1:intr.mpert
-                    for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
-                        for kpert_m in max(1, ipert_m - intr.mband):jpert_m
+                    for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+                        for kpert_m in max(1, ipert_m-intr.mband):jpert_m
                             ipert = ipert_m + (ipert_n - 1) * intr.mpert
                             jpert = jpert_m + (ipert_n - 1) * intr.mpert
                             kpert = kpert_m + (ipert_n - 1) * intr.mpert
@@ -360,13 +360,13 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in max(1, jpert_m - intr.mband):min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in max(1, jpert_m-intr.mband):min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
                 if ctrl.sing_order ≥ 1
                     k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
-                                        singfac[ipert, 2] * k_interp[ipert, jpert, 1]
+                                         singfac[ipert, 2] * k_interp[ipert, jpert, 1]
                 end
                 if ctrl.sing_order ≥ 2
                     k[ipert, jpert, 3] =
@@ -389,7 +389,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
                 end
                 if ctrl.sing_order ≥ 5
                     k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
-                                        singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
+                                         singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
                 end
                 if ctrl.sing_order ≥ 6
                     k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
@@ -402,7 +402,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     # G = [G, G', G''/2, G'''/6]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
@@ -428,14 +428,14 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
 
     # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
     # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
-    for isol in 1:2*intr.numpert_total
+    for isol in 1:(2*intr.numpert_total)
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
     # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
     for i in 1:ctrl.sing_order
-        for isol in 1:2*intr.numpert_total
+        for isol in 1:(2*intr.numpert_total)
             for j in 1:i
                 @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
             end
@@ -446,7 +446,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
 
     # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
     for i in 0:ctrl.sing_order
-        for isol in 1:2*intr.numpert_total
+        for isol in 1:(2*intr.numpert_total)
             for j in 0:i
                 x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
             end
@@ -455,14 +455,14 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     end
 
     # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
-    # eq. 28 in Glasser 2023 PoP paper    
+    # eq. 28 in Glasser 2023 PoP paper
     # Compute resonant and nonresonant indices
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     r1 = ipert_res
     r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
     n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
     n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
-    
+
     j = 0
     # Start with the S⁻¹LS components
     # Glasser PoP 2023 eq. 39: at each other of L, we get contributions to z^k from RLR,
@@ -478,8 +478,8 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     # Apply the effect of the shearing transformation to the resonant indices R
     # Glasser PoP 2023 eq. 25 + 28: M = zS⁻¹LS - zS⁻¹S' = zS⁻¹LS + 0.5 [R, 0; 0, -R], 0ᵗʰ order only
     for i in eachindex(r1)
-        mmat[r1[i], r2[2 * i - 1], 1, 1] += 0.5
-        mmat[r1[i], r2[2 * i], 2, 1] -= 0.5
+        mmat[r1[i], r2[2*i-1], 1, 1] += 0.5
+        mmat[r1[i], r2[2*i], 2, 1] -= 0.5
     end
 end
 
@@ -500,13 +500,25 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
   - `power::Vector{ComplexF64}`: α values for all modes (0 for nonresonant)
   - `k::Int`: The current order in the power series expansion
 """
-function solve_higher_order_vmat!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::DconInternal, k::Int)
-    
+function solve_higher_order_vmat!(
+    vmat::Array{ComplexF64,4},
+    mmat::Array{ComplexF64,4},
+    m0mat::Matrix{ComplexF64},
+    alpha::Vector{ComplexF64},
+    r1::Vector{Int},
+    r2::Vector{Int},
+    n1::Vector{Int},
+    n2::Vector{Int},
+    power::Vector{ComplexF64},
+    intr::DconInternal,
+    k::Int
+)
+
     # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
         vmat[:, :, :, k+1] .+= sing_matmul(mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
     end
-    for isol in 1:2*intr.numpert_total
+    for isol in 1:(2*intr.numpert_total)
         for i in eachindex(r1) # go block by block?
             # a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ (for multi-n 2D, we make a the ith block fo M₀)
             m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
@@ -556,7 +568,7 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
             @views c[:, i, j] .+= tmp
-            @views mul!(tmp, a[:, m+1:2*m, j], b[:, i, 2])
+            @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
             @views c[:, i, j] .+= tmp
         end
     end
@@ -569,7 +581,7 @@ end
 
 Compute the asymptotic series solution for a given singular surface.
 Fills and returns `ua` with the asymptotic solution vmat from the provided asymptotics.
-We obtain the solution using equations 45 and 41 in the 2016 DCON paper. 
+We obtain the solution using equations 45 and 41 in the 2016 DCON paper.
 Performs the same function as `sing_get_ua` in the Fortran code.
 
 ### Arguments
@@ -592,9 +604,9 @@ function sing_get_ua(sing_asymp::SingAsymptotics, z::Float64)
     # Loop through resonances - this might change in 3D
     for i in eachindex(r1)
         # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
-        pfac = abs(z).^sing_asymp.alpha[i] # zᵅ
-        ua[:, r2[2 * i - 1], :] ./= pfac # /zᵅ = z⁻ᵅ
-        ua[:, r2[2 * i], :] .*= pfac
+        pfac = abs(z) .^ sing_asymp.alpha[i] # zᵅ
+        ua[:, r2[2*i-1], :] ./= pfac # /zᵅ = z⁻ᵅ
+        ua[:, r2[2*i], :] .*= pfac
 
         # Apply shearing transformation u = Rv (eq. 41 in Glasser 2016)
         ua[r1[i], :, 1] ./= sqrt_z # z^-0.5
@@ -602,8 +614,8 @@ function sing_get_ua(sing_asymp::SingAsymptotics, z::Float64)
 
         # Renormalize
         if z < 0
-            ua[:, r2[2 * i - 1], :] .*= abs(ua[r1[i], r2[2 * i - 1], 1]) / ua[r1[i], r2[2 * i - 1], 1]
-            ua[:, r2[2 * i], :] .*= abs(ua[r1[i], r2[2 * i], 1]) / ua[r1[i], r2[2 * i], 1]
+            ua[:, r2[2*i-1], :] .*= abs(ua[r1[i], r2[2*i-1], 1]) / ua[r1[i], r2[2*i-1], 1]
+            ua[:, r2[2*i], :] .*= abs(ua[r1[i], r2[2*i], 1]) / ua[r1[i], r2[2*i], 1]
         end
     end
 
@@ -627,12 +639,12 @@ function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::Dcon
     # Build temp1
     temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
     temp1[1:intr.numpert_total, :] .= ua[:, :, 1]
-    temp1[intr.numpert_total+1:2*intr.numpert_total, :] .= ua[:, :, 2]
+    temp1[(intr.numpert_total+1):(2*intr.numpert_total), :] .= ua[:, :, 2]
 
     # Built temp2
     temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
     temp2[1:intr.numpert_total, :] .= u[:, :, 1]
-    temp2[intr.numpert_total+1:2*intr.numpert_total, :] .= u[:, :, 2]
+    temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
 
     # LU factorization and solve
     temp2 .= lu(temp1) \ temp2
@@ -640,7 +652,7 @@ function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::Dcon
     # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
-    ca[:, :, 2] .= temp2[intr.numpert_total+1:2*intr.numpert_total, :]
+    ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
 
     return ca
 end
@@ -711,7 +723,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
         Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
         Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
-        
+
         # Form full matrices from flat representations
         # TODO: make these block diagonal for multi-n?
         amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
