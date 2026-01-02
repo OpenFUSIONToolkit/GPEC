@@ -2,6 +2,8 @@
     SingType
 
 A mutable struct containing data for singular surfaces in the plasma stability analysis.
+This struct contains the basic parameters of the singular surface. Asymptotic data for
+ideal DCON calculations is computed on-demand and stored in `SingAsymptotics`.
 
 ## Fields
 
@@ -11,7 +13,26 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `di::Float64` - Mercier criterion
+  - `di::Float64` - Mercier criterion (computed from equilibrium, not asymptotics)
+"""
+@kwdef mutable struct SingType
+    psifac::Float64 = 0.0
+    rho::Float64 = 0.0
+    m::Vector{Int} = Int[]
+    n::Vector{Int} = Int[]
+    q::Float64 = 0.0
+    q1::Float64 = 0.0
+    di::Float64 = 0.0
+end
+
+"""
+    SingAsymptotics
+
+A struct containing asymptotic expansion data for ideal DCON calculations at a singular surface.
+This data is computed on-demand during singular surface crossings in `cross_ideal_singular_surf!`.
+
+## Fields
+
   - `alpha::Vector{ComplexF64}` - Resonant matrix eigenvalues
   - `r1::Vector{Int}` - Resonant indices along first index
   - `r2::Vector{Int}` - Resonant indices along second index
@@ -22,23 +43,16 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
-@kwdef mutable struct SingType
-    psifac::Float64 = 0.0
-    rho::Float64 = 0.0
-    m::Vector{Int} = Int[]
-    n::Vector{Int} = Int[]
-    q::Float64 = 0.0
-    q1::Float64 = 0.0
-    di::Float64 = 0.0
-    alpha::Vector{ComplexF64} = ComplexF64[]
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
-    n1::Vector{Int} = Int[]
-    n2::Vector{Int} = Int[]
-    power::Vector{ComplexF64} = ComplexF64[]
-    vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
+@kwdef struct SingAsymptotics
+    alpha::Vector{ComplexF64}
+    r1::Vector{Int}
+    r2::Vector{Int}
+    n1::Vector{Int}
+    n2::Vector{Int}
+    power::Vector{ComplexF64}
+    vmat::Array{ComplexF64,4}
+    mmat::Array{ComplexF64,4}
+    m0mat::Matrix{ComplexF64}
 end
 
 """

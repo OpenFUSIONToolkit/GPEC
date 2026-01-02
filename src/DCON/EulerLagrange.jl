@@ -252,7 +252,9 @@ Handle the crossing of a rational surface during integration if `kin_flag` is fa
 Formerly `ode_ideal_cross!`. Performs the same function as `ode_ideal_cross` in the Fortran code.
 Differences mainly in integration data storage logic, but otherwise identical. It normalizes and 
 reinitializes the solution vector at the singularity, and updates relevant state variables. 
-The integration chunks are now pre-computed by `chunk_el_integration_bounds`.
+
+Asymptotics are now computed on-demand here instead of being pre-computed, making it clear
+that asymptotic calculations are specific to ideal DCON and not inherent to the singular surface.
 
 ### Arguments
 
@@ -264,15 +266,18 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
     # Fixup solution at singular surface
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
 
+    # Compute asymptotic power series on-demand for this singular surface
+    singp = intr.sing[ising]
+    sing_asymp = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr)
+
     # Get asymptotic coefficients before crossing rational surface
-    odet.ca_l[:, :, :, ising] .= sing_get_ca(ctrl, intr, odet, ising)
+    odet.ca_l[:, :, :, ising] .= sing_get_ca(ctrl, intr, odet, sing_asymp, singp)
 
     # Re-initialize on opposite side of rational surface
     psi_old = odet.psifac
-    singp = intr.sing[ising]
     dpsi = singp.psifac - odet.psifac
     odet.psifac += 2 * dpsi # jump to other side of singular surface
-    ua = sing_get_ua(ctrl, intr, odet, ising)
+    ua = sing_get_ua(ctrl, intr, odet, sing_asymp, singp)
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     
     # Single n: remove largest solution and sub in asymptotics on the other side
@@ -283,7 +288,7 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
     if !ctrl.con_flag
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
-        for i in eachindex(singp.r1)
+        for i in eachindex(sing_asymp.r1)
             push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
             odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
         end
@@ -299,7 +304,7 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
 
     # Apply asymptotic solution on other side of singular surface
     if !ctrl.con_flag
-        for i in eachindex(singp.r1)
+        for i in eachindex(sing_asymp.r1)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
@@ -307,7 +312,7 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
         end
     end
     # Get asymptotic coefficients after crossing rational surface
-    odet.ca_r[:, :, :, ising] .= sing_get_ca(ctrl, intr, odet, ising)
+    odet.ca_r[:, :, :, ising] .= sing_get_ca(ctrl, intr, odet, sing_asymp, singp)
 
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac

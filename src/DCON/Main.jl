@@ -129,7 +129,12 @@ function Main(path::String="./")
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
         end
-        sing_scan!(intr, ctrl, equil, ffit)
+        
+        # NOTE: Asymptotic calculations for ideal DCON are now computed on-demand during 
+        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that 
+        # asymptotics are only needed for ideal DCON and are not inherent properties of 
+        # the singular surface.
+        
         if ctrl.kin_flag
             # ksing_find()
         end
