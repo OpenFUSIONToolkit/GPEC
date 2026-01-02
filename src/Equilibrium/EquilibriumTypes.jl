@@ -155,7 +155,7 @@ function EquilibriumConfig(path::String)
     missingkeys = filter(k -> !haskey(control_data, k), required_keys)
 
     if !isempty(missingkeys)
-        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missing, ", "))")
+        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missingkeys, ", "))")
     end
 
     # Construct validated structs
