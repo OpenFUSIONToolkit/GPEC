@@ -181,6 +181,8 @@ function Main(path::String="./")
     println("Normal termination.")
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+
+    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
 end
 
 """

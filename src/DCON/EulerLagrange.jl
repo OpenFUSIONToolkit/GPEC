@@ -348,7 +348,7 @@ function integrate_el_region!(odet::OdeState, ctrl::DconControl, equil::Equilibr
     # Advance differential equation from psi_start to psi_end
     rtol = compute_tols(ctrl, intr, odet, chunk.ising) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, Tsit5(); reltol=rtol, callback=cb)
+    sol = solve(prob, BS5(); reltol=rtol, callback=cb)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
     # Update u and psifac with the solution at the end of the interval
