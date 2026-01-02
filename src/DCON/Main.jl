@@ -140,7 +140,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Integrating Euler-Lagrange equation")
         end
-        odet = ode_run(ctrl, equil, ffit, intr)
+        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             println("Fixed-boundary mode unstable for n = $nstring.")
         end

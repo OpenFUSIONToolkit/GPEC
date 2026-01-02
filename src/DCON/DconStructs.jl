@@ -323,7 +323,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
   - `ising::Int` - Index of the next singular surface to be crossed during integration.
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-  - `next::String` - Next integration action to take (e.g. `"cross"` to cross a rational surface or `"finish"`).
+  - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
@@ -376,7 +376,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
     ising::Int = 0
     psimax::Float64 = 0.0
-    next::String = ""
+    needs_crossing::Bool = false
     nzero::Int = 0
 
     # Used for Gaussian reduction
