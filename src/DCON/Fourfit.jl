@@ -218,10 +218,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         kmats_flatview = @view kmats_flat[ipsi, :, :]
         # --- Profiles ---
         psi = equil.psi_grid[ipsi]
-        p1 = (BSplineKit.Derivative(1) * equil.P_spline)(psi)
+        p1 = ForwardDiff.derivative(equil.P_spline, psi)
         q = equil.q_values[ipsi]
-        q1 = (BSplineKit.Derivative(1) * equil.q_spline)(psi)
-        jtheta = -(BSplineKit.Derivative(1) * equil.F_spline)(psi)
+        q1 = ForwardDiff.derivative(equil.q_spline, psi)
+        jtheta = -ForwardDiff.derivative(equil.F_spline, psi)
         chi1 = 2π * equil.psio
 
         # Fill lower half (0, -1, …, -mband)

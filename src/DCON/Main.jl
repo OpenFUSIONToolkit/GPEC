@@ -242,10 +242,10 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/sq/fs/dVdpsi"] = equil.dVdpsi_values
         out_h5["splines/sq/fs/q"] = equil.q_values
         # Write spline first derivatives at grid points
-        out_h5["splines/sq/fs1/2piF"] = [(BSplineKit.Derivative(1) * equil.F_spline)(psi) for psi in equil.psi_grid]
-        out_h5["splines/sq/fs1/mu0p"] = [(BSplineKit.Derivative(1) * equil.P_spline)(psi) for psi in equil.psi_grid]
-        out_h5["splines/sq/fs1/dVdpsi"] = [(BSplineKit.Derivative(1) * equil.dVdpsi_spline)(psi) for psi in equil.psi_grid]
-        out_h5["splines/sq/fs1/q"] = [(BSplineKit.Derivative(1) * equil.q_spline)(psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/2piF"] = [ForwardDiff.derivative(equil.F_spline, psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/mu0p"] = [ForwardDiff.derivative(equil.P_spline, psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/dVdpsi"] = [ForwardDiff.derivative(equil.dVdpsi_spline, psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/q"] = [ForwardDiff.derivative(equil.q_spline, psi) for psi in equil.psi_grid]
         out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
         out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
         out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)

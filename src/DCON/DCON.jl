@@ -8,7 +8,8 @@ using FFTW
 using OrdinaryDiffEq
 using HDF5
 using JLD2
-using BSplineKit
+using Interpolations
+using ForwardDiff
 
 import ..Equilibrium
 import ..Spl

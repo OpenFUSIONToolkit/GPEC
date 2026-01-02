@@ -4,7 +4,7 @@ module Equilibrium
 import ..Spl
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
-using TOML, BSplineKit
+using TOML, Interpolations, ForwardDiff
 import StaticArrays: @MMatrix
 
 # --- Internal Module Structure ---
@@ -217,7 +217,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     dpsi = 1.0 - rzphi.xs[mpsi+1]
     # Use spline to evaluate F and its derivative at boundary
     F_boundary = pe.F_spline(pe.psi_grid[mpsi+1])
-    F_deriv_boundary = (BSplineKit.Derivative(1) * pe.F_spline)(pe.psi_grid[mpsi+1])
+    F_deriv_boundary = ForwardDiff.derivative(pe.F_spline, pe.psi_grid[mpsi+1])
     bt0 = (F_boundary + F_deriv_boundary * dpsi) / (2π * rmean)
 
     pe.params.rmean = rmean
@@ -271,7 +271,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
 
     # Evaluate P and its derivative at axis for linear extrapolation
     P_axis = pe.P_spline(pe.psi_grid[1])
-    P_deriv_axis = (BSplineKit.Derivative(1) * pe.P_spline)(pe.psi_grid[1])
+    P_deriv_axis = ForwardDiff.derivative(pe.P_spline, pe.psi_grid[1])
     p0 = P_axis - P_deriv_axis * pe.psi_grid[1]
     betat = 2 * (fsi1 / fsi2) / bt0^2
     betaj = 2 * sqrt(fsi3 / fsi2) / bwall^2
@@ -335,11 +335,11 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
         x1 = psi_grid[ipsi+1]
         xmax = x1 - x0
 
-        # Evaluate q and its derivatives using BSplineKit
+        # Evaluate q and its derivatives using ForwardDiff
         a = equil.q_spline(x0)  # q value
-        b = (BSplineKit.Derivative(1) * equil.q_spline)(x0)  # first derivative
-        c = (BSplineKit.Derivative(2) * equil.q_spline)(x0)  # second derivative
-        d = (BSplineKit.Derivative(3) * equil.q_spline)(x0)  # third derivative
+        b = ForwardDiff.derivative(equil.q_spline, x0)  # first derivative
+        c = ForwardDiff.derivative(x -> ForwardDiff.derivative(equil.q_spline, x), x0)  # second derivative
+        d = ForwardDiff.derivative(x -> ForwardDiff.derivative(y -> ForwardDiff.derivative(equil.q_spline, y), x), x0)  # third derivative
 
         if d != 0.0
             xcrit = -c / d
@@ -369,13 +369,13 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
 
     # Compute derived q-values using splines and node values
     q0_val = equil.q_spline(psi_grid[1])
-    q0_deriv = (BSplineKit.Derivative(1) * equil.q_spline)(psi_grid[1])
+    q0_deriv = ForwardDiff.derivative(equil.q_spline, psi_grid[1])
     q0 = q0_val - q0_deriv * psi_grid[1]
     qmax_edge = q_values[end]
     qmin = min(minimum(qexl), q0)
     qmax = max(maximum(qexl), qmax_edge)
     qa_val = equil.q_spline(psi_grid[end])
-    qa_deriv = (BSplineKit.Derivative(1) * equil.q_spline)(psi_grid[end])
+    qa_deriv = ForwardDiff.derivative(equil.q_spline, psi_grid[end])
     qa = qa_val + qa_deriv * (1.0 - psi_grid[end])
 
     q95 = equil.q_spline(0.95)
@@ -453,8 +453,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             psi_val = equil.psi_grid[ipsi+1]
             # Evaluate F and P derivatives at this psi
             s1 = equil.F_values[ipsi+1]  # F*2π value
-            s1p = (BSplineKit.Derivative(1) * equil.F_spline)(psi_val)  # F derivative
-            s2p = (BSplineKit.Derivative(1) * equil.P_spline)(psi_val)  # P derivative
+            s1p = ForwardDiff.derivative(equil.F_spline, psi_val)  # F derivative
+            s2p = ForwardDiff.derivative(equil.P_spline, psi_val)  # P derivative
 
             denom = (2π * r[ipsi+1, itheta+1])^2
             source[ipsi+1, itheta+1] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)

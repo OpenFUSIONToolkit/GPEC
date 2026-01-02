@@ -24,6 +24,21 @@ It is used as a temporary workspace to avoid allocations in tight loops.
 end
 
 """
+    NonUniformSplineWrapper
+
+Wrapper for Interpolations.jl cubic B-splines on non-uniform grids.
+Combines a cubic B-spline on a uniform index grid with a coordinate
+transformation from non-uniform physical coordinates to uniform indices.
+"""
+struct NonUniformSplineWrapper{T1,T2}
+    index_spline::T1  # Cubic B-spline on uniform index grid
+    psi_to_index::T2  # Linear mapping from psi to index
+end
+
+# Make the wrapper callable
+(wrapper::NonUniformSplineWrapper)(psi) = wrapper.index_spline(wrapper.psi_to_index(psi))
+
+"""
     FieldLineDerivParams
 
 A struct to hold constant parameters for the ODE integration, making them
@@ -498,13 +513,42 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         end
     end
 
-    # Create individual BSplineKit.jl splines for each quantity
-    # BSplineKit supports non-uniform grids (psi_nodes is non-uniform for "ldp" grid type)
-    # Use cubic B-splines with natural boundary conditions (extrapolate flat outside domain)
-    F_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 1], BSplineKit.BSplineOrder(4))
-    P_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 2], BSplineKit.BSplineOrder(4))
-    dVdpsi_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 3], BSplineKit.BSplineOrder(4))
-    q_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 4], BSplineKit.BSplineOrder(4))
+    # Create individual Interpolations.jl splines for each quantity
+    #
+    # WORKAROUND for non-uniform grids with Cubic B-splines:
+    # Interpolations.jl's BSpline(Cubic()) only works with uniform grids via scale().
+    # For non-uniform grids like our psi_nodes, we create:
+    # 1. A uniform index grid [1.0, 2.0, ..., n]
+    # 2. Cubic B-spline interpolation on uniform indices
+    # 3. Linear coordinate transformation: psi → fractional index
+    #
+    # This allows cubic accuracy in index space while handling irregular psi spacing.
+
+    # Create uniform index coordinates
+    n_nodes = length(psi_nodes)
+    index_coords = range(1.0, Float64(n_nodes), length=n_nodes)
+
+    # Create cubic B-spline interpolations on uniform index grid
+    F_index_itp = interpolate(sq_nodes[:, 1], BSpline(Cubic(Flat(OnGrid()))))
+    P_index_itp = interpolate(sq_nodes[:, 2], BSpline(Cubic(Flat(OnGrid()))))
+    dVdpsi_index_itp = interpolate(sq_nodes[:, 3], BSpline(Cubic(Flat(OnGrid()))))
+    q_index_itp = interpolate(sq_nodes[:, 4], BSpline(Cubic(Flat(OnGrid()))))
+
+    # Scale to uniform index coordinates
+    F_index_spline = scale(F_index_itp, index_coords)
+    P_index_spline = scale(P_index_itp, index_coords)
+    dVdpsi_index_spline = scale(dVdpsi_index_itp, index_coords)
+    q_index_spline = scale(q_index_itp, index_coords)
+
+    # Create coordinate transformation: psi → fractional index
+    # Using linear interpolation for the coordinate mapping
+    psi_to_index = interpolate((psi_nodes,), collect(index_coords), Gridded(Linear()))
+
+    # Create wrapped splines using NonUniformSplineWrapper (defined at top of file)
+    F_spline = NonUniformSplineWrapper(F_index_spline, psi_to_index)
+    P_spline = NonUniformSplineWrapper(P_index_spline, psi_to_index)
+    dVdpsi_spline = NonUniformSplineWrapper(dVdpsi_index_spline, psi_to_index)
+    q_spline = NonUniformSplineWrapper(q_index_spline, psi_to_index)
 
     # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
     rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes; bctypex="extrap", bctypey="periodic")

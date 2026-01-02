@@ -227,7 +227,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
 
         # Shorthand to evaluate q/q1 inside newton iteration
         qval(ψ) = equil.q_spline(ψ)
-        q1val(ψ) = (BSplineKit.Derivative(1) * equil.q_spline)(ψ)
+        q1val(ψ) = ForwardDiff.derivative(equil.q_spline, ψ)
 
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)

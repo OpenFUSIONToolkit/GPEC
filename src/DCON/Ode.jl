@@ -96,7 +96,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Shorthand to evaluate q/q1 inside newton iteration
     qval = psi -> equil.q_spline(psi)
-    q1val = psi -> (BSplineKit.Derivative(1) * equil.q_spline)(psi)
+    q1val = psi -> ForwardDiff.derivative(equil.q_spline, psi)
 
     # Preliminary computations
     odet.psifac = equil.psi_grid[1]

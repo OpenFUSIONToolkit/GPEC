@@ -482,10 +482,10 @@ This object provides a complete representation of the processed plasma equilibri
 mutable struct PlasmaEquilibrium
     config::EquilibriumConfig
     params::EquilibriumParameters
-    F_spline::Any  # BSplineKit.jl cubic B-spline interpolation
-    P_spline::Any  # BSplineKit.jl cubic B-spline interpolation
-    dVdpsi_spline::Any  # BSplineKit.jl cubic B-spline interpolation
-    q_spline::Any  # BSplineKit.jl cubic B-spline interpolation
+    F_spline::Any  # Interpolations.jl cubic B-spline (ScaledInterpolation)
+    P_spline::Any  # Interpolations.jl cubic B-spline (ScaledInterpolation)
+    dVdpsi_spline::Any  # Interpolations.jl cubic B-spline (ScaledInterpolation)
+    q_spline::Any  # Interpolations.jl cubic B-spline (ScaledInterpolation)
     # Grid and node values for efficient array operations
     psi_grid::Vector{Float64}  # Normalized psi grid points
     F_values::Vector{Float64}  # F*2π values at grid points

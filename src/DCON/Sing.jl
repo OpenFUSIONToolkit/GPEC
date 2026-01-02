@@ -60,7 +60,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=(BSplineKit.Derivative(1) * equil.q_spline)(psifac)
+                        q1=ForwardDiff.derivative(equil.q_spline, psifac)
                     ))
                     intr.msing += 1
                 end
@@ -95,7 +95,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = (BSplineKit.Derivative(1) * equil.q_spline)(equil.psi_grid[end])
+    intr.q1lim = ForwardDiff.derivative(equil.q_spline, equil.psi_grid[end])
     intr.psilim = equil.config.control.psihigh
 
     # Optionally override qlim based on dmlim
@@ -122,7 +122,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 
         # Shorthand to evaluate q/q1 inside newton iteration
         qval(ψ) = equil.q_spline(ψ)
-        q1val(ψ) = (BSplineKit.Derivative(1) * equil.q_spline)(ψ)
+        q1val(ψ) = ForwardDiff.derivative(equil.q_spline, ψ)
 
         intr.psilim = equil.psi_grid[jpsi]
         converged = false
@@ -279,11 +279,11 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
-    # Evaluate q and its derivatives up to 3rd order using BSplineKit
+    # Evaluate q and its derivatives up to 3rd order using ForwardDiff
     q[1] = equil.q_spline(singp.psifac)
-    q[2] = (BSplineKit.Derivative(1) * equil.q_spline)(singp.psifac)
-    q[3] = (BSplineKit.Derivative(2) * equil.q_spline)(singp.psifac)
-    q[4] = (BSplineKit.Derivative(3) * equil.q_spline)(singp.psifac)
+    q[2] = ForwardDiff.derivative(equil.q_spline, singp.psifac)
+    q[3] = ForwardDiff.derivative(x -> ForwardDiff.derivative(equil.q_spline, x), singp.psifac)
+    q[4] = ForwardDiff.derivative(x -> ForwardDiff.derivative(y -> ForwardDiff.derivative(equil.q_spline, y), x), singp.psifac)
     f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
     g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
     k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)

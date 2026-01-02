@@ -17,11 +17,11 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
     for ipsi in 1:length(plasma_eq.psi_grid)
         psi = plasma_eq.psi_grid[ipsi]
         twopif = plasma_eq.F_values[ipsi]
-        p1 = (BSplineKit.Derivative(1) * plasma_eq.P_spline)(psi)
+        p1 = ForwardDiff.derivative(plasma_eq.P_spline, psi)
         v1 = plasma_eq.dVdpsi_values[ipsi]
-        v2 = (BSplineKit.Derivative(1) * plasma_eq.dVdpsi_spline)(psi)
+        v2 = ForwardDiff.derivative(plasma_eq.dVdpsi_spline, psi)
         q = plasma_eq.q_values[ipsi]
-        q1 = (BSplineKit.Derivative(1) * plasma_eq.q_spline)(psi)
+        q1 = ForwardDiff.derivative(plasma_eq.q_spline, psi)
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian
