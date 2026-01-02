@@ -1,85 +1,4 @@
 """
-    chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::DconInternal)
-
-Pre-compute all integration chunks from the current position to the edge.
-Returns a vector of `IntegrationChunk` objects, each representing a region to integrate
-and whether it needs a rational surface crossing beforehand.
-
-This function replaces the iterative while-loop logic with a single upfront computation,
-making the integration flow more predictable and easier to parallelize (e.g., for STRIDE).
-
-### Arguments
-
-  - `odet::OdeState` - ODE state struct (starting position and singular surface index)
-  - `ctrl::DconControl` - Control parameters
-  - `intr::DconInternal` - Internal data (singular surfaces, limits)
-
-### Returns
-
-  - `Vector{IntegrationChunk}` - Array of integration chunks to process
-
-### TODOs
-
-Support for `kin_flag`
-"""
-function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::DconInternal)
-    chunks = IntegrationChunk[]
-    
-    # Start from current position
-    psi_current = odet.psifac
-    ising_current = odet.ising_start
-
-    # Wrapper to find next singular surface to integrate toward that is resonant within integration limits
-    function find_next_resonant_surface!(ising::Int, intr::DconInternal)
-        ising += 1
-        while ising <= intr.msing
-            if intr.psilim < intr.sing[ising].psifac || 
-            any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising].m)
-                break
-            end
-            ising += 1
-        end
-        return ising
-    end
-    
-    # -------------------- Create chunks ------------------------
-    if false  # TODO: kin_flag
-        # Kinetic not implemented yet, some of the below code might be able to be reused?
-    else
-        # Loop through singular surfaces to cross until edge is reached
-        ising_current = find_next_resonant_surface!(ising_current, intr)
-        while ising_current <= intr.msing && intr.psilim >= intr.sing[ising_current].psifac && ctrl.singfac_min != 0
-            # Set integration limit to just before the next singular surface
-            psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
-                        abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
-            push!(chunks, IntegrationChunk(
-                psi_start=psi_current,
-                psi_end=psi_end,
-                needs_crossing=true,
-                ising=ising_current
-            ))
-            
-            # After crossing, we jump to the other side of the singular surface
-            dpsi = intr.sing[ising_current].psifac - psi_end
-            psi_current = psi_end + 2 * dpsi
-            
-            # Move to next singular surface that is either resonant or beyond integration limits
-            ising_current = find_next_resonant_surface!(ising_current, intr)
-        end
-
-        # No more singular surfaces to cross, set integration limit to edge
-        push!(chunks, IntegrationChunk(
-            psi_start=psi_current,
-            psi_end=intr.psilim * (1 - eps),
-            needs_crossing=false,
-            ising=0
-        ))
-    end
-    
-    return chunks
-end
-
-"""
     eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
@@ -231,6 +150,87 @@ end
 # TODO: NOT IMPLEMENTED YET! (low priority, just make sure sing_start = 0 in dcon.toml)
 function initialize_el_at_singular_surf()
     return
+end
+
+"""
+    chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::DconInternal)
+
+Pre-compute all integration chunks from the current position to the edge.
+Returns a vector of `IntegrationChunk` objects, each representing a region to integrate
+and whether it needs a rational surface crossing beforehand.
+
+This function replaces the iterative while-loop logic with a single upfront computation,
+making the integration flow more predictable and easier to parallelize (e.g., for STRIDE).
+
+### Arguments
+
+  - `odet::OdeState` - ODE state struct (starting position and singular surface index)
+  - `ctrl::DconControl` - Control parameters
+  - `intr::DconInternal` - Internal data (singular surfaces, limits)
+
+### Returns
+
+  - `Vector{IntegrationChunk}` - Array of integration chunks to process
+
+### TODOs
+
+Support for `kin_flag`
+"""
+function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::DconInternal)
+    chunks = IntegrationChunk[]
+    
+    # Start from current position
+    psi_current = odet.psifac
+    ising_current = odet.ising_start
+
+    # Wrapper to find next singular surface to integrate toward that is resonant within integration limits
+    function find_next_resonant_surface!(ising::Int, intr::DconInternal)
+        ising += 1
+        while ising <= intr.msing
+            if intr.psilim < intr.sing[ising].psifac || 
+            any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising].m)
+                break
+            end
+            ising += 1
+        end
+        return ising
+    end
+    
+    # -------------------- Create chunks ------------------------
+    if false  # TODO: kin_flag
+        # Kinetic not implemented yet, some of the below code might be able to be reused?
+    else
+        # Loop through singular surfaces to cross until edge is reached
+        ising_current = find_next_resonant_surface!(ising_current, intr)
+        while ising_current <= intr.msing && intr.psilim >= intr.sing[ising_current].psifac && ctrl.singfac_min != 0
+            # Set integration limit to just before the next singular surface
+            psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
+                        abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
+            push!(chunks, IntegrationChunk(
+                psi_start=psi_current,
+                psi_end=psi_end,
+                needs_crossing=true,
+                ising=ising_current
+            ))
+            
+            # After crossing, we jump to the other side of the singular surface
+            dpsi = intr.sing[ising_current].psifac - psi_end
+            psi_current = psi_end + 2 * dpsi
+            
+            # Move to next singular surface that is either resonant or beyond integration limits
+            ising_current = find_next_resonant_surface!(ising_current, intr)
+        end
+
+        # No more singular surfaces to cross, set integration limit to edge
+        push!(chunks, IntegrationChunk(
+            psi_start=psi_current,
+            psi_end=intr.psilim * (1 - eps),
+            needs_crossing=false,
+            ising=0
+        ))
+    end
+    
+    return chunks
 end
 
 """

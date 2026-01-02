@@ -455,9 +455,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     end
 
     # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
-    # eq. 28 in Glasser 2023 PoP paper
-    mmat .= 0
-    
+    # eq. 28 in Glasser 2023 PoP paper    
     # Compute resonant and nonresonant indices
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     r1 = ipert_res

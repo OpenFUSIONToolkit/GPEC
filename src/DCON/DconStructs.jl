@@ -11,7 +11,6 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `di::Float64` - Mercier criterion (computed from equilibrium, not asymptotics)
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -20,7 +19,6 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
-    di::Float64 = 0.0
 end
 
 """

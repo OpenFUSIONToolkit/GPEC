@@ -303,7 +303,6 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]
         out_h5["singular/q"] = [sing.q for sing in intr.sing]
         out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
-        out_h5["singular/di"] = [sing.di for sing in intr.sing]
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
