@@ -31,7 +31,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::Dc
 
     # Wrapper to find next singular surface to integrate toward that is resonant within integration limits
     function find_next_resonant_surface!(ising::Int, intr::DconInternal)
-        ising_current += 1
+        ising += 1
         while ising <= intr.msing
             if intr.psilim < intr.sing[ising].psifac || 
             any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising].m)
