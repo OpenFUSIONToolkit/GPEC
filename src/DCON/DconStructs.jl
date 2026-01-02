@@ -44,15 +44,16 @@ This data is computed on-demand during singular surface crossings in `cross_idea
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
 @kwdef struct SingAsymptotics
-    alpha::Vector{ComplexF64}
-    r1::Vector{Int}
-    r2::Vector{Int}
-    n1::Vector{Int}
-    n2::Vector{Int}
-    power::Vector{ComplexF64}
-    vmat::Array{ComplexF64,4}
-    mmat::Array{ComplexF64,4}
-    m0mat::Matrix{ComplexF64}
+    sing_order::Int = 0
+    alpha::Vector{ComplexF64} = Vector{ComplexF64}(undef, 0)
+    r1::Vector{Int} = Int[]
+    r2::Vector{Int} = Int[]
+    n1::Vector{Int} = Int[]
+    n2::Vector{Int} = Int[]
+    power::Vector{ComplexF64} = Vector{ComplexF64}(undef, 0)
+    vmat::Array{ComplexF64,4} = Array{ComplexF64,4}(undef, 0, 0, 0, 0)
+    mmat::Array{ComplexF64,4} = Array{ComplexF64,4}(undef, 0, 0, 0, 0)
+    m0mat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """

@@ -165,12 +165,6 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
     n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
     n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
 
-    psifac = singp.psifac
-    q = singp.q
-    di0 = Spl.spline_eval!(intr.locstab, singp.psifac)[1] / singp.psifac
-    q1 = singp.q1
-    rho = singp.rho
-
     # Compute Mercier criterion and singular power
     compute_sing_mmat!(mmat, singp, ctrl, equil, ffit, intr)
     
@@ -192,7 +186,6 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
 
     # Zeroth-order non-resonant solutions
     # TODO: without the third dimension, this is just setting to the identity
-    vmat .= 0
     for ipert in 1:intr.numpert_total
         vmat[ipert, ipert, 1, 1] = 1
         vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
@@ -219,7 +212,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
         sing_solve!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, intr, k)
     end
     
-    return SingAsymptotics(alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
+    return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
 end
 
 """
@@ -579,7 +572,7 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
 end
 
 """
-    sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState, sing_asymp::SingAsymptotics, singp::SingType)
+    sing_get_ua(sing_asymp::SingAsymptotics, z::Float64) -> ua
 
 Compute the asymptotic series solution for a given singular surface.
 Fills and returns `ua` with the asymptotic solution vmat from the provided asymptotics.
@@ -589,36 +582,33 @@ Performs the same function as `sing_get_ua` in the Fortran code.
 ### Arguments
 
   - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data
-  - `singp::SingType`: Singular surface basic parameters
+  - `z::Float64`: Distance from singular surface = ψ - ψ_res (Note this is -dpsi from cross_ideal_singular_surf)
 """
-function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState, sing_asymp::SingAsymptotics, singp::SingType)
+function sing_get_ua(sing_asymp::SingAsymptotics, z::Float64)
 
     r1 = sing_asymp.r1
     r2 = sing_asymp.r2
-
-    # Compute distance from singular surface (z)
-    dpsi = odet.psifac - singp.psifac
-    sqrtfac = sqrt(complex(dpsi))
+    sqrt_z = sqrt(complex(z)) # √z
 
     # Compute power series via Horner's method (eq. 45 in Glasser 2016)
-    ua = copy(sing_asymp.vmat[:, :, :, 2*ctrl.sing_order+1])
-    for iorder in (2*ctrl.sing_order-1):-1:0
-        ua .= ua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1] # sqrtfac becomes √zᵏ here
+    ua = copy(sing_asymp.vmat[:, :, :, 2*sing_asymp.sing_order+1])
+    for iorder in (2*sing_asymp.sing_order-1):-1:0
+        ua .= ua .* sqrt_z .+ sing_asymp.vmat[:, :, :, iorder+1] # sqrt_z becomes √zᵏ here
     end
 
     # Loop through resonances - this might change in 3D
     for i in eachindex(r1)
         # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
-        pfac = abs(dpsi).^sing_asymp.alpha[i] # zᵅ
+        pfac = abs(z).^sing_asymp.alpha[i] # zᵅ
         ua[:, r2[2 * i - 1], :] ./= pfac # /zᵅ = z⁻ᵅ
         ua[:, r2[2 * i], :] .*= pfac
 
         # Apply shearing transformation u = Rv (eq. 41 in Glasser 2016)
-        ua[r1[i], :, 1] ./= sqrtfac # z^-0.5
-        ua[r1[i], :, 2] .*= sqrtfac # z^0.5
+        ua[r1[i], :, 1] ./= sqrt_z # z^-0.5
+        ua[r1[i], :, 2] .*= sqrt_z # z^0.5
 
         # Renormalize
-        if odet.psifac < singp.psifac
+        if z < 0
             ua[:, r2[2 * i - 1], :] .*= abs(ua[r1[i], r2[2 * i - 1], 1]) / ua[r1[i], r2[2 * i - 1], 1]
             ua[:, r2[2 * i], :] .*= abs(ua[r1[i], r2[2 * i], 1]) / ua[r1[i], r2[2 * i], 1]
         end
@@ -639,9 +629,7 @@ Compute the asymptotic expansion coefficients according to equation
   - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data
   - `singp::SingType`: Singular surface basic parameters
 """
-function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState, sing_asymp::SingAsymptotics, singp::SingType)
-
-    ua = sing_get_ua(ctrl, intr, odet, sing_asymp, singp)
+function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::DconInternal)
 
     # Build temp1
     temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
@@ -650,8 +638,8 @@ function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState, sing
 
     # Built temp2
     temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
-    temp2[1:intr.numpert_total, :] .= odet.u[:, :, 1]
-    temp2[intr.numpert_total+1:2*intr.numpert_total, :] .= odet.u[:, :, 2]
+    temp2[1:intr.numpert_total, :] .= u[:, :, 1]
+    temp2[intr.numpert_total+1:2*intr.numpert_total, :] .= u[:, :, 2]
 
     # LU factorization and solve
     temp2 .= lu(temp1) \ temp2

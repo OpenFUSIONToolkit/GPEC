@@ -266,25 +266,21 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
     # Fixup solution at singular surface
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
 
-    # Compute asymptotic power series on-demand for this singular surface
+    # Compute asymptotic power series for this singular surface
     singp = intr.sing[ising]
     sing_asymp = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr)
+    dpsi = singp.psifac - odet.psifac # ψ_res - ψ
 
     # Get asymptotic coefficients before crossing rational surface
-    odet.ca_l[:, :, :, ising] .= sing_get_ca(ctrl, intr, odet, sing_asymp, singp)
+    ua = sing_get_ua(sing_asymp, -dpsi)
+    odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Re-initialize on opposite side of rational surface
-    psi_old = odet.psifac
-    dpsi = singp.psifac - odet.psifac
-    odet.psifac += 2 * dpsi # jump to other side of singular surface
-    ua = sing_get_ua(ctrl, intr, odet, sing_asymp, singp)
-    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    
     # Single n: remove largest solution and sub in asymptotics on the other side
     # Multi-n: if we remove the N largest modes in arbitrary order, we can mess up the
     # diagonal structure of the matrix and later calculations. zeroed_idx let's us make sure
     # the solution vector we're zeroing corresponds to the same block as the resonant mode we
     # introduce. It is also needed when transforming u back to the full solution after integration.
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     if !ctrl.con_flag
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
@@ -294,15 +290,17 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
         end
     end
 
-    # Approximate solution vectors across singular surface
+    # Re-initialize on opposite side of rational surface by approximating solution
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising))
-    sing_der!(du1, odet.u, params, psi_old)
+    sing_der!(du1, odet.u, params, odet.psifac)
+    odet.psifac += 2 * dpsi # jump to other side of singular surface
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
 
     # Apply asymptotic solution on other side of singular surface
+    ua = sing_get_ua(sing_asymp, dpsi)
     if !ctrl.con_flag
         for i in eachindex(sing_asymp.r1)
             # Zero out the resonant components
@@ -312,7 +310,7 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Eq
         end
     end
     # Get asymptotic coefficients after crossing rational surface
-    odet.ca_r[:, :, :, ising] .= sing_get_ca(ctrl, intr, odet, sing_asymp, singp)
+    odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
