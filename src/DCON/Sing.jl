@@ -209,7 +209,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
 
     # Higher order solutions - need to solve iteratively
     for k in 1:2*ctrl.sing_order
-        sing_solve!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, intr, k)
+        solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k)
     end
     
     return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
@@ -486,7 +486,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
 end
 
 """
-    sing_solve!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, intr::DconInternal, k::Int)
+    solve_higher_order_vmat!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::DconInternal, k::Int)
 
 Solves iteratively for the next order in the power series `vmat`.
 See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
@@ -497,17 +497,12 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
   - `vmat::Array{ComplexF64,4}`: V matrix power series (modified in-place)
   - `mmat::Array{ComplexF64,4}`: M matrix power series
   - `m0mat::Matrix{ComplexF64}`: Zeroth order M matrix
-  - `alpha::Vector{ComplexF64}`: Eigenvalues
+  - `alpha::Vector{ComplexF64}`: Eigenvalues of M₀ for resonant modes
   - `r1, r2, n1, n2::Vector{Int}`: Resonant and nonresonant indices
-  - `intr::DconInternal`: Internal data
+  - `power::Vector{ComplexF64}`: α values for all modes (0 for nonresonant)
   - `k::Int`: The current order in the power series expansion
 """
-function sing_solve!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, intr::DconInternal, k::Int)
-    # Compute power vector for all modes
-    power = zeros(ComplexF64, 2 * intr.numpert_total)
-    ipert_res_extended = vcat(r1, r1 .+ intr.numpert_total)
-    power[r1] .= -alpha
-    power[r1 .+ intr.numpert_total] .= alpha
+function sing_solve!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::DconInternal, k::Int)
     
     # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
@@ -626,8 +621,8 @@ Compute the asymptotic expansion coefficients according to equation
 
 ### Arguments
 
-  - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data
-  - `singp::SingType`: Singular surface basic parameters
+  - `u::Array{ComplexF64,3}`: Current solution matrix, shape (numpert_total, numpert_total, 2)
+  - `ua::Array{ComplexF64,3}`: Asymptotic solution matrix, shape (numpert_total, numpert_total, 2)
 """
 function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::DconInternal)
 

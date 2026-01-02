@@ -1,9 +1,7 @@
 """
     SingType
 
-A mutable struct containing data for singular surfaces in the plasma stability analysis.
-This struct contains the basic parameters of the singular surface. Asymptotic data for
-ideal DCON calculations is computed on-demand and stored in `SingAsymptotics`.
+A mutable struct holding data related to the singular surfaces in the equilibrium.
 
 ## Fields
 
@@ -43,17 +41,17 @@ This data is computed on-demand during singular surface crossings in `cross_idea
   - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
-@kwdef struct SingAsymptotics
-    sing_order::Int = 0
-    alpha::Vector{ComplexF64} = Vector{ComplexF64}(undef, 0)
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
-    n1::Vector{Int} = Int[]
-    n2::Vector{Int} = Int[]
-    power::Vector{ComplexF64} = Vector{ComplexF64}(undef, 0)
-    vmat::Array{ComplexF64,4} = Array{ComplexF64,4}(undef, 0, 0, 0, 0)
-    mmat::Array{ComplexF64,4} = Array{ComplexF64,4}(undef, 0, 0, 0, 0)
-    m0mat::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+struct SingAsymptotics
+    sing_order::Int
+    alpha::Vector{ComplexF64}
+    r1::Vector{Int}
+    r2::Vector{Int}
+    n1::Vector{Int}
+    n2::Vector{Int}
+    power::Vector{ComplexF64}
+    vmat::Array{ComplexF64,4}
+    mmat::Array{ComplexF64,4}
+    m0mat::Matrix{ComplexF64}
 end
 
 """
@@ -65,7 +63,7 @@ A struct representing a region of integration in the Euler-Lagrange solver.
 
   - `psi_start::Float64` - Starting ψ coordinate for this integration region
   - `psi_end::Float64` - Ending ψ coordinate for this integration region
-  - `needs_crossing::Bool` - Whether a rational surface crossing is needed before this chunk
+  - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
   - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
 """
 @kwdef struct IntegrationChunk

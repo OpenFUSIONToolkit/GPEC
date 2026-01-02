@@ -28,30 +28,29 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::Dc
     # Start from current position
     psi_current = odet.psifac
     ising_current = odet.ising_start
+
+    # Wrapper to find next singular surface to integrate toward that is resonant within integration limits
+    function find_next_resonant_surface!(ising::Int, intr::DconInternal)
+        ising_current += 1
+        while ising <= intr.msing
+            if intr.psilim < intr.sing[ising].psifac || 
+            any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising].m)
+                break
+            end
+            ising += 1
+        end
+        return ising
+    end
     
+    # -------------------- Create chunks ------------------------
     if false  # TODO: kin_flag
         # Kinetic not implemented yet, some of the below code might be able to be reused?
     else
-        # Find first singular surface to integrate toward that is resonant within integration limits
-        ising_current += 1
-        while ising_current <= intr.msing
-            # If we're beyond integration limits, no need to increment
-            if intr.psilim < intr.sing[ising_current].psifac
-                break
-            end
-            # Check if any mode number in this singular surface is resonant within our range
-            if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising_current].m)
-                break
-            end
-            # Skip this surface and check the next one
-            ising_current += 1
-        end
-
-        # -------------------- Create chunks ------------------------
-        # Determine if there's a singular surface to integrate toward        
-        while !(ising_current > intr.msing || intr.psilim < intr.sing[ising_current].psifac || ctrl.singfac_min == 0)
+        # Loop through singular surfaces to cross until edge is reached
+        ising_current = find_next_resonant_surface!(ising_current, intr)
+        while ising_current <= intr.msing && intr.psilim >= intr.sing[ising_current].psifac && ctrl.singfac_min != 0
             # Set integration limit to just before the next singular surface
-            psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min / 
+            psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
                         abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
             push!(chunks, IntegrationChunk(
                 psi_start=psi_current,
@@ -65,20 +64,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::Dc
             psi_current = psi_end + 2 * dpsi
             
             # Move to next singular surface that is either resonant or beyond integration limits
-            # Same logic as above
-            ising_current += 1
-            while ising_current <= intr.msing
-                # If we're beyond integration limits, no need to increment
-                if intr.psilim < intr.sing[ising_current].psifac
-                    break
-                end
-                # Check if any mode number in this singular surface is resonant within our range
-                if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising_current].m)
-                    break
-                end
-                # Skip this surface and check the next one
-                ising_current += 1
-            end
+            ising_current = find_next_resonant_surface!(ising_current, intr)
         end
 
         # No more singular surfaces to cross, set integration limit to edge
@@ -140,7 +126,9 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
     for chunk in chunks
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+        if ctrl.verbose
+            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+        end
 
         # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
@@ -186,12 +174,12 @@ end
     initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
-Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising`, and `u`.
-The integration bounds (`psimax` and `needs_crossing`) are set separately by `set_el_integration_bounds!`.
+Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
 
 ### TODOs
 
 Support for `kin_flag`
+Move ising_start logic to chunk_el_integration_bounds?
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
