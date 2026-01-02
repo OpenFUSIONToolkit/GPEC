@@ -179,11 +179,11 @@ function set_el_integration_bounds!(odet::OdeState, ctrl::DconControl, intr::Dco
     if false  # TODO: kin_flag
         # Kinetic branch not implemented yet
     else
-        # For initialization, ising was already set to the inner surface, so start from there
+        # For initialization, ising was already set to the inner surface, so we need to move to the next one
         # For crossing, ising was already incremented in the crossing function
-        if !is_init
-            # After crossing, we've already moved ising forward in cross_ideal_singular_surf
-            # So we just need to check if we need to skip any surfaces outside mlow/mhigh range
+        if is_init
+            # Move to the first singular surface after our starting position
+            odet.ising += 1
         end
         
         # Skip surfaces outside mlow/mhigh range
@@ -192,9 +192,9 @@ function set_el_integration_bounds!(odet::OdeState, ctrl::DconControl, intr::Dco
         # eventually we might want to allow the user to set mlow/mhigh independently, in which case
         # this check would be necessary. In 3D, this might be even more applicable since rational
         # surfaces will be more dense.
-        while true
-            # Check if we're beyond the last singular surface or outside integration limits
-            if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+        while odet.ising <= intr.msing && odet.ising >= 1
+            # Check if we're beyond integration limits
+            if intr.psilim < intr.sing[odet.ising].psifac
                 break
             end
             # Check if any mode number in this singular surface is within our range
@@ -206,7 +206,7 @@ function set_el_integration_bounds!(odet::OdeState, ctrl::DconControl, intr::Dco
         end
         
         # Determine psimax and whether we need to cross
-        if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
+        if odet.ising > intr.msing || odet.ising < 1 || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac || ctrl.singfac_min == 0
             # No more singular surfaces to cross, integrate to edge
             odet.psimax = intr.psilim * (1 - eps)
             odet.needs_crossing = false
