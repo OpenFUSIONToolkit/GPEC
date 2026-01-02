@@ -152,10 +152,6 @@ the 2016 Glasser DCON paper for the mathematical details.
 ### Arguments
 
   - `ising::Int`: Index of the singular surface to process (1 to `intr.msing`)
-
-### TODOs
-
-Check logic on typing of di
 """
 function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
@@ -505,7 +501,7 @@ Solves iteratively for the next order in the power series `singp.vmat`.
 See equation 47 in the Glass 2016 DCON paper. Identical to the Fortran
 `sing_solve` subroutine.
 
-## Arguments
+### Arguments
 
   - `singp::SingType`: The singular surface data structure containing all relevant matrices and parameters.
   - `k::Int`: The current order in the power series expansion.
@@ -540,7 +536,7 @@ end
 Matrix multiplication specific to singular matrices.
 Identical to the Fortran `sing_matmul` subroutine.
 
-## Arguments
+### Arguments
 
   - `a::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
   - `b::Array{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
@@ -575,17 +571,21 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
 end
 
 """
-    sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+    sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState, ising::Int)
 
 Compute the asymptotic series solution for a given singular surface.
 Fills and returns `ua` with the asymptotic solution vmat computed in
 `sing_vmat`. We obtain the solution using equations 45 and 41 in the
 2016 DCON paper. Performs the same function as `sing_get_ua` in the
 Fortran code.
-"""
-function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
-    singp = intr.sing[odet.ising]
+### Arguments
+
+  - `ising::Int`: Index of the singular surface to process.
+"""
+function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState, ising::Int)
+
+    singp = intr.sing[ising]
     r1 = singp.r1
     r2 = singp.r2
 
@@ -621,15 +621,19 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 end
 
 """
-    sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+    sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState, ising::Int)
 
 Compute the asymptotic expansion coefficients according to equation
 50 in Glasser 2016 DCON paper. Performs the same function as
 `sing_get_ca` in the Fortran code.
-"""
-function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
-    ua = sing_get_ua(ctrl, intr, odet)
+### Arguments
+
+  - `ising::Int`: Index of the singular surface to process.
+"""
+function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState, ising::Int)
+
+    ua = sing_get_ua(ctrl, intr, odet, ising)
 
     # Build temp1
     temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
@@ -692,11 +696,11 @@ Implement kin_flag functionality
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,DconInternal,OdeState},
+        FourFitVars,DconInternal,OdeState,IntegrationChunk},
     psieval::Float64)
 
     # Unpack structs and initialize
-    ctrl, equil, ffit, intr, odet = params
+    _, equil, ffit, intr, odet, _ = params
     fill!(odet.tmp, 0)
     u1 = @view(u[:, :, 1])
     u2 = @view(u[:, :, 2])
