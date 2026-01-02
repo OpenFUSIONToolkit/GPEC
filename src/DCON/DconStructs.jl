@@ -42,6 +42,25 @@ A mutable struct containing data for singular surfaces in the plasma stability a
 end
 
 """
+    IntegrationChunk
+
+A struct representing a region of integration in the Euler-Lagrange solver.
+
+## Fields
+
+  - `psi_start::Float64` - Starting ψ coordinate for this integration region
+  - `psi_end::Float64` - Ending ψ coordinate for this integration region
+  - `needs_crossing::Bool` - Whether a rational surface crossing is needed before this chunk
+  - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
+"""
+@kwdef struct IntegrationChunk
+    psi_start::Float64
+    psi_end::Float64
+    needs_crossing::Bool
+    ising::Int = 0
+end
+
+"""
 DebugSettings
 
 A mutable struct containing settings for debugging and benchmarking output.

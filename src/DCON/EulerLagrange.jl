@@ -1,12 +1,123 @@
 """
+    chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::DconInternal)
+
+Pre-compute all integration chunks from the current position to the edge.
+Returns a vector of `IntegrationChunk` objects, each representing a region to integrate
+and whether it needs a rational surface crossing beforehand.
+
+This function replaces the iterative while-loop logic with a single upfront computation,
+making the integration flow more predictable and easier to parallelize (e.g., for STRIDE).
+
+### Arguments
+
+  - `odet::OdeState` - ODE state struct (starting position and singular surface index)
+  - `ctrl::DconControl` - Control parameters
+  - `intr::DconInternal` - Internal data (singular surfaces, limits)
+
+### Returns
+
+  - `Vector{IntegrationChunk}` - Array of integration chunks to process
+
+### TODOs
+
+Support for `kin_flag`
+"""
+function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::DconInternal)
+    chunks = IntegrationChunk[]
+    
+    # Start from current position
+    psi_current = odet.psifac
+    ising_current = odet.ising
+    
+    # Find first singular surface to integrate toward
+    if false  # TODO: kin_flag
+        # Kinetic branch not implemented yet
+    else
+        # Move to the first singular surface after our starting position
+        ising_current += 1
+        
+        # Skip surfaces outside mlow/mhigh range
+        while ising_current <= intr.msing && ising_current >= 1
+            # Check if we're beyond integration limits
+            if intr.psilim < intr.sing[ising_current].psifac
+                break
+            end
+            # Check if any mode number in this singular surface is within our range
+            if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising_current].m)
+                break
+            end
+            # Skip this surface
+            ising_current += 1
+        end
+        
+        # Create chunks: alternate between integration and crossing
+        while true
+            # Determine if there's a singular surface to integrate toward
+            if ising_current > intr.msing || ising_current < 1 || 
+               intr.psilim < intr.sing[min(max(ising_current, 1), intr.msing)].psifac || 
+               ctrl.singfac_min == 0
+                # No more singular surfaces to cross, integrate to edge
+                psi_end = intr.psilim * (1 - eps)
+                push!(chunks, IntegrationChunk(
+                    psi_start=psi_current,
+                    psi_end=psi_end,
+                    needs_crossing=false,
+                    ising=0
+                ))
+                break
+            else
+                # Integrate to just before the next singular surface
+                psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min / 
+                          abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
+                push!(chunks, IntegrationChunk(
+                    psi_start=psi_current,
+                    psi_end=psi_end,
+                    needs_crossing=true,
+                    ising=ising_current
+                ))
+                
+                # After crossing, we jump to the other side of the singular surface
+                singp = intr.sing[ising_current]
+                dpsi = singp.psifac - psi_end
+                psi_current = psi_end + 2 * dpsi
+                
+                # Move to next singular surface
+                ising_current += 1
+                
+                # Skip surfaces outside mlow/mhigh range
+                while ising_current <= intr.msing
+                    # Check if we're beyond integration limits
+                    if intr.psilim < intr.sing[ising_current].psifac
+                        break
+                    end
+                    # Check if any mode number in this singular surface is within our range
+                    if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[ising_current].m)
+                        break
+                    end
+                    # Skip this surface
+                    ising_current += 1
+                end
+                
+                # Check termination conditions for ksing
+                if ctrl.ksing >= 0 && ising_current > ctrl.ksing
+                    break
+                end
+            end
+        end
+    end
+    
+    return chunks
+end
+
+"""
     eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
 Formerly `ode_run`. Has the same functionality as `ode_run` in the Fortran code, with the addition of
 a single dump to the `euler.h5` file at the end of integration instead of multiple dumps
 to `euler.bin` throughout the integration. We have made the control logic more clear
-by replacing the while loop with a for loop that iterates over integration regions,
-and making integration bounds explicit arguments to the integration function.
+by pre-computing all integration chunks upfront and using a for loop to iterate through them,
+eliminating the while-loop logic and making integration bounds explicit at each step.
 We now perform significant post-processing after integration including finding the peak dW 
 in the edge region and evaluating the stability criterion over the entire integration, 
 which were previously done during integration in the Fortran code.
@@ -37,30 +148,26 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
         println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" Spl.spline_eval!(equil.sq, odet.psifac)[4]))")
     end
 
-    # Set bounds for first integration region
-    set_el_integration_bounds!(odet, ctrl, intr, true)
+    # Pre-compute all integration chunks
+    chunks = chunk_el_integration_bounds(odet, ctrl, intr)
     
-    # Always integrate once, even if no rational surfaces are crossed
-    integrate_el_region!(odet, ctrl, equil, ffit, intr, odet.psifac, odet.psimax)
-
-    # If at a rational surface, do the appropriate crossing routine, then integrate again
-    while odet.ising <= ctrl.ksing || ctrl.ksing < 0
-        # Check if we need to cross a rational surface
-        if !odet.needs_crossing
-            break
-        end
+    # Iterate through each chunk
+    for chunk in chunks
+        # Update odet.ising to track the next singular surface we're integrating toward
+        # This is needed for tolerance calculations during integration
+        odet.ising = chunk.ising
         
-        if ctrl.kin_flag
-            error("kin_flag = true not implemented yet!")
-        else
-            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr)
-        end
-
-        # Set bounds for next integration region
-        set_el_integration_bounds!(odet, ctrl, intr, false)
+        # Integrate this region
+        integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk.psi_start, chunk.psi_end)
         
-        # Integrate to next singular surface or edge
-        integrate_el_region!(odet, ctrl, equil, ffit, intr, odet.psifac, odet.psimax)
+        # If this chunk requires crossing a rational surface after integration, do it
+        if chunk.needs_crossing
+            if ctrl.kin_flag
+                error("kin_flag = true not implemented yet!")
+            else
+                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr)
+            end
+        end
     end
 
     # Deallocate unused storage of integration data
@@ -155,79 +262,13 @@ function initialize_el_at_singular_surf()
 end
 
 """
-    set_el_integration_bounds!(odet::OdeState, ctrl::DconControl, intr::DconInternal, is_init::Bool)
-
-Determine the bounds (`psimax` and `needs_crossing`) for the next integration region.
-This function extracts the common logic from `initialize_el_at_axis!` and `cross_ideal_singular_surf!`
-to make it clear where integration bounds are set. It finds the next singular surface
-to integrate toward and sets the integration endpoint.
-
-### Arguments
-
-  - `odet::OdeState` - ODE state struct (modified in-place)
-  - `ctrl::DconControl` - Control parameters
-  - `intr::DconInternal` - Internal data
-  - `is_init::Bool` - True if calling from initialization, false if calling after crossing
-
-### TODOs
-
-Support for `kin_flag`
-"""
-function set_el_integration_bounds!(odet::OdeState, ctrl::DconControl, intr::DconInternal, is_init::Bool)
-    
-    # Find next singular surface (either next one in the list or outside integration limits)
-    if false  # TODO: kin_flag
-        # Kinetic branch not implemented yet
-    else
-        # For initialization, ising was already set to the inner surface, so we need to move to the next one
-        # For crossing, ising was already incremented in the crossing function
-        if is_init
-            # Move to the first singular surface after our starting position
-            odet.ising += 1
-        end
-        
-        # Skip surfaces outside mlow/mhigh range
-        # TODO: Based on existing logic, checking if mlow <= m <= mhigh may not be necessary,
-        # since DCON sets the poloidal mode numbers to include the resonant modes anyway. However,
-        # eventually we might want to allow the user to set mlow/mhigh independently, in which case
-        # this check would be necessary. In 3D, this might be even more applicable since rational
-        # surfaces will be more dense.
-        while odet.ising <= intr.msing && odet.ising >= 1
-            # Check if we're beyond integration limits
-            if intr.psilim < intr.sing[odet.ising].psifac
-                break
-            end
-            # Check if any mode number in this singular surface is within our range
-            if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
-                break
-            end
-            # Skip this surface
-            odet.ising += 1
-        end
-        
-        # Determine psimax and whether we need to cross
-        if odet.ising > intr.msing || odet.ising < 1 || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac || ctrl.singfac_min == 0
-            # No more singular surfaces to cross, integrate to edge
-            odet.psimax = intr.psilim * (1 - eps)
-            odet.needs_crossing = false
-        else
-            # Set psimax just before the next singular surface
-            # TODO: Nik: where does singfac_min / n * q' come from? Unclear how to generalize to multi-n
-            # Safest choice for now is to use the smallest resonant n for maximum separation
-            odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
-            odet.needs_crossing = true
-        end
-    end
-end
-
-"""
     cross_ideal_singular_surf!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Handle the crossing of a rational surface during integration if `kin_flag` is false.
 Formerly `ode_ideal_cross!`. Performs the same function as `ode_ideal_cross` in the Fortran code.
 Differences mainly in integration data storage logic, but otherwise identical. It normalizes and 
 reinitializes the solution vector at the singularity, and updates relevant state variables. 
-The integration bounds for the next region are now set separately by `set_el_integration_bounds!`.
+The integration chunks are now pre-computed by `chunk_el_integration_bounds`.
 
 ### TODOs
 
@@ -408,7 +449,7 @@ function compute_tols(ctrl, intr, odet)
     else
         # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
         # Note: odet.q is updated within the derivative calculation
-        if odet.ising <= intr.msing
+        if odet.ising > 0 && odet.ising <= intr.msing
             singfac_local = abs(minimum(intr.sing[odet.ising].n) * (intr.sing[odet.ising].q - odet.q))
         end
         # If in between singular surfaces, check distance to both
