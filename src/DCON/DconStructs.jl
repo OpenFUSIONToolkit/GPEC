@@ -225,6 +225,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
+    save_interval::Int = 10  # Save every Nth ODE step (1 = save all, 10 = save every 10th). Always saves near rational surfaces.
 end
 
 @kwdef mutable struct FourFitVars
