@@ -27,7 +27,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
-    v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
+    v1 = equil.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
@@ -167,7 +167,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     rfac = zeros(Float64, mtheta + 1)
 
     # Compute output
-    qa = Spl.spline_eval!(equil.sq, psifac)[4]
+    qa = equil.q_spline(psifac)
     for itheta in 1:equil.config.control.mtheta+1
         f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
@@ -215,7 +215,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
 
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = Spl.spline_eval!(equil.sq, ctrl.psiedge)[4]
+    qedge = equil.q_spline(ctrl.psiedge)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psii = ctrl.psiedge
     psi_array = zeros(Float64, npsi + 1)
@@ -226,8 +226,8 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
         # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
+        qval(ψ) = equil.q_spline(ψ)
+        q1val(ψ) = (BSplineKit.Derivative(1) * equil.q_spline)(ψ)
 
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
@@ -299,7 +299,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     tot_eigvals = zeros(ComplexF64, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
-    v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
+    v1 = equil.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2

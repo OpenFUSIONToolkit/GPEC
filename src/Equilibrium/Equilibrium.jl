@@ -4,7 +4,7 @@ module Equilibrium
 import ..Spl
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
-using TOML
+using TOML, BSplineKit
 import StaticArrays: @MMatrix
 
 # --- Internal Module Structure ---
@@ -202,7 +202,6 @@ the same function as equil_out_global in the Fortran code.
 """
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     rzphi = pe.rzphi
-    sq = pe.sq
     mpsi = size(rzphi.fs, 1) - 1
     mtheta = size(rzphi.fs, 2) - 1
 
@@ -216,7 +215,10 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
     dpsi = 1.0 - rzphi.xs[mpsi+1]
-    bt0 = (sq.fs[mpsi+1, 1] + sq.fs1[mpsi+1, 1] * dpsi) / (2π * rmean)
+    # Use spline to evaluate F and its derivative at boundary
+    F_boundary = pe.F_spline(pe.psi_grid[mpsi+1])
+    F_deriv_boundary = (BSplineKit.Derivative(1) * pe.F_spline)(pe.psi_grid[mpsi+1])
+    bt0 = (F_boundary + F_deriv_boundary * dpsi) / (2π * rmean)
 
     pe.params.rmean = rmean
     pe.params.amean = amean
@@ -255,19 +257,22 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.crnt = crnt
     pe.params.bwall = bwall
 
-    # Flux surface integrals
-    hs1 = sq.fs[:, 2] .* sq.fs[:, 3]                 # p * dV/dpsi
-    hs2 = sq.fs[:, 3]                               # dV/dpsi
-    hs3 = sq.fs[:, 2] .^ 2 .* sq.fs[:, 3]              # p^2 * dV/dpsi
+    # Flux surface integrals using stored node values
+    hs1 = pe.P_values .* pe.dVdpsi_values          # p * dV/dpsi
+    hs2 = pe.dVdpsi_values                         # dV/dpsi
+    hs3 = pe.P_values .^ 2 .* pe.dVdpsi_values     # p^2 * dV/dpsi
 
-    dpsi_vec = diff(sq.xs)
+    dpsi_vec = diff(pe.psi_grid)
     fsi1 = sum((hs1[1:end-1] .+ hs1[2:end]) .* dpsi_vec) / 2
     fsi2 = sum((hs2[1:end-1] .+ hs2[2:end]) .* dpsi_vec) / 2
     fsi3 = sum((hs3[1:end-1] .+ hs3[2:end]) .* dpsi_vec) / 2
 
-    volume = sum((sq.fs[1:end-1, 3] .+ sq.fs[2:end, 3]) .* dpsi_vec) / 2
+    volume = sum((pe.dVdpsi_values[1:end-1] .+ pe.dVdpsi_values[2:end]) .* dpsi_vec) / 2
 
-    p0 = sq.fs[1, 2] - sq.fs1[1, 2] * sq.xs[1]  # linear extrapolation
+    # Evaluate P and its derivative at axis for linear extrapolation
+    P_axis = pe.P_spline(pe.psi_grid[1])
+    P_deriv_axis = (BSplineKit.Derivative(1) * pe.P_spline)(pe.psi_grid[1])
+    p0 = P_axis - P_deriv_axis * pe.psi_grid[1]
     betat = 2 * (fsi1 / fsi2) / bt0^2
     betaj = 2 * sqrt(fsi3 / fsi2) / bwall^2
     betan = 100 * amean * bt0 * betat / crnt
@@ -290,7 +295,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.psi_boundary_sign = -1
     pe.params.psi_boundary_zero = false
 
-    pe.params.q0 = sq.fs[1, 4]
+    pe.params.q0 = pe.q_values[1]
     pe.params.b0 = bt0
 
     pe.params.volume = volume
@@ -314,23 +319,27 @@ the same function as equil_out_qfind in the Fortran code.
 """
 function equilibrium_qfind!(equil::PlasmaEquilibrium)
 
-    sq = equil.sq
-    mpsi = length(sq.xs) - 1
+    psi_grid = equil.psi_grid
+    q_values = equil.q_values
+    mpsi = length(psi_grid) - 1
     psiexl = Float64[]
     qexl = Float64[]
 
     # Left endpoint
-    push!(psiexl, sq.xs[1])
-    push!(qexl, sq.fs[1, 4])
+    push!(psiexl, psi_grid[1])
+    push!(qexl, q_values[1])
 
-    # Search for extrema in q(ψ)
+    # Search for extrema in q(ψ) using derivatives
     for ipsi in 1:mpsi
-        x0 = sq.xs[ipsi]
-        x1 = sq.xs[ipsi+1]
+        x0 = psi_grid[ipsi]
+        x1 = psi_grid[ipsi+1]
         xmax = x1 - x0
 
-        f, f1, f2, f3 = Spl.spline_deriv3!(sq, x0)
-        a, b, c, d = f[4], f1[4], f2[4], f3[4]
+        # Evaluate q and its derivatives using BSplineKit
+        a = equil.q_spline(x0)  # q value
+        b = (BSplineKit.Derivative(1) * equil.q_spline)(x0)  # first derivative
+        c = (BSplineKit.Derivative(2) * equil.q_spline)(x0)  # second derivative
+        d = (BSplineKit.Derivative(3) * equil.q_spline)(x0)  # third derivative
 
         if d != 0.0
             xcrit = -c / d
@@ -341,9 +350,9 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
                     x = xcrit - delta
                     if 0 ≤ x < xmax
                         ψ = x0 + x
-                        fψ = Spl.spline_eval!(sq, ψ)
+                        q_psi = equil.q_spline(ψ)
                         push!(psiexl, ψ)
-                        push!(qexl, fψ[4])
+                        push!(qexl, q_psi)
                     end
                 end
             end
@@ -351,21 +360,25 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     end
 
     # Right endpoint
-    push!(psiexl, sq.xs[end])
-    push!(qexl, sq.fs[end, 4])
+    push!(psiexl, psi_grid[end])
+    push!(qexl, q_values[end])
 
     equil.params.qextrema_psi = psiexl
     equil.params.qextrema_q = qexl
     equil.params.mextrema = length(psiexl)
-    # Compute derived q-values
-    q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
-    qmax_edge = sq.fs[end, 4]
+
+    # Compute derived q-values using splines and node values
+    q0_val = equil.q_spline(psi_grid[1])
+    q0_deriv = (BSplineKit.Derivative(1) * equil.q_spline)(psi_grid[1])
+    q0 = q0_val - q0_deriv * psi_grid[1]
+    qmax_edge = q_values[end]
     qmin = min(minimum(qexl), q0)
     qmax = max(maximum(qexl), qmax_edge)
-    qa = sq.fs[end, 4] + sq.fs1[end, 4] * (1.0 - sq.xs[end])
+    qa_val = equil.q_spline(psi_grid[end])
+    qa_deriv = (BSplineKit.Derivative(1) * equil.q_spline)(psi_grid[end])
+    qa = qa_val + qa_deriv * (1.0 - psi_grid[end])
 
-    f95 = Spl.spline_eval!(sq, 0.95)
-    q95 = f95[4]
+    q95 = equil.q_spline(0.95)
 
     # Store derived values
     equil.params.q0 = q0
@@ -385,7 +398,6 @@ Performs the same function as equil_out_gse in the Fortran code.
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     rzphi = equil.rzphi
-    sq = equil.sq
     mpsi, mtheta = rzphi.mx, rzphi.my
     ro, zo = equil.ro, equil.zo
     psio = equil.psio
@@ -438,9 +450,11 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         for itheta in 0:mtheta
             rz_eval = Spl.bicube_eval!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
             f4 = rz_eval[4]
-            s1 = sq.fs[ipsi+1, 1]
-            s1p = sq.fs1[ipsi+1, 1]
-            s2p = sq.fs1[ipsi+1, 2]
+            psi_val = equil.psi_grid[ipsi+1]
+            # Evaluate F and P derivatives at this psi
+            s1 = equil.F_values[ipsi+1]  # F*2π value
+            s1p = (BSplineKit.Derivative(1) * equil.F_spline)(psi_val)  # F derivative
+            s2p = (BSplineKit.Derivative(1) * equil.P_spline)(psi_val)  # P derivative
 
             denom = (2π * r[ipsi+1, itheta+1])^2
             source[ipsi+1, itheta+1] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)

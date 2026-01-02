@@ -41,7 +41,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
+                    singfac = (m - n * equil.q_spline(psifac)) * dm
                     abs(singfac) < 1e-8 && (converged = true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
@@ -60,7 +60,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=Spl.spline_deriv1!(equil.sq, psifac)[2][4]
+                        q1=(BSplineKit.Derivative(1) * equil.q_spline)(psifac)
                     ))
                     intr.msing += 1
                 end
@@ -95,7 +95,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = equil.sq.fs1[end, 4]
+    intr.q1lim = (BSplineKit.Derivative(1) * equil.q_spline)(equil.psi_grid[end])
     intr.psilim = equil.config.control.psihigh
 
     # Optionally override qlim based on dmlim
@@ -117,14 +117,14 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
     # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(equil.sq.fs[:, 4] .- intr.qlim))
+        _, jpsi = findmin(abs.(equil.q_values .- intr.qlim))
         jpsi = min(jpsi, equil.config.control.mpsi - 1)
 
         # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
+        qval(ψ) = equil.q_spline(ψ)
+        q1val(ψ) = (BSplineKit.Derivative(1) * equil.q_spline)(ψ)
 
-        intr.psilim = equil.sq.xs[jpsi]
+        intr.psilim = equil.psi_grid[jpsi]
         converged = false
         for _ in 1:itmax
             dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
@@ -279,8 +279,11 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
-    # Evaluate cubic splines
-    q .= getindex.(Spl.spline_deriv3!(equil.sq, singp.psifac), 4)
+    # Evaluate q and its derivatives up to 3rd order using BSplineKit
+    q[1] = equil.q_spline(singp.psifac)
+    q[2] = (BSplineKit.Derivative(1) * equil.q_spline)(singp.psifac)
+    q[3] = (BSplineKit.Derivative(2) * equil.q_spline)(singp.psifac)
+    q[4] = (BSplineKit.Derivative(3) * equil.q_spline)(singp.psifac)
     f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
     g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
     k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
@@ -704,7 +707,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
+    odet.q = equil.q_spline(psieval)
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # kinetic stuff - skip for now

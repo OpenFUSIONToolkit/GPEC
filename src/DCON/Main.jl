@@ -44,7 +44,7 @@ function Main(path::String="./")
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
-    locstab_fs = zeros(Float64, length(equil.sq.xs), 5)
+    locstab_fs = zeros(Float64, length(equil.psi_grid), 5)
     if ctrl.mer_flag
         if ctrl.verbose
             println("Evaluating Mercier criterion")
@@ -57,7 +57,7 @@ function Main(path::String="./")
     #   CALL bal_scan
     #ENDIF
     # Fit data to splines
-    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
+    intr.locstab = Spl.CubicSpline(Vector(equil.psi_grid), locstab_fs; bctype="extrap")
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -235,17 +235,17 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["equil/zo"] = equil.zo
 
         # Write spline arrays
-        out_h5["splines/sq/xs"] = Vector(equil.sq.xs)
-        # TODO: getting errors when trying to dump just fs, so splitting for now, which adds so many lines
-        # This should be fixed if we separate these like Nik mentioned
-        out_h5["splines/sq/fs/2piF"] = equil.sq.fs[:, 1]
-        out_h5["splines/sq/fs/mu0p"] = equil.sq.fs[:, 2]
-        out_h5["splines/sq/fs/dVdpsi"] = equil.sq.fs[:, 3]
-        out_h5["splines/sq/fs/q"] = equil.sq.fs[:, 4]
-        out_h5["splines/sq/fs1/2piF"] = equil.sq.fs1[:, 1]
-        out_h5["splines/sq/fs1/mu0p"] = equil.sq.fs1[:, 2]
-        out_h5["splines/sq/fs1/dVdpsi"] = equil.sq.fs1[:, 3]
-        out_h5["splines/sq/fs1/q"] = equil.sq.fs1[:, 4]
+        out_h5["splines/sq/xs"] = Vector(equil.psi_grid)
+        # Write spline function values at grid points
+        out_h5["splines/sq/fs/2piF"] = equil.F_values
+        out_h5["splines/sq/fs/mu0p"] = equil.P_values
+        out_h5["splines/sq/fs/dVdpsi"] = equil.dVdpsi_values
+        out_h5["splines/sq/fs/q"] = equil.q_values
+        # Write spline first derivatives at grid points
+        out_h5["splines/sq/fs1/2piF"] = [(BSplineKit.Derivative(1) * equil.F_spline)(psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/mu0p"] = [(BSplineKit.Derivative(1) * equil.P_spline)(psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/dVdpsi"] = [(BSplineKit.Derivative(1) * equil.dVdpsi_spline)(psi) for psi in equil.psi_grid]
+        out_h5["splines/sq/fs1/q"] = [(BSplineKit.Derivative(1) * equil.q_spline)(psi) for psi in equil.psi_grid]
         out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
         out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
         out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
@@ -272,8 +272,8 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 
         # Write local stability data
         if ctrl.mer_flag
-            out_h5["locstab/di"] = Vector(intr.locstab.fs[:, 1] ./ equil.sq.xs)
-            out_h5["locstab/dr"] = Vector(intr.locstab.fs[:, 2] ./ equil.sq.xs)
+            out_h5["locstab/di"] = Vector(intr.locstab.fs[:, 1] ./ equil.psi_grid)
+            out_h5["locstab/dr"] = Vector(intr.locstab.fs[:, 2] ./ equil.psi_grid)
             out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag

@@ -34,7 +34,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
     end
 
     if ctrl.verbose # mimicing output from ode_output_open
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" Spl.spline_eval!(equil.sq, odet.psifac)[4]))")
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.q_spline(odet.psifac)))")
     end
 
     # Always integrate once, even if no rational surfaces are crossed
@@ -95,18 +95,18 @@ Support for `kin_flag`
 function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Shorthand to evaluate q/q1 inside newton iteration
-    qval = psi -> Spl.spline_eval!(equil.sq, psi)[4]
-    q1val = psi -> Spl.spline_deriv1!(equil.sq, psi)[2][4]
+    qval = psi -> equil.q_spline(psi)
+    q1val = psi -> (BSplineKit.Derivative(1) * equil.q_spline)(psi)
 
     # Preliminary computations
-    odet.psifac = equil.sq.xs[1]
+    odet.psifac = equil.psi_grid[1]
 
     # Use Newton iteration to find starting psi if qlow is above q0
-    if ctrl.qlow > equil.sq.fs[1, 4]
-        # Find last index where q < qlow 
-        idx = findlast(jpsi -> equil.sq.fs[jpsi-1, 4] < ctrl.qlow, 2:equil.sq.mx)
+    if ctrl.qlow > equil.q_values[1]
+        # Find last index where q < qlow
+        idx = findlast(jpsi -> equil.q_values[jpsi-1] < ctrl.qlow, 2:length(equil.psi_grid))
         if idx !== nothing
-            odet.psifac = equil.sq.xs[idx]
+            odet.psifac = equil.psi_grid[idx]
         end
         # Refine psifac using Newton iteration
         converged = false

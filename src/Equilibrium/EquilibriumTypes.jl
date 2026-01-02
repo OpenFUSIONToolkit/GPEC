@@ -445,14 +445,18 @@ This object provides a complete representation of the processed plasma equilibri
 
   - `params::EquilibriumParameters`:
     Computed equilibrium parameters and diagnostics.
-  - `sq::CubicSpline{Float64}`:
-    Final 1D profile spline.
-
-      + **x value:** normalized ψ
-      + **Quantity 1:** Toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
-      + **Quantity 2:** Pressure × μ₀, `P * μ₀`
-      + **Quantity 3:** dV/dψ
-      + **Quantity 4:** q
+  - `F_spline`:
+    1D spline for toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
+    **x value:** normalized ψ ∈ [0, 1]
+  - `P_spline`:
+    1D spline for pressure × μ₀, `P * μ₀`
+    **x value:** normalized ψ ∈ [0, 1]
+  - `dVdpsi_spline`:
+    1D spline for volume derivative with respect to flux, `dV/dψ`
+    **x value:** normalized ψ ∈ [0, 1]
+  - `q_spline`:
+    1D spline for safety factor, `q`
+    **x value:** normalized ψ ∈ [0, 1]
   - `rzphi::BicubicSpline`:
     Final 2D flux-coordinate mapping spline.
 
@@ -478,7 +482,16 @@ This object provides a complete representation of the processed plasma equilibri
 mutable struct PlasmaEquilibrium
     config::EquilibriumConfig
     params::EquilibriumParameters
-    sq::Spl.CubicSpline{Float64}
+    F_spline::Any  # BSplineKit.jl cubic B-spline interpolation
+    P_spline::Any  # BSplineKit.jl cubic B-spline interpolation
+    dVdpsi_spline::Any  # BSplineKit.jl cubic B-spline interpolation
+    q_spline::Any  # BSplineKit.jl cubic B-spline interpolation
+    # Grid and node values for efficient array operations
+    psi_grid::Vector{Float64}  # Normalized psi grid points
+    F_values::Vector{Float64}  # F*2π values at grid points
+    P_values::Vector{Float64}  # P*μ₀ values at grid points
+    dVdpsi_values::Vector{Float64}  # dV/dψ values at grid points
+    q_values::Vector{Float64}  # q values at grid points
     rzphi::Spl.BicubicSpline
     eqfun::Spl.BicubicSpline
     ro::Float64

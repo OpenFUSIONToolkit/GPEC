@@ -414,7 +414,7 @@ robustness.
 ## Returns:
 
   - A `PlasmaEquilibrium` object containing the final, processed equilibrium data,
-    including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
+    including the profile splines (`F_spline`, `P_spline`, `dVdpsi_spline`, `q_spline`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
 function equilibrium_solver(raw_profile::DirectRunInput)
@@ -472,32 +472,39 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             rzphi_nodes[ipsi, itheta, 4] = jac_term
         end
 
-        # Store surface-averaged quantities for the `sq` spline
+        # Store surface-averaged quantities for the profile splines
         sq_nodes[ipsi, 1] = bfield.f * 2π
         sq_nodes[ipsi, 2] = bfield.p
         sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
     end
 
-    # Fit 1D profile spline `sq` and perform q-profile revision if needed
-    sq = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
-    q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
+    # Perform q-profile revision if needed (before creating final splines)
+    # Create temporary spline to get q0 with derivatives
+    sq_temp = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
+    q0 = sq_temp.fs[1, 4] - sq_temp.fs1[1, 4] * sq_temp.xs[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
     if equil_params.newq0 != 0.0
         println("Revising q-profile for newq0 = $(equil_params.newq0)...")
-        f0 = sq.fs[1, 1] - sq.fs1[1, 1] * sq.xs[1]
+        f0 = sq_temp.fs[1, 1] - sq_temp.fs1[1, 1] * sq_temp.xs[1]
         f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / sq.fs[i, 1]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / sq_temp.fs[i, 1]^2) * sign(equil_params.newq0)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
         end
-        # Re-create the spline with the revised data
-        sq = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
     end
+
+    # Create individual BSplineKit.jl splines for each quantity
+    # BSplineKit supports non-uniform grids (psi_nodes is non-uniform for "ldp" grid type)
+    # Use cubic B-splines with natural boundary conditions (extrapolate flat outside domain)
+    F_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 1], BSplineKit.BSplineOrder(4))
+    P_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 2], BSplineKit.BSplineOrder(4))
+    dVdpsi_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 3], BSplineKit.BSplineOrder(4))
+    q_spline = BSplineKit.interpolate(psi_nodes, sq_nodes[:, 4], BSplineKit.BSplineOrder(4))
 
     # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
     rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes; bctypex="extrap", bctypey="periodic")
@@ -508,9 +515,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
         psi_norm = psi_nodes[ipsi]
-        fsq = Spl.spline_eval!(sq, psi_norm)
-        q = fsq[4]
-        f_val = fsq[1]
+        q = q_spline(psi_norm)
+        f_val = F_spline(psi_norm)
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
             f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
@@ -548,5 +554,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         end
     end
     eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; bctypex="extrap", bctypey="periodic")
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), sq, rzphi, eqfun, ro, zo, psio)
+    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(),
+        F_spline, P_spline, dVdpsi_spline, q_spline,
+        psi_nodes, sq_nodes[:, 1], sq_nodes[:, 2], sq_nodes[:, 3], sq_nodes[:, 4],
+        rzphi, eqfun, ro, zo, psio)
 end

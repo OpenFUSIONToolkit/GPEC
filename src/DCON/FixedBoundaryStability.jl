@@ -19,7 +19,7 @@ function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.Plasma
 
     # Loop over integration steps, computing crit/checking for zero crossings
     for istep in 1:odet.step
-        zero_cross, nonherm = check_for_zero_crossings!(odet, equil.sq, istep)
+        zero_cross, nonherm = check_for_zero_crossings!(odet, equil, istep)
         if zero_cross
             nzero += 1
         end
@@ -59,12 +59,12 @@ can do it post-integration rather than during and don't directly handle file out
   - `nonherm::Bool`: True if W⁻¹ was non-Hermitian beyond tolerance
 
 """
-function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64}, istep::Int)
+function check_for_zero_crossings!(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium, istep::Int)
 
     # Compute smallest eigenvalue (crit) at current step
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
-    dVdpsi = Spl.spline_eval!(sq, psi)[3]
+    dVdpsi = equil.dVdpsi_spline(psi)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
 
@@ -77,7 +77,7 @@ function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64},
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep - 1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep - 1]))
-        dVdpsi = Spl.spline_eval!(sq, psi_mid)[3]
+        dVdpsi = equil.dVdpsi_spline(psi_mid)
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))

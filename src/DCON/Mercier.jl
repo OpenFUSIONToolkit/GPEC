@@ -8,20 +8,20 @@ in the Fortran code.
 function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
     # Shorthand
-    sq = plasma_eq.sq
     rzphi = plasma_eq.rzphi
 
     # Allocate splines
     ff_fs = zeros(length(rzphi.ys), 5)
 
     # Compute surface quantities
-    for ipsi in 1:length(sq.xs)
-        twopif = sq.fs[ipsi, 1]
-        p1 = sq.fs1[ipsi, 2]
-        v1 = sq.fs[ipsi, 3]
-        v2 = sq.fs1[ipsi, 3]
-        q = sq.fs[ipsi, 4]
-        q1 = sq.fs1[ipsi, 4]
+    for ipsi in 1:length(plasma_eq.psi_grid)
+        psi = plasma_eq.psi_grid[ipsi]
+        twopif = plasma_eq.F_values[ipsi]
+        p1 = (BSplineKit.Derivative(1) * plasma_eq.P_spline)(psi)
+        v1 = plasma_eq.dVdpsi_values[ipsi]
+        v2 = (BSplineKit.Derivative(1) * plasma_eq.dVdpsi_spline)(psi)
+        q = plasma_eq.q_values[ipsi]
+        q1 = (BSplineKit.Derivative(1) * plasma_eq.q_spline)(psi)
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian
@@ -69,8 +69,8 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
 
         # Store results in output spline structure
-        locstab_fs[ipsi, 1] = di * sq.xs[ipsi]
-        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * sq.xs[ipsi]
+        locstab_fs[ipsi, 1] = di * plasma_eq.psi_grid[ipsi]
+        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * plasma_eq.psi_grid[ipsi]
         locstab_fs[ipsi, 3] = h
     end
 end
