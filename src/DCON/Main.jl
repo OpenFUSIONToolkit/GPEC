@@ -117,7 +117,7 @@ function Main(path::String="./")
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = make_metric(equil; mband=intr.mband)
 
         if ctrl.verbose
             println("   Computing F, G, and K Matrices")

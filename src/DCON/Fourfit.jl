@@ -2,32 +2,35 @@
     MetricData
 
 A structure to hold the computed metric tensor components and their
-Fourier-spline representation. This is the Julia equivalent of the `fspline_type`
+Fourier coefficients. This is the Julia equivalent of the `fspline_type`
 named `metric` in the Fortran `fourfit_make_metric` subroutine.
 
 ### Fields
 
-  - `mpsi::Int`: Number of radial grid points minus one.
-  - `mtheta::Int`: Number of poloidal grid points minus one.
+  - `mpsi::Int`: Number of radial grid points.
+  - `mtheta::Int`: Number of poloidal grid points.
+  - `mband::Int`: Number of Fourier modes (0 to mband).
   - `xs::Vector{Float64}`: Radial coordinates (normalized poloidal flux `ψ_norm`).
   - `ys::Vector{Float64}`: Poloidal angle coordinates `θ` in radians (0 to 2π).
   - `fs::Array{Float64, 3}`: The raw metric data on the grid, size `(mpsi, mtheta, 8)`.
     The 8 quantities are: `g¹¹`, `g²²`, `g³³`, `g²³`, `g³¹`, `g¹²`, `J`, `∂J/∂ψ`.
-  - `fspline::Spl.FourierSpline`: The fitted Fourier-cubic spline object.
+  - `fourier_coeffs::Matrix{ComplexF64}`: Fourier coefficients, size `(mpsi, (mband+1)*8)`.
+    Stores coefficients for modes 0 to mband for each of the 8 metric quantities.
 """
 @kwdef mutable struct MetricData
     mpsi::Int
     mtheta::Int
+    mband::Int = 0
     xs::Vector{Float64} = zeros(mpsi)
     ys::Vector{Float64} = zeros(mtheta)
     fs::Array{Float64,3} = zeros(mpsi, mtheta, 8)
-    fspline::Union{Spl.FourierSpline,Nothing} = nothing
+    fourier_coeffs::Matrix{ComplexF64} = zeros(ComplexF64, mpsi, (mband+1)*8)
 end
 
-MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
+MetricData(mpsi::Int, mtheta::Int, mband::Int) = MetricData(; mpsi, mtheta, mband)
 
 """
-    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10, fft_flag::Bool=true) -> MetricData
+    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10) -> MetricData
 
 Constructs the metric tensor data on a (ψ, θ) grid from an input plasma equilibrium.
 The metric coefficients stored in `metric.fs` include:
@@ -41,10 +44,12 @@ The metric coefficients stored in `metric.fs` include:
  7. J (Jacobian)
  8. ∂J/∂ψ
 
+Fourier coefficients for modes 0 to mband are computed using FFTW and stored in
+`metric.fourier_coeffs`.
+
 ### Arguments
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
-  - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
 
 ### Returns
 
@@ -56,7 +61,7 @@ The metric coefficients stored in `metric.fs` include:
 Add kinetic metric tensor components for kin_flag = true
 Remove mband if we decide to fully deprecate banded matrices
 """
-function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
+function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int)
 
     # TODO: add kinetic metric tensor components
 
@@ -66,7 +71,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
 
     # Set coordinate grids based on the input equilibrium
     # The theta_grid is normalized (0 to 1), so scale to radians.
-    metric = MetricData(mpsi, mtheta)
+    metric = MetricData(mpsi, mtheta, mband)
     metric.xs .= Vector(equil.psi_grid)
     metric.ys .= Vector(equil.theta_grid .* 2π)
 
@@ -127,22 +132,27 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
         end
     end
 
-    # --- Fit the grid data to a Fourier-cubic spline ---
-    fit_method = fft_flag ? 2 : 1
-    # In Fortran, `bctype` was set for the periodic `y` dimension. Here, the `FourierSpline`
-    # `bctype` argument applies to the non-periodic `x` dimension. The Fortran
-    # code used "extrap" for this.
-    bctype_x = "not-a-knot"
+    # --- Compute Fourier coefficients using FFTW ---
+    # Use mtheta-1 points for FFT (drop the last periodic point that equals the first)
+    ntheta_fft = mtheta - 1
+    nqty = 8  # Number of metric quantities
 
-    # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
-    metric.fspline = Spl.FourierSpline(
-        metric.xs,
-        metric.ys,
-        metric.fs,
-        mband;
-        bctype=bctype_x,
-        fit_method=fit_method
-    )
+    # FFT along theta direction and normalize (matching Fortran's sign=-1 normalization)
+    # The Fortran code divides by n before FFT, which is equivalent to fft(x)/n
+    for iqty in 1:nqty
+        for ipsi in 1:mpsi
+            # Get the theta data (drop last periodic point)
+            theta_data = @view metric.fs[ipsi, 1:ntheta_fft, iqty]
+            # Compute FFT and normalize
+            fft_result = fft(theta_data) / ntheta_fft
+            # Store modes 0 to mband (indices 1 to mband+1 in Julia)
+            for m in 0:mband
+                j = m + 1 + (iqty - 1) * (mband + 1)  # Column index in fourier_coeffs
+                metric.fourier_coeffs[ipsi, j] = fft_result[m + 1]
+            end
+        end
+    end
+
     return metric
 end
 
@@ -230,14 +240,14 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         chi1 = 2π * equil.psio
 
         # Fill lower half (0, -1, …, -mband)
-        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:intr.mband+1]
-        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, intr.mband+2:2*intr.mband+2]
-        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 2*intr.mband+3:3*intr.mband+3]
-        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 3*intr.mband+4:4*intr.mband+4]
-        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 4*intr.mband+5:5*intr.mband+5]
-        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 5*intr.mband+6:6*intr.mband+6]
-        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 6*intr.mband+7:7*intr.mband+7]
-        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 7*intr.mband+8:8*intr.mband+8]
+        g11[mid:-1:1] .= metric.fourier_coeffs[ipsi, 1:intr.mband+1]
+        g22[mid:-1:1] .= metric.fourier_coeffs[ipsi, intr.mband+2:2*intr.mband+2]
+        g33[mid:-1:1] .= metric.fourier_coeffs[ipsi, 2*intr.mband+3:3*intr.mband+3]
+        g23[mid:-1:1] .= metric.fourier_coeffs[ipsi, 3*intr.mband+4:4*intr.mband+4]
+        g31[mid:-1:1] .= metric.fourier_coeffs[ipsi, 4*intr.mband+5:5*intr.mband+5]
+        g12[mid:-1:1] .= metric.fourier_coeffs[ipsi, 5*intr.mband+6:6*intr.mband+6]
+        jmat[mid:-1:1] .= metric.fourier_coeffs[ipsi, 6*intr.mband+7:7*intr.mband+7]
+        jmat1[mid:-1:1] .= metric.fourier_coeffs[ipsi, 7*intr.mband+8:8*intr.mband+8]
 
         # Fill upper half (+1:mband) with conjugate symmetry
         for k in 1:intr.mband
