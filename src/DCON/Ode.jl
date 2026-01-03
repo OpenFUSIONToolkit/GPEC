@@ -40,6 +40,10 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
     # Always integrate once, even if no rational surfaces are crossed
     ode_step!(odet, ctrl, equil, ffit, intr)
 
+    # After first integration step, compute absolute tolerance scale from solution data
+    # This allows more efficient stepping in the deep core where solutions are small
+    compute_atol_scale!(odet, equil, intr)
+
     # If at a rational surface, do the appropriate crossing routine, then integrate again
     while odet.ising != ctrl.ksing && odet.next == "cross"
 
@@ -50,6 +54,11 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
         end
 
         ode_step!(odet, ctrl, equil, ffit, intr)
+
+        # Update absolute tolerance scale periodically as integration progresses
+        if odet.ising % 5 == 0  # Update every 5 rational surfaces
+            compute_atol_scale!(odet, equil, intr)
+        end
     end
 
     # Deallocate unused storage of integration data
@@ -296,10 +305,9 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
 
     # Advance differential equation to next singular surface or edge
-    rtol = compute_tols(ctrl, intr, odet) # initial tolerances
+    rtol, atol = compute_tols(ctrl, intr, odet) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (odet.psifac, odet.psimax), (ctrl, equil, ffit, intr, odet))
-    sol = solve(prob, BS5(); reltol=rtol, callback=cb)
-    # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
+    sol = solve(prob, BS5(); reltol=rtol, abstol=atol, callback=cb)
 
     # Update u and psifac with the solution at the end of the interval
     odet.u .= sol.u[end]
@@ -319,12 +327,13 @@ and `ode_record_edge` post-integration using the saved data.
 
 """
 function integrator_callback!(integrator)
-    
+
     ctrl, _, _, intr, odet = integrator.p
 
     # Update integration tolerances
-    integrator.opts.reltol = compute_tols(ctrl, intr, odet)
-    # integrator.opts.abstol = atol
+    rtol, atol = compute_tols(ctrl, intr, odet)
+    integrator.opts.reltol = rtol
+    integrator.opts.abstol = atol
 
     # Check if the solution norms are above a threshold, if so apply Gaussian reduction
     ode_unorm!(integrator.u, odet, ctrl, intr, false)
@@ -343,6 +352,67 @@ function integrator_callback!(integrator)
 end
 
 """
+    compute_atol_scale!(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+
+Compute a reference scale for absolute tolerance by sampling solution magnitudes
+at safe locations (half-integer q values between rational surfaces, avoiding the
+deep core and singular surfaces). This scale allows the ODE solver to take larger
+steps in the deep core where solutions are small, improving efficiency.
+
+The scale is computed by finding the maximum solution magnitude at sampled q values.
+If no suitable sampling points exist, falls back to using current solution magnitude.
+"""
+function compute_atol_scale!(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    # Sample at half-integer q values between rational surfaces, excluding deep core
+    max_scale = 0.0
+    q_samples = Float64[]
+
+    # Find q range to sample (avoid deep core, stop before edge)
+    q_start = max(equil.sq.fs[1, 4] + 0.5, ceil(equil.sq.fs[1, 4]) + 0.5)  # Start at least 0.5 above q0
+    q_end = min(intr.qlim, equil.sq.fs[end, 4]) - 0.5  # End 0.5 before limit
+
+    # Generate half-integer q values in this range
+    if q_end > q_start
+        for q_sample in q_start:1.0:q_end
+            # Check if this q is far enough from rational surfaces (at least 0.3 away)
+            is_safe = true
+            for ising in 1:intr.msing
+                if abs(q_sample - intr.sing[ising].q) < 0.3
+                    is_safe = false
+                    break
+                end
+            end
+            if is_safe
+                push!(q_samples, q_sample)
+            end
+        end
+    end
+
+    # If we have safe sampling points, use stored solution data
+    if !isempty(q_samples) && odet.step > 1
+        for istep in 1:min(odet.step-1, length(odet.q_store))
+            q_at_step = odet.q_store[istep]
+            # Check if this step is near one of our safe q values
+            for q_sample in q_samples
+                if abs(q_at_step - q_sample) < 0.1
+                    max_scale = max(max_scale, maximum(abs, odet.u_store[:, :, :, istep]))
+                    break
+                end
+            end
+        end
+    end
+
+    # Fallback: if no samples found, use current solution magnitude scaled up
+    # to be conservative (multiply by 10 to ensure we're not too restrictive)
+    if max_scale == 0.0
+        max_scale = maximum(abs, odet.u) * 10.0
+    end
+
+    odet.atol_scale = max_scale
+    return nothing
+end
+
+"""
     compute_tols(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
 Compute relative and absolute tolerances for the ODE solver based on proximity
@@ -354,12 +424,11 @@ functionality.
 ### TODOs
 
 Support for `kin_flag`
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Add back absolute tolerance calculation if needed
 
 ### Returns
 
   - rtol: Relative tolerance
+  - atol: Absolute tolerance (scalar, applied uniformly to all components)
 
 """
 function compute_tols(ctrl, intr, odet)
@@ -378,15 +447,14 @@ function compute_tols(ctrl, intr, odet)
             singfac_local = min(singfac_local, abs(minimum(intr.sing[odet.ising-1].n) * (intr.sing[odet.ising-1].q - odet.q)))
         end
     end
-    rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
-    # Absolute tolerances (not used for now, if so, will need to pass in integrator.u)
-    # atol = similar(odet.u, Float64)
-    # for ieq in 1:size(odet.u, 3), isol in 1:size(odet.u, 2)
-    #     @views atol0 = maximum(abs, odet.u[:, isol, ieq]) * tol
-    #     atol0 == 0 && (atol0 = Inf)
-    #     atol[:, isol, ieq] .= atol0
-    # end
-    return rtol
+    rtol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
+
+    # Absolute tolerance: use stored reference scale if available, otherwise use current solution magnitude
+    # The reference scale is computed during initialization and represents typical solution magnitudes
+    # away from the deep core, allowing larger steps when solutions are small near the axis
+    atol = odet.atol_scale > 0.0 ? odet.atol_scale * rtol : maximum(abs, odet.u) * rtol
+
+    return rtol, atol
 end
 
 """

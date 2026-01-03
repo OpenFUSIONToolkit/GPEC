@@ -378,6 +378,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     psimax::Float64 = 0.0
     next::String = ""
     nzero::Int = 0
+    atol_scale::Float64 = 0.0  # Reference scale for absolute tolerance
 
     # Used for Gaussian reduction
     new::Bool = true
