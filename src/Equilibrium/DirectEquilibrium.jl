@@ -36,7 +36,17 @@ struct NonUniformSplineWrapper{T1,T2}
 end
 
 # Make the wrapper callable
-(wrapper::NonUniformSplineWrapper)(psi) = wrapper.index_spline(wrapper.psi_to_index(psi))
+# For 1D splines (scalar output at each psi)
+(wrapper::NonUniformSplineWrapper)(psi) = begin
+    psi_idx = wrapper.psi_to_index(psi)
+    # Check if index_spline is 1D or 2D
+    if ndims(wrapper.index_spline) == 1
+        return wrapper.index_spline(psi_idx)
+    else
+        # For 2D splines (vector/matrix output at each psi), extract all components
+        return [wrapper.index_spline(psi_idx, i) for i in axes(wrapper.index_spline, 2)]
+    end
+end
 
 """
     NonUniformSplineWrapper2D

@@ -282,7 +282,15 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         end
     end
 
-    return Spl.CubicSpline(psi_array, reshape(wv_array, npsi+1, :); bctype="extrap")
+    # Create spline using Interpolations.jl with coordinate transformation
+    wv_flat = reshape(wv_array, npsi+1, :)
+    n_psi = length(psi_array)
+    index_coords = range(1.0, Float64(n_psi), length=n_psi)
+    psi_to_index = interpolate((psi_array,), collect(index_coords), Gridded(Linear()))
+
+    wv_itp = interpolate(wv_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    wv_scaled = scale(wv_itp, index_coords, 1:size(wv_flat, 2))
+    return Equilibrium.NonUniformSplineWrapper(wv_scaled, psi_to_index)
 end
 
 """
@@ -308,7 +316,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
     # Compute vacuum matrix from spline
-    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.numpert_total, intr.numpert_total)
+    wv = reshape(odet.wvmat_spline(odet.psifac), intr.numpert_total, intr.numpert_total)
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv

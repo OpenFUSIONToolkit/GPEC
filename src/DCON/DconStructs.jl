@@ -231,16 +231,16 @@ end
     mpert::Int
     mband::Int
 
-    # Spline matrices
-    amats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    bmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    cmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    dmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    emats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    hmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    fmats_lower::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    kmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    gmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    # Spline matrices (now using Interpolations.jl via NonUniformSplineWrapper)
+    amats::Any = nothing
+    bmats::Any = nothing
+    cmats::Any = nothing
+    dmats::Any = nothing
+    emats::Any = nothing
+    hmats::Any = nothing
+    fmats_lower::Any = nothing
+    kmats::Any = nothing
+    gmats::Any = nothing
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
@@ -367,7 +367,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat_spline::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    wvmat_spline::Any = nothing  # Now using Interpolations.jl via NonUniformSplineWrapper
 
     # Data for integrator
     psifac::Float64 = 0.0

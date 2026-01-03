@@ -284,9 +284,22 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     q[2] = ForwardDiff.derivative(equil.q_spline, singp.psifac)
     q[3] = ForwardDiff.derivative(x -> ForwardDiff.derivative(equil.q_spline, x), singp.psifac)
     q[4] = ForwardDiff.derivative(x -> ForwardDiff.derivative(y -> ForwardDiff.derivative(equil.q_spline, y), x), singp.psifac)
-    f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
-    g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
-    k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
+
+    # Evaluate complex matrix splines and their derivatives using ForwardDiff
+    f_lower_interp[:, :, 1] .= reshape(ffit.fmats_lower(singp.psifac), size(f_lower_interp, 1), size(f_lower_interp, 2))
+    f_lower_interp[:, :, 2] .= reshape(ForwardDiff.derivative(ffit.fmats_lower, singp.psifac), size(f_lower_interp, 1), size(f_lower_interp, 2))
+    f_lower_interp[:, :, 3] .= reshape(ForwardDiff.derivative(x -> ForwardDiff.derivative(ffit.fmats_lower, x), singp.psifac), size(f_lower_interp, 1), size(f_lower_interp, 2))
+    f_lower_interp[:, :, 4] .= reshape(ForwardDiff.derivative(x -> ForwardDiff.derivative(y -> ForwardDiff.derivative(ffit.fmats_lower, y), x), singp.psifac), size(f_lower_interp, 1), size(f_lower_interp, 2))
+
+    g_interp[:, :, 1] .= reshape(ffit.gmats(singp.psifac), size(g_interp, 1), size(g_interp, 2))
+    g_interp[:, :, 2] .= reshape(ForwardDiff.derivative(ffit.gmats, singp.psifac), size(g_interp, 1), size(g_interp, 2))
+    g_interp[:, :, 3] .= reshape(ForwardDiff.derivative(x -> ForwardDiff.derivative(ffit.gmats, x), singp.psifac), size(g_interp, 1), size(g_interp, 2))
+    g_interp[:, :, 4] .= reshape(ForwardDiff.derivative(x -> ForwardDiff.derivative(y -> ForwardDiff.derivative(ffit.gmats, y), x), singp.psifac), size(g_interp, 1), size(g_interp, 2))
+
+    k_interp[:, :, 1] .= reshape(ffit.kmats(singp.psifac), size(k_interp, 1), size(k_interp, 2))
+    k_interp[:, :, 2] .= reshape(ForwardDiff.derivative(ffit.kmats, singp.psifac), size(k_interp, 1), size(k_interp, 2))
+    k_interp[:, :, 3] .= reshape(ForwardDiff.derivative(x -> ForwardDiff.derivative(ffit.kmats, x), singp.psifac), size(k_interp, 1), size(k_interp, 2))
+    k_interp[:, :, 4] .= reshape(ForwardDiff.derivative(x -> ForwardDiff.derivative(y -> ForwardDiff.derivative(ffit.kmats, y), x), singp.psifac), size(k_interp, 1), size(k_interp, 2))
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
@@ -715,12 +728,12 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         error("kin_flag not implemented yet")
     else
         # Evaluate matrix splines at the current psi value
-        Spl.spline_eval!(odet.amat, ffit.amats, psieval)
-        Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
-        Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
-        Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
-        Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
-        Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
+        odet.amat .= reshape(ffit.amats(psieval), size(odet.amat))
+        odet.bmat .= reshape(ffit.bmats(psieval), size(odet.bmat))
+        odet.cmat .= reshape(ffit.cmats(psieval), size(odet.cmat))
+        odet.fmat_lower .= reshape(ffit.fmats_lower(psieval), size(odet.fmat_lower))
+        odet.kmat .= reshape(ffit.kmats(psieval), size(odet.kmat))
+        odet.gmat .= reshape(ffit.gmats(psieval), size(odet.gmat))
         
         # Form full matrices from flat representations
         # TODO: make these block diagonal for multi-n?

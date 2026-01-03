@@ -321,17 +321,50 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: add kinetic matrices here
     end
 
-    # --- Fit splines ---
+    # --- Fit splines using Interpolations.jl ---
+    # Create coordinate transformation for non-uniform psi grid
+    n_psi = length(metric.xs)
+    index_coords = range(1.0, Float64(n_psi), length=n_psi)
+    psi_to_index = interpolate((metric.xs,), collect(index_coords), Gridded(Linear()))
+
     ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband)
-    ffit.amats = Spl.CubicSpline(metric.xs, amats_flat; bctype="extrap")
-    ffit.bmats = Spl.CubicSpline(metric.xs, bmats_flat; bctype="extrap")
-    ffit.cmats = Spl.CubicSpline(metric.xs, cmats_flat; bctype="extrap")
-    ffit.dmats = Spl.CubicSpline(metric.xs, dmats_flat; bctype="extrap")
-    ffit.emats = Spl.CubicSpline(metric.xs, emats_flat; bctype="extrap")
-    ffit.hmats = Spl.CubicSpline(metric.xs, hmats_flat; bctype="extrap")
-    ffit.fmats_lower = Spl.CubicSpline(metric.xs, fmats_lower_flat; bctype="extrap")
-    ffit.gmats = Spl.CubicSpline(metric.xs, gmats_flat; bctype="extrap")
-    ffit.kmats = Spl.CubicSpline(metric.xs, kmats_flat; bctype="extrap")
+
+    # Create complex splines using NonUniformSplineWrapper
+    amats_itp = interpolate(amats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    amats_scaled = scale(amats_itp, index_coords, 1:size(amats_flat, 2))
+    ffit.amats = Equilibrium.NonUniformSplineWrapper(amats_scaled, psi_to_index)
+
+    bmats_itp = interpolate(bmats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    bmats_scaled = scale(bmats_itp, index_coords, 1:size(bmats_flat, 2))
+    ffit.bmats = Equilibrium.NonUniformSplineWrapper(bmats_scaled, psi_to_index)
+
+    cmats_itp = interpolate(cmats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    cmats_scaled = scale(cmats_itp, index_coords, 1:size(cmats_flat, 2))
+    ffit.cmats = Equilibrium.NonUniformSplineWrapper(cmats_scaled, psi_to_index)
+
+    dmats_itp = interpolate(dmats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    dmats_scaled = scale(dmats_itp, index_coords, 1:size(dmats_flat, 2))
+    ffit.dmats = Equilibrium.NonUniformSplineWrapper(dmats_scaled, psi_to_index)
+
+    emats_itp = interpolate(emats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    emats_scaled = scale(emats_itp, index_coords, 1:size(emats_flat, 2))
+    ffit.emats = Equilibrium.NonUniformSplineWrapper(emats_scaled, psi_to_index)
+
+    hmats_itp = interpolate(hmats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    hmats_scaled = scale(hmats_itp, index_coords, 1:size(hmats_flat, 2))
+    ffit.hmats = Equilibrium.NonUniformSplineWrapper(hmats_scaled, psi_to_index)
+
+    fmats_lower_itp = interpolate(fmats_lower_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    fmats_lower_scaled = scale(fmats_lower_itp, index_coords, 1:size(fmats_lower_flat, 2))
+    ffit.fmats_lower = Equilibrium.NonUniformSplineWrapper(fmats_lower_scaled, psi_to_index)
+
+    gmats_itp = interpolate(gmats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    gmats_scaled = scale(gmats_itp, index_coords, 1:size(gmats_flat, 2))
+    ffit.gmats = Equilibrium.NonUniformSplineWrapper(gmats_scaled, psi_to_index)
+
+    kmats_itp = interpolate(kmats_flat, (BSpline(Cubic(Flat(OnGrid()))), NoInterp()))
+    kmats_scaled = scale(kmats_itp, index_coords, 1:size(kmats_flat, 2))
+    ffit.kmats = Equilibrium.NonUniformSplineWrapper(kmats_scaled, psi_to_index)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
