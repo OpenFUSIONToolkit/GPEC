@@ -97,12 +97,6 @@ function Main(path::String="./")
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
-    if ctrl.delta_mband >= intr.mpert
-        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
-        ctrl.delta_mband = 0
-    end
-    intr.mband = intr.mpert - 1 - ctrl.delta_mband
-    intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
     # Fit equilibrium quantities to Fourier-spline functions.
@@ -112,12 +106,12 @@ function Main(path::String="./")
             println("   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))")
             println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
             println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println("   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))")
+            println("   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))")
             println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = make_metric(equil; mpert=intr.mpert, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
             println("   Computing F, G, and K Matrices")
@@ -213,7 +207,6 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 
         # Write derived run parameters
         out_h5["info/mpert"] = intr.mpert
-        out_h5["info/mband"] = intr.mband
         out_h5["info/mlow"] = intr.mlow
         out_h5["info/mhigh"] = intr.mhigh
         out_h5["info/npert"] = intr.npert

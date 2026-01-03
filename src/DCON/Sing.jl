@@ -304,9 +304,10 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # For now, leaving overly detailed comments to remind so I don't have to work through this again
     # First, compute Taylor series coefficients of QL̄ (but without scaling by 1/n!), so we get binomial coefficients leftover
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
+    mband = intr.mpert - 1  # Fourier bandwidth
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m + mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
@@ -357,8 +358,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         for j in 0:n
             for ipert_n in 1:intr.npert
                 for jpert_m in 1:intr.mpert
-                    for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
-                        for kpert_m in max(1, ipert_m - intr.mband):jpert_m
+                    for ipert_m in jpert_m:min(intr.mpert, jpert_m + mband)
+                        for kpert_m in max(1, ipert_m - mband):jpert_m
                             ipert = ipert_m + (ipert_n - 1) * intr.mpert
                             jpert = jpert_m + (ipert_n - 1) * intr.mpert
                             kpert = kpert_m + (ipert_n - 1) * intr.mpert
@@ -377,7 +378,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in max(1, jpert_m - intr.mband):min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in max(1, jpert_m - mband):min(intr.mpert, jpert_m + mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
@@ -419,7 +420,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # G = [G, G', G''/2, G'''/6]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m + mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]

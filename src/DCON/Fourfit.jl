@@ -27,7 +27,7 @@ end
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
 
 """
-    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10, fft_flag::Bool=true) -> MetricData
+    make_metric(equil::Equilibrium.PlasmaEquilibrium; mpert::Int, fft_flag::Bool=true) -> MetricData
 
 Constructs the metric tensor data on a (ψ, θ) grid from an input plasma equilibrium.
 The metric coefficients stored in `metric.fs` include:
@@ -43,7 +43,7 @@ The metric coefficients stored in `metric.fs` include:
 
 ### Arguments
 
-  - `mband::Int`: Number of Fourier modes to retain in the metric representation.
+  - `mpert::Int`: Number of poloidal modes (determines Fourier modes as mpert-1).
   - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
 
 ### Returns
@@ -54,9 +54,8 @@ The metric coefficients stored in `metric.fs` include:
 ### TODOs
 
 Add kinetic metric tensor components for kin_flag = true
-Remove mband if we decide to fully deprecate banded matrices
 """
-function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
+function make_metric(equil::Equilibrium.PlasmaEquilibrium; mpert::Int, fft_flag::Bool)
 
     # TODO: add kinetic metric tensor components
 
@@ -130,6 +129,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     bctype_x = "not-a-knot"
 
     # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
+    mband = mpert - 1  # Fourier bandwidth is mpert - 1
     metric.fspline = Spl.FourierSpline(
         metric.xs,
         metric.ys,
@@ -154,12 +154,6 @@ F = L · Lᴴ, which speeds up calculations later (i.e. `sing_der!``). Unlike
 the Fortran, we also do not use OffsetArrays (indexed from -mband:mband),
 but instead use standard Julia arrays and map the zero index to the middle.
 
-Note that even when using dense matrices (delta_mband = 0), the
-`mband` still appears here for backwards compatibility with the Fortran code,
-where the Fourier splines expect it as input. So even though `mband` appears
-a lot below, it is left to make implementing banded matrices easier in the future
-and does not affect the actual matrix sizes, they are all dense.
-
 ### Arguments
 
   - `metric::MetricData`:
@@ -179,6 +173,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     # --- Extract inputs ---
     sq = equil.sq
     mpsi = metric.mpsi
+    mband = intr.mpert - 1  # Fourier bandwidth is mpert - 1
 
     # Allocations (use flat storage for all matrices to fill splines)
     # TODO: This can be made more efficient for 2D equilibria by using block diagonals
@@ -191,19 +186,19 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    g11 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g22 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g33 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g23 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g31 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g12 = zeros(ComplexF64, 2 * intr.mband + 1)
-    jmat = zeros(ComplexF64, 2 * intr.mband + 1)
-    jmat1 = zeros(ComplexF64, 2 * intr.mband + 1)
+    g11 = zeros(ComplexF64, 2 * mband + 1)
+    g22 = zeros(ComplexF64, 2 * mband + 1)
+    g33 = zeros(ComplexF64, 2 * mband + 1)
+    g23 = zeros(ComplexF64, 2 * mband + 1)
+    g31 = zeros(ComplexF64, 2 * mband + 1)
+    g12 = zeros(ComplexF64, 2 * mband + 1)
+    jmat = zeros(ComplexF64, 2 * mband + 1)
+    jmat1 = zeros(ComplexF64, 2 * mband + 1)
 
     # Instead of using Offset Arrays like in Fortran (-mband:mband), we store everything in
     # a single 1:(2*mband+1) array and map the zero index to the middle
-    mid = intr.mband + 1  # "zero" position in Julia arrays
-    imat = zeros(ComplexF64, 2 * intr.mband + 1)
+    mid = mband + 1  # "zero" position in Julia arrays
+    imat = zeros(ComplexF64, 2 * mband + 1)
     imat[mid] = 1 + 0im
 
     for ipsi in 1:mpsi
@@ -225,17 +220,17 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         chi1 = 2π * equil.psio
 
         # Fill lower half (0, -1, …, -mband)
-        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:intr.mband+1]
-        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, intr.mband+2:2*intr.mband+2]
-        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 2*intr.mband+3:3*intr.mband+3]
-        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 3*intr.mband+4:4*intr.mband+4]
-        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 4*intr.mband+5:5*intr.mband+5]
-        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 5*intr.mband+6:6*intr.mband+6]
-        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 6*intr.mband+7:7*intr.mband+7]
-        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 7*intr.mband+8:8*intr.mband+8]
+        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:mband+1]
+        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, mband+2:2*mband+2]
+        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 2*mband+3:3*mband+3]
+        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 3*mband+4:4*mband+4]
+        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 4*mband+5:5*mband+5]
+        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 5*mband+6:6*mband+6]
+        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 6*mband+7:7*mband+7]
+        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 7*mband+8:8*mband+8]
 
         # Fill upper half (+1:mband) with conjugate symmetry
-        for k in 1:intr.mband
+        for k in 1:mband
             g11[mid+k] = conj(g11[mid-k])
             g22[mid+k] = conj(g22[mid-k])
             g33[mid+k] = conj(g33[mid-k])
@@ -254,7 +249,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
             for m1 in intr.mlow:intr.mhigh
                 ipert_m = m1 - intr.mlow + 1
                 singfac1 = m1 - nq
-                for dm in max(1 - ipert_m, -intr.mband):min(intr.mpert - ipert_m, intr.mband)
+                for dm in max(1 - ipert_m, -mband):min(intr.mpert - ipert_m, mband)
                     m2 = m1 + dm
                     singfac2 = m2 - nq
                     jpert_m = ipert_m + dm
@@ -317,7 +312,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     end
 
     # --- Fit splines ---
-    ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband)
+    ffit = FourFitVars(; mpert=intr.mpert)
     ffit.amats = Spl.CubicSpline(metric.xs, amats_flat; bctype="extrap")
     ffit.bmats = Spl.CubicSpline(metric.xs, bmats_flat; bctype="extrap")
     ffit.cmats = Spl.CubicSpline(metric.xs, cmats_flat; bctype="extrap")

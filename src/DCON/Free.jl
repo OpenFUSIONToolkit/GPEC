@@ -92,11 +92,12 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Normalize eigenfunction and energy.
     if normalize
         for isol in 1:intr.numpert_total
+            mband = intr.mpert - 1  # Fourier bandwidth
             norm = 0.0 + 0.0im
             for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
                 ipert = (ipert_n - 1) * intr.mpert + ipert_m
                 jpert = (ipert_n - 1) * intr.mpert + jpert_m
-                norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
+                norm += ffit.jmat[jpert_m-ipert_m+mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
             end
             norm /= v1
             vac.wt[:, isol] ./= sqrt(norm)
@@ -320,12 +321,13 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     # Normalize eigenfunction and energy (only need the first eigenmode)
     if normalize
+        mband = intr.mpert - 1  # Fourier bandwidth
         isol = 1
         norm = 0.0 + 0.0im
         for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
             ipert = (ipert_n - 1) * intr.mpert + ipert_m
             jpert = (ipert_n - 1) * intr.mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+            norm += ffit.jmat[jpert_m-ipert_m+mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
         end
         norm /= v1
         tot_eigvals[isol] /= norm

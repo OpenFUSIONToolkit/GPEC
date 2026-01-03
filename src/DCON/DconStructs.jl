@@ -65,7 +65,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `mlow::Int` - Lowest poloidal mode number
   - `mhigh::Int` - Highest poloidal mode number
   - `mpert::Int` - Number of poloidal modes (mhigh - mlow + 1)
-  - `mband::Int` - Bandwidth for matrix operations (mpert - 1 - delta_mband)
   - `nlow::Int` - Lowest toroidal mode number
   - `nhigh::Int` - Highest toroidal mode number
   - `npert::Int` - Number of toroidal modes (nhigh - nlow + 1)
@@ -89,7 +88,6 @@ A mutable struct holding internal state variables for stability calculations.
     mlow::Int = 0
     mhigh::Int = 0
     mpert::Int = 0
-    mband::Int = 0
     nlow::Int = 0
     nhigh::Int = 0
     npert::Int = 0
@@ -130,7 +128,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nn_high::Int` - Upper bound for toroidal modes
   - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
   - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
-  - `delta_mband::Int` - Integration keeps only this wide a band of solutions along the diagonal in m,m'
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
@@ -185,7 +182,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
-    delta_mband::Int = 0
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
@@ -229,7 +225,6 @@ end
 
 @kwdef mutable struct FourFitVars
     mpert::Int
-    mband::Int
 
     # Spline matrices
     amats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
@@ -243,10 +238,9 @@ end
     gmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
 
     # Used in Free.jl
-    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
+    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mpert - 1)
 end
 
-# TODO: I think this initialization is funky - just need mband, not mpert. Fix later
 FourFitVars(mpert::Int) = FourFitVars(; mpert)
 
 """
