@@ -116,25 +116,25 @@ end
         # Test 1: Far from singular surface (singfac > crossover)
         odet.ising = 1
         odet.q = 1.5  # Far from q=2.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol, atol = JPEC.DCON.compute_tols(ctrl, intr, odet)
         @test rtol == ctrl.tol_nr  # Should use non-resonant tolerance
-        
+
         # Test 2: Close to singular surface (singfac < crossover)
         odet.ising = 1
         odet.q = 1.999  # Very close to q=2.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol, atol = JPEC.DCON.compute_tols(ctrl, intr, odet)
         @test rtol == ctrl.tol_r  # Should use resonant tolerance
-        
+
         # Test 3: Between two singular surfaces
         odet.ising = 2
         odet.q = 2.5  # Between q=2.0 and q=3.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol, atol = JPEC.DCON.compute_tols(ctrl, intr, odet)
         @test rtol == ctrl.tol_nr  # Should use min distance to either surface
-        
+
         # Test 4: Beyond all singular surfaces
         odet.ising = 3
         odet.q = 4.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol, atol = JPEC.DCON.compute_tols(ctrl, intr, odet)
         @test rtol == ctrl.tol_nr
 
         # Edge case - no singular surfaces
@@ -151,9 +151,9 @@ end
         odet = JPEC.DCON.OdeState(mpert, 10, 10, 0)
         odet.ising = 1
         odet.q = 2.0
-        
+
         # Should return non-resonant tolerance when no singular surfaces
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol, atol = JPEC.DCON.compute_tols(ctrl, intr, odet)
         @test rtol == ctrl.tol_nr
     end
 
