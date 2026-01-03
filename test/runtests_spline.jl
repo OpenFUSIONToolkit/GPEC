@@ -96,10 +96,10 @@ end
 
 @testset "Empty Spline Constructors" begin
     @info "Testing empty spline constructors for type stability"
-    
+
     # Test Float64 empty spline
     empty_cs_f64 = JPEC.Spl.empty_CubicSpline(Float64)
-    @test empty_cs_f64.handle == C_NULL
+    @test isempty(empty_cs_f64._interps)  # Empty interps indicates uninitialized
     @test empty_cs_f64.mx == 0
     @test empty_cs_f64.nqty == 0
     @test typeof(empty_cs_f64) == JPEC.Spl.CubicSpline{Float64}
@@ -109,10 +109,10 @@ end
     @test length(empty_cs_f64._f1) == 0
     @test length(empty_cs_f64._f2) == 0
     @test length(empty_cs_f64._f3) == 0
-    
+
     # Test ComplexF64 empty spline
     empty_cs_c64 = JPEC.Spl.empty_CubicSpline(ComplexF64)
-    @test empty_cs_c64.handle == C_NULL
+    @test isempty(empty_cs_c64._interps)
     @test empty_cs_c64.mx == 0
     @test empty_cs_c64.nqty == 0
     @test typeof(empty_cs_c64) == JPEC.Spl.CubicSpline{ComplexF64}
@@ -122,15 +122,15 @@ end
     @test length(empty_cs_c64._f1) == 0
     @test length(empty_cs_c64._f2) == 0
     @test length(empty_cs_c64._f3) == 0
-    
+
     # Test default type (ComplexF64)
     empty_cs_default = JPEC.Spl.empty_CubicSpline()
     @test typeof(empty_cs_default) == JPEC.Spl.CubicSpline{ComplexF64}
-    @test empty_cs_default.handle == C_NULL
-    
+    @test isempty(empty_cs_default._interps)
+
     # Test empty BicubicSpline
     empty_bs = JPEC.Spl.empty_BicubicSpline()
-    @test empty_bs.handle == C_NULL
+    @test isempty(empty_bs._interps)
     @test empty_bs.mx == 0
     @test empty_bs.my == 0
     @test empty_bs.nqty == 0
@@ -144,20 +144,6 @@ end
     @test length(empty_bs._fxx) == 0
     @test length(empty_bs._fxy) == 0
     @test length(empty_bs._fyy) == 0
-    
-    # Test empty FourierSpline
-    empty_fs = JPEC.Spl.empty_FourierSpline()
-    @test empty_fs.handle == C_NULL
-    @test empty_fs.mx == 0
-    @test empty_fs.my == 0
-    @test empty_fs.nqty == 0
-    @test typeof(empty_fs) == JPEC.Spl.FourierSpline
-    @test length(empty_fs._xs) == 0
-    @test length(empty_fs._ys) == 0
-    @test size(empty_fs._fs) == (0, 0, 0)
-    # Test nested CubicSpline
-    @test empty_fs.cs.handle == C_NULL
-    @test typeof(empty_fs.cs) == JPEC.Spl.CubicSpline{ComplexF64}
 end
 
 @testset "Empty Spline Assertions" begin
@@ -186,26 +172,21 @@ end
     @test_throws AssertionError JPEC.Spl.bicube_deriv1!(empty_bs, 0.5, 0.5)
     @test_throws AssertionError JPEC.Spl.bicube_deriv2!(empty_bs, 0.5, 0.5)
     @test_throws AssertionError JPEC.Spl.bicube_eval(empty_bs, [0.5], [0.5])
-    
-    # Test FourierSpline assertions
-    empty_fs = JPEC.Spl.empty_FourierSpline()
-    @test_throws AssertionError JPEC.Spl.fspline_eval(empty_fs, 0.5, 0.5)
-    @test_throws AssertionError JPEC.Spl.fspline_eval(empty_fs, [0.5], [0.5])
 end
 
 @testset "Spline Replacement" begin
     @info "Testing that empty splines can be replaced with real splines"
-    
+
     # Create an empty spline
     empty_cs = JPEC.Spl.empty_CubicSpline(ComplexF64)
-    @test empty_cs.handle == C_NULL
-    
+    @test isempty(empty_cs._interps)
+
     # Create a real spline
     xs = collect(range(0.0; stop=1.0, length=10))
     fs = ones(ComplexF64, 10, 1)
     real_spline = JPEC.Spl.CubicSpline(xs, fs; bctype="extrap")
-    @test real_spline.handle != C_NULL
-    
+    @test !isempty(real_spline._interps)
+
     # Verify the real spline can be evaluated
     result = JPEC.Spl.spline_eval!(real_spline, 0.5)
     @test length(result) == 1

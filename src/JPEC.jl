@@ -18,6 +18,6 @@ import .DCON as DCON
 export DCON
 
 include(joinpath(@__DIR__, "..", "deps", "build_helpers.jl"))
-export build_fortran, build_spline_fortran, build_vacuum_fortran
+export build_fortran, build_vacuum_fortran
 
 end # module JPEC
