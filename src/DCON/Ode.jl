@@ -355,11 +355,11 @@ function integrator_callback!(integrator)
         if odet.step >= size(odet.u_store, 4)
             resize_storage!(odet)
         end
-        # Save values
+        # Save values using copyto! for better performance than broadcast
         odet.psi_store[odet.step] = integrator.t
-        odet.u_store[:, :, :, odet.step] .= integrator.u
+        copyto!(@view(odet.u_store[:, :, :, odet.step]), integrator.u)
         odet.q_store[odet.step] = odet.q # these two were set in sing_der!
-        odet.ud_store[:, :, :, odet.step] .= odet.ud
+        copyto!(@view(odet.ud_store[:, :, :, odet.step]), odet.ud)
         # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
         odet.step += 1
     end

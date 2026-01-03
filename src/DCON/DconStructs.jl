@@ -348,6 +348,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
       + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
       + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
       + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
+      + `chol_workspace::Matrix{ComplexF64}` - Pre-allocated workspace for in-place Cholesky
 """
 mutable struct OdeState
     # Initialization parameters
@@ -402,6 +403,9 @@ mutable struct OdeState
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing}
     singfac_vec::Vector{Float64}
 
+    # Pre-allocated workspaces for performance
+    chol_workspace::Matrix{ComplexF64}  # For in-place Cholesky factorization
+
     # Explicit constructor to avoid @kwdef overhead
     function OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int)
         new(
@@ -450,7 +454,9 @@ mutable struct OdeState
             Vector{ComplexF64}(undef, numpert_total^2),  # gmat
             Matrix{ComplexF64}(undef, numpert_total, numpert_total),  # tmp
             nothing,  # Afact
-            Vector{Float64}(undef, numpert_total)  # singfac_vec
+            Vector{Float64}(undef, numpert_total),  # singfac_vec
+            # Pre-allocated workspaces for performance
+            Matrix{ComplexF64}(undef, numpert_total, numpert_total)  # chol_workspace
         )
     end
 end

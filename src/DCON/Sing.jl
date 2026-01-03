@@ -728,7 +728,9 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
         gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
 
-        odet.Afact = cholesky(Hermitian(amat))
+        # Use in-place Cholesky with pre-allocated workspace to avoid allocation
+        copyto!(odet.chol_workspace, amat)
+        odet.Afact = cholesky!(Hermitian(odet.chol_workspace))
         # bmat = A⁻¹ * bmat
         ldiv!(odet.Afact, bmat)
         # cmat = A⁻¹ * cmat
