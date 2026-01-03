@@ -206,6 +206,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     imat = zeros(ComplexF64, 2 * intr.mband + 1)
     imat[mid] = 1 + 0im
 
+    # Pre-allocate workspace for matrix solve operations to avoid allocations in loop
+    temp1 = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    temp2 = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
         amats_flatview = @view amats_flat[ipsi, :, :]
@@ -302,8 +306,9 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
-        temp1 = amat_fact \ dmat
-        temp2 = amat_fact \ cmat
+        # Use in-place linear solve to avoid allocating temporaries
+        ldiv!(temp1, amat_fact, dmat)
+        ldiv!(temp2, amat_fact, cmat)
         fmat .-= adjoint(dmat) * temp1
         kmat .= emat .- (adjoint(kmat) * temp2)
         gmat .= hmat .- (adjoint(cmat) * temp2)

@@ -570,23 +570,29 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
     transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
 
+    # Pre-allocate workspace matrices to avoid allocations in loops
+    temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    gauss_buffer = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+
     # Construct gaussian reduction matrices for each fixup
     identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
     mask = trues(intr.numpert_total)
     for ifix in 1:odet.ifix
-        gauss[:, :, ifix] = copy(identity)
+        gauss[:, :, ifix] .= identity
         mask .= true
         for isol in 1:intr.numpert_total
             ksol = odet.index[isol, ifix]
             mask[ksol] = false
-            temp = copy(identity)
+            # Reset temp to identity and modify
+            copyto!(temp, identity)
             for jsol in 1:intr.numpert_total
                 if mask[jsol]
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            # Matrix multiplication gauss = gauss * temp
-            gauss[:, :, ifix] .= gauss[:, :, ifix] * temp
+            # In-place matrix multiplication: gauss = gauss * temp
+            mul!(gauss_buffer, view(gauss, :, :, ifix), temp)
+            gauss[:, :, ifix] .= gauss_buffer
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
         if odet.sing_flag[ifix]
@@ -600,23 +606,32 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     # Here, the i'th region is between the (i-1)'th and i'th fixup e.g. transforms[:, :, 1]
     # is the transform matrix for the region between init and first fixup
     # and mfix + 1 is the for the region after the last fixup and before the edge
-    transforms[:, :, end] = copy(identity)
+    transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        transforms[:, :, ifix] = gauss[:, :, ifix] * transforms[:, :, ifix+1]
+        mul!(view(transforms, :, :, ifix), view(gauss, :, :, ifix), view(transforms, :, :, ifix+1))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
     # "undoing" the Gaussian reductions to get the true solution vectors
+    # Reuse gauss_buffer as workspace for matrix multiplications
     jfix = 1
     for ifix in 1:odet.ifix+1
         # If after the last fixup, go to the end of integration
         kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         for istep in jfix:kfix
             # This is u1->u4 in Fortran
-            odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * transforms[:, :, ifix]
-            odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * transforms[:, :, ifix]
-            odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * transforms[:, :, ifix]
-            odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * transforms[:, :, ifix]
+            # Use in-place matrix multiplication to avoid allocating temporaries
+            mul!(gauss_buffer, view(odet.u_store, :, :, 1, istep), view(transforms, :, :, ifix))
+            odet.u_store[:, :, 1, istep] .= gauss_buffer
+
+            mul!(gauss_buffer, view(odet.u_store, :, :, 2, istep), view(transforms, :, :, ifix))
+            odet.u_store[:, :, 2, istep] .= gauss_buffer
+
+            mul!(gauss_buffer, view(odet.ud_store, :, :, 1, istep), view(transforms, :, :, ifix))
+            odet.ud_store[:, :, 1, istep] .= gauss_buffer
+
+            mul!(gauss_buffer, view(odet.ud_store, :, :, 2, istep), view(transforms, :, :, ifix))
+            odet.ud_store[:, :, 2, istep] .= gauss_buffer
         end
         jfix = kfix + 1
     end

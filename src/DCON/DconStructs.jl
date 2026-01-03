@@ -349,7 +349,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
       + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
       + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
 """
-@kwdef mutable struct OdeState
+mutable struct OdeState
     # Initialization parameters
     numpert_total::Int
     numunorms_init::Int
@@ -357,54 +357,103 @@ and a small set of temporary matrices and factors used to compute singular-layer
     numsteps_init::Int
 
     # Saved data throughout integration
-    step::Int = 1
-    psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
-    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
+    step::Int
+    psi_store::Vector{Float64}
+    q_store::Vector{Float64}
+    u_store::Array{ComplexF64,4}
+    ud_store::Array{ComplexF64,4}
+    crit_store::Vector{Float64}
+    ca_r::Array{ComplexF64,4}
+    ca_l::Array{ComplexF64,4}
 
     # Used for to find peak dW in the edge
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat_spline::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    dW_edge::Vector{ComplexF64}
+    wvmat_spline::Spl.CubicSpline{ComplexF64}
 
     # Data for integrator
-    psifac::Float64 = 0.0
-    q::Float64 = 0.0
-    u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ising::Int = 0
-    psimax::Float64 = 0.0
-    next::String = ""
-    nzero::Int = 0
+    psifac::Float64
+    q::Float64
+    u::Array{ComplexF64,3}
+    ud::Array{ComplexF64,3}
+    ising::Int
+    psimax::Float64
+    next::String
+    nzero::Int
 
     # Used for Gaussian reduction
-    new::Bool = true
-    unorm::Vector{Float64} = zeros(Float64, numpert_total)
-    unorm0::Vector{Float64} = zeros(Float64, numpert_total)
-    ifix::Int = 0
-    index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)
-    sing_flag::Vector{Bool} = falses(numunorms_init)
-    zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
-    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
-    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
+    new::Bool
+    unorm::Vector{Float64}
+    unorm0::Vector{Float64}
+    ifix::Int
+    index::Array{Int,2}
+    sing_flag::Vector{Bool}
+    zeroed_idx::Vector{Vector{Int}}
+    fixfac::Array{ComplexF64,3}
+    fixstep::Vector{Int64}
 
     # Temporary matrices for sing_der calculations
-    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
-    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
-end
+    amat::Vector{ComplexF64}
+    bmat::Vector{ComplexF64}
+    cmat::Vector{ComplexF64}
+    fmat_lower::Vector{ComplexF64}
+    kmat::Vector{ComplexF64}
+    gmat::Vector{ComplexF64}
+    tmp::Matrix{ComplexF64}
+    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing}
+    singfac_vec::Vector{Float64}
 
-# Initialize function for OdeState with relevant parameters for array initialization
-OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+    # Explicit constructor to avoid @kwdef overhead
+    function OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int)
+        new(
+            # Initialization parameters
+            numpert_total,
+            numunorms_init,
+            msing,
+            numsteps_init,
+            # Saved data throughout integration
+            1,  # step
+            Vector{Float64}(undef, numsteps_init),  # psi_store
+            Vector{Float64}(undef, numsteps_init),  # q_store
+            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init),  # u_store
+            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init),  # ud_store
+            Vector{Float64}(undef, numsteps_init),  # crit_store
+            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing),  # ca_r
+            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing),  # ca_l
+            # Used for to find peak dW in the edge
+            Array{ComplexF64}(undef, numsteps_init),  # dW_edge
+            Spl.empty_CubicSpline(ComplexF64),  # wvmat_spline
+            # Data for integrator
+            0.0,  # psifac
+            0.0,  # q
+            zeros(ComplexF64, numpert_total, numpert_total, 2),  # u
+            zeros(ComplexF64, numpert_total, numpert_total, 2),  # ud
+            0,  # ising
+            0.0,  # psimax
+            "",  # next
+            0,  # nzero
+            # Used for Gaussian reduction
+            true,  # new
+            zeros(Float64, numpert_total),  # unorm
+            zeros(Float64, numpert_total),  # unorm0
+            0,  # ifix
+            zeros(Int, numpert_total, numunorms_init),  # index
+            falses(numunorms_init),  # sing_flag
+            [Int[] for _ in 1:numunorms_init],  # zeroed_idx
+            zeros(ComplexF64, numpert_total, numpert_total, numunorms_init),  # fixfac
+            zeros(Int64, numunorms_init),  # fixstep
+            # Temporary matrices for sing_der calculations
+            Vector{ComplexF64}(undef, numpert_total^2),  # amat
+            Vector{ComplexF64}(undef, numpert_total^2),  # bmat
+            Vector{ComplexF64}(undef, numpert_total^2),  # cmat
+            Vector{ComplexF64}(undef, numpert_total^2),  # fmat_lower
+            Vector{ComplexF64}(undef, numpert_total^2),  # kmat
+            Vector{ComplexF64}(undef, numpert_total^2),  # gmat
+            Matrix{ComplexF64}(undef, numpert_total, numpert_total),  # tmp
+            nothing,  # Afact
+            Vector{Float64}(undef, numpert_total)  # singfac_vec
+        )
+    end
+end
 
 
 # Below here are debug output structs used for benchmarking and unit testing
