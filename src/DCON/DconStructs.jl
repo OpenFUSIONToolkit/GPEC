@@ -170,6 +170,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `use_blocked_ode::Bool` - Enable blocked ODE approach (option 3) to reduce core integration cost
 """
 @kwdef mutable struct DconControl
     verbose::Bool = true
@@ -225,6 +226,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
+    use_blocked_ode::Bool = false
 end
 
 @kwdef mutable struct FourFitVars
@@ -400,6 +402,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+
+    # Blocked ODE tracking (for option 3)
+    use_blocked_ode::Bool = false
+    local_numpert::Int = numpert_total  # Current active system size
+    expansion_history::Vector{Tuple{Int,Int,Float64}} = Tuple{Int,Int,Float64}[]  # (ising, old_size, new_size, psifac)
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization

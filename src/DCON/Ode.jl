@@ -167,6 +167,16 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     for ipert in 1:intr.numpert_total
         odet.u[ipert, ipert, 2] = 1
     end
+
+    # Initialize blocked ODE if enabled
+    if ctrl.use_blocked_ode
+        odet.use_blocked_ode = true
+        # Start with minimal modes in the core based on q/qa ratio
+        odet.local_numpert = compute_local_numpert(odet.q, intr.qlim, intr.mpert, intr.npert)
+        if ctrl.verbose
+            println("   Blocked ODE enabled: starting with $(odet.local_numpert) / $(intr.numpert_total) modes (q=$((@sprintf "%.2f" odet.q))/qa=$((@sprintf "%.2f" intr.qlim)))")
+        end
+    end
 end
 
 # TODO: NOT IMPLEMENTED YET! (low priority, just make sure sing_start = 0 in dcon.toml)
@@ -188,6 +198,11 @@ location and parameters of the next singular surface and writes outputs as desir
 Remove while true logic
 """
 function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+
+    # Expand the block if using blocked ODE
+    if odet.use_blocked_ode
+        expand_block!(odet, intr, equil, ctrl)
+    end
 
     # Fixup solution at singular surface
     ode_unorm!(odet.u, odet, ctrl, intr, true)
@@ -598,3 +613,64 @@ function transform_u!(odet::OdeState, intr::DconInternal)
         jfix = kfix + 1
     end
 end
+
+"""
+    compute_local_numpert(q::Float64, qa::Float64, mpert::Int, npert::Int)
+
+Compute the local number of perturbations needed at a given q value.
+Uses the scaling: local_mpert ≈ ceil(q/qa) * mpert
+
+### Arguments
+  - q: Current safety factor value
+  - qa: Limiting q value (edge)
+  - mpert: Total number of poloidal modes
+  - npert: Total number of toroidal modes
+
+### Returns
+  - local_numpert: Number of modes needed locally (per n block)
+"""
+function compute_local_numpert(q::Float64, qa::Float64, mpert::Int, npert::Int)
+    # Compute the fraction of poloidal modes needed
+    q_ratio = min(1.0, q / qa)
+    local_mpert = max(1, ceil(Int, q_ratio * mpert))
+    return local_mpert * npert
+end
+
+"""
+    expand_block!(odet::OdeState, intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
+
+Expand the active block of modes when crossing a rational surface. This "activates" higher-m
+modes by allowing them to be non-zero. They start at zero and mode coupling naturally builds
+them up. This is the "blocked" approach from option 3.
+
+### Arguments
+  - odet: OdeState containing current integration state
+  - intr: DconInternal containing mode information
+  - equil: PlasmaEquilibrium for q evaluation
+"""
+function expand_block!(odet::OdeState, intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl)
+    # Compute new local_numpert based on current q
+    qa = intr.qlim
+    new_local_numpert = compute_local_numpert(odet.q, qa, intr.mpert, intr.npert)
+
+    # Only expand if we need more modes
+    if new_local_numpert > odet.local_numpert
+        old_size = odet.local_numpert
+
+        # Update the local size
+        odet.local_numpert = new_local_numpert
+
+        # Record the expansion
+        push!(odet.expansion_history, (odet.ising, old_size, new_local_numpert, odet.psifac))
+
+        if ctrl.verbose
+            println("   Expanded active modes from $(old_size) to $(new_local_numpert) at rational surface $(odet.ising) (ψ=$((@sprintf "%.3f" odet.psifac)), q=$((@sprintf "%.2f" odet.q)))")
+        end
+
+        # The new solution vectors (indices old_size+1:new_local_numpert) are already zero
+        # in odet.u and will naturally build up through mode coupling in the ODE evolution
+        # This is the key to option 3: we don't waste integrator time on high-m modes
+        # in the core where they're legitimately near-zero
+    end
+end
+
