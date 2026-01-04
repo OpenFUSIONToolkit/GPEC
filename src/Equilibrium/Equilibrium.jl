@@ -46,10 +46,10 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
         eq_input = read_efit(eq_config)
-    elseif eq_type == "chease2"
-        eq_input = read_chease2(eq_config)
-    elseif eq_type == "chease"
-        eq_input = read_chease(eq_config)
+    elseif eq_type in ["chease2", "chease_ascii"]
+        eq_input = read_chease_ascii(eq_config)
+    elseif eq_type in ["chease", "chease_binary"]
+        eq_input = read_chease_binary(eq_config)
     elseif eq_type == "lar"
 
         if additional_input === nothing
