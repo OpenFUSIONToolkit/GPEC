@@ -59,15 +59,9 @@ function equilibrium_solver(input::InverseRunInput)
 
     me = 3
 
-    # Not using anymore
-    # interp = false
-    # diagnose_rz_in = false
-    # diagnose_rzphi = false
-
     # c-----------------------------------------------------------------------
     # c     allocate and define local arrays.
     # c-----------------------------------------------------------------------
-    # sq_in._fs[:, 3] .= sqrt.(sq_in._xs)
     rz_in._xs = sq_in._xs
     rz_in._ys = collect(0:rz_in.my) ./ rz_in.my
 
