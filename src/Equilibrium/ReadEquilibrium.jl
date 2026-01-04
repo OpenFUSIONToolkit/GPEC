@@ -337,8 +337,8 @@ function read_chease_ascii(config::EquilibriumConfig)
     xs = (zpsi .- zpsi[1]) ./ psio_norm # Use normalized range for x axis [0,1]
 
     fs = zeros(npsi1, 4)
-    # Both zq * zfb and ztmf are almost the same ! But I don't know why current GPEC follows zq .*zfb - JB.Cho
-    fs[:, 1] .= zq .* zfb
+    # Both zq * zfb and ztmf are the same ! But I don't know why current GPEC follows zq .*zfb - JB.Cho
+    # fs[:, 1] .= zq .* zfb
     fs[:, 1] .= ztmf
     fs[:, 2] .= zcppr # normalized Pressure
     fs[:, 3] .= zq # q profile
