@@ -7,7 +7,7 @@
 
     # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
-        efit_control = EquilibriumControl(;
+        efit_control = JPEC.Equilibrium.EquilibriumControl(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
@@ -23,7 +23,7 @@
 
     # --- 2. Load CHEASE Binary Data ---
     @testset "Load CHEASE Binary" begin
-        binary_control = EquilibriumControl(;
+        binary_control = JPEC.Equilibrium.EquilibriumControl(;
             eq_filename=joinpath(data_dir, "INP1_binary"),
             eq_type="chease_binary",
             jac_type="boozer",
@@ -40,7 +40,7 @@
 
     # --- 3. Load CHEASE ASCII Data ---
     @testset "Load CHEASE ASCII" begin
-        ascii_control = EquilibriumControl(;
+        ascii_control = JPEC.Equilibrium.EquilibriumControl(;
             eq_filename=joinpath(data_dir, "INP1_ascii"),
             eq_type="chease_ascii",
             jac_type="boozer",
