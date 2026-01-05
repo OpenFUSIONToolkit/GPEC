@@ -63,7 +63,7 @@ function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64},
 
     # Compute smallest eigenvalue (crit) at current step
     psi = odet.psi_store[istep]
-    u = odet.u_store[:, :, :, istep]
+    u = odet.u_store[:, :, istep]
     dVdpsi = Spl.spline_eval!(sq, psi)[3]
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
@@ -76,7 +76,7 @@ function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64},
         # Ensure the zero crossing is physical and not just numerical noise
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep - 1])
-        u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep - 1]))
+        u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, istep - 1]))
         dVdpsi = Spl.spline_eval!(sq, psi_mid)[3]
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2
@@ -101,7 +101,7 @@ construction but may accumulate numerical noise during integration.
 
 ### Arguments
 
-  - `u::Array{ComplexF64, 3}`: Solution matrix at `psi`
+  - `u::Array{ComplexF64, 2}`: Solution matrix at `psi` with shape (2N, N)
 
 ### Returns
 
@@ -109,10 +109,15 @@ construction but may accumulate numerical noise during integration.
   - `nonherm::Bool`: true if W⁻¹ was non-Hermitian beyond tolerance (> 1e-3)
 
 """
-function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
+function compute_smallest_eigenvalue(u::Array{ComplexF64,2})
+    
+    # Split u into displacement (u1) and conjugate momenta (u2) components
+    N = size(u, 1) ÷ 2
+    u1 = @view u[1:N, :]
+    u2 = @view u[N+1:end, :]
 
     # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
-    wp_inverse = u[:, :, 1] / u[:, :, 2]
+    wp_inverse = u1 / u2
 
     # TODO: This section not be necessary since W should be Hermitian by construction.
     # This likely just removes any numerical noise during integration

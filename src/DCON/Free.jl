@@ -31,7 +31,9 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
-        @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+        u1 = @view odet.u[1:intr.numpert_total, :]
+        u2 = @view odet.u[intr.numpert_total+1:end, :]
+        @views wp = (u2 / u1) ./ equil.psio^2
     end
 
     # Compute vacuum response matrix
@@ -122,12 +124,12 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     end
 
     # Normalize eigenvectors based on scaled wt
-    coeffs = odet.u[:,:,1,end] \ (vac.wt .* (2π * equil.psio * 1e-3))
+    coeffs = odet.u_store[1:intr.numpert_total, :, end] \ (vac.wt .* (2π * equil.psio * 1e-3))
     for istep in 1:odet.step
-        odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * coeffs
-        odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * coeffs
-        odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * coeffs
-        odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * coeffs
+        odet.u_store[1:intr.numpert_total, :, istep] .= odet.u_store[1:intr.numpert_total, :, istep] * coeffs
+        odet.u_store[intr.numpert_total+1:end, :, istep] .= odet.u_store[intr.numpert_total+1:end, :, istep] * coeffs
+        odet.ud_store[1:intr.numpert_total, :, istep] .= odet.ud_store[1:intr.numpert_total, :, istep] * coeffs
+        odet.ud_store[intr.numpert_total+1:end, :, istep] .= odet.ud_store[intr.numpert_total+1:end, :, istep] * coeffs
     end
 
     # Write energies to screen

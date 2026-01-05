@@ -165,7 +165,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Initialize solutions with the identity matrix for U_22 as described in [Glasser PoP 2016] Section VI
     for ipert in 1:intr.numpert_total
-        odet.u[ipert, ipert, 2] = 1
+        odet.u[ipert + intr.numpert_total, ipert] = 1
     end
 end
 
@@ -193,7 +193,7 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     ode_unorm!(odet.u, odet, ctrl, intr, true)
 
     # Get asymptotic coefficients before crossing rational surface
-    odet.ca_l[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
+    odet.ca_l[:, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
     # Re-initialize on opposite side of rational surface
     psi_old = odet.psifac
@@ -212,15 +212,15 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     if !ctrl.con_flag
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
-        for i in eachindex(singp.r1)
+        for i in eachindex(ipert_res)
             push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
-            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix]] .= 0
         end
     end
 
     # Approximate solution vectors across singular surface
-    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    du1 = zeros(ComplexF64, 2*intr.numpert_total, intr.numpert_total)
+    du2 = zeros(ComplexF64, 2*intr.numpert_total, intr.numpert_total)
     params = (ctrl, equil, ffit, intr, odet)
     sing_der!(du1, odet.u, params, psi_old)
     sing_der!(du2, odet.u, params, odet.psifac)
@@ -228,15 +228,16 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
 
     # Apply asymptotic solution on other side of singular surface
     if !ctrl.con_flag
-        for i in eachindex(singp.r1)
-            # Zero out the resonant components
-            odet.u[ipert_res[i], :, :] .= 0
+        for i in eachindex(ipert_res)
+            # Zero out the resonant components (both displacement and conjugate momenta)
+            odet.u[ipert_res[i], :] .= 0
+            odet.u[ipert_res[i] + intr.numpert_total, :] .= 0
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
-            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix]] .= ua[:, ipert_res[i] + intr.numpert_total]
         end
     end
     # Get asymptotic coefficients after crossing rational surface
-    odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
+    odet.ca_r[:, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
     # Find next singular surface (either the next in the list or outside integration limits)
     while true
@@ -260,8 +261,8 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
     odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.u_store[:, :, odet.step] = odet.u
+    odet.ud_store[:, :, odet.step] = odet.ud
     odet.step += 1
 end
 
@@ -335,9 +336,9 @@ function integrator_callback!(integrator)
     end
     # Save values
     odet.psi_store[odet.step] = integrator.t
-    odet.u_store[:, :, :, odet.step] .= integrator.u
+    odet.u_store[:, :, odet.step] .= integrator.u
     odet.q_store[odet.step] = odet.q # these two were set in sing_der!
-    odet.ud_store[:, :, :, odet.step] .= odet.ud
+    odet.ud_store[:, :, odet.step] .= odet.ud
     # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
     odet.step += 1
 end
@@ -390,7 +391,7 @@ function compute_tols(ctrl, intr, odet)
 end
 
 """
-    ode_unorm!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::DconControl, intr::DconInternal, sing_flag::Bool)
+    ode_unorm!(u::Array{ComplexF64,2}, odet::OdeState, ctrl::DconControl, intr::DconInternal, sing_flag::Bool)
 
 Computes norms of the solution vectors of the array `u` and normalizes them
 if this is not the first call after a fixup. Throws an error if any vector
@@ -414,10 +415,11 @@ operate on `u` directly without extra copies.
 
 Add resizing logic for unorm arrays when ifix exceeds allocated size
 """
-function ode_unorm!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::DconControl, intr::DconInternal, sing_flag::Bool)
+function ode_unorm!(u::Array{ComplexF64,2}, odet::OdeState, ctrl::DconControl, intr::DconInternal, sing_flag::Bool)
     
-    # Compute norms of first solution vectors, abort if any are zero
-    odet.unorm .= norm.(eachcol(u[:, :, 1]))
+    # Compute norms of displacement solution vectors (first N rows), abort if any are zero
+    u1 = @view u[1:intr.numpert_total, :]
+    odet.unorm .= norm.(eachcol(u1))
     if minimum(odet.unorm) == 0
         jmax = argmin(odet.unorm)
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
@@ -445,7 +447,7 @@ function ode_unorm!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::DconControl, i
 end
 
 """
-    ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, sing_flag::Bool)
+    ode_fixup!(u::Array{ComplexF64,2}, odet::OdeState, intr::DconInternal, sing_flag::Bool)
 
 Applies Gaussian reduction to orthogonalize solution vectors in `u`. Performs
 the same function as `ode_fixup` in the Fortran code, except now relevant
@@ -456,7 +458,7 @@ description of `ode_unorm!` for more details on the benefits of in-place `u`
 updates.
 
 """
-function ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, sing_flag::Bool)
+function ode_fixup!(u::Array{ComplexF64,2}, odet::OdeState, intr::DconInternal, sing_flag::Bool)
 
     # Store data for the current fixup
     ifix = odet.ifix
@@ -472,20 +474,21 @@ function ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, 
     # Sort unorm in descending order (since we triangularize from largest to smallest)
     odet.index[:, ifix] = sortperm(odet.unorm; rev=true)
 
-    # Triangularize primary solutions
+    # Triangularize primary solutions (working with displacement components)
+    u1 = @view u[1:intr.numpert_total, :]
     mask = trues(2, intr.numpert_total)
     for isol in 1:intr.numpert_total
         ksol = odet.index[isol, ifix]
         mask[2, ksol] = false
         # Set pivot row based on max location
-        @views kpert = argmax(abs.(u[:, ksol, 1]) .* mask[1, :])
+        @views kpert = argmax(abs.(u1[:, ksol]) .* mask[1, :])
         mask[1, kpert] = false
         # Eliminate other solution vectors below the pivot
         for jsol in 1:intr.numpert_total
             if mask[2, jsol]
-                odet.fixfac[ksol, jsol, ifix] = -u[kpert, jsol, 1] / u[kpert, ksol, 1]
-                @. @views u[:, jsol, :] .= u[:, jsol, :] .+ u[:, ksol, :] .* odet.fixfac[ksol, jsol, ifix]
-                u[kpert, jsol, 1] = 0
+                odet.fixfac[ksol, jsol, ifix] = -u1[kpert, jsol] / u1[kpert, ksol]
+                @. @views u[:, jsol] .= u[:, jsol] .+ u[:, ksol] .* odet.fixfac[ksol, jsol, ifix]
+                u1[kpert, jsol] = 0
             end
         end
     end
@@ -589,11 +592,11 @@ function transform_u!(odet::OdeState, intr::DconInternal)
         # If after the last fixup, go to the end of integration
         kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         for istep in jfix:kfix
-            # This is u1->u4 in Fortran
-            odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * transforms[:, :, ifix]
-            odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * transforms[:, :, ifix]
-            odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * transforms[:, :, ifix]
-            odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * transforms[:, :, ifix]
+            # Apply transformation to both displacement (1:N) and conjugate momenta (N+1:2N) components
+            odet.u_store[1:intr.numpert_total, :, istep] .= odet.u_store[1:intr.numpert_total, :, istep] * transforms[:, :, ifix]
+            odet.u_store[intr.numpert_total+1:end, :, istep] .= odet.u_store[intr.numpert_total+1:end, :, istep] * transforms[:, :, ifix]
+            odet.ud_store[1:intr.numpert_total, :, istep] .= odet.ud_store[1:intr.numpert_total, :, istep] * transforms[:, :, ifix]
+            odet.ud_store[intr.numpert_total+1:end, :, istep] .= odet.ud_store[intr.numpert_total+1:end, :, istep] * transforms[:, :, ifix]
         end
         jfix = kfix + 1
     end
