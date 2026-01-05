@@ -34,7 +34,7 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        chease_config_chease_binary = JPEC.Equilibrium.EquilibriumConfig(chease_control, JPEC.Equilibrium.EquilibriumOutput())
+        chease_config_chease_binary = JPEC.Equilibrium.EquilibriumConfig(binary_control, JPEC.Equilibrium.EquilibriumOutput())
         global plasma_eq_binary = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_binary)
         
         @test plasma_eq_binary isa JPEC.Equilibrium.PlasmaEquilibrium
@@ -52,7 +52,7 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        chease_config_chease_ascii = JPEC.Equilibrium.EquilibriumConfig(chease_control, JPEC.Equilibrium.EquilibriumOutput())
+        chease_config_chease_ascii = JPEC.Equilibrium.EquilibriumConfig(ascii_control, JPEC.Equilibrium.EquilibriumOutput())
         global plasma_eq_ascii = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_ascii)
         
         @test plasma_eq_ascii isa JPEC.Equilibrium.PlasmaEquilibrium
