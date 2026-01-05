@@ -23,7 +23,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
-        val_str = strip(data_str[i:i+field_width-1])
+        val_str = strip(data_str[i:(i+field_width-1)])
         if !isempty(val_str)
             try
                 push!(parsed_values, parse(Float64, val_str))
@@ -72,7 +72,7 @@ function read_efit(config::EquilibriumConfig)
     current_line_idx = 6
     function parse_block(num_pts)
         num_lines = ceil(Int, num_pts / 5)
-        block = lines[current_line_idx:current_line_idx+num_lines-1]
+        block = lines[current_line_idx:(current_line_idx+num_lines-1)]
         data = _read_1d_gfile_format(block, num_pts)
         current_line_idx += num_lines
         return data
@@ -123,29 +123,29 @@ end
 """
     read_chease_binary(equil_config)
 
-Parses a binary CHEASE file, creates initial 1D and 2D splines with proper 
+Parses a binary CHEASE file, creates initial 1D and 2D splines with proper
 normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object.
 """
 function read_chease_binary(config::EquilibriumConfig)
     println("--> Reading CHEASE file (Binary): $(config.control.eq_filename)")
-    
+
     R0EXP = config.control.r0exp
     B0EXP = config.control.b0exp
 
     open(config.control.eq_filename, "r") do io
         seekstart(io)
-        read(io, UInt32) 
+        read(io, UInt32)
         ntnova = read(io, Int32)
         npsi1 = read(io, Int32)
         nsym = read(io, Int32)
-        read(io, UInt32) 
+        read(io, UInt32)
 
-        read(io, UInt32) 
+        read(io, UInt32)
         axx = [read(io, Float64) for _ in 1:5]
         read(io, UInt32)
 
         # 1D array allocation
-        zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim = 
+        zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim =
             [zeros(i == 1 || i == 10 ? npsi1-1 : npsi1) for i in 1:10]
 
         for arr in (zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim)
@@ -164,13 +164,13 @@ function read_chease_binary(config::EquilibriumConfig)
         xs = (zpsi .- zpsi[1]) ./ psio_norm
 
         fs = zeros(npsi1, 4)
-        fs[:, 1] .= ztmf   
-        fs[:, 2] .= zcppr  
-        fs[:, 3] .= zq     
+        fs[:, 1] .= ztmf
+        fs[:, 2] .= zcppr
+        fs[:, 3] .= zq
 
         sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
         Spl.spline_integrate!(sq_in)
-        
+
         fs_copy = copy(sq_in.fs)
         fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
         sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
@@ -179,7 +179,7 @@ function read_chease_binary(config::EquilibriumConfig)
         mtau = ntnova + 1  # Same with ASCII
         poloidal_start = 3 # This 3 is to skip ghost datas, which are used for derivatives
         poloidal_stop = ntnova + 3
-        
+
         fs_2d = zeros(npsi1, mtau, 2)
         buffer = zeros(Float64, ntnova + 3, npsi1) # CHEASE binary record size
 
@@ -188,9 +188,9 @@ function read_chease_binary(config::EquilibriumConfig)
         read!(io, buffer)
         read(io, UInt32)
         buffer .*= R0EXP
-        
+
         # sart reading with ASCII
-        ro = buffer[poloidal_start, 1] 
+        ro = buffer[poloidal_start, 1]
         fs_2d[:, :, 1] .= transpose(buffer[poloidal_start:poloidal_stop, :])
 
         # Reading Z data
@@ -199,7 +199,7 @@ function read_chease_binary(config::EquilibriumConfig)
         read(io, UInt32)
         buffer .*= R0EXP
 
-        zo = buffer[poloidal_start, 1] 
+        zo = buffer[poloidal_start, 1]
         fs_2d[:, :, 2] .= transpose(buffer[poloidal_start:poloidal_stop, :])
 
         # Grid setting
@@ -237,7 +237,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     ntnova = parse(Int, header_parts[1])
     npsi1 = parse(Int, header_parts[2])
     nsym = parse(Int, header_parts[3])
-    
+
     # --- Parse axx (FORMAT 20: 1E22.15) ---
     axx = parse(Float64, split(lines[2])[1])   # RBOXLEN - compuational box lenth
     # --- Pre-allocate Arrays ---
@@ -246,7 +246,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     zq = zeros(npsi1) # q(ψ)
     zdq = zeros(npsi1) # dq/dψ
     ztmf = zeros(npsi1) # normalized F(ψ)
-    ztp = zeros(npsi1) # normalized dF/dψ 
+    ztp = zeros(npsi1) # normalized dF/dψ
     zfb = zeros(npsi1) # normazlied F(ψ)/q(ψ)
     zfbp = zeros(npsi1) # d/dψ [F(ψ)/q(ψ) ]
     zpsi = zeros(npsi1) # ψ Poloidal flux
@@ -262,7 +262,7 @@ function read_chease_ascii(config::EquilibriumConfig)
         data = Float64[]
         for line in lines[lines_range]
             for i in 0:4
-                s = strip(line[22*i+1:min(end, 22 * (i + 1))])
+                s = strip(line[(22*i+1):min(end, 22*(i+1))])
                 if !isempty(s)
                     push!(data, parse(Float64, s))
                 end
@@ -277,14 +277,14 @@ function read_chease_ascii(config::EquilibriumConfig)
     function load_vector!(vec)
         count = length(vec)
         lines_needed = cld(count, 5)
-        vec .= parse_floats(line_idx:line_idx+lines_needed-1)
+        vec .= parse_floats(line_idx:(line_idx+lines_needed-1))
         return line_idx += lines_needed
     end
 
     function load_matrix!(mat)
         count = size(mat, 1) * size(mat, 2)
         lines_needed = cld(count, 5)
-        data = parse_floats(line_idx:line_idx+lines_needed-1)
+        data = parse_floats(line_idx:(line_idx+lines_needed-1))
         line_idx += lines_needed
         # Fill column-major (Fortran-style)
         for j in 1:size(mat, 2)
@@ -373,4 +373,3 @@ function read_chease_ascii(config::EquilibriumConfig)
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
 end
-

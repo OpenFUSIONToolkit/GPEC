@@ -1,6 +1,6 @@
 # Vacuum Module
 
-The Vacuum module provides magnetostatic vacuum field calculations with plasma-wall interactions. 
+The Vacuum module provides magnetostatic vacuum field calculations with plasma-wall interactions.
 Refactored/interfaced from/with VACUUM by M.S. Chance.
 
 ## Overview
@@ -130,4 +130,3 @@ wv, grri, xzpts = JPEC.Vacuum.compute_vacuum_response(inputs, wall_settings)
 - Requires proper initialization of DCON parameters before using the Fortran interface
 - The pure Julia implementation (`compute_vacuum_response`) provides equivalent functionality
 - For n=0 modes with closed walls, automatic regularization is applied
-

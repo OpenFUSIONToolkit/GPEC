@@ -56,7 +56,7 @@ using Interpolations
                     mtheta=16
                 )
             )
-            
+
             # Test "nowall"
             wall_settings = WallShapeSettings(shape="nowall")
             wall_geo = JPEC.Vacuum.initialize_wall(inputs, plasma_surf, wall_settings)
@@ -77,14 +77,14 @@ using Interpolations
             xout, zout, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin, zin, mw1)
             @test isapprox(xout, [1.0, 2.0, 3.0, 4.0], atol=1e-9)
             @test isapprox(zout, [0.0, 0.0, 0.0, 0.0], atol=1e-9)
-            
+
             # A simple circle
             theta = range(0, 2pi, length=10)
             xin_circ = cos.(theta)
             zin_circ = sin.(theta)
             xout_circ, zout_circ, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin_circ, zin_circ, 10)
             # The points should still be on the unit circle
-            @test all(r -> isapprox(r, 1.0, atol=1e-9), sqrt.(xout_circ.^2 + zout_circ.^2))
+            @test all(r -> isapprox(r, 1.0, atol=1e-9), sqrt.(xout_circ .^ 2 + zout_circ .^ 2))
         end
     end
 
@@ -108,7 +108,7 @@ using Interpolations
             P = JPEC.Vacuum.Pn_minus_half_1997(s, n)
             @test length(P) == n + 2
             @test !any(isnan, P)
-            
+
             # Test Pn_minus_half_2007 error
             # @test JPEC.Vacuum.Pn_minus_half_2007(s, n)
             @test_logs (:warn, "2007 paper implementation of Pn_minus_half is not yet complete. Use old version.") JPEC.Vacuum.Pn_minus_half_2007(s, n)
@@ -148,11 +148,11 @@ using Interpolations
             mtheta_in = 17
             theta_in = collect(range(0, 1, length=mtheta_in))
             vecin = sin.(2π .* theta_in)
-            
+
             mtheta_out = 33
             vecout = JPEC.Vacuum.interp_to_new_grid(vecin, mtheta_out)
-            
-            theta_out = (0:mtheta_out-1) ./ mtheta_out
+
+            theta_out = (0:(mtheta_out-1)) ./ mtheta_out
             expected_out = sin.(2π .* theta_out)
 
             @test isapprox(vecout, expected_out, atol=1e-2)
@@ -163,7 +163,7 @@ using Interpolations
         end
 
         @testset "periodic_cubic_deriv" begin
-            theta = range(0, 2pi, length=101)[1:end-1]
+            theta = range(0, 2pi, length=101)[1:(end-1)]
             vals = sin.(theta)
             derivs = JPEC.Vacuum.periodic_cubic_deriv(theta, vals)
             @test isapprox(derivs, cos.(theta), atol=1e-3)
@@ -177,7 +177,7 @@ using Interpolations
             @test Z_points == [3, 4, 5, 3, 4, 5]
         end
     end
-    
+
     # ----------------------------------------------------------------------
     @testset "VacuumInternals.jl - Fourier" begin
         @testset "fourier_transform!" begin
@@ -186,9 +186,9 @@ using Interpolations
             gij = [1.0 2.0 3.0 4.0; 5.0 6.0 7.0 8.0; 9.0 10.0 11.0 12.0; 13.0 14.0 15.0 16.0]
             cs = zeros(mtheta, mpert)
             cs[:, 1] .= 1.0 # Simple basis
-            
+
             JPEC.Vacuum.fourier_transform!(gil, gij, cs, 0, 0)
-            
+
             # gil should be the sum of columns of gij
             @test gil[:, 1] == [10.0, 26.0, 42.0, 58.0]
             @test gil[:, 2] == [0.0, 0.0, 0.0, 0.0]
@@ -202,12 +202,12 @@ using Interpolations
             cs = zeros(mtheta, mpert)
             cs[:, 1] .= 1.0
             gll = zeros(mpert, mpert)
-            
+
             JPEC.Vacuum.fourier_inverse_transform!(gll, gil, cs, 0, 0)
-            
+
             # gll[1,1] should be sum(cs[:,1] .* gil[:,1]) * 2pi*dth
             expected = sum([1.0, 2.0, 3.0, 4.0]) * dth * 2pi
-            @test isapprox(gll[1,1], expected)
+            @test isapprox(gll[1, 1], expected)
         end
     end
 
@@ -219,18 +219,18 @@ using Interpolations
             mtheta_eq = 17
             r_eq = 1.7 .+ 0.3 .* cos.(range(0, 2pi, length=mtheta_eq))
             z_eq = 0.3 .* sin.(range(0, 2pi, length=mtheta_eq))
-            
+
             inputs = VacuumInput(
-                r = collect(r_eq),
-                z = collect(z_eq),
-                delta = zeros(mtheta_eq),
-                mlow = 1,
-                mhigh = 2,
-                mpert = 2,
-                n = 1,
-                qa = 2.0,
-                mtheta_eq = mtheta_eq,
-                mtheta = mtheta
+                r=collect(r_eq),
+                z=collect(z_eq),
+                delta=zeros(mtheta_eq),
+                mlow=1,
+                mhigh=2,
+                mpert=2,
+                n=1,
+                qa=2.0,
+                mtheta_eq=mtheta_eq,
+                mtheta=mtheta
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
@@ -252,16 +252,16 @@ using Interpolations
             z_eq = 0.3 .* sin.(range(0, 2pi, length=mtheta_eq))
 
             inputs = VacuumInput(
-                r = collect(r_eq),
-                z = collect(z_eq),
-                delta = zeros(mtheta_eq),
-                mlow = 1,
-                mhigh = 2,
-                mpert = 2,
-                n = 1,
-                qa = 2.0,
-                mtheta_eq = mtheta_eq,
-                mtheta = mtheta
+                r=collect(r_eq),
+                z=collect(z_eq),
+                delta=zeros(mtheta_eq),
+                mlow=1,
+                mhigh=2,
+                mpert=2,
+                n=1,
+                qa=2.0,
+                mtheta_eq=mtheta_eq,
+                mtheta=mtheta
             )
             # Use a conformal wall
             wall_settings = WallShapeSettings(shape="conformal", a=0.5)

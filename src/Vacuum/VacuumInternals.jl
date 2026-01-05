@@ -1,31 +1,30 @@
 # Gaussian quadrature weights and points for 8-point integration
 const GAUSSIANWEIGHTS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
-               0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
+    0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
 
 const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
-                0.183434642495650,  0.525532409916329,  0.796666477413627,  0.960289856497536]
+    0.183434642495650, 0.525532409916329, 0.796666477413627, 0.960289856497536]
 
 """
     kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, inputs; xwall=nothing, zwall=nothing)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
 
-**WARNING: This kernel only supports closed toroidal walls currently. 
+**WARNING: This kernel only supports closed toroidal walls currently.
 The residue calculation needs to be updated for open walls.**
 
 # Arguments
 
-- `grad_greenfunction_mat`: Gradient Green's function matrix (output)
-- `greenfunction_mat`: Green's function matrix (output)
-- `x_obspoints`: Observer x coordinates (R coordinates)
-- `z_obspoints`: Observer z coordinates (Z coordinates)
-- `x_sourcepoints`: Source x coordinates (R coordinates)
-- `z_sourcepoints`: Source z coordinates (Z coordinates)
-- `j1`: Boundary condition index for observer (1=plasma, 2=wall)
-- `j2`: Boundary condition index for source (1=plasma, 2=wall)
-- `iopw`: Wall option (0=inactive, 1=active)
-- `n`: Toroidal mode number
-
+  - `grad_greenfunction_mat`: Gradient Green's function matrix (output)
+  - `greenfunction_mat`: Green's function matrix (output)
+  - `x_obspoints`: Observer x coordinates (R coordinates)
+  - `z_obspoints`: Observer z coordinates (Z coordinates)
+  - `x_sourcepoints`: Source x coordinates (R coordinates)
+  - `z_sourcepoints`: Source z coordinates (Z coordinates)
+  - `j1`: Boundary condition index for observer (1=plasma, 2=wall)
+  - `j2`: Boundary condition index for source (1=plasma, 2=wall)
+  - `iopw`: Wall option (0=inactive, 1=active)
+  - `n`: Toroidal mode number
 
 # Returns
 
@@ -33,11 +32,22 @@ Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
 
 # Notes
 
-- Uses Simpson's rule for integration away from singular points
-- Uses Gaussian quadrature near singular points for improved accuracy
-- Implements analytical singularity removal following Chance 1997
+  - Uses Simpson's rule for integration away from singular points
+  - Uses Gaussian quadrature near singular points for improved accuracy
+  - Implements analytical singularity removal following Chance 1997
 """
-function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Matrix{Float64}, x_obspoints::Vector{Float64}, z_obspoints::Vector{Float64}, x_sourcepoints::Vector{Float64}, z_sourcepoints::Vector{Float64}, j1::Int, j2::Int, iopw::Int, n::Int)
+function kernel!(
+    grad_greenfunction_mat::Matrix{Float64},
+    greenfunction_mat::Matrix{Float64},
+    x_obspoints::Vector{Float64},
+    z_obspoints::Vector{Float64},
+    x_sourcepoints::Vector{Float64},
+    z_sourcepoints::Vector{Float64},
+    j1::Int,
+    j2::Int,
+    iopw::Int,
+    n::Int
+)
 
     # These used to be function arguments, but can just set inside here based on j1/j2
     isgn = 2 * j2 - 3
@@ -47,7 +57,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     dtheta = 2π / mtheta
     ak0i = 0.0
     jres = 1
-    theta_grid = range(start=0; length=mtheta, step=dtheta)
+    theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
     # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
     fill!(greenfunction_mat, 0.0)
@@ -64,10 +74,10 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     simpson_a1=1*dtheta/3
     simpson_a2=2*dtheta/3
     simpson_a4=4*dtheta/3
-    
+
     slog1m = 3*dtheta*(log(dtheta)-1/3)
     slog1p = slog1m
-    
+
     log2dtheta = log(2*dtheta)
     log_correction_0=16.0*dtheta*(log2dtheta-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log2dtheta-8.0/15.0)/45.0
@@ -93,8 +103,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
     end
 
     # do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
-    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints, extrapolation_bc=Interpolations.Periodic())
-    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints, extrapolation_bc=Interpolations.Periodic())
+    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints; extrapolation_bc=Interpolations.Periodic())
+    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints; extrapolation_bc=Interpolations.Periodic())
 
     gradients_x = (t -> Interpolations.gradient(spline_x, t)).(theta_grid)
     gradients_z = (t -> Interpolations.gradient(spline_z, t)).(theta_grid)
@@ -109,14 +119,14 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         z_obs=z_obspoints[j]
         theta_obs=theta_grid[j] # theta value
         fill!(work, 0.0)
-        
+
         # if the point of observation point is in negative, We cannot use green func
         # This is same for source point
         if x_obs < 0.0
             (j2 == 2) && (work[j] = 1.0)
             continue
         end
-            
+
         # set istart and iend
         iend = 2 # end point of integration
         aval1=0.0 # ∇𝒢_0
@@ -155,8 +165,8 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
             # Call green function
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            G_n, coupling_n, coupling_0 = green(x_obs,z_obs,x_source,z_source,
-                                               dx_dtheta[ic],dz_dtheta[ic],n)
+            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source,
+                dx_dtheta[ic], dz_dtheta[ic], n)
 
             # simpson integral. 4 for odd, 2 for even, and 1 for others.
             simpson_b=simpson_b2
@@ -179,10 +189,10 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
             # gren : log singularity values accumulated. simpson integral for G_n
             # aval1 : aval1
             work[ic] += isgn*coupling_n*simpson_a
-            greenfunction_mat[j,ic] += G_n*simpson_b # integral of G_n (log singularity)
+            greenfunction_mat[j, ic] += G_n*simpson_b # integral of G_n (log singularity)
             aval1 += coupling_0 * simpson_a
         end
-        
+
         # if it's plasma/plasma, wall/wall and in negative wall point, skip loop
         # obs : j1 = 1(plasma), wall(2)
         # src : j1 = 1(plasma), wall(2)
@@ -191,15 +201,15 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
         end
 
         # Get js
-        js1=mod(j-iend+mtheta-1,mtheta)+1
-        js2=mod(j-iend+mtheta,mtheta)+1
-        js3=mod(j-iend+mtheta+1,mtheta)+1
-        js4=mod(j-iend+mtheta+2,mtheta)+1
-        js5=mod(j-iend+mtheta+3,mtheta)+1
+        js1=mod(j-iend+mtheta-1, mtheta)+1
+        js2=mod(j-iend+mtheta, mtheta)+1
+        js3=mod(j-iend+mtheta+1, mtheta)+1
+        js4=mod(j-iend+mtheta+2, mtheta)+1
+        js5=mod(j-iend+mtheta+3, mtheta)+1
 
         # Singular points when source point and obs point are the same
         # integration each left and right by gaussian quadrature
-        for ilr in [1,2]
+        for ilr in [1, 2]
             gauss_xleft = theta_obs + (2*ilr-iend-2)*dtheta
             gauss_xright = gauss_xleft + 2 * dtheta
             gauss_xavg = (gauss_xright + gauss_xleft)/2
@@ -217,7 +227,7 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 ztp = Interpolations.gradient(spline_z, tgaus0)[1]
 
                 # call green function
-                G_n, coupling_n, coupling_0 = green(x_obs,z_obs,xt,zt,xtp,ztp,n,uselegacygreenfunction=true)
+                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, xt, zt, xtp, ztp, n; uselegacygreenfunction=true)
 
                 # add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
                 # iops = 1
@@ -234,9 +244,9 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 pgaus=(tgaus[ig]-theta_obs-(2-iend)*dtheta)/dtheta
                 pgaus2=pgaus*pgaus
                 A0 = (pgaus2-1)*(pgaus2-4)/4.0 * wgbg
-                A1_plus  = -(pgaus+1)*pgaus*(pgaus2-4)/6.0 * wgbg
+                A1_plus = -(pgaus+1)*pgaus*(pgaus2-4)/6.0 * wgbg
                 A1_minus = -(pgaus-1)*pgaus*(pgaus2-4)/6.0 * wgbg
-                A2_plus  = (pgaus2-1)*pgaus*(pgaus+2)/24.0 * wgbg
+                A2_plus = (pgaus2-1)*pgaus*(pgaus+2)/24.0 * wgbg
                 A2_minus = (pgaus2-1)*pgaus*(pgaus-2)/24.0 * wgbg
 
                 # add up in work
@@ -251,16 +261,16 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
                 if j == jres
                     ak0i -= isgn * coupling_0 * wgbg
                 end
-                
+
                 # skip when plasma, no skip when considering wall
                 (iopw == 0) && continue
 
                 # if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up G_n_nonsingular value
-                greenfunction_mat[j,js1] += G_n_nonsingular * A2_minus
-                greenfunction_mat[j,js2] += G_n_nonsingular * A1_minus
-                greenfunction_mat[j,js3] += G_n_nonsingular * A0
-                greenfunction_mat[j,js4] += G_n_nonsingular * A1_plus
-                greenfunction_mat[j,js5] += G_n_nonsingular * A2_plus
+                greenfunction_mat[j, js1] += G_n_nonsingular * A2_minus
+                greenfunction_mat[j, js2] += G_n_nonsingular * A1_minus
+                greenfunction_mat[j, js3] += G_n_nonsingular * A0
+                greenfunction_mat[j, js4] += G_n_nonsingular * A1_plus
+                greenfunction_mat[j, js5] += G_n_nonsingular * A2_plus
             end
         end
 
@@ -282,15 +292,15 @@ function kernel!(grad_greenfunction_mat::Matrix{Float64}, greenfunction_mat::Mat
 
         # Only when plasma/plasma, log singularity activate. (S1)
         if iops == 1 && iopw != 0
-            greenfunction_mat[j,js1] -= log_correction_2 / x_obs
-            greenfunction_mat[j,js2] -= log_correction_1 / x_obs
-            greenfunction_mat[j,js3] -= log_correction_0 / x_obs
-            greenfunction_mat[j,js4] -= log_correction_1/x_obs
-            greenfunction_mat[j,js5] -= log_correction_2/x_obs
+            greenfunction_mat[j, js1] -= log_correction_2 / x_obs
+            greenfunction_mat[j, js2] -= log_correction_1 / x_obs
+            greenfunction_mat[j, js3] -= log_correction_0 / x_obs
+            greenfunction_mat[j, js4] -= log_correction_1/x_obs
+            greenfunction_mat[j, js5] -= log_correction_2/x_obs
         end
 
         # Store all the datas of work in grdgre, gren
-        @views grad_greenfunction_mat[(j1-1)*mtheta + j, (j2-1)*mtheta .+ (1:mtheta)] .= work
+        @views grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)] .= work
         @views greenfunction_mat[j, 1:mtheta] ./= 2π
     end
 end
@@ -302,20 +312,20 @@ Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coeffici
 
 # Arguments
 
-- `gll`: Output matrix (mpert × mpert) updated in-place
-- `gil`: Input matrix (mtheta × mpert) containing Fourier-space data
-- `cs`: Fourier coefficient matrix (mtheta × mpert)
-- `m00`: Integer offset in the gil matrix (row offset)
-- `l00`: Integer offset in the gil matrix (column offset)
+  - `gll`: Output matrix (mpert × mpert) updated in-place
+  - `gil`: Input matrix (mtheta × mpert) containing Fourier-space data
+  - `cs`: Fourier coefficient matrix (mtheta × mpert)
+  - `m00`: Integer offset in the gil matrix (row offset)
+  - `l00`: Integer offset in the gil matrix (column offset)
 
 # Notes
 
-- Computes: `gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]`
-- Performs the same function as fouranv in the Fortran code.
+  - Computes: `gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]`
+  - Performs the same function as fouranv in the Fortran code.
 
 # Returns
 
--  gll(l2,l1) : output matrix updated in-place (mpert × mpert)
+  - gll(l2,l1) : output matrix updated in-place (mpert × mpert)
 """
 function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
@@ -326,7 +336,7 @@ function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, 
     # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
     # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
     dth = 2π / mtheta
-    mul!(gll, cs', view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 2π * dth, 0.0)
+    mul!(gll, cs', view(gil, (m00+1):(m00+mtheta), (l00+1):(l00+mpert)), 2π * dth, 0.0)
 end
 
 """
@@ -335,7 +345,7 @@ end
     Purpose:
       This routine performs a truncated Fourier transform of gij onto gil
       using Fourier coefficients stored in cs.
-    
+
     Inputs:
       gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
       cs(j,l)    : Fourier coefficient matrix (mth × mpert)
@@ -350,10 +360,10 @@ function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matr
 
     # Zero out relevant gil block
     mtheta, mpert = size(cs)
-    fill!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 0.0)
+    fill!(view(gil, (m00+1):(m00+mtheta), (l00+1):(l00+mpert)), 0.0)
 
     # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
-    mul!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), gij, cs)
+    mul!(view(gil, (m00+1):(m00+mtheta), (l00+1):(l00+mpert)), gij, cs)
 end
 
 # Returns the array of derivatives at all x points, I think this acts like difspl
@@ -371,22 +381,22 @@ Replaces `lagp`, `lagpe4`, and `lag` from Fortran code.
 
 # Arguments
 
-- `ax::Vector{Float64}`: Array of x-coordinates for the interpolation points
-- `af::Vector{Float64}`: Array of y-coordinates (function values) for the interpolation points
-- `m::Int`: Number of interpolation points
-- `nl::Int`: Number of points to use for the local interpolation (polynomial degree + 1)
-- `x::Float64`: The x-value at which to evaluate the interpolated function and/or its derivative
-- `iop::Int`: Flag controlling output (0 = value only, 1 = value and derivative)
+  - `ax::Vector{Float64}`: Array of x-coordinates for the interpolation points
+  - `af::Vector{Float64}`: Array of y-coordinates (function values) for the interpolation points
+  - `m::Int`: Number of interpolation points
+  - `nl::Int`: Number of points to use for the local interpolation (polynomial degree + 1)
+  - `x::Float64`: The x-value at which to evaluate the interpolated function and/or its derivative
+  - `iop::Int`: Flag controlling output (0 = value only, 1 = value and derivative)
 
 # Returns
 
-- `f::Float64`: The interpolated function value at `x`
-- `df::Float64`: The interpolated function derivative at `x` (0.0 if iop=0)
+  - `f::Float64`: The interpolated function value at `x`
+  - `df::Float64`: The interpolated function derivative at `x` (0.0 if iop=0)
 
 # Notes
 
-- Uses local Lagrange interpolation with `nl` points centered around `x`
-- Automatically adjusts interpolation window to stay within array bounds
+  - Uses local Lagrange interpolation with `nl` points centered around `x`
+  - Automatically adjusts interpolation window to stay within array bounds
 """
 function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x::Float64, iop::Int)
 
@@ -397,7 +407,7 @@ function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x
     jn = findfirst(i -> ax[i] >= x, 1:m)
     jn = (jn === nothing) ? m : jn
     jn = max(jn - 1, 1)
-    if jn < m && abs(ax[jn + 1] - x) < abs(x - ax[jn])
+    if jn < m && abs(ax[jn+1] - x) < abs(x - ax[jn])
         jn += 1
     end
 
@@ -459,25 +469,25 @@ end
 
 Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
 
-This function unifies the Fortran functions `trans`, `transdx`, and `transdxx` into a single 
+This function unifies the Fortran functions `trans`, `transdx`, and `transdxx` into a single
 function with optional offset parameters.
 
 # Arguments
 
-- `vecin::Vector{Float64}`: Input array to be resampled
-- `mtheta::Int`: Desired length of the output array
-- `dx0::Float64`: Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mtheta_in`)
-- `dx1::Float64`: Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`)
+  - `vecin::Vector{Float64}`: Input array to be resampled
+  - `mtheta::Int`: Desired length of the output array
+  - `dx0::Float64`: Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mtheta_in`)
+  - `dx1::Float64`: Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`)
 
 # Returns
 
-- `vecout::Vector{Float64}`: The resampled output array (length `mtheta`)
+  - `vecout::Vector{Float64}`: The resampled output array (length `mtheta`)
 
 # Notes
 
-- If `mtheta == length(vecin)`, returns the input vector unchanged
-- Uses periodic cubic spline interpolation for resampling
-- Input grid is normalized to [0, 1] for interpolation
+  - If `mtheta == length(vecin)`, returns the input vector unchanged
+  - Uses periodic cubic spline interpolation for resampling
+  - Input grid is normalized to [0, 1] for interpolation
 """
 function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
 
@@ -587,25 +597,25 @@ end
 """
     Pn_minus_half_1997(s, n)
 
-Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s), 
+Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s),
 recursively using Chance 1997 equations (47)-(50).
 
-The implementation follows the original Fortran code. Note: equation (50) in the paper 
+The implementation follows the original Fortran code. Note: equation (50) in the paper
 has a typo where the exponent should be -1/4 instead of +1/2.
 
 # Arguments
 
-- `s::Real`: Legendre function parameter (s > 1)
-- `n::Int`: Maximum order n (n ≥ 0)
+  - `s::Real`: Legendre function parameter (s > 1)
+  - `n::Int`: Maximum order n (n ≥ 0)
 
 # Returns
 
-- `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
+  - `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
 
 # Notes
 
-- Uses recursive relation from Chance 1997 eq. (47)
-- Base cases computed from eqs. (48)-(50) using elliptic integrals
+  - Uses recursive relation from Chance 1997 eq. (47)
+  - Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
 
@@ -642,26 +652,26 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
 
 # Arguments
 
-- `x_obs`: Observation point R-coordinate (Float64)
-- `z_obs`: Observation point Z-coordinate (Float64)
-- `x_source`: Source point R-coordinate (Float64)
-- `z_source`: Source point Z-coordinate (Float64)
-- `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
-- `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
-- `n`: Toroidal mode number (Int)
-- `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default true)
+  - `x_obs`: Observation point R-coordinate (Float64)
+  - `z_obs`: Observation point Z-coordinate (Float64)
+  - `x_source`: Source point R-coordinate (Float64)
+  - `z_source`: Source point Z-coordinate (Float64)
+  - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
+  - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
+  - `n`: Toroidal mode number (Int)
+  - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default true)
 
 # Returns
 
-- `G_n`: 2π𝒢ⁿ(θ,θ′) — Green's function value
-- `coupling_n`: 𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
-- `coupling_0`: 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
+  - `G_n`: 2π𝒢ⁿ(θ,θ′) — Green's function value
+  - `coupling_n`: 𝒥 ∇'𝒢ⁿ∇'ℒ — Coupling term for mode n
+  - `coupling_0`: 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ — Coupling term for mode 0
 
 # Notes
 
-- Uses Legendre functions P^n_{-1/2}(s) computed via elliptic integrals
-- Implements analytical derivatives from Chance 1997 equations
-- The coupling terms include the Jacobian factor from the coordinate transformation
+  - Uses Legendre functions P^n_{-1/2}(s) computed via elliptic integrals
+  - Implements analytical derivatives from Chance 1997 equations
+  - The coupling terms include the Jacobian factor from the coordinate transformation
 """
 function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=true)
 
@@ -676,15 +686,15 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     # Chance 1997 eq.(41) ℛ = R
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
-    R2 = sqrt(R4) 
+    R2 = sqrt(R4)
     R = sqrt(R2)
     R5 = R4 * R
 
     # Chance 1997 eq.(42) 𝘴 = s
     s = (x_obs2 + x_source2 + ζ2) / R2
-    
-    # Legendre functions for 
-    # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1 
+
+    # Legendre functions for
+    # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
     if uselegacygreenfunction
         legendre = Pn_minus_half_1997(s, n)
     else
@@ -701,26 +711,26 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     G_n = gg * pn
 
     # Chance 1997 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
-    grad_gg = gg / R4 /2π
+    grad_gg = gg / R4 / 2π
 
     # ∂Gⁿ/∂X' = dG_dX
-    xterm1 = (n * (x_obs2 + x_source2 + ζ2)*(x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
-    xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1 
+    xterm1 = (n * (x_obs2 + x_source2 + ζ2) * (x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
+    xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1
     dG_dX = grad_gg * (xterm1 + xterm2) / x_source
-    
+
     # ∂Gⁿ/∂Z' = dG_dZ
     zterm1 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
     zterm2 = 4.0 * x_multiple * pnp1
     dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
-    
-    # Chance 1997 eq.(51) 
+
+    # Chance 1997 eq.(51)
     # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
     # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
-    # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ 
-    dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source*(x_source2-x_obs2+ζ2) * p0 ) 
-    dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1) 
+    # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
+    dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source * (x_source2-x_obs2+ζ2) * p0)
+    dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1)
     coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5
     return G_n, coupling_n, coupling_0
 end
@@ -733,34 +743,34 @@ end
 Calculate the magnetic field on a specified grid using finite differencing
 of the magnetic scalar potential `chi`.
 
-This is the Julia version of the Fortran `pickup` routine. It computes the vacuum 
+This is the Julia version of the Fortran `pickup` routine. It computes the vacuum
 magnetic field perturbation at a set of grid points given the plasma surface perturbation.
 
 # Arguments
 
-- `inputs::VacuumInput`: Struct containing vacuum calculation parameters
-- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry and basis functions
-- `grri::Matrix{Float64}`: Inverted Green's function response matrix from vaccal!
-- `Bn_real::Vector{Float64}`: Real part of normal field Fourier harmonics at plasma surface
-- `Bn_imag::Vector{Float64}`: Imaginary part of normal field Fourier harmonics at plasma surface
-- `R_grid::AbstractVector`: R-coordinates for output field evaluation
-- `Z_grid::AbstractVector`: Z-coordinates for output field evaluation
+  - `inputs::VacuumInput`: Struct containing vacuum calculation parameters
+  - `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry and basis functions
+  - `grri::Matrix{Float64}`: Inverted Green's function response matrix from vaccal!
+  - `Bn_real::Vector{Float64}`: Real part of normal field Fourier harmonics at plasma surface
+  - `Bn_imag::Vector{Float64}`: Imaginary part of normal field Fourier harmonics at plasma surface
+  - `R_grid::AbstractVector`: R-coordinates for output field evaluation
+  - `Z_grid::AbstractVector`: Z-coordinates for output field evaluation
 
 # Returns
 
-- `B_R::Matrix{ComplexF64}`: R-component of magnetic field on grid (nx × nz)
-- `B_Z::Matrix{ComplexF64}`: Z-component of magnetic field on grid (nx × nz)
-- `B_phi::Matrix{ComplexF64}`: Toroidal component of magnetic field on grid (nx × nz)
-- `grid_info::Matrix{Int}`: Grid point classification (1=inside plasma, 0=outside)
+  - `B_R::Matrix{ComplexF64}`: R-component of magnetic field on grid (nx × nz)
+  - `B_Z::Matrix{ComplexF64}`: Z-component of magnetic field on grid (nx × nz)
+  - `B_phi::Matrix{ComplexF64}`: Toroidal component of magnetic field on grid (nx × nz)
+  - `grid_info::Matrix{Int}`: Grid point classification (1=inside plasma, 0=outside)
 
 # Notes
 
-- Uses 5-point finite difference stencil for computing field from potential
-- Field components computed as: B_R = -∂χ/∂R, B_Z = -∂χ/∂Z, B_φ = inχ/R
+  - Uses 5-point finite difference stencil for computing field from potential
+  - Field components computed as: B_R = -∂χ/∂R, B_Z = -∂χ/∂Z, B_φ = inχ/R
 """
 function _pickup_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, grri::Matrix{Float64},
-                       Bn_real::Vector{Float64}, Bn_imag::Vector{Float64}, 
-                       R_grid::AbstractVector, Z_grid::AbstractVector)
+    Bn_real::Vector{Float64}, Bn_imag::Vector{Float64},
+    R_grid::AbstractVector, Z_grid::AbstractVector)
 
     nx = length(R_grid)
     nz = length(Z_grid)
@@ -787,7 +797,7 @@ function _pickup_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, grri::M
 
     Threads.@threads for i in 1:n_points
         R, Z = R_points[i], Z_points[i]
-        
+
         # Points for finite difference stencil
         observe_points = [
             (R, Z + del_Z),
@@ -812,15 +822,15 @@ function _pickup_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, grri::M
             # B_R = -d(chi)/dR, B_Z = -d(chi)/dZ
             br_r = -(chi_r[3, idx] - chi_r[4, idx]) / (2.0 * del_R)
             br_i = -(chi_i[3, idx] - chi_i[4, idx]) / (2.0 * del_R)
-            
+
             bz_r = -(chi_r[1, idx] - chi_r[2, idx]) / (2.0 * del_Z)
             bz_i = -(chi_i[1, idx] - chi_i[2, idx]) / (2.0 * del_Z)
-            
+
             # B_phi = i*n*chi / R
             # Bphi = i*n*(chi_r + i*chi_i)/R = (-n*chi_i + i*n*chi_r)/R
             bphi_r = -inputs.n * chi_i[5, idx] / R_points[idx]
-            bphi_i =  inputs.n * chi_r[5, idx] / R_points[idx]
-            
+            bphi_i = inputs.n * chi_r[5, idx] / R_points[idx]
+
             B_R_complex[i, j] = br_r + ifac * br_i
             B_Z_complex[i, j] = bz_r + ifac * bz_i
             B_phi_complex[i, j] = bphi_r + ifac * bphi_i
@@ -851,17 +861,17 @@ This is the Julia version of the Fortran `loops` subroutine.
 
 # Arguments
 
-- `R_grid::AbstractVector`: Vector of R-coordinates defining the grid
-- `Z_grid::AbstractVector`: Vector of Z-coordinates defining the grid
+  - `R_grid::AbstractVector`: Vector of R-coordinates defining the grid
+  - `Z_grid::AbstractVector`: Vector of Z-coordinates defining the grid
 
 # Returns
 
-- `R_points::Vector{Float64}`: Flattened array of R-coordinates (length nx*nz)
-- `Z_points::Vector{Float64}`: Flattened array of Z-coordinates (length nx*nz)
+  - `R_points::Vector{Float64}`: Flattened array of R-coordinates (length nx*nz)
+  - `Z_points::Vector{Float64}`: Flattened array of Z-coordinates (length nx*nz)
 
 # Notes
 
-- Grid points are ordered as: [(R[1],Z[1]), (R[1],Z[2]), ..., (R[1],Z[nz]), (R[2],Z[1]), ...]
+  - Grid points are ordered as: [(R[1],Z[1]), (R[1],Z[2]), ..., (R[1],Z[nz]), (R[2],Z[1]), ...]
 """
 function _create_pickup_grid(R_grid::AbstractVector, Z_grid::AbstractVector)
     nx = length(R_grid)
@@ -889,33 +899,33 @@ by integrating the Green's function response with the source perturbation at the
 
 # Arguments
 
-- `R_obs::Float64`: R-coordinate of observation point
-- `Z_obs::Float64`: Z-coordinate of observation point
-- `inputs::VacuumInput`: Struct containing vacuum calculation parameters
-- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry
-- `grri::Matrix{Float64}`: Inverted Green's function response matrix
-- `Bn_real::Vector{Float64}`: Real part of normal field Fourier harmonics
-- `Bn_imag::Vector{Float64}`: Imaginary part of normal field Fourier harmonics
+  - `R_obs::Float64`: R-coordinate of observation point
+  - `Z_obs::Float64`: Z-coordinate of observation point
+  - `inputs::VacuumInput`: Struct containing vacuum calculation parameters
+  - `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry
+  - `grri::Matrix{Float64}`: Inverted Green's function response matrix
+  - `Bn_real::Vector{Float64}`: Real part of normal field Fourier harmonics
+  - `Bn_imag::Vector{Float64}`: Imaginary part of normal field Fourier harmonics
 
 # Returns
 
-- `chi_real::Float64`: Real part of the magnetic scalar potential at (R_obs, Z_obs)
-- `chi_imag::Float64`: Imaginary part of the magnetic scalar potential at (R_obs, Z_obs)
+  - `chi_real::Float64`: Real part of the magnetic scalar potential at (R_obs, Z_obs)
+  - `chi_imag::Float64`: Imaginary part of the magnetic scalar potential at (R_obs, Z_obs)
 
 # Notes
 
-- The potential is computed via Fourier series over poloidal modes
-- Includes coupling term from Green's function derivative
-- Factor of -0.5 * dtheta applied from Fortran convention
+  - The potential is computed via Fourier series over poloidal modes
+  - Includes coupling term from Green's function derivative
+  - Factor of -0.5 * dtheta applied from Fortran convention
 """
 function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
-                                  inputs::VacuumInput, plasma_surf::PlasmaGeometry,
-                                  grri::Matrix{Float64}, 
-                                  Bn_real::Vector{Float64}, Bn_imag::Vector{Float64})
-    
+    inputs::VacuumInput, plasma_surf::PlasmaGeometry,
+    grri::Matrix{Float64},
+    Bn_real::Vector{Float64}, Bn_imag::Vector{Float64})
+
     chi_real = 0.0
     chi_imag = 0.0
-    
+
     mtheta = inputs.mtheta
     mpert = inputs.mpert
     n = inputs.n
@@ -931,8 +941,8 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
     for i_theta in 1:mtheta
         R_src = plasma_surf.x[i_theta]
         Z_src = plasma_surf.z[i_theta]
-        
-        # Call the low-level Green's function calculator. 
+
+        # Call the low-level Green's function calculator.
         # The `green` function returns the Green's function value itself (G_n) and
         # the coupling terms for mode n and mode 0.
         G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n)
@@ -962,16 +972,16 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
             # grri has structure [ (grri_cc, grri_cs), (grri_sc, grri_ss) ]
             # The indices for chiwc, chiws in Fortran map to columns of grri
             chi_wc = grri[i_theta, l1]          # Real part kernel
-            chi_ws = grri[i_theta, mpert + l1]  # Imaginary part kernel
-            
+            chi_ws = grri[i_theta, mpert+l1]  # Imaginary part kernel
+
             term_r += g_real[i_theta, l1] * chi_wc - g_imag[i_theta, l1] * chi_ws
             term_i += g_imag[i_theta, l1] * chi_wc + g_real[i_theta, l1] * chi_ws
         end
-        
+
         chi_real += term_r * Bn_real[l1] - term_i * Bn_imag[l1]
         chi_imag += term_i * Bn_real[l1] + term_r * Bn_imag[l1]
     end
-    
+
     # The factor of 0.5 * isg * dth in Fortran
     # isg is -1 for plasma surface
     factor = -0.5 * dtheta

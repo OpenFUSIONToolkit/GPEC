@@ -261,11 +261,11 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     hs3 = sq.fs[:, 2] .^ 2 .* sq.fs[:, 3]              # p^2 * dV/dpsi
 
     dpsi_vec = diff(sq.xs)
-    fsi1 = sum((hs1[1:end-1] .+ hs1[2:end]) .* dpsi_vec) / 2
-    fsi2 = sum((hs2[1:end-1] .+ hs2[2:end]) .* dpsi_vec) / 2
-    fsi3 = sum((hs3[1:end-1] .+ hs3[2:end]) .* dpsi_vec) / 2
+    fsi1 = sum((hs1[1:(end-1)] .+ hs1[2:end]) .* dpsi_vec) / 2
+    fsi2 = sum((hs2[1:(end-1)] .+ hs2[2:end]) .* dpsi_vec) / 2
+    fsi3 = sum((hs3[1:(end-1)] .+ hs3[2:end]) .* dpsi_vec) / 2
 
-    volume = sum((sq.fs[1:end-1, 3] .+ sq.fs[2:end, 3]) .* dpsi_vec) / 2
+    volume = sum((sq.fs[1:(end-1), 3] .+ sq.fs[2:end, 3]) .* dpsi_vec) / 2
 
     p0 = sq.fs[1, 2] - sq.fs1[1, 2] * sq.xs[1]  # linear extrapolation
     betat = 2 * (fsi1 / fsi2) / bt0^2

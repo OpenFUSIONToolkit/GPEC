@@ -129,7 +129,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(;autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000)
 
     r_arr = sol.t
     y_mat = hcat(sol.u...)'
@@ -262,7 +262,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
 
     # Compute 1D data and spline
     sqfs = Array{Float64}(undef, ma + 1, 4)
-    psis = [(ia / (ma + 1))^2 for ia in 1:ma+1]
+    psis = [(ia / (ma + 1))^2 for ia in 1:(ma+1)]
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
@@ -272,8 +272,8 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]
     z = [zmin + j * (zmax - zmin) / mz for j in 0:mz]
     psifs = Array{Float64}(undef, mr + 1, mz + 1, 1)
-    for iz in 1:mz+1
-        for ir in 1:mr+1
+    for iz in 1:(mz+1)
+        for ir in 1:(mr+1)
             psifs[ir, iz, 1] = psio - psifac * (efac * (r[ir] * z[iz])^2 + (r[ir]^2 - r0^2)^2 / 4)
         end
     end

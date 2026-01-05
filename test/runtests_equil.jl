@@ -17,7 +17,7 @@
         )
         efit_config = JPEC.Equilibrium.EquilibriumConfig(efit_control, JPEC.Equilibrium.EquilibriumOutput())
         global plasma_eq_efit = JPEC.Equilibrium.setup_equilibrium(efit_config)
-        
+
         @test plasma_eq_efit isa JPEC.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
     end
@@ -36,7 +36,7 @@
         )
         chease_config_chease_binary = JPEC.Equilibrium.EquilibriumConfig(binary_control, JPEC.Equilibrium.EquilibriumOutput())
         global plasma_eq_binary = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_binary)
-        
+
         @test plasma_eq_binary isa JPEC.Equilibrium.PlasmaEquilibrium
     end
 
@@ -54,7 +54,7 @@
         )
         chease_config_chease_ascii = JPEC.Equilibrium.EquilibriumConfig(ascii_control, JPEC.Equilibrium.EquilibriumOutput())
         global plasma_eq_ascii = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_ascii)
-        
+
         @test plasma_eq_ascii isa JPEC.Equilibrium.PlasmaEquilibrium
     end
 
@@ -74,12 +74,12 @@
         @testset "Spline Evaluation Consistency" begin
             test_psi = 0.5
             test_theta = collect(range(0.0, 1.0, length=50))
-            
+
             fs_ascii = JPEC.Spl.bicube_eval(plasma_eq_ascii.rzphi, [test_psi], test_theta)
             fs_binary = JPEC.Spl.bicube_eval(plasma_eq_binary.rzphi, [test_psi], test_theta)
 
-            @test isapprox(fs_ascii[:,:,1], fs_binary[:,:,1], atol=tol)
-            @test isapprox(fs_ascii[:,:,2], fs_binary[:,:,2], atol=tol)
+            @test isapprox(fs_ascii[:, :, 1], fs_binary[:, :, 1], atol=tol)
+            @test isapprox(fs_ascii[:, :, 2], fs_binary[:, :, 2], atol=tol)
         end
     end
 
@@ -89,13 +89,13 @@
             test_psi = 0.5
             test_theta = collect(range(0.0, 1.0, length=20))
             fs = JPEC.Spl.bicube_eval(eq.rzphi, [test_psi], test_theta)
-            
+
             rfac = sqrt.(max.(0.0, fs[1, :, 1]))
             eta = 2.0 * pi .* (test_theta .+ fs[1, :, 2])
-            
+
             R = eq.ro .+ rfac .* cos.(eta)
             Z = eq.zo .+ rfac .* sin.(eta)
-            
+
             @test !any(isnan, R)
             @test !any(isnan, Z)
             @test all(R .> 0)

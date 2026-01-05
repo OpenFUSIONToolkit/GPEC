@@ -8,6 +8,7 @@ and returns a `VacuumData` struct containing the data needed for perturbed equil
 and data dumping.
 
 ### TODOs
+
 Check if normalize is ever false, currently always true, and if not, remove related logic
 """
 function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::Vacuum.WallShapeSettings)
@@ -38,7 +39,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     wv_block = zeros(ComplexF64, intr.mpert, intr.mpert)
     for ipert_n in 1:intr.npert
         n = ipert_n - 1 + intr.nlow
-        
+
         # Set VACUUM run parameters and boundary shape
         vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
         fill!(vac.grri, 0.0)
@@ -50,11 +51,11 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         if intr.debug_settings.output_benchmark_data
             @info "Outputting top level vacuum debug data for n = $n"
             benchmark_inputs = VacuumBenchmarkInputs(
-                    wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac, 
-                    complex_flag, vac_inputs.kernelsign, wall_flag,
-                    farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
-                    vac_inputs, wall_settings,
-                    n, ipert_n, intr.psilim
+                wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac,
+                complex_flag, vac_inputs.kernelsign, wall_flag,
+                farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
+                vac_inputs, wall_settings,
+                n, ipert_n, intr.psilim
             )
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
@@ -70,7 +71,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         end
 
         # Store block in full wv matrix
-        @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
+        @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
 
         Vacuum.unset_dcon_params()
     end
@@ -122,7 +123,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     end
 
     # Normalize eigenvectors based on scaled wt
-    coeffs = odet.u[:,:,1,end] \ (vac.wt .* (2π * equil.psio * 1e-3))
+    coeffs = odet.u[:, :, 1, end] \ (vac.wt .* (2π * equil.psio * 1e-3))
     for istep in 1:odet.step
         odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * coeffs
         odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * coeffs
@@ -153,7 +154,6 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
-
 """
 function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
@@ -168,7 +168,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
 
     # Compute output
     qa = Spl.spline_eval!(equil.sq, psifac)[4]
-    for itheta in 1:equil.config.control.mtheta+1
+    for itheta in 1:(equil.config.control.mtheta+1)
         f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
         angle[itheta] = 2π * (theta_norm[itheta] + f[2])
@@ -190,17 +190,17 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
 
     # For input to the Julia vacuum code
     return Vacuum.VacuumInput(;
-        r = reverse(r),
-        z = reverse(z),
-        delta = reverse(delta),
-        mhigh = intr.mhigh,
-        mlow = intr.mlow,
-        mpert = intr.mpert,
-        n = n,
-        qa = qa,
-        mtheta_eq = equil.config.control.mtheta,
-        mtheta = ctrl.mthvac,
-        force_wv_symmetry = ctrl.force_wv_symmetry
+        r=reverse(r),
+        z=reverse(z),
+        delta=reverse(delta),
+        mhigh=intr.mhigh,
+        mlow=intr.mlow,
+        mpert=intr.mpert,
+        n=n,
+        qa=qa,
+        mtheta_eq=equil.config.control.mtheta,
+        mtheta=ctrl.mthvac,
+        force_wv_symmetry=ctrl.force_wv_symmetry
     )
 end
 
@@ -221,7 +221,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
     psi_array = zeros(Float64, npsi + 1)
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
-    for i in 1:npsi+1
+    for i in 1:(npsi+1)
         # Space points evenly in q
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
@@ -272,7 +272,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
             end
 
             # Store block in full wv matrix
-            @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
+            @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
 
             # Free VACUUM memory
             Vacuum.unset_dcon_params()
