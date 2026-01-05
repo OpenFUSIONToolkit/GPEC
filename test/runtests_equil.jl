@@ -15,7 +15,8 @@
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_efit = setup_equilibrium(EquilibriumConfig(efit_control, EquilibriumOutput()))
+        efit_config = JPEC.Equilibrium.EquilibriumConfig(efit_control, JPEC.Equilibrium.EquilibriumOutput())
+        global plasma_eq_efit = JPEC.Equilibrium.setup_equilibrium(efit_config)
         
         @test plasma_eq_efit isa JPEC.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
@@ -33,7 +34,8 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        global plasma_eq_binary = setup_equilibrium(EquilibriumConfig(binary_control, EquilibriumOutput()))
+        chease_config_chease_binary = JPEC.Equilibrium.EquilibriumConfig(chease_control, JPEC.Equilibrium.EquilibriumOutput())
+        global plasma_eq_binary = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_binary)
         
         @test plasma_eq_binary isa JPEC.Equilibrium.PlasmaEquilibrium
     end
@@ -50,7 +52,8 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        global plasma_eq_ascii = setup_equilibrium(EquilibriumConfig(ascii_control, EquilibriumOutput()))
+        chease_config_chease_ascii = JPEC.Equilibrium.EquilibriumConfig(chease_control, JPEC.Equilibrium.EquilibriumOutput())
+        global plasma_eq_ascii = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_ascii)
         
         @test plasma_eq_ascii isa JPEC.Equilibrium.PlasmaEquilibrium
     end
