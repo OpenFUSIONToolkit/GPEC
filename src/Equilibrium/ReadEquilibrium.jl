@@ -241,14 +241,14 @@ function read_chease_ascii(config::EquilibriumConfig)
     # --- Parse axx (FORMAT 20: 1E22.15) ---
     axx = parse(Float64, split(lines[2])[1])   # RBOXLEN - compuational box lenth
     # --- Pre-allocate Arrays ---
-    zcpr = zeros(npsi1 - 1) # Don't know.. no in EQDSK
-    zcppr = zeros(npsi1) # dP/dψ .
+    zcpr = zeros(npsi1 - 1) # normalized P(ψ)
+    zcppr = zeros(npsi1) # normalized dP/dψ
     zq = zeros(npsi1) # q(ψ)
-    zdq = zeros(npsi1) # Don't know.. no in EQDSK
+    zdq = zeros(npsi1) # dq/dψ
     ztmf = zeros(npsi1) # normalized F(ψ)
-    ztp = zeros(npsi1) # dF/dψ (T' in chease) # Don't know.. no in EQDSK
+    ztp = zeros(npsi1) # normalized dF/dψ 
     zfb = zeros(npsi1) # normazlied F(ψ)/q(ψ)
-    zfbp = zeros(npsi1) # Don't know.. no in EQDSK
+    zfbp = zeros(npsi1) # d/dψ [F(ψ)/q(ψ) ]
     zpsi = zeros(npsi1) # ψ Poloidal flux
     zpsim = zeros(npsi1 - 1) # ψ mid
 
