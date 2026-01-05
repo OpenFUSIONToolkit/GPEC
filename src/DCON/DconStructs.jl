@@ -13,13 +13,11 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `q1::Float64` - Derivative of safety factor with respect to ψ
   - `di::Float64` - Mercier criterion
   - `alpha::Vector{ComplexF64}` - Resonant matrix eigenvalues
-  - `r1::Vector{Int}` - Resonant indices along first index
-  - `r2::Vector{Int}` - Resonant indices along second index
-  - `n1::Vector{Int}` - Nonresonant indices along first index
-  - `n2::Vector{Int}` - Nonresonant indices along second index
+  - `r::Vector{Int}` - Resonant mode indices for the 2N×2N identity matrix
+  - `n::Vector{Int}` - Nonresonant mode indices for the 2N×2N identity matrix
   - `power::Vector{ComplexF64}` - Power series coefficients
-  - `vmat::Array{ComplexF64,4}` - Power series of V matrix for asymptotic analysis
-  - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
+  - `vmat::Array{ComplexF64,3}` - Power series of V matrix for asymptotic analysis with shape (2N×2N×orders)
+  - `mmat::Array{ComplexF64,3}` - Power series of M matrix for asymptotic analysis with shape (2N×2N×orders)
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
 @kwdef mutable struct SingType
@@ -31,13 +29,11 @@ A mutable struct containing data for singular surfaces in the plasma stability a
     q1::Float64 = 0.0
     di::Float64 = 0.0
     alpha::Vector{ComplexF64} = ComplexF64[]
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
-    n1::Vector{Int} = Int[]
-    n2::Vector{Int} = Int[]
+    r::Vector{Int} = Int[]
+    n::Vector{Int} = Int[]
     power::Vector{ComplexF64} = ComplexF64[]
-    vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
+    vmat::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
+    mmat::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
     m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
 end
 
@@ -307,20 +303,20 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
-  - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
-    `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
-  - `ud_store::Array{ComplexF64,4}` - Stored derivatives of the solution at each saved step with same shape as `u_store`.
+  - `u_store::Array{ComplexF64,3}` - Stored solution arrays at each saved step with shape
+    `(2*numpert_total, numpert_total, numsteps_init)` (complex solution state used by the solver).
+  - `ud_store::Array{ComplexF64,3}` - Stored derivatives of the solution at each saved step with same shape as `u_store`.
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
-  - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
-    with shape `(numpert_total, numpert_total, 2, msing)`.
-  - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
-    with shape `(numpert_total, numpert_total, 2, msing)`.
+  - `ca_r::Array{ComplexF64,3}` - Asymptotic coefficients just to the right of each singular surface
+    with shape `(2*numpert_total, numpert_total, msing)`.
+  - `ca_l::Array{ComplexF64,3}` - Asymptotic coefficients just to the left of each singular surface
+    with shape `(2*numpert_total, numpert_total, msing)`.
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
   - `wvmat_spline::Spl.CubicSpline{ComplexF64}` - Spline representation of precomputed wv matrices used by `free_test`/vacuum routines.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
-  - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
-  - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
+  - `u::Array{ComplexF64,2}` - Current working solution arrays with shape `(2*numpert_total, numpert_total)`.
+  - `ud::Array{ComplexF64,2}` - Current working solution derivative (different than du) arrays with shape `(2*numpert_total, numpert_total)`.
   - `ising::Int` - Index of the next singular surface to be crossed during integration.
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
   - `next::String` - Next integration action to take (e.g. `"cross"` to cross a rational surface or `"finish"`).
@@ -344,7 +340,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
       + `fmat_lower::Vector{ComplexF64}` - Lower-triangle factor of F (length `numpert_total^2`)
       + `kmat::Vector{ComplexF64}` - Flattened K matrix (length `numpert_total^2`)
       + `gmat::Vector{ComplexF64}` - Flattened G matrix (length `numpert_total^2`)
-      + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
+      + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(2*numpert_total, numpert_total)`.
       + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
       + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
 """
@@ -359,11 +355,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
     step::Int = 1
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    u_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, 2*numpert_total, numpert_total, numsteps_init)
+    ud_store::Array{ComplexF64,3} = Array{ComplexF64}(undef, 2*numpert_total, numpert_total, numsteps_init)
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
-    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
+    ca_r::Array{ComplexF64,3} = Array{ComplexF64}(undef, 2*numpert_total, numpert_total, msing)
+    ca_l::Array{ComplexF64,3} = Array{ComplexF64}(undef, 2*numpert_total, numpert_total, msing)
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
@@ -372,8 +368,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Data for integrator
     psifac::Float64 = 0.0
     q::Float64 = 0.0
-    u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
+    u::Array{ComplexF64,2} = zeros(ComplexF64, 2*numpert_total, numpert_total)
+    ud::Array{ComplexF64,2} = zeros(ComplexF64, 2*numpert_total, numpert_total)
     ising::Int = 0
     psimax::Float64 = 0.0
     next::String = ""
@@ -397,7 +393,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 2*numpert_total, numpert_total)
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 end
