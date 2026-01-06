@@ -44,7 +44,6 @@ const GAUSSIANPOINTS32 = [
     0.985611511545268335400, 0.997263861849481563545
 ]
 
-
 """
     kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iops, inputs; xwall=nothing, zwall=nothing)
 
@@ -140,7 +139,7 @@ function kernel!(
         z_obs=z_obspoints[j]
         theta_obs=theta_grid[j]
         grad_green_0 = 0.0 # simpson integral for coupling_0 (𝒥 ∇'𝒢⁰∇'ℒ)
-        # Take a view of the appropriate row of grad_greenfunction_mat for this observer point
+        # Workspace = view of appropriate row of grad_greenfunction_mat for this observer point
         grad_green_work = @view(grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)])
 
         # if observation point is negative, we cannot use green function
@@ -168,8 +167,9 @@ function kernel!(
 
         # Perform Simpson integration for nonsingular source points (excludes 3 singular points)
         # For cases where wall doesn't cross x=0 (iend = istart = 2), the singular points are j-1, j, j+1
-        for ic in (j+istart):(j+mtheta-iend)
-            # Wrap source point index (ic) so it ranges from [1, mtheta]
+        for i in 1:(mtheta-3)
+            # Get source point index (ic) and ensure it is in range [1, mtheta]
+            ic = i + j + istart - 1
             if ic > mtheta
                 ic = ic - mtheta
             end
@@ -184,9 +184,9 @@ function kernel!(
             G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[ic], dz_dtheta[ic], n)
 
             # Compute composite Simpson's 1/3 rule weight (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
-            endpoint = (ic == j + istart || ic == j + mtheta - iend)
-            odd_index = isodd(ic - j - istart)
-            wsimpson = (endpoint ? 1 : (odd_index ? 4 : 2)) * dtheta / 3
+            # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+            endpoint = (i == 1)||(i == mtheta - 3)
+            wsimpson = (endpoint ? 1 : (iseven(i) ? 4 : 2)) * dtheta / 3
 
             # Sum contributions to Green's function matrices using Simpson weight
             grad_green_work[ic] += isgn * coupling_n * wsimpson

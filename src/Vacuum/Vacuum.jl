@@ -313,8 +313,6 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     end
     wv = complex.(vacmat, vacmti)
 
-    display(wv)
-
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
     @views xzpts[:, 1] .= plasma_surf.x
