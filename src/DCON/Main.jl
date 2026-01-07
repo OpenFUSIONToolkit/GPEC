@@ -51,11 +51,10 @@ function Main(path::String="./")
         end
         mercier_scan!(locstab_fs, equil)
     end
-    # TODO: ballooning stability
-    #IF(bal_flag)THEN
-    #   IF(ctrl.verbose) WRITE(*,*)"Evaluating ballooning criterion"
-    #   CALL bal_scan
-    #ENDIF
+    if ctrl.bal_flag
+        compute_ballooning_stability!(ctrl, locstab_fs, equil)
+    end
+
     # Fit data to splines
     intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
 
@@ -279,7 +278,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
             out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag
-            out_h5["locstab/ca1"] = Vector(locstab_fs[:, 4])
+            out_h5["locstab/ca1"] = Vector(intr.locstab.fs[:, 4])
         end
 
         # Write integration data
