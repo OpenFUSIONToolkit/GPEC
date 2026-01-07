@@ -322,6 +322,56 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     return wv, grri, xzpts
 end
 
+function compute_vacuum_response_plasma(inputs::VacuumInput, wall_settings::WallShapeSettings)
+
+    # Initialization and allocations
+    (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
+    plasma_surf = initialize_plasma_surface(inputs)
+    grri = zeros(mtheta, 2 * mpert)
+    grad_greenfunction_mat = zeros(mtheta, mtheta)
+    greenfunction_temp = zeros(mtheta, mtheta)
+
+    # Plasma–Plasma block
+    kernel_plasma!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, n)
+
+    # Fourier transform plasma-plasma block
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+
+    # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997
+    grri .= grad_greenfunction_mat \ grri
+
+    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
+    arr = zeros(mpert, mpert)
+    aii = zeros(mpert, mpert)
+    ari = zeros(mpert, mpert)
+    air = zeros(mpert, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0)
+    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0)
+    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert)
+
+    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
+    vacmat = arr .+ aii
+    vacmti = air .- ari
+    # Force symmetry of response matrix if desired
+    force_wv_symmetry && begin
+        for l1 in 1:mpert
+            for l2 in l1:mpert
+                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
+                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
+            end
+        end
+    end
+    wv = complex.(vacmat, vacmti)
+
+    # Create xzpts array
+    xzpts = zeros(Float64, inputs.mtheta, 4)
+    @views xzpts[:, 1] .= plasma_surf.x
+    @views xzpts[:, 2] .= plasma_surf.z
+    return wv, grri, xzpts
+end
+
 """
     compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry,
            Bn::Vector{<:Number}, R_grid::AbstractVector, Z_grid::AbstractVector)

@@ -277,6 +277,133 @@ function kernel!(
     greenfunction_mat ./= 2π
 end
 
+function kernel_plasma!(
+    grad_greenfunction_mat::Matrix{Float64},
+    greenfunction_mat::Matrix{Float64},
+    x_obspoints::Vector{Float64},
+    z_obspoints::Vector{Float64},
+    x_sourcepoints::Vector{Float64},
+    z_sourcepoints::Vector{Float64},
+    n::Int
+)
+
+    mtheta = length(x_obspoints)
+    dtheta = 2π / mtheta
+    theta_grid = range(; start=0, length=mtheta, step=dtheta)
+
+    # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
+    fill!(greenfunction_mat, 0.0)
+
+    # S₁ᵢ in Chance 1997, eq.(78)
+    log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
+    log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
+    log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
+
+    # Used for Z'_θ and X'_θ in eq.(51)
+    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints; extrapolation_bc=Interpolations.Periodic())
+    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints; extrapolation_bc=Interpolations.Periodic())
+    dx_dtheta = [Interpolations.gradient(spline_x, t)[1] for t in theta_grid]
+    dz_dtheta = [Interpolations.gradient(spline_z, t)[1] for t in theta_grid]
+
+    # Loop through observer points
+    for j in 1:mtheta
+        # Initialize variables
+        x_obs=x_obspoints[j]
+        z_obs=z_obspoints[j]
+        theta_obs=theta_grid[j]
+        grad_green_0 = 0.0 # simpson integral for coupling_0 (𝒥 ∇'𝒢⁰∇'ℒ)
+        # Workspace = view of appropriate row of grad_greenfunction_mat for this observer point
+        grad_green_work = @view(grad_greenfunction_mat[j, 1:mtheta])
+
+        # Perform Simpson integration for nonsingular source points (excludes j-1, j, j+1)
+        for i in 1:(mtheta-3)
+            # Get source point index (ic) and ensure it is in range [1, mtheta]
+            ic = i + j + 1
+            if ic > mtheta
+                ic -= mtheta
+            end
+            x_source=x_sourcepoints[ic]
+            z_source=z_sourcepoints[ic]
+
+            # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
+            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[ic], dz_dtheta[ic], n)
+
+            # Compute composite Simpson's 1/3 rule weight (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
+            # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+            endpoint = (i == 1)||(i == mtheta - 3)
+            wsimpson = (endpoint ? 1 : (iseven(i) ? 4 : 2)) * dtheta / 3
+
+            # Sum contributions to Green's function matrices using Simpson weight
+            grad_green_work[ic] += -1 * coupling_n * wsimpson
+            greenfunction_mat[j, ic] += G_n * wsimpson
+            grad_green_0 += coupling_0 * wsimpson
+        end
+
+        # Perform Gaussian quadrature for singular points (source = obs point)
+        # Get indices of the singularity region ([j-2, j-1, j, j+1, j+2])
+        js = mod.(j .+ ((mtheta-3):(mtheta+1)), mtheta) .+ 1
+        # Integrate region of length 2 * dtheta on left (ilr = 1)/right (ilr = 2) of singularity
+        for ilr in [1, 2]
+            gauss_xleft = theta_obs + 2 * (ilr-2) * dtheta
+            gauss_xright = gauss_xleft + 2 * dtheta
+            gauss_xavg = (gauss_xright + gauss_xleft)/2
+            theta_gauss = gauss_xavg .+ GAUSSIANPOINTS .* dtheta # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
+            for ig in 1:8 # 8-point Gaussian quadrature
+                # Compute green function for this Gaussian point
+                theta_gauss0 = mod(theta_gauss[ig], 2π)
+                x_gauss = spline_x(theta_gauss0)
+                dx_dtheta_gauss = Interpolations.gradient(spline_x, theta_gauss0)[1]
+                z_gauss = spline_z(theta_gauss0)
+                dz_dtheta_gauss = Interpolations.gradient(spline_z, theta_gauss0)[1]
+                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
+
+                # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
+                G_n_nonsingular = G_n + log((theta_obs-theta_gauss[ig])^2)/x_obs
+
+                # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
+                wgauss = GAUSSIANWEIGHTS[ig] * dtheta
+                # Calculate p = θ/Δ = (θⱼ - θ')/Δ, 0 at observation point, ±1,±2 at other 5-point stencil nodes
+                pgauss=(theta_gauss[ig]-theta_obs)/dtheta
+                # Compute 5-point Lagrange basis polynomials at the Gauss point and multiply by quadrature weight
+                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss
+                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss
+                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss
+                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss
+                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
+
+                # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
+                greenfunction_mat[j, js[1]] += G_n_nonsingular * A2_minus
+                greenfunction_mat[j, js[2]] += G_n_nonsingular * A1_minus
+                greenfunction_mat[j, js[3]] += G_n_nonsingular * A0
+                greenfunction_mat[j, js[4]] += G_n_nonsingular * A1_plus
+                greenfunction_mat[j, js[5]] += G_n_nonsingular * A2_plus
+
+                # Second type of singularity: 𝒦ⁿ
+                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰ (js[3] = j if iend=2)
+                grad_green_work[js[1]] += -1 * coupling_n * A2_minus
+                grad_green_work[js[2]] += -1 * coupling_n * A1_minus
+                grad_green_work[js[3]] += -1 * coupling_n * A0
+                grad_green_work[js[4]] += -1 * coupling_n * A1_plus
+                grad_green_work[js[5]] += -1 * coupling_n * A2_plus
+                # Subtract off the diverging singular n=0 component
+                grad_green_work[j] -= -1 * coupling_0 * wgauss
+            end
+        end
+
+        # Subtract regular integral component of δⱼᵢK⁰ in eq. 83 and add residue value in eq. 89/90
+        grad_green_work[j] += grad_green_0 + 2.0
+
+        # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
+        greenfunction_mat[j, js[1]] -= log_correction_2 / x_obs
+        greenfunction_mat[j, js[2]] -= log_correction_1 / x_obs
+        greenfunction_mat[j, js[3]] -= log_correction_0 / x_obs
+        greenfunction_mat[j, js[4]] -= log_correction_1 / x_obs
+        greenfunction_mat[j, js[5]] -= log_correction_2 / x_obs
+    end
+    # Since we computed 2π𝒢, divide by 2π to get 𝒢
+    greenfunction_mat ./= 2π
+end
+
 """
     fourier_inverse_transform!(gll, gil, cs, m00, l00)
 
