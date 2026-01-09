@@ -291,8 +291,8 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
             z_wall[i] = z_plasma[i] + a * r_minor * sin(alph)
         end
 
-        if any(x_wall .== centerstack_min)
-            @warn "Conformal wall with a=$a would cross R=0 axis; forcing minimum wall R to $centerstack_min to avoid unphysical geometry."
+        if any(x_wall .<= centerstack_min + eps(Float64))
+            @warn "Conformal wall with a=$a would cross R=0 axis; forcing minimum wall R to $(@sprintf "%.2e" centerstack_min) m to avoid unphysical geometry."
         end
 
     elseif wall_settings.shape == "elliptical"
