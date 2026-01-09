@@ -15,7 +15,7 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
   - `kernelsign::Float64`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
 """
-@kwdef mutable struct VacuumInput
+@kwdef struct VacuumInput
     r::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
     ν::Vector{Float64} = Float64[]
@@ -156,7 +156,7 @@ function initialize_plasma_surface(inputs::VacuumInput)
     dx_dtheta = periodic_cubic_deriv(θ_grid, x_plasma)
     dz_dtheta = periodic_cubic_deriv(θ_grid, z_plasma)
 
-    # Precompute Fourier transform terms, e.g. from eqs 109-110, 115-118 of Chance 1997
+    # Precompute Fourier transform terms, sin(lθ - nν) and cos(lθ - nν)
     sin_ln_basis = zeros(Float64, mtheta, mpert)
     cos_ln_basis = zeros(Float64, mtheta, mpert)
     for j in 1:mpert

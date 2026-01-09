@@ -152,6 +152,7 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
+  - `ctrl`: DCON control parameters (DconControl)
 """
 function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
@@ -165,7 +166,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     rfac = zeros(Float64, mtheta + 1)
 
     # Compute output
-    for itheta in 1:(equil.config.control.mtheta+1)
+    for itheta in 1:(mtheta+1)
         f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
         angle[itheta] = 2π * (theta_norm[itheta] + f[2])
