@@ -72,8 +72,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Store block in full wv matrix
         @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
-
-        Vacuum.unset_dcon_params()
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -167,7 +165,6 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     rfac = zeros(Float64, mtheta + 1)
 
     # Compute output
-    qa = Spl.spline_eval!(equil.sq, psifac)[4] # remove this when removing set_dcon_params
     for itheta in 1:(equil.config.control.mtheta+1)
         f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
@@ -182,10 +179,6 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
         ν .= -ν
         n = -n
     end
-
-    # Pass all required values to VACUUM
-    Vacuum.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
-        reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
     return Vacuum.VacuumInput(;

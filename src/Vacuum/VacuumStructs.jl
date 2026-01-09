@@ -159,11 +159,11 @@ function initialize_plasma_surface(inputs::VacuumInput)
     # Precompute Fourier transform terms, e.g. from eqs 109-110, 115-118 of Chance 1997
     sin_ln_basis = zeros(Float64, mtheta, mpert)
     cos_ln_basis = zeros(Float64, mtheta, mpert)
-    for l in mlow:(mlow+mpert-1)
+    for j in 1:mpert
         for i in 1:mtheta
-            arg = l * θ_grid[i] - n * ν[i]
-            cos_ln_basis[i, l] = cos(arg)
-            sin_ln_basis[i, l] = sin(arg)
+            l = mlow + j - 1
+            cos_ln_basis[i, j] = cos(l * θ_grid[i] - n * ν[i])
+            sin_ln_basis[i, j] = sin(l * θ_grid[i] - n * ν[i])
         end
     end
 
