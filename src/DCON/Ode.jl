@@ -1,88 +1,4 @@
 """
-OdeState
-
-A mutable struct to hold the state of the ODE solver for DCON.
-This struct contains all necessary fields to manage the ODE integration process,
-including solution vectors, tolerances, and flags for the integration process.
-"""
-# TODO: Rethink msol variable, I think the Fortran implementation is confusing. Explicitly use mpert or 2*mpert in loops when possible. Might
-# cause issues in ode_resist_cross, there's some logic I don't understand there where msol is increased, will need careful thinking
-@kwdef mutable struct OdeState
-    # Initialization parameters
-    mpert::Int                  # poloidal mode number count
-    msol::Int                   # number of solutions
-    numunorms_init::Int             # initial storage size for unorm data
-    msing::Int                   # number of singular surfaces
-    numsteps_init::Int             # initial size of data store
-
-    # Saved data throughout integration
-    step::Int = 1                    # current step of integration (this is like istep in Fortran)
-    psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)  # psi at each step of integration
-    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, mpert, 2, numsteps_init) # store of u at each step of integration
-    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, mpert, 2, numsteps_init) # store of ud at each step of integration
-    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, 2 * mpert, 2, msing) # asymptotic coefficients just right of singular surface
-    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, mpert, 2 * mpert, 2, msing) # asymptotic coefficients just left of singular surface
-    index::Array{Int,2} = zeros(Int, mpert, numunorms_init)                                   # indices for sorting solutions
-    sing_flag::Vector{Bool} = falses(numunorms_init)                     # flags for singular solutions
-    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, numunorms_init)             # fixup factors for Gaussian reduction
-    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)               # psi values at which unorms were performed
-
-    # Used for to find peak dW in the edge
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)  # dW at each step in the edge
-    wvmat_spline::Union{Missing,Spl.CubicSpline{ComplexF64}} = missing  # spline of wv matrices for free_test # TODO: how to initialize a spline?
-    wvmat_spline_created::Bool = false  # flag for if wv matrix spline has been computed
-
-    # Data for integrator
-    psifac::Float64 = 0.0       # normalized flux coordinate
-    q::Float64 = 0.0            # q value at psifac
-    u::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, 2)            # solution vectors
-    ud::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, 2)           # derivative of solution vectors used in GPEC
-    ising::Int = 0               # index of next singular surface
-    m1::Int = 0                 # poloidal mode number for the next singular surface (?)
-    psimax::Float64 = 0.0         # maximum psi value for the integrator
-    singfac::Float64 = 0.0      # separation from singular surface in terms of m - nq
-    next::String = ""           # next integration action ("cross" or "finish")
-    psi_prev::Float64 = 0.0     # previous psi value
-    crit_prev::Float64 = 0.0    # previous crit value
-    u_prev::Array{ComplexF64,3} = zeros(ComplexF64, mpert, mpert, 2) # previous solution array
-    nzero::Int = 0              # count of zero crossings detected
-
-    # Used for Gaussian reduction
-    new::Bool = true            # flag for computing new unorm0 after a fixup
-    unorm::Vector{Float64} = zeros(Float64, 2 * mpert)                        # norms of solution vectors
-    unorm0::Vector{Float64} = zeros(Float64, 2 * mpert)                       # initial norms of solution vectors
-    ifix::Int = 0                # index for number of unorms performed
-
-    # Temporary matrices for sing_der calculations
-    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
-    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
-    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
-    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
-    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
-    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, mpert^2)
-    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, mpert, mpert)
-    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
-    singfac_vec::Vector{Float64} = Vector{Float64}(undef, mpert)
-
-    flag_count::Int = 0         # count of flags raised # TODO: remove this? Only used in ode_test if res_flag = true
-end
-
-# Base struct that handles storage of the ODE solution throughout integration
-mutable struct OdeDataStore
-    psi::Vector{Float64}
-    u::Vector{Array{ComplexF64,3}}
-    ud::Vector{Array{ComplexF64,3}}
-    step::Int
-end
-
-# Initialize function for data storage object of a given size, will resize as needed
-OdeDataStore(numsteps_init::Int) =
-    OdeDataStore(Vector{Float64}(undef, numsteps_init), Vector{Array{ComplexF64,3}}(undef, numsteps_init), Vector{Array{ComplexF64,3}}(undef, numsteps_init), 0)
-
-# Initialize function for OdeState with relevant parameters for array initialization
-OdeState(mpert::Int, msol::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; mpert, msol, numsteps_init, numunorms_init, msing)
-
-"""
     `ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)`
 
 Main driver for integrating plasma equilibrium and detecting singular surfaces.
@@ -90,22 +6,24 @@ Has the same functionality as `ode_run` in the Fortran code, with the addition o
 a single dump to the `euler.h5` file at the end of integration instead of multiple dumps
 to `euler.bin` throughout the integration. We have made the control logic more clear
 including making a clear end condition to the while loop and implementing the unorming
-and output logic within a callback in the integration.
+and logic within a callback in the integration. We now perform significant post-processing
+after integration including finding the peak dW in the edge region and evaluating the
+stability criterion over the entire integration, which were previously done during
+integration in the Fortran code.
 
 ### TODOs
 
-Support for `res_flag` and `kin_flag`
+Support for `kin_flag`
 restype functionality if we decide to do this
 
 ### Returns
 
 An OdeState struct containing the final state of the ODE solver after integration is complete.
 """
-function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # Initialization
-    odet = OdeState(intr.mpert, intr.mpert, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-
+    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
         ode_axis_init!(odet, ctrl, equil, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -115,96 +33,64 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
         error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
     end
 
-    # Since we search for the peak dW in this region, initialize to -Infinity
-    if ctrl.psiedge < intr.psilim
-        fill!(odet.dW_edge, -Inf * (1 + im))
-    end
-
     if ctrl.verbose # mimicing output from ode_output_open
-        println("   ψ = $(odet.psifac), q = $(Spl.spline_eval!(equil.sq, odet.psifac)[4])")
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" Spl.spline_eval!(equil.sq, odet.psifac)[4]))")
     end
-
-    # Write header data to files
-    ode_output_init(ctrl, equil, intr, odet, outp)
 
     # Always integrate once, even if no rational surfaces are crossed
-    ode_step!(odet, ctrl, equil, ffit, intr, outp)
+    ode_step!(odet, ctrl, equil, ffit, intr)
 
     # If at a rational surface, do the appropriate crossing routine, then integrate again
     while odet.ising != ctrl.ksing && odet.next == "cross"
-        if ctrl.res_flag
-            error("res_flag = true not implemented yet!")
-        elseif ctrl.kin_flag
+
+        if ctrl.kin_flag
             error("kin_flag = true not implemented yet!")
         else
-            ode_ideal_cross!(odet, ctrl, equil, ffit, intr, outp)
+            ode_ideal_cross!(odet, ctrl, equil, ffit, intr)
         end
 
-        odet.flag_count = 0
-        ode_step!(odet, ctrl, equil, ffit, intr, outp)
+        ode_step!(odet, ctrl, equil, ffit, intr)
     end
 
     # Deallocate unused storage of integration data
     if ctrl.psiedge < intr.psilim
         # Find the peak dW in the edge region and truncate integration data there
-        odet.step = findmax(real.(odet.dW_edge))[2]
+        odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $(odet.psi_store[odet.step]), q = $(Spl.spline_eval!(equil.sq, odet.psi_store[odet.step])[4])")
+            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
         end
 
         # Update u, psilim, and qlim for usage in determining wp and wt
         intr.psilim = odet.psi_store[end]
-        intr.qlim = Spl.spline_eval!(equil.sq, intr.psilim)[4]
+        intr.qlim = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
         odet.step -= 1 # step was incremented one extra time in ode_step!
         trim_storage!(odet)
     end
 
-    ureal = build_ureal(intr, odet)
-
-    if outp.write_euler_h5
-        if ctrl.verbose
-            println("Writing saved integration data to euler.h5...")
-        end
-        # We open in r+ mode to add to the existing file from ode_output_init instead of overwriting it
-        h5open(joinpath(intr.dir_path, outp.fname_euler_h5), "r+") do euler_h5
-            # Output psilim and qlim here in case they were changed due to peak edge dW search
-            euler_h5["info/psilim"] = intr.psilim
-            euler_h5["info/qlim"] = intr.qlim
-            euler_h5["integration/msol"] = odet.msol
-            euler_h5["integration/nstep"] = odet.step
-            euler_h5["integration/psi"] = odet.psi_store
-            euler_h5["integration/q"] = Spl.spline_eval(equil.sq, odet.psi_store, 0)[4]
-            euler_h5["integration/u"] = odet.u_store
-            euler_h5["integration/ud"] = odet.ud_store
-            # TODO: for GPEC, should add u1, u2, u3, u4? I think this would just be a
-            # matter of adding u[:, :, 2] and ud to the build ureal function, yes?
-            euler_h5["integration/ureal"] = ureal
-            euler_h5["singular/msing"] = intr.msing
-            euler_h5["singular/psi"] = [intr.sing[ising].psifac for ising in 1:intr.msing]
-            euler_h5["singular/q"] = [intr.sing[ising].q for ising in 1:intr.msing]
-            euler_h5["singular/q1"] = [intr.sing[ising].q1 for ising in 1:intr.msing]
-            euler_h5["singular/ca_left"] = odet.ca_l
-            euler_h5["singular/ca_right"] = odet.ca_r
-            # TODO: restype writing would also be added here, Matt says not needed for now (or maybe ever)
-        end
+    # Evaluate stability criterion (critical determinant) of saved solutions
+    if ctrl.verbose
+        println("Evaluating fixed-boundary stability criterion")
     end
+    odet.nzero = evaluate_stability_criterion!(odet, equil)
+
+    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
+    transform_u!(odet, intr)
+
     return odet
 end
-
 
 """
     ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization). This includes
-determining `psifac`, `psimax`, `ising`, `m1`, `singfac`, and initializing `u`.
+determining `psifac`, `psimax`, `ising`, `singfac`, and initializing `u`.
 
 ### TODOs
 
 Support for `kin_flag`
-Remove while true logic
 """
 function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
@@ -217,25 +103,24 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Use Newton iteration to find starting psi if qlow is above q0
     if ctrl.qlow > equil.sq.fs[1, 4]
-        # Start check from the edge for robustness in reverse shear cores
-        for jpsi in equil.sq.mx:-1:2  # avoid starting iteration on endpoints
-            if equil.sq.fs[jpsi-1, 4] < ctrl.qlow
-                odet.psifac = equil.sq.xs[jpsi]
-                break
-            end
+        # Find last index where q < qlow 
+        idx = findlast(jpsi -> equil.sq.fs[jpsi-1, 4] < ctrl.qlow, 2:equil.sq.mx)
+        if idx !== nothing
+            odet.psifac = equil.sq.xs[idx]
         end
-        it = 0
-        while it ≤ itmax
-            it += 1
+        # Refine psifac using Newton iteration
+        converged = false
+        for _ in 1:itmax
             dpsi = (ctrl.qlow - qval(odet.psifac)) / q1val(odet.psifac)
             odet.psifac += dpsi
-            if abs(dpsi) < eps * abs(odet.psifac)
-                break
-            end
+            abs(dpsi) < eps * abs(odet.psifac) && (converged = true; break)
+        end
+        if !converged
+            error("Newton iteration for psifac did not converge after $itmax iterations.")
         end
     end
 
-    # Find inner singular surface
+    # Find inner singular surface (where sing.psifac > psi(qlow/q0))
     if false #(TODO: kin_flag)
     # for ising = 1:kmsing
     #     if kinsing[ising].psifac > psifac
@@ -243,170 +128,56 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     #     end
     # end
     else
-        odet.ising = 0
-        for i in 1:intr.msing
-            if intr.sing[i].psifac > odet.psifac
-                odet.ising = max(0, i - 1)
-                break
-            end
-        end
+        odet.ising = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1  
     end
 
     # Find next singular surface
-    if false # TODO: (kin_flag)
-    # while true
-    #     ising += 1
-    #     if ising > kmsing
-    #         break
-    #     end
-    #     if psilim < kinsing[ising].psifac
-    #         break
-    #     end
-    #     odet.q = kinsing[ising].q
-    #     if mlow <= nn * odet.q && mhigh >= nn * odet.q
-    #         break
-    #     end
-    # end
-    # if ising > kmsing || singfac_min == 0
-    #     psimax = psilim * (1 - eps)
-    #     next = "finish"
-    # elseif psilim < kinsing[ising].psifac
-    #     psimax = psilim * (1 - eps)
-    #     next = "finish"
-    # else
-    #     psimax = kinsing[ising].psifac - singfac_min / abs(nn * kinsing[ising].q1)
-    #     next = "cross"
-    # end
+    if false
+        # TODO: (kin_flag)
     else
+        # Find next singular surface (either next one in the list or outside integration limits)
+        # TODO: clean this up in integration bounds PR, this exact block appears several times
+        # TODO: Based on the existing logic, I don't think checking if mlow <= m <= mhigh is necessary,
+        # since DCON sets the poloidal mode numbers to include the resonant modes anyway. However, based
+        # on discussion with Nik, eventually we might just want to allow the user to set mlow/mhigh, in
+        # which case this check would be necessary. In 3D, this might be even more applicable since rational
+        # surfaces will be more dense so we might not set out mode spectrum to include all resonances.
         while true
             odet.ising += 1
             if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
                 break
             end
-            if intr.mlow <= ctrl.nn * intr.sing[odet.ising].q && intr.mhigh >= ctrl.nn * intr.sing[odet.ising].q
+            if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
                 break
             end
         end
-        if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac || ctrl.singfac_min == 0
+        # Determine psimax and classify next integration limit type
+        if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
-            odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(ctrl.nn * intr.sing[odet.ising].q1)
+            # TODO: Nik: where does singfac_min / n * q' come from? Unclear how to generalize to multi-n
+            # Safest choice for now is to use the smallest resonant n for maximum separation
+            odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
             odet.next = "cross"
         end
     end
 
-    # Allocate and sort solutions by increasing value of |m-ms1|
-    m = intr.mlow - 1 .+ collect(1:intr.mpert)
-    if ctrl.sort_type == "absm"
-        key = abs.(m)
-    elseif ctrl.sort_type == "sing"
-        key = m
-        if intr.msing > 0
-            key .-= intr.sing[1].m
-        end
-        @. key = -abs(key)
-    else
-        error("Cannot recognize sort_type = $(ctrl.sort_type)")
+    # Initialize solutions with the identity matrix for U_22 as described in [Glasser PoP 2016] Section VI
+    for ipert in 1:intr.numpert_total
+        odet.u[ipert, ipert, 2] = 1
     end
-    index = sortperm(key; rev=true) # in original Fortran: bubble(key, index, 1, mpert)
-
-    # Initialize solutions
-    for ipert in 1:intr.mpert
-        odet.u[index[ipert], ipert, 2] = 1
-    end
-    odet.msol = intr.mpert
-    odet.u_prev .= odet.u
-    odet.psi_prev = odet.psifac
-
-    # Compute conditions at next singular surface
-    if false #TODO: (kin_flag)
-    # if kmsing > 0
-    #     m1 = round(Int, nn * kinsing[ising].q)
-    # else
-    #     m1 = round(Int, nn * qlim) + sign(one, nn * sq.fs1[mpsi, 5])
-    # end
-    else
-        # note: Julia's default round does Banker's rounding, to match NINT in fortran we need to specify RoundFromZero
-        if intr.msing > 0
-            odet.m1 = round(Int, ctrl.nn * intr.sing[odet.ising].q, RoundFromZero)
-        else
-            odet.m1 = round(Int, ctrl.nn * intr.qlim, RoundFromZero) + sign(ctrl.nn * equil.sq.fs1[end, 4])
-        end
-    end
-    odet.singfac = abs(odet.m1 - ctrl.nn * equil.sq.fs[1, 4]) # Fortran: q=sq%fs(0,4)
 end
 
 # TODO: NOT IMPLEMENTED YET! (low priority, just make sure sing_start = 0 in dcon.toml)
 function ode_sing_init()
     return
 end
-#     # Declare and initialize local variables
-#     star = fill(' ', mpert)
-#     # local variables
-#     ua = Array{Complex{r8}}(undef, mpert, 2*mpert, 2)
-#     dpsi = 0.0
-#     new = true
-
-#     ising = sing_start
-#     dpsi = singfac_min/abs(nn*sing[ising].q1)*10
-#     odet.psifac = sing[ising].psifac + dpsi
-#     odet.q = sing[ising].q + dpsi*sing[ising].q1
-
-#     # Allocate and initialize solution arrays
-#     u      = zeros(Complex{r8}, mpert, mpert, 2)
-#     du     = zeros(Complex{r8}, mpert, mpert, 2)
-#     u_prev = zeros(Complex{r8}, mpert, mpert, 2)
-#     unorm0 = zeros(r8, 2*mpert)
-#     unorm  = zeros(r8, 2*mpert)
-#     index  = zeros(Int, 2*mpert)
-
-#     if old_init
-#         u .= 0.0
-#         for ipert ∈ 1:mpert
-#             u[ipert, ipert, 2] = 1.0
-#         end
-#     else
-#         sing_get_ua(ising, odet.psifac, ua)
-#         # Big slice: u = ua[:, mpert+1:2*mpert,:]
-#         for i = 1:mpert, j = 1:mpert, k = 1:2
-#             u[i, j, k] = ua[i, mpert+j, k]
-#         end
-#     end
-#     u_prev .= u
-#     psi_prev = psifac
-#     msol = mpert
-#     neq = 4 * mpert * msol
-
-#     # Compute conditions at next singular surface
-#     while true
-#         ising += 1
-#         if ising > msing || psilim < sing[ising ≤ msing ? ising : msing].psifac
-#             break
-#         end
-#         odet.q = sing[ising].q
-#         if mlow ≤ nn*q && mhigh ≥ nn*q
-#             break
-#         end
-#     end
-# This needs to be fixed up
-#     if ising > msing || psilim < sing[ising ≤ msing ? ising : msing].psifac
-#         m1 = round(Int, ctrl.nn*intr.qlim) + round(Int, sign(one, ctrl.nn*equil.sq.fs1[mpsi, 4]))
-#         psimax = psilim * (1-eps)
-#         next_ = "finish"
-#     else
-#         m1 = round(Int, nn*sing[ising].q)
-#         psimax = sing[ising].psifac - singfac_min/abs(nn*sing[ising].q1)
-#         next_ = "cross"
-#     end
-#     # Terminate, or in Julia just return (no need for RETURN)
-#     return nothing  # or could return a struct with all these values, for a more Julian approach
-# end
 
 """
-    ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+    ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
-Handle the crossing of a rational surface during ODE integration if both `res_flag` and `kin_flag` are false.
+Handle the crossing of a rational surface during ODE integration if `kin_flag` is false.
 Performs the same function as `ode_ideal_cross` in the Fortran code. Differences mainly in integration data
 storage logic, but otherwise identical. It normalizes and reinitializes the solution vector at the singularity,
 and updates relevant state variables and updates `odet` for continued integration. It also determines the
@@ -416,79 +187,82 @@ location and parameters of the next singular surface and writes outputs as desir
 
 Remove while true logic
 """
-function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # Fixup solution at singular surface
-    if ctrl.verbose
-        println("   ψ = $(intr.sing[odet.ising].psifac), q = $(intr.sing[odet.ising].q)")
-    end
-    ode_unorm!(odet, ctrl, intr, outp, true)
+    ode_unorm!(odet.u, odet, ctrl, intr, true)
 
     # Get asymptotic coefficients before crossing rational surface
-    ca = sing_get_ca(ctrl, intr, odet)
-    odet.ca_l[:, :, :, odet.ising] .= ca
+    odet.ca_l[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
     # Re-initialize on opposite side of rational surface
     psi_old = odet.psifac
     singp = intr.sing[odet.ising]
-    ipert0 = round(Int, ctrl.nn * singp.q, RoundFromZero) - intr.mlow + 1
     dpsi = singp.psifac - odet.psifac
-    odet.psifac = singp.psifac + dpsi
+    odet.psifac += 2 * dpsi # jump to other side of singular surface
     ua = sing_get_ua(ctrl, intr, odet)
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    
+    # TODO: make this comment shorter?
+    # Single n: remove largest solution and sub in asymptotics on the other side
+    # Multi-n: if we remove the N largest modes in arbitrary order, we can mess up the
+    # diagonal structure of the matrix and later calculations. zeroed_idx let's us make sure
+    # the solution vector we're zeroing corresponds to the same block as the resonant mode we
+    # introduce. It is also needed when transforming u back to the full solution after integration.
     if !ctrl.con_flag
-        odet.u[:, odet.index[1, odet.ifix], :] .= 0
+        # Eliminate the solution with the largest norm (in the same block) for each resonance
+        odet.zeroed_idx[odet.ifix] = Int[]
+        for i in eachindex(singp.r1)
+            push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
+        end
     end
 
-    # Update solution vectors
-    du1 = zeros(ComplexF64, intr.mpert, intr.mpert, 2)
-    du2 = zeros(ComplexF64, intr.mpert, intr.mpert, 2)
-    params = (ctrl, equil, ffit, intr, odet, outp)
+    # Approximate solution vectors across singular surface
+    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    params = (ctrl, equil, ffit, intr, odet)
     sing_der!(du1, odet.u, params, psi_old)
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
+
+    # Apply asymptotic solution on other side of singular surface
     if !ctrl.con_flag
-        odet.u[ipert0, :, :] .= 0
-        odet.u[:, odet.index[1, odet.ifix], :] .= ua[:, ipert0+intr.mpert, :]
+        for i in eachindex(singp.r1)
+            # Zero out the resonant components
+            odet.u[ipert_res[i], :, :] .= 0
+            # Introduce the small asymptotic resonant solution on the other side of the singular surface
+            odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= ua[:, ipert_res[i] + intr.numpert_total, :]
+        end
     end
-
     # Get asymptotic coefficients after crossing rational surface
-    ca = sing_get_ca(ctrl, intr, odet)
-    odet.ca_r[:, :, :, odet.ising] .= ca
+    odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
 
-    # Find next ising
+    # Find next singular surface (either the next in the list or outside integration limits)
     while true
         odet.ising += 1
         if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
             break
         end
-        if intr.mlow <= ctrl.nn * intr.sing[odet.ising].q && intr.mhigh >= ctrl.nn * intr.sing[odet.ising].q
+        if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
             break
         end
     end
-
-    # Compute conditions at next singular surface
-    if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+    
+    # Determine psimax and classify next integration limit type
+    if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac
         odet.psimax = intr.psilim * (1 - eps)
-        odet.m1 = round(Int, ctrl.nn * intr.qlim, RoundFromZero) + sign(ctrl.nn * equil.sq.fs1[end, 4])
         odet.next = "finish"
     else
-        singp = intr.sing[odet.ising] # Update singp
-        odet.psimax = singp.psifac - ctrl.singfac_min / abs(ctrl.nn * singp.q1)
-        odet.m1 = round(Int, ctrl.nn * singp.q, RoundFromZero)
-        write_output(outp, :crit_out, @sprintf("   ising   psi         q          di      re alpha   im alpha\n"))
-        write_output(outp, :crit_out, @sprintf("%6d%11.3e%11.3e%11.3e%11.3e%11.3e\n", odet.ising, singp.psifac, singp.q, singp.di, real(singp.alpha), imag(singp.alpha)))
+        odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
     end
 
-    # Restart ode solver
-    odet.new = true
-    odet.psi_store[odet.step] = odet.psifac # Store current psi
-    odet.u_store[:, :, :, odet.step] = odet.u   # Store current u
-    odet.step += 1 # Advance step to account for crossing step
-    odet.u_prev .= odet.u
-    odet.psi_prev = odet.psifac
-
-    # Write next header before continuing integration
-    write_output(outp, :crit_out, "    psifac      dpsi        q       singfac     eval1")
+    # Store values after crossing step and advance
+    odet.psi_store[odet.step] = odet.psifac
+    odet.q_store[odet.step] = odet.q
+    odet.u_store[:, :, :, odet.step] = odet.u
+    odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.step += 1
 end
 
 # Example stub for kinetic crossing
@@ -497,18 +271,12 @@ function ode_kin_cross()
     return
 end
 
-# Example stub for resistive crossing
-function ode_resist_cross()
-    # Implement resistive crossing logic here
-    return
-end
-
 """
-    ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+    ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Integrate the Euler-Lagrange equations to the next rational surface or edge.
 Performs the same function as `ode_step` in the Fortran code, with the addition of
-a callback function to handle tolerances, normalization, output, and storage at each
+a callback function to handle tolerances, normalization, and storage at each
 step of the integration. In Fortran, this was performed by running LSODE in one-step
 mode (so ode_step was called hundreds of times) and calling the relevant functions in
 a DO loop. Here, we use the DifferentialEquations.jl interface to achieve the same
@@ -519,91 +287,56 @@ the solution at the new point.
 
 ### TODOs
 
-Check if additional output is needed at the start and end of integration
 Check sensitivity of results to tolerances, currently using same logic as Fortran
 Check absolute tolerances, currently only relative tolerances are updated
 """
-function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, outp::DconOutput)
+function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
-    # Set up the callback to be run at every step
+    # Callback to be run at every step, handles fixups, tolerances, and data storage
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
 
-    # Choose integration bounds
-    if ctrl.node_flag # TODO: I can't find any mention of what this flag is for, can we get rid of it?
-        while odet.psifac >= equil.sq.xs[ix]
-            ix += 1
-        end
-        psiout = equil.sq.xs[ix]
-        psiout = min(psiout, odet.psimax)
-    else
-        psiout = odet.psimax
-    end
-
-    # TODO: need input here! Fortran emphasized that it was important to record data at the first and last step
-    # However, the recording for u, ud, psi is now done after integration. Is there anything still within
-    # ode_output_step that needs to be recorded with this precision, or can it just be called within the
-    # callback? Currently, ode_output_step does: ode_output_monitor (crit values), and in Fortran also does
-    # ode_output_get_evals, and ode_output_sol
-    # We don't use the `first` variable, and instead call the functions directly here before/after integration
-    ode_output_step(ctrl, equil, intr, odet, outp)
-
     # Advance differential equation to next singular surface or edge
-    rtol, atol = compute_tols(ctrl, intr, odet) # initial tolerances
-    prob = ODEProblem(sing_der!, odet.u, (odet.psifac, psiout), (ctrl, equil, ffit, intr, odet, outp))
-    sol = solve(prob, Tsit5(); reltol=rtol, abstol=atol, callback=cb)
+    rtol = compute_tols(ctrl, intr, odet) # initial tolerances
+    prob = ODEProblem(sing_der!, odet.u, (odet.psifac, odet.psimax), (ctrl, equil, ffit, intr, odet))
+    sol = solve(prob, BS5(); reltol=rtol, callback=cb)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
     # Update u and psifac with the solution at the end of the interval
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
 
-    # TODO: same as above, this might not be needed
-    ode_output_step(ctrl, equil, intr, odet, outp) # always output final condition
-
-    println("   ψ = $(odet.psifac), max u = $(maximum(abs, odet.u)), steps = $(odet.step-1)")
+    println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
 end
 
 """
     integrator_callback!(integrator)
 
-Callback function for ODE integrator to handle normalization, output, and storage at each step.
-This handles the logic that was previously in a DO loop within ode_run and called every step
-by running LSODE in one step mode in the Fortran code.
+Callback function for ODE integrator to handle normalization, output, and storage
+at each step. This handles the solution normalization logic that was previously
+in a DO loop within ode_run and called every step by running LSODE in one step mode
+in the Fortran code. However, we now perform the equivalent of `ode_output_step`
+and `ode_record_edge` post-integration using the saved data.
 
-### TODOs
-
-Check if additional output is needed at the start and end of integration
-Check if ode_test is actually needed for res_flag = true case
 """
 function integrator_callback!(integrator)
-    ctrl, equil, ffit, intr, odet, outp = integrator.p
-    odet.u .= integrator.u
-    odet.psifac = integrator.t
+    
+    ctrl, _, _, intr, odet = integrator.p
 
     # Update integration tolerances
-    rtol, atol = compute_tols(ctrl, intr, odet)
-    integrator.opts.reltol = rtol
+    integrator.opts.reltol = compute_tols(ctrl, intr, odet)
     # integrator.opts.abstol = atol
 
-    # Note: no need for istep > 0 condition, since this is called after the first integration step always
-    ode_unorm!(odet, ctrl, intr, outp, false)
-    integrator.u .= odet.u # Update integrator.u with normalized odet.u
+    # Check if the solution norms are above a threshold, if so apply Gaussian reduction
+    ode_unorm!(integrator.u, odet, ctrl, intr, false)
 
-    # TODO: ode_test if res_flag = False effectively controls whether we print at the end of integration
-    # this then controls the output of ode_output_step and then has a break condition below
-    # Currently, all output logic is handled via psi_saves. There's a chance we will need other pieces
-    # of this ode_test logic (i.e. res_flag = True, compute powers) in the future, but for now this is sufficient
-    # force_output = ode_test(odet, intr, ctrl)
-    ode_output_step(ctrl, equil, intr, odet, outp)
-    ode_record_edge_dW!(odet, ctrl, equil, ffit, intr)
-
-    # Grow arrays if needed
+    # Grow arrays if out of storage space
     if odet.step >= size(odet.u_store, 4)
         resize_storage!(odet)
     end
     # Save values
-    odet.psi_store[odet.step] = odet.psifac
-    odet.u_store[:, :, :, odet.step] .= odet.u
+    odet.psi_store[odet.step] = integrator.t
+    odet.u_store[:, :, :, odet.step] .= integrator.u
+    odet.q_store[odet.step] = odet.q # these two were set in sing_der!
     odet.ud_store[:, :, :, odet.step] .= odet.ud
     # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
     odet.step += 1
@@ -622,11 +355,12 @@ functionality.
 
 Support for `kin_flag`
 Check sensitivity of results to tolerances, currently using same logic as Fortran
+Add back absolute tolerance calculation if needed
 
 ### Returns
 
   - rtol: Relative tolerance
-  - atol: Absolute tolerance array matching the shape of `odet.u`
+
 """
 function compute_tols(ctrl, intr, odet)
     singfac_local = Inf
@@ -634,104 +368,68 @@ function compute_tols(ctrl, intr, odet)
     if false  # kin_flag (not implemented)
     # Insert kin_flag branch if needed
     else
+        # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
         # Note: odet.q is updated within the derivative calculation
         if odet.ising <= intr.msing
-            singfac_local = abs(intr.sing[odet.ising].m - ctrl.nn * odet.q)
+            singfac_local = abs(minimum(intr.sing[odet.ising].n) * (intr.sing[odet.ising].q - odet.q))
         end
         # If in between singular surfaces, check distance to both
         if odet.ising > 1
-            singfac_local = min(singfac_local, abs(intr.sing[odet.ising-1].m - ctrl.nn * odet.q))
+            singfac_local = min(singfac_local, abs(minimum(intr.sing[odet.ising-1].n) * (intr.sing[odet.ising-1].q - odet.q)))
         end
     end
     rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
-    # Absolute tolerances
-    atol = similar(odet.u, Float64)
-    for ieq in 1:size(odet.u, 3), isol in 1:size(odet.u, 2)
-        @views atol0 = maximum(abs, odet.u[:, isol, ieq]) * tol
-        atol0 == 0 && (atol0 = Inf)
-        atol[:, isol, ieq] .= atol0
-    end
-    return rtol, atol
+    # Absolute tolerances (not used for now, if so, will need to pass in integrator.u)
+    # atol = similar(odet.u, Float64)
+    # for ieq in 1:size(odet.u, 3), isol in 1:size(odet.u, 2)
+    #     @views atol0 = maximum(abs, odet.u[:, isol, ieq]) * tol
+    #     atol0 == 0 && (atol0 = Inf)
+    #     atol[:, isol, ieq] .= atol0
+    # end
+    return rtol
 end
 
 """
-    resize_storage!(odet::OdeState)
+    ode_unorm!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::DconControl, intr::DconInternal, sing_flag::Bool)
 
-Resize storage arrays in `odet` when the current step exceeds allocated size.
-Doubles the size of the storage arrays for `u_store`, `ud_store`, and `psi_store`,
-and copies over existing data to the new arrays.
-"""
-function resize_storage!(odet::OdeState)
-    oldlen = size(odet.u_store, 4)
-    newlen = 2 * oldlen
+Computes norms of the solution vectors of the array `u` and normalizes them
+if this is not the first call after a fixup. Throws an error if any vector
+norm is zero. It then compares the variation in norms relative to initial values
+after a fixup, and applies the Gaussian reduction via `ode_fixup!` if the
+variation exceeds `ctrl.ucrit` or if `sing_flag` is true. Performs the same
+function as `ode_unorm` in the Fortran code, with minor differences in indexing
+and array handling.
 
-    # Allocate new arrays
-    u_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
-    ud_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
-    psi_new = Vector{Float64}(undef, newlen)
-
-    # Copy old data
-    u_new[:, :, :, 1:odet.step] = odet.u_store[:, :, :, 1:odet.step]
-    ud_new[:, :, :, 1:odet.step] = odet.ud_store[:, :, :, 1:odet.step]
-    psi_new[1:odet.step] = odet.psi_store[1:odet.step]
-
-    # Replace old arrays
-    odet.u_store = u_new
-    odet.ud_store = ud_new
-    odet.psi_store = psi_new
-end
-
-"""
-    trim_storage!(odet::OdeState)
-
-Trim storage arrays in `odet` to the actual number of steps taken.
-Resizes `u_store`, `ud_store`, and `psi_store` to the current step count,
-removing any unused allocated space.
-"""
-function trim_storage!(odet::OdeState)
-    resize!(odet.psi_store, odet.step)
-    odet.u_store = odet.u_store[:, :, :, 1:odet.step]
-    odet.ud_store = odet.ud_store[:, :, :, 1:odet.step]
-end
-
-"""
-    ode_unorm!(odet::OdeState, ctrl::DconControl, intr::DconInternal, outp::DconOutput, sing_flag::Bool)
-
-Computes norms of the solution vectors, normalizes them
-relative to initial values, and applies Gaussian reduction via `ode_fixup!`
-if the variation exceeds a threshold or if `sing_flag` is true.
-Throws an error if any vector norm is zero. Performs the same function as `ode_unorm`
-in the Fortran code, with minor differences in indexing and array handling.
+Note that we pass `u` as an argument to reduce the number of copies that are
+necessary in the integration callback, since otherwise we'd need to copy from
+the integrator state to `odet.u` and then back again. This way, we can just
+operate on `u` directly without extra copies.
 
 ### Arguments
 
+  - u: Current solution vector array, updated in-place if fixfac is called
   - sing_flag: Indicates if normalization is occuring at a singular surface or not
 
 ### TODOs
 
 Add resizing logic for unorm arrays when ifix exceeds allocated size
 """
-function ode_unorm!(odet::OdeState, ctrl::DconControl, intr::DconInternal, outp::DconOutput, sing_flag::Bool)
+function ode_unorm!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::DconControl, intr::DconInternal, sing_flag::Bool)
+    
     # Compute norms of first solution vectors, abort if any are zero
-    for j in 1:intr.mpert
-        odet.unorm[j] = @views norm(odet.u[:, j, 1])
-    end
-    for j in intr.mpert+1:odet.msol
-        odet.unorm[j] = @views norm(odet.u[:, j, 2])
-    end
-    umsol = @view(odet.unorm[1:odet.msol])
-    if minimum(umsol) == 0
-        jmax = argmin(umsol)
+    odet.unorm .= norm.(eachcol(u[:, :, 1]))
+    if minimum(odet.unorm) == 0
+        jmax = argmin(odet.unorm)
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
     # Normalize unorm and perform Gaussian reduction if required
     if odet.new
         odet.new = false
-        odet.unorm0[1:odet.msol] .= umsol
+        odet.unorm0 .= odet.unorm
     else
-        @views @. odet.unorm[1:odet.msol] = odet.unorm[1:odet.msol] / odet.unorm0[1:odet.msol]
-        uratio = maximum(umsol) / minimum(umsol)
+        odet.unorm ./= odet.unorm0
+        uratio = maximum(odet.unorm) / minimum(odet.unorm)
         if uratio > ctrl.ucrit || sing_flag
             # TODO: add resizing logic here as well
             if odet.ifix < ctrl.numunorms_init
@@ -740,42 +438,25 @@ function ode_unorm!(odet::OdeState, ctrl::DconControl, intr::DconInternal, outp:
                 @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
                 Increase `numunorms_init` in dcon.toml if needed. Automatic resizing will be added in a future version."
             end
-            ode_fixup!(odet, intr, outp, sing_flag, false)
+            ode_fixup!(u, odet, intr, sing_flag)
             odet.new = true
         end
     end
 end
 
 """
-    ode_fixup!(odet::OdeState, intr::DconInternal, sing_flag::Bool, test::Bool)
+    ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, sing_flag::Bool)
 
-Applies Gaussian reduction to orthogonalize solution vectors in `odet.u`. Performs
-the same function as `ode_fixup` in the Fortran code, except now `fixfac` and other
-relevant data are stored in memory instead of dumped to `euler.bin`. Used when
+Applies Gaussian reduction to orthogonalize solution vectors in `u`. Performs
+the same function as `ode_fixup` in the Fortran code, except now relevant
+`fixfac` data are stored in memory instead of dumped to `euler.bin`. Used when
 the spread in norms exceeds a threshold or when a rational surface is reached.
+This will update both `u` and relevant fields in `odet` in-place. See the
+description of `ode_unorm!` for more details on the benefits of in-place `u`
+updates.
 
-### TODOs
-
-Check if `secondary` logic is needed, currently always false
-Check if `test` logic is needed, currently always false (I don't think it ever is)
-Check if `flag_count` is used anywhere, currently always set to 0
 """
-function ode_fixup!(odet::OdeState, intr::DconInternal, outp::DconOutput, sing_flag::Bool, test::Bool)
-
-    # TODO: seems like secondary is always false in fortran DCON (unless manually changed). is this needed?
-    secondary = false
-
-    # TODO: can test be removed if we aren't implementing ode_test_fixup?
-
-    # Write to output
-    if outp.write_crit_out
-        write_output(outp, :crit_out, "\n   psifac      dpsi        q       singfac     eval1")
-        write_output(outp, :crit_out, @sprintf("\nGaussian Reduction at psi = %10.3e, q = %6.3f\n", odet.psifac, odet.q))
-        if !sing_flag
-            write_output(outp, :crit_out, "   psifac      dpsi        q       singfac     eval1\n")
-        end
-    end
-    odet.flag_count = 0 # TODO: is this used anywhere?
+function ode_fixup!(u::Array{ComplexF64,3}, odet::OdeState, intr::DconInternal, sing_flag::Bool)
 
     # Store data for the current fixup
     ifix = odet.ifix
@@ -785,214 +466,98 @@ function ode_fixup!(odet::OdeState, intr::DconInternal, outp::DconOutput, sing_f
     odet.fixstep[ifix] = odet.step - 1
 
     # Initialize fixfac
-    if !test
-        for isol in 1:odet.msol
-            odet.fixfac[isol, isol, ifix] = 1
-        end
-        # Sort unorm
-        odet.index[1:odet.msol, ifix] .= 1:odet.msol
-        odet.index[1:intr.mpert, ifix] .= sortperm_subrange(odet.unorm, 1:intr.mpert) # in original Fortran: bubble(unorm, index, 1, mpert)
-        odet.index[intr.mpert+1:odet.msol, ifix] .= sortperm_subrange(odet.unorm, intr.mpert+1:odet.msol) # in original Fortran: bubble(unorm, index, mpert + 1, msol)
+    for isol in 1:intr.numpert_total
+        odet.fixfac[isol, isol, ifix] = 1
     end
+    # Sort unorm in descending order (since we triangularize from largest to smallest)
+    odet.index[:, ifix] = sortperm(odet.unorm; rev=true)
 
     # Triangularize primary solutions
-    mask = trues(2, odet.msol)
-    masked = zeros(typeof(abs(odet.u[1, 1, 1])), intr.mpert)
-    for isol in 1:intr.mpert
+    mask = trues(2, intr.numpert_total)
+    for isol in 1:intr.numpert_total
         ksol = odet.index[isol, ifix]
         mask[2, ksol] = false
-        if !test
-            # Find max location
-            @. @views masked = abs(odet.u[:, ksol, 1]) * mask[1, 1:intr.mpert]
-            @views kpert = argmax(masked)
-            mask[1, kpert] = false
-        end
-        for jsol in 1:odet.msol
+        # Set pivot row based on max location
+        @views kpert = argmax(abs.(u[:, ksol, 1]) .* mask[1, :])
+        mask[1, kpert] = false
+        # Eliminate other solution vectors below the pivot
+        for jsol in 1:intr.numpert_total
             if mask[2, jsol]
-                if !test
-                    odet.fixfac[ksol, jsol, ifix] = -odet.u[kpert, jsol, 1] / odet.u[kpert, ksol, 1]
-                end
-                @. @views odet.u[:, jsol, :] .= odet.u[:, jsol, :] .+ odet.u[:, ksol, :] .* odet.fixfac[ksol, jsol, ifix]
-                if !test
-                    odet.u[kpert, jsol, 1] = 0
-                end
-            end
-        end
-    end
-
-    # Triangularize secondary solutions
-    if odet.msol > intr.mpert && secondary
-        mask .= trues(2, odet.msol)
-        for isol in intr.mpert+1:odet.msol
-            ksol = odet.index[isol, ifix]
-            mask[2, ksol] = false
-            if !test
-                @. @views masked = abs(odet.u[:, ksol, 2]) * mask[1, 1:intr.mpert]
-                kpert = argmax(masked)
-                mask[1, kpert] = false
-            end
-            for jsol in intr.mpert+1:odet.msol
-                if mask[2, jsol]
-                    if !test
-                        odet.fixfac[ksol, jsol, ifix] = -odet.u[kpert, jsol, 2] / odet.u[kpert, ksol, 2]
-                    end
-                    @. @views odet.u[:, jsol, :] = odet.u[:, jsol, :] + odet.u[:, ksol, :] * odet.fixfac[ksol, jsol, ifix]
-                    if !test
-                        odet.u[kpert, jsol, 2] = 0
-                    end
-                end
+                odet.fixfac[ksol, jsol, ifix] = -u[kpert, jsol, 1] / u[kpert, ksol, 1]
+                @. @views u[:, jsol, :] .= u[:, jsol, :] .+ u[:, ksol, :] .* odet.fixfac[ksol, jsol, ifix]
+                u[kpert, jsol, 1] = 0
             end
         end
     end
 end
 
 """
-    ode_test(ctrl::DconControl, intr::DconInternal, odet::OdeState)::Bool
+    findmax_dW_edge!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
-Returns `true` if integration is complete or if any stopping criteria are met.
-The Fortran version of this function had more logic for stopping the integration
-which we do not include due to the callback structure of the Julia implementation.
-
-### TODOs
-
-Implement res_flag = true logic
-Determine if this function is ever needed (definitely not for res_flag = false case)
-"""
-function ode_test(ctrl::DconControl, intr::DconInternal, odet::OdeState)::Bool
-
-    # check if we are at end of integration
-    flag = odet.psifac == odet.psimax
-
-    # if not running with res_flag = true this function will exit and return flag here)
-    if !ctrl.res_flag || flag || odet.ising > intr.msing || odet.singfac > ctrl.singfac_max
-        return flag
-    end
-
-    @error "ode_test with res_flag = true not implemented yet!"
-    # TODO: none of this has been checked, wait until we implement res_flag = true
-    # ca_old .= ca           # Save previous surface ca
-    # sing_get_ca(ising, psifac, u, ca)    # Updates global ca
-    # dca = ca .- ca_old
-    # dsingfac = abs((singfac - singfac_old)/singfac)
-    # singfac_old = singfac
-
-    # power = zeros(Float64, msol)
-    # powmax_old = powmax
-    # for isol in 1:msol
-    #     # ca[:,isol,:]::matrix of size (mpert,2)
-    #     # Flatten the relevant slice for norm calculation
-    #     ca_isol = ca[:, isol, :]           # mpert × 2
-    #     dca_isol = dca[:, isol, :]
-    #     norm = abs(sum(conj.(ca_isol) .* ca_isol))
-    #     dnorm = abs(sum(conj.(ca_isol) .* dca_isol))
-    #     power[isol] = dnorm / (norm * dsingfac)
-    # end
-    # powmax = maximum(power)
-
-    # odet.flag_count += 1
-    # if odet.flag_count < 3
-    #     return flag
-    # end
-    # flag = flag || ((singfac < singfac_max) && (powmax > powmax_old))
-
-    # if ising == ksing
-    #     println(err_unit, float(log10(singfac)), "  ", float(log10(powmax)))
-    # end
-
-    # return flag
-end
-
-"""
-    ode_record_edge_dW!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
-
-Records the total dW if the integration passes `ctrl.psiedge`, which occurs
-if psiedge is less than the psilim determined in sing_lim!. This performs the same
-function as `ode_record_edge` in the Fortran code, but the logic is different since
-we store the integration in memory so we dont need the "_edge" arrays.
+Records the total dW in the integration region between `ctrl.psiedge` and 
+`ctrl.psilim`. This performs the same function as `ode_record_edge` in the
+Fortran, but everything is now done post-integration which cleans up the logic,
+i.e. no "_edge" arrays.
 
 The dW is stored at that step index in `odet.dW_edge`; because we initialize
 dW_edge to -Inf, we can just take the max value after integration to get the
 total dW at the edge and avoid unphysical kink modes that might occur just
 inside rational surfaces.
 
-The first time this function is called, we create a rough spline for the wv matrix
-in between psiedge and psilim using `free_compute_wv_spline`, which is then used in
-`free_compute_total` to compute the total dW at the edge.
-"""
-function ode_record_edge_dW!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+We have also separated the computation of the wv matrix spline and the total dW
+calculation into `free_compute_wv_spline` and `free_compute_total` respectively
+for clarity. We create the wv matrix spline once prior to the loop.
 
-    if odet.psifac >= ctrl.psiedge
-        # Only create wv matrix spline once
-        if !odet.wvmat_spline_created
-            odet.wvmat_spline = free_compute_wv_spline(ctrl, equil, intr)
-            odet.wvmat_spline_created = true
+"""
+function findmax_dW_edge!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+
+    # Since we search for the maximum dW, initialize to -Infinity
+    fill!(odet.dW_edge, -Inf * (1 + im))
+
+    # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
+    odet.wvmat_spline = free_compute_wv_spline(ctrl, equil, intr)
+
+    # Loop through integration, compute dW at steps where psifac >= psiedge
+    for istep in 1:odet.step
+        odet.psifac = odet.psi_store[istep]
+        if odet.psifac >= ctrl.psiedge
+            odet.u .= odet.u_store[:, :, :, istep]
+            odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
         end
-        odet.dW_edge[odet.step] = free_compute_total(equil, ffit, intr, odet)
     end
+
+    # Return the index that maximizes dW_edge to identify truncation point
+    return findmax(real.(odet.dW_edge))[2]
 end
 
 """
-    get_psi_saves!(odet::OdeState, ctrl::DconControl, intr::DconInternal)
+    transform_u!(odet::OdeState, intr::DconInternal)
 
-Calculates the psi values at which to save the solution during ODE integration based on specified spacing type,
-number of saves per region, and number of rational surfaces, and saves into `odet.psi_save_nodes`. Note that
-`odet.psi_save_nodes` does not store the start/endpoints, since those are saved automatically.
+Constructs the transformation matrices to form the true solution vectors. Effectively
+"undoes" the Gaussian reduction applied during fixups throughout the integration, such that
+we have the true solution vectors for use in GPEC. Modifies the store arrays in `odet` in-place.
+Performs a similar function as `idcon_transform` + `idcon_build` in the Fortran code,
+except we separate the building of the transformation matrices and determining the coefficients
+for a chosen force-free solution, which can be done in postprocessing.
 """
-# TODO: this is no longer used, but might be useful code? Leaving for now, but likely can be removed
-function get_psi_saves!(odet::OdeState, ctrl::DconControl, intr::DconInternal)
-
-    # This function is called after the ode init functions, so the starting psi is stored in odet.psifac
-    # This repeats some logic used in the init and cross functions
-
-    # Loop through interrational intervals (just one interval if no rational surfaces)
-    for ising in 1:intr.msing+1
-        # Determine bottom of interrational interval
-        if ising == 1
-            psibot = odet.psifac
-        else
-            psibot = intr.sing[ising-1].psifac + ctrl.singfac_min / abs(ctrl.nn * intr.sing[ising-1].q1)
-        end
-        # Determine top of interrational interval
-        if ising <= intr.msing
-            psitop = intr.sing[ising].psifac - ctrl.singfac_min / abs(ctrl.nn * intr.sing[ising].q1)
-        else
-            psitop = intr.psilim * (1 - eps)
-        end
-        # Calculate save nodes in interval
-        if ctrl.save_spacing == "Chebyshev"
-            odet.psi_saves[(ising-1)*ctrl.saves_per_region+1:ising*ctrl.saves_per_region] = chebyshev_nodes(psibot, psitop, ctrl.saves_per_region)
-        else
-            error("Cannot recognize save_spacing = $(ctrl.save_spacing)")
-        end
-    end
-end
-
-"""
-    build_ureal(intr::DconInternal, odet::OdeState)
-
-Constructs the transformation matrices to convert the complex solution vectors
-to real-valued vectors in each region between fixups. Effectively "undoes" the
-Gaussian reduction applied during fixups throughout the integration, such that
-we have the true solution vectors for use in GPEC.
-"""
-function build_ureal(intr::DconInternal, odet::OdeState)
+function transform_u!(odet::OdeState, intr::DconInternal)
 
     # Gaussian reduction matrices for each fixup
-    gauss = Array{ComplexF64,3}(undef, intr.mpert, intr.mpert, odet.ifix)
+    gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
-    transforms = Array{ComplexF64,3}(undef, intr.mpert, intr.mpert, odet.ifix + 1)
+    transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
 
     # Construct gaussian reduction matrices for each fixup
-    identity = Matrix{ComplexF64}(I, intr.mpert, intr.mpert)
-    mask = trues(intr.mpert)
+    identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
+    mask = trues(intr.numpert_total)
     for ifix in 1:odet.ifix
         gauss[:, :, ifix] = copy(identity)
         mask .= true
-        for isol in 1:odet.msol
+        for isol in 1:intr.numpert_total
             ksol = odet.index[isol, ifix]
             mask[ksol] = false
             temp = copy(identity)
-            for jsol in 1:intr.mpert
+            for jsol in 1:intr.numpert_total
                 if mask[jsol]
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
@@ -1000,8 +565,11 @@ function build_ureal(intr::DconInternal, odet::OdeState)
             # Matrix multiplication gauss = gauss * temp
             gauss[:, :, ifix] .= gauss[:, :, ifix] * temp
         end
+        # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
         if odet.sing_flag[ifix]
-            gauss[:, odet.index[1, ifix], ifix] .= 0.0
+            for zeroed_idx in odet.zeroed_idx[ifix]
+                gauss[:, odet.index[zeroed_idx, ifix], ifix] .= 0.0
+            end
         end
     end
 
@@ -1016,15 +584,17 @@ function build_ureal(intr::DconInternal, odet::OdeState)
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
     # "undoing" the Gaussian reductions to get the true solution vectors
-    ureal = Array{ComplexF64}(undef, odet.step, intr.mpert, intr.mpert)
     jfix = 1
     for ifix in 1:odet.ifix+1
-        kfix = odet.fixstep[ifix]
+        # If after the last fixup, go to the end of integration
+        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         for istep in jfix:kfix
-            ureal[istep, :, :] .= odet.u_store[:, :, 1, istep] * transforms[:, :, ifix]
+            # This is u1->u4 in Fortran
+            odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * transforms[:, :, ifix]
+            odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * transforms[:, :, ifix]
+            odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * transforms[:, :, ifix]
+            odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * transforms[:, :, ifix]
         end
         jfix = kfix + 1
     end
-
-    return ureal
 end

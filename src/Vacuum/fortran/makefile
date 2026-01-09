@@ -17,7 +17,6 @@ F90 = $(FC) $(FFLAGS) $(ZEROFLAG) $(RECURSFLAG) $(LEGACYFLAG)
 
 OBJS = \
 	bzio.o \
-	aleg_new.o \
 	vacuum_global.o \
 	vacuum_io.o \
 	vacuum_ma.o \
@@ -25,7 +24,8 @@ OBJS = \
 	vacuum_penn.o \
 	vacuum_sprk2.o \
 	vacuum_ut.o \
-	vacuum_vac.o
+	vacuum_vac.o \
+	test_kernel_data.o
 
 # targets
 
@@ -33,7 +33,7 @@ all : $(OUTLIB)
 
 $(OUTLIB): $(OBJS)
 	$(FC) $(LDFLAGS) -o $@ $^ $(LIBS)
-	mv $(OUTLIB) ../../../deps/
+	cp $(OUTLIB) ../../../deps/
 
 clean:
 	rm -f *.o *.mod *.original *.dylib

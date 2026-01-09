@@ -1,8 +1,3 @@
-#=
-Analytic equilibrium functions that prepare all the necessary equilibrium
-input information for a direct or inverse equilibrium construction
-=#
-
 """
     lar_init_conditions(rmin, sigma_type, params)
 
@@ -154,7 +149,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = Spl.CubicSpline(xs_r, fs_r; bctype=4)
+    spl = Spl.CubicSpline(xs_r, fs_r; bctype="extrap")
 
     dr = lar_a / (ma + 1)
     r = 0.0
@@ -180,7 +175,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         sq_fs[ia, 3] = qval
     end
 
-    sq_in = Spl.CubicSpline(sq_xs, sq_fs; bctype=4)
+    sq_in = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
 
     rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
@@ -205,15 +200,16 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes; bctypex=4, bctypey=2)
+    rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes; bctypex="extrap", bctypey="periodic")
 
     return InverseRunInput(equil_input, sq_in, rz_in, lar_r0, 0.0, psio)
 
 end
 
-
 """
-This is a Julia version of the Fortran code in sol.f, implementing Soloviev's analytical equilibrium.
+This function handles the Solovev analytical equilibrium model, transforming the input parameters
+into the necessary splines and scalar values for equilibrium construction. This is a Julia version
+of the Fortran code in sol.f, with no major differences except for arrays going from 0:n to 1:n+1.
 
 ## Arguments:
 
@@ -230,12 +226,9 @@ This is a Julia version of the Fortran code in sol.f, implementing Soloviev's an
 
 ## Returns:
 
-  - `plasma_eq`: PlasmaEquilibrium object
+  - `DirectRunInput` object
 """
-function sol_run(
-    equil_inputs::EquilibriumConfig,
-    sol_inputs::SolevevConfig
-)
+function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
 
     mr = sol_inputs.mr
     mz = sol_inputs.mz
@@ -254,29 +247,7 @@ function sol_run(
         p0fac = 1.0
     end
 
-    # Grid setup
-    r = range(0.0; stop=a, length=mr)
-    z = range(-a * e; stop=a * e, length=mz)
-    rg = [ri for ri in r, _ in z]
-    zg = [zi for _ in r, zi in z]
-
-    #-----------------------------------------------------------------------
-    # allocate arrays
-    #-----------------------------------------------------------------------
-    sq_in = zeros(Float64, ma, 4)
-    psi_in = zeros(Float64, mr, mz)
-    sqfs = zeros(ma, 4)
-    psifs = zeros(mr, mz, 1)
-
-    r = zeros(Float64, mr)
-    z = zeros(Float64, mz)
-    rg = zeros(Float64, mr, mz)  # 2D grid arrays
-    zg = zeros(Float64, mr, mz)
-    #-----------------------------------------------------------------------
-    # compute scalar data (EXTERNAL DEPENDENCIES - global variables)
-    #-----------------------------------------------------------------------
-    ro = 0      # EXTERNAL: global variable ro?
-    zo = 0      # EXTERNAL: global variable zo?
+    # Compute scalar data
     f0 = r0 * b0fac
     psio = e * f0 * a * a / (2 * q0 * r0)
     psifac = psio / (a * r0)^2
@@ -286,43 +257,31 @@ function sol_run(
     rmax = r0 + 1.5 * a
     zmax = 1.5 * e * a
     zmin = -zmax
-    #-----------------------------------------------------------------------
-    # compute 1D data
-    #-----------------------------------------------------------------------
-    psis = [(ia / (ma + 1))^2 for ia in 1:ma] # changed from ...ia in 1:(ma+1)]
-    sqfs[:, 1] .= f0 * f0fac
-    sqfs[:, 2] = pfac .* (1 * p0fac .- psis)
+
+    # Compute 1D data and spline
+    sqfs = Array{Float64}(undef, ma + 1, 4)
+    psis = [(ia / (ma + 1))^2 for ia in 1:ma+1]
+    sqfs[:, 1] .= f0 .* f0fac
+    sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
+    sq_in = Spl.CubicSpline(psis, sqfs; bctype="extrap")
 
-    sq_in = Spl.CubicSpline(psis, sqfs; bctype=3)
-    #-----------------------------------------------------------------------
-    # compute 2D data
-    #-----------------------------------------------------------------------
-    for ir in 1:(mr)
-        r[ir] = rmin + (ir - 1) * (rmax - rmin) / mr
-    end
-
-    for iz in 1:(mz)
-        z[iz] = zmin + (iz - 1) * (zmax - zmin) / mz
-    end
-
-    for iz in 1:(mz)
-        for ir in 1:(mr)
-            #    rg[ir, iz] = r[ir]
-            #    zg[ir, iz] = z[iz]
+    # Compute 2D data and spline
+    r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]
+    z = [zmin + j * (zmax - zmin) / mz for j in 0:mz]
+    psifs = Array{Float64}(undef, mr + 1, mz + 1, 1)
+    for iz in 1:mz+1
+        for ir in 1:mr+1
             psifs[ir, iz, 1] = psio - psifac * (efac * (r[ir] * z[iz])^2 + (r[ir]^2 - r0^2)^2 / 4)
         end
     end
+    psi_in = Spl.BicubicSpline(r, z, psifs; bctypex="extrap", bctypey="extrap")
 
-    psi_in = Spl.BicubicSpline(r, z, psifs; bctypex=3, bctypey=3)
-    #-----------------------------------------------------------------------
-    # process equilibrium
-    #-----------------------------------------------------------------------
-    println("Generating Soloviev equilibrium inputs with:")
-    println("  mr=$mr, mz=$mz, ma=$ma")
-    println("  e=$e, a=$a, r0=$r0")
-    println("  q0=$q0, p0fac=$p0fac, b0fac=$b0fac, f0fac=$f0fac")
+    # Print out equilibrium info
+    println("Generating Solovev equilibrium inputs with:")
+    println("   mr=$mr, mz=$mz, ma=$ma")
+    println("   e=$e, a=$a, r0=$r0")
+    println("   q0=$q0, p0fac=$p0fac, b0fac=$b0fac, f0fac=$f0fac")
 
     return DirectRunInput(equil_inputs, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
-
 end

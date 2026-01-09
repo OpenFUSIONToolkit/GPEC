@@ -46,7 +46,7 @@ int zop_(int *ioc, char *name, int *nsize, int *idisk,
 
   return 0;
 }
-
+   
 int zcl_(int *ioc)
 {
   close(ofp[*ioc]);
@@ -75,7 +75,7 @@ int zrd_(int *ioc, char *a, int *nwords, int *adres, int *lgivup, int *irr)
   int num_read, ncurr, offsets, nbytes;
 
   nbytes = *nwords * WORD_LENGTH;
-/*  ncurr = ftell(ofp[*ioc]); */
+/*  ncurr = ftell(ofp[*ioc]); */  
   offsets = (*adres - 0 ) * WORD_LENGTH;
   /*  printf("In zrdc: offsets = %d    ioc=%d   ncurr=%d\n", offsets, *ioc, ncurr);
 */
@@ -123,7 +123,7 @@ int ZOP_(int *ioc, char *name, int *nsize, int *idisk,
 
   return 0;
 }
-
+   
 int ZCL_(int *ioc)
 {
   close(ofp[*ioc]);
@@ -152,7 +152,7 @@ int ZRD_(int *ioc, char *a, int *nwords, int *adres, int *lgivup, int *irr)
   int num_read, ncurr, offsets, nbytes;
 
   nbytes = *nwords * WORD_LENGTH;
-/*  ncurr = ftell(ofp[*ioc]); */
+/*  ncurr = ftell(ofp[*ioc]); */  
   offsets = (*adres - 0 ) * WORD_LENGTH;
   /*  printf("In zrdc: offsets = %d    ioc=%d   ncurr=%d\n", offsets, *ioc, ncurr);
 */
@@ -199,7 +199,7 @@ int zop(int *ioc, char *name, int *nsize, int *idisk,
 
   return 0;
 }
-
+   
 int zcl(int *ioc)
 {
   close(ofp[*ioc]);
@@ -228,7 +228,7 @@ int zrd(int *ioc, char *a, int *nwords, int *adres, int *lgivup, int *irr)
   int num_read, ncurr, offsets, nbytes;
 
   nbytes = *nwords * WORD_LENGTH;
-/*  ncurr = ftell(ofp[*ioc]); */
+/*  ncurr = ftell(ofp[*ioc]); */  
   offsets = (*adres - 0 ) * WORD_LENGTH;
   /*  printf("In zrdc: offsets = %d    ioc=%d   ncurr=%d\n", offsets, *ioc, ncurr);
 */
@@ -276,7 +276,7 @@ int ZOP(int *ioc, char *name, int *nsize, int *idisk,
 
   return 0;
 }
-
+   
 int ZCL(int *ioc)
 {
   close(ofp[*ioc]);
@@ -305,7 +305,7 @@ int ZRD(int *ioc, char *a, int *nwords, int *adres, int *lgivup, int *irr)
   int num_read, ncurr, offsets, nbytes;
 
   nbytes = *nwords * WORD_LENGTH;
-/*  ncurr = ftell(ofp[*ioc]); */
+/*  ncurr = ftell(ofp[*ioc]); */  
   offsets = (*adres - 0 ) * WORD_LENGTH;
   /*  printf("In zrdc: offsets = %d    ioc=%d   ncurr=%d\n", offsets, *ioc, ncurr);
 */

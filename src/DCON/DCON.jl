@@ -7,9 +7,11 @@ using TOML
 using FFTW
 using OrdinaryDiffEq
 using HDF5
+using JLD2
+
 import ..Equilibrium
 import ..Spl
-import ..VacuumMod
+import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
 
@@ -17,10 +19,11 @@ import StaticArrays: @MVector, @MMatrix
 include("DconStructs.jl")
 include("Main.jl")
 include("Mercier.jl")
+include("Bal.jl")
 include("Ode.jl")
 include("Sing.jl")
 include("Fourfit.jl")
-include("OdeOutput.jl")
+include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 

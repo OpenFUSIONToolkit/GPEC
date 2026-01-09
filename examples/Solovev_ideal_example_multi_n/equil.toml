@@ -1,15 +1,15 @@
 [EQUIL_CONTROL]
-eq_type = "efit"             # Type of the input 2D equilibrium file
-eq_filename = "g147131.02300_DIIID_KEFIT"  # path to equilibrium file
+eq_type = "sol"             # Type of the input 2D equilibrium file
+eq_filename = "sol.toml"  # path to equilibrium file
 
-jac_type = "hamada"          # Coordinate system (hamada, pest, boozer, equal_arc)
+jac_type = "pest"          # Coordinate system (hamada, pest, boozer, equal_arc)
 power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
 power_b = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
 power_r = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
 
 grid_type = "ldp"            # Radial grid packing
 psilow = 1e-4                # Min psi (normalized)
-psihigh = 0.993              # Max psi (normalized)
+psihigh = 0.99999              # Max psi (normalized)
 mpsi = 128                   # Radial grid intervals
 mtheta = 256                 # Poloidal grid intervals
 

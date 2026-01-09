@@ -11,7 +11,8 @@ qlow = 1.02                   # Integration initiated at q determined by min(q0,
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn = 1                        # Toroidal mode number
+nn_low = 1                    # Smallest toroidal mode number to include
+nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
@@ -35,13 +36,14 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
+force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
 
-termbycross_flag = false      # Terminate ODE solver in the event of a zero crossing
-
-use_classic_splines = false   # Use a classical cubic spline instead of tri-diagonal solution
-
-[DCON_OUTPUT]
-write_crit_out = true         # Write crit.out which contains integration data
-write_dcon_out = true         # Write dcon.out which contains equilibrium data and final eigenvalues/vectors
-write_euler_h5 = true         # Write euler.h5 (euler.bin Julia equivalent)
-write_eqdata_h5 = true        # Write eqdata.h5, which contains profile and stability data
+[WALL]
+shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
+a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
+aw = 0.05                     # Half-thickness of the wall.
+bw = 1.5                      # Elongation.
+cw = 0                        # Offset of the center of the wall from the major radius.
+dw = 0.5                      # Triangularity
+tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
+equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
