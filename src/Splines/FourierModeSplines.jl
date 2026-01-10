@@ -8,6 +8,26 @@ This approach:
 1. Applies FFT to each radial slice to get Fourier coefficients
 2. Creates 1D splines for each (mode, quantity) combination
 3. Evaluates by summing Fourier modes at the query point
+
+# Performance Notes
+
+Trigonometric recurrence is used for Fourier mode evaluation to avoid
+repeated calls to cos/sin. This uses:
+    cos(m·θ) = 2·cos(θ)·cos((m-1)·θ) - cos((m-2)·θ)
+    sin(m·θ) = 2·cos(θ)·sin((m-1)·θ) - sin((m-2)·θ)
+
+This is numerically stable for reasonable mode numbers (mband < 100).
+
+# Thread Safety Warning
+
+The evaluation functions (`evaluate!`, `deriv1!`, `deriv2!`) mutate internal work
+arrays and are NOT thread-safe. For multi-threaded usage:
+- Use separate FourierModeSplines instances per thread
+
+# References
+
+- FFT normalization: FFTW convention with DFT of length N
+- Trigonometric recurrence: Numerical Recipes, Press et al. (1992), Sec. 5.5
 """
 
 using FFTW
@@ -20,10 +40,15 @@ using FFTW
 
 Fourier-based 2D interpolation: cubic in x (radial), Fourier series in y (poloidal).
 
+# Type Parameters
+
+  - `S`: Type of the radial splines (for type stability)
+
 # Fields
 
   - `xs::Vector{Float64}`: Radial coordinates (psi)
-  - `ys::Vector{Float64}`: Poloidal coordinates (theta), assumed [0, 2π) or normalized
+  - `ys::Vector{Float64}`: Poloidal coordinates (theta)
+  - `period::Float64`: Angular period (typically 2π or 1.0 for normalized coordinates)
   - `mband::Int`: Number of Fourier modes (0 to mband inclusive)
   - `nqty::Int`: Number of quantities
   - `cos_coeffs::Array{Float64,3}`: Cosine coefficients (npsi × nmodes × nqty)
@@ -34,6 +59,7 @@ Fourier-based 2D interpolation: cubic in x (radial), Fourier series in y (poloid
 struct FourierModeSplines{S}
     xs::Vector{Float64}
     ys::Vector{Float64}
+    period::Float64
     mband::Int
     nqty::Int
     cos_coeffs::Array{Float64,3}
@@ -44,10 +70,13 @@ struct FourierModeSplines{S}
     _f::Vector{Float64}
     _fx::Vector{Float64}
     _fy::Vector{Float64}
+    _fxx::Vector{Float64}
+    _fxy::Vector{Float64}
+    _fyy::Vector{Float64}
 end
 
 """
-    FourierModeSplines(xs, ys, fs, mband; bctype="extrap")
+    FourierModeSplines(xs, ys, fs, mband; bctype="extrap", period=nothing)
 
 Create a Fourier-based 2D interpolator.
 
@@ -56,49 +85,77 @@ Create a Fourier-based 2D interpolator.
   - `xs::Vector{Float64}`: Radial coordinates (sorted)
   - `ys::Vector{Float64}`: Poloidal coordinates (sorted, periodic domain)
   - `fs::Array{Float64,3}`: Function values (npsi × ntheta × nqty)
-  - `mband::Int`: Number of Fourier modes to retain
-  - `bctype`: Boundary condition for radial splines
+  - `mband::Int`: Number of Fourier modes to retain (0 to mband inclusive)
+  - `bctype`: Boundary condition for radial splines ("natural", "periodic", "extrap")
+  - `period`: Angular period. If nothing, auto-detected from ys (2π if max > 2, else 1.0)
+
+# Bounds Checking
+
+  - `mband` must be ≤ ntheta ÷ 2 (Nyquist limit)
+  - Larger mband values will be silently clamped to the Nyquist limit
+
+# Example
+
+```julia
+xs = range(0, 1; length=100) |> collect
+ys = range(0, 2π; length=64) |> collect  # 64 poloidal points
+fs = zeros(100, 64, 2)
+for i in 1:100, j in 1:64
+    fs[i, j, 1] = exp(-xs[i]) * cos(3*ys[j])
+    fs[i, j, 2] = exp(-xs[i]) * sin(3*ys[j])
+end
+fms = FourierModeSplines(xs, ys, fs, 10)  # Keep 10 modes
+f, fx, fy = deriv1!(fms, 0.5, π/4)
+```
 """
 function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
     fs::Array{Float64,3}, mband::Int;
-    bctype::String="extrap")
+    bctype::String="extrap", period::Union{Nothing,Float64}=nothing)
     npsi, ntheta, nqty = size(fs)
-    nmodes = mband + 1  # modes 0, 1, ..., mband
 
     @assert length(xs) == npsi "xs length must match first dimension of fs"
     @assert length(ys) == ntheta "ys length must match second dimension of fs"
+    @assert mband >= 0 "mband must be non-negative"
 
-    # Compute Fourier coefficients at each radial location
+    # Clamp mband to Nyquist limit
+    nyquist_limit = ntheta ÷ 2
+    actual_mband = min(mband, nyquist_limit)
+    if actual_mband < mband
+        @warn "mband=$mband exceeds Nyquist limit for ntheta=$ntheta. Using mband=$actual_mband"
+    end
+
+    nmodes = actual_mband + 1  # modes 0, 1, ..., mband
+
+    # Determine the angular period
+    if period === nothing
+        # Auto-detect: if ys[end] < 2.0, assume normalized [0, 1)
+        period = ys[end] < 2.0 ? 1.0 : 2π
+    end
+
+    # Compute Fourier coefficients using batched FFT
+    # Reshape for batched operation: (ntheta, npsi * nqty)
+    fs_reshaped = reshape(permutedims(fs, (2, 1, 3)), ntheta, npsi * nqty)
+
+    # Apply batched FFT along first dimension
+    fft_results = fft(fs_reshaped, 1)
+
+    # Extract and normalize Fourier coefficients
     cos_coeffs = zeros(Float64, npsi, nmodes, nqty)
     sin_coeffs = zeros(Float64, npsi, nmodes, nqty)
 
-    # Determine the angular period (assume ys spans [0, period))
-    period = 2π  # Default assumption
-    if length(ys) > 1
-        # Check if ys is normalized [0, 1] or [0, 2π]
-        if ys[end] < 2.0
-            period = 1.0
-        end
-    end
+    for iq in 1:nqty
+        for ipsi in 1:npsi
+            col_idx = (iq - 1) * npsi + ipsi
+            fft_col = fft_results[:, col_idx]
 
-    for ipsi in 1:npsi
-        for iq in 1:nqty
-            # Get the poloidal slice
-            f_theta = fs[ipsi, :, iq]
-
-            # Use FFT to compute Fourier coefficients
-            fft_result = fft(f_theta)
-
-            # Extract coefficients (normalized)
             # Mode 0 (DC component)
-            cos_coeffs[ipsi, 1, iq] = real(fft_result[1]) / ntheta
+            @inbounds cos_coeffs[ipsi, 1, iq] = real(fft_col[1]) / ntheta
 
             # Higher modes
-            for m in 1:mband
-                if m < ntheta ÷ 2 + 1
-                    # Positive frequency
-                    cos_coeffs[ipsi, m+1, iq] = 2 * real(fft_result[m+1]) / ntheta
-                    sin_coeffs[ipsi, m+1, iq] = -2 * imag(fft_result[m+1]) / ntheta
+            @inbounds for m in 1:actual_mband
+                if m < nyquist_limit + 1
+                    cos_coeffs[ipsi, m+1, iq] = 2 * real(fft_col[m+1]) / ntheta
+                    sin_coeffs[ipsi, m+1, iq] = -2 * imag(fft_col[m+1]) / ntheta
                 end
             end
         end
@@ -123,30 +180,79 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
     _f = zeros(Float64, nqty)
     _fx = zeros(Float64, nqty)
     _fy = zeros(Float64, nqty)
+    _fxx = zeros(Float64, nqty)
+    _fxy = zeros(Float64, nqty)
+    _fyy = zeros(Float64, nqty)
 
-    FourierModeSplines{SplineType}(xs, ys, mband, nqty,
+    FourierModeSplines{SplineType}(xs, ys, period, actual_mband, nqty,
         cos_coeffs, sin_coeffs,
         cos_splines, sin_splines,
-        _f, _fx, _fy)
+        _f, _fx, _fy, _fxx, _fxy, _fyy)
+end
+
+"""
+    _compute_trig_values(mband, omega, y)
+
+Compute cos(m·ω·y) and sin(m·ω·y) for m = 0, 1, ..., mband using trigonometric recurrence.
+
+Returns (cos_vals, sin_vals) where each is a Vector{Float64} of length mband+1.
+"""
+function _compute_trig_values(mband::Int, omega::Float64, y::Float64)
+    nmodes = mband + 1
+    cos_vals = Vector{Float64}(undef, nmodes)
+    sin_vals = Vector{Float64}(undef, nmodes)
+
+    # Base cases
+    theta = omega * y
+    c1 = cos(theta)
+    s1 = sin(theta)
+    two_c1 = 2.0 * c1
+
+    @inbounds cos_vals[1] = 1.0  # cos(0) = 1
+    @inbounds sin_vals[1] = 0.0  # sin(0) = 0
+
+    if mband >= 1
+        @inbounds cos_vals[2] = c1
+        @inbounds sin_vals[2] = s1
+    end
+
+    # Recurrence: cos(m·θ) = 2·cos(θ)·cos((m-1)·θ) - cos((m-2)·θ)
+    #             sin(m·θ) = 2·cos(θ)·sin((m-1)·θ) - sin((m-2)·θ)
+    @inbounds for m in 2:mband
+        cos_vals[m+1] = muladd(two_c1, cos_vals[m], -cos_vals[m-1])
+        sin_vals[m+1] = muladd(two_c1, sin_vals[m], -sin_vals[m-1])
+    end
+
+    return cos_vals, sin_vals
 end
 
 """
     evaluate!(fms, x, y) -> Vector{Float64}
 
 Evaluate the Fourier-mode spline at point (x, y).
+
+Uses trigonometric recurrence for efficient Fourier mode computation.
+
+Thread-safety: NOT thread-safe. Use separate instances per thread.
 """
-function evaluate!(fms::FourierModeSplines, x::Float64, y::Float64)
+function evaluate!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
     fill!(fms._f, 0.0)
 
+    # Angular frequency
+    omega = 2π / fms.period
+
+    # Compute all trig values using recurrence
+    cos_vals, sin_vals = _compute_trig_values(fms.mband, omega, y)
+
     # Sum over Fourier modes
-    for m in 0:fms.mband
-        cos_my = cos(m * 2π * y)  # Assuming y is normalized to [0, 1]
-        sin_my = sin(m * 2π * y)
+    @inbounds for m in 0:fms.mband
+        cos_my = cos_vals[m+1]
+        sin_my = sin_vals[m+1]
 
         for iq in 1:fms.nqty
             cm = evaluate!(fms.cos_splines[m+1, iq], x)[1]
             sm = evaluate!(fms.sin_splines[m+1, iq], x)[1]
-            fms._f[iq] += cm * cos_my + sm * sin_my
+            fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
         end
     end
 
@@ -157,17 +263,27 @@ end
     deriv1!(fms, x, y) -> (f, fx, fy)
 
 Evaluate Fourier-mode spline and first derivatives at point (x, y).
+
+Uses trigonometric recurrence for efficient Fourier mode computation.
+
+Thread-safety: NOT thread-safe. Use separate instances per thread.
 """
-function deriv1!(fms::FourierModeSplines, x::Float64, y::Float64)
+function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
     fill!(fms._f, 0.0)
     fill!(fms._fx, 0.0)
     fill!(fms._fy, 0.0)
 
-    for m in 0:fms.mband
-        cos_my = cos(m * 2π * y)
-        sin_my = sin(m * 2π * y)
-        dcos_dy = -m * 2π * sin_my
-        dsin_dy = m * 2π * cos_my
+    omega = 2π / fms.period
+    cos_vals, sin_vals = _compute_trig_values(fms.mband, omega, y)
+
+    @inbounds for m in 0:fms.mband
+        cos_my = cos_vals[m+1]
+        sin_my = sin_vals[m+1]
+        # d/dy[cos(m·ω·y)] = -m·ω·sin(m·ω·y)
+        # d/dy[sin(m·ω·y)] = m·ω·cos(m·ω·y)
+        m_omega = m * omega
+        dcos_dy = -m_omega * sin_my
+        dsin_dy = m_omega * cos_my
 
         for iq in 1:fms.nqty
             f_cm, f1_cm = deriv1!(fms.cos_splines[m+1, iq], x)
@@ -178,9 +294,9 @@ function deriv1!(fms::FourierModeSplines, x::Float64, y::Float64)
             dcm_dx = f1_cm[1]
             dsm_dx = f1_sm[1]
 
-            fms._f[iq] += cm * cos_my + sm * sin_my
-            fms._fx[iq] += dcm_dx * cos_my + dsm_dx * sin_my
-            fms._fy[iq] += cm * dcos_dy + sm * dsin_dy
+            fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
+            fms._fx[iq] = muladd(dcm_dx, cos_my, muladd(dsm_dx, sin_my, fms._fx[iq]))
+            fms._fy[iq] = muladd(cm, dcos_dy, muladd(sm, dsin_dy, fms._fy[iq]))
         end
     end
 
@@ -188,10 +304,81 @@ function deriv1!(fms::FourierModeSplines, x::Float64, y::Float64)
 end
 
 """
+    deriv2!(fms, x, y) -> (f, fx, fy, fxx, fxy, fyy)
+
+Evaluate Fourier-mode spline through second derivatives at point (x, y).
+Includes cross-derivative fxy.
+
+Uses trigonometric recurrence for efficient Fourier mode computation.
+
+Thread-safety: NOT thread-safe. Use separate instances per thread.
+"""
+function deriv2!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
+    fill!(fms._f, 0.0)
+    fill!(fms._fx, 0.0)
+    fill!(fms._fy, 0.0)
+    fill!(fms._fxx, 0.0)
+    fill!(fms._fxy, 0.0)
+    fill!(fms._fyy, 0.0)
+
+    omega = 2π / fms.period
+    cos_vals, sin_vals = _compute_trig_values(fms.mband, omega, y)
+
+    @inbounds for m in 0:fms.mband
+        cos_my = cos_vals[m+1]
+        sin_my = sin_vals[m+1]
+        m_omega = m * omega
+        m_omega_sq = m_omega * m_omega
+
+        # First derivatives
+        dcos_dy = -m_omega * sin_my
+        dsin_dy = m_omega * cos_my
+
+        # Second derivatives
+        d2cos_dy2 = -m_omega_sq * cos_my
+        d2sin_dy2 = -m_omega_sq * sin_my
+
+        for iq in 1:fms.nqty
+            f_cm, f1_cm, f2_cm = deriv2!(fms.cos_splines[m+1, iq], x)
+            f_sm, f1_sm, f2_sm = deriv2!(fms.sin_splines[m+1, iq], x)
+
+            cm = f_cm[1]
+            sm = f_sm[1]
+            dcm_dx = f1_cm[1]
+            dsm_dx = f1_sm[1]
+            d2cm_dx2 = f2_cm[1]
+            d2sm_dx2 = f2_sm[1]
+
+            # f = Σ [cm·cos(m·ω·y) + sm·sin(m·ω·y)]
+            fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
+
+            # fx = Σ [dcm/dx·cos(m·ω·y) + dsm/dx·sin(m·ω·y)]
+            fms._fx[iq] = muladd(dcm_dx, cos_my, muladd(dsm_dx, sin_my, fms._fx[iq]))
+
+            # fy = Σ [cm·dcos/dy + sm·dsin/dy]
+            fms._fy[iq] = muladd(cm, dcos_dy, muladd(sm, dsin_dy, fms._fy[iq]))
+
+            # fxx = Σ [d²cm/dx²·cos(m·ω·y) + d²sm/dx²·sin(m·ω·y)]
+            fms._fxx[iq] = muladd(d2cm_dx2, cos_my, muladd(d2sm_dx2, sin_my, fms._fxx[iq]))
+
+            # fxy = Σ [dcm/dx·dcos/dy + dsm/dx·dsin/dy]
+            fms._fxy[iq] = muladd(dcm_dx, dcos_dy, muladd(dsm_dx, dsin_dy, fms._fxy[iq]))
+
+            # fyy = Σ [cm·d²cos/dy² + sm·d²sin/dy²]
+            fms._fyy[iq] = muladd(cm, d2cos_dy2, muladd(sm, d2sin_dy2, fms._fyy[iq]))
+        end
+    end
+
+    return fms._f, fms._fx, fms._fy, fms._fxx, fms._fxy, fms._fyy
+end
+
+"""
     evaluate(fms, xs_eval, ys_eval) -> Array{Float64,3}
 
 Vectorized evaluation at multiple points.
 Returns array of shape (length(xs_eval), length(ys_eval), nqty).
+
+Note: This allocates and is thread-safe.
 """
 function evaluate(fms::FourierModeSplines, xs_eval::Vector{Float64}, ys_eval::Vector{Float64})
     nx = length(xs_eval)
