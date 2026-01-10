@@ -433,6 +433,80 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
 end
 
 """
+    ProfileSplines
+
+Named 1D splines for equilibrium profiles, replacing the monolithic `sq` spline.
+Each profile is stored as a separate spline for code clarity.
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared x-axis (normalized psi)
+  - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
+  - `P_spline`: μ₀*P (plasma pressure × μ₀)
+  - `dVdpsi_spline`: dV/dψ (volume derivative)
+  - `q_spline`: q (safety factor)
+
+# Cached Arrays (for efficient grid-point access)
+
+  - `F_vals`, `P_vals`, `dVdpsi_vals`, `q_vals`: Values at grid points
+  - `F_derivs`, `P_derivs`, `dVdpsi_derivs`, `q_derivs`: First derivatives at grid points
+"""
+struct ProfileSplines{S}
+    xs::Vector{Float64}
+    F_spline::S
+    P_spline::S
+    dVdpsi_spline::S
+    q_spline::S
+    # Cached values at grid points
+    F_vals::Vector{Float64}
+    P_vals::Vector{Float64}
+    dVdpsi_vals::Vector{Float64}
+    q_vals::Vector{Float64}
+    # Cached first derivatives at grid points
+    F_derivs::Vector{Float64}
+    P_derivs::Vector{Float64}
+    dVdpsi_derivs::Vector{Float64}
+    q_derivs::Vector{Float64}
+end
+
+"""
+    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; bctype="extrap")
+
+Create ProfileSplines from arrays of profile values.
+"""
+function ProfileSplines(xs::Vector{Float64},
+    F_vals::Vector{Float64},
+    P_vals::Vector{Float64},
+    dVdpsi_vals::Vector{Float64},
+    q_vals::Vector{Float64};
+    bctype::String="extrap")
+    npts = length(xs)
+    @assert length(F_vals) == npts
+    @assert length(P_vals) == npts
+    @assert length(dVdpsi_vals) == npts
+    @assert length(q_vals) == npts
+
+    # Create individual splines
+    F_spline = Spl.CubicSpline1D(xs, F_vals; bctype=bctype)
+    P_spline = Spl.CubicSpline1D(xs, P_vals; bctype=bctype)
+    dVdpsi_spline = Spl.CubicSpline1D(xs, dVdpsi_vals; bctype=bctype)
+    q_spline = Spl.CubicSpline1D(xs, q_vals; bctype=bctype)
+
+    # Extract cached derivatives from the splines
+    F_derivs = vec(F_spline.fs1)
+    P_derivs = vec(P_spline.fs1)
+    dVdpsi_derivs = vec(dVdpsi_spline.fs1)
+    q_derivs = vec(q_spline.fs1)
+
+    ProfileSplines{typeof(F_spline)}(
+        xs,
+        F_spline, P_spline, dVdpsi_spline, q_spline,
+        copy(F_vals), copy(P_vals), copy(dVdpsi_vals), copy(q_vals),
+        F_derivs, P_derivs, dVdpsi_derivs, q_derivs
+    )
+end
+
+"""
     PlasmaEquilibrium(...)
 
 The final, self-contained result of the equilibrium reconstruction.
@@ -445,8 +519,10 @@ This object provides a complete representation of the processed plasma equilibri
 
   - `params::EquilibriumParameters`:
     Computed equilibrium parameters and diagnostics.
+  - `profiles::ProfileSplines`:
+    Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
   - `sq::CubicSpline{Float64}`:
-    Final 1D profile spline.
+    Legacy 1D profile spline (deprecated, kept for compatibility during migration).
 
       + **x value:** normalized ψ
       + **Quantity 1:** Toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
@@ -478,7 +554,8 @@ This object provides a complete representation of the processed plasma equilibri
 mutable struct PlasmaEquilibrium
     config::EquilibriumConfig
     params::EquilibriumParameters
-    sq::Spl.CubicSpline{Float64}
+    profiles::ProfileSplines
+    sq::Spl.CubicSpline{Float64}  # Legacy, kept for compatibility
     rzphi::Spl.BicubicSpline
     eqfun::Spl.BicubicSpline
     ro::Float64

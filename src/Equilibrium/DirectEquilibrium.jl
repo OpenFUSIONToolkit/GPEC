@@ -548,5 +548,16 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         end
     end
     eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; bctypex="extrap", bctypey="periodic")
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), sq, rzphi, eqfun, ro, zo, psio)
+
+    # Create ProfileSplines from the sq_nodes data
+    profiles = ProfileSplines(
+        psi_nodes,
+        sq_nodes[:, 1],  # F * 2π
+        sq_nodes[:, 2],  # P * μ₀
+        sq_nodes[:, 3],  # dV/dψ
+        sq_nodes[:, 4];  # q
+        bctype="extrap"
+    )
+
+    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles, sq, rzphi, eqfun, ro, zo, psio)
 end
