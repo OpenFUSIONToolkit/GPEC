@@ -5,6 +5,7 @@ import ..Spl
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
+using FastInterpolations
 import StaticArrays: @MMatrix
 
 # --- Internal Module Structure ---

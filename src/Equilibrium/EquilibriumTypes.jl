@@ -539,12 +539,12 @@ This object provides a complete representation of the processed plasma equilibri
       + **Quantity 2:** Offset between the geometric poloidal angle (η) and the new angle (θₙₑw), η / (2π) - θₙₑw
       + **Quantity 3:** ν in ϕ = 2πζ + ν(ψ, θ)
       + **Quantity 4:** Jacobian
-  - `eqfun::BicubicWrapper`:
-    2D spline storing local physics and geometric quantities that vary across flux surfaces.
-    These are precomputed for efficient use in subsequent stability and transport codes.
+  - `eqfun::EqfunSplines`:
+    Grid-based splines storing local physics and geometric quantities.
+    All derivatives pre-computed at construction time for efficient grid-point evaluation.
 
-      + **x value:** normalized ψ ∈ [0, 1]
-      + **y value:** SFL poloidal angle θₙₑw ∈ [0, 1]
+      + **x value:** normalized ψ (grid points only)
+      + **y value:** SFL poloidal angle θₙₑw (grid points only)
       + **Quantity 1:** Total magnetic field strength, B [T]
       + **Quantity 2:** (e₁⋅e₂ + q⋅e₃⋅e₁) / (J⋅B²)
       + **Quantity 3:** (e₂⋅e₃ + q⋅e₃⋅e₃) / (J⋅B²)

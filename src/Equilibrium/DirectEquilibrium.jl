@@ -548,8 +548,31 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    eqfun = Spl.BicubicWrapper(psi_nodes, collect(theta_nodes), eqfun_fs_nodes;
-        periodic_y=true, endpoint_inclusive=true)
+    # Pre-compute eqfun first derivatives on the grid using FastInterpolations
+    # Since eqfun is only evaluated at grid points, we just store arrays
+    nqty_eqfun = size(eqfun_fs_nodes, 3)
+    eqfun_fs_x = zeros(Float64, mpsi + 1, mtheta + 1, nqty_eqfun)
+    eqfun_fs_y = zeros(Float64, mpsi + 1, mtheta + 1, nqty_eqfun)
+
+    theta_nodes_vec = collect(theta_nodes)
+
+    # Compute theta derivatives (periodic BC) - vectorized
+    for iq in 1:nqty_eqfun
+        for ipsi in 1:(mpsi+1)
+            f_theta = eqfun_fs_nodes[ipsi, :, iq]
+            eqfun_fs_y[ipsi, :, iq] .= cubic_interp(theta_nodes_vec, f_theta, theta_nodes_vec; bc=PeriodicBC(), deriv=1)
+        end
+    end
+
+    # Compute psi derivatives (natural/not-a-knot BC) - vectorized
+    for iq in 1:nqty_eqfun
+        for itheta in 1:(mtheta+1)
+            f_psi = eqfun_fs_nodes[:, itheta, iq]
+            eqfun_fs_x[:, itheta, iq] .= cubic_interp(psi_nodes, f_psi, psi_nodes; bc=NaturalBC(), deriv=1)
+        end
+    end
+
+    eqfun = Spl.EqfunSplines(psi_nodes, theta_nodes_vec, eqfun_fs_nodes, eqfun_fs_x, eqfun_fs_y)
 
     # Create ProfileSplines from the sq_nodes data
     profiles = ProfileSplines(
