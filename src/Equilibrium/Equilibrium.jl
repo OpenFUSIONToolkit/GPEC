@@ -68,13 +68,13 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         # Example 1D spline setup
         xs = collect(0.0:0.1:1.0)
         fs = sin.(2π .* xs)  # vector of Float64
-        spline_ex = Spl.CubicSpline(xs, fs)
+        spline_ex = Spl.CubicSpline1D(xs, fs)
         #println(spline_ex)
         # Example 2D bicubic spline setup
         xs = 0.0:0.1:1.0
         ys = 0.0:0.2:1.0
         fs = [sin(2π * x) * cos(2π * y) for x in xs, y in ys, _ in 1:1]
-        bicube_ex = Spl.BicubicSpline(collect(xs), collect(ys), fs)
+        bicube_ex = Spl.BicubicWrapper(collect(xs), collect(ys), fs; periodic_y=false)
         #println(bicube_ex)
         eq_input = InverseRunInput(
             eq_config,
@@ -159,7 +159,10 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         rfac = 0.0
         cosfac = 0.0
         z = 0.0
-        while true
+        max_iter = 1000
+        iter = 0
+        while iter < max_iter
+            iter += 1
             f, fx, fy, fxx, fxy, fyy = Spl.bicube_deriv2!(rzphi, psifac, theta)
             r2, r2y, r2yy = f[1], fy[1], fyy[1]
             eta, eta1, eta2 = f[2], fy[2], fyy[2]
@@ -177,9 +180,15 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             z2 = (2 * rfac1 * phase1 + rfac * phase2) * cosfac + (rfac2 - rfac * phase1^2) * sinfac
             dtheta = -z1 / z2
             theta += dtheta
-            if abs(dtheta) < 1e-12 * abs(theta)
+            # Wrap theta back into valid periodic range [0, 2π)
+            y_period = rzphi.ys[end] - rzphi.ys[1] + (rzphi.ys[2] - rzphi.ys[1])
+            theta = mod(theta - rzphi.ys[1], y_period) + rzphi.ys[1]
+            if abs(dtheta) < 1e-12 * y_period
                 break
             end
+        end
+        if iter >= max_iter
+            @warn "Newton iteration for separatrix extrema did not converge" iside eta0 theta
         end
         rext[iside] = pe.ro + rfac * cosfac
         zsep[iside] = z
@@ -386,7 +395,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     rzphi = equil.rzphi
     sq = equil.sq
-    mpsi, mtheta = rzphi.mx, rzphi.my
+    mpsi = length(rzphi.xs) - 1
+    mtheta = length(rzphi.ys) - 1
     ro, zo = equil.ro, equil.zo
     psio = equil.psio
     verbose = equil.params.verbose
@@ -413,15 +423,14 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     end
 
     flux_fs = zeros(Float64, mpsi + 1, mtheta + 1, 2)
+    flux_fsx = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # x-derivatives
+    flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # y-derivatives
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
             f, fx, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
             f1, f2, f4 = f[1], f[2], f[4]
-
-            fy1 = rzphi._fsy[ipsi+1, itheta+1, 1]
-            fy2 = rzphi._fsy[ipsi+1, itheta+1, 2]
-            fx1 = rzphi._fsx[ipsi+1, itheta+1, 1]
-            fx2 = rzphi._fsx[ipsi+1, itheta+1, 2]
+            fy1, fy2 = fy[1], fy[2]
+            fx1, fx2 = fx[1], fx[2]
 
             flux_fs[ipsi+1, itheta+1, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
             flux_fs[ipsi+1, itheta+1, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
@@ -431,7 +440,15 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             end
         end
     end
-    flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs; bctypex="extrap", bctypey="periodic")
+    flux = Spl.BicubicWrapper(collect(rzphi.xs), collect(rzphi.ys), flux_fs; periodic_y=true)
+    # Compute flux derivatives at all grid points for diagnostics
+    for ipsi in 0:mpsi
+        for itheta in 0:mtheta
+            _, flux_fx, flux_fy = Spl.bicube_deriv1!(flux, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
+            flux_fsx[ipsi+1, itheta+1, :] .= flux_fx
+            flux_fsy[ipsi+1, itheta+1, :] .= flux_fy
+        end
+    end
 
     source = zeros(Float64, mpsi + 1, mtheta + 1)
     for ipsi in 0:mpsi
@@ -447,13 +464,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
 
-    total = flux.fsx[:, :, 1] .- flux.fsy[:, :, 2] .+ source
-    error = abs.(total) ./ maximum([maximum(abs.(flux.fsx[:, :, 1])), maximum(abs.(flux.fsy[:, :, 2])), maximum(abs.(source))])
+    total = flux_fsx[:, :, 1] .- flux_fsy[:, :, 2] .+ source
+    error = abs.(total) ./ maximum([maximum(abs.(flux_fsx[:, :, 1])), maximum(abs.(flux_fsy[:, :, 2])), maximum(abs.(source))])
     errlog = ifelse.(error .> 0, log10.(error), 0.0)
 
     if diagnose_maxima
-        fxmax = maximum(abs.(flux.fsx[:, :, 1]))
-        fymax = maximum(abs.(flux.fsy[:, :, 2]))
+        fxmax = maximum(abs.(flux_fsx[:, :, 1]))
+        fymax = maximum(abs.(flux_fsy[:, :, 2]))
         smax = maximum(abs.(source))
         emax = maximum(abs.(error))
         lmax = maximum(errlog)
@@ -466,11 +483,11 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     term = zeros(Float64, mpsi + 1, 2)
     for ipsi in 0:mpsi
         fs_matrix = zeros(Float64, mtheta + 1, 2)
-        fs_matrix[:, 1] = flux.fsx[ipsi+1, :, 1]
+        fs_matrix[:, 1] = flux_fsx[ipsi+1, :, 1]
         fs_matrix[:, 2] = source[ipsi+1, :]
 
-        spline = Spl.CubicSpline(Vector(flux.ys), fs_matrix; bctype="periodic")
-        Spl.spline_integrate!(spline)
+        spline = Spl.CubicSpline1D(Vector(flux.ys), fs_matrix; bctype="periodic")
+        Spl.integrate!(spline)
 
         term[ipsi+1, :] .= spline.fsi[end, :]
         # spline will be automatically deallocated by finalizer
@@ -491,8 +508,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             file["mtheta"] = mtheta
             file["r"] = Float32.(r)
             file["z"] = Float32.(z)
-            file["flux_fsx"] = Float32.(flux.fsx[:, :, 1])
-            file["flux_fsy"] = Float32.(flux.fsy[:, :, 2])
+            file["flux_fsx"] = Float32.(flux_fsx[:, :, 1])
+            file["flux_fsy"] = Float32.(flux_fsy[:, :, 2])
             file["source"] = Float32.(source)
             file["total"] = Float32.(total)
             file["error"] = Float32.(error)
@@ -506,8 +523,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
                 for itheta in 0:mtheta
                     gse_data[ipsi+1, itheta+1, 1] = Float32(flux.ys[itheta+1])
                     gse_data[ipsi+1, itheta+1, 2] = Float32(flux.xs[ipsi+1])
-                    gse_data[ipsi+1, itheta+1, 3] = Float32(flux.fs[ipsi+1, itheta+1, 1])
-                    gse_data[ipsi+1, itheta+1, 4] = Float32(flux.fs[ipsi+1, itheta+1, 2])
+                    gse_data[ipsi+1, itheta+1, 3] = Float32(flux_fs[ipsi+1, itheta+1, 1])
+                    gse_data[ipsi+1, itheta+1, 4] = Float32(flux_fs[ipsi+1, itheta+1, 2])
                     gse_data[ipsi+1, itheta+1, 5] = Float32(source[ipsi+1, itheta+1])
                     gse_data[ipsi+1, itheta+1, 6] = Float32(total[ipsi+1, itheta+1])
                     gse_data[ipsi+1, itheta+1, 7] = Float32(error[ipsi+1, itheta+1])

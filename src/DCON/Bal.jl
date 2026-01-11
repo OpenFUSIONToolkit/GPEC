@@ -18,7 +18,7 @@ the numerical ODE integration.
   - `asymptotic_matrix::Matrix{Float64}`: 2×2 matrix where each column is an asymptotic solution.
 """
 function compute_asymptotic_solutions(poloidal_angle::Float64, growth_parameter::Float64,
-    asymptotic_spline::Spl.CubicSpline,
+    asymptotic_spline::Spl.CubicSpline1D,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64)
     asymptotic_matrix = zeros(Float64, 2, 2)
     first_order_correction = zeros(Float64, 2, 2)
@@ -110,12 +110,12 @@ Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK inte
   - `(coefficient_1, coefficient_2)`: Asymptotic coefficients determining stability.
 """
 function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Float64,
-    ode_coefficient_spline::Spl.CubicSpline,
-    asymptotic_spline::Spl.CubicSpline,
+    ode_coefficient_spline::Spl.CubicSpline1D,
+    asymptotic_spline::Spl.CubicSpline1D,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
     control::DconControl)
 
-    
+
     TOLERANCE = 1e-5
     MINIMUM_THETA = 1.0
     MINIMUM_STEP = 1e-10
@@ -270,7 +270,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     end
 
     # compute curvature terms
-    spl0 = Spl.CubicSpline(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); bctype="periodic")
+    spl0 = Spl.CubicSpline1D(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); bctype="periodic")
 
     kappas .= -spl0.fs1[:, 1] .* two_pi_f ./ (2 .* jac)
     kappan .= ((pressure_gradient ./ bsq .- fx_psi[4, :] ./ jac) ./ chi_prime .+
@@ -284,11 +284,11 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     bf_fs[:, 3] = (dbdb2 - dbdb1 .^ 2 ./ (4 .* dbdb0)) ./ (bsq .* jacfac)
     bf_fs[:, 4] = 2 .* kappan .* pressure_gradient ./ chi_prime .* jacfac
     bf_fs[:, 5] = -2 .* kappas .* pressure_gradient ./ chi_prime .* q_derivative .* jacfac
-    ode_coefficient_spline = Spl.CubicSpline(theta_grid, bf_fs; bctype="periodic")
+    ode_coefficient_spline = Spl.CubicSpline1D(theta_grid, bf_fs; bctype="periodic")
 
     # initialize spline 'bg'
-    spl0_bg = Spl.CubicSpline(theta_grid, -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2); bctype="periodic")
-    Spl.spline_integrate!(spl0_bg)
+    spl0_bg = Spl.CubicSpline1D(theta_grid, -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2); bctype="periodic")
+    Spl.integrate!(spl0_bg)
     bg_fs = zeros(mtheta + 1, 5)
     bg_fs[:, 5] = spl0_bg.fs[:, 1] .- spl0_bg.fsi[end, 1]
 
@@ -306,8 +306,8 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         spl1_fs[itheta+1, 4] = -spl1_fs[itheta+1, 1]
     end
 
-    spl1 = Spl.CubicSpline(theta_grid, spl1_fs; bctype="periodic")
-    Spl.spline_integrate!(spl1)
+    spl1 = Spl.CubicSpline1D(theta_grid, spl1_fs; bctype="periodic")
+    Spl.integrate!(spl1)
 
     d0bar = [spl1.fsi[end, 1] spl1.fsi[end, 2]; spl1.fsi[end, 3] spl1.fsi[end, 4]]
 
@@ -315,7 +315,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # if stable by Mercier, no more work to do
     if di > 0
-        return di, NaN, ode_coefficient_spline, Spl.CubicSpline(theta_grid, bg_fs; bctype="periodic"), zeros(2, 2), 0.0
+        return di, NaN, ode_coefficient_spline, Spl.CubicSpline1D(theta_grid, bg_fs; bctype="periodic"), zeros(2, 2), 0.0
     end
 
     alpha = sqrt(-di)
@@ -340,11 +340,11 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         spl2_fs[itheta+1, 4] = spl1.fs[itheta+1, 3] * v0[1, 2] + (spl1.fs[itheta+1, 4] + alpha) * v0[2, 2]
     end
 
-    spl2 = Spl.CubicSpline(theta_grid, spl2_fs; bctype="periodic")
-    Spl.spline_integrate!(spl2)
+    spl2 = Spl.CubicSpline1D(theta_grid, spl2_fs; bctype="periodic")
+    Spl.integrate!(spl2)
     # CRITICAL: Replace fs with integrated values (matching Fortran's spl2%fs=spl2%fsi)
     spl2_fs_integrated = copy(spl2.fsi)  # Save integrated values
-    spl2 = Spl.CubicSpline(theta_grid, spl2_fs_integrated; bctype="periodic")
+    spl2 = Spl.CubicSpline1D(theta_grid, spl2_fs_integrated; bctype="periodic")
 
 
     # Compute derivatives for second-order terms
@@ -377,8 +377,8 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
                                d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
     end
 
-    spl3 = Spl.CubicSpline(theta_grid, spl3_fs; bctype="periodic")
-    Spl.spline_integrate!(spl3)
+    spl3 = Spl.CubicSpline1D(theta_grid, spl3_fs; bctype="periodic")
+    Spl.integrate!(spl3)
 
     # Compute first-order constants for both eigenfunctions
     # First eigenfunction (with -alpha correction)
@@ -406,7 +406,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     bg_fs[:, 3] = spl2.fs[:, 3] .+ v10[1, 2]
     bg_fs[:, 4] = spl2.fs[:, 4] .+ v10[2, 2]
 
-    bg = Spl.CubicSpline(theta_grid, bg_fs; bctype="periodic")
+    bg = Spl.CubicSpline1D(theta_grid, bg_fs; bctype="periodic")
 
     reference_angle = 0.0 # Central poloidal angle (typically 0)
     return di, alpha, ode_coefficient_spline, bg, v0, reference_angle

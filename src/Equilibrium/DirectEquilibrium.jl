@@ -29,11 +29,11 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams
+struct FieldLineDerivParams{B<:Spl.BicubicWrapper,S<:Spl.CubicSpline1D}
     ro::Float64
     zo::Float64
-    psi_in::Spl.BicubicSpline
-    sq_in::Spl.CubicSpline
+    psi_in::B
+    sq_in::S
     psio::Float64
     power_bp::Int
     power_b::Int
@@ -63,8 +63,8 @@ function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
-    psi_in::Spl.BicubicSpline,
-    sq_in::Spl.CubicSpline{Float64},
+    psi_in::Spl.BicubicWrapper,
+    sq_in::Spl.CubicSpline1D,
     psio::Float64;
     derivs::Int=0
 )
@@ -188,7 +188,7 @@ function direct_position!(raw_profile::DirectRunInput)
     y_coords = Vector(raw_profile.psi_in.ys)
     new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs; bctypex=3, bctypey=3)
+    raw_profile.psi_in = Spl.BicubicWrapper(x_coords, y_coords, new_psi_fs; periodic_y=false)
 
     # Helper function for robust Newton-Raphson search with restarts
     function find_separatrix_crossing(start_r, end_r, label)
@@ -462,7 +462,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             bfield.f * (y_out[:, 4] .- ff_x_nodes .* y_out[end, 4]),
             y_out[:, 2] ./ y_out[end, 2] .- ff_x_nodes
         )
-        ff = Spl.CubicSpline(ff_x_nodes, ff_fs_nodes; bctype="periodic")
+        ff = Spl.CubicSpline1D(ff_x_nodes, ff_fs_nodes; bctype="periodic")
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
@@ -480,7 +480,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
 
     # Fit 1D profile spline `sq` and perform q-profile revision if needed
-    sq = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
+    sq = Spl.CubicSpline1D(psi_nodes, sq_nodes; bctype="extrap")
     q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
@@ -496,11 +496,11 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             rzphi_nodes[i, :, 3] .*= ffac
         end
         # Re-create the spline with the revised data
-        sq = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
+        sq = Spl.CubicSpline1D(psi_nodes, sq_nodes; bctype="extrap")
     end
 
     # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
-    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes; bctypex="extrap", bctypey="periodic")
+    rzphi = Spl.BicubicWrapper(psi_nodes, collect(theta_nodes), rzphi_nodes; periodic_y=true)
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
@@ -547,7 +547,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; bctypex="extrap", bctypey="periodic")
+    eqfun = Spl.BicubicWrapper(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; periodic_y=true)
 
     # Create ProfileSplines from the sq_nodes data
     profiles = ProfileSplines(

@@ -55,10 +55,10 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        ff = Spl.CubicSpline(Vector(rzphi.ys), ff_fs; bctype="periodic")
+        ff = Spl.CubicSpline1D(Vector(rzphi.ys), ff_fs; bctype="periodic")
 
         # Integrate quantities with respect to theta
-        Spl.spline_integrate!(ff)
+        Spl.integrate!(ff)
         avg = ff.fsi[end, :]
 
         # Evaluate Mercier criterion and related quantities

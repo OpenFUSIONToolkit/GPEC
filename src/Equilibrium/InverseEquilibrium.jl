@@ -108,13 +108,13 @@ function equilibrium_solver(input::InverseRunInput)
         end
     end
 
-    deta[1, :] = inverse_extrap(r2[2:me+1, :], deta[2:me+1, :], 0.0)
+    deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
     rz_in_fs = zeros(Float64, mx + 1, my + 1, 3)
     rz_in_fs[:, :, 1] = r2
     rz_in_fs[:, :, 2] = deta
 
-    rz_spline = Spl.BicubicSpline(rz_, rz_in.xs, rz_in.ys; bctypex="extrap", bctypey="periodic")
+    rz_spline = Spl.BicubicWrapper(rz_in.xs, rz_in.ys, rz_in_fs; periodic_y=true)
 
     # c-----------------------------------------------------------------------
     # c     prepare new spline type for surface quantities.
@@ -130,13 +130,13 @@ function equilibrium_solver(input::InverseRunInput)
     if grid_type == "ldp"
         xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
         fs = zeros(Float64, mpsi + 1, 4)
-        sq = Spl.spline_setup(xs, fs; bctype="extrap")
+        sq = Spl.CubicSpline1D(xs, fs; bctype="extrap")
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end
 
-    local rzphi::Spl.BicubicSplineType
-    local eqfun::Spl.BicubicSplineType
+    local rzphi::Spl.BicubicWrapper
+    local eqfun::Spl.BicubicWrapper
 
     # c-----------------------------------------------------------------------
     # c     prepare new bicube type for coordinates.
@@ -155,8 +155,8 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun_xs = copy(sq_xs)
     eqfun_ys = collect(0:mtheta) ./ mtheta
 
-    rzphi = Spl.bicube_setup(copy(sq.xs), collect(0:mtheta) ./ mtheta, rzphi_fs)
-    eqfun = Spl.bicube_setup(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs)
+    rzphi = Spl.BicubicWrapper(copy(sq.xs), collect(0:mtheta) ./ mtheta, rzphi_fs; periodic_y=true)
+    eqfun = Spl.BicubicWrapper(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs; periodic_y=true)
 
 
     # spl_xs = zeros(Float64,mtheta+1)

@@ -146,6 +146,7 @@ Create a 1D cubic spline interpolator.
 
   - `xs::Vector{Float64}`: Grid points (must be sorted in ascending order).
     Typically normalized flux psi_N in [0, 1] for radial profiles.
+
   - `fs::Union{Vector{T}, Matrix{T}}`: Function values at grid points.
     If Vector, treated as single quantity. If Matrix, shape is (npts, nqty).
   - `bctype`: Boundary condition type. Options:
@@ -175,7 +176,7 @@ q_val = evaluate!(q_spline, 0.5)
 
 # Get value and derivatives
 q, dq_dpsi, d2q_dpsi2, d3q_dpsi3 = deriv3!(q_spline, 0.5)
-```    # Ensure fs is a matrix (npts × nqty)
+```
 """
 function CubicSpline1D(xs::Vector{Float64}, fs::Union{Vector{T},Matrix{T}};
     bctype::Union{String,Int}="extrap") where {T<:Union{Float64,ComplexF64}}
@@ -714,4 +715,60 @@ function empty_ComplexMatrixSpline(n1::Int=1, n2::Int=1)
     xs = Float64[0.0, 1.0]
     data = zeros(ComplexF64, 2, n1, n2)
     ComplexMatrixSpline(xs, data)
+end
+
+# =============================================================================
+# Compatibility Aliases (matching legacy Fortran API)
+# =============================================================================
+
+# These aliases allow consumer code to use the familiar Fortran-style function names
+# while using the new pure Julia implementations.
+
+"""
+    spline_eval!(spline, x)
+
+Legacy API alias for `evaluate!(spline, x)`.
+"""
+spline_eval!(spline::CubicSpline1D, x::Float64) = evaluate!(spline, x)
+
+"""
+    spline_deriv1!(spline, x)
+
+Legacy API alias for `deriv1!(spline, x)`.
+"""
+spline_deriv1!(spline::CubicSpline1D, x::Float64) = deriv1!(spline, x)
+
+"""
+    spline_deriv2!(spline, x)
+
+Legacy API alias for `deriv2!(spline, x)`.
+"""
+spline_deriv2!(spline::CubicSpline1D, x::Float64) = deriv2!(spline, x)
+
+"""
+    spline_deriv3!(spline, x)
+
+Legacy API alias for `deriv3!(spline, x)`.
+"""
+spline_deriv3!(spline::CubicSpline1D, x::Float64) = deriv3!(spline, x)
+
+"""
+    spline_integrate!(spline)
+
+Legacy API alias for `integrate!(spline)`.
+"""
+spline_integrate!(spline::CubicSpline1D) = integrate!(spline)
+
+"""
+    spline_eval!(out, spline, x)
+
+Legacy in-place API: evaluate spline at x and write to preallocated output vector.
+Used in hot loops where output array is reused.
+"""
+function spline_eval!(out::AbstractVector, spline::CubicSpline1D, x::Float64)
+    result = evaluate!(spline, x)
+    @inbounds for i in eachindex(out)
+        out[i] = result[i]
+    end
+    return out
 end

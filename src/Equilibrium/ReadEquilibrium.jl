@@ -23,7 +23,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
-        val_str = strip(data_str[i:i+field_width-1])
+        val_str = strip(data_str[i:(i+field_width-1)])
         if !isempty(val_str)
             try
                 push!(parsed_values, parse(Float64, val_str))
@@ -72,7 +72,7 @@ function read_efit(config::EquilibriumConfig)
     current_line_idx = 6
     function parse_block(num_pts)
         num_lines = ceil(Int, num_pts / 5)
-        block = lines[current_line_idx:current_line_idx+num_lines-1]
+        block = lines[current_line_idx:(current_line_idx+num_lines-1)]
         data = _read_1d_gfile_format(block, num_pts)
         current_line_idx += num_lines
         return data
@@ -95,7 +95,7 @@ function read_efit(config::EquilibriumConfig)
         qprof_data,
         sqrt.(psi_norm_grid)
     )
-    sq_in = Spl.CubicSpline(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap")
+    sq_in = Spl.CubicSpline1D(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap")
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -113,7 +113,7 @@ function read_efit(config::EquilibriumConfig)
     zmin, zmax = extrema(z_grid)
 
     psi_proc_3d = reshape(psi_proc, (nw, nh, 1))
-    psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d; bctypex="extrap", bctypey="extrap")
+    psi_in = Spl.BicubicWrapper(collect(r_grid), collect(z_grid), psi_proc_3d; periodic_y=false)
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
@@ -168,7 +168,7 @@ function read_chease2(config::EquilibriumConfig)
         data = Float64[]
         for line in lines[lines_range]
             for i in 0:4
-                s = strip(line[22*i+1:min(end, 22 * (i + 1))])
+                s = strip(line[(22*i+1):min(end, 22*(i+1))])
                 if !isempty(s)
                     push!(data, parse(Float64, s))
                 end
@@ -183,14 +183,14 @@ function read_chease2(config::EquilibriumConfig)
     function load_vector!(vec)
         count = length(vec)
         lines_needed = cld(count, 5)
-        vec .= parse_floats(line_idx:line_idx+lines_needed-1)
+        vec .= parse_floats(line_idx:(line_idx+lines_needed-1))
         return line_idx += lines_needed
     end
 
     function load_matrix!(mat)
         count = size(mat, 1) * size(mat, 2)
         lines_needed = cld(count, 5)
-        data = parse_floats(line_idx:line_idx+lines_needed-1)
+        data = parse_floats(line_idx:(line_idx+lines_needed-1))
         line_idx += lines_needed
         # Fill column-major (Fortran-style)
         for j in 1:size(mat, 2)
@@ -232,15 +232,15 @@ function read_chease2(config::EquilibriumConfig)
     fs[:, 2] .= zcppr
     fs[:, 3] .= zq
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
+    sq_in = Spl.CubicSpline1D(xs, fs; bctype="extrap")
     # --- Integrate pressure ---
-    Spl.spline_integrate!(sq_in)  # Integrate in-place, sq_in.fsi filled
+    Spl.integrate!(sq_in)  # Integrate in-place, sq_in.fsi filled
     # Make a writable copy of the fs array
     fs_copy = copy(sq_in.fs)
     # Normalize pressure integral column (2nd column)
     fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
     # Refit spline using the modified fs_copy
-    sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
+    sq_in = Spl.CubicSpline1D(sq_in.xs, fs_copy; bctype="extrap")
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -249,12 +249,12 @@ function read_chease2(config::EquilibriumConfig)
     ys = range(0, 2π; length=mtau) |> collect
     # Allocate and fill fs array (radial × poloidal × 2 quantities)
     fs = zeros(length(xs), length(ys), 2)
-    fs[:, :, 1] .= transpose(zrcp[1:ntnova+1, :])
-    fs[:, :, 2] .= transpose(zzcp[1:ntnova+1, :])
+    fs[:, :, 1] .= transpose(zrcp[1:(ntnova+1), :])
+    fs[:, :, 2] .= transpose(zzcp[1:(ntnova+1), :])
 
 
     # Setup bicubic spline with periodic boundary conditions
-    rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
+    rz_in = Spl.BicubicWrapper(xs, ys, fs; periodic_y=true)
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
@@ -308,7 +308,7 @@ function read_chease(config::EquilibriumConfig)
         function print_summary(name, arr)
             n = length(arr)
             first5 = arr[1:min(5, n)]
-            last5 = arr[max(1, n - 4):end]
+            last5 = arr[max(1, n-4):end]
             println("$name first 5: ", first5)
             return println("$name last 5:  ", last5)
         end
@@ -348,11 +348,11 @@ function read_chease(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        sq_in = Spl.spline_setup(xs, fs; bctype="extrap")
-        Spl.spline_integrate!(sq_in)
+        sq_in = Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        Spl.integrate!(sq_in)
         fs_copy = copy(sq_in.fs)
         fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.spline_setup(sq_in._xs, fs_copy; bctype="extrap")
+        sq_in = Spl.CubicSpline1D(sq_in.xs, fs_copy; bctype="extrap")
 
         # --- Setup parameters ---
         mtau = ntnova
@@ -391,7 +391,7 @@ function read_chease(config::EquilibriumConfig)
         ys = range(0, 2π; length=mtau) |> collect
 
         # Setup bicubic spline with periodic boundary conditions
-        rz_in = Spl.bicube_setup(xs, ys, fs; bctypex="extrap", bctypey="periodic")
+        rz_in = Spl.BicubicWrapper(xs, ys, fs; periodic_y=true)
 
         if diagnostics
             # --- Print first 5 and last 5 entries of each slice ---
@@ -400,7 +400,7 @@ function read_chease(config::EquilibriumConfig)
                 n = length(flat)
                 println("Slice $k:")
                 println("  First 5 entries: ", flat[1:5])
-                println("  Last  5 entries: ", flat[n-4:n])
+                println("  Last  5 entries: ", flat[(n-4):n])
             end
         end
         println("--> Finished reading CHEASE equilibrium.")

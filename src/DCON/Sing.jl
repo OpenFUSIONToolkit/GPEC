@@ -42,7 +42,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
                     singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
-                    abs(singfac) < 1e-8 && (converged = true; break)
+                    abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
 
@@ -69,7 +69,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
         end
     end
     # Sort singular surfaces by increasing ψ
-    intr.sing = sort(intr.sing, by = s -> s.psifac)
+    intr.sing = sort(intr.sing; by=s -> s.psifac)
 end
 
 """
@@ -193,7 +193,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         singp.m0mat = vcat([transpose(singp.mmat[singp.r1[i], singp.r2, :, 1]) for i in eachindex(singp.r1)]...)
     end
 
-    singp.alpha = eigen(singp.m0mat).values[length(singp.r1)+1:end] # take the M largest eigenvalues
+    singp.alpha = eigen(singp.m0mat).values[(length(singp.r1)+1):end] # take the M largest eigenvalues
     # In 3D, need to do a surface average to obtain the di computed in Mercier.jl
     # In 2D, I think alphas are the same for all resonances so can just take the first index
     singp.di = -real(singp.alpha[1]^2)
@@ -209,7 +209,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         singp.vmat[ipert, ipert, 1, 1] = 1
         singp.vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
     end
-    
+
     # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
     # TODO: this will probably need a better generalization in 3D
     for i in eachindex(singp.r1) # go block by block in M₀
@@ -222,12 +222,12 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         singp.vmat[r1, r1, 2, 1] = -(m0mat[1, 1] + alpha) / m0mat[1, 2]
         singp.vmat[r1, r2, 2, 1] = -(m0mat[1, 1] - alpha) / m0mat[1, 2]
         det = conj(singp.vmat[r1, r1, 1, 1]) * singp.vmat[r1, r2, 2, 1] -
-            conj(singp.vmat[r1, r2, 1, 1]) * singp.vmat[r1, r1, 2, 1]
+              conj(singp.vmat[r1, r2, 1, 1]) * singp.vmat[r1, r1, 2, 1]
         singp.vmat[r1, :, :, 1] ./= sqrt(det)
     end
 
     # Higher order solutions - need to solve iteratively
-    for k in 1:2*ctrl.sing_order
+    for k in 1:(2*ctrl.sing_order)
         sing_solve!(singp, intr, k)
     end
 end
@@ -281,14 +281,14 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Evaluate cubic splines
     q .= getindex.(Spl.spline_deriv3!(equil.sq, singp.psifac), 4)
-    f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
-    g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
-    k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
+    f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.deriv3!(ffit.fmats_lower, singp.psifac)
+    g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.deriv3!(ffit.gmats, singp.psifac)
+    k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.deriv3!(ffit.kmats, singp.psifac)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
     for i in 2:4
-        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i], inner=intr.mpert)
+        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i]; inner=intr.mpert)
     end
     # For resonant modes mᵢ - nᵢq(ψ) = [-nᵢq', -nᵢq'', -nᵢq'''] - shift up terms by 1 index
     # Add scaling to account for hardcoding coefficients in computations below
@@ -306,13 +306,13 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
                 if ctrl.sing_order ≥ 1
                     f_lower[ipert, jpert, 2] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 2] +
-                                            singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
+                                               singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
                 end
                 if ctrl.sing_order ≥ 2
                     f_lower[ipert, jpert, 3] =
@@ -335,7 +335,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
                 end
                 if ctrl.sing_order ≥ 5
                     f_lower[ipert, jpert, 6] = 10 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 4] +
-                                            10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
+                                               10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
                 end
                 if ctrl.sing_order ≥ 6
                     f_lower[ipert, jpert, 7] = 20 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 4]
@@ -357,8 +357,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         for j in 0:n
             for ipert_n in 1:intr.npert
                 for jpert_m in 1:intr.mpert
-                    for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
-                        for kpert_m in max(1, ipert_m - intr.mband):jpert_m
+                    for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+                        for kpert_m in max(1, ipert_m-intr.mband):jpert_m
                             ipert = ipert_m + (ipert_n - 1) * intr.mpert
                             jpert = jpert_m + (ipert_n - 1) * intr.mpert
                             kpert = kpert_m + (ipert_n - 1) * intr.mpert
@@ -377,13 +377,13 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in max(1, jpert_m - intr.mband):min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in max(1, jpert_m-intr.mband):min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
                 if ctrl.sing_order ≥ 1
                     k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
-                                        singfac[ipert, 2] * k_interp[ipert, jpert, 1]
+                                         singfac[ipert, 2] * k_interp[ipert, jpert, 1]
                 end
                 if ctrl.sing_order ≥ 2
                     k[ipert, jpert, 3] =
@@ -406,7 +406,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
                 end
                 if ctrl.sing_order ≥ 5
                     k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
-                                        singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
+                                         singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
                 end
                 if ctrl.sing_order ≥ 6
                     k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
@@ -419,7 +419,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # G = [G, G', G''/2, G'''/6]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
@@ -445,14 +445,14 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
     # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
-    for isol in 1:2*intr.numpert_total
+    for isol in 1:(2*intr.numpert_total)
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
     # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
     for i in 1:ctrl.sing_order
-        for isol in 1:2*intr.numpert_total
+        for isol in 1:(2*intr.numpert_total)
             for j in 1:i
                 @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
             end
@@ -463,7 +463,7 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
     for i in 0:ctrl.sing_order
-        for isol in 1:2*intr.numpert_total
+        for isol in 1:(2*intr.numpert_total)
             for j in 0:i
                 x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
             end
@@ -493,8 +493,8 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     # Apply the effect of the shearing transformation to the resonant indices R
     # Glasser PoP 2023 eq. 25 + 28: M = zS⁻¹LS - zS⁻¹S' = zS⁻¹LS + 0.5 [R, 0; 0, -R], 0ᵗʰ order only
     for i in eachindex(r1)
-        singp.mmat[r1[i], r2[2 * i - 1], 1, 1] += 0.5
-        singp.mmat[r1[i], r2[2 * i], 2, 1] -= 0.5
+        singp.mmat[r1[i], r2[2*i-1], 1, 1] += 0.5
+        singp.mmat[r1[i], r2[2*i], 2, 1] -= 0.5
     end
 end
 
@@ -516,7 +516,7 @@ function sing_solve!(singp::SingType, intr::DconInternal, k::Int)
     for l in 1:k
         singp.vmat[:, :, :, k+1] .+= sing_matmul(singp.mmat[:, :, :, l+1], singp.vmat[:, :, :, k-l+1])
     end
-    for isol in 1:2*intr.numpert_total
+    for isol in 1:(2*intr.numpert_total)
         for i in eachindex(singp.r1) # go block by block?
             # a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ (for multi-n 2D, we make a the ith block fo M₀)
             m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
@@ -566,7 +566,7 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
             @views c[:, i, j] .+= tmp
-            @views mul!(tmp, a[:, m+1:2*m, j], b[:, i, 2])
+            @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
             @views c[:, i, j] .+= tmp
         end
     end
@@ -602,9 +602,9 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     # Loop through resonances - this might change in 3D
     for i in eachindex(r1)
         # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
-        pfac = abs(dpsi).^singp.alpha[i] # zᵅ
-        ua[:, r2[2 * i - 1], :] ./= pfac # /zᵅ = z⁻ᵅ
-        ua[:, r2[2 * i], :] .*= pfac
+        pfac = abs(dpsi) .^ singp.alpha[i] # zᵅ
+        ua[:, r2[2*i-1], :] ./= pfac # /zᵅ = z⁻ᵅ
+        ua[:, r2[2*i], :] .*= pfac
 
         # Apply shearing transformation u = Rv (eq. 41 in Glasser 2016)
         ua[r1[i], :, 1] ./= sqrtfac # z^-0.5
@@ -612,8 +612,8 @@ function sing_get_ua(ctrl::DconControl, intr::DconInternal, odet::OdeState)
 
         # Renormalize
         if odet.psifac < singp.psifac
-            ua[:, r2[2 * i - 1], :] .*= abs(ua[r1[i], r2[2 * i - 1], 1]) / ua[r1[i], r2[2 * i - 1], 1]
-            ua[:, r2[2 * i], :] .*= abs(ua[r1[i], r2[2 * i], 1]) / ua[r1[i], r2[2 * i], 1]
+            ua[:, r2[2*i-1], :] .*= abs(ua[r1[i], r2[2*i-1], 1]) / ua[r1[i], r2[2*i-1], 1]
+            ua[:, r2[2*i], :] .*= abs(ua[r1[i], r2[2*i], 1]) / ua[r1[i], r2[2*i], 1]
         end
     end
 
@@ -634,12 +634,12 @@ function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     # Build temp1
     temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
     temp1[1:intr.numpert_total, :] .= ua[:, :, 1]
-    temp1[intr.numpert_total+1:2*intr.numpert_total, :] .= ua[:, :, 2]
+    temp1[(intr.numpert_total+1):(2*intr.numpert_total), :] .= ua[:, :, 2]
 
     # Built temp2
     temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
     temp2[1:intr.numpert_total, :] .= odet.u[:, :, 1]
-    temp2[intr.numpert_total+1:2*intr.numpert_total, :] .= odet.u[:, :, 2]
+    temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= odet.u[:, :, 2]
 
     # LU factorization and solve
     temp2 .= lu(temp1) \ temp2
@@ -647,7 +647,7 @@ function sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState)
     # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
-    ca[:, :, 2] .= temp2[intr.numpert_total+1:2*intr.numpert_total, :]
+    ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
 
     return ca
 end
@@ -712,21 +712,12 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         error("kin_flag not implemented yet")
     else
         # Evaluate matrix splines at the current psi value
-        Spl.spline_eval!(odet.amat, ffit.amats, psieval)
-        Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
-        Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
-        Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
-        Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
-        Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
-        
-        # Form full matrices from flat representations
-        # TODO: make these block diagonal for multi-n?
-        amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
-        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
-        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
-        fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
-        kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
-        gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
+        amat = Spl.evaluate!(ffit.amats, psieval)
+        bmat = Spl.evaluate!(ffit.bmats, psieval)
+        cmat = Spl.evaluate!(ffit.cmats, psieval)
+        fmat_lower = Spl.evaluate!(ffit.fmats_lower, psieval)
+        kmat = Spl.evaluate!(ffit.kmats, psieval)
+        gmat = Spl.evaluate!(ffit.gmats, psieval)
 
         odet.Afact = cholesky(Hermitian(amat))
         # bmat = A⁻¹ * bmat
