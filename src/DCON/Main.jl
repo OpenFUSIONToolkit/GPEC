@@ -253,26 +253,13 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
         out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
         out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
-        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, 1]
-        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, 2]
-        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, 3]
-        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, 4]
-        out_h5["splines/rzphi/fsx/rcoords"] = equil.rzphi.fsx[:, 1]
-        out_h5["splines/rzphi/fsx/offset"] = equil.rzphi.fsx[:, 2]
-        out_h5["splines/rzphi/fsx/nu"] = equil.rzphi.fsx[:, 3]
-        out_h5["splines/rzphi/fsx/jac"] = equil.rzphi.fsx[:, 4]
-        out_h5["splines/rzphi/fsy/rcoords"] = equil.rzphi.fsy[:, 1]
-        out_h5["splines/rzphi/fsy/offset"] = equil.rzphi.fsy[:, 2]
-        out_h5["splines/rzphi/fsy/nu"] = equil.rzphi.fsy[:, 3]
-        out_h5["splines/rzphi/fsy/jac"] = equil.rzphi.fsy[:, 4]
-        out_h5["splines/rzphi/fsxy/rcoords"] = equil.rzphi.fsxy[:, 1]
-        out_h5["splines/rzphi/fsxy/offset"] = equil.rzphi.fsxy[:, 2]
-        out_h5["splines/rzphi/fsxy/nu"] = equil.rzphi.fsxy[:, 3]
-        out_h5["splines/rzphi/fsxy/jac"] = equil.rzphi.fsxy[:, 4]
-        out_h5["splines/rzphi/x0"] = 0 # TODO: equil.rzphi.x0
-        out_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
-        out_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
-        out_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
+        # BicubicWrapper stores fs as 3D array (nx × ny × nqty)
+        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, :, 1]
+        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, :, 2]
+        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, :, 3]
+        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, :, 4]
+        # Derivatives are computed on-the-fly by Interpolations.jl, not stored
+        # TODO: If derivative grids are needed, compute them here using deriv1!/deriv2!
 
         # Write local stability data
         if ctrl.mer_flag
