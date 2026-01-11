@@ -11,6 +11,7 @@ include("Helper.jl")
 include("SplineAdapter.jl")
 include("BicubicWrapper.jl")
 include("FourierModeSplines.jl")
+include("RZPhiSplines.jl")
 
 # Fortran-backed bicubic spline (for compatibility and comparison)
 include("BicubicSplineFortran.jl")
@@ -21,6 +22,7 @@ export evaluate!, deriv1!, deriv2!, deriv3!, integrate!
 export BicubicWrapper, empty_BicubicWrapper
 export FourierModeSplines, empty_FourierModeSplines, get_complex_coeff, get_complex_coeffs!
 export ComplexMatrixSpline, empty_ComplexMatrixSpline
+export RZPhiSplines, empty_RZPhiSplines
 
 # Exports - Fortran-backed splines
 export BicubicSpline, empty_BicubicSpline

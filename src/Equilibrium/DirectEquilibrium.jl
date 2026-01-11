@@ -499,10 +499,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq = Spl.CubicSpline1D(psi_nodes, sq_nodes; bctype="extrap")
     end
 
-    # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
-    # Use Fortran BicubicSpline which handles endpoint-inclusive data correctly
-    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes;
-        bctypex="extrap", bctypey="periodic")
+    # Fit the geometric spline `rzphi`. Uses 1D periodic splines in theta per flux surface.
+    # This works because rzphi is only ever evaluated at psi grid points.
+    rzphi = Spl.RZPhiSplines(psi_nodes, collect(theta_nodes), rzphi_nodes)
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes

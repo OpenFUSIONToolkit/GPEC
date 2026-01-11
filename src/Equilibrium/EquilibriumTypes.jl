@@ -529,10 +529,11 @@ This object provides a complete representation of the processed plasma equilibri
       + **Quantity 2:** Pressure × μ₀, `P * μ₀`
       + **Quantity 3:** dV/dψ
       + **Quantity 4:** q
-  - `rzphi::BicubicWrapper`:
-    Final 2D flux-coordinate mapping spline.
+  - `rzphi::RZPhiSplines`:
+    Flux-coordinate mapping using 1D periodic splines in theta per flux surface.
+    (Only evaluated at psi grid points, so 2D interpolation in psi is not needed.)
 
-      + **x value:** normalized ψ
+      + **x value:** normalized ψ (grid points only)
       + **y value:** SFL poloidal angle ∈ [0, 1]
       + **Quantity 1:** r_coord² = (R - ro)² + (Z - zo)²
       + **Quantity 2:** Offset between the geometric poloidal angle (η) and the new angle (θₙₑw), η / (2π) - θₙₑw
