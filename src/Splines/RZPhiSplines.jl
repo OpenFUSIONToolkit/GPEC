@@ -59,11 +59,13 @@ struct RZPhiSplines{S<:CubicSpline1D}
     theta_splines::Matrix{S}
     psi_deriv_splines::Matrix{S}
 
-    fs::Array{Float64,3}
-    fs_psi::Array{Float64,3}
-    fs_y::Array{Float64,3}
+    # Pre-computed values at grid points for fast on-grid access
+    fs::Array{Float64,3}       # f values (npsi, ntheta, nqty)
+    fs_psi::Array{Float64,3}   # d/dpsi derivatives
+    fs_y::Array{Float64,3}     # d/dtheta derivatives
+    fs_yy::Array{Float64,3}    # d²/dtheta² second derivatives
 
-    # Work arrays
+    # Work arrays for off-grid evaluation
     _f::Vector{Float64}
     _fx::Vector{Float64}
     _fy::Vector{Float64}
@@ -112,6 +114,7 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
     # Allocate derivative arrays
     fs_psi = zeros(Float64, npsi, ntheta, nqty)
     fs_y = zeros(Float64, npsi, ntheta, nqty)
+    fs_yy = zeros(Float64, npsi, ntheta, nqty)
 
     # Pre-compute psi derivatives: for each (theta, qty), fit spline in psi direction
     # Uses vectorized extraction of fs1 from the spline (no loop over psi)
@@ -124,7 +127,7 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
         end
     end
 
-    # Create theta splines and extract theta derivatives
+    # Create theta splines and extract theta derivatives (first and second)
     # For each (psi, qty), fit periodic spline in theta direction
     for ipsi in 1:npsi
         for iq in 1:nqty
@@ -132,10 +135,18 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
             theta_splines[ipsi, iq] = CubicSpline1D(
                 ys_internal, fs[ipsi, 1:(end-1), iq]; bctype="periodic"
             )
-            # Vectorized: fs1 contains derivatives at ALL theta grid points (excluding endpoint)
+
+            # Extract first derivatives from spline coefficients at grid points
             fs_y[ipsi, 1:ntheta_internal, iq] .= @view theta_splines[ipsi, iq].fs1[:, 1]
-            # Endpoint wraps to start (periodic)
-            fs_y[ipsi, ntheta, iq] = fs_y[ipsi, 1, iq]
+            fs_y[ipsi, ntheta, iq] = fs_y[ipsi, 1, iq]  # Periodic wrap
+
+            # Compute second derivatives at grid points using spline evaluation
+            # This is done once at construction, so we can afford spline calls here
+            for jtheta in 1:ntheta_internal
+                _, _, f2_val = deriv2!(theta_splines[ipsi, iq], ys_internal[jtheta])
+                fs_yy[ipsi, jtheta, iq] = f2_val[1]
+            end
+            fs_yy[ipsi, ntheta, iq] = fs_yy[ipsi, 1, iq]  # Periodic wrap
 
             # Create psi derivative spline for off-grid theta evaluation
             psi_deriv_splines[ipsi, iq] = CubicSpline1D(
@@ -144,7 +155,7 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
         end
     end
 
-    # Allocate work arrays
+    # Allocate work arrays for off-grid evaluation
     _f = zeros(Float64, nqty)
     _fx = zeros(Float64, nqty)
     _fy = zeros(Float64, nqty)
@@ -155,7 +166,7 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
     RZPhiSplines{SplineType}(
         xs, ys, nqty, npsi, ntheta,
         theta_splines, psi_deriv_splines,
-        copy(fs), fs_psi, fs_y,
+        copy(fs), fs_psi, fs_y, fs_yy,
         _f, _fx, _fy, _fxx, _fxy, _fyy
     )
 end
@@ -207,13 +218,62 @@ Wrap theta to the range [ys[1], ys[end]) for periodic evaluation.
 end
 
 # =============================================================================
-# Evaluation Methods (Index-based - preferred for performance)
+# Evaluation Methods (Fully Indexed - FASTEST for on-grid access)
 # =============================================================================
 
 """
-    evaluate!(rzphi, ipsi::Int, theta) -> Vector{Float64}
+    evaluate!(rzphi, ipsi::Int, itheta::Int) -> Vector{Float64}
 
-Evaluate at grid index ipsi and theta. This is the fast path - use when you have the index.
+Evaluate at grid indices (ipsi, itheta). FASTEST path - direct array access.
+Returns reference to internal work array (not thread-safe).
+"""
+@inline function evaluate!(rzphi::RZPhiSplines{S}, ipsi::Int, itheta::Int) where {S}
+    @inbounds for iq in 1:rzphi.nqty
+        rzphi._f[iq] = rzphi.fs[ipsi, itheta, iq]
+    end
+    return rzphi._f
+end
+
+"""
+    deriv1!(rzphi, ipsi::Int, itheta::Int) -> (f, fx, fy)
+
+Evaluate value and first derivatives at grid indices (ipsi, itheta).
+FASTEST path - direct array access, no spline evaluation.
+Returns references to internal work arrays (not thread-safe).
+"""
+@inline function deriv1!(rzphi::RZPhiSplines{S}, ipsi::Int, itheta::Int) where {S}
+    @inbounds for iq in 1:rzphi.nqty
+        rzphi._f[iq] = rzphi.fs[ipsi, itheta, iq]
+        rzphi._fx[iq] = rzphi.fs_psi[ipsi, itheta, iq]
+        rzphi._fy[iq] = rzphi.fs_y[ipsi, itheta, iq]
+    end
+    return rzphi._f, rzphi._fx, rzphi._fy
+end
+
+"""
+    deriv2_fy!(rzphi, ipsi::Int, itheta::Int) -> (f, fy, fyy)
+
+Evaluate f, fy, fyy at grid indices. For cases where fx, fxx, fxy are not needed.
+FASTEST path - direct array access.
+Returns references to internal work arrays (not thread-safe).
+"""
+@inline function deriv2_fy!(rzphi::RZPhiSplines{S}, ipsi::Int, itheta::Int) where {S}
+    @inbounds for iq in 1:rzphi.nqty
+        rzphi._f[iq] = rzphi.fs[ipsi, itheta, iq]
+        rzphi._fy[iq] = rzphi.fs_y[ipsi, itheta, iq]
+        rzphi._fyy[iq] = rzphi.fs_yy[ipsi, itheta, iq]
+    end
+    return rzphi._f, rzphi._fy, rzphi._fyy
+end
+
+# =============================================================================
+# Evaluation Methods (Index + theta - for off-grid theta)
+# =============================================================================
+
+"""
+    evaluate!(rzphi, ipsi::Int, theta::Float64) -> Vector{Float64}
+
+Evaluate at grid index ipsi and arbitrary theta. Uses spline interpolation.
 Returns reference to internal work array (not thread-safe).
 """
 function evaluate!(rzphi::RZPhiSplines{S}, ipsi::Int, theta::Float64) where {S}
@@ -228,10 +288,10 @@ function evaluate!(rzphi::RZPhiSplines{S}, ipsi::Int, theta::Float64) where {S}
 end
 
 """
-    deriv1!(rzphi, ipsi::Int, theta) -> (f, fx, fy)
+    deriv1!(rzphi, ipsi::Int, theta::Float64) -> (f, fx, fy)
 
-Evaluate value and first derivatives at grid index ipsi and theta.
-This is the fast path - use when you have the index.
+Evaluate value and first derivatives at grid index ipsi and arbitrary theta.
+Uses spline interpolation for off-grid theta.
 Returns references to internal work arrays (not thread-safe).
 """
 function deriv1!(rzphi::RZPhiSplines{S}, ipsi::Int, theta::Float64) where {S}
@@ -394,6 +454,7 @@ Legacy API alias for `evaluate!(rzphi, x, y)`.
 """
 bicube_eval!(rzphi::RZPhiSplines, x::Float64, y::Float64) = evaluate!(rzphi, x, y)
 bicube_eval!(rzphi::RZPhiSplines, ipsi::Int, y::Float64) = evaluate!(rzphi, ipsi, y)
+bicube_eval!(rzphi::RZPhiSplines, ipsi::Int, itheta::Int) = evaluate!(rzphi, ipsi, itheta)
 
 """
     bicube_deriv1!(rzphi, x, y)
@@ -402,6 +463,7 @@ Legacy API alias for `deriv1!(rzphi, x, y)`.
 """
 bicube_deriv1!(rzphi::RZPhiSplines, x::Float64, y::Float64) = deriv1!(rzphi, x, y)
 bicube_deriv1!(rzphi::RZPhiSplines, ipsi::Int, y::Float64) = deriv1!(rzphi, ipsi, y)
+bicube_deriv1!(rzphi::RZPhiSplines, ipsi::Int, itheta::Int) = deriv1!(rzphi, ipsi, itheta)
 
 """
     bicube_deriv2!(rzphi, x, y)

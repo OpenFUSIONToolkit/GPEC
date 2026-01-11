@@ -513,7 +513,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         f_val = fsq[1]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, ipsi, theta_norm)
+            # Use indexed evaluation for on-grid access (faster than spline evaluation)
+            f, fx, fy = Spl.bicube_deriv1!(rzphi, ipsi, itheta)
             rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
@@ -558,7 +559,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     # Compute theta derivatives (periodic BC) - vectorized
     for iq in 1:nqty_eqfun
         for ipsi in 1:(mpsi+1)
-            f_theta = eqfun_fs_nodes[ipsi, :, iq]
+            f_theta = copy(eqfun_fs_nodes[ipsi, :, iq])
+            # Enforce periodicity to avoid floating point discrepancies
+            f_theta[end] = f_theta[1]
             eqfun_fs_y[ipsi, :, iq] .= cubic_interp(theta_nodes_vec, f_theta, theta_nodes_vec; bc=PeriodicBC(), deriv=1)
         end
     end
