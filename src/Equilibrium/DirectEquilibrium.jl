@@ -500,7 +500,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
 
     # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
-    rzphi = Spl.BicubicWrapper(psi_nodes, collect(theta_nodes), rzphi_nodes; periodic_y=true)
+    # Use Fortran BicubicSpline for rzphi
+    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes;
+        bctypex="extrap", bctypey="periodic")
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes

@@ -551,13 +551,13 @@ This object provides a complete representation of the processed plasma equilibri
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{S<:Spl.CubicSpline1D,P<:ProfileSplines,B<:Spl.BicubicWrapper}
+mutable struct PlasmaEquilibrium{S<:Spl.CubicSpline1D,P<:ProfileSplines,B1,B2}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
     sq::S
-    rzphi::B
-    eqfun::B
+    rzphi::B1
+    eqfun::B2
     ro::Float64
     zo::Float64
     psio::Float64
