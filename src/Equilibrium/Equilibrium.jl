@@ -115,14 +115,10 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     mpsi = size(rzphi.fs, 1) - 1
     mtheta = size(rzphi.fs, 2) - 1
 
-    # Allocate vector to store eta offset from rzphi
-    vector = zeros(Float64, mtheta + 1)
-    for it in 0:mtheta
-        f = Spl.bicube_eval!(rzphi, rzphi.xs[mpsi+1], rzphi.ys[it+1])
-        vector[it+1] = rzphi.ys[it+1] + f[2]
-    end
+    # Allocate vector to store eta offset from rzphi (direct array access at grid points)
+    vector = rzphi.ys .+ @view rzphi.fs[end, :, 2]
 
-    psifac = rzphi.xs[mpsi+1]
+    edge_idx = mpsi + 1  # Edge flux surface index
     eta0 = 0.0
     idx = findmin(abs.(vector .- eta0))[2]
     theta = rzphi.ys[idx]
@@ -132,7 +128,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         it = 0
         while true
             it += 1
-            f, _, fy = Spl.bicube_deriv1!(rzphi, psifac, theta)
+            f, _, fy = Spl.bicube_deriv1!(rzphi, edge_idx, theta)
             eta = theta + f[2] - eta0
             eta_theta = 1 + fy[2]
             dtheta = -eta / eta_theta
@@ -141,7 +137,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
                 break
             end
         end
-        f = Spl.bicube_eval!(rzphi, psifac, theta)
+        f = Spl.bicube_eval!(rzphi, edge_idx, theta)
         rsep[iside] = pe.ro + sqrt(f[1]) * cos(2π * (theta + f[2]))
         eta0 = 0.5
         idx = findmin(abs.(vector .- eta0))[2]
@@ -164,7 +160,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         iter = 0
         while iter < max_iter
             iter += 1
-            f, fx, fy, fxx, fxy, fyy = Spl.bicube_deriv2!(rzphi, psifac, theta)
+            f, fx, fy, fxx, fxy, fyy = Spl.bicube_deriv2!(rzphi, edge_idx, theta)
             r2, r2y, r2yy = f[1], fy[1], fyy[1]
             eta, eta1, eta2 = f[2], fy[2], fyy[2]
 
@@ -240,16 +236,18 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     gs1 = zeros(Float64, mtheta + 1)
     gs2 = zeros(Float64, mtheta + 1)
 
+    # Direct array access at edge flux surface grid points
+    edge_fs = @view rzphi.fs[end, :, :]
+    edge_fy = @view rzphi.fs_y[end, :, :]
     for itheta in 0:mtheta
-        f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[mpsi+1], rzphi.ys[itheta+1])
-        jac = f[4]
+        jac = edge_fs[itheta+1, 4]
         chi1 = 2π * psio / jac
         jacfac = π / jac
-        rfac = sqrt(f[1])
-        eta = 2π * (rzphi.ys[itheta+1] + f[2])
+        rfac = sqrt(edge_fs[itheta+1, 1])
+        eta = 2π * (rzphi.ys[itheta+1] + edge_fs[itheta+1, 2])
         r = pe.ro + rfac * cos(eta)
-        v21 = jacfac * fy[1] / (2π * rfac)
-        v22 = jacfac * (1 + fy[2]) * (2 * rfac)
+        v21 = jacfac * edge_fy[itheta+1, 1] / (2π * rfac)
+        v22 = jacfac * (1 + edge_fy[itheta+1, 2]) * (2 * rfac)
         v33 = jacfac * 2π * (r / π)
         dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
         gs1[itheta+1] = sqrt(dvsq) / (2π * r)
@@ -408,37 +406,36 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         println("Diagnosing Grad-Shafranov solution...")
     end
 
-    rfac = zeros(Float64, mtheta + 1)
-    angle = zeros(Float64, mtheta + 1)
+    # Compute R, Z coordinates using direct array access
     r = zeros(Float64, mpsi + 1, mtheta + 1)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
-    for ipsi in 0:mpsi
-        for itheta in 0:mtheta
-            rz_eval = Spl.bicube_eval!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            rfac[itheta+1] = sqrt(rz_eval[1])
-            angle[itheta+1] = 2π * (rzphi.ys[itheta+1] + rz_eval[2])
-        end
-        r[ipsi+1, :] .= ro .+ rfac .* cos.(angle)
-        z[ipsi+1, :] .= zo .+ rfac .* sin.(angle)
+    for ipsi in 1:(mpsi+1)
+        rfac = @. sqrt(rzphi.fs[ipsi, :, 1])
+        angle = @. 2π * (rzphi.ys + rzphi.fs[ipsi, :, 2])
+        r[ipsi, :] .= ro .+ rfac .* cos.(angle)
+        z[ipsi, :] .= zo .+ rfac .* sin.(angle)
     end
 
+    # Compute flux quantities using direct array access at grid points
     flux_fs = zeros(Float64, mpsi + 1, mtheta + 1, 2)
     flux_fsx = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # x-derivatives
     flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # y-derivatives
-    for ipsi in 0:mpsi
-        for itheta in 0:mtheta
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            f1, f2, f4 = f[1], f[2], f[4]
-            fy1, fy2 = fy[1], fy[2]
-            fx1, fx2 = fx[1], fx[2]
+    for ipsi in 1:(mpsi+1)
+        for itheta in 1:(mtheta+1)
+            f1 = rzphi.fs[ipsi, itheta, 1]
+            f2 = rzphi.fs[ipsi, itheta, 2]
+            f4 = rzphi.fs[ipsi, itheta, 4]
+            fy1 = rzphi.fs_y[ipsi, itheta, 1]
+            fy2 = rzphi.fs_y[ipsi, itheta, 2]
+            fx1 = rzphi.fs_psi[ipsi, itheta, 1]
+            fx2 = rzphi.fs_psi[ipsi, itheta, 2]
 
-            flux_fs[ipsi+1, itheta+1, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
-            flux_fs[ipsi+1, itheta+1, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
+            flux_fs[ipsi, itheta, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
+            flux_fs[ipsi, itheta, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
 
-            for iqty in 1:2
-                flux_fs[ipsi+1, itheta+1, iqty] *= 2π * psio / f4
-            end
+            flux_fs[ipsi, itheta, 1] *= 2π * psio / f4
+            flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
     flux = Spl.BicubicWrapper(collect(rzphi.xs), collect(rzphi.ys), flux_fs; periodic_y=true)
@@ -451,17 +448,16 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
 
+    # Compute source term using direct array access
     source = zeros(Float64, mpsi + 1, mtheta + 1)
-    for ipsi in 0:mpsi
-        for itheta in 0:mtheta
-            rz_eval = Spl.bicube_eval!(rzphi, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            f4 = rz_eval[4]
-            s1 = sq.fs[ipsi+1, 1]
-            s1p = sq.fs1[ipsi+1, 1]
-            s2p = sq.fs1[ipsi+1, 2]
-
-            denom = (2π * r[ipsi+1, itheta+1])^2
-            source[ipsi+1, itheta+1] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
+    for ipsi in 1:(mpsi+1)
+        s1 = sq.fs[ipsi, 1]
+        s1p = sq.fs1[ipsi, 1]
+        s2p = sq.fs1[ipsi, 2]
+        for itheta in 1:(mtheta+1)
+            f4 = rzphi.fs[ipsi, itheta, 4]
+            denom = (2π * r[ipsi, itheta])^2
+            source[ipsi, itheta] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
         end
     end
 

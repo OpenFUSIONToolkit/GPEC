@@ -75,28 +75,28 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
+    # Use direct array access at grid points for performance
     for ipsi in 1:mpsi
-        psi_norm = rzphi.xs[ipsi]
         for jtheta in 1:mtheta
             theta_norm = rzphi.ys[jtheta] # θ is from 0 to 1
 
-            # Evaluate the geometry spline to get (R,Z) and their derivatives
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
-
-            # Extract geometric quantities from the spline data
-            # See EquilibriumAPI.txt for `rzphi` quantities
-            r_coord_sq = f[1]
-            eta_offset = f[2]
-            jac = f[4]
-            jac1 = fx[4] # ∂J/∂ψ
+            # Direct array access for geometric quantities (see EquilibriumAPI.txt)
+            r_coord_sq = rzphi.fs[ipsi, jtheta, 1]
+            eta_offset = rzphi.fs[ipsi, jtheta, 2]
+            jac = rzphi.fs[ipsi, jtheta, 4]
+            jac1 = rzphi.fs_psi[ipsi, jtheta, 4] # ∂J/∂ψ
 
             rfac = sqrt(r_coord_sq)
             eta = 2π * (theta_norm + eta_offset)
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
             # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
-            fx1, fx2, fx3 = fx[1], fx[2], fx[3]
-            fy1, fy2, fy3 = fy[1], fy[2], fy[3]
+            fx1 = rzphi.fs_psi[ipsi, jtheta, 1]
+            fx2 = rzphi.fs_psi[ipsi, jtheta, 2]
+            fx3 = rzphi.fs_psi[ipsi, jtheta, 3]
+            fy1 = rzphi.fs_y[ipsi, jtheta, 1]
+            fy2 = rzphi.fs_y[ipsi, jtheta, 2]
+            fy3 = rzphi.fs_y[ipsi, jtheta, 3]
 
             v[1, 1] = fx1 / (2.0 * rfac * jac)
             v[1, 2] = fx2 * 2π * rfac / jac

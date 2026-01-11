@@ -28,18 +28,22 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         for itheta in 1:length(rzphi.ys)
             theta = rzphi.ys[itheta]
 
-            # Evaluate bicubic spline at grid point
-            f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi], theta)
+            # Direct array access at grid points
+            f1 = rzphi.fs[ipsi, itheta, 1]
+            f2 = rzphi.fs[ipsi, itheta, 2]
+            jac = rzphi.fs[ipsi, itheta, 4]
+            fy1 = rzphi.fs_y[ipsi, itheta, 1]
+            fy2 = rzphi.fs_y[ipsi, itheta, 2]
+            fy3 = rzphi.fs_y[ipsi, itheta, 3]
 
-            rfac = sqrt(f[1])
-            eta = 2π * (theta + f[2])
+            rfac = sqrt(f1)
+            eta = 2π * (theta + f2)
             r = plasma_eq.ro + rfac * cos(eta)
-            jac = f[4]  # Jacobian
 
             # Evaluate other local quantities
-            v21 = fy[1] / (2.0 * rfac * jac)
-            v22 = (1.0 + fy[2]) * 2π * rfac / jac
-            v23 = fy[3] * r / jac
+            v21 = fy1 / (2.0 * rfac * jac)
+            v22 = (1.0 + fy2) * 2π * rfac / jac
+            v23 = fy3 * r / jac
             v33 = 2π * r / jac
             bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
             dpsisq = (2π * r)^2 * (v21^2 + v22^2)

@@ -508,13 +508,12 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
-        psi_norm = psi_nodes[ipsi]
-        fsq = Spl.spline_eval!(sq, psi_norm)
+        fsq = Spl.spline_eval!(sq, psi_nodes[ipsi])
         q = fsq[4]
         f_val = fsq[1]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
+            f, fx, fy = Spl.bicube_deriv1!(rzphi, ipsi, theta_norm)
             rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
