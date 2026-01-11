@@ -408,3 +408,62 @@ end
 
 # Convenience evaluation
 (fms::FourierModeSplines)(x::Float64, y::Float64) = evaluate!(fms, x, y)
+
+"""
+    get_complex_coeff(fms, ipsi, mode, qty) -> ComplexF64
+
+Get the complex Fourier coefficient for a specific grid point, mode, and quantity.
+
+For real-valued signals, the complex DFT coefficient is:
+
+  - c_0 = a_0 (DC component, purely real)
+  - c_m = (a_m - i*b_m) / 2 for m > 0
+
+This matches the normalization: f(θ) = Σ_m c_m * exp(i*m*θ)
+
+# Arguments
+
+  - `fms`: FourierModeSplines object
+  - `ipsi`: Radial grid index (1-based)
+  - `mode`: Fourier mode number (0, 1, ..., mband)
+  - `qty`: Quantity index (1-based)
+"""
+function get_complex_coeff(fms::FourierModeSplines, ipsi::Int, mode::Int, qty::Int)
+    @boundscheck begin
+        @assert 1 <= ipsi <= length(fms.xs) "ipsi out of bounds"
+        @assert 0 <= mode <= fms.mband "mode out of bounds"
+        @assert 1 <= qty <= fms.nqty "qty out of bounds"
+    end
+    if mode == 0
+        # DC component is purely real
+        return complex(fms.cos_coeffs[ipsi, 1, qty], 0.0)
+    else
+        # c_m = (a_m - i*b_m) / 2 = cos/2 + i*sin/2 (since b_m = -2*Im(c_m))
+        return complex(fms.cos_coeffs[ipsi, mode+1, qty] / 2,
+            fms.sin_coeffs[ipsi, mode+1, qty] / 2)
+    end
+end
+
+"""
+    get_complex_coeffs!(out, fms, ipsi, qty)
+
+Fill vector `out` with complex Fourier coefficients for modes 0:mband.
+
+The output has length mband+1, with out[k+1] = coefficient for mode k.
+"""
+function get_complex_coeffs!(out::AbstractVector{ComplexF64}, fms::FourierModeSplines,
+    ipsi::Int, qty::Int)
+    nmodes = fms.mband + 1
+    @assert length(out) >= nmodes "output vector too short"
+
+    # DC component
+    @inbounds out[1] = complex(fms.cos_coeffs[ipsi, 1, qty], 0.0)
+
+    # Higher modes
+    @inbounds for m in 1:fms.mband
+        out[m+1] = complex(fms.cos_coeffs[ipsi, m+1, qty] / 2,
+            fms.sin_coeffs[ipsi, m+1, qty] / 2)
+    end
+
+    return out
+end

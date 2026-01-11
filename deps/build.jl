@@ -9,6 +9,6 @@ const parent_dir = joinpath(@__DIR__, "..", "src")
 include(joinpath(@__DIR__, "build_helpers.jl"))
 
 export build_fortran
-export build_spline_fortran, build_vacuum_fortran
+export build_vacuum_fortran
 
 build_fortran() # Call the build function to execute the builds

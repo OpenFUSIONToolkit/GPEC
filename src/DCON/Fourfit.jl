@@ -13,7 +13,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
   - `ys::Vector{Float64}`: Poloidal angle coordinates `θ` in radians (0 to 2π).
   - `fs::Array{Float64, 3}`: The raw metric data on the grid, size `(mpsi, mtheta, 8)`.
     The 8 quantities are: `g¹¹`, `g²²`, `g³³`, `g²³`, `g³¹`, `g¹²`, `J`, `∂J/∂ψ`.
-  - `fspline::Spl.FourierSpline`: The fitted Fourier-cubic spline object.
+  - `fspline::Spl.FourierModeSplines`: The fitted Fourier-cubic spline object.
 """
 @kwdef mutable struct MetricData
     mpsi::Int
@@ -21,7 +21,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
     xs::Vector{Float64} = zeros(mpsi)
     ys::Vector{Float64} = zeros(mtheta)
     fs::Array{Float64,3} = zeros(mpsi, mtheta, 8)
-    fspline::Union{Spl.FourierSpline,Nothing} = nothing
+    fspline::Union{Spl.FourierModeSplines,Nothing} = nothing
 end
 
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
@@ -123,20 +123,17 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     end
 
     # --- Fit the grid data to a Fourier-cubic spline ---
-    fit_method = fft_flag ? 2 : 1
-    # In Fortran, `bctype` was set for the periodic `y` dimension. Here, the `FourierSpline`
-    # `bctype` argument applies to the non-periodic `x` dimension. The Fortran
-    # code used "extrap" for this.
+    # The bctype applies to the non-periodic radial (x) dimension.
+    # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
     bctype_x = "not-a-knot"
 
-    # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
-    metric.fspline = Spl.FourierSpline(
+    metric.fspline = Spl.FourierModeSplines(
         metric.xs,
         metric.ys,
         metric.fs,
         mband;
         bctype=bctype_x,
-        fit_method=fit_method
+        period=2π  # ys are in radians [0, 2π)
     )
     return metric
 end
@@ -224,15 +221,19 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         jtheta = -sq.fs1[ipsi, 1]
         chi1 = 2π * equil.psio
 
-        # Fill lower half (0, -1, …, -mband)
-        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:(intr.mband+1)]
-        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (intr.mband+2):(2*intr.mband+2)]
-        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (2*intr.mband+3):(3*intr.mband+3)]
-        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (3*intr.mband+4):(4*intr.mband+4)]
-        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (4*intr.mband+5):(5*intr.mband+5)]
-        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (5*intr.mband+6):(6*intr.mband+6)]
-        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (6*intr.mband+7):(7*intr.mband+7)]
-        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (7*intr.mband+8):(8*intr.mband+8)]
+        # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)
+        # The 8 quantities are: g11, g22, g33, g23, g31, g12, jmat, jmat1
+        fspline = metric.fspline
+        for m in 0:intr.mband
+            g11[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 1)
+            g22[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 2)
+            g33[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 3)
+            g23[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 4)
+            g31[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 5)
+            g12[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 6)
+            jmat[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 7)
+            jmat1[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 8)
+        end
 
         # Fill upper half (+1:mband) with conjugate symmetry
         for k in 1:intr.mband

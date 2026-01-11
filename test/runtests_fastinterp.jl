@@ -346,35 +346,4 @@
         @test empty_fms.nqty == 1
     end
 
-    @testset "CubicSpline1D vs Legacy CubicSpline Comparison" begin
-        @info "Comparing new CubicSpline1D against legacy Fortran-backed CubicSpline"
-
-        # Create same data for both
-        xs = collect(range(0.0; stop=2π, length=50))
-        fs_sin = sin.(xs)
-        fs_matrix = hcat(fs_sin)
-
-        # Create both splines
-        legacy_spline = JPEC.Spl.CubicSpline(xs, fs_matrix; bctype="extrap")
-        new_spline = JPEC.Spl.CubicSpline1D(xs, fs_sin; bctype="extrap")
-
-        # Compare at multiple evaluation points WITHIN the grid
-        xs_eval = collect(range(0.5; stop=5.5, length=20))
-
-        for x in xs_eval
-            # Legacy evaluation
-            f_legacy, f1_legacy, f2_legacy, f3_legacy = JPEC.Spl.spline_eval(legacy_spline, [x], 3)
-
-            # New evaluation
-            f_new, f1_new, f2_new, f3_new = JPEC.Spl.deriv3!(new_spline, x)
-
-            # Values should be close (allow small numerical differences)
-            @test abs(f_legacy[1, 1] - f_new[1]) < 1e-8
-            @test abs(f1_legacy[1, 1] - f1_new[1]) < 1e-6
-            @test abs(f2_legacy[1, 1] - f2_new[1]) < 1e-4
-            # Third derivatives may differ more due to different implementations
-            @test abs(f3_legacy[1, 1] - f3_new[1]) < 0.5
-        end
-    end
-
 end
