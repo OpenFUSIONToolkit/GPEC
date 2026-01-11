@@ -41,6 +41,22 @@ Periodic boundary condition: f(x_1) = f(x_n), f'(x_1) = f'(x_n).
 """
 struct PeriodicSplineBC <: SplineBoundaryCondition end
 
+"""
+Not-a-knot boundary condition: f'''(x) is continuous at x_2 and x_{n-1}.
+
+This forces the spline to behave as if the first two knots (and last two knots)
+belong to a single cubic polynomial.
+"""
+struct NotAKnotSplineBC <: SplineBoundaryCondition end
+
+"""
+Extrapolated boundary condition: f'(x) is estimated from extrapolation of 4 nearby points.
+
+This matches the Fortran GPEC "extrap" mode (bctype=3) which uses polynomial
+extrapolation to estimate the first derivative at each endpoint.
+"""
+struct ExtrapSplineBC <: SplineBoundaryCondition end
+
 # Boundary condition type codes (matching legacy Fortran interface)
 const BC_NATURAL = 1
 const BC_PERIODIC = 2
@@ -61,10 +77,9 @@ function _get_boundary_condition(bctype::Union{String,Int})::SplineBoundaryCondi
     elseif bctype == "periodic" || bctype == BC_PERIODIC
         return PeriodicSplineBC()
     elseif bctype == "extrap" || bctype == BC_EXTRAPOLATED
-        return NaturalSplineBC()
+        return ExtrapSplineBC()
     elseif bctype == "not-a-knot" || bctype == BC_NOT_A_KNOT
-        # Note: True not-a-knot requires different tridiagonal system
-        return NaturalSplineBC()
+        return NotAKnotSplineBC()
     else
         error(
             "Unknown boundary condition type: $bctype. " *
@@ -235,6 +250,167 @@ function CubicSpline1D(xs::Vector{Float64}, fs::Union{Vector{T},Matrix{T}};
 end
 
 """
+    _solve_not_a_knot_spline(xs, fs, h, rhs)
+
+Solve the spline coefficient system with not-a-knot boundary conditions.
+
+Not-a-knot requires third derivative continuity at the second and second-to-last
+knots, which means d_1 = d_2 and d_{n-2} = d_{n-1}. This creates constraints
+that are non-tridiagonal, requiring a more general solver.
+
+# Implementation
+
+Uses row elimination to reduce the pentadiagonal system to tridiagonal:
+
+  - Left boundary: eliminate c_1 using the not-a-knot constraint
+  - Right boundary: eliminate c_n using the not-a-knot constraint
+  - Solve the reduced (n-2)×(n-2) tridiagonal system for c_2, ..., c_{n-1}
+  - Back-substitute to find c_1 and c_n
+"""
+function _solve_not_a_knot_spline(xs::Vector{Float64}, fs::Vector{T},
+    h::Vector{Float64}, rhs::Vector{T}) where {T}
+    n = length(xs)
+
+    # Not-a-knot constraints:
+    # Left:  (c_2 - c_1)/h_1 = (c_3 - c_2)/h_2  =>  c_1 = c_2 + (h_1/h_2)*(c_2 - c_3)
+    # Right: (c_{n-1} - c_{n-2})/h_{n-2} = (c_n - c_{n-1})/h_{n-1}
+    #        =>  c_n = c_{n-1} + (h_{n-1}/h_{n-2})*(c_{n-1} - c_{n-2})
+
+    # For a simpler implementation, we use an equivalent formulation:
+    # Set up the interior equations for i = 2, ..., n-1 and substitute the
+    # not-a-knot constraints for c_1 and c_n.
+
+    # Interior system (n-2 equations for c_2, ..., c_{n-1})
+    m = n - 2  # Number of interior unknowns
+    if m < 2
+        # Not enough points for not-a-knot; fall back to something reasonable
+        return zeros(T, n)
+    end
+
+    # Build modified tridiagonal system
+    dl = zeros(Float64, m - 1)  # sub-diagonal
+    d = zeros(Float64, m)       # diagonal
+    du = zeros(Float64, m - 1)  # super-diagonal
+    b = zeros(T, m)             # RHS
+
+    # Row 1 (i=2 in original): h_1*c_1 + 2*(h_1+h_2)*c_2 + h_2*c_3 = rhs_2
+    # Substitute c_1 = c_2*(1 + h_1/h_2) - c_3*(h_1/h_2) from not-a-knot:
+    # h_1*(c_2*(1 + h_1/h_2) - c_3*(h_1/h_2)) + 2*(h_1+h_2)*c_2 + h_2*c_3 = rhs_2
+    # c_2*(h_1*(1 + h_1/h_2) + 2*(h_1+h_2)) + c_3*(h_2 - h_1^2/h_2) = rhs_2
+    h1, h2 = h[1], h[2]
+    d[1] = h1 * (1 + h1 / h2) + 2 * (h1 + h2)
+    if m > 1
+        du[1] = h2 - h1^2 / h2
+    end
+    b[1] = rhs[2]
+
+    # Interior rows (i = 3 to n-2 in original, indices 2 to m-1 in reduced system)
+    @inbounds for k in 2:(m-1)
+        i = k + 1  # Original index
+        dl[k-1] = h[i-1]
+        d[k] = 2 * (h[i-1] + h[i])
+        du[k] = h[i]
+        b[k] = rhs[i]
+    end
+
+    # Last row (i = n-1 in original, index m in reduced system)
+    # h_{n-2}*c_{n-2} + 2*(h_{n-2}+h_{n-1})*c_{n-1} + h_{n-1}*c_n = rhs_{n-1}
+    # Substitute c_n = c_{n-1}*(1 + h_{n-1}/h_{n-2}) - c_{n-2}*(h_{n-1}/h_{n-2})
+    hn2, hn1 = h[n-2], h[n-1]
+    if m > 1
+        dl[m-1] = hn2 - hn1^2 / hn2
+    end
+    d[m] = hn1 * (1 + hn1 / hn2) + 2 * (hn2 + hn1)
+    b[m] = rhs[n-1]
+
+    # Solve tridiagonal system using Thomas algorithm
+    c_interior = zeros(T, m)
+    if m == 1
+        c_interior[1] = b[1] / d[1]
+    else
+        # Forward elimination
+        upper_elim = zeros(Float64, m)
+        rhs_elim = zeros(T, m)
+
+        upper_elim[1] = du[1] / d[1]
+        rhs_elim[1] = b[1] / d[1]
+
+        @inbounds for i in 2:(m-1)
+            denom = d[i] - dl[i-1] * upper_elim[i-1]
+            upper_elim[i] = du[i] / denom
+            rhs_elim[i] = (b[i] - dl[i-1] * rhs_elim[i-1]) / denom
+        end
+        rhs_elim[m] = (b[m] - dl[m-1] * rhs_elim[m-1]) / (d[m] - dl[m-1] * upper_elim[m-1])
+
+        # Back substitution
+        c_interior[m] = rhs_elim[m]
+        @inbounds for i in (m-1):-1:1
+            c_interior[i] = rhs_elim[i] - upper_elim[i] * c_interior[i+1]
+        end
+    end
+
+    # Reconstruct full c vector
+    c = zeros(T, n)
+    c[2:(n-1)] .= c_interior
+
+    # Back-substitute for c_1 and c_n using not-a-knot constraints
+    # c_1 = c_2 + (h_1/h_2)*(c_2 - c_3) = c_2*(1 + h_1/h_2) - c_3*(h_1/h_2)
+    c[1] = c[2] * (1 + h1 / h2) - c[3] * (h1 / h2)
+    # c_n = c_{n-1}*(1 + h_{n-1}/h_{n-2}) - c_{n-2}*(h_{n-1}/h_{n-2})
+    c[n] = c[n-1] * (1 + hn1 / hn2) - c[n-2] * (hn1 / hn2)
+
+    return c
+end
+
+"""
+    _estimate_endpoint_derivative(xs, fs, x0)
+
+Estimate the first derivative f'(x0) using cubic Lagrange interpolation
+through 4 points (xs, fs). This matches the Fortran `spline_get_yp` function.
+
+For 4 points at x1, x2, x3, x4 with values f1, f2, f3, f4, the derivative
+of the Lagrange interpolating polynomial at x0 is computed analytically.
+"""
+function _estimate_endpoint_derivative(xs::AbstractVector{Float64},
+    fs::AbstractVector{T}, x0::Float64) where {T}
+    @assert length(xs) == 4 && length(fs) == 4
+
+    x1, x2, x3, x4 = xs[1], xs[2], xs[3], xs[4]
+    f1, f2, f3, f4 = fs[1], fs[2], fs[3], fs[4]
+
+    # Lagrange basis polynomial derivatives at x0
+    # L_i(x) = Π_{j≠i} (x - x_j) / (x_i - x_j)
+    # L_i'(x) = Σ_{k≠i} [ 1/(x_i - x_k) * Π_{j≠i,k} (x - x_j) / (x_i - x_j) ]
+
+    # For efficiency, compute denominators
+    d12 = x1 - x2
+    d13 = x1 - x3
+    d14 = x1 - x4
+    d23 = x2 - x3
+    d24 = x2 - x4
+    d34 = x3 - x4
+
+    # Compute L_1'(x0)
+    L1_denom = d12 * d13 * d14
+    L1_deriv = ((x0 - x2) * (x0 - x3) + (x0 - x2) * (x0 - x4) + (x0 - x3) * (x0 - x4)) / L1_denom
+
+    # Compute L_2'(x0)
+    L2_denom = (-d12) * d23 * d24
+    L2_deriv = ((x0 - x1) * (x0 - x3) + (x0 - x1) * (x0 - x4) + (x0 - x3) * (x0 - x4)) / L2_denom
+
+    # Compute L_3'(x0)
+    L3_denom = (-d13) * (-d23) * d34
+    L3_deriv = ((x0 - x1) * (x0 - x2) + (x0 - x1) * (x0 - x4) + (x0 - x2) * (x0 - x4)) / L3_denom
+
+    # Compute L_4'(x0)
+    L4_denom = (-d14) * (-d24) * (-d34)
+    L4_deriv = ((x0 - x1) * (x0 - x2) + (x0 - x1) * (x0 - x3) + (x0 - x2) * (x0 - x3)) / L4_denom
+
+    # f'(x0) = Σ f_i * L_i'(x0)
+    return f1 * L1_deriv + f2 * L2_deriv + f3 * L3_deriv + f4 * L4_deriv
+end
+
+"""
     _compute_spline_coeffs(xs, fs, bc) -> Vector{T}
 
 Compute second derivative coefficients (c) for cubic spline interpolation
@@ -305,6 +481,33 @@ function _compute_spline_coeffs(xs::Vector{Float64}, fs::Vector{T},
         end
         rhs[1] = 3 * ((fs[2] - fs[1]) / h[1] - (fs[1] - fs[end]) / h[end])
         rhs[n] = 0
+    end
+
+    # Handle extrap BC (clamped with extrapolated derivatives)
+    # Estimate f' at endpoints using cubic polynomial fit through 4 nearby points
+    if bc isa ExtrapSplineBC && n >= 4
+        # Estimate f'(x_1) from first 4 points using Lagrange interpolation derivative
+        yp_left = _estimate_endpoint_derivative(xs[1:4], fs[1:4], xs[1])
+        # Estimate f'(x_n) from last 4 points
+        yp_right = _estimate_endpoint_derivative(xs[(n-3):n], fs[(n-3):n], xs[n])
+
+        # Modify boundary equations for clamped spline with estimated derivatives
+        # Left boundary: 2*h_1*c_1 + h_1*c_2 = 6*((f_2-f_1)/h_1 - yp_left)
+        d[1] = 2 * h[1]
+        du[1] = h[1]
+        rhs[1] = 6 * ((fs[2] - fs[1]) / h[1] - yp_left)
+
+        # Right boundary: h_{n-1}*c_{n-1} + 2*h_{n-1}*c_n = 6*(yp_right - (f_n-f_{n-1})/h_{n-1})
+        dl[n-1] = h[n-1]
+        d[n] = 2 * h[n-1]
+        rhs[n] = 6 * (yp_right - (fs[n] - fs[n-1]) / h[n-1])
+    end
+
+    # Handle not-a-knot BC
+    # Not-a-knot requires third derivative continuity at second and second-to-last knots.
+    # This creates a pentadiagonal system; use a dedicated solver.
+    if bc isa NotAKnotSplineBC && n >= 4
+        return _solve_not_a_knot_spline(xs, fs, h, rhs)
     end
 
     # Solve tridiagonal system using Thomas algorithm
