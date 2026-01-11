@@ -412,14 +412,17 @@ end
 """
     get_complex_coeff(fms, ipsi, mode, qty) -> ComplexF64
 
-Get the complex Fourier coefficient for a specific grid point, mode, and quantity.
+Get the normalized complex FFT coefficient for a specific grid point, mode, and quantity.
 
-For real-valued signals, the complex DFT coefficient is:
+The FourierModeSplines internally stores:
 
-  - c_0 = a_0 (DC component, purely real)
-  - c_m = (a_m - i*b_m) / 2 for m > 0
+  - cos_coeffs = 2 * real(FFT) / ntheta  (for m > 0)
+  - sin_coeffs = -2 * imag(FFT) / ntheta (for m > 0)
 
-This matches the normalization: f(θ) = Σ_m c_m * exp(i*m*θ)
+This function returns the normalized FFT coefficient (FFT/ntheta):
+
+  - c_0 = cos_coeffs[0]  (DC component)
+  - c_m = cos_coeffs[m]/2 - i*sin_coeffs[m]/2  (for m > 0)
 
 # Arguments
 
@@ -435,21 +438,21 @@ function get_complex_coeff(fms::FourierModeSplines, ipsi::Int, mode::Int, qty::I
         @assert 1 <= qty <= fms.nqty "qty out of bounds"
     end
     if mode == 0
-        # DC component is purely real
+        # DC component
         return complex(fms.cos_coeffs[ipsi, 1, qty], 0.0)
     else
-        # c_m = (a_m - i*b_m) / 2 = cos/2 + i*sin/2 (since b_m = -2*Im(c_m))
+        # Higher modes: FFT/ntheta = cos/2 - i*sin/2
         return complex(fms.cos_coeffs[ipsi, mode+1, qty] / 2,
-            fms.sin_coeffs[ipsi, mode+1, qty] / 2)
+            -fms.sin_coeffs[ipsi, mode+1, qty] / 2)
     end
 end
 
 """
     get_complex_coeffs!(out, fms, ipsi, qty)
 
-Fill vector `out` with complex Fourier coefficients for modes 0:mband.
+Fill vector `out` with normalized complex FFT coefficients for modes 0:mband.
 
-The output has length mband+1, with out[k+1] = coefficient for mode k.
+The output has length mband+1, with out[k+1] = FFT/ntheta for mode k.
 """
 function get_complex_coeffs!(out::AbstractVector{ComplexF64}, fms::FourierModeSplines,
     ipsi::Int, qty::Int)
@@ -459,10 +462,10 @@ function get_complex_coeffs!(out::AbstractVector{ComplexF64}, fms::FourierModeSp
     # DC component
     @inbounds out[1] = complex(fms.cos_coeffs[ipsi, 1, qty], 0.0)
 
-    # Higher modes
+    # Higher modes: FFT/ntheta = cos/2 - i*sin/2
     @inbounds for m in 1:fms.mband
         out[m+1] = complex(fms.cos_coeffs[ipsi, m+1, qty] / 2,
-            fms.sin_coeffs[ipsi, m+1, qty] / 2)
+            -fms.sin_coeffs[ipsi, m+1, qty] / 2)
     end
 
     return out
