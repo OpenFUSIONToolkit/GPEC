@@ -500,7 +500,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
 
     # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
-    # Use Fortran BicubicSpline for rzphi
+    # Use Fortran BicubicSpline which handles endpoint-inclusive data correctly
     rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes;
         bctypex="extrap", bctypey="periodic")
 
@@ -549,7 +549,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    eqfun = Spl.BicubicWrapper(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; periodic_y=true)
+    eqfun = Spl.BicubicWrapper(psi_nodes, collect(theta_nodes), eqfun_fs_nodes;
+        periodic_y=true, endpoint_inclusive=true)
 
     # Create ProfileSplines from the sq_nodes data
     profiles = ProfileSplines(

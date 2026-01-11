@@ -197,7 +197,7 @@ function _check_uniform_spacing(coords::Vector{Float64}, name::String)::Bool
 end
 
 """
-    BicubicWrapper(xs, ys, fs; periodic_y=false)
+    BicubicWrapper(xs, ys, fs; periodic_y=false, endpoint_inclusive=false)
 
 Create a 2D bicubic spline interpolator.
 
@@ -207,6 +207,9 @@ Create a 2D bicubic spline interpolator.
   - `ys::Vector{Float64}`: Y-coordinates (sorted, uniformly spaced)
   - `fs::Array{Float64,3}`: Function values (nx × ny × nqty)
   - `periodic_y::Bool`: If true, use periodic boundary conditions in y (theta direction)
+  - `endpoint_inclusive::Bool`: If true and periodic_y=true, the y data includes a
+    redundant endpoint (last point equals first point). The endpoint will be removed
+    internally for proper B-spline periodic handling.
 
 # Boundary Conditions
 
@@ -220,6 +223,7 @@ the spacing and throws an error if grids are non-uniform.
 
 For periodic data in y, the grid should span [y0, y_period) without duplicating
 the endpoint (i.e., don't include both 0 and 2π for a 2π-periodic function).
+Use `endpoint_inclusive=true` if your data DOES include the endpoint.
 
 # Example
 
@@ -239,38 +243,58 @@ xs = range(0, 1; length=10) |> collect
 ys = range(0, 1; length=20)[1:(end-1)] |> collect  # [0, 1) without endpoint
 fs = zeros(10, 19, 2)
 bw_periodic = BicubicWrapper(xs, ys, fs; periodic_y=true)
+
+# Periodic with endpoint included (from Fortran-style data)
+xs = range(0, 1; length=10) |> collect
+ys = range(0, 1; length=20) |> collect  # [0, 1] WITH endpoint
+fs = zeros(10, 20, 2)
+bw_periodic_ei = BicubicWrapper(xs, ys, fs; periodic_y=true, endpoint_inclusive=true)
 ```
 """
 function BicubicWrapper(
-    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float64,3}; periodic_y::Bool=false
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float64,3};
+    periodic_y::Bool=false, endpoint_inclusive::Bool=false
 )
     nx, ny, nqty = size(fs)
     @assert length(xs) == nx "xs length must match first dimension of fs"
     @assert length(ys) == ny "ys length must match second dimension of fs"
 
+    # Handle endpoint-inclusive periodic data
+    # B-splines with periodic BC need endpoint-exclusive data for correct derivative continuity
+    if periodic_y && endpoint_inclusive && ny > 1
+        # Strip the redundant endpoint
+        ys_internal = ys[1:(end-1)]
+        fs_internal = fs[:, 1:(end-1), :]
+        ny_internal = ny - 1
+        # Compute period from original data (full range)
+        y_period = ys[end] - ys[1]
+    else
+        ys_internal = ys
+        fs_internal = fs
+        ny_internal = ny
+        # For endpoint-exclusive data, period = range + one spacing
+        dy = ny > 1 ? (ys[end] - ys[1]) / (ny - 1) : 0.0
+        y_period = periodic_y ? (ys[end] - ys[1] + dy) : 0.0
+    end
+
     # Create uniform target ranges
     xs_range = range(xs[1], xs[end]; length=nx)
-    ys_range = range(ys[1], ys[end]; length=ny)
+    ys_range = range(ys_internal[1], ys_internal[end]; length=ny_internal)
     xs_uniform = collect(xs_range)
     ys_uniform = collect(ys_range)
 
     # Check if grids are non-uniform and resample if needed
     x_uniform = _check_uniform_spacing(xs, "x")
-    y_uniform = _check_uniform_spacing(ys, "y")
+    y_uniform = _check_uniform_spacing(ys_internal, "y")
 
     if !x_uniform || !y_uniform
         # Resample data to uniform grid using linear interpolation
         # This is more accurate than pretending non-uniform grid is uniform
-        fs_resampled = _resample_to_uniform_grid(xs, ys, fs, xs_uniform, ys_uniform, periodic_y)
+        fs_resampled = _resample_to_uniform_grid(xs, ys_internal, fs_internal, xs_uniform, ys_uniform, periodic_y)
         fs_use = fs_resampled
     else
-        fs_use = fs
+        fs_use = fs_internal
     end
-
-    # Compute y period for coordinate wrapping (for periodic BCs)
-    # For periodic data, the period is the full range plus one grid spacing
-    dy = ny > 1 ? (ys[end] - ys[1]) / (ny - 1) : 0.0
-    y_period = periodic_y ? (ys[end] - ys[1] + dy) : 0.0
 
     # Choose boundary condition for y based on periodic_y flag
     if periodic_y
@@ -357,6 +381,39 @@ function _wrap_periodic(y::Float64, y_min::Float64, y_period::Float64)::Float64
 end
 
 """
+    _wrap_to_data_range(y, y_min, y_max, y_period) -> Float64
+
+Wrap y coordinate to the data range [y_min, y_max] using the given period.
+This is used for periodic interpolation where Interpolations.jl's Periodic()
+extrapolation doesn't correctly handle coordinates outside the scaled range.
+
+For endpoint-inclusive data (y_max - y_min ≈ y_period), this returns y clamped
+to [y_min, y_max]. For endpoint-exclusive data, this wraps using the period.
+"""
+function _wrap_to_data_range(y::Float64, y_min::Float64, y_max::Float64, y_period::Float64)::Float64
+    if y_period ≤ 0
+        return y
+    end
+
+    # First wrap to [y_min, y_min + y_period)
+    y_wrapped = _wrap_periodic(y, y_min, y_period)
+
+    # For endpoint-inclusive data, y_max ≈ y_min + y_period
+    # In this case, y_wrapped is already in [y_min, y_max)
+    # For endpoint-exclusive data, y_max < y_min + y_period
+    # and we need to ensure y is within [y_min, y_max]
+    data_range = y_max - y_min
+    if data_range >= y_period * 0.999  # endpoint-inclusive (with tolerance)
+        return y_wrapped
+    else
+        # Endpoint-exclusive: wrap to [y_min, y_max]
+        # Map [0, y_period) to [y_min, y_max]
+        t = (y_wrapped - y_min) / y_period  # t in [0, 1)
+        return y_min + t * data_range
+    end
+end
+
+"""
     evaluate!(bw, x, y) -> Vector{Float64}
 
 Evaluate the bicubic spline at point (x, y).
@@ -367,8 +424,11 @@ The result is valid until the next mutating call on this wrapper.
 Thread-safety: NOT thread-safe. Use separate wrappers per thread.
 """
 function evaluate!(bw::BicubicWrapper{I,S}, x::Float64, y::Float64) where {I,S}
+    # For periodic y, wrap coordinate to the data range
+    y_eval = bw.periodic_y ? _wrap_to_data_range(y, bw.ys[1], bw.ys[end], bw.y_period) : y
+
     @inbounds for q in 1:bw.nqty
-        bw._f[q] = bw.itps[q](x, y)
+        bw._f[q] = bw.itps[q](x, y_eval)
     end
     return bw._f
 end
@@ -384,9 +444,14 @@ The results are valid until the next mutating call on this wrapper.
 Thread-safety: NOT thread-safe. Use separate wrappers per thread.
 """
 function deriv1!(bw::BicubicWrapper{I,S}, x::Float64, y::Float64) where {I,S}
+    # For periodic y, wrap coordinate to the data range [ys[1], ys[end]]
+    # This is needed because Interpolations.jl's Periodic() extrapolation
+    # wraps based on the scaled range, which may not match the actual period
+    y_eval = bw.periodic_y ? _wrap_to_data_range(y, bw.ys[1], bw.ys[end], bw.y_period) : y
+
     @inbounds for q in 1:bw.nqty
-        bw._f[q] = bw.itps[q](x, y)
-        grad = Interpolations.gradient(bw.itps[q], x, y)
+        bw._f[q] = bw.itps[q](x, y_eval)
+        grad = Interpolations.gradient(bw.itps[q], x, y_eval)
         bw._fx[q] = grad[1]
         bw._fy[q] = grad[2]
     end
@@ -405,20 +470,20 @@ The results are valid until the next mutating call on this wrapper.
 Thread-safety: NOT thread-safe. Use separate wrappers per thread.
 """
 function deriv2!(bw::BicubicWrapper{I,S}, x::Float64, y::Float64) where {I,S}
+    # For periodic y, wrap coordinate to the data range
+    y_eval = bw.periodic_y ? _wrap_to_data_range(y, bw.ys[1], bw.ys[end], bw.y_period) : y
+    x_eval = clamp(x, bw.xs[1], bw.xs[end])
+
     # Use extrapolated interpolations for value and gradient
     @inbounds for q in 1:bw.nqty
-        bw._f[q] = bw.itps[q](x, y)
-        grad = Interpolations.gradient(bw.itps[q], x, y)
+        bw._f[q] = bw.itps[q](x, y_eval)
+        grad = Interpolations.gradient(bw.itps[q], x, y_eval)
         bw._fx[q] = grad[1]
         bw._fy[q] = grad[2]
     end
 
     # For hessian, use scaled interpolations directly
     # This works around Interpolations.jl not supporting hessian through extrapolation for periodic BCs
-    # Wrap y coordinate for periodic case, clamp x to valid range
-    y_eval = bw.periodic_y ? _wrap_periodic(y, bw.ys[1], bw.y_period) : y
-    x_eval = clamp(x, bw.xs[1], bw.xs[end])
-
     @inbounds for q in 1:bw.nqty
         hess = Interpolations.hessian(bw.scaled_itps[q], x_eval, y_eval)
         bw._fxx[q] = hess[1, 1]
