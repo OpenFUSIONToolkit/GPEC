@@ -163,7 +163,7 @@ Find the psi grid index for a given psi value.
 Assumes psi is at or very close to a grid point.
 Uses binary search for efficiency.
 """
-function _find_psi_index(rzphi::RZPhiSplines, psi::Float64)::Int
+@inline function _find_psi_index(rzphi::RZPhiSplines, psi::Float64)::Int
     xs = rzphi.xs
     npsi = rzphi.npsi
 
@@ -189,7 +189,7 @@ end
 
 Wrap theta to the range [ys[1], ys[end]) for periodic evaluation.
 """
-function _wrap_theta(rzphi::RZPhiSplines, theta::Float64)::Float64
+@inline function _wrap_theta(rzphi::RZPhiSplines, theta::Float64)::Float64
     y_min = rzphi.ys[1]
     y_period = rzphi.ys[end] - rzphi.ys[1]
 
