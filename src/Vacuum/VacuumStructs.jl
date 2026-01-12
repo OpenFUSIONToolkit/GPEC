@@ -370,6 +370,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     end
 
     if any(x_wall .<= 0.0) && !nowall
+        # to add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
         error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
     end
 
