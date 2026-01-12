@@ -5,7 +5,7 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 Pkg.instantiate()
 using JPEC
-using LinearAlgebra, Random, DelimitedFiles, Printf #TODO: clean up imports - do we need all of these here?
+using DelimitedFiles, Printf #TODO: clean up imports - do we need all of these here? #using LinearAlgebra, Random
 
 # Check if specific test files are requested via ARGS
 if !isempty(ARGS)
