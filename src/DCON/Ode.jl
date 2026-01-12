@@ -322,7 +322,7 @@ but always saves steps near rational surfaces (beginning and end of each integra
 """
 function integrator_callback!(integrator)
 
-    ctrl, equil, _, intr, odet = integrator.p
+    ctrl, _, _, intr, odet = integrator.p
 
     # Update integration tolerances
     integrator.opts.reltol = compute_tols(ctrl, intr, odet)
@@ -566,13 +566,12 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
     transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
-
-    # Pre-allocate workspace matrices to avoid allocations in loops
-    temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    # Qorkspace matrix to avoid allocations in loops
     gauss_buffer = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
     # Construct gaussian reduction matrices for each fixup
     identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
+    temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
     mask = trues(intr.numpert_total)
     for ifix in 1:odet.ifix
         gauss[:, :, ifix] .= identity
@@ -587,7 +586,6 @@ function transform_u!(odet::OdeState, intr::DconInternal)
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            # In-place matrix multiplication: gauss = gauss * temp
             mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
             gauss[:, :, ifix] .= gauss_buffer
         end
@@ -610,24 +608,19 @@ function transform_u!(odet::OdeState, intr::DconInternal)
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
     # "undoing" the Gaussian reductions to get the true solution vectors
-    # Reuse gauss_buffer as workspace for matrix multiplications
     jfix = 1
     for ifix in 1:(odet.ifix+1)
         # If after the last fixup, go to the end of integration
         kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
-        for istep in jfix:kfix
+        @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
-            # Use in-place matrix multiplication to avoid allocating temporaries
-            mul!(gauss_buffer, view(odet.u_store,:,:,1,istep), view(transforms,:,:,ifix))
+            mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
             odet.u_store[:, :, 1, istep] .= gauss_buffer
-
-            mul!(gauss_buffer, view(odet.u_store,:,:,2,istep), view(transforms,:,:,ifix))
+            mul!(gauss_buffer, odet.u_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.u_store[:, :, 2, istep] .= gauss_buffer
-
-            mul!(gauss_buffer, view(odet.ud_store,:,:,1,istep), view(transforms,:,:,ifix))
+            mul!(gauss_buffer, odet.ud_store[:, :, 1, istep], transforms[:, :, ifix])
             odet.ud_store[:, :, 1, istep] .= gauss_buffer
-
-            mul!(gauss_buffer, view(odet.ud_store,:,:,2,istep), view(transforms,:,:,ifix))
+            mul!(gauss_buffer, odet.ud_store[:, :, 2, istep], transforms[:, :, ifix])
             odet.ud_store[:, :, 2, istep] .= gauss_buffer
         end
         jfix = kfix + 1

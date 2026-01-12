@@ -170,6 +170,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
 """
 @kwdef mutable struct DconControl
     verbose::Bool = true
@@ -225,7 +226,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
-    save_interval::Int = 10  # Save every Nth ODE step (1 = save all, 10 = save every 10th). Always saves near rational surfaces.
+    save_interval::Int = 10
 end
 
 @kwdef mutable struct FourFitVars
@@ -258,17 +259,17 @@ Populated in `Free.jl`.
 
 ## Fields
 
-- `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
-- `mpert::Int` - Number of poloidal modes
-- `numpert_total::Int` - Total number of modes (mpert × npert)
-- `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
-- `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
-- `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
-- `ep::Vector{ComplexF64}` - Plasma eigenvalues
-- `ev::Vector{ComplexF64}` - Vacuum eigenvalues
-- `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-- `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-- `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
+  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `mpert::Int` - Number of poloidal modes
+  - `numpert_total::Int` - Total number of modes (mpert × npert)
+  - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
+  - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
+  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+  - `ep::Vector{ComplexF64}` - Plasma eigenvalues
+  - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
+  - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+  - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
+  - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
     mthvac::Int
@@ -348,9 +349,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
       + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
       + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
       + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
-      + `chol_workspace::Matrix{ComplexF64}` - Pre-allocated workspace for in-place Cholesky
 """
-mutable struct OdeState
+@kwdef mutable struct OdeState
     # Initialization parameters
     numpert_total::Int
     numunorms_init::Int
@@ -358,109 +358,53 @@ mutable struct OdeState
     numsteps_init::Int
 
     # Saved data throughout integration
-    step::Int
-    psi_store::Vector{Float64}
-    q_store::Vector{Float64}
-    u_store::Array{ComplexF64,4}
-    ud_store::Array{ComplexF64,4}
-    crit_store::Vector{Float64}
-    ca_r::Array{ComplexF64,4}
-    ca_l::Array{ComplexF64,4}
+    step::Int = 1
+    psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
+    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
+    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
+    ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
+    ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
 
     # Used for to find peak dW in the edge
-    dW_edge::Vector{ComplexF64}
-    wvmat_spline::Spl.CubicSpline{ComplexF64}
+    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
+    wvmat_spline::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
 
     # Data for integrator
-    psifac::Float64
-    q::Float64
-    u::Array{ComplexF64,3}
-    ud::Array{ComplexF64,3}
-    ising::Int
-    psimax::Float64
-    next::String
-    nzero::Int
+    psifac::Float64 = 0.0
+    q::Float64 = 0.0
+    u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
+    ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
+    ising::Int = 0
+    psimax::Float64 = 0.0
+    next::String = ""
+    nzero::Int = 0
 
     # Used for Gaussian reduction
-    new::Bool
-    unorm::Vector{Float64}
-    unorm0::Vector{Float64}
-    ifix::Int
-    index::Array{Int,2}
-    sing_flag::Vector{Bool}
-    zeroed_idx::Vector{Vector{Int}}
-    fixfac::Array{ComplexF64,3}
-    fixstep::Vector{Int64}
+    new::Bool = true
+    unorm::Vector{Float64} = zeros(Float64, numpert_total)
+    unorm0::Vector{Float64} = zeros(Float64, numpert_total)
+    ifix::Int = 0
+    index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)
+    sing_flag::Vector{Bool} = falses(numunorms_init)
+    zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
+    fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
+    fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
 
     # Temporary matrices for sing_der calculations
-    amat::Vector{ComplexF64}
-    bmat::Vector{ComplexF64}
-    cmat::Vector{ComplexF64}
-    fmat_lower::Vector{ComplexF64}
-    kmat::Vector{ComplexF64}
-    gmat::Vector{ComplexF64}
-    tmp::Matrix{ComplexF64}
-    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing}
-    singfac_vec::Vector{Float64}
-
-    # Pre-allocated workspaces for performance
-    chol_workspace::Matrix{ComplexF64}  # For in-place Cholesky factorization
-
-    # Explicit constructor to avoid @kwdef overhead
-    function OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int)
-        new(
-            # Initialization parameters
-            numpert_total,
-            numunorms_init,
-            msing,
-            numsteps_init,
-            # Saved data throughout integration
-            1,  # step
-            Vector{Float64}(undef, numsteps_init),  # psi_store
-            Vector{Float64}(undef, numsteps_init),  # q_store
-            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init),  # u_store
-            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init),  # ud_store
-            Vector{Float64}(undef, numsteps_init),  # crit_store
-            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing),  # ca_r
-            Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing),  # ca_l
-            # Used for to find peak dW in the edge
-            Array{ComplexF64}(undef, numsteps_init),  # dW_edge
-            Spl.empty_CubicSpline(ComplexF64),  # wvmat_spline
-            # Data for integrator
-            0.0,  # psifac
-            0.0,  # q
-            zeros(ComplexF64, numpert_total, numpert_total, 2),  # u
-            zeros(ComplexF64, numpert_total, numpert_total, 2),  # ud
-            0,  # ising
-            0.0,  # psimax
-            "",  # next
-            0,  # nzero
-            # Used for Gaussian reduction
-            true,  # new
-            zeros(Float64, numpert_total),  # unorm
-            zeros(Float64, numpert_total),  # unorm0
-            0,  # ifix
-            zeros(Int, numpert_total, numunorms_init),  # index
-            falses(numunorms_init),  # sing_flag
-            [Int[] for _ in 1:numunorms_init],  # zeroed_idx
-            zeros(ComplexF64, numpert_total, numpert_total, numunorms_init),  # fixfac
-            zeros(Int64, numunorms_init),  # fixstep
-            # Temporary matrices for sing_der calculations
-            Vector{ComplexF64}(undef, numpert_total^2),  # amat
-            Vector{ComplexF64}(undef, numpert_total^2),  # bmat
-            Vector{ComplexF64}(undef, numpert_total^2),  # cmat
-            Vector{ComplexF64}(undef, numpert_total^2),  # fmat_lower
-            Vector{ComplexF64}(undef, numpert_total^2),  # kmat
-            Vector{ComplexF64}(undef, numpert_total^2),  # gmat
-            Matrix{ComplexF64}(undef, numpert_total, numpert_total),  # tmp
-            nothing,  # Afact
-            Vector{Float64}(undef, numpert_total),  # singfac_vec
-            # Pre-allocated workspaces for performance
-            Matrix{ComplexF64}(undef, numpert_total, numpert_total)  # chol_workspace
-        )
-    end
+    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
+    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 end
 
+OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
 
 # Below here are debug output structs used for benchmarking and unit testing
 
@@ -474,23 +418,23 @@ A struct to hold all inputs required for vacuum benchmarking between Fortran and
 
 ## Fields
 
-- `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
-- `mpert::Int` - Number of poloidal modes
-- `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
-- `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
-- `complex_flag::Bool` - Flag indicating if complex arithmetic is used
-- `kernelsign::Float64` - Sign of the kernel for vacuum calculation
-- `wall_flag::Bool` - Flag indicating presence of wall
-- `farwall_flag::Bool` - Flag indicating presence of far wall
-- `grri::Matrix{Float64}` - Green's function response matrix
-- `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
-- `ahg_file::String` - Filename for AHG data
-- `dir_path::String` - Directory path for input/output files
-- `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
-- `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
-- `n::Int` - Toroidal mode number
-- `ipert_n::Int` - Index of perturbed toroidal mode
-- `psifac::Float64` - Normalized flux coordinate
+  - `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
+  - `mpert::Int` - Number of poloidal modes
+  - `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
+  - `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
+  - `complex_flag::Bool` - Flag indicating if complex arithmetic is used
+  - `kernelsign::Float64` - Sign of the kernel for vacuum calculation
+  - `wall_flag::Bool` - Flag indicating presence of wall
+  - `farwall_flag::Bool` - Flag indicating presence of far wall
+  - `grri::Matrix{Float64}` - Green's function response matrix
+  - `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
+  - `ahg_file::String` - Filename for AHG data
+  - `dir_path::String` - Directory path for input/output files
+  - `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
+  - `n::Int` - Toroidal mode number
+  - `ipert_n::Int` - Index of perturbed toroidal mode
+  - `psifac::Float64` - Normalized flux coordinate
 """
 @kwdef struct VacuumBenchmarkInputs
     # Vacuum computation parameters
@@ -506,13 +450,13 @@ A struct to hold all inputs required for vacuum benchmarking between Fortran and
     xzpts::Matrix{Float64}
     ahg_file::String
     dir_path::String
-    
+
     # VacuumInput struct for Julia code
     vac_inputs::Vacuum.VacuumInput
-    
+
     # Wall settings
     wall_settings::Vacuum.WallShapeSettings
-    
+
     # Additional context
     n::Int
     ipert_n::Int
