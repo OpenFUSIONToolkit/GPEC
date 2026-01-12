@@ -1,9 +1,10 @@
-using LinearAlgebra, BandedMatrices, Random, Test, DelimitedFiles, Printf #TODO: clean up imports - do we need all of these here?
+using LinearAlgebra, Random, Test, DelimitedFiles, Printf #TODO: clean up imports - do we need all of these here?
 using Test
 using Pkg
 
 # Activate the project environment one level up
 Pkg.activate(joinpath(@__DIR__, ".."))
+Pkg.instantiate()
 using JPEC
 
 # Check if specific test files are requested via ARGS
