@@ -72,9 +72,8 @@ using Interpolations
                 VacuumInput(
                     r=0.05 .+ 0.03 .* cos.(range(0, 2pi, length=16)),
                     z=0.03 .* sin.(range(0, 2pi, length=16)),
-                    delta=zeros(16),
-                    mtheta=16,
-                    mtheta_eq=16
+                    ν=zeros(16),
+                    mtheta=16
                 )
             )
             # Use a "dee" wall shape with parameters that will produce R < 0
