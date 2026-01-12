@@ -1,4 +1,5 @@
 using Test
+using DelimitedFiles, Printf
 
 #TODO: these take forever to run- can we optimize them up?
 @testset "Sing Tests" begin
