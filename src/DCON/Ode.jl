@@ -566,7 +566,7 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
     transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
-    # Qorkspace matrix to avoid allocations in loops
+    # Workspace matrix to avoid allocations in loops
     gauss_buffer = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
     # Construct gaussian reduction matrices for each fixup
