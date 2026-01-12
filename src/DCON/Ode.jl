@@ -355,11 +355,11 @@ function integrator_callback!(integrator)
         if odet.step >= size(odet.u_store, 4)
             resize_storage!(odet)
         end
-        # Save values using copyto! for better performance than broadcast
         odet.psi_store[odet.step] = integrator.t
-        copyto!(@view(odet.u_store[:, :, :, odet.step]), integrator.u)
+        @views odet.u_store[:, :, :, odet.step] .= integrator.u
         odet.q_store[odet.step] = odet.q # these two were set in sing_der!
-        copyto!(@view(odet.ud_store[:, :, :, odet.step]), odet.ud)
+        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+
         # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
         odet.step += 1
     end
@@ -566,21 +566,20 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
     transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
-    # Workspace matrix to avoid allocations in loops
+    # Temporary workspace matrices
     gauss_buffer = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
-
-    # Construct gaussian reduction matrices for each fixup
     identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
     temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
     mask = trues(intr.numpert_total)
+
+    # Construct gaussian reduction matrices for each fixup
     for ifix in 1:odet.ifix
         gauss[:, :, ifix] .= identity
         mask .= true
         for isol in 1:intr.numpert_total
             ksol = odet.index[isol, ifix]
             mask[ksol] = false
-            # Reset temp to identity and modify
-            copyto!(temp, identity)
+            temp .= identity
             for jsol in 1:intr.numpert_total
                 if mask[jsol]
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
