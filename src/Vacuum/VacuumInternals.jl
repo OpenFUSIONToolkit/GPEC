@@ -1095,7 +1095,6 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
     mtheta = inputs.mtheta
     mpert = inputs.mpert
     n = inputs.n
-    qa = inputs.qa
     dtheta = 2pi / mtheta
 
     # Pre-calculate Green's function for the observation point
@@ -1119,13 +1118,8 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
 
         # Accumulate Fourier series for g_real and g_imag at this source point
         for l_idx in 1:mpert
-            l = l_modes[l_idx]
-            arg = l * (i_theta-1) * dtheta + n * qa * plasma_surf.delta[i_theta]
-            cos_val = cos(arg)
-            sin_val = sin(arg)
-
-            g_real[i_theta, l_idx] = aval * cos_val
-            g_imag[i_theta, l_idx] = aval * sin_val
+            g_real[i_theta, l_idx] = aval * plasma_surf.cos_ln_basis[i_theta, l_idx]
+            g_imag[i_theta, l_idx] = aval * plasma_surf.sin_ln_basis[i_theta, l_idx]
         end
     end
 

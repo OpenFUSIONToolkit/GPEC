@@ -13,35 +13,32 @@ using Interpolations
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
             @test vac_in.n == 0
+            @test vac_in.kernelsign == 1.0
+            @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
             # Test default constructor for WallShapeSettings
             wall_set = WallShapeSettings()
             @test wall_set.shape == "nowall"
             @test wall_set.a == 0.3
-
-            # Test default constructor for WallGeometry
-            wall_geo = JPEC.Vacuum.WallGeometry()
-            @test wall_geo.nowall == true
-            @test isempty(wall_geo.x)
         end
 
         @testset "initialize_plasma_surface" begin
             inputs = VacuumInput(
                 r=[1.0, 1.1, 1.2, 1.1],
                 z=[0.0, 0.1, 0.0, -0.1],
-                delta=zeros(4),
+                ν=zeros(4),
                 mtheta=4,
                 mpert=1,
                 mlow=1,
-                n=1,
-                qa=1.0
+                n=1
             )
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
             @test length(plasma_surf.x) == 4
             @test length(plasma_surf.z) == 4
             @test length(plasma_surf.dx_dtheta) == 4
-            @test size(plasma_surf.coslt) == (4, 1)
+            @test size(plasma_surf.cos_ln_basis) == (4, 1)
+            @test size(plasma_surf.sin_ln_basis) == (4, 1)
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end
@@ -52,7 +49,7 @@ using Interpolations
                 VacuumInput(
                     r=1.7 .+ 0.3 .* cos.(range(0, 2pi, length=16)),
                     z=0.3 .* sin.(range(0, 2pi, length=16)),
-                    delta=zeros(16),
+                    ν=zeros(16),
                     mtheta=16
                 )
             )
@@ -261,13 +258,10 @@ using Interpolations
             inputs = VacuumInput(
                 r=collect(r_eq),
                 z=collect(z_eq),
-                delta=zeros(mtheta_eq),
+                ν=zeros(mtheta_eq),
                 mlow=1,
-                mhigh=2,
                 mpert=2,
                 n=1,
-                qa=2.0,
-                mtheta_eq=mtheta_eq,
                 mtheta=mtheta
             )
             wall_settings = WallShapeSettings(shape="nowall")
@@ -292,13 +286,10 @@ using Interpolations
             inputs = VacuumInput(
                 r=collect(r_eq),
                 z=collect(z_eq),
-                delta=zeros(mtheta_eq),
+                ν=zeros(mtheta_eq),
                 mlow=1,
-                mhigh=2,
                 mpert=2,
                 n=1,
-                qa=2.0,
-                mtheta_eq=mtheta_eq,
                 mtheta=mtheta
             )
             # Use a conformal wall
