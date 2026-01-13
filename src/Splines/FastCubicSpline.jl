@@ -2,11 +2,26 @@
 FastCubicSpline - Lightweight wrapper around FastInterpolations.jl
 
 This module provides a thin wrapper around FastInterpolations.jl's CubicInterpolant,
-offering the same API as SplineAdapter's CubicSpline1D but with FastInterpolations
-doing the heavy lifting for maximum performance.
+offering an API similar to SplineAdapter's CubicSpline1D but optimized for single-quantity
+interpolation with FastInterpolations doing the heavy lifting.
 
 The "extrap" boundary condition is implemented by computing endpoint derivatives
 via 4-point polynomial extrapolation, then using FastInterpolations' BCPair API.
+
+## Performance Comparison (FastInterpolations v0.2.2)
+
+| Operation       | CubicSpline1D | FastCubicSpline1D | Notes                    |
+|-----------------|---------------|-------------------|--------------------------|
+| evaluate (1 pt) |      5.1 ns   |        9.3 ns     | Single point             |
+| deriv1 (1 pt)   |      5.2 ns   |        9.3 ns     | Single point             |
+| deriv2 (1 pt)   |      4.9 ns   |        8.1 ns     | Single point             |
+| deriv3 (1 pt)   |      4.6 ns   |        6.2 ns     | Single point             |
+| Monotonic loop  |      4.7 ns/pt|        8.9 ns/pt  | Best case for cached     |
+| Random loop     |     14.5 ns/pt|        8.8 ns/pt  | FastCubicSpline1D wins   |
+
+**Summary**: CubicSpline1D with cached interval search is ~2x faster for monotonic
+access patterns (typical in ODE integration). FastCubicSpline1D is faster for random
+access but lacks multi-quantity support and cached interval optimization.
 """
 
 using FastInterpolations
