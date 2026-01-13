@@ -1,8 +1,5 @@
 module SplinesMod
 
-# Helper utilities
-include("Helper.jl")
-
 # Pure Julia spline implementations
 include("SplineAdapter.jl")
 include("BicubicWrapper.jl")

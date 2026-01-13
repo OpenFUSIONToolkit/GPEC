@@ -42,14 +42,6 @@ Periodic boundary condition: f(x_1) = f(x_n), f'(x_1) = f'(x_n).
 struct PeriodicSplineBC <: SplineBoundaryCondition end
 
 """
-Not-a-knot boundary condition: f'''(x) is continuous at x_2 and x_{n-1}.
-
-This forces the spline to behave as if the first two knots (and last two knots)
-belong to a single cubic polynomial.
-"""
-struct NotAKnotSplineBC <: SplineBoundaryCondition end
-
-"""
 Extrapolated boundary condition: f'(x) is estimated from extrapolation of 4 nearby points.
 
 This matches the Fortran GPEC "extrap" mode (bctype=3) which uses polynomial
@@ -57,34 +49,22 @@ extrapolation to estimate the first derivative at each endpoint.
 """
 struct ExtrapSplineBC <: SplineBoundaryCondition end
 
-# Boundary condition type codes (matching legacy Fortran interface)
-const BC_NATURAL = 1
-const BC_PERIODIC = 2
-const BC_EXTRAPOLATED = 3
-const BC_NOT_A_KNOT = 4
-
 """
 Map boundary condition specification to concrete type.
 
-Accepts string names ("natural", "periodic", "extrap", "not-a-knot") or
-legacy integer codes (1-4).
-
-Note: "not-a-knot" is approximated using natural spline conditions.
+Accepts string names: "natural", "periodic", "extrap".
 """
-function _get_boundary_condition(bctype::Union{String,Int})::SplineBoundaryCondition
-    if bctype == "natural" || bctype == BC_NATURAL
+function _get_boundary_condition(bctype::String)::SplineBoundaryCondition
+    if bctype == "natural"
         return NaturalSplineBC()
-    elseif bctype == "periodic" || bctype == BC_PERIODIC
+    elseif bctype == "periodic"
         return PeriodicSplineBC()
-    elseif bctype == "extrap" || bctype == BC_EXTRAPOLATED
+    elseif bctype == "extrap"
         return ExtrapSplineBC()
-    elseif bctype == "not-a-knot" || bctype == BC_NOT_A_KNOT
-        return NotAKnotSplineBC()
     else
         error(
             "Unknown boundary condition type: $bctype. " *
-            "Valid options: \"natural\", \"periodic\", \"extrap\", \"not-a-knot\" " *
-            "or integers 1-4 (BC_NATURAL, BC_PERIODIC, BC_EXTRAPOLATED, BC_NOT_A_KNOT)"
+            "Valid options: \"natural\", \"periodic\", \"extrap\""
         )
     end
 end
@@ -92,10 +72,10 @@ end
 """
 Map boundary condition to extrapolation behavior symbol.
 """
-function _get_extrapolation_mode(bctype::Union{String,Int})::Symbol
-    if bctype == "natural" || bctype == BC_NATURAL
+function _get_extrapolation_mode(bctype::String)::Symbol
+    if bctype == "natural"
         return :constant
-    elseif bctype == "periodic" || bctype == BC_PERIODIC
+    elseif bctype == "periodic"
         return :wrap
     else
         return :extension
@@ -166,17 +146,12 @@ Create a 1D cubic spline interpolator.
     If Vector, treated as single quantity. If Matrix, shape is (npts, nqty).
   - `bctype`: Boundary condition type. Options:
 
-      + `"natural"`: f''(x) = 0 at endpoints (default for most physics applications)
+      + `"natural"`: f''(x) = 0 at endpoints
       + `"periodic"`: f and f' continuous across domain wrap
-      + `"extrap"`: Natural BC with linear extrapolation outside domain
-      + `"not-a-knot"`: Approximated as natural (see note below)
-      + Integer codes 1-4 for legacy compatibility
+      + `"extrap"`: Endpoint derivatives estimated from 4-point polynomial extrapolation
 
 # Notes
 
-  - "not-a-knot" boundary conditions are approximated using natural spline
-    conditions. This may cause small differences near domain boundaries compared
-    to true not-a-knot implementations.
   - For periodic data, ensure fs[1, :] ≈ fs[end, :] for physical consistency.
 
 # Example
@@ -194,7 +169,7 @@ q, dq_dpsi, d2q_dpsi2, d3q_dpsi3 = deriv3!(q_spline, 0.5)
 ```
 """
 function CubicSpline1D(xs::Vector{Float64}, fs::Union{Vector{T},Matrix{T}};
-    bctype::Union{String,Int}="extrap") where {T<:Union{Float64,ComplexF64}}
+    bctype::String="extrap") where {T<:Union{Float64,ComplexF64}}
     # Ensure fs is a matrix (npts × nqty)
     fs_mat = fs isa Vector ? reshape(fs, :, 1) : fs
     npts, nqty = size(fs_mat)
@@ -247,119 +222,6 @@ function CubicSpline1D(xs::Vector{Float64}, fs::Union{Vector{T},Matrix{T}};
     _f3 = zeros(T, nqty)
 
     CubicSpline1D{T,typeof(bc)}(xs, copy(fs_mat), fs1, fsi, bc, extrap, coeffs, _f, _f1, _f2, _f3)
-end
-
-"""
-    _solve_not_a_knot_spline(xs, fs, h, rhs)
-
-Solve the spline coefficient system with not-a-knot boundary conditions.
-
-Not-a-knot requires third derivative continuity at the second and second-to-last
-knots, which means d_1 = d_2 and d_{n-2} = d_{n-1}. This creates constraints
-that are non-tridiagonal, requiring a more general solver.
-
-# Implementation
-
-Uses row elimination to reduce the pentadiagonal system to tridiagonal:
-
-  - Left boundary: eliminate c_1 using the not-a-knot constraint
-  - Right boundary: eliminate c_n using the not-a-knot constraint
-  - Solve the reduced (n-2)×(n-2) tridiagonal system for c_2, ..., c_{n-1}
-  - Back-substitute to find c_1 and c_n
-"""
-function _solve_not_a_knot_spline(xs::Vector{Float64}, fs::Vector{T},
-    h::Vector{Float64}, rhs::Vector{T}) where {T}
-    n = length(xs)
-
-    # Not-a-knot constraints:
-    # Left:  (c_2 - c_1)/h_1 = (c_3 - c_2)/h_2  =>  c_1 = c_2 + (h_1/h_2)*(c_2 - c_3)
-    # Right: (c_{n-1} - c_{n-2})/h_{n-2} = (c_n - c_{n-1})/h_{n-1}
-    #        =>  c_n = c_{n-1} + (h_{n-1}/h_{n-2})*(c_{n-1} - c_{n-2})
-
-    # For a simpler implementation, we use an equivalent formulation:
-    # Set up the interior equations for i = 2, ..., n-1 and substitute the
-    # not-a-knot constraints for c_1 and c_n.
-
-    # Interior system (n-2 equations for c_2, ..., c_{n-1})
-    m = n - 2  # Number of interior unknowns
-    if m < 2
-        # Not enough points for not-a-knot; fall back to something reasonable
-        return zeros(T, n)
-    end
-
-    # Build modified tridiagonal system
-    dl = zeros(Float64, m - 1)  # sub-diagonal
-    d = zeros(Float64, m)       # diagonal
-    du = zeros(Float64, m - 1)  # super-diagonal
-    b = zeros(T, m)             # RHS
-
-    # Row 1 (i=2 in original): h_1*c_1 + 2*(h_1+h_2)*c_2 + h_2*c_3 = rhs_2
-    # Substitute c_1 = c_2*(1 + h_1/h_2) - c_3*(h_1/h_2) from not-a-knot:
-    # h_1*(c_2*(1 + h_1/h_2) - c_3*(h_1/h_2)) + 2*(h_1+h_2)*c_2 + h_2*c_3 = rhs_2
-    # c_2*(h_1*(1 + h_1/h_2) + 2*(h_1+h_2)) + c_3*(h_2 - h_1^2/h_2) = rhs_2
-    h1, h2 = h[1], h[2]
-    d[1] = h1 * (1 + h1 / h2) + 2 * (h1 + h2)
-    if m > 1
-        du[1] = h2 - h1^2 / h2
-    end
-    b[1] = rhs[2]
-
-    # Interior rows (i = 3 to n-2 in original, indices 2 to m-1 in reduced system)
-    @inbounds for k in 2:(m-1)
-        i = k + 1  # Original index
-        dl[k-1] = h[i-1]
-        d[k] = 2 * (h[i-1] + h[i])
-        du[k] = h[i]
-        b[k] = rhs[i]
-    end
-
-    # Last row (i = n-1 in original, index m in reduced system)
-    # h_{n-2}*c_{n-2} + 2*(h_{n-2}+h_{n-1})*c_{n-1} + h_{n-1}*c_n = rhs_{n-1}
-    # Substitute c_n = c_{n-1}*(1 + h_{n-1}/h_{n-2}) - c_{n-2}*(h_{n-1}/h_{n-2})
-    hn2, hn1 = h[n-2], h[n-1]
-    if m > 1
-        dl[m-1] = hn2 - hn1^2 / hn2
-    end
-    d[m] = hn1 * (1 + hn1 / hn2) + 2 * (hn2 + hn1)
-    b[m] = rhs[n-1]
-
-    # Solve tridiagonal system using Thomas algorithm
-    c_interior = zeros(T, m)
-    if m == 1
-        c_interior[1] = b[1] / d[1]
-    else
-        # Forward elimination
-        upper_elim = zeros(Float64, m)
-        rhs_elim = zeros(T, m)
-
-        upper_elim[1] = du[1] / d[1]
-        rhs_elim[1] = b[1] / d[1]
-
-        @inbounds for i in 2:(m-1)
-            denom = d[i] - dl[i-1] * upper_elim[i-1]
-            upper_elim[i] = du[i] / denom
-            rhs_elim[i] = (b[i] - dl[i-1] * rhs_elim[i-1]) / denom
-        end
-        rhs_elim[m] = (b[m] - dl[m-1] * rhs_elim[m-1]) / (d[m] - dl[m-1] * upper_elim[m-1])
-
-        # Back substitution
-        c_interior[m] = rhs_elim[m]
-        @inbounds for i in (m-1):-1:1
-            c_interior[i] = rhs_elim[i] - upper_elim[i] * c_interior[i+1]
-        end
-    end
-
-    # Reconstruct full c vector
-    c = zeros(T, n)
-    c[2:(n-1)] .= c_interior
-
-    # Back-substitute for c_1 and c_n using not-a-knot constraints
-    # c_1 = c_2 + (h_1/h_2)*(c_2 - c_3) = c_2*(1 + h_1/h_2) - c_3*(h_1/h_2)
-    c[1] = c[2] * (1 + h1 / h2) - c[3] * (h1 / h2)
-    # c_n = c_{n-1}*(1 + h_{n-1}/h_{n-2}) - c_{n-2}*(h_{n-1}/h_{n-2})
-    c[n] = c[n-1] * (1 + hn1 / hn2) - c[n-2] * (hn1 / hn2)
-
-    return c
 end
 
 """
@@ -501,13 +363,6 @@ function _compute_spline_coeffs(xs::Vector{Float64}, fs::Vector{T},
         dl[n-1] = h[n-1]
         d[n] = 2 * h[n-1]
         rhs[n] = 6 * (yp_right - (fs[n] - fs[n-1]) / h[n-1])
-    end
-
-    # Handle not-a-knot BC
-    # Not-a-knot requires third derivative continuity at second and second-to-last knots.
-    # This creates a pentadiagonal system; use a dedicated solver.
-    if bc isa NotAKnotSplineBC && n >= 4
-        return _solve_not_a_knot_spline(xs, fs, h, rhs)
     end
 
     # Solve tridiagonal system using Thomas algorithm

@@ -121,7 +121,7 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
     for iq in 1:nqty
         for itheta in 1:ntheta
             psi_data = fs[:, itheta, iq]  # Creates a copy (Vector{Float64})
-            psi_spline = CubicSpline1D(xs, psi_data; bctype="not-a-knot")
+            psi_spline = CubicSpline1D(xs, psi_data; bctype="extrap")
             # Vectorized: fs1 contains derivatives at ALL psi grid points
             fs_psi[:, itheta, iq] .= @view psi_spline.fs1[:, 1]
         end
