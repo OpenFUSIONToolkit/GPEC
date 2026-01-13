@@ -165,8 +165,10 @@ q_spline = CubicSpline1D(psi, q_profile; bctype="extrap")
 # Evaluate at arbitrary point
 q_val = evaluate!(q_spline, 0.5)
 
-# Get value and derivatives
-q, dq_dpsi, d2q_dpsi2, d3q_dpsi3 = deriv3!(q_spline, 0.5)
+# Get derivatives (each function returns only the requested derivative)
+dq_dpsi = deriv1!(q_spline, 0.5)
+d2q_dpsi2 = deriv2!(q_spline, 0.5)
+d3q_dpsi3 = deriv3!(q_spline, 0.5)
 ```
 """
 function CubicSpline1D(xs::Vector{Float64}, fs::Union{Vector{T},Matrix{T}};

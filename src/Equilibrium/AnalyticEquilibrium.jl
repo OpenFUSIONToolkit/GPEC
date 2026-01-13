@@ -162,7 +162,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     for ia in 1:(ma+1)
         r += dr
         r_nodes[ia] = r
-        f, f1 = Spl.spline_deriv1!(spl, r)
+        f = Spl.evaluate!(spl, r)
+        f1 = Spl.deriv1!(spl, r)
         ψ = f[3]
         Bphi = f[2]
         pval = f[6]
@@ -182,7 +183,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     for ia in 1:(ma+1)
         r = r_nodes[ia]
-        f, f1 = Spl.spline_deriv1!(spl, r)
+        f = Spl.evaluate!(spl, r)
+        f1 = Spl.deriv1!(spl, r)
         y4 = f[4]
         q = f[8]
         dψdr = f1[3]

@@ -337,7 +337,10 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
         x1 = sq.xs[ipsi+1]
         xmax = x1 - x0
 
-        f, f1, f2, f3 = Spl.spline_deriv3!(sq, x0)
+        f = Spl.evaluate!(sq, x0)
+        f1 = Spl.deriv1!(sq, x0)
+        f2 = Spl.deriv2!(sq, x0)
+        f3 = Spl.deriv3!(sq, x0)
         a, b, c, d = f[4], f1[4], f2[4], f3[4]
 
         if d != 0.0

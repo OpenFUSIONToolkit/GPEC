@@ -91,7 +91,8 @@ function direct_get_bfield!(
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    f_sq, f1_sq = Spl.spline_deriv1!(sq_in, psi_norm)
+    f_sq = Spl.evaluate!(sq_in, psi_norm)
+    f1_sq = Spl.deriv1!(sq_in, psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
     bf_out.f1 = f1_sq[1] # dF/dψ
     bf_out.p = f_sq[2]  # μ0*Pressure
@@ -466,7 +467,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
-            f, f1 = Spl.spline_deriv1!(ff, theta_nodes[itheta])
+            f = Spl.evaluate!(ff, theta_nodes[itheta])
+            f1 = Spl.deriv1!(ff, theta_nodes[itheta])
             @views rzphi_nodes[ipsi, itheta, 1:3] = f[1:3]
             jac_term = (1.0 + f1[4]) * y_out[end, 2] * 2π * psio
             rzphi_nodes[ipsi, itheta, 4] = jac_term
