@@ -27,7 +27,8 @@
 
         xs_fine = collect(range(0.3; stop=5.8, length=30))
         for x in xs_fine
-            f, f1 = JPEC.Spl.deriv1!(spline, x)
+            f = JPEC.Spl.evaluate!(spline, x)
+            f1 = JPEC.Spl.deriv1!(spline, x)
             @test abs(f[1] - sin(x)) < 1e-5
             @test abs(f1[1] - cos(x)) < 1e-3
         end
@@ -43,7 +44,9 @@
 
         xs_fine = collect(range(0.5; stop=5.5, length=30))
         for x in xs_fine
-            f, f1, f2 = JPEC.Spl.deriv2!(spline, x)
+            f = JPEC.Spl.evaluate!(spline, x)
+            f1 = JPEC.Spl.deriv1!(spline, x)
+            f2 = JPEC.Spl.deriv2!(spline, x)
             @test abs(f[1] - sin(x)) < 1e-5
             @test abs(f1[1] - cos(x)) < 1e-3
             @test abs(f2[1] + sin(x)) < 1e-2
@@ -60,7 +63,10 @@
 
         xs_fine = collect(range(0.5; stop=5.5, length=30))
         for x in xs_fine
-            f, f1, f2, f3 = JPEC.Spl.deriv3!(spline, x)
+            f = JPEC.Spl.evaluate!(spline, x)
+            f1 = JPEC.Spl.deriv1!(spline, x)
+            f2 = JPEC.Spl.deriv2!(spline, x)
+            f3 = JPEC.Spl.deriv3!(spline, x)
             @test abs(f[1] - sin(x)) < 1e-5
             @test abs(f1[1] - cos(x)) < 1e-3
             @test abs(f2[1] + sin(x)) < 1e-2
@@ -81,7 +87,10 @@
         # Interior points should be more accurate
         xs_fine = collect(range(1.2; stop=1.8, length=30))
         for x in xs_fine
-            f, f1, f2, f3 = JPEC.Spl.deriv3!(spline, x)
+            f = JPEC.Spl.evaluate!(spline, x)
+            f1 = JPEC.Spl.deriv1!(spline, x)
+            f2 = JPEC.Spl.deriv2!(spline, x)
+            f3 = JPEC.Spl.deriv3!(spline, x)
             @test abs(f[1] - x^3) < 1e-4
             @test abs(f1[1] - 3*x^2) < 1e-3
             @test abs(f2[1] - 6*x) < 1e-2
@@ -114,7 +123,8 @@
         spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
 
         x_test = π/4
-        f, f1 = JPEC.Spl.deriv1!(spline, x_test)
+        f = JPEC.Spl.evaluate!(spline, x_test)
+        f1 = JPEC.Spl.deriv1!(spline, x_test)
 
         @test abs(f[1] - sin(x_test)) < 1e-5
         @test abs(f[2] - cos(x_test)) < 1e-5
@@ -184,7 +194,8 @@
         cms = JPEC.Spl.ComplexMatrixSpline(xs, data)
 
         x_test = 0.5
-        f, f1 = JPEC.Spl.deriv1!(cms, x_test)
+        f = JPEC.Spl.evaluate!(cms, x_test)
+        f1 = JPEC.Spl.deriv1!(cms, x_test)
 
         # First derivative of linear function is the slope
         for i in 1:n1, j in 1:n2
@@ -193,7 +204,7 @@
         end
 
         # Test third derivative (should be zero for linear)
-        f, f1, f2, f3 = JPEC.Spl.deriv3!(cms, x_test)
+        f3 = JPEC.Spl.deriv3!(cms, x_test)
         for i in 1:n1, j in 1:n2
             @test abs(f3[i, j]) < 1e-5
         end

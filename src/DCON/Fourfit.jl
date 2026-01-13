@@ -125,7 +125,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # --- Fit the grid data to a Fourier-cubic spline ---
     # The bctype applies to the non-periodic radial (x) dimension.
     # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
-    bctype_x = "not-a-knot"
+    bctype_x = "extrap"
 
     metric.fspline = Spl.FourierModeSplines(
         metric.xs,

@@ -226,8 +226,8 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
         # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
+        qval(ψ) = Spl.evaluate!(equil.sq, ψ)[4]
+        q1val(ψ) = Spl.deriv1!(equil.sq, ψ)[4]
 
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)

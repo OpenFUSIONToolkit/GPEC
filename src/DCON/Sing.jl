@@ -60,7 +60,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=Spl.spline_deriv1!(equil.sq, psifac)[2][4]
+                        q1=Spl.deriv1!(equil.sq, psifac)[4]
                     ))
                     intr.msing += 1
                 end
@@ -121,8 +121,8 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
         jpsi = min(jpsi, equil.config.control.mpsi - 1)
 
         # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
+        qval(ψ) = Spl.evaluate!(equil.sq, ψ)[4]
+        q1val(ψ) = Spl.deriv1!(equil.sq, ψ)[4]
 
         intr.psilim = equil.sq.xs[jpsi]
         converged = false
@@ -279,11 +279,23 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
-    # Evaluate cubic splines
-    q .= getindex.(Spl.spline_deriv3!(equil.sq, singp.psifac), 4)
-    f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.deriv3!(ffit.fmats_lower, singp.psifac)
-    g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.deriv3!(ffit.gmats, singp.psifac)
-    k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.deriv3!(ffit.kmats, singp.psifac)
+    # Evaluate cubic splines - get q and its derivatives (column 4 of sq spline)
+    q .= (Spl.evaluate!(equil.sq, singp.psifac)[4],
+        Spl.deriv1!(equil.sq, singp.psifac)[4],
+        Spl.deriv2!(equil.sq, singp.psifac)[4],
+        Spl.deriv3!(equil.sq, singp.psifac)[4])
+    f_lower_interp[:, :, 1] .= Spl.evaluate!(ffit.fmats_lower, singp.psifac)
+    f_lower_interp[:, :, 2] .= Spl.deriv1!(ffit.fmats_lower, singp.psifac)
+    f_lower_interp[:, :, 3] .= Spl.deriv2!(ffit.fmats_lower, singp.psifac)
+    f_lower_interp[:, :, 4] .= Spl.deriv3!(ffit.fmats_lower, singp.psifac)
+    g_interp[:, :, 1] .= Spl.evaluate!(ffit.gmats, singp.psifac)
+    g_interp[:, :, 2] .= Spl.deriv1!(ffit.gmats, singp.psifac)
+    g_interp[:, :, 3] .= Spl.deriv2!(ffit.gmats, singp.psifac)
+    g_interp[:, :, 4] .= Spl.deriv3!(ffit.gmats, singp.psifac)
+    k_interp[:, :, 1] .= Spl.evaluate!(ffit.kmats, singp.psifac)
+    k_interp[:, :, 2] .= Spl.deriv1!(ffit.kmats, singp.psifac)
+    k_interp[:, :, 3] .= Spl.deriv2!(ffit.kmats, singp.psifac)
+    k_interp[:, :, 4] .= Spl.deriv3!(ffit.kmats, singp.psifac)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')

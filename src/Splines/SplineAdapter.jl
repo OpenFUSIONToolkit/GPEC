@@ -77,6 +77,8 @@ function _get_extrapolation_mode(bctype::String)::Symbol
         return :constant
     elseif bctype == "periodic"
         return :wrap
+    elseif bctype == "extrap"
+        return :extension
     else
         return :extension
     end
@@ -674,38 +676,33 @@ end
 """
     ComplexMatrixSpline{S}
 
-A matrix where each element is a separate 1D spline in psi (normalized flux),
+A wrapper providing matrix-shaped output from a single complex CubicSpline1D,
 for complex-valued MHD stability matrix coefficients.
 
 This structure is used for interpolating the Fourier-decomposed perturbation
 matrices (A, B, C, D, E, F, G, H, K stability matrices in DCON) along the radial
-direction. Each matrix element can have different radial dependence, requiring
-separate spline fits. Complex values are handled by storing separate real and
-imaginary splines for each matrix element.
+direction. Uses a single CubicSpline1D{ComplexF64} with nqty = n1*n2 for efficiency,
+with output reshaped to (n1, n2) matrix form.
 
 # Type Parameters
 
-  - `S`: The concrete CubicSpline1D type used for real/imaginary parts
+  - `S`: The concrete CubicSpline1D{ComplexF64} type
 
 # Fields
 
-  - `xs::Vector{Float64}`: Shared x-axis (normalized flux psi_N)
-  - `n1::Int`: First dimension of matrix
-  - `n2::Int`: Second dimension of matrix
-  - `real_splines::Matrix{S}`: Real part splines (n1 × n2)
-  - `imag_splines::Matrix{S}`: Imaginary part splines (n1 × n2)
-  - `_out, _out1, _out2, _out3`: Work arrays for evaluation output
+  - `spline::S`: Single complex spline with nqty = n1*n2 quantities
+  - `n1::Int`: First dimension of output matrix
+  - `n2::Int`: Second dimension of output matrix
+  - `_out, _out1, _out2, _out3`: Work arrays for reshaped output
 
 # Thread Safety
 
 The mutating evaluation functions use internal work arrays and are NOT thread-safe.
 """
-struct ComplexMatrixSpline{S}
-    xs::Vector{Float64}
+struct ComplexMatrixSpline{S<:CubicSpline1D{ComplexF64}}
+    spline::S
     n1::Int
     n2::Int
-    real_splines::Matrix{S}
-    imag_splines::Matrix{S}
     _out::Matrix{ComplexF64}
     _out1::Matrix{ComplexF64}
     _out2::Matrix{ComplexF64}
@@ -728,27 +725,19 @@ function ComplexMatrixSpline(xs::Vector{Float64}, data::Array{ComplexF64,3};
     npsi, n1, n2 = size(data)
     @assert length(xs) == npsi "xs length must match first dimension of data"
 
-    # Create template spline to get concrete type
-    template = CubicSpline1D(xs, real.(data[:, 1, 1]); bctype=bctype)
-    SplineType = typeof(template)
+    # Flatten (npsi, n1, n2) -> (npsi, n1*n2) using column-major order
+    data_flat = reshape(data, npsi, n1 * n2)
 
-    # Create spline matrices
-    real_splines = Matrix{SplineType}(undef, n1, n2)
-    imag_splines = Matrix{SplineType}(undef, n1, n2)
+    # Create single complex spline with nqty = n1*n2
+    spline = CubicSpline1D(xs, data_flat; bctype=bctype)
 
-    for i in 1:n1, j in 1:n2
-        real_splines[i, j] = CubicSpline1D(xs, real.(data[:, i, j]); bctype=bctype)
-        imag_splines[i, j] = CubicSpline1D(xs, imag.(data[:, i, j]); bctype=bctype)
-    end
-
-    # Work arrays
+    # Work arrays for reshaped output
     _out = zeros(ComplexF64, n1, n2)
     _out1 = zeros(ComplexF64, n1, n2)
     _out2 = zeros(ComplexF64, n1, n2)
     _out3 = zeros(ComplexF64, n1, n2)
 
-    ComplexMatrixSpline{SplineType}(xs, n1, n2, real_splines, imag_splines,
-        _out, _out1, _out2, _out3)
+    ComplexMatrixSpline{typeof(spline)}(spline, n1, n2, _out, _out1, _out2, _out3)
 end
 
 """
@@ -769,9 +758,16 @@ function ComplexMatrixSpline(xs::Vector{Float64}, data_flat::Matrix{ComplexF64},
     @assert size(data_flat, 1) == npsi
     @assert size(data_flat, 2) == n1 * n2
 
-    # Reshape to 3D
+    # Reshape to 3D then use main constructor
     data = reshape(data_flat, npsi, n1, n2)
     ComplexMatrixSpline(xs, data; bctype=bctype)
+end
+
+# Helper to reshape flat spline output to matrix
+@inline function _reshape_to_matrix!(out::Matrix{ComplexF64}, flat::Vector{ComplexF64}, n1::Int)
+    @inbounds for j in axes(out, 2), i in axes(out, 1)
+        out[i, j] = flat[(j-1)*n1+i]
+    end
 end
 
 """
@@ -781,72 +777,42 @@ Evaluate the ComplexMatrixSpline at point x.
 Returns matrix of complex values (stored in work array, not thread-safe).
 """
 function evaluate!(cms::ComplexMatrixSpline, x::Float64)
-    @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re_val = evaluate!(cms.real_splines[i, j], x)[1]
-        im_val = evaluate!(cms.imag_splines[i, j], x)[1]
-        cms._out[i, j] = re_val + im_val * 1im
-    end
+    f = evaluate!(cms.spline, x)
+    _reshape_to_matrix!(cms._out, f, cms.n1)
     return cms._out
 end
 
 """
-    deriv1!(cms, x) -> (f, f1)
+    deriv1!(cms, x) -> f1
 
-Evaluate ComplexMatrixSpline and first derivative at point x.
+Evaluate ComplexMatrixSpline first derivative at point x.
 """
 function deriv1!(cms::ComplexMatrixSpline, x::Float64)
-    @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re = evaluate!(cms.real_splines[i, j], x)
-        im_v = evaluate!(cms.imag_splines[i, j], x)
-        re1 = deriv1!(cms.real_splines[i, j], x)
-        im1 = deriv1!(cms.imag_splines[i, j], x)
-        cms._out[i, j] = re[1] + im_v[1] * 1im
-        cms._out1[i, j] = re1[1] + im1[1] * 1im
-    end
-    return cms._out, cms._out1
+    f1 = deriv1!(cms.spline, x)
+    _reshape_to_matrix!(cms._out1, f1, cms.n1)
+    return cms._out1
 end
 
 """
-    deriv2!(cms, x) -> (f, f1, f2)
+    deriv2!(cms, x) -> f2
 
-Evaluate ComplexMatrixSpline through second derivative at point x.
+Evaluate ComplexMatrixSpline second derivative at point x.
 """
 function deriv2!(cms::ComplexMatrixSpline, x::Float64)
-    @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re = evaluate!(cms.real_splines[i, j], x)
-        im_v = evaluate!(cms.imag_splines[i, j], x)
-        re1 = deriv1!(cms.real_splines[i, j], x)
-        im1 = deriv1!(cms.imag_splines[i, j], x)
-        re2 = deriv2!(cms.real_splines[i, j], x)
-        im2 = deriv2!(cms.imag_splines[i, j], x)
-        cms._out[i, j] = re[1] + im_v[1] * 1im
-        cms._out1[i, j] = re1[1] + im1[1] * 1im
-        cms._out2[i, j] = re2[1] + im2[1] * 1im
-    end
-    return cms._out, cms._out1, cms._out2
+    f2 = deriv2!(cms.spline, x)
+    _reshape_to_matrix!(cms._out2, f2, cms.n1)
+    return cms._out2
 end
 
 """
-    deriv3!(cms, x) -> (f, f1, f2, f3)
+    deriv3!(cms, x) -> f3
 
-Evaluate ComplexMatrixSpline through third derivative at point x.
+Evaluate ComplexMatrixSpline third derivative at point x.
 """
 function deriv3!(cms::ComplexMatrixSpline, x::Float64)
-    @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re = evaluate!(cms.real_splines[i, j], x)
-        im_v = evaluate!(cms.imag_splines[i, j], x)
-        re1 = deriv1!(cms.real_splines[i, j], x)
-        im1 = deriv1!(cms.imag_splines[i, j], x)
-        re2 = deriv2!(cms.real_splines[i, j], x)
-        im2 = deriv2!(cms.imag_splines[i, j], x)
-        re3 = deriv3!(cms.real_splines[i, j], x)
-        im3 = deriv3!(cms.imag_splines[i, j], x)
-        cms._out[i, j] = re[1] + im_v[1] * 1im
-        cms._out1[i, j] = re1[1] + im1[1] * 1im
-        cms._out2[i, j] = re2[1] + im2[1] * 1im
-        cms._out3[i, j] = re3[1] + im3[1] * 1im
-    end
-    return cms._out, cms._out1, cms._out2, cms._out3
+    f3 = deriv3!(cms.spline, x)
+    _reshape_to_matrix!(cms._out3, f3, cms.n1)
+    return cms._out3
 end
 
 """
@@ -855,8 +821,8 @@ end
 Create an empty/placeholder ComplexMatrixSpline for type stability.
 """
 function empty_ComplexMatrixSpline(n1::Int=1, n2::Int=1)
-    xs = Float64[0.0, 1.0]
-    data = zeros(ComplexF64, 2, n1, n2)
+    xs = Float64[0.0, 1.0, 2.0, 3.0, 4.0]  # Need at least 4 points for extrap BC
+    data = zeros(ComplexF64, 5, n1, n2)
     ComplexMatrixSpline(xs, data)
 end
 
