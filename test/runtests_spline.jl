@@ -15,7 +15,8 @@
         end
 
         # Test first derivative (commonly used)
-        f, f1 = JPEC.Spl.deriv1!(spline, 1.5)
+        f1 = JPEC.Spl.deriv1!(spline, 1.5)
+        f = JPEC.Spl.evaluate!(spline, 1.5)
         @test abs(f[1] - 1.5^3) < 1e-4
         @test abs(f1[1] - 3 * 1.5^2) < 0.1
     end
@@ -34,7 +35,8 @@
         end
 
         # Test first derivative
-        f, f1 = JPEC.Spl.deriv1!(spline, Float64(pi) / 4)
+        f1 = JPEC.Spl.deriv1!(spline, Float64(pi) / 4)
+        f = JPEC.Spl.evaluate!(spline, Float64(pi) / 4)
         @test abs(f[1] - sin(Float64(pi) / 4)) < 1e-6
         @test abs(f1[1] - cos(Float64(pi) / 4)) < 1e-4
     end
@@ -56,7 +58,7 @@
         end
 
         # Test first derivative
-        f, f1 = JPEC.Spl.deriv1!(spline, 2.25)
+        f1 = JPEC.Spl.deriv1!(spline, 2.25)
         @test abs(f1[1] + im * exp(-im * 2.25)) < 1e-4
         @test abs(f1[2] - im * exp(im * 2.25)) < 1e-4
     end
@@ -73,8 +75,8 @@
         @test abs(f_start[1] - f_end[1]) < 1e-10
 
         # Check derivative continuity
-        _, f1_start = JPEC.Spl.deriv1!(spline, 0.0)
-        _, f1_end = JPEC.Spl.deriv1!(spline, 2 * Float64(pi))
+        f1_start = JPEC.Spl.deriv1!(spline, 0.0)
+        f1_end = JPEC.Spl.deriv1!(spline, 2 * Float64(pi))
         @test abs(f1_start[1] - f1_end[1]) < 1e-10
     end
 

@@ -143,7 +143,7 @@ function RZPhiSplines(xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{Float6
             # Compute second derivatives at grid points using spline evaluation
             # This is done once at construction, so we can afford spline calls here
             for jtheta in 1:ntheta_internal
-                _, _, f2_val = deriv2!(theta_splines[ipsi, iq], ys_internal[jtheta])
+                f2_val = deriv2!(theta_splines[ipsi, iq], ys_internal[jtheta])
                 fs_yy[ipsi, jtheta, iq] = f2_val[1]
             end
             fs_yy[ipsi, ntheta, iq] = fs_yy[ipsi, 1, iq]  # Periodic wrap
@@ -299,7 +299,8 @@ function deriv1!(rzphi::RZPhiSplines{S}, ipsi::Int, theta::Float64) where {S}
 
     @inbounds for iq in 1:rzphi.nqty
         # Get f and fy from theta spline
-        f_val, f1_val = SplinesMod.deriv1!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
+        f1_val = SplinesMod.deriv1!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
+        f_val = SplinesMod.evaluate!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
         rzphi._f[iq] = f_val[1]
         rzphi._fy[iq] = f1_val[1]
 
@@ -323,7 +324,9 @@ function deriv2!(rzphi::RZPhiSplines{S}, ipsi::Int, theta::Float64) where {S}
 
     @inbounds for iq in 1:rzphi.nqty
         # Get f, fy, fyy from theta spline
-        f_val, f1_val, f2_val = SplinesMod.deriv2!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
+        f_val = SplinesMod.evaluate!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
+        f1_val = SplinesMod.deriv1!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
+        f2_val = SplinesMod.deriv2!(rzphi.theta_splines[ipsi, iq], theta_wrapped)
         rzphi._f[iq] = f_val[1]
         rzphi._fy[iq] = f1_val[1]
         rzphi._fyy[iq] = f2_val[1]
@@ -333,7 +336,7 @@ function deriv2!(rzphi::RZPhiSplines{S}, ipsi::Int, theta::Float64) where {S}
         rzphi._fx[iq] = fx_val[1]
 
         # Get fxy (d/dtheta of d/dpsi) from psi derivative spline
-        _, fxy_val = SplinesMod.deriv1!(rzphi.psi_deriv_splines[ipsi, iq], theta_wrapped)
+        fxy_val = SplinesMod.deriv1!(rzphi.psi_deriv_splines[ipsi, iq], theta_wrapped)
         rzphi._fxy[iq] = fxy_val[1]
 
         # Compute fxx using finite differences on fs_psi

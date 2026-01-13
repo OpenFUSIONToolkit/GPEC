@@ -445,10 +445,10 @@ function evaluate!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
 end
 
 """
-    deriv1!(spline, x) -> (f, f1)
+    deriv1!(spline, x) -> Vector{T}
 
-Evaluate spline and first derivative at point x.
-Results stored in work arrays (not thread-safe).
+Evaluate first derivative at point x.
+Results stored in work array (not thread-safe).
 """
 function deriv1!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
     i = _find_interval(spline.xs, x)
@@ -456,22 +456,20 @@ function deriv1!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
 
     nqty = size(spline.coeffs, 3)
     @inbounds for q in 1:nqty
-        a = spline.coeffs[i, 1, q]
         b = spline.coeffs[i, 2, q]
         c = spline.coeffs[i, 3, q]
         d = spline.coeffs[i, 4, q]
-        spline._f[q] = muladd(t, muladd(t, muladd(t, d, c), b), a)
         spline._f1[q] = muladd(t, muladd(3 * t, d, 2 * c), b)
     end
 
-    return spline._f, spline._f1
+    return spline._f1
 end
 
 """
-    deriv2!(spline, x) -> (f, f1, f2)
+    deriv2!(spline, x) -> Vector{T}
 
-Evaluate spline through second derivative at point x.
-Results stored in work arrays (not thread-safe).
+Evaluate second derivative at point x.
+Results stored in work array (not thread-safe).
 """
 function deriv2!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
     i = _find_interval(spline.xs, x)
@@ -479,45 +477,34 @@ function deriv2!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
 
     nqty = size(spline.coeffs, 3)
     @inbounds for q in 1:nqty
-        a = spline.coeffs[i, 1, q]
-        b = spline.coeffs[i, 2, q]
         c = spline.coeffs[i, 3, q]
         d = spline.coeffs[i, 4, q]
-        spline._f[q] = muladd(t, muladd(t, muladd(t, d, c), b), a)
-        spline._f1[q] = muladd(t, muladd(3 * t, d, 2 * c), b)
         spline._f2[q] = muladd(6 * t, d, 2 * c)
     end
 
-    return spline._f, spline._f1, spline._f2
+    return spline._f2
 end
 
 """
-    deriv3!(spline, x) -> (f, f1, f2, f3)
+    deriv3!(spline, x) -> Vector{T}
 
-Evaluate spline through third derivative at point x.
+Evaluate third derivative at point x.
 
 For cubic splines, the third derivative is piecewise constant within each
 interval: f'''(x) = 6d, where d is the cubic coefficient.
 
-Results stored in work arrays (not thread-safe).
+Results stored in work array (not thread-safe).
 """
 function deriv3!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
     i = _find_interval(spline.xs, x)
-    t = x - spline.xs[i]
 
     nqty = size(spline.coeffs, 3)
     @inbounds for q in 1:nqty
-        a = spline.coeffs[i, 1, q]
-        b = spline.coeffs[i, 2, q]
-        c = spline.coeffs[i, 3, q]
         d = spline.coeffs[i, 4, q]
-        spline._f[q] = muladd(t, muladd(t, muladd(t, d, c), b), a)
-        spline._f1[q] = muladd(t, muladd(3 * t, d, 2 * c), b)
-        spline._f2[q] = muladd(6 * t, d, 2 * c)
-        spline._f3[q] = 6 * d  # Third derivative is constant within interval
+        spline._f3[q] = 6 * d
     end
 
-    return spline._f, spline._f1, spline._f2, spline._f3
+    return spline._f3
 end
 
 """
@@ -723,8 +710,10 @@ Evaluate ComplexMatrixSpline and first derivative at point x.
 """
 function deriv1!(cms::ComplexMatrixSpline, x::Float64)
     @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re, re1 = deriv1!(cms.real_splines[i, j], x)
-        im_v, im1 = deriv1!(cms.imag_splines[i, j], x)
+        re = evaluate!(cms.real_splines[i, j], x)
+        im_v = evaluate!(cms.imag_splines[i, j], x)
+        re1 = deriv1!(cms.real_splines[i, j], x)
+        im1 = deriv1!(cms.imag_splines[i, j], x)
         cms._out[i, j] = re[1] + im_v[1] * 1im
         cms._out1[i, j] = re1[1] + im1[1] * 1im
     end
@@ -738,8 +727,12 @@ Evaluate ComplexMatrixSpline through second derivative at point x.
 """
 function deriv2!(cms::ComplexMatrixSpline, x::Float64)
     @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re, re1, re2 = deriv2!(cms.real_splines[i, j], x)
-        im_v, im1, im2 = deriv2!(cms.imag_splines[i, j], x)
+        re = evaluate!(cms.real_splines[i, j], x)
+        im_v = evaluate!(cms.imag_splines[i, j], x)
+        re1 = deriv1!(cms.real_splines[i, j], x)
+        im1 = deriv1!(cms.imag_splines[i, j], x)
+        re2 = deriv2!(cms.real_splines[i, j], x)
+        im2 = deriv2!(cms.imag_splines[i, j], x)
         cms._out[i, j] = re[1] + im_v[1] * 1im
         cms._out1[i, j] = re1[1] + im1[1] * 1im
         cms._out2[i, j] = re2[1] + im2[1] * 1im
@@ -754,8 +747,14 @@ Evaluate ComplexMatrixSpline through third derivative at point x.
 """
 function deriv3!(cms::ComplexMatrixSpline, x::Float64)
     @inbounds for i in 1:cms.n1, j in 1:cms.n2
-        re, re1, re2, re3 = deriv3!(cms.real_splines[i, j], x)
-        im_v, im1, im2, im3 = deriv3!(cms.imag_splines[i, j], x)
+        re = evaluate!(cms.real_splines[i, j], x)
+        im_v = evaluate!(cms.imag_splines[i, j], x)
+        re1 = deriv1!(cms.real_splines[i, j], x)
+        im1 = deriv1!(cms.imag_splines[i, j], x)
+        re2 = deriv2!(cms.real_splines[i, j], x)
+        im2 = deriv2!(cms.imag_splines[i, j], x)
+        re3 = deriv3!(cms.real_splines[i, j], x)
+        im3 = deriv3!(cms.imag_splines[i, j], x)
         cms._out[i, j] = re[1] + im_v[1] * 1im
         cms._out1[i, j] = re1[1] + im1[1] * 1im
         cms._out2[i, j] = re2[1] + im2[1] * 1im

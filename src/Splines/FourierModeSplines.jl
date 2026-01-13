@@ -286,8 +286,10 @@ function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
         dsin_dy = m_omega * cos_my
 
         for iq in 1:fms.nqty
-            f_cm, f1_cm = deriv1!(fms.cos_splines[m+1, iq], x)
-            f_sm, f1_sm = deriv1!(fms.sin_splines[m+1, iq], x)
+            f_cm = evaluate!(fms.cos_splines[m+1, iq], x)
+            f_sm = evaluate!(fms.sin_splines[m+1, iq], x)
+            f1_cm = deriv1!(fms.cos_splines[m+1, iq], x)
+            f1_sm = deriv1!(fms.sin_splines[m+1, iq], x)
 
             cm = f_cm[1]
             sm = f_sm[1]
@@ -339,8 +341,12 @@ function deriv2!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
         d2sin_dy2 = -m_omega_sq * sin_my
 
         for iq in 1:fms.nqty
-            f_cm, f1_cm, f2_cm = deriv2!(fms.cos_splines[m+1, iq], x)
-            f_sm, f1_sm, f2_sm = deriv2!(fms.sin_splines[m+1, iq], x)
+            f_cm = evaluate!(fms.cos_splines[m+1, iq], x)
+            f_sm = evaluate!(fms.sin_splines[m+1, iq], x)
+            f1_cm = deriv1!(fms.cos_splines[m+1, iq], x)
+            f1_sm = deriv1!(fms.sin_splines[m+1, iq], x)
+            f2_cm = deriv2!(fms.cos_splines[m+1, iq], x)
+            f2_sm = deriv2!(fms.sin_splines[m+1, iq], x)
 
             cm = f_cm[1]
             sm = f_sm[1]
