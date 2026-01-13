@@ -130,6 +130,7 @@ mutable struct CubicSpline1D{T<:Union{Float64,ComplexF64},BC<:SplineBoundaryCond
     _f1::Vector{T}
     _f2::Vector{T}
     _f3::Vector{T}
+    _last_ix::Base.RefValue{Int}  # Cached interval index for sequential search
 end
 
 """
@@ -220,8 +221,9 @@ function CubicSpline1D(xs::Vector{Float64}, fs::Union{Vector{T},Matrix{T}};
     _f1 = zeros(T, nqty)
     _f2 = zeros(T, nqty)
     _f3 = zeros(T, nqty)
+    _last_ix = Ref(1)  # Cached interval index, starts at 1
 
-    CubicSpline1D{T,typeof(bc)}(xs, copy(fs_mat), fs1, fsi, bc, extrap, coeffs, _f, _f1, _f2, _f3)
+    CubicSpline1D{T,typeof(bc)}(xs, copy(fs_mat), fs1, fsi, bc, extrap, coeffs, _f, _f1, _f2, _f3, _last_ix)
 end
 
 """
@@ -400,7 +402,7 @@ Find the interval index for evaluation point x.
 Returns index i such that xs[i] <= x < xs[i+1].
 Uses binary search for O(log n) complexity.
 """
-function _find_interval(xs::Vector{Float64}, x::Float64)
+@inline function _find_interval(xs::Vector{Float64}, x::Float64)
     n = length(xs)
     if x <= xs[1]
         return 1
@@ -422,13 +424,52 @@ function _find_interval(xs::Vector{Float64}, x::Float64)
 end
 
 """
+Find interval using cached index from previous evaluation.
+Uses sequential search from last position - O(1) for monotonic queries.
+Falls back to binary search if sequential search would be slow.
+"""
+@inline function _find_interval_cached!(xs::Vector{Float64}, x::Float64, last_ix::Base.RefValue{Int})
+    n = length(xs)
+    nmax = n - 1
+
+    # Handle boundary cases
+    @inbounds if x <= xs[1]
+        last_ix[] = 1
+        return 1
+    elseif x >= xs[end]
+        last_ix[] = nmax
+        return nmax
+    end
+
+    ix = last_ix[]
+    # Clamp to valid range
+    ix = max(1, min(ix, nmax))
+
+    # Sequential search from cached position (like GPEC Fortran)
+    @inbounds begin
+        # Search backwards if needed
+        while ix > 1 && x < xs[ix]
+            ix -= 1
+        end
+        # Search forwards if needed
+        while ix < nmax && x >= xs[ix+1]
+            ix += 1
+        end
+    end
+
+    last_ix[] = ix
+    return ix
+end
+
+"""
     evaluate!(spline, x) -> Vector{T}
 
 Evaluate the spline at point x, returning values for all quantities.
 Results stored in spline._f work array (not thread-safe).
+Uses cached interval search for fast sequential evaluation.
 """
 function evaluate!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
-    i = _find_interval(spline.xs, x)
+    i = _find_interval_cached!(spline.xs, x, spline._last_ix)
     t = x - spline.xs[i]
 
     nqty = size(spline.coeffs, 3)
@@ -449,9 +490,10 @@ end
 
 Evaluate first derivative at point x.
 Results stored in work array (not thread-safe).
+Uses cached interval search for fast sequential evaluation.
 """
 function deriv1!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
-    i = _find_interval(spline.xs, x)
+    i = _find_interval_cached!(spline.xs, x, spline._last_ix)
     t = x - spline.xs[i]
 
     nqty = size(spline.coeffs, 3)
@@ -470,9 +512,10 @@ end
 
 Evaluate second derivative at point x.
 Results stored in work array (not thread-safe).
+Uses cached interval search for fast sequential evaluation.
 """
 function deriv2!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
-    i = _find_interval(spline.xs, x)
+    i = _find_interval_cached!(spline.xs, x, spline._last_ix)
     t = x - spline.xs[i]
 
     nqty = size(spline.coeffs, 3)
@@ -494,9 +537,10 @@ For cubic splines, the third derivative is piecewise constant within each
 interval: f'''(x) = 6d, where d is the cubic coefficient.
 
 Results stored in work array (not thread-safe).
+Uses cached interval search for fast sequential evaluation.
 """
 function deriv3!(spline::CubicSpline1D{T,BC}, x::Float64) where {T,BC}
-    i = _find_interval(spline.xs, x)
+    i = _find_interval_cached!(spline.xs, x, spline._last_ix)
 
     nqty = size(spline.coeffs, 3)
     @inbounds for q in 1:nqty
