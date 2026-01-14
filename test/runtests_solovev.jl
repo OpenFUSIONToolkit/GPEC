@@ -57,7 +57,7 @@ end
 
     # Spline types (using new Julia implementations)
     @test isa(sq, JPEC.Spl.CubicSpline1D)
-    @test isa(psi, JPEC.Spl.BicubicWrapper)
+    @test isa(psi, JPEC.Spl.BicubicSpline)
 
     # Domain monotonicity
     @test issorted(sq.xs)

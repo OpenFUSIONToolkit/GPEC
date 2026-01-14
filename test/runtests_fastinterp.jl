@@ -219,8 +219,8 @@
         @test size(empty_cms._out) == (2, 3)
     end
 
-    @testset "BicubicWrapper - Basic Evaluation" begin
-        @info "Testing BicubicWrapper basic evaluation"
+    @testset "BicubicSpline - Basic Evaluation" begin
+        @info "Testing BicubicSpline basic evaluation"
 
         # Create 2D function: f(x,y) = sin(x) * cos(y)
         xs = collect(range(0.0; stop=2π, length=50))
@@ -231,18 +231,18 @@
             fs[ix, iy, 1] = sin(x) * cos(y)
         end
 
-        bw = JPEC.Spl.BicubicWrapper(xs, ys, fs)
+        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
 
         # Evaluate at interior point
         x_test, y_test = π/3, π/4
-        f = JPEC.Spl.evaluate!(bw, x_test, y_test)
+        f = JPEC.Spl.evaluate!(bcs, x_test, y_test)
 
         expected = sin(x_test) * cos(y_test)
         @test abs(f[1] - expected) < 1e-5
     end
 
-    @testset "BicubicWrapper - First Derivatives" begin
-        @info "Testing BicubicWrapper first derivatives"
+    @testset "BicubicSpline - First Derivatives" begin
+        @info "Testing BicubicSpline first derivatives"
 
         xs = collect(range(0.0; stop=2π, length=60))
         ys = collect(range(0.0; stop=2π, length=60))
@@ -252,10 +252,10 @@
             fs[ix, iy, 1] = sin(x) * cos(y)
         end
 
-        bw = JPEC.Spl.BicubicWrapper(xs, ys, fs)
+        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
 
         x_test, y_test = π/3, π/4
-        f, fx, fy = JPEC.Spl.deriv1!(bw, x_test, y_test)
+        f, fx, fy = JPEC.Spl.deriv1!(bcs, x_test, y_test)
 
         # Analytical derivatives
         expected_fx = cos(x_test) * cos(y_test)
@@ -265,8 +265,8 @@
         @test abs(fy[1] - expected_fy) < 1e-3
     end
 
-    @testset "BicubicWrapper - Second Derivatives and Cross-Derivative" begin
-        @info "Testing BicubicWrapper second derivatives including fxy"
+    @testset "BicubicSpline - Second Derivatives and Cross-Derivative" begin
+        @info "Testing BicubicSpline second derivatives including fxy"
 
         xs = collect(range(0.0; stop=2π, length=80))
         ys = collect(range(0.0; stop=2π, length=80))
@@ -276,10 +276,10 @@
             fs[ix, iy, 1] = sin(x) * cos(y)
         end
 
-        bw = JPEC.Spl.BicubicWrapper(xs, ys, fs)
+        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
 
         x_test, y_test = π/3, π/4
-        f, fx, fy, fxx, fxy, fyy = JPEC.Spl.deriv2!(bw, x_test, y_test)
+        f, fx, fy, fxx, fxy, fyy = JPEC.Spl.deriv2!(bcs, x_test, y_test)
 
         # Analytical second derivatives
         expected_fxx = -sin(x_test) * cos(y_test)
@@ -291,13 +291,13 @@
         @test abs(fxy[1] - expected_fxy) < 1e-2
     end
 
-    @testset "BicubicWrapper - Empty Constructor" begin
-        @info "Testing BicubicWrapper empty constructor"
+    @testset "BicubicSpline - Empty Constructor" begin
+        @info "Testing BicubicSpline empty constructor"
 
-        empty_bw = JPEC.Spl.empty_BicubicWrapper()
-        @test length(empty_bw.xs) == 2
-        @test length(empty_bw.ys) == 2
-        @test empty_bw.nqty == 1
+        empty_bcs = JPEC.Spl.empty_BicubicSpline()
+        @test length(empty_bcs.xs) == 2
+        @test length(empty_bcs.ys) == 2
+        @test empty_bcs.nqty == 1
     end
 
     @testset "FourierModeSplines - Basic Evaluation" begin

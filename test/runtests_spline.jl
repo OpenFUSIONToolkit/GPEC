@@ -80,7 +80,7 @@
         @test abs(f1_start[1] - f1_end[1]) < 1e-10
     end
 
-    @testset "BicubicWrapper" begin
+    @testset "BicubicSpline" begin
         # Test bicubic spline setup and evaluation for a 2D function
         xs = collect(range(0.0; stop=2 * Float64(pi), length=50))
         ys = collect(range(0.0; stop=2 * Float64(pi), length=50))
@@ -93,16 +93,16 @@
             fvals[ix, iy, 2] = f2(x, y)
         end
 
-        bcspline = JPEC.Spl.BicubicWrapper(xs, ys, fvals)
+        bcspline = JPEC.Spl.BicubicSpline(xs, ys, fvals; bctypex="extrap", bctypey="extrap")
 
         # Test evaluation at interior points
         x_test, y_test = Float64(pi) / 2, Float64(pi) / 4
-        f = JPEC.Spl.bicube_eval!(bcspline, x_test, y_test)
+        f = JPEC.Spl.evaluate!(bcspline, x_test, y_test)
         @test abs(f[1] - f1(x_test, y_test)) < 1e-4
         @test abs(f[2] - f2(x_test, y_test)) < 1e-4
 
         # Test first derivatives
-        f, fx, fy = JPEC.Spl.bicube_deriv1!(bcspline, x_test, y_test)
+        f, fx, fy = JPEC.Spl.deriv1!(bcspline, x_test, y_test)
         @test abs(fx[1] - cos(x_test) * cos(y_test)) < 1e-3
         @test abs(fy[1] + sin(x_test) * sin(y_test)) < 1e-3
     end
@@ -141,55 +141,17 @@ end
     empty_cs_c64 = JPEC.Spl.empty_CubicSpline1D(ComplexF64)
     @test typeof(empty_cs_c64) <: JPEC.Spl.CubicSpline1D
 
-    # Test empty BicubicWrapper
-    empty_bw = JPEC.Spl.empty_BicubicWrapper()
-    @test length(empty_bw.xs) >= 2
-    @test length(empty_bw.ys) >= 2
-    @test typeof(empty_bw) <: JPEC.Spl.BicubicWrapper
+    # Test empty BicubicSpline
+    empty_bcs = JPEC.Spl.empty_BicubicSpline()
+    @test length(empty_bcs.xs) >= 2
+    @test length(empty_bcs.ys) >= 2
+    @test typeof(empty_bcs) <: JPEC.Spl.BicubicSpline
 
     # Test empty FourierModeSplines
     empty_fms = JPEC.Spl.empty_FourierModeSplines()
     @test typeof(empty_fms) <: JPEC.Spl.FourierModeSplines
 
-    # Test empty RZPhiSplines
-    empty_rzphi = JPEC.Spl.empty_RZPhiSplines()
-    @test typeof(empty_rzphi) <: JPEC.Spl.RZPhiSplines
-
     # Test empty EqfunSplines
     empty_eqfun = JPEC.Spl.empty_EqfunSplines()
     @test typeof(empty_eqfun) == JPEC.Spl.EqfunSplines
-end
-
-@testset "RZPhiSplines" begin
-    @info "Testing RZPhiSplines for on-grid psi evaluation"
-
-    # Create test data on a grid
-    npsi, ntheta, nqty = 11, 33, 4
-    xs = collect(range(0.0; stop=1.0, length=npsi))
-    ys = collect(range(0.0; stop=2 * Float64(pi), length=ntheta))  # endpoint-inclusive
-
-    # Test function: R(psi, theta) = 1 + 0.3*psi*cos(theta)
-    fs = zeros(Float64, npsi, ntheta, nqty)
-    for (ipsi, psi) in enumerate(xs), (itheta, theta) in enumerate(ys)
-        fs[ipsi, itheta, 1] = 1.0 + 0.3 * psi * cos(theta)
-        fs[ipsi, itheta, 2] = 0.1 * psi * sin(theta)
-        fs[ipsi, itheta, 3] = theta / (2 * Float64(pi))
-        fs[ipsi, itheta, 4] = psi
-    end
-
-    rzphi = JPEC.Spl.RZPhiSplines(xs, ys, fs)
-
-    # Test evaluation at grid points
-    ipsi_test = 6
-    psi_test = xs[ipsi_test]
-    theta_test = Float64(pi) / 4
-
-    f = JPEC.Spl.evaluate!(rzphi, psi_test, theta_test)
-    expected_R = 1.0 + 0.3 * psi_test * cos(theta_test)
-    @test abs(f[1] - expected_R) < 1e-6
-
-    # Test first derivatives
-    f, fx, fy = JPEC.Spl.deriv1!(rzphi, psi_test, theta_test)
-    expected_dR_dtheta = -0.3 * psi_test * sin(theta_test)
-    @test abs(fy[1] - expected_dR_dtheta) < 1e-4
 end
