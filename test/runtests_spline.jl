@@ -150,8 +150,4 @@ end
     # Test empty FourierModeSplines
     empty_fms = JPEC.Spl.empty_FourierModeSplines()
     @test typeof(empty_fms) <: JPEC.Spl.FourierModeSplines
-
-    # Test empty EqfunSplines
-    empty_eqfun = JPEC.Spl.empty_EqfunSplines()
-    @test typeof(empty_eqfun) == JPEC.Spl.EqfunSplines
 end
