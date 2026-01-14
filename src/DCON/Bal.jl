@@ -117,7 +117,6 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
 
 
     TOLERANCE = 1e-5
-    MINIMUM_THETA = 1.0
     MINIMUM_STEP = 1e-10
 
     # Determine integration limits
@@ -162,10 +161,7 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
 
             return coefficient_1, coefficient_2
         else
-            # retcode=Success with early termination is normal (ODE reached stopping condition)
-            if ode_solution.retcode != ReturnCode.Success
-                @warn "ODE integration failed for surface ipsi = $flux_surface_index (retcode: $(ode_solution.retcode))"
-            end
+            @warn "ODE integration failed for surface ipsi = $flux_surface_index (retcode: $(ode_solution.retcode))"
             return NaN, NaN
         end
     catch e
@@ -219,6 +215,10 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     kappas = zeros(mtheta + 1)
     fx_psi = zeros(4, mtheta + 1)  # Store fx values (4 components) for each theta point
 
+    # Pre-allocate basis vector matrices (reused each iteration)
+    v = zeros(3, 3)  # contravariant basis vectors
+    w = zeros(3, 3)  # covariant basis vectors
+
     # loop over poloidal angle using direct array access at grid points
     ipsi = flux_surface_index
     for itheta in 1:(mtheta+1)
@@ -243,7 +243,6 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         jac[itheta] = f4
 
         # contravariant basis vectors v^i
-        v = zeros(3, 3)
         v[1, 1] = fx1 / (2 * rfac * jac[itheta])
         v[1, 2] = fx2 * 2pi * rfac / jac[itheta]
         v[1, 3] = fx3 * r / jac[itheta]
@@ -253,7 +252,6 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         v[3, 3] = 2pi * r / jac[itheta]
 
         # covariant basis vectors w_i (direct method)
-        w = zeros(3, 3)
         w[1, 1] = (1 + fy2) * (2pi)^2 * rfac * r / jac[itheta]
         w[1, 2] = -fy1 * pi * r / (rfac * jac[itheta])
         w[2, 1] = -fx2 * (2pi)^2 * r * rfac / jac[itheta]
