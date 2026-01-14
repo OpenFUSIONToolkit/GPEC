@@ -10,12 +10,6 @@ JPEC (Julia Perturbed Equilibrium Code) is a work-in-progress Julia port of the 
 
 ### Building and Testing
 
-**First-time setup:** JPEC uses packages from the FuseRegistry. Add it before instantiating:
-```julia
-using Pkg
-Pkg.Registry.add(RegistrySpec(url="https://github.com/ProjectTorreyPines/FuseRegistry.jl.git"))
-```
-
 ```bash
 # Run all tests (includes building Fortran)
 julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.build(); Pkg.instantiate(); include("test/runtests.jl")'
