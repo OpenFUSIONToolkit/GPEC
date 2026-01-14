@@ -253,7 +253,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
         out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
         out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
-        # BicubicWrapper stores fs as 3D array (nx × ny × nqty)
+        # BicubicSpline stores fs as 3D array (nx × ny × nqty)
         out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, :, 1]
         out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, :, 2]
         out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, :, 3]

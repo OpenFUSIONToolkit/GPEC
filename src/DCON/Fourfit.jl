@@ -84,19 +84,19 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             r_coord_sq = rzphi.fs[ipsi, jtheta, 1]
             eta_offset = rzphi.fs[ipsi, jtheta, 2]
             jac = rzphi.fs[ipsi, jtheta, 4]
-            jac1 = rzphi.fs_psi[ipsi, jtheta, 4] # ∂J/∂ψ
+            jac1 = rzphi.fsx[ipsi, jtheta, 4] # ∂J/∂ψ
 
             rfac = sqrt(r_coord_sq)
             eta = 2π * (theta_norm + eta_offset)
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
             # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
-            fx1 = rzphi.fs_psi[ipsi, jtheta, 1]
-            fx2 = rzphi.fs_psi[ipsi, jtheta, 2]
-            fx3 = rzphi.fs_psi[ipsi, jtheta, 3]
-            fy1 = rzphi.fs_y[ipsi, jtheta, 1]
-            fy2 = rzphi.fs_y[ipsi, jtheta, 2]
-            fy3 = rzphi.fs_y[ipsi, jtheta, 3]
+            fx1 = rzphi.fsx[ipsi, jtheta, 1]
+            fx2 = rzphi.fsx[ipsi, jtheta, 2]
+            fx3 = rzphi.fsx[ipsi, jtheta, 3]
+            fy1 = rzphi.fsy[ipsi, jtheta, 1]
+            fy2 = rzphi.fsy[ipsi, jtheta, 2]
+            fy3 = rzphi.fsy[ipsi, jtheta, 3]
 
             v[1, 1] = fx1 / (2.0 * rfac * jac)
             v[1, 2] = fx2 * 2π * rfac / jac

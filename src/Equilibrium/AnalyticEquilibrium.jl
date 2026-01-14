@@ -202,7 +202,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    rz_in = Spl.BicubicWrapper(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes; periodic_y=true)
+    rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes;
+        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
 
     return InverseRunInput(equil_input, sq_in, rz_in, lar_r0, 0.0, psio)
 
@@ -277,7 +278,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
             psifs[ir, iz, 1] = psio - psifac * (efac * (r[ir] * z[iz])^2 + (r[ir]^2 - r0^2)^2 / 4)
         end
     end
-    psi_in = Spl.BicubicWrapper(r, z, psifs; periodic_y=false)
+    psi_in = Spl.BicubicSpline(r, z, psifs; bctypex="extrap", bctypey="extrap")
 
     # Print out equilibrium info
     println("Generating Solovev equilibrium inputs with:")

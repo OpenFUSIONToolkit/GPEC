@@ -280,17 +280,17 @@ raw equilibrium data and preparing the initial splines.
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
           * 1D profiles are represented by `CubicSpline1D`
-          * 2D flux surfaces by `BicubicWrapper`
+          * 2D flux surfaces by `BicubicSpline`
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput{S<:Spl.CubicSpline1D,B<:Spl.BicubicWrapper}
+mutable struct DirectRunInput{S<:Spl.CubicSpline1D,B<:Spl.BicubicSpline}
     config::EquilibriumConfig
     sq_in::S       # 1D profile spline (CubicSpline1D)
-    psi_in::B      # 2D flux spline (BicubicWrapper)
+    psi_in::B      # 2D flux spline (BicubicSpline)
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
@@ -307,12 +307,12 @@ A container struct for inputs to the `inverse_run` function.
 
   - `config::EquilibriumConfig` - The equilibrium configuration object
   - `sq_in::CubicSpline1D` - 1D spline input profile (F*Bt, Pressure, q)
-  - `rz_in::BicubicWrapper` - 2D bicubic spline for (R,Z) geometry
+  - `rz_in::BicubicSpline` - 2D bicubic spline for (R,Z) geometry
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput{S<:Spl.CubicSpline1D,B<:Spl.BicubicWrapper}
+mutable struct InverseRunInput{S<:Spl.CubicSpline1D,B<:Spl.BicubicSpline}
     config::EquilibriumConfig
     sq_in::S   # 1D spline input profile (e.g. F*Bt, Pressure, q)
     rz_in::B   # 2D bicubic spline input for (R,Z) geometry

@@ -32,9 +32,9 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             f1 = rzphi.fs[ipsi, itheta, 1]
             f2 = rzphi.fs[ipsi, itheta, 2]
             jac = rzphi.fs[ipsi, itheta, 4]
-            fy1 = rzphi.fs_y[ipsi, itheta, 1]
-            fy2 = rzphi.fs_y[ipsi, itheta, 2]
-            fy3 = rzphi.fs_y[ipsi, itheta, 3]
+            fy1 = rzphi.fsy[ipsi, itheta, 1]
+            fy2 = rzphi.fsy[ipsi, itheta, 2]
+            fy3 = rzphi.fsy[ipsi, itheta, 3]
 
             rfac = sqrt(f1)
             eta = 2π * (theta + f2)

@@ -113,7 +113,7 @@ function read_efit(config::EquilibriumConfig)
     zmin, zmax = extrema(z_grid)
 
     psi_proc_3d = reshape(psi_proc, (nw, nh, 1))
-    psi_in = Spl.BicubicWrapper(collect(r_grid), collect(z_grid), psi_proc_3d; periodic_y=false)
+    psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d; bctypex="extrap", bctypey="extrap")
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
@@ -254,7 +254,7 @@ function read_chease2(config::EquilibriumConfig)
 
 
     # Setup bicubic spline with periodic boundary conditions
-    rz_in = Spl.BicubicWrapper(xs, ys, fs; periodic_y=true)
+    rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
@@ -391,7 +391,7 @@ function read_chease(config::EquilibriumConfig)
         ys = range(0, 2π; length=mtau) |> collect
 
         # Setup bicubic spline with periodic boundary conditions
-        rz_in = Spl.BicubicWrapper(xs, ys, fs; periodic_y=true)
+        rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
 
         if diagnostics
             # --- Print first 5 and last 5 entries of each slice ---

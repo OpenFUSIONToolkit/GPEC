@@ -227,13 +227,13 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         f1 = rzphi.fs[ipsi, ith, 1]
         f2 = rzphi.fs[ipsi, ith, 2]
         f4 = rzphi.fs[ipsi, ith, 4]
-        fx1 = rzphi.fs_psi[ipsi, ith, 1]
-        fx2 = rzphi.fs_psi[ipsi, ith, 2]
-        fx3 = rzphi.fs_psi[ipsi, ith, 3]
-        fx4 = rzphi.fs_psi[ipsi, ith, 4]
-        fy1 = rzphi.fs_y[ipsi, ith, 1]
-        fy2 = rzphi.fs_y[ipsi, ith, 2]
-        fy3 = rzphi.fs_y[ipsi, ith, 3]
+        fx1 = rzphi.fsx[ipsi, ith, 1]
+        fx2 = rzphi.fsx[ipsi, ith, 2]
+        fx3 = rzphi.fsx[ipsi, ith, 3]
+        fx4 = rzphi.fsx[ipsi, ith, 4]
+        fy1 = rzphi.fsy[ipsi, ith, 1]
+        fy2 = rzphi.fsy[ipsi, ith, 2]
+        fy3 = rzphi.fsy[ipsi, ith, 3]
 
         fx_psi[:, ith] .= (fx1, fx2, fx3, fx4)  # Store fx for later use
 

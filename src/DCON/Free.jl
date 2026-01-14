@@ -169,7 +169,7 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     # Compute output
     qa = Spl.spline_eval!(equil.sq, psifac)[4]
     for itheta in 1:(equil.config.control.mtheta+1)
-        f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
+        f = Spl.evaluate!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
         angle[itheta] = 2π * (theta_norm[itheta] + f[2])
         delta[itheta] = -f[3] / qa

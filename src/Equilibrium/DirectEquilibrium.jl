@@ -29,7 +29,7 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams{B<:Spl.BicubicWrapper,S<:Spl.CubicSpline1D}
+struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:Spl.CubicSpline1D}
     ro::Float64
     zo::Float64
     psi_in::B
@@ -63,22 +63,22 @@ function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
-    psi_in::Spl.BicubicWrapper,
+    psi_in::Spl.BicubicSpline,
     sq_in::Spl.CubicSpline1D,
     psio::Float64;
     derivs::Int=0
 )
     # Evaluate 2D spline for psi(r,z) and its derivatives
     if derivs == 0
-        f_psi = Spl.bicube_eval!(psi_in, r, z)
+        f_psi = Spl.evaluate!(psi_in, r, z)
         bf_out.psi = f_psi[1]
     elseif derivs == 1
-        f_psi, fx_psi, fy_psi = Spl.bicube_deriv1!(psi_in, r, z)
+        f_psi, fx_psi, fy_psi = Spl.deriv1!(psi_in, r, z)
         bf_out.psi = f_psi[1]
         bf_out.psir = fx_psi[1]
         bf_out.psiz = fy_psi[1]
     else # derivs >= 2
-        f_psi, fx_psi, fy_psi, fxx_psi, fxy_psi, fyy_psi = Spl.bicube_deriv2!(psi_in, r, z)
+        f_psi, fx_psi, fy_psi, fxx_psi, fxy_psi, fyy_psi = Spl.deriv2!(psi_in, r, z)
         bf_out.psi = f_psi[1]
         bf_out.psir = fx_psi[1]
         bf_out.psiz = fy_psi[1]
@@ -189,7 +189,7 @@ function direct_position!(raw_profile::DirectRunInput)
     y_coords = Vector(raw_profile.psi_in.ys)
     new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = Spl.BicubicWrapper(x_coords, y_coords, new_psi_fs; periodic_y=false)
+    raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs; bctypex="extrap", bctypey="extrap")
 
     # Helper function for robust Newton-Raphson search with restarts
     function find_separatrix_crossing(start_r, end_r, label)
@@ -501,9 +501,10 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq = Spl.CubicSpline1D(psi_nodes, sq_nodes; bctype="extrap")
     end
 
-    # Fit the geometric spline `rzphi`. Uses 1D periodic splines in theta per flux surface.
-    # This works because rzphi is only ever evaluated at psi grid points.
-    rzphi = Spl.RZPhiSplines(psi_nodes, collect(theta_nodes), rzphi_nodes)
+    # Fit the geometric spline `rzphi` using bicubic spline with extrap/periodic BCs.
+    # Uses endpoint_inclusive_y=true since theta_nodes includes both 0 and 1.
+    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes;
+        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
@@ -515,8 +516,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         f_val = fsq[1]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            # Use indexed evaluation for on-grid access (faster than spline evaluation)
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, ipsi, itheta)
+            # Evaluate at grid point coordinates
+            f, fx, fy = Spl.deriv1!(rzphi, psi_nodes[ipsi], theta_norm)
             rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)

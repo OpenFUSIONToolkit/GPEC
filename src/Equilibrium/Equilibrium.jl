@@ -75,7 +75,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         xs = 0.0:0.1:1.0
         ys = 0.0:0.2:1.0
         fs = [sin(2π * x) * cos(2π * y) for x in xs, y in ys, _ in 1:1]
-        bicube_ex = Spl.BicubicWrapper(collect(xs), collect(ys), fs; periodic_y=false)
+        bicube_ex = Spl.BicubicSpline(collect(xs), collect(ys), fs; bctypex="extrap", bctypey="extrap")
         #println(bicube_ex)
         eq_input = InverseRunInput(
             eq_config,
@@ -128,7 +128,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         it = 0
         while true
             it += 1
-            f, _, fy = Spl.bicube_deriv1!(rzphi, edge_idx, theta)
+            f, _, fy = Spl.deriv1!(rzphi, rzphi.xs[edge_idx], theta)
             eta = theta + f[2] - eta0
             eta_theta = 1 + fy[2]
             dtheta = -eta / eta_theta
@@ -137,7 +137,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
                 break
             end
         end
-        f = Spl.bicube_eval!(rzphi, edge_idx, theta)
+        f = Spl.evaluate!(rzphi, rzphi.xs[edge_idx], theta)
         rsep[iside] = pe.ro + sqrt(f[1]) * cos(2π * (theta + f[2]))
         eta0 = 0.5
         idx = findmin(abs.(vector .- eta0))[2]
@@ -160,7 +160,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         iter = 0
         while iter < max_iter
             iter += 1
-            f, fx, fy, fxx, fxy, fyy = Spl.bicube_deriv2!(rzphi, edge_idx, theta)
+            f, fx, fy, fxx, fxy, fyy = Spl.deriv2!(rzphi, rzphi.xs[edge_idx], theta)
             r2, r2y, r2yy = f[1], fy[1], fyy[1]
             eta, eta1, eta2 = f[2], fy[2], fyy[2]
 
@@ -238,7 +238,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
 
     # Direct array access at edge flux surface grid points
     edge_fs = @view rzphi.fs[end, :, :]
-    edge_fy = @view rzphi.fs_y[end, :, :]
+    edge_fy = @view rzphi.fsy[end, :, :]
     for itheta in 0:mtheta
         jac = edge_fs[itheta+1, 4]
         chi1 = 2π * psio / jac
@@ -429,10 +429,10 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             f1 = rzphi.fs[ipsi, itheta, 1]
             f2 = rzphi.fs[ipsi, itheta, 2]
             f4 = rzphi.fs[ipsi, itheta, 4]
-            fy1 = rzphi.fs_y[ipsi, itheta, 1]
-            fy2 = rzphi.fs_y[ipsi, itheta, 2]
-            fx1 = rzphi.fs_psi[ipsi, itheta, 1]
-            fx2 = rzphi.fs_psi[ipsi, itheta, 2]
+            fy1 = rzphi.fsy[ipsi, itheta, 1]
+            fy2 = rzphi.fsy[ipsi, itheta, 2]
+            fx1 = rzphi.fsx[ipsi, itheta, 1]
+            fx2 = rzphi.fsx[ipsi, itheta, 2]
 
             flux_fs[ipsi, itheta, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
             flux_fs[ipsi, itheta, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
@@ -441,11 +441,12 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
-    flux = Spl.BicubicWrapper(collect(rzphi.xs), collect(rzphi.ys), flux_fs; periodic_y=true)
+    flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs;
+        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
     # Compute flux derivatives at all grid points for diagnostics
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            _, flux_fx, flux_fy = Spl.bicube_deriv1!(flux, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
+            _, flux_fx, flux_fy = Spl.deriv1!(flux, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
             flux_fsx[ipsi+1, itheta+1, :] .= flux_fx
             flux_fsy[ipsi+1, itheta+1, :] .= flux_fy
         end
