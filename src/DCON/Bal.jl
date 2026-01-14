@@ -221,46 +221,45 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # loop over poloidal angle using direct array access at grid points
     ipsi = flux_surface_index
-    for itheta in 0:mtheta
-        ith = itheta + 1
+    for itheta in 1:(mtheta+1)
         # Direct array access for values and derivatives
-        f1 = rzphi.fs[ipsi, ith, 1]
-        f2 = rzphi.fs[ipsi, ith, 2]
-        f4 = rzphi.fs[ipsi, ith, 4]
-        fx1 = rzphi.fsx[ipsi, ith, 1]
-        fx2 = rzphi.fsx[ipsi, ith, 2]
-        fx3 = rzphi.fsx[ipsi, ith, 3]
-        fx4 = rzphi.fsx[ipsi, ith, 4]
-        fy1 = rzphi.fsy[ipsi, ith, 1]
-        fy2 = rzphi.fsy[ipsi, ith, 2]
-        fy3 = rzphi.fsy[ipsi, ith, 3]
+        f1 = rzphi.fs[ipsi, itheta, 1]
+        f2 = rzphi.fs[ipsi, itheta, 2]
+        f4 = rzphi.fs[ipsi, itheta, 4]
+        fx1 = rzphi.fsx[ipsi, itheta, 1]
+        fx2 = rzphi.fsx[ipsi, itheta, 2]
+        fx3 = rzphi.fsx[ipsi, itheta, 3]
+        fx4 = rzphi.fsx[ipsi, itheta, 4]
+        fy1 = rzphi.fsy[ipsi, itheta, 1]
+        fy2 = rzphi.fsy[ipsi, itheta, 2]
+        fy3 = rzphi.fsy[ipsi, itheta, 3]
 
-        fx_psi[:, ith] .= (fx1, fx2, fx3, fx4)  # Store fx for later use
+        fx_psi[:, itheta] .= (fx1, fx2, fx3, fx4)  # Store fx for later use
 
-        theta = rzphi.ys[ith]
+        theta = rzphi.ys[itheta]
         rfac = sqrt(f1)
         eta = 2pi * (theta + f2)
         r = plasma_eq.ro + rfac * cos(eta)
-        jac[ith] = f4
+        jac[itheta] = f4
 
         # contravariant basis vectors v^i
         v = zeros(3, 3)
-        v[1, 1] = fx1 / (2 * rfac * jac[ith])
-        v[1, 2] = fx2 * 2pi * rfac / jac[ith]
-        v[1, 3] = fx3 * r / jac[ith]
-        v[2, 1] = fy1 / (2 * rfac * jac[ith])
-        v[2, 2] = (1 + fy2) * 2pi * rfac / jac[ith]
-        v[2, 3] = fy3 * r / jac[ith]
-        v[3, 3] = 2pi * r / jac[ith]
+        v[1, 1] = fx1 / (2 * rfac * jac[itheta])
+        v[1, 2] = fx2 * 2pi * rfac / jac[itheta]
+        v[1, 3] = fx3 * r / jac[itheta]
+        v[2, 1] = fy1 / (2 * rfac * jac[itheta])
+        v[2, 2] = (1 + fy2) * 2pi * rfac / jac[itheta]
+        v[2, 3] = fy3 * r / jac[itheta]
+        v[3, 3] = 2pi * r / jac[itheta]
 
         # covariant basis vectors w_i (direct method)
         w = zeros(3, 3)
-        w[1, 1] = (1 + fy2) * (2pi)^2 * rfac * r / jac[ith]
-        w[1, 2] = -fy1 * pi * r / (rfac * jac[ith])
-        w[2, 1] = -fx2 * (2pi)^2 * r * rfac / jac[ith]
-        w[2, 2] = fx1 * pi * r / (rfac * jac[ith])
-        w[3, 1] = (fx2 * fy3 - fx3 * (1 + fy2)) * 2pi * r * rfac / jac[ith]
-        w[3, 2] = (fx3 * fy1 - fx1 * fy3) * r / (2 * rfac * jac[ith])
+        w[1, 1] = (1 + fy2) * (2pi)^2 * rfac * r / jac[itheta]
+        w[1, 2] = -fy1 * pi * r / (rfac * jac[itheta])
+        w[2, 1] = -fx2 * (2pi)^2 * r * rfac / jac[itheta]
+        w[2, 2] = fx1 * pi * r / (rfac * jac[itheta])
+        w[3, 1] = (fx2 * fy3 - fx3 * (1 + fy2)) * 2pi * r * rfac / jac[itheta]
+        w[3, 2] = (fx3 * fy1 - fx1 * fy3) * r / (2 * rfac * jac[itheta])
         w[3, 3] = 1 / (2pi * r)
 
         # store physical quantities
@@ -269,17 +268,17 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         e_phi = @view v[3, :]
 
         B_vec = (e_theta + q * e_phi) * chi_prime
-        b1[ith] = dot(B_vec, grad_psi)
-        bsq[ith] = dot(B_vec, B_vec)
+        b1[itheta] = dot(B_vec, grad_psi)
+        bsq[itheta] = dot(B_vec, B_vec)
 
         grad_alpha = @view w[1, :]
         grad_theta = @view w[2, :]
         grad_phi = @view w[3, :]
         gtheta = grad_phi - q * grad_theta
 
-        dbdb0[ith] = dot(grad_alpha, grad_alpha) * q_derivative^2
-        dbdb1[ith] = -2 * dot(gtheta, grad_alpha) * q_derivative
-        dbdb2[ith] = dot(gtheta, gtheta)
+        dbdb0[itheta] = dot(grad_alpha, grad_alpha) * q_derivative^2
+        dbdb1[itheta] = -2 * dot(gtheta, grad_alpha) * q_derivative
+        dbdb2[itheta] = dot(gtheta, gtheta)
     end
 
     # compute curvature terms
@@ -307,16 +306,16 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # Mercier criterion calculation
     spl1_fs = zeros(mtheta + 1, 4)
-    for itheta in 0:mtheta
+    for itheta in 1:(mtheta+1)
         c0 = zeros(2, 2)
         c0[1, 1] = 0.5
-        c0[1, 2] = 1 / ode_coefficient_spline.fs[ith, 1]
-        c0[2, 1] = -ode_coefficient_spline.fs[ith, 4]
+        c0[1, 2] = 1 / ode_coefficient_spline.fs[itheta, 1]
+        c0[2, 1] = -ode_coefficient_spline.fs[itheta, 4]
         c0[2, 2] = -0.5
-        spl1_fs[ith, 1] = c0[1, 1] + c0[1, 2]*bg_fs[ith, 5]
-        spl1_fs[ith, 2] = c0[1, 2]
-        spl1_fs[ith, 3] = c0[2, 1] + (c0[2, 2]-c0[1, 1]-c0[1, 2]*bg_fs[ith, 5])*bg_fs[ith, 5]
-        spl1_fs[ith, 4] = -spl1_fs[ith, 1]
+        spl1_fs[itheta, 1] = c0[1, 1] + c0[1, 2]*bg_fs[itheta, 5]
+        spl1_fs[itheta, 2] = c0[1, 2]
+        spl1_fs[itheta, 3] = c0[2, 1] + (c0[2, 2]-c0[1, 1]-c0[1, 2]*bg_fs[itheta, 5])*bg_fs[itheta, 5]
+        spl1_fs[itheta, 4] = -spl1_fs[itheta, 1]
     end
 
     spl1 = Spl.CubicSpline1D(theta_grid, spl1_fs; bctype="periodic")
@@ -345,12 +344,12 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     # This follows the structure from bal_prep.f lines 300-340
     spl2_fs = zeros(mtheta + 1, 4)
 
-    for itheta in 0:mtheta
+    for itheta in 1:(mtheta+1)
         # Matrix product: (spl1 - alpha*I) * v0
-        spl2_fs[ith, 1] = (spl1.fs[ith, 1] - alpha) * v0[1, 1] + spl1.fs[ith, 2] * v0[2, 1]
-        spl2_fs[ith, 2] = spl1.fs[ith, 3] * v0[1, 1] + (spl1.fs[ith, 4] - alpha) * v0[2, 1]
-        spl2_fs[ith, 3] = (spl1.fs[ith, 1] + alpha) * v0[1, 2] + spl1.fs[ith, 2] * v0[2, 2]
-        spl2_fs[ith, 4] = spl1.fs[ith, 3] * v0[1, 2] + (spl1.fs[ith, 4] + alpha) * v0[2, 2]
+        spl2_fs[itheta, 1] = (spl1.fs[itheta, 1] - alpha) * v0[1, 1] + spl1.fs[itheta, 2] * v0[2, 1]
+        spl2_fs[itheta, 2] = spl1.fs[itheta, 3] * v0[1, 1] + (spl1.fs[itheta, 4] - alpha) * v0[2, 1]
+        spl2_fs[itheta, 3] = (spl1.fs[itheta, 1] + alpha) * v0[1, 2] + spl1.fs[itheta, 2] * v0[2, 2]
+        spl2_fs[itheta, 4] = spl1.fs[itheta, 3] * v0[1, 2] + (spl1.fs[itheta, 4] + alpha) * v0[2, 2]
     end
 
     spl2 = Spl.CubicSpline1D(theta_grid, spl2_fs; bctype="periodic")
@@ -363,31 +362,30 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     # Compute derivatives for second-order terms
     spl3_fs = zeros(mtheta + 1, 4)
 
-    for itheta in 0:mtheta
+    for itheta in 1:(mtheta+1)
         # d1 matrix elements (first-order corrections to d matrix)
-        fexp = -spl1.fs[ith, 2] * ode_coefficient_spline.fs[ith, 2] * 2
-        d1_11 = fexp * bg_fs[ith, 5]
+        fexp = -spl1.fs[itheta, 2] * ode_coefficient_spline.fs[itheta, 2] * 2
+        d1_11 = fexp * bg_fs[itheta, 5]
         d1_12 = fexp
-        d1_21 = -fexp * bg_fs[ith, 5]^2
+        d1_21 = -fexp * bg_fs[itheta, 5]^2
         d1_22 = -d1_11
 
         # Now use in spl3_fs calculation
-        spl3_fs[ith, 1] = (spl1.fs1[ith, 1] + 1 - alpha) * spl2.fs[ith, 1] +
-                          spl1.fs[ith, 2] * spl2.fs[ith, 2] +
-                          d1_11 * v0[1, 1] + d1_12 * v0[2, 1]
+        spl3_fs[itheta, 1] = (spl1.fs1[itheta, 1] + 1 - alpha) * spl2.fs[itheta, 1] +
+                             spl1.fs[itheta, 2] * spl2.fs[itheta, 2] +
+                             d1_11 * v0[1, 1] + d1_12 * v0[2, 1]
 
+        spl3_fs[itheta, 2] = spl1.fs[itheta, 3] * spl2.fs[itheta, 1] +
+                             (spl1.fs[itheta, 4] + 1 - alpha) * spl2.fs[itheta, 2] +
+                             d1_21 * v0[1, 1] + d1_22 * v0[2, 1]
 
-        spl3_fs[ith, 2] = spl1.fs[ith, 3] * spl2.fs[ith, 1] +
-                          (spl1.fs[ith, 4] + 1 - alpha) * spl2.fs[ith, 2] +
-                          d1_21 * v0[1, 1] + d1_22 * v0[2, 1]
+        spl3_fs[itheta, 3] = (spl1.fs[itheta, 1] + 1 + alpha) * spl2.fs[itheta, 3] +
+                             spl1.fs[itheta, 2] * spl2.fs[itheta, 4] +
+                             d1_11 * v0[1, 2] + d1_12 * v0[2, 2]
 
-        spl3_fs[ith, 3] = (spl1.fs[ith, 1] + 1 + alpha) * spl2.fs[ith, 3] +
-                          spl1.fs[ith, 2] * spl2.fs[ith, 4] +
-                          d1_11 * v0[1, 2] + d1_12 * v0[2, 2]
-
-        spl3_fs[ith, 4] = spl1.fs[ith, 3] * spl2.fs[ith, 3] +
-                          (spl1.fs[ith, 4] + 1 + alpha) * spl2.fs[ith, 4] +
-                          d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
+        spl3_fs[itheta, 4] = spl1.fs[itheta, 3] * spl2.fs[itheta, 3] +
+                             (spl1.fs[itheta, 4] + 1 + alpha) * spl2.fs[itheta, 4] +
+                             d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
     end
 
     spl3 = Spl.CubicSpline1D(theta_grid, spl3_fs; bctype="periodic")
