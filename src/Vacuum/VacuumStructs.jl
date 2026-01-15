@@ -248,6 +248,10 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
             z_wall[i] = z_plasma[i] + a * r_minor * sin(alph)
         end
 
+        if any(x_wall .<= centerstack_min + eps(Float64))
+            @warn "Conformal wall with a=$a would cross R=0 axis; forcing minimum wall R to $(@sprintf "%.2e" centerstack_min) m to avoid unphysical geometry."
+        end
+
     elseif wall_settings.shape == "elliptical"
         @info "Calculating elliptical wall shape with a = $((@sprintf "%.2e" a)) m."
         wcentr = r_major
@@ -322,7 +326,11 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall)
     end
 
-    # Trigonometric basis arrays
+    if any(x_wall .<= 0.0) && !nowall
+        # to add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
+        error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
+    end
+
     return WallGeometry(
         nowall,
         is_closed_toroidal,
