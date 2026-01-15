@@ -115,7 +115,7 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
     control::DconControl)
 
-    
+
     TOLERANCE = 1e-5
     MINIMUM_THETA = 1.0
     MINIMUM_STEP = 1e-10

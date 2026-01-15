@@ -776,12 +776,31 @@ end
 
 
 function sing_get_f_det(psival::Float64)
-    # Placeholder implementation - replace with actual determinant calculation
-    # based on the singular surface evaluation at psi = psival
-    return complex(sin(psival), cos(psival))  # Example complex function
+    # Placeholder implementation - creates a determinant field with singularities
+    # for testing purposes. This should be replaced with actual determinant calculation
+    # based on the singular surface evaluation at psi = psival.
+    #
+    # Current behavior: creates a determinant field with minima near 0.3, 0.5, and 0.7
+    # to simulate realistic singular surface structure for adaptive refinement testing.
+
+    # Create multiple smooth valleys to simulate plural resonances
+    # Valley 1: centered at 0.3
+    val1 = 0.05 * (psival - 0.3)^2 + 0.01 * complex(cos(2π * psival), sin(2π * psival))
+
+    # Valley 2: centered at 0.5 (the main singularity)
+    val2 = 0.02 * (psival - 0.5)^2 + 0.01 * complex(sin(4π * psival), cos(4π * psival))
+
+    # Valley 3: centered at 0.7
+    val3 = 0.08 * (psival - 0.7)^2 + 0.01 * complex(sin(π * psival), cos(π * psival))
+
+    # Combine with base oscillation
+    base = 1.0 + 0.3 * complex(sin(6π * psival), cos(6π * psival))
+
+    # Return the combined determinant field
+    return base + val1 + val2 + val3
 end
 
-#TODO: We probably don't want to pass EquilibriumControl in - this is an irregular thing
+#TODO: We probably don't want to pass EquilibriumControl in - this is an irregular thing to do
 """
     ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl)
 
@@ -836,9 +855,11 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
 
     # Binary file handling would use Julia's serialization or HDF5
     bin_unit = bin_open("dcon_detf.bin", "w")
+
     =#
 
-    sing_adp_find_sing!(x0, x1, det0, det1, nsing, psising,
+    #TODO: convert
+    adp_find_sing!(x0, x1, det0, det1, det_max, psising,
         singnum, i_recur, i_depth, i_record,
         tol, sing_det, odet.sing_flag, tmp_record)
 
@@ -864,7 +885,7 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
     #-----------------------------------------------------------------------
     for i in 2:(singnum-1)
         x1 = psising[i]
-        x1 = sing_newton(sing_get_f_det, x1, psising[i-1], psising[i+1])
+        x1 = sing_newton(sing_get_f_det, x1, psising[i-1], psising[i+1]) #TODO: convert this function and what is going on with the nested function call
         det0 = sing_get_f_det(psising[i])
         det1 = sing_get_f_det(x1)
 
@@ -939,9 +960,10 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
         )
 
         # Evaluate spline
-        spline_result = spline_eval(sq, psising[ising+1], 1)
-        kinsing[ising].q = spline_result.f[4]
-        kinsing[ising].q1 = spline_result.f1[4]
+        spline_eval!(equil.sq, psising[ising+1], 1)
+        #spline_result = spline_eval(equil.sq, psising[ising+1], 1)
+        kinsing[ising].q = equil.sq.f[4] #spline_result.f[4]
+        kinsing[ising].q1 = equil.sq.f1[4] #spline_result.f1[4]
     end
 
     # Print results
@@ -960,3 +982,297 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
 
     return kinsing, singnum
 end
+
+
+"""
+    adp_find_sing!(x0, x1, det0, det1, det_max, singpos, singnum, i_recur, i_depth,
+                        i_record, tol, sing_det, sing_flag, record)
+                        , det_max, sing_get_f_det, bin_unit)
+
+Recursive adaptive finder for singular surfaces in plasma equilibrium.
+
+Uses adaptive grid refinement to locate singularities (resonant surfaces) by
+monitoring the gradient of the determinant function.
+
+# Arguments
+
+  - `x0::Float64`: Left boundary of search interval
+  - `x1::Float64`: Right boundary of search interval
+  - `det_max::Ref{ComplexF64}`: Maximum determinant encountered (modified)
+  - `det0::ComplexF64`: Determinant value at x0
+  - `det1::ComplexF64`: Determinant value at x1
+  - `singpos::Vector{Float64}`: Array to store singular positions (modified)
+  - `singnum::Ref{Int}`: Current number of singularities found (modified)
+  - `i_recur::Ref{Int}`: Recursion counter (modified)
+  - `i_depth::Ref{Int}`: Current recursion depth (modified)
+  - `i_record::Ref{Int}`: Record counter (modified)
+  - `tol::Float64`: Tolerance for grid partition criterion
+  - `sing_det::Ref{ComplexF64}`: Best singular determinant value (modified)
+  - `sing_flag::Ref{Bool}`: Flag indicating if inside singular region (modified)
+  - `record::Matrix{ComplexF64}`: Record of (x, det) pairs (modified)
+  - `sing_get_f_det::Function`: Function to compute determinant at a point
+  - `bin_unit::IO`: Binary output file handle (optional)
+
+# Algorithm
+
+ 1. Subdivides interval adaptively based on linearity test
+ 2. Identifies singularities by detecting local minima in |det|
+ 3. Tracks the sharpest singular point in each singular region
+"""
+function adp_find_sing!(x0::Float64, x1::Float64,
+    det_max::ComplexF64, det0::ComplexF64, det1::ComplexF64,
+    singpos::Vector{Float64},
+    singnum::Ref{Int},
+    i_recur::Ref{Int},
+    i_depth::Ref{Int},
+    i_record::Ref{Int},
+    tol::Float64,
+    sing_det::Ref{ComplexF64},
+    sing_flag::Ref{Bool},
+    record::Matrix{ComplexF64}) # sing_get_f_det::Function, bin_unit::Union{IO,Nothing}=nothing)
+
+    grid_tol = 1e-6
+
+    # Increment depth and recursion counters
+    i_depth[] += 1
+    i_recur[] += 1
+
+    # Set up 3-point stencil
+    x = [x0, 0.5 * (x0 + x1), x1]
+    det = ComplexF64[det0, sing_get_f_det(x[2]), det1]
+
+    # Track maximum determinant
+    if abs(det[2]) > abs(det_max)
+        det_max = det[2]
+    end
+
+    # Criteria for grid partition (linearity test)
+    tmp1 = abs(det[1] + det[3])
+    tmpm = abs(det[2]) * 2
+
+    if abs(tmpm - tmp1) > tol * tmp1 && (x[3] - x[1]) > grid_tol
+        # Grid is not linear enough - subdivide further
+        adp_find_sing!(x[1], x[2], det_max, det[1], det[2],
+            singpos, singnum, i_recur, i_depth, i_record,
+            tol, sing_det, sing_flag, record)
+
+        adp_find_sing!(x[2], x[3], det_max, det[2], det[3],
+            singpos, singnum, i_recur, i_depth, i_record,
+            tol, sing_det, sing_flag, record)
+    else
+        # Grid is linear enough - judge singularity with gradient of |det|
+        tmp1 = abs(det[2]) - abs(det[1])
+        tmp2 = abs(det[3]) - abs(det[2])
+
+        # Case 1: tmp1 < 0 AND tmp2 < 0 (descending on both sides - peak before x[3])
+        if tmp1 < 0 && tmp2 < 0
+            if sing_flag[]
+                # Already in singular region - update if this is sharper
+                if abs(sing_det[]) > abs(det[3])
+                    sing_det[] = det[3]
+                    singpos[singnum[]] = x[3]
+                end
+            else
+                # Entering new singular region
+                singnum[] += 1
+                if singnum[] + 3 > length(singpos)
+                    error("Increase singpos array size")
+                end
+                singpos[singnum[]] = x[3]
+                sing_det[] = det[3]
+                sing_flag[] = true
+            end
+        end
+
+        # Case 2: tmp1 < 0 AND tmp2 > 0 (local minimum at x[2])
+        if tmp1 < 0 && tmp2 > 0
+            if sing_flag[]
+                # Already in singular region - update if this is sharper
+                if abs(sing_det[]) > abs(det[2])
+                    sing_det[] = det[2]
+                    singpos[singnum[]] = x[2]
+                end
+            else
+                # Entering new singular region
+                singnum[] += 1
+                if singnum[] + 3 > length(singpos)
+                    error("Increase singpos array size")
+                end
+                singpos[singnum[]] = x[2]
+                sing_det[] = det[2]
+                sing_flag[] = true
+            end
+        end
+
+        # Case 3: tmp1 > 0 AND tmp2 > 0 (ascending on both sides)
+        if tmp1 > 0 && tmp2 > 0
+            if sing_flag[]
+                # Exiting singular region
+                sing_flag[] = false
+                # Update to sharpest point seen
+                if abs(sing_det[]) > abs(det[1]) && singnum[] > 0
+                    sing_det[] = det[1]
+                    singpos[singnum[]] = x[1]
+                end
+            end
+        end
+
+        # Case 4: tmp1 > 0 AND tmp2 < 0 (ascending then descending - peak at x[2])
+        if tmp1 > 0 && tmp2 < 0
+            if sing_flag[]
+                # Exiting singular region
+                sing_flag[] = false
+                # Update to sharpest point seen
+                if abs(sing_det[]) > abs(det[1]) && singnum[] > 0
+                    sing_det[] = det[1]
+                    singpos[singnum[]] = x[1]
+                end
+            end
+        end
+
+        # Error check for exact zeros
+        if tmp1 == 0 || tmp2 == 0
+            error("det(2)-det(1)=0 or det(3)-det(2)=0")
+        end
+
+        #=
+        # Write records to file (ASCII)
+        open("singularity_search.out", "a") do f
+            @printf(f, " %16.8e %16.8e %16.8e %16.8e\n",
+                   x[2], abs(det[2]), real(det[2]), imag(det[2]))
+            @printf(f, " %16.8e %16.8e %16.8e %16.8e\n",
+                   x[3], abs(det[3]), real(det[3]), imag(det[3]))
+        end
+        =#
+        #= TODO: Getting rid of binary output?
+        # Write binary records if unit provided
+        if bin_unit !== nothing
+            write(bin_unit, Float32(x[2]), Float32(log10(abs(det[2]))),
+                  Float32(real(det[2])), Float32(imag(det[2])))
+            write(bin_unit, Float32(x[3]), Float32(log10(abs(det[3]))),
+                  Float32(real(det[3])), Float32(imag(det[3])))
+        end
+        =#
+
+        # Store record in memory (with bounds checking)
+        if i_record[] < size(record, 2)
+            i_record[] += 1
+            record[:, i_record[]] = [ComplexF64(x[2]), det[2]]
+        end
+        if i_record[] < size(record, 2)
+            i_record[] += 1
+            record[:, i_record[]] = [ComplexF64(x[3]), det[3]]
+        end
+    end
+
+    i_depth[] -= 1
+
+    return nothing
+end
+
+#=
+"""
+    sing_newton!(ff, z, bo0, bo1)
+
+Newton iteration for singular surface finder.
+
+Uses a modified Newton's method with adaptive step sizing to find local minima
+of |ff(z)| within bounds. Includes safeguards against overshooting and climbing
+out of sharp local wells.
+
+# Arguments
+- `ff::Function`: Function returning complex determinant at position z
+- `z::Ref{Float64}`: Initial guess (modified to final position)
+- `bo0::Float64`: Lower bound estimate of neighboring minimum
+- `bo1::Float64`: Upper bound estimate of neighboring minimum
+
+# Algorithm
+1. Sets conservative bounds inside estimated neighboring minima
+2. Uses modified Newton iteration with adaptive step control
+3. Tracks optimal position throughout iteration
+4. Includes safeguards for sharp local wells and peaks
+
+# Returns
+Modifies `z[]` in place to contain the position of the local minimum.
+"""
+function sing_newton!(ff::Function, z::Ref{Float64}, bo0::Float64, bo1::Float64)
+
+    # Parameters
+    const dzfac = 1e-6
+    const dbfac = 1e-1
+    const tol = 1e-15
+    const itmax = 1000
+
+    # Find initial guess - bounds well inside of estimated neighboring minima
+    b0 = z[] - (z[] - bo0) * dbfac
+    b1 = z[] + (bo1 - z[]) * dbfac
+
+    f = abs(ff(z[]))
+    zopt = z[]
+    fopt = f
+
+    # First step is a fraction of a half step towards the nearer boundary
+    dz1 = (b0 + z[]) * 0.5 - z[]
+    dz2 = (b1 + z[]) * 0.5 - z[]
+    dz = dz1 * dzfac
+    if abs(dz2) < abs(dz1)
+        dz = dz2 * dzfac
+    end
+
+    it = 0
+
+    # Iterate
+    while true
+        it += 1
+        err = abs(dz / z[])
+
+        # Check convergence
+        if err < tol
+            z[] = zopt
+            break
+        end
+
+        # Check iteration limit
+        if it > itmax
+            it = -1
+            @warn @sprintf("  - search terminated at %.3e with large %.3e error",
+                          zopt, err)
+            z[] = zopt
+            break
+        end
+
+        # Check if step would go outside bounds
+        if z[] + dz <= b0 || z[] + dz >= b1
+            # We've climbed out of the sharp local well
+            # Case 1: we are on the right side, but near a peak so the
+            #         ~0 gradient way overshoots to the other side
+            # Case 2: we are already on the other side of a peak and
+            #         falling down towards the neighboring minimum
+            dz *= 0.5
+        else
+            # Take Newton step
+            z_old = z[]
+            z[] = z[] + dz
+            f_old = f
+            f = abs(ff(z[]))
+
+            # Track optimal position
+            if f < fopt
+                fopt = f
+                zopt = z[]
+            end
+
+            # Compute new Newton step
+            dz = -f * (z[] - z_old) / (f - f_old)
+        end
+    end
+
+    # Final check for better position
+    if f < fopt
+        fopt = f
+        zopt = z[]
+    end
+
+    return nothing
+end
+=#
