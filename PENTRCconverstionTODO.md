@@ -8,8 +8,8 @@
 | PENTRC | `pentrc/torque.F90` |`tpsi()` | src/ | | | TODO |
 | PENTRC | `pentrc/torque.F90` |`tintgrl_grid` | src/ | | | TODO |
 | PENTRC | `pentrc/torque.F90` |`tintgrl_lsode` | src/ | | | TODO |
-| DCON | `dcon/sing.f` | `ksing_find()` | `src/DCON/Sing.jl` | Option 1) `sing_find!`<br>Option 2) `sing_king_fing!` |  | In progress |
-|  |  | `sing_get_f_det()` | `src/DCON/Sing.jl` | `sing_get_f_det()` | Maybe include inside `ksing_find()` | TODO |
+| DCON | `dcon/sing.f` | `ksing_find()` | `src/DCON/Sing.jl` | Option 1) `sing_find!`<br>Option 2) `sing_king_fing!` |  | first pass done and kinda tested|
+|  |  | `sing_get_f_det()` | `src/DCON/Sing.jl` | `sing_get_f_det()` | Maybe include inside `ksing_find()` | first pass done and kinda tested |
 |  |  | `sing_der()` | `src/DCON/Sing.jl` | `sing_der!` |  | TODO |
 | DCON | `dcon/ode.f` | `ode_kin_cross()` | `src/DCON/Ode.jl` | `ode_kin_cross()` | for `ode_run()` | TODO |
 |  |  | `ode_axis_init()` |  | `ode_axis_init()` |  | TODO |

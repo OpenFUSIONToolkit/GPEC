@@ -779,4 +779,156 @@ end
         end
     end
 
+    @testset " Test sing_newton! " begin
+        @testset "sing_newton! tracks optimal position" begin
+            # Test that Newton's method tracks the position with minimum |f(x)|
+            f_test(x) = complex((x - 0.5)^2 - 0.1, 0)
+
+            z = Ref(0.8)
+            DCON.sing_newton!(f_test, z, 0.0, 1.0)
+
+            # The optimal position should have |f| < initial value
+            initial_f = abs(f_test(0.8))
+            final_f = abs(f_test(z[]))
+            @test final_f < initial_f
+
+            # Should be within bounds
+            @test z[] >= 0.0
+            @test z[] <= 1.0
+        end
+
+        @testset "sing_newton! respects bounds strictly" begin
+            # Test that z stays within the specified bounds
+            f_bounded(x) = complex((x - 0.4)^2, 0)
+
+            z = Ref(0.1)
+            bo0 = 0.05
+            bo1 = 0.95
+            DCON.sing_newton!(f_bounded, z, bo0, bo1)
+
+            # Should stay within modified bounds (which are 90% of original)
+            @test z[] > bo0
+            @test z[] < bo1
+        end
+
+        @testset "sing_newton! finds minimum in valid interval" begin
+            # Test with test_det_field which has complex behavior
+            z = Ref(0.52)
+            bo0 = 0.4
+            bo1 = 0.6
+
+            initial_f = abs(test_det_field(z[]))
+            DCON.sing_newton!(test_det_field, z, bo0, bo1)
+            final_f = abs(test_det_field(z[]))
+
+            # Should improve from starting position
+            @test final_f < initial_f
+
+            # Should stay within bounds
+            @test z[] >= bo0 * 0.9  # Allow for modified bounds
+            @test z[] <= bo1 * 1.1
+        end
+
+        @testset "sing_newton! converges on simple determinant" begin
+            # Test with a simple centered function
+            f_center(x) = complex((x - 0.5)^2 - 0.05, sin(x))
+
+            z = Ref(0.7)
+            initial_f = abs(f_center(z[]))
+
+            DCON.sing_newton!(f_center, z, 0.0, 1.0)
+            final_f = abs(f_center(z[]))
+
+            # Should improve significantly
+            @test final_f < initial_f
+        end
+
+        @testset "sing_newton! handles negative determinant values" begin
+            # Test with function that has negative values (uses abs)
+            f_negative(x) = complex(-(x - 0.6)^2, 0)
+
+            z = Ref(0.2)
+            initial_f = abs(f_negative(z[]))
+
+            DCON.sing_newton!(f_negative, z, 0.0, 1.0)
+            final_f = abs(f_negative(z[]))
+
+            # Should improve
+            @test final_f <= initial_f  # May be equal if already optimal
+        end
+
+        @testset "sing_newton! works with complex values" begin
+            # Test with truly complex determinant values
+            f_complex(x) = complex((x - 0.5)^2, x * 0.1)
+
+            z = Ref(0.3)
+            initial_f = abs(f_complex(z[]))
+
+            DCON.sing_newton!(f_complex, z, 0.0, 1.0)
+            final_f = abs(f_complex(z[]))
+
+            # Should improve
+            @test final_f < initial_f
+
+            # Should be within bounds
+            @test z[] >= 0.0
+            @test z[] <= 1.0
+        end
+
+        @testset "sing_newton! modifies Ref in place" begin
+            # Test that the Ref value is actually modified
+            z = Ref(0.3)
+            original_z = z[]
+
+            f_test(x) = complex((x - 0.7)^2, 0)
+            DCON.sing_newton!(f_test, z, 0.0, 1.0)
+
+            # The value should have changed
+            @test z[] != original_z
+        end
+
+        @testset "sing_newton! improves from far starting point" begin
+            # Test starting far from optimal
+            f_far(x) = complex((x - 0.5)^2 - 0.08, 0)
+
+            z = Ref(0.05)  # Very far from optimal
+            initial_f = abs(f_far(z[]))
+
+            DCON.sing_newton!(f_far, z, 0.0, 1.0)
+            final_f = abs(f_far(z[]))
+
+            # Should significantly improve
+            @test final_f < initial_f * 0.5
+        end
+
+        @testset "sing_newton! iteration limit handling" begin
+            # Test with a pathological function that may not converge well
+            # but should still return a valid result
+            f_pathological(x) = complex(sin(10 * x), cos(5 * x))
+
+            z = Ref(0.3)
+            # Should not crash, just run to iteration limit
+            @test_nowarn DCON.sing_newton!(f_pathological, z, 0.0, 1.0)
+
+            # Should still be within bounds
+            @test z[] >= 0.0
+            @test z[] <= 1.0
+        end
+
+        @testset "sing_newton! small interval convergence" begin
+            # Test with a small interval
+            f_small(x) = complex((x - 0.51)^2, 0)
+
+            z = Ref(0.49)
+            DCON.sing_newton!(f_small, z, 0.48, 0.52)
+
+            # Should be near the optimal
+            @test z[] >= 0.48
+            @test z[] <= 0.52
+
+            # Function value should be small (near optimum)
+            @test abs(f_small(z[])) < 0.01
+        end
+    end
+
 end

@@ -1367,7 +1367,7 @@ function adp_find_sing!(x0::Float64, x1::Float64,
     return nothing
 end
 
-#=
+
 """
     sing_newton!(ff, z, bo0, bo1)
 
@@ -1378,27 +1378,30 @@ of |ff(z)| within bounds. Includes safeguards against overshooting and climbing
 out of sharp local wells.
 
 # Arguments
-- `ff::Function`: Function returning complex determinant at position z
-- `z::Ref{Float64}`: Initial guess (modified to final position)
-- `bo0::Float64`: Lower bound estimate of neighboring minimum
-- `bo1::Float64`: Upper bound estimate of neighboring minimum
+
+  - `ff::Function`: Function returning complex determinant at position z
+  - `z::Ref{Float64}`: Initial guess (modified to final position)
+  - `bo0::Float64`: Lower bound estimate of neighboring minimum
+  - `bo1::Float64`: Upper bound estimate of neighboring minimum
 
 # Algorithm
-1. Sets conservative bounds inside estimated neighboring minima
-2. Uses modified Newton iteration with adaptive step control
-3. Tracks optimal position throughout iteration
-4. Includes safeguards for sharp local wells and peaks
+
+ 1. Sets conservative bounds inside estimated neighboring minima
+ 2. Uses modified Newton iteration with adaptive step control
+ 3. Tracks optimal position throughout iteration
+ 4. Includes safeguards for sharp local wells and peaks
 
 # Returns
+
 Modifies `z[]` in place to contain the position of the local minimum.
 """
 function sing_newton!(ff::Function, z::Ref{Float64}, bo0::Float64, bo1::Float64)
 
     # Parameters
-    const dzfac = 1e-6
-    const dbfac = 1e-1
-    const tol = 1e-15
-    const itmax = 1000
+    dzfac = 1e-6
+    dbfac = 1e-1
+    tol = 1e-15
+    itmax = 1000
 
     # Find initial guess - bounds well inside of estimated neighboring minima
     b0 = z[] - (z[] - bo0) * dbfac
@@ -1419,7 +1422,7 @@ function sing_newton!(ff::Function, z::Ref{Float64}, bo0::Float64, bo1::Float64)
     it = 0
 
     # Iterate
-    while true
+    while true #TODO--> this is dangerous- do we want to do it this way really?
         it += 1
         err = abs(dz / z[])
 
@@ -1433,7 +1436,7 @@ function sing_newton!(ff::Function, z::Ref{Float64}, bo0::Float64, bo1::Float64)
         if it > itmax
             it = -1
             @warn @sprintf("  - search terminated at %.3e with large %.3e error",
-                          zopt, err)
+                zopt, err)
             z[] = zopt
             break
         end
@@ -1472,4 +1475,3 @@ function sing_newton!(ff::Function, z::Ref{Float64}, bo0::Float64, bo1::Float64)
 
     return nothing
 end
-=#
