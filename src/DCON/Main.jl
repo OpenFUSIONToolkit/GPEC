@@ -22,7 +22,7 @@ function Main(path::String="./")
     end
     intr.debug_settings = debug_settings
     # Set up variables
-    # TODO: dcon_kin_threads logic?
+    # TODO: dcon_kin_threads logic? --> later extension to kinetic code, looks like it was deprecated in Fortran DCON too
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
     # Determine psilim and qlim (where we will integrate to)
@@ -109,10 +109,14 @@ function Main(path::String="./")
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             println("Run parameters:")
-            println("   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))")
+            println(
+                "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))"
+            )
             println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
             println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println("   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))")
+            println(
+                "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))"
+            )
             println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
         end
 
@@ -126,14 +130,22 @@ function Main(path::String="./")
         # Compute matrices and populate FourFitVars struct
         ffit = make_matrix(equil, intr, metric)
 
-        if ctrl.kin_flag
+        if ctrl.kin_flag #TODO: verify this works --> also this is probably where we want to choose whether we are running PENTRC or using a dummy W matrix
+            action_matrices!(ffit, intr, equil, metric) #TODO: WIP version of this in Fourfit.jl
+            if ctrl.verbose
+                println("Initializing PENTRC")
+            end
+            #initialize_pentrc(INPUTS) #TODO: make sure to convert this- this is located in pentrc_interface.jl
+            #TODO: implement any PENTRC set up here, GPEC set the pentrc equilibrium description, sets the
+            #  kinetic profiles, and sets perturbed equilibrium displacements
+            # This is probably where we let the user specify damping and such or call PENTRC
             if ctrl.verbose
                 println("   Computing Kinetic Damping Matrices")
             end
-            ffit = make_kinetic_matrix(equil, intr, ctrl, metric, ffit)
+            ffit = make_kinetic_matrix(equil, intr, ctrl, metric, ffit) #this is Claude's conversion of fourfit_kinetic_matrix with a couple small modifications
         end
         sing_scan!(intr, ctrl, equil, ffit)
-        if ctrl.kin_flag
+        if ctrl.kin_flag #TODO: Write this funtion
             # ksing_find()
         end
     end
@@ -175,7 +187,7 @@ function Main(path::String="./")
 
     end_time = time() - start_time
     println("----------------------------------")
-    println("Run time: $(@sprintf("%.3e", end_time)) seconds") 
+    println("Run time: $(@sprintf("%.3e", end_time)) seconds")
     println("Normal termination.")
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
@@ -193,9 +205,8 @@ vacuum data if `vac_flag` is true.
 ### TODOs
 
 Combine spline unpacking if possible, too many extra lines
-
 """
-function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
+function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 

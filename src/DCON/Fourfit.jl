@@ -225,14 +225,14 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         chi1 = 2π * equil.psio
 
         # Fill lower half (0, -1, …, -mband)
-        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:intr.mband+1]
-        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, intr.mband+2:2*intr.mband+2]
-        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 2*intr.mband+3:3*intr.mband+3]
-        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 3*intr.mband+4:4*intr.mband+4]
-        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 4*intr.mband+5:5*intr.mband+5]
-        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 5*intr.mband+6:6*intr.mband+6]
-        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 6*intr.mband+7:7*intr.mband+7]
-        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 7*intr.mband+8:8*intr.mband+8]
+        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:(intr.mband+1)]
+        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (intr.mband+2):(2*intr.mband+2)]
+        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (2*intr.mband+3):(3*intr.mband+3)]
+        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (3*intr.mband+4):(4*intr.mband+4)]
+        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (4*intr.mband+5):(5*intr.mband+5)]
+        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (5*intr.mband+6):(6*intr.mband+6)]
+        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (6*intr.mband+7):(7*intr.mband+7)]
+        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (7*intr.mband+8):(8*intr.mband+8)]
 
         # Fill upper half (+1:mband) with conjugate symmetry
         for k in 1:intr.mband
@@ -254,7 +254,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
             for m1 in intr.mlow:intr.mhigh
                 ipert_m = m1 - intr.mlow + 1
                 singfac1 = m1 - nq
-                for dm in max(1 - ipert_m, -intr.mband):min(intr.mpert - ipert_m, intr.mband)
+                for dm in max(1-ipert_m, -intr.mband):min(intr.mpert-ipert_m, intr.mband)
                     m2 = m1 + dm
                     singfac2 = m2 - nq
                     jpert_m = ipert_m + dm
@@ -272,7 +272,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
                     bmats_flatview[ipert_flat] = -2π * im * chi1 * (n * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
                     cmats_flatview[ipert_flat] =
                         2π * im * ((2π * im * chi1 * singfac2 * (n * g12[dmidx] + m1 * g31[dmidx])) -
-                                (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
+                                   (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
                         2π * im * (jtheta * singfac1 * imat[dmidx] + n * p1 / chi1 * jmat[dmidx])
                     dmats_flatview[ipert_flat] = 2π * chi1 * (g23[dmidx] + g33[dmidx] * m1 / n)
                     emats_flatview[ipert_flat] = -chi1 / n * (q1 * chi1 * g33[dmidx] - 2π * im * chi1 * g31[dmidx] * singfac2 + jtheta * imat[dmidx])
@@ -343,22 +343,33 @@ end
 Computes kinetic damping matrices and extends FourFitVars with kinetic terms.
 Implements Fortran fourfit_kinetic_matrix method 0 (lines 983-1275).
 
+# Arguments
+
+  - `equil::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data
+  - `intr::DconInternal`: Internal parameters including mband, mlow, mhigh, mpert
+  - `ctrl::DconControl`: Control parameters for kinetic calculations such as the grid type
+  - `metric::MetricData`: Metric coefficients on the (ψ, θ) grid
+  - `ffit::FourFitVars`: Structure to store the computed spline matricesn
+
 # Algorithm
-1. Loop over radial grid (psi) in parallel
-2. For each psi, sum kinetic contributions over all ell values
-3. Call compute_tpsi_matrices() for ions/electrons
-4. Apply normalization factors (kinfac1, kinfac2) with optional tanh smoothing
-5. Evaluate ideal matrices (A,B,C,D,E,H,F) from existing splines
-6. Add kinetic terms to create modified matrices (non-Hermitian!)
-7. Factor modified A using LU decomposition
-8. Compute 11 composite matrices for ODE solver
-9. Fit all matrices to cubic splines in psi
+
+ 1. Loop over radial grid (psi) in parallel
+ 2. For each psi, sum kinetic contributions over all ell values
+ 3. Call compute_tpsi_matrices() for ions/electrons
+ 4. Apply normalization factors (kinfac1, kinfac2) with optional tanh smoothing
+ 5. Evaluate ideal matrices (A,B,C,D,E,H,F) from existing splines
+ 6. Add kinetic terms to create modified matrices (non-Hermitian!)
+ 7. Factor modified A using LU decomposition
+ 8. Compute 11 composite matrices for ODE solver
+ 9. Fit all matrices to cubic splines in psi
 
 # Modifications from Ideal MHD
-- A matrix becomes non-Hermitian → use LU instead of Cholesky
-- New composite matrices needed for kinetic ODE formulation
+
+  - A matrix becomes non-Hermitian → use LU instead of Cholesky
+  - New composite matrices needed for kinetic ODE formulation
 
 # Returns
+
 Modified `ffit` with populated kinetic matrix splines
 """
 function make_kinetic_matrix(
@@ -367,12 +378,18 @@ function make_kinetic_matrix(
     ctrl::DconControl,
     metric::MetricData,
     ffit::FourFitVars
-) :: FourFitVars
+)::FourFitVars
+
+    #TODO: in the original Fortran code, there was some parallelization stuff here so we can add that later
 
     # Extract parameters
     mpsi = metric.mpsi
     chi1 = 2π * equil.psio
     nl = ctrl.kinetic.nl
+
+    if ctrl.kingridtype != 0 #TODO - implement methods 1-4 from DCON (also document what each of these methods is)
+        error("Only kingridtype = 0 (default) is implemented currently")
+    end
 
     # Determine particle type flag
     ft = if ctrl.passing_flag && ctrl.trapped_flag
@@ -386,9 +403,12 @@ function make_kinetic_matrix(
     end
 
     # Allocate flat storage arrays (for spline fitting)
+    #TODO: I am not sure if therse are the same size as in Fortran - they are kwmatls(mpert,mpert,6,0:mpsi,-nl:nl) and I'm not sure what nl is
+    # Ah- I think Claude did lines 1068-1073 here instead
     kwmats_flat = [zeros(ComplexF64, mpsi, intr.numpert_total^2) for _ in 1:6]
     ktmats_flat = [zeros(ComplexF64, mpsi, intr.numpert_total^2) for _ in 1:6]
 
+    #TODO: these may all need to be splines? see lines 1044-1054 in Fortran
     akmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     bkmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     ckmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
@@ -403,6 +423,7 @@ function make_kinetic_matrix(
     gaats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
 
     # Parallel loop over radial surfaces (matches Fortran OMP PARALLEL DO)
+    # TODO: the above is Claude's claim- verify this is true
     Threads.@threads for ipsi in 1:mpsi
         psifac = metric.xs[ipsi]
 
@@ -410,7 +431,7 @@ function make_kinetic_matrix(
         kwmat_sum = zeros(ComplexF64, intr.mpert, intr.mpert, 6)
         ktmat_sum = zeros(ComplexF64, intr.mpert, intr.mpert, 6)
 
-        for ell in -nl:nl
+        for ell in (-nl):nl
             # Ions
             if ctrl.ion_flag
                 kwmat_l, _ = compute_tpsi_matrices(
@@ -514,11 +535,12 @@ function make_kinetic_matrix(
         # r1mat (complex expression from Fortran lines 1213-1217)
         temp1 = kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1]
         temp2 = amat_lu \ bkmat
-        r1mat = kwmat_sum[:, :, 4] .+ ktmat_sum[:, :, 4] .-
-                (chi1 / (2π * ctrl.nn_low))^2 .* adjoint(temp1) .+
-                im * chi1 / (2π * ctrl.nn_low) .* adjoint(bkaat) .-
-                im * chi1 / (2π * ctrl.nn_low) .* (aamat * bkmat) .-
-                adjoint(bkaat) * temp2
+        r1mat =
+            kwmat_sum[:, :, 4] .+ ktmat_sum[:, :, 4] .-
+            (chi1 / (2π * ctrl.nn_low))^2 .* adjoint(temp1) .+
+            im * chi1 / (2π * ctrl.nn_low) .* adjoint(bkaat) .-
+            im * chi1 / (2π * ctrl.nn_low) .* (aamat * bkmat) .-
+            adjoint(bkaat) * temp2
 
         # kkmat = E_b - B₁† * A⁻¹ * C
         temp1 = amat_lu \ cmat
@@ -580,4 +602,169 @@ function make_kinetic_matrix(
     ffit.gaats = Spl.CubicSpline(metric.xs, gaats_flat; bctype="extrap")
 
     return ffit
+end
+
+"""
+    action_matrices!(ffit::FourFitVars, intr::DconInternal,
+                             equil::Equilibrium.PlasmaEquilibrium, metric::MetricData)
+
+Compute equilibrium action matrices necessary to calculate perturbed modB.
+This is a conversion of the fourfit_action_matrix function.
+
+These matrices (S, T, X, Y, Z) represent the coupling between different poloidal
+mode numbers in the perturbed equilibrium and are essential for kinetic energy
+calculations in MHD stability analysis.
+
+# Arguments
+
+  - `ffit::FourFitVars`: Structure to store the computed spline matrices
+  - `intr::DconInternal`: Internal parameters including mband, mlow, mhigh, mpert
+  - `equil::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data
+  - `metric::MetricData`: Metric coefficients on the (ψ, θ) grid
+
+# Physical Meaning
+
+The matrices appear in the perturbed energy integral:
+δW = ∫∫ξ†·W·ξ dψdθ
+where ξ is the plasma displacement vector and W is the Euler-Lagrange operator.
+
+# Notes
+
+  - Uses the same mid-index convention as `make_matrix`: mode m is at index m + mband + 1
+  - Exploits conjugate symmetry for real quantities in Fourier space: f(m) = conj(f(-m))
+  - Matrices are stored as flat arrays and reshaped at each radial location before spline fitting
+"""
+function action_matrices!(ffit::FourFitVars, intr::DconInternal,
+    equil::Equilibrium.PlasmaEquilibrium, metric::MetricData)
+
+    if intr.verbose
+        println("   Computing action matrices S, T, X, Y, Z")
+    end
+
+    nn = intr.nn_low  # Single toroidal mode number for 2D DCON TODO: see what to do with more toroidal modes later
+    sq = equil.sq # Safety factor profile (I think)
+    ifac = 1im # Imaginary unit factor
+
+    mpsi = metric.mpsi
+    mpert = intr.mpert
+    mband = intr.mband
+    mlow = intr.mlow
+    mhigh = intr.mhigh
+
+    # Allocate flat storage for the 5 output matrices
+    smats_flat = zeros(ComplexF64, mpsi, mpert^2)
+    tmats_flat = zeros(ComplexF64, mpsi, mpert^2)
+    xmats_flat = zeros(ComplexF64, mpsi, mpert^2)
+    ymats_flat = zeros(ComplexF64, mpsi, mpert^2)
+    zmats_flat = zeros(ComplexF64, mpsi, mpert^2)
+
+    # Allocate band arrays for Fourier coefficients
+    # Using mid-index convention: mode -mband is at index 1, mode 0 is at index mband+1, mode +mband is at index 2*mband+1
+    mid = mband + 1
+    sband = zeros(ComplexF64, 2 * mband + 1)
+    tband = zeros(ComplexF64, 2 * mband + 1)
+    xband = zeros(ComplexF64, 2 * mband + 1)
+    yband1 = zeros(ComplexF64, 2 * mband + 1)
+    yband2 = zeros(ComplexF64, 2 * mband + 1)
+    zband1 = zeros(ComplexF64, 2 * mband + 1)
+    zband2 = zeros(ComplexF64, 2 * mband + 1)
+    zband3 = zeros(ComplexF64, 2 * mband + 1)
+
+    # Allocate full matrices for assembly at each radius
+    smat = zeros(ComplexF64, mpert, mpert)
+    tmat = zeros(ComplexF64, mpert, mpert)
+    xmat = zeros(ComplexF64, mpert, mpert)
+    ymat = zeros(ComplexF64, mpert, mpert)
+    zmat = zeros(ComplexF64, mpert, mpert)
+
+    # Loop over radial locations
+    for ipsi in 1:mpsi
+        # Get safety factor at this radius
+        q = sq.fs[ipsi, 4]
+
+        # Extract Fourier bands from metric.fspline structure
+        # The fspline stores Fourier bands for (g^ij, J, dJ/dψ)
+        # Negative modes (0 down to -mband): stored at indices mid:-1:1
+        sband[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:(mband+1)]
+        tband[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (mband+2):(2*mband+2)]
+        xband[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (2*mband+3):(3*mband+3)]
+        yband1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (3*mband+4):(4*mband+4)]
+        yband2[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (4*mband+5):(5*mband+5)]
+        zband1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (5*mband+6):(6*mband+6)]
+        zband2[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (6*mband+7):(7*mband+7)]
+        zband3[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (7*mband+8):(8*mband+8)]
+
+        # Exploit conjugate symmetry for positive modes: f(m) = conj(f(-m))
+        for k in 1:mband
+            sband[mid+k] = conj(sband[mid-k])
+            tband[mid+k] = conj(tband[mid-k])
+            xband[mid+k] = conj(xband[mid-k])
+            yband1[mid+k] = conj(yband1[mid-k])
+            yband2[mid+k] = conj(yband2[mid-k])
+            zband1[mid+k] = conj(zband1[mid-k])
+            zband2[mid+k] = conj(zband2[mid-k])
+            zband3[mid+k] = conj(zband3[mid-k])
+        end
+
+        # Clear the matrices for this radius
+        fill!(smat, 0)
+        fill!(tmat, 0)
+        fill!(xmat, 0)
+        fill!(ymat, 0)
+        fill!(zmat, 0)
+
+        # Build coupling matrices
+        # Loop over mode pairs (m1, m2) within the perturbation spectrum
+        for m1_idx in 1:mpert
+            m1 = mlow + m1_idx - 1
+
+            # Only compute band-diagonal elements (coupling within ±mband)
+            dm_min = max(1 - m1_idx, -mband)
+            dm_max = min(mpert - m1_idx, mband)
+
+            for dm in dm_min:dm_max
+                m2 = m1 + dm
+                m2_idx = m1_idx + dm
+
+                # Resonance factor: m2 - n*q
+                # This identifies resonant surfaces where mode rotation matches field line winding
+                singfac2 = m2 - nn * q
+
+                # Get band array index for mode difference dm
+                dm_idx = dm + mid
+
+                # Fill matrix elements
+                # S, T, X are simple band elements
+                smat[m1_idx, m2_idx] = sband[dm_idx]
+                tmat[m1_idx, m2_idx] = tband[dm_idx]
+                xmat[m1_idx, m2_idx] = xband[dm_idx]
+
+                # Y has resonance-dependent correction
+                ymat[m1_idx, m2_idx] = yband1[dm_idx] + ifac * singfac2 * yband2[dm_idx]
+
+                # Z has multiple terms with mode number dependence
+                zmat[m1_idx, m2_idx] = zband1[dm_idx] +
+                                       ifac * (m2 * zband2[dm_idx] + nn * zband3[dm_idx])
+            end
+        end
+
+        # Store flattened matrices at this radius
+        # Julia is column-major, so reshape works naturally
+        smats_flat[ipsi, :] = reshape(smat, (mpert^2,))
+        tmats_flat[ipsi, :] = reshape(tmat, (mpert^2,))
+        xmats_flat[ipsi, :] = reshape(xmat, (mpert^2,))
+        ymats_flat[ipsi, :] = reshape(ymat, (mpert^2,))
+        zmats_flat[ipsi, :] = reshape(zmat, (mpert^2,))
+    end
+
+    # Fit splines in radial direction for interpolation
+    ffit.smats = Spl.CubicSpline(metric.xs, smats_flat; bctype="extrap")
+    ffit.tmats = Spl.CubicSpline(metric.xs, tmats_flat; bctype="extrap")
+    ffit.xmats = Spl.CubicSpline(metric.xs, xmats_flat; bctype="extrap")
+    ffit.ymats = Spl.CubicSpline(metric.xs, ymats_flat; bctype="extrap")
+    ffit.zmats = Spl.CubicSpline(metric.xs, zmats_flat; bctype="extrap")
+
+    if intr.verbose
+        println("   Action matrices computed and splined")
+    end
 end

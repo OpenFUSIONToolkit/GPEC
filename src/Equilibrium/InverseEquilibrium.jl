@@ -108,7 +108,7 @@ function equilibrium_solver(input::InverseRunInput)
         end
     end
 
-    deta[1, :] = inverse_extrap(r2[2:me+1, :], deta[2:me+1, :], 0.0)
+    deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
     rz_in_fs = zeros(Float64, mx + 1, my + 1, 3)
     rz_in_fs[:, :, 1] = r2

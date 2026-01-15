@@ -112,5 +112,3 @@ Notes:
 - `docs/src/vacuum.md` — coupling between equilibrium and vacuum solvers
 
 ```
-
-
