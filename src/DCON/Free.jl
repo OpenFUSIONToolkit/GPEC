@@ -72,8 +72,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Store block in full wv matrix
         @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
-
-        Vacuum.unset_dcon_params()
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -154,6 +152,7 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
   - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
+  - `ctrl`: DCON control parameters (DconControl)
 """
 function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
@@ -163,42 +162,33 @@ function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEqu
     angle = zeros(Float64, mtheta + 1)
     r = zeros(Float64, mtheta + 1)
     z = zeros(Float64, mtheta + 1)
-    delta = zeros(Float64, mtheta + 1)
+    ν = zeros(Float64, mtheta + 1)
     rfac = zeros(Float64, mtheta + 1)
 
     # Compute output
-    qa = Spl.spline_eval!(equil.sq, psifac)[4]
-    for itheta in 1:(equil.config.control.mtheta+1)
+    for itheta in 1:(mtheta+1)
         f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
         rfac[itheta] = sqrt(f[1])
         angle[itheta] = 2π * (theta_norm[itheta] + f[2])
-        delta[itheta] = -f[3] / qa
+        ν[itheta] = f[3]
     end
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)
 
     # Invert values for n < 0
     if n < 0
-        qa = -qa
-        delta .= -delta
+        ν .= -ν
         n = -n
     end
-
-    # Pass all required values to VACUUM
-    Vacuum.set_dcon_params(equil.config.control.mtheta, intr.mlow, intr.mhigh, n, qa,
-        reverse(r), reverse(z), reverse(delta))
 
     # For input to the Julia vacuum code
     return Vacuum.VacuumInput(;
         r=reverse(r),
         z=reverse(z),
-        delta=reverse(delta),
-        mhigh=intr.mhigh,
+        ν=reverse(ν),
         mlow=intr.mlow,
         mpert=intr.mpert,
         n=n,
-        qa=qa,
-        mtheta_eq=equil.config.control.mtheta,
         mtheta=ctrl.mthvac,
         force_wv_symmetry=ctrl.force_wv_symmetry
     )

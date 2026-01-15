@@ -1,12 +1,51 @@
-# Gaussian quadrature weights and points for 8-point integration
+# Gaussian quadrature weights and points for 8-point integration (used for kernel! function)
 const GAUSSIANWEIGHTS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
     0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
 
 const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
     0.183434642495650, 0.525532409916329, 0.796666477413627, 0.960289856497536]
 
+# 32-point Gaussian quadrature abscissae (used for Pn_minus_half_2007 function when nρ̂>0.1)
+const GAUSSIANWEIGHTS32 = [
+    0.007018610009470096600, 0.016274394730905670605,
+    0.025392065309262059456, 0.034273862913021433103,
+    0.042835898022226680657, 0.050998059262376176196,
+    0.058684093478535547145, 0.065822222776361846838,
+    0.072345794108848506225, 0.078193895787070306472,
+    0.083311924226946755222, 0.087652093004403811143,
+    0.091173878695763884713, 0.093844399080804565639,
+    0.095638720079274859419, 0.096540088514727800567,
+    0.096540088514727800567, 0.095638720079274859419,
+    0.093844399080804565639, 0.091173878695763884713,
+    0.087652093004403811143, 0.083311924226946755222,
+    0.078193895787070306472, 0.072345794108848506225,
+    0.065822222776361846838, 0.058684093478535547145,
+    0.050998059262376176196, 0.042835898022226680657,
+    0.034273862913021433103, 0.025392065309262059456,
+    0.016274394730905670605, 0.007018610009470096600
+]
+
+const GAUSSIANPOINTS32 = [
+    -0.997263861849481563545, -0.985611511545268335400,
+    -0.964762255587506430774, -0.934906075937739689171,
+    -0.896321155766052123965, -0.849367613732569970134,
+    -0.794483795967942406963, -0.732182118740289680387,
+    -0.663044266930215200975, -0.587715757240762329041,
+    -0.506899908932229390024, -0.421351276130635345364,
+    -0.331868602282127649780, -0.239287362252137074545,
+    -0.144471961582796493485, -0.048307665687738316235,
+    0.048307665687738316235, 0.144471961582796493485,
+    0.239287362252137074545, 0.331868602282127649780,
+    0.421351276130635345364, 0.506899908932229390024,
+    0.587715757240762329041, 0.663044266930215200975,
+    0.732182118740289680387, 0.794483795967942406963,
+    0.849367613732569970134, 0.896321155766052123965,
+    0.934906075937739689171, 0.964762255587506430774,
+    0.985611511545268335400, 0.997263861849481563545
+]
+
 """
-    kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iopw, iops, inputs; xwall=nothing, zwall=nothing)
+    kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iops, inputs; xwall=nothing, zwall=nothing)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
 
@@ -21,14 +60,15 @@ The residue calculation needs to be updated for open walls.**
   - `z_obspoints`: Observer z coordinates (Z coordinates)
   - `x_sourcepoints`: Source x coordinates (R coordinates)
   - `z_sourcepoints`: Source z coordinates (Z coordinates)
-  - `j1`: Boundary condition index for observer (1=plasma, 2=wall)
-  - `j2`: Boundary condition index for source (1=plasma, 2=wall)
-  - `iopw`: Wall option (0=inactive, 1=active)
+  - `j1/j2`: Block index for observer/source (1=plasma, 2=wall)
   - `n`: Toroidal mode number
 
 # Returns
 
 Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
+Note that greenfunction_mat is zeroed each time this function is called,
+but grad_greenfunction_mat is not since it fills a different block of the
+(2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
 
@@ -45,18 +85,16 @@ function kernel!(
     z_sourcepoints::Vector{Float64},
     j1::Int,
     j2::Int,
-    iopw::Int,
     n::Int
 )
 
     # These used to be function arguments, but can just set inside here based on j1/j2
-    isgn = 2 * j2 - 3
-    iops = (j1 == 1 && j2 == 1) ? 1 : 0 # only equal to 1 for plasma/plasma block
+    plasma_plasma_block = j1 == 1 && j2 == 1 # previously iops
+    plasma_is_source = j2 == 1 # previously iopw
+    isgn = plasma_is_source ? -1 : 1
 
     mtheta = length(x_obspoints)
     dtheta = 2π / mtheta
-    ak0i = 0.0
-    jres = 1
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
     # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
@@ -66,72 +104,55 @@ function kernel!(
         error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
     end
 
-    # definition for solving parameters
-    simpson_b1=1*dtheta/3
-    simpson_b2=2*dtheta/3
-    simpson_b4=4*dtheta/3
-
-    simpson_a1=1*dtheta/3
-    simpson_a2=2*dtheta/3
-    simpson_a4=4*dtheta/3
-
-    slog1m = 3*dtheta*(log(dtheta)-1/3)
-    slog1p = slog1m
-
-    log2dtheta = log(2*dtheta)
-    log_correction_0=16.0*dtheta*(log2dtheta-68.0/15.0)/15.0
-    log_correction_1=128.0*dtheta*(log2dtheta-8.0/15.0)/45.0
-    log_correction_2=4.0*dtheta*(7.0*log2dtheta-11.0/15.0)/45.0
+    # S₁ᵢ in Chance 1997, eq.(78)
+    log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
+    log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
+    log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
 
     has_zero_crossing = false
-    # See if the conductor surface needs to be checked for singular points
-    if j1 == 2 || j2 == 2
+    # See if the conductor surface crosses R=0 (x=0) anywhere
+    if !plasma_plasma_block
         # Initialize jbot and jtop, and figure out wall geometry based on which block we are in
         jbot = jtop = mtheta/2+1
-        xwall = j2 == 2 ? x_sourcepoints : x_obspoints
-
-        # Find where sign of wall x point acrosses zero.
-        # has_zero_crossing means there is 0-crossing point
+        xwall = plasma_is_source ? x_obspoints : x_sourcepoints
+        # Find if sign of wall x point crosses zero
         for i in 1:mtheta
             next_i = i == mtheta ? 1 : i + 1
             if xwall[i] * xwall[next_i] <= 0.0
-                jbot = xwall[i] > 0.0 ? i : jbot
-                jtop = xwall[i] < 0.0 ? i + 1 : jtop
+                jbot = xwall[i] > 0.0 ? i : # index where the wall leaves positive R
+                       jtop = xwall[i] < 0.0 ? i + 1 : jtop # index where the wall returns to positive R
                 has_zero_crossing = true
             end
         end
     end
 
-    # do spline and calc derivative for Z'_θ and X'_θ in eq.(51)
+    # Used for Z'_θ and X'_θ in eq.(51)
     spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints; extrapolation_bc=Interpolations.Periodic())
     spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints; extrapolation_bc=Interpolations.Periodic())
+    dx_dtheta = [Interpolations.gradient(spline_x, t)[1] for t in theta_grid]
+    dz_dtheta = [Interpolations.gradient(spline_z, t)[1] for t in theta_grid]
 
-    gradients_x = (t -> Interpolations.gradient(spline_x, t)).(theta_grid)
-    gradients_z = (t -> Interpolations.gradient(spline_z, t)).(theta_grid)
-    dx_dtheta = first.(gradients_x) # d x / d theta
-    dz_dtheta = first.(gradients_z) # d z / d theta
-
-    # observer loop
-    work = zeros(mtheta)
+    # Loop through observer points
     for j in 1:mtheta
-        # initialize variable
-        x_obs=x_obspoints[j] #observation point
+        # Initialize variables
+        x_obs=x_obspoints[j]
         z_obs=z_obspoints[j]
-        theta_obs=theta_grid[j] # theta value
-        fill!(work, 0.0)
+        theta_obs=theta_grid[j]
+        grad_green_0 = 0.0 # simpson integral for coupling_0 (𝒥 ∇'𝒢⁰∇'ℒ)
+        # Workspace = view of appropriate row of grad_greenfunction_mat for this observer point
+        grad_green_work = @view(grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)])
 
-        # if the point of observation point is in negative, We cannot use green func
-        # This is same for source point
+        # if observation point is negative, we cannot use green function
         if x_obs < 0.0
-            (j2 == 2) && (work[j] = 1.0)
+            !plasma_is_source && (grad_green_work[j] = 1.0)
             continue
         end
 
-        # set istart and iend
-        iend = 2 # end point of integration
-        aval1=0.0 # ∇𝒢_0
-        # if wall crossing zero and wall is source, iend set.
-        if has_zero_crossing && j2 == 2
+        # Compute istart and iend (start/end index of integration to avoid singularity)
+        # If no zero crossing, istart = iend = 2
+        iend = 2
+        if has_zero_crossing && !plasma_is_source
+            # Determine iend/istart so Simpson sweep avoids integrating across the (x=0) discontinuity near the observer index j
             if jbot - j == 1
                 iend = 3
             elseif jbot - j == 0
@@ -142,167 +163,118 @@ function kernel!(
                 iend = 1
             end
         end
-        istart = 4 - iend # starting point of integration
+        istart = 4 - iend
 
-        # 4-3 on mth. then mths is equals to mtheta+3 ??? I'm not sure
-        mth_source=mtheta-(istart+iend-1)
-
-        # loop for source point
-        for i in 1:mth_source
-
-            # 4.5 get source point index(ic) theta(theta), X(xt), and Z(zt)
+        # Perform Simpson integration for nonsingular source points (excludes 3 singular points)
+        # For cases where wall doesn't cross x=0 (iend = istart = 2), the singular points are j-1, j, j+1
+        for i in 1:(mtheta-3)
+            # Get source point index (ic) and ensure it is in range [1, mtheta]
             ic = i + j + istart - 1
             if ic > mtheta
                 ic = ic - mtheta
             end
-            # theta_source=(ic-1)*dtheta
             x_source=x_sourcepoints[ic]
             z_source=z_sourcepoints[ic]
 
-            # if source point is in negative, we cannot use green function
+            # if source point is negative, we cannot use green function
             # & if source point(ic) and obs point (j) is same, it's singular
             (x_source < 0 || ic == j) && continue
 
-            # Call green function
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source,
-                dx_dtheta[ic], dz_dtheta[ic], n)
+            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[ic], dz_dtheta[ic], n)
 
-            # simpson integral. 4 for odd, 2 for even, and 1 for others.
-            simpson_b=simpson_b2
-            if (i÷2)*2 == i
-                simpson_b=simpson_b4
-            end
-            if (i == 1)||(i == mth_source)
-                simpson_b=simpson_b1
-            end
-            simpson_a=simpson_a2
-            if (i÷2)*2 == i
-                simpson_a=simpson_a4
-            end
-            if (i == 1)||(i == mth_source)
-                simpson_a=simpson_a1
-            end
+            # Compute composite Simpson's 1/3 rule weight (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
+            # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+            endpoint = (i == 1)||(i == mtheta - 3)
+            wsimpson = (endpoint ? 1 : (iseven(i) ? 4 : 2)) * dtheta / 3
 
-            # work and gren
-            # work : simpson integral for coupling_n (𝒥 ∇'𝒢ⁿ∇'ℒ)
-            # gren : log singularity values accumulated. simpson integral for G_n
-            # aval1 : aval1
-            work[ic] += isgn*coupling_n*simpson_a
-            greenfunction_mat[j, ic] += G_n*simpson_b # integral of G_n (log singularity)
-            aval1 += coupling_0 * simpson_a
+            # Sum contributions to Green's function matrices using Simpson weight
+            grad_green_work[ic] += isgn * coupling_n * wsimpson
+            greenfunction_mat[j, ic] += G_n * wsimpson
+            grad_green_0 += coupling_0 * wsimpson
         end
 
-        # if it's plasma/plasma, wall/wall and in negative wall point, skip loop
-        # obs : j1 = 1(plasma), wall(2)
-        # src : j1 = 1(plasma), wall(2)
-        if (j1+j2) != 2 && has_zero_crossing && j > jbot && j < jtop
+        # Skip singularity calculation for R < 0 wall points
+        if has_zero_crossing && j > jbot && j < jtop
             continue
         end
 
-        # Get js
-        js1=mod(j-iend+mtheta-1, mtheta)+1
-        js2=mod(j-iend+mtheta, mtheta)+1
-        js3=mod(j-iend+mtheta+1, mtheta)+1
-        js4=mod(j-iend+mtheta+2, mtheta)+1
-        js5=mod(j-iend+mtheta+3, mtheta)+1
-
-        # Singular points when source point and obs point are the same
-        # integration each left and right by gaussian quadrature
+        # Perform Gaussian quadrature for singular points (source = obs point)
+        # Get indices of the singularity region ([j-2, j-1, j, j+1, j+2] for iend = 2)
+        js = mod.(j - iend .+ ((mtheta-1):(mtheta+3)), mtheta) .+ 1
+        # Integrate region of length 2 * dtheta on left (ilr = 1)/right (ilr = 2) of singularity
         for ilr in [1, 2]
             gauss_xleft = theta_obs + (2*ilr-iend-2)*dtheta
             gauss_xright = gauss_xleft + 2 * dtheta
             gauss_xavg = (gauss_xright + gauss_xleft)/2
-            gauss_halfdifference = (gauss_xright - gauss_xleft)/2
-            tgaus = gauss_xavg .+ GAUSSIANPOINTS .* gauss_halfdifference # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
-            # for each of 8 gaussian points
-            for ig in 1:8
-                tgaus0 = tgaus[ig] #i-th value of for 8 points, in theta
-                tgaus0 = mod(tgaus0, 2π)
+            theta_gauss = gauss_xavg .+ GAUSSIANPOINTS .* dtheta # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
+            for ig in 1:8 # 8-point Gaussian quadrature
+                # Compute green function for this Gaussian point
+                theta_gauss0 = mod(theta_gauss[ig], 2π)
+                x_gauss = spline_x(theta_gauss0)
+                dx_dtheta_gauss = Interpolations.gradient(spline_x, theta_gauss0)[1]
+                z_gauss = spline_z(theta_gauss0)
+                dz_dtheta_gauss = Interpolations.gradient(spline_z, theta_gauss0)[1]
+                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
-                # get X, X', Z, Z' for gaussian point
-                xt = spline_x(tgaus0)
-                xtp = Interpolations.gradient(spline_x, tgaus0)[1]
-                zt = spline_z(tgaus0)
-                ztp = Interpolations.gradient(spline_z, tgaus0)[1]
+                # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
+                G_n_nonsingular = plasma_plasma_block ? G_n + log((theta_obs-theta_gauss[ig])^2)/x_obs : G_n
 
-                # call green function
-                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, xt, zt, xtp, ztp, n; uselegacygreenfunction=true)
+                # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
+                wgauss = GAUSSIANWEIGHTS[ig] * dtheta
+                # Calculate p = θ/Δ = (θⱼ - θ')/Δ, 0 at observation point, ±1,±2 at other 5-point stencil nodes
+                pgauss=(theta_gauss[ig]-theta_obs-(2-iend)*dtheta)/dtheta
+                # Compute 5-point Lagrange basis polynomials at the Gauss point and multiply by quadrature weight
+                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss
+                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss
+                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss
+                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss
+                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
 
-                # add logarithm to G_n to analytically isolate the singularity. Chance eq.(75)
-                # iops = 1
-                G_n_nonsingular = G_n + iops * log((theta_obs-tgaus[ig])^2)/x_obs
-
-                # calc GAUSSIANWEIGHTS. GAUSSIANWEIGHTS contains gaussian quadrature weights for each 8 points
-                wgbg=GAUSSIANWEIGHTS[ig]*gauss_halfdifference
-
-                # calc pgaus. below Chance eq.(77)
-                # All are the noted index, times (wgbg)/(2 pgaus)
-                # A0 has no extra factor
-                # A1 has an extra factor of (pgaus +/- 1)
-                # A2 has an extra factor of (pgaus +/- 2)
-                pgaus=(tgaus[ig]-theta_obs-(2-iend)*dtheta)/dtheta
-                pgaus2=pgaus*pgaus
-                A0 = (pgaus2-1)*(pgaus2-4)/4.0 * wgbg
-                A1_plus = -(pgaus+1)*pgaus*(pgaus2-4)/6.0 * wgbg
-                A1_minus = -(pgaus-1)*pgaus*(pgaus2-4)/6.0 * wgbg
-                A2_plus = (pgaus2-1)*pgaus*(pgaus+2)/24.0 * wgbg
-                A2_minus = (pgaus2-1)*pgaus*(pgaus-2)/24.0 * wgbg
-
-                # add up in work
-                work[js1] += isgn * coupling_n * A2_minus
-                work[js2] += isgn * coupling_n * A1_minus
-                work[js3] += isgn * coupling_n * A0
-                work[js4] += isgn * coupling_n * A1_plus
-                work[js5] += isgn * coupling_n * A2_plus
-
-                # minus diverging value
-                work[j] -= isgn * coupling_0 * wgbg
-                if j == jres
-                    ak0i -= isgn * coupling_0 * wgbg
+                # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
+                if plasma_is_source
+                    greenfunction_mat[j, js[1]] += G_n_nonsingular * A2_minus
+                    greenfunction_mat[j, js[2]] += G_n_nonsingular * A1_minus
+                    greenfunction_mat[j, js[3]] += G_n_nonsingular * A0
+                    greenfunction_mat[j, js[4]] += G_n_nonsingular * A1_plus
+                    greenfunction_mat[j, js[5]] += G_n_nonsingular * A2_plus
                 end
 
-                # skip when plasma, no skip when considering wall
-                (iopw == 0) && continue
-
-                # if Wall is considered(wall/wall, plasma/wall, wall/plasma), add up G_n_nonsingular value
-                greenfunction_mat[j, js1] += G_n_nonsingular * A2_minus
-                greenfunction_mat[j, js2] += G_n_nonsingular * A1_minus
-                greenfunction_mat[j, js3] += G_n_nonsingular * A0
-                greenfunction_mat[j, js4] += G_n_nonsingular * A1_plus
-                greenfunction_mat[j, js5] += G_n_nonsingular * A2_plus
+                # Second type of singularity: 𝒦ⁿ
+                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰ (js[3] = j if iend=2)
+                grad_green_work[js[1]] += isgn * coupling_n * A2_minus
+                grad_green_work[js[2]] += isgn * coupling_n * A1_minus
+                grad_green_work[js[3]] += isgn * coupling_n * A0
+                grad_green_work[js[4]] += isgn * coupling_n * A1_plus
+                grad_green_work[js[5]] += isgn * coupling_n * A2_plus
+                # Subtract off the diverging singular n=0 component
+                grad_green_work[j] -= isgn * coupling_0 * wgauss
             end
         end
 
-        # Set residue based on logic similar to Table I of Chance 1997
-        residue = (j1 == 2) ? 2.0 : 0.0
+        # Set residue based on logic similar to Table I of Chance 1997 + existing δⱼᵢ in eq. 69
         # Would need to pass in wall geometry to generalize this to open walls
         is_closed_toroidal = true
         if is_closed_toroidal
-            residue_diagonal=(2-j1)*(2-j2)+(j1-1)*(j2-1)
-            residue_k0=(2-j1)*(2-j2)+(j1-3)*(j2-1)
-            residue=residue_diagonal+residue_k0
+            residue = (j1 == 2.0) ? 0.0 : (j2 == 1 ? 2.0 : -2.0) # Chance eq. 89
+        else
+            # TODO: this line can be gotten rid of if we are never doing open walls
+            residue = (j1 == j2) ? 2.0 : 0.0 # Chance eq. 90
         end
+        # Subtract regular integral component of δⱼᵢK⁰ in eq. 83 and add residue value in eq. 89/90
+        grad_green_work[j] = grad_green_work[j] - isgn * grad_green_0 + residue
 
-        # minus residue value
-        work[j] = work[j] - isgn * aval1 + residue
-        if j == jres
-            ak0i -= isgn * aval1
+        # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
+        if plasma_plasma_block
+            greenfunction_mat[j, js[1]] -= log_correction_2 / x_obs
+            greenfunction_mat[j, js[2]] -= log_correction_1 / x_obs
+            greenfunction_mat[j, js[3]] -= log_correction_0 / x_obs
+            greenfunction_mat[j, js[4]] -= log_correction_1 / x_obs
+            greenfunction_mat[j, js[5]] -= log_correction_2 / x_obs
         end
-
-        # Only when plasma/plasma, log singularity activate. (S1)
-        if iops == 1 && iopw != 0
-            greenfunction_mat[j, js1] -= log_correction_2 / x_obs
-            greenfunction_mat[j, js2] -= log_correction_1 / x_obs
-            greenfunction_mat[j, js3] -= log_correction_0 / x_obs
-            greenfunction_mat[j, js4] -= log_correction_1/x_obs
-            greenfunction_mat[j, js5] -= log_correction_2/x_obs
-        end
-
-        # Store all the datas of work in grdgre, gren
-        @views grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)] .= work
-        @views greenfunction_mat[j, 1:mtheta] ./= 2π
     end
+    # Since we computed 2π𝒢, divide by 2π to get 𝒢
+    greenfunction_mat ./= 2π
 end
 
 """
@@ -638,14 +610,259 @@ function Pn_minus_half_1997(s::Real, n::Int)
     return P
 end
 
-function Pn_minus_half_2007(s::Real, n::Int)
-    @warn "2007 paper implementation of Pn_minus_half is not yet complete. Use old version."
-    # This is a temporary alias. The new implementation should be added here.
-    return Pn_minus_half_1997(s, n)
+"""
+    elliptic_integrals_bulirsch(m1; error=1e-8, maxit=10)
+
+Compute complete elliptic integrals K(m1) and E(m1) using Bulirsch's algorithm.
+This is the Julia equivalent of the Fortran `ek3` subroutine.
+
+# Arguments
+
+  - `m1::Float64`: Complementary parameter (1 - k²), where k is the elliptic modulus
+  - `error::Float64`: Convergence tolerance (default 1e-8)
+  - `maxit::Int`: Maximum iterations (default 10)
+
+# Returns
+
+  - `K::Float64`: Complete elliptic integral of the first kind K(m1)
+  - `E::Float64`: Complete elliptic integral of the second kind E(m1)
+  - `convergence::Float64`: Convergence metric
+  - `iterations::Int`: Number of iterations performed
+
+# Notes
+
+  - Based on Bulirsch's method as described in Numerical Recipes
+  - Precision is approximately error²
+  - Reference: JCP 221 (2007) 330-348
+"""
+function elliptic_integrals_bulirsch(m1::Float64; error::Float64=1e-8, maxit::Int=10)
+
+    # Check valid input
+    if m1 <= 0.0 || m1 > 1.0
+        throw(DomainError(m1, "Input m1 must be in range (0, 1]"))
+    end
+
+    # Initialize for K and E calculation
+    pp = 1.0
+    aa = 1.0
+    bb1 = 1.0      # for K
+    bb2 = abs(m1)  # for E
+
+    qcval = sqrt(abs(m1))
+    aval0 = aa
+    bval1 = bb1
+    bval2 = bb2
+    pval0 = pp
+
+    eval = qcval
+    emval = 1.0
+
+    # Initialize based on pval0 > 0
+    if pval0 > 0.0
+        pval = sqrt(pval0)
+        aval1 = aval0
+        aval2 = aval0
+        bval1 = bval1 / pval
+        bval2 = bval2 / pval
+    else
+        fval = qcval * qcval
+        tval = 1.0 - fval
+        gval = 1.0 - pval0
+        fval = fval - pval0
+        qval1 = tval * (bval1 - aval0 * pval0)
+        qval2 = tval * (bval2 - aval0 * pval0)
+
+        pval = sqrt(fval / gval)
+        aval1 = (aval0 - bval1) / gval
+        aval2 = (aval0 - bval2) / gval
+        bval1 = aval1 * pval - qval1 / (gval * gval * pval)
+        bval2 = aval2 * pval - qval2 / (gval * gval * pval)
+    end
+
+    # Iterate until convergence
+    kounter = 0
+    sval = 0.0
+
+    while kounter < maxit
+        kounter += 1
+
+        hval1 = aval1
+        hval2 = aval2
+        aval1 = aval1 + bval1 / pval
+        aval2 = aval2 + bval2 / pval
+        rval = eval / pval
+        bval1 = bval1 + hval1 * rval
+        bval1 = bval1 + bval1
+        bval2 = bval2 + hval2 * rval
+        bval2 = bval2 + bval2
+        pval = rval + pval
+
+        sval = emval
+        emval = qcval + emval
+
+        if abs(sval - qcval) <= sval * error
+            break
+        end
+
+        qcval = sqrt(eval)
+        qcval = qcval + qcval
+        eval = qcval * emval
+    end
+
+    # Calculate convergence metric
+    snorm = (sval != 0.0) ? sval * sval : 1.0
+    convergence = (sval - qcval)^2 / snorm
+    convergence = max(convergence, 1.0e-100)
+
+    # Calculate final K and E values
+    K = π/2 * (bval1 + aval1 * emval) / (emval * (emval + pval))
+    E = π/2 * (bval2 + aval2 * emval) / (emval * (emval + pval))
+
+    return K, E, convergence, kounter
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=true)
+    Pn_minus_half_2007(s, n)
+
+Compute the Legendre function of the first kind of order -1/2, P^n_{-1/2}(s),
+using methods from Chance J. Comp. Phys 221 (2007) 330-348.
+
+This implementation uses:
+
+ 1. Bulirsch's algorithm for elliptic integrals (more accurate than polynomial approximations)
+ 2. Gaussian integration for large mode numbers (n*rhohat >= 0.1) where rhohat = 1/√(2*y*w)
+ 3. Upward recurrence for small mode numbers
+
+# Arguments
+
+  - `s::Real`: Legendre function parameter (s > 1)
+  - `n::Int`: Maximum order n (n ≥ 0)
+
+# Returns
+
+  - `P::Vector{Float64}`: Array of values P^0_{-1/2}(s) through P^{n+1}_{-1/2}(s)
+
+# Notes
+
+  - This version is more accurate than Pn_minus_half_1997 for large n
+  - Expected to diverge from 1997 version at large nloc
+  - Reference: JCP 221 (2007) 330-348    # Constants
+"""
+function Pn_minus_half_2007(s::Real, n::Int)
+
+    # Constants
+    sqpi = sqrt(π)
+    pii = 2.0 / π
+    sqtwo = sqrt(2.0)
+
+    # Initialize output array
+    P = zeros(n + 2)
+
+    # Preliminary computations
+    xxq = s * s
+    ysq = xxq - 1.0
+    y = sqrt(ysq)
+    w = s + y
+
+    # rhohat parameter for determining integration method
+    rhohatsq = 1.0 / (2.0 * y * w)
+    rhohat = sqrt(rhohatsq)
+
+    # Compute m1 = 1/w (complementary parameter for elliptic integrals)
+    m1 = 1.0 / w
+    m1sq = m1 * m1
+    m1sqrt = sqrt(m1)      # m1^(1/4)
+    m1sqrti = sqrt(w)      # m1^(-1/4)
+
+    # Compute elliptic integrals using Bulirsch algorithm
+    K, E, conv, iters = elliptic_integrals_bulirsch(m1sq; error=1e-15, maxit=20)
+
+    # Base cases: P^0 and P^1
+    pn = pii * m1sqrt * K
+    pnp = pii * m1sqrti * E
+
+    P[1] = pn  # P^0_{-1/2}
+    pp = (pnp - s * pn) / (2.0 * y)
+    P[2] = pp  # P^1_{-1/2}
+
+    # Use Gaussian integration if n*rhohat >= 0.1
+    if n * rhohat >= 0.1
+
+        # Integration limits
+        xl = 0.0
+        xu = 5.0
+
+        # Transform to integration interval
+        agaus = 0.5 * (xu + xl)
+        bgaus = 0.5 * (xu - xl)
+
+        # Calculate integrals for P^n and P^{n+1}
+        gint = 0.0
+        gintp = 0.0
+
+        for ig in 1:32
+            tg0 = agaus + GAUSSIANPOINTS32[ig] * bgaus
+            tg02 = tg0 * tg0
+            tg1 = tg02 / (2.0 * n)
+            tg1p = tg02 / (2.0 * n + 2.0)
+            sinhtg1 = sinh(tg1)
+            sinhtg1p = sinh(tg1p)
+            sinhtg12 = sinhtg1 * sinhtg1
+            sinhtg12p = sinhtg1p * sinhtg1p
+            dnom = s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12)
+            dnomp = s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p)
+            dnom = sqrt(dnom)
+            dnomp = sqrt(dnomp)
+            anumr = tg0 * exp(-tg02)
+            gint += GAUSSIANWEIGHTS32[ig] * anumr / dnom
+            gintp += GAUSSIANWEIGHTS32[ig] * anumr / dnomp
+        end
+
+        gint *= bgaus
+        gintp *= bgaus
+
+        # Calculate coefficients
+        pcoef = sqrt((s - 1.0) / (s + 1.0))
+
+        # Gamma functions: Gamma[1/2 - n] and Gamma[1/2 - (n+1)]
+        gamn = sqpi
+        gamp = -2.0 * sqpi
+
+        if n != 0
+            # Compute Gamma[1/2 - n] = sqpi / product(-(i-1) - 0.5 for i in 1:n)
+            gamn = sqpi / prod(-(i - 1) - 0.5 for i in 1:n)
+            gamp = -gamn / (n + 0.5)
+        end
+
+        # Final Legendre function values
+        gint = sqtwo * pcoef^n * gint / (n * sqpi * gamn)
+        gintp = sqtwo * pcoef^(n + 1) * gintp / ((n + 1.0) * sqpi * gamp)
+
+        P[end-1] = gint   # P^n_{-1/2}
+        P[end] = gintp    # P^{n+1}_{-1/2}
+
+    else
+        # Use upward recurrence for small n*rhohat < 0.1
+        if n == 0
+            return P
+        end
+
+        for i in 1:n
+            ak02 = 0.5 - i
+            pm = pn
+            pn = pp
+            pp = -2.0 * i * s * pn / y - ak02 * ak02 * pm
+        end
+
+        P[end-1] = pn   # P^n_{-1/2}
+        P[end] = pp     # P^{n+1}_{-1/2}
+    end
+
+    return P
+end
+
+"""
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
@@ -659,7 +876,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
   - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
   - `n`: Toroidal mode number (Int)
-  - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default true)
+  - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
 
 # Returns
 
@@ -672,8 +889,9 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - Uses Legendre functions P^n_{-1/2}(s) computed via elliptic integrals
   - Implements analytical derivatives from Chance 1997 equations
   - The coupling terms include the Jacobian factor from the coordinate transformation
+  - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=true)
+function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2
@@ -929,7 +1147,6 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
     mtheta = inputs.mtheta
     mpert = inputs.mpert
     n = inputs.n
-    qa = inputs.qa
     dtheta = 2pi / mtheta
 
     # Pre-calculate Green's function for the observation point
@@ -953,13 +1170,8 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
 
         # Accumulate Fourier series for g_real and g_imag at this source point
         for l_idx in 1:mpert
-            l = l_modes[l_idx]
-            arg = l * (i_theta-1) * dtheta + n * qa * plasma_surf.delta[i_theta]
-            cos_val = cos(arg)
-            sin_val = sin(arg)
-
-            g_real[i_theta, l_idx] = aval * cos_val
-            g_imag[i_theta, l_idx] = aval * sin_val
+            g_real[i_theta, l_idx] = aval * plasma_surf.cos_ln_basis[i_theta, l_idx]
+            g_imag[i_theta, l_idx] = aval * plasma_surf.sin_ln_basis[i_theta, l_idx]
         end
     end
 

@@ -236,29 +236,28 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Plasma–Plasma block
     j1, j2 = 1, 1
-    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
+    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, 0, mpert)
 
     !wall.nowall && begin
-        @warn "Vacuum response calculations with wall are open-beta and still being benchmarked for accuracy."
         # Plasma–Wall block
         j1, j2 = 1, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, 0, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, n)
 
         # Wall–Wall block
         j1, j2 = 2, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, 0, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, n)
 
         # Wall–Plasma block
         j1, j2 = 2, 1
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -295,10 +294,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cos_ln_basis, 0, 0)
+    fourier_inverse_transform!(aii, grri, plasma_surf.sin_ln_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.sin_ln_basis, 0, 0)
+    fourier_inverse_transform!(air, grri, plasma_surf.cos_ln_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii

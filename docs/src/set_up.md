@@ -3,6 +3,7 @@
 - [Setting up JPEC](#setting-up-jpec)
   - [On Windows via WSL (Ubuntu)](#on-windows-via-wsl-ubuntu)
   - [On macOS](#on-macos)
+  - [Pre-commit Hooks (Optional Developer Tools)](#pre-commit-hooks-optional-developer-tools)
 
 ## On Windows via WSL (Ubuntu)
 1. Install WSL and Ubuntu
@@ -167,3 +168,69 @@ Clone it from GitHub directly to your virtual machine.
             ```
 
 ## On macOS
+
+(Setup instructions to be added)
+
+## Pre-commit Hooks (Optional Developer Tools)
+
+The repository uses pre-commit hooks to maintain code quality and prevent noisy commits from Jupyter notebook metadata and outputs.
+
+### Why Use Pre-commit Hooks?
+
+Pre-commit hooks automatically:
+- Strip Jupyter notebook outputs, execution counts, and metadata (prevents merge conflicts and noisy diffs)
+- Format Julia code according to `.JuliaFormatter.toml` settings
+- Remove trailing whitespace and fix line endings
+- Validate YAML/TOML syntax
+- Prevent accidentally committing large files (>5MB)
+
+### Installation
+
+```bash
+# Install pre-commit (requires Python/pip)
+pip install pre-commit
+
+# Install JuliaFormatter globally (required for Julia code formatting hook)
+julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
+
+# Install the git hooks in your local repository
+cd /path/to/JPEC
+pre-commit install
+```
+
+### Usage
+
+Once installed, the hooks run automatically on `git commit`. You can also run them manually:
+
+```bash
+# Run on all files in the repository
+pre-commit run --all-files
+
+# Run only on currently staged files
+pre-commit run
+```
+
+### Bypassing Hooks (Not Recommended)
+
+In rare cases where you need to bypass the hooks:
+
+```bash
+git commit --no-verify
+```
+
+However, this is discouraged as it may introduce notebook clutter or formatting inconsistencies.
+
+### Optional: Standalone nbstripout Filter
+
+For additional protection beyond pre-commit, you can install nbstripout as a git filter:
+
+```bash
+# Install nbstripout globally
+pip install nbstripout
+
+# Install filter for this repository
+cd /path/to/JPEC
+nbstripout --install
+```
+
+This ensures notebooks are cleaned even if pre-commit is bypassed with `--no-verify`. However, this is **optional** and not required for normal development - the pre-commit hook is sufficient for most workflows.
