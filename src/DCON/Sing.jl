@@ -774,40 +774,227 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     @views odet.ud[:, :, 2] .-= odet.tmp
 end
 
+"""
+    sing_get_f_det(psifac::Float64) -> ComplexF64
 
-function sing_get_f_det(psival::Float64)
-    # Placeholder implementation - creates a determinant field with singularities
-    # for testing purposes. This should be replaced with actual determinant calculation
-    # based on the singular surface evaluation at psi = psival.
-    #
-    # Current behavior: creates a determinant field with minima near 0.3, 0.5, and 0.7
-    # to simulate realistic singular surface structure for adaptive refinement testing.
+Find determinant of non-Hermitian F matrix.
+Subprogram 13 from GPEC code base - converted from Fortran to Julia.
 
-    # Create multiple smooth valleys to simulate plural resonances
-    # Valley 1: centered at 0.3
-    val1 = 0.05 * (psival - 0.3)^2 + 0.01 * complex(cos(2π * psival), sin(2π * psival))
+# Arguments
 
-    # Valley 2: centered at 0.5 (the main singularity)
-    val2 = 0.02 * (psival - 0.5)^2 + 0.01 * complex(sin(4π * psival), cos(4π * psival))
+  - `psifac`: Psi factor value at which to evaluate the determinant
 
-    # Valley 3: centered at 0.7
-    val3 = 0.08 * (psival - 0.7)^2 + 0.01 * complex(sin(π * psival), cos(π * psival))
+# Returns
 
-    # Combine with base oscillation
-    base = 1.0 + 0.3 * complex(sin(6π * psival), cos(6π * psival))
+  - `det`: Complex determinant of the F matrix
+"""
+function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl)
 
-    # Return the combined determinant field
-    return base + val1 + val2 + val3
+    #-----------------------------------------------------------------------
+    # Compute q and singfac
+    #-----------------------------------------------------------------------
+    spline_eval!(equil.sq, psifac, 0)
+    q = equil.sq.f[4]
+    nn = intr.nlow #Choosing one for now but eventually going to need multi-n support here
+    nq = nn * q
+    singfac = [intr.mlow - nn*q + ipert for ipert in 0:(intr.mpert-1)]
+    chi1 = twopi * equil.psio
+
+    #-----------------------------------------------------------------------
+    # Compute F matrix
+    #-----------------------------------------------------------------------
+    f = zeros(ComplexF64, intr.mpert, intr.mpert)
+
+    if ctrl.kin_flag
+        if intr.fkg_kmats_flag
+            # Evaluate splines
+            cspline_eval!(ffit.f0mats, psifac, 0)
+            cspline_eval!(ffit.pmats, psifac, 0)
+            cspline_eval!(ffit.paats, psifac, 0)
+            cspline_eval!(ffit.r1mats, psifac, 0)
+
+            f0mat = reshape(ffit.f0mats.f, intr.mpert, intr.mpert)
+            pmat = reshape(ffit.pmats.f, intr.mpert, intr.mpert)
+            paat = reshape(ffit.paats.f, intr.mpert, intr.mpert)
+            r1mat = reshape(ffit.r1mats.f, intr.mpert, intr.mpert)
+        else
+            # Evaluate splines
+            cspline_eval!(ffit.amats, psifac, 0)
+            cspline_eval!(ffit.dbats, psifac, 0)
+            cspline_eval!(ffit.fbats, psifac, 0)
+
+            amat = reshape(ffit.amats.f, intr.mpert, intr.mpert)
+            dbat = reshape(ffit.dbats.f, intr.mpert, intr.mpert)
+            fmat = reshape(ffit.fbats.f, intr.mpert, intr.mpert)
+
+            kwmat = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
+            ktmat = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
+
+            for i in 1:4
+                cspline_eval!(ffit.kwmats[i], psifac, 0)
+                cspline_eval!(ffit.ktmats[i], psifac, 0)
+                kwmat[:, :, i] = reshape(ffit.kwmats[i].f, intr.mpert, intr.mpert)
+                ktmat[:, :, i] = reshape(ffit.ktmats[i].f, intr.mpert, intr.mpert)
+            end
+
+            amat = amat + kwmat[:, :, 1] + ktmat[:, :, 1]
+            b1mat = ifac * dbat
+
+            #-----------------------------------------------------------------------
+            # Factor kinetic non-Hermitian matrix A using banded storage
+            #-----------------------------------------------------------------------
+            # Convert to banded storage format (LAPACK style)
+            amatlu = zeros(ComplexF64, 3*intr.mband+1, intr.mpert)
+            umat = Matrix{ComplexF64}(I, intr.mpert, intr.mpert)
+
+            for jpert in 1:intr.mpert
+                for ipert in 1:intr.mpert
+                    # Band storage: row index is (2*mband+1+ipert-jpert)
+                    amatlu[2*intr.mband+1+ipert-jpert, jpert] = amat[ipert, jpert]
+                end
+            end
+
+            # LU factorization of banded matrix
+            ipiv, info = LAPACK.gbtrf!(intr.mband, intr.mband, amatlu)
+
+            if info != 0
+                error("gbtrf: amat singular at psifac = $psifac, ipert = $info, reduce delta_mband")
+            end
+
+            # Solve systems using banded LU
+            temp1 = copy(dbat)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp1)
+            f0mat = fmat - adjoint(dbat) * temp1
+
+            temp2 = copy(amat)
+            LAPACK.gbtrs!('C', intr.mband, intr.mband, amatlu, ipiv, temp2)
+            aamat = adjoint(temp2)
+            umat = umat - aamat
+
+            bkmat = kwmat[:, :, 2] + ktmat[:, :, 2] +
+                    ifac * chi1 / (twopi*nn) * (kwmat[:, :, 1] + ktmat[:, :, 1])
+            bkaat = kwmat[:, :, 2] - ktmat[:, :, 2] +
+                    ifac * chi1 / (twopi*nn) * (kwmat[:, :, 1] + ktmat[:, :, 1])
+
+            temp2 = copy(bkmat)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp2)
+            pmat = adjoint(b1mat) * temp2
+
+            temp2 = copy(b1mat)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp2)
+            paat = adjoint(bkaat) * temp2 - ifac * chi1 / (twopi*nn) * umat * b1mat
+            paat = adjoint(paat)
+
+            temp1 = kwmat[:, :, 1] + ktmat[:, :, 1]
+            temp2 = copy(bkmat)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp2)
+
+            r1mat =
+                kwmat[:, :, 4] + ktmat[:, :, 4] -
+                (chi1 / (twopi*nn))^2 * adjoint(temp1) +
+                ifac * chi1 / (twopi*nn) * adjoint(bkaat) -
+                ifac * chi1 / (twopi*nn) * aamat * bkmat -
+                adjoint(bkaat) * temp2
+        end
+
+        # Construct F matrix
+        for ipert in 1:intr.mpert
+            m1 = intr.mlow + ipert - 1
+            singfac1 = m1 - nn * q
+            for jpert in 1:intr.mpert
+                m2 = intr.mlow + jpert - 1
+                singfac2 = m2 - nn * q
+                f[ipert, jpert] = singfac1 * f0mat[ipert, jpert] * singfac2 -
+                                  singfac1 * pmat[ipert, jpert] -
+                                  conj(paat[jpert, ipert]) * singfac2 +
+                                  r1mat[ipert, jpert]
+            end
+        end
+    else
+        # Non-kinetic case (Hermitian)
+        cspline_eval!(ffit.amats, psifac, 0)
+        cspline_eval!(ffit.dbats, psifac, 0)
+        cspline_eval!(ffit.fbats, psifac, 0)
+
+        amat = reshape(ffit.amats.f, intr.mpert, intr.mpert)
+        dbat = reshape(ffit.dbats.f, intr.mpert, intr.mpert)
+        fmat = reshape(ffit.fbats.f, intr.mpert, intr.mpert)
+
+        # Hermitian factorization (Bunch-Kaufman)
+        amat_copy = copy(amat)
+        ipiv, info = LAPACK.hetrf!('L', amat_copy)
+
+        if info != 0
+            error("hetrf: amat singular at psifac = $psifac, ipert = $info, increase delta_mband")
+        end
+
+        temp1 = copy(dbat)
+        LAPACK.hetrs!('L', amat_copy, ipiv, temp1)
+        fmat = fmat - adjoint(dbat) * temp1
+
+        # Construct F matrix
+        for ipert in 1:intr.mpert
+            m1 = intr.mlow + ipert - 1
+            singfac1 = m1 - nn * q
+            for jpert in 1:intr.mpert
+                m2 = intr.mlow + jpert - 1
+                singfac2 = m2 - nn * q
+                f[ipert, jpert] = singfac1 * fmat[ipert, jpert] * singfac2
+            end
+        end
+    end
+
+    #-----------------------------------------------------------------------
+    # Convert F to banded storage and compute LU factorization
+    #-----------------------------------------------------------------------
+    kl = intr.mpert - 1
+    ku = intr.mpert - 1
+    ldab = 2*kl + ku + 1
+    m = intr.mpert
+    n = intr.mpert
+
+    lumat = zeros(ComplexF64, ldab, n)
+
+    for jpert in 1:intr.mpert
+        for ipert in 1:intr.mpert
+            lumat[kl+ku+1+ipert-jpert, jpert] = f[ipert, jpert]
+        end
+    end
+
+    fpiv, info = LAPACK.gbtrf!(kl, ku, lumat)
+
+    if info != 0
+        println("gbtrf info = ", info)
+        error("Termination by galerkin_solve_equation")
+    end
+
+    #-----------------------------------------------------------------------
+    # Calculate the determinant
+    #-----------------------------------------------------------------------
+    d = 1.0
+    for i in 1:m
+        if fpiv[i] != i
+            d = -d
+        end
+    end
+
+    det = prod(lumat[kl+ku+1, :]) * d
+
+    return det
 end
+
+
 
 #TODO: We probably don't want to pass EquilibriumControl in - this is an irregular thing to do
 """
-    ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl)
+    ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl, intr::DconInternal, odet::OdeState,
+               ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium)
 
 Find new singular surfaces in plasma physics simulations.
 Subprogram 14 from GPEC code base - converted from Fortran to Julia.
 """
-function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl, intr::DconInternal, odet::OdeState;
+function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl, intr::DconInternal, odet::OdeState,
+    ffit::FourFitVars, equil::Equilibrium.PlasmaEquilibrium;
     debug::Bool=false)
     # Parameters
     #TODO: these are probably things we want to pass in --> looks like they are often defined in the vac.in files
@@ -836,8 +1023,8 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
     # Adaptively search the singular point
     #-----------------------------------------------------------------------
     odet.sing_flag = false
-    det0 = sing_get_f_det(x0)
-    det1 = sing_get_f_det(x1)
+    det0 = sing_get_f_det!(ffit, x0, intr, equil, ctrl)
+    det1 = sing_get_f_det!(ffit, x1, intr, equil, ctrl)
 
     det_max = abs(det0) > abs(det1) ? det0 : det1
 
@@ -859,9 +1046,10 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
     =#
 
     #TODO: convert
-    adp_find_sing!(x0, x1, det0, det1, det_max, psising,
-        singnum, i_recur, i_depth, i_record,
-        tol, sing_det, odet.sing_flag, tmp_record)
+    adp_find_sing!(x0, x1, det_max, det0, det1, psising,
+        Ref(singnum), Ref(i_recur), Ref(i_depth), Ref(i_record),
+        tol, Ref(sing_det), Ref(odet.sing_flag), tmp_record,
+        ffit, equil, intr, ctrl)
 
     # bin_close(bin_unit)
 
@@ -883,11 +1071,14 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
     #-----------------------------------------------------------------------
     # Newton method to find accurate local minimum points
     #-----------------------------------------------------------------------
+    # Create a closure that captures the necessary parameters for sing_get_f_det
+    det_func(psi) = sing_get_f_det!(ffit, psi, intr, equil, ctrl)
+
     for i in 2:(singnum-1)
         x1 = psising[i]
-        x1 = sing_newton(sing_get_f_det, x1, psising[i-1], psising[i+1]) #TODO: convert this function and what is going on with the nested function call
-        det0 = sing_get_f_det(psising[i])
-        det1 = sing_get_f_det(x1)
+        x1 = sing_newton(det_func, x1, psising[i-1], psising[i+1]) #TODO: convert this function and what is going on with the nested function call
+        det0 = sing_get_f_det!(ffit, psising[i], intr, equil, ctrl)
+        det1 = sing_get_f_det!(ffit, x1, intr, equil, ctrl)
 
         if abs(det0) > abs(det1)
             psising[i] = x1
@@ -910,7 +1101,7 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
     psising[1] = psising_check[1]
 
     for i in 2:(singnum_check-1)
-        det0 = sing_get_f_det(psising_check[i])
+        det0 = sing_get_f_det!(ffit, psising_check[i], intr, equil, ctrl)
         reps = keps1 / keps2
         eps = keps2 * reps * 10^(psising_check[i] / log10(reps))
 
@@ -939,7 +1130,7 @@ function ksing_find(ctrl::DconControl, equilCtrl::Equilibrium.EquilibriumControl
         println(io, rpad("psi", 16), rpad("real(det)", 16),
             rpad("imag(det)", 16))
         for i in 1:singnum
-            det0 = sing_get_f_det(psising[i])
+            det0 = sing_get_f_det!(ffit, psising[i], intr, equil, ctrl)
             println(io, rpad(string(psising[i]), 16),
                 rpad(string(real(det0)), 16),
                 rpad(string(imag(det0)), 16))
@@ -1029,7 +1220,11 @@ function adp_find_sing!(x0::Float64, x1::Float64,
     tol::Float64,
     sing_det::Ref{ComplexF64},
     sing_flag::Ref{Bool},
-    record::Matrix{ComplexF64}) # sing_get_f_det::Function, bin_unit::Union{IO,Nothing}=nothing)
+    record::Matrix{ComplexF64},
+    ffit::FourFitVars,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::DconInternal,
+    ctrl::DconControl) # sing_get_f_det::Function, bin_unit::Union{IO,Nothing}=nothing)
 
     grid_tol = 1e-6
 
@@ -1039,7 +1234,7 @@ function adp_find_sing!(x0::Float64, x1::Float64,
 
     # Set up 3-point stencil
     x = [x0, 0.5 * (x0 + x1), x1]
-    det = ComplexF64[det0, sing_get_f_det(x[2]), det1]
+    det = ComplexF64[det0, sing_get_f_det!(ffit, x[2], intr, equil, ctrl), det1]
 
     # Track maximum determinant
     if abs(det[2]) > abs(det_max)
@@ -1054,11 +1249,13 @@ function adp_find_sing!(x0::Float64, x1::Float64,
         # Grid is not linear enough - subdivide further
         adp_find_sing!(x[1], x[2], det_max, det[1], det[2],
             singpos, singnum, i_recur, i_depth, i_record,
-            tol, sing_det, sing_flag, record)
+            tol, sing_det, sing_flag, record,
+            ffit, equil, intr, ctrl)
 
         adp_find_sing!(x[2], x[3], det_max, det[2], det[3],
             singpos, singnum, i_recur, i_depth, i_record,
-            tol, sing_det, sing_flag, record)
+            tol, sing_det, sing_flag, record,
+            ffit, equil, intr, ctrl)
     else
         # Grid is linear enough - judge singularity with gradient of |det|
         tmp1 = abs(det[2]) - abs(det[1])
