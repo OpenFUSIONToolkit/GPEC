@@ -239,8 +239,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -256,8 +256,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -294,10 +294,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cos_ln_basis, 0, 0)
+    fourier_inverse_transform!(aii, grri, plasma_surf.sin_ln_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.sin_ln_basis, 0, 0)
+    fourier_inverse_transform!(air, grri, plasma_surf.cos_ln_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii

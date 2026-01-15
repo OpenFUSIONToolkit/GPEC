@@ -109,23 +109,6 @@ function kernel!(
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
 
-    has_zero_crossing = false
-    # See if the conductor surface crosses R=0 (x=0) anywhere
-    if !plasma_plasma_block
-        # Initialize jbot and jtop, and figure out wall geometry based on which block we are in
-        jbot = jtop = mtheta/2+1
-        xwall = plasma_is_source ? x_obspoints : x_sourcepoints
-        # Find if sign of wall x point crosses zero
-        for i in 1:mtheta
-            next_i = i == mtheta ? 1 : i + 1
-            if xwall[i] * xwall[next_i] <= 0.0
-                jbot = xwall[i] > 0.0 ? i : # index where the wall leaves positive R
-                       jtop = xwall[i] < 0.0 ? i + 1 : jtop # index where the wall returns to positive R
-                has_zero_crossing = true
-            end
-        end
-    end
-
     # Used for Z'_θ and X'_θ in eq.(51)
     spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints; extrapolation_bc=Interpolations.Periodic())
     spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints; extrapolation_bc=Interpolations.Periodic())
@@ -142,69 +125,34 @@ function kernel!(
         # Workspace = view of appropriate row of grad_greenfunction_mat for this observer point
         grad_green_work = @view(grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)])
 
-        # if observation point is negative, we cannot use green function
-        if x_obs < 0.0
-            !plasma_is_source && (grad_green_work[j] = 1.0)
-            continue
-        end
+        # Obtain nonsingular region (endpoints at j+2 and j-2, so exclude j-1, j, and j+1)
+        nonsing_src_indices = mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
 
-        # Compute istart and iend (start/end index of integration to avoid singularity)
-        # If no zero crossing, istart = iend = 2
-        iend = 2
-        if has_zero_crossing && !plasma_is_source
-            # Determine iend/istart so Simpson sweep avoids integrating across the (x=0) discontinuity near the observer index j
-            if jbot - j == 1
-                iend = 3
-            elseif jbot - j == 0
-                iend = 4
-            elseif j - jtop == 0
-                iend = 0
-            elseif j - jtop == 1
-                iend = 1
-            end
-        end
-        istart = 4 - iend
+        # Compute composite Simpson's 1/3 rule weights (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
+        # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+        nsrc = length(nonsing_src_indices)
+        simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
 
-        # Perform Simpson integration for nonsingular source points (excludes 3 singular points)
-        # For cases where wall doesn't cross x=0 (iend = istart = 2), the singular points are j-1, j, j+1
-        for i in 1:(mtheta-3)
-            # Get source point index (ic) and ensure it is in range [1, mtheta]
-            ic = i + j + istart - 1
-            if ic > mtheta
-                ic = ic - mtheta
-            end
-            x_source=x_sourcepoints[ic]
-            z_source=z_sourcepoints[ic]
-
-            # if source point is negative, we cannot use green function
-            # & if source point(ic) and obs point (j) is same, it's singular
-            (x_source < 0 || ic == j) && continue
+        # Perform Simpson integration for nonsingular source points
+        for (isrc, wsimpson) in zip(nonsing_src_indices, simpson_weights)
+            x_source=x_sourcepoints[isrc]
+            z_source=z_sourcepoints[isrc]
 
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[ic], dz_dtheta[ic], n)
-
-            # Compute composite Simpson's 1/3 rule weight (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
-            # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-            endpoint = (i == 1)||(i == mtheta - 3)
-            wsimpson = (endpoint ? 1 : (iseven(i) ? 4 : 2)) * dtheta / 3
+            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[isrc], dz_dtheta[isrc], n)
 
             # Sum contributions to Green's function matrices using Simpson weight
-            grad_green_work[ic] += isgn * coupling_n * wsimpson
-            greenfunction_mat[j, ic] += G_n * wsimpson
+            grad_green_work[isrc] += isgn * coupling_n * wsimpson
+            greenfunction_mat[j, isrc] += G_n * wsimpson
             grad_green_0 += coupling_0 * wsimpson
         end
 
-        # Skip singularity calculation for R < 0 wall points
-        if has_zero_crossing && j > jbot && j < jtop
-            continue
-        end
-
         # Perform Gaussian quadrature for singular points (source = obs point)
-        # Get indices of the singularity region ([j-2, j-1, j, j+1, j+2] for iend = 2)
-        js = mod.(j - iend .+ ((mtheta-1):(mtheta+3)), mtheta) .+ 1
-        # Integrate region of length 2 * dtheta on left (ilr = 1)/right (ilr = 2) of singularity
-        for ilr in [1, 2]
-            gauss_xleft = theta_obs + (2*ilr-iend-2)*dtheta
+        # Get indices of the singularity region, [j-2, j-1, j, j+1, j+2]
+        js = mod.(j .+ ((mtheta-3):(mtheta+1)), mtheta) .+ 1
+        # Integrate region of length 2 * dtheta on left/right of singularity
+        for region in ["left", "right"]
+            gauss_xleft = theta_obs - (region == "left" ? 2 * dtheta : 0)
             gauss_xright = gauss_xleft + 2 * dtheta
             gauss_xavg = (gauss_xright + gauss_xleft)/2
             theta_gauss = gauss_xavg .+ GAUSSIANPOINTS .* dtheta # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
@@ -222,8 +170,8 @@ function kernel!(
 
                 # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
                 wgauss = GAUSSIANWEIGHTS[ig] * dtheta
-                # Calculate p = θ/Δ = (θⱼ - θ')/Δ, 0 at observation point, ±1,±2 at other 5-point stencil nodes
-                pgauss=(theta_gauss[ig]-theta_obs-(2-iend)*dtheta)/dtheta
+                # Calculate p = θ/Δ = (θⱼ - θ')/Δ
+                pgauss=(theta_gauss[ig]-theta_obs)/dtheta
                 # Compute 5-point Lagrange basis polynomials at the Gauss point and multiply by quadrature weight
                 A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss
                 A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss
@@ -241,7 +189,7 @@ function kernel!(
                 end
 
                 # Second type of singularity: 𝒦ⁿ
-                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰ (js[3] = j if iend=2)
+                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰
                 grad_green_work[js[1]] += isgn * coupling_n * A2_minus
                 grad_green_work[js[2]] += isgn * coupling_n * A1_minus
                 grad_green_work[js[3]] += isgn * coupling_n * A0
@@ -1274,7 +1222,6 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
     mtheta = inputs.mtheta
     mpert = inputs.mpert
     n = inputs.n
-    qa = inputs.qa
     dtheta = 2pi / mtheta
 
     # Pre-calculate Green's function for the observation point
@@ -1298,13 +1245,8 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
 
         # Accumulate Fourier series for g_real and g_imag at this source point
         for l_idx in 1:mpert
-            l = l_modes[l_idx]
-            arg = l * (i_theta-1) * dtheta + n * qa * plasma_surf.delta[i_theta]
-            cos_val = cos(arg)
-            sin_val = sin(arg)
-
-            g_real[i_theta, l_idx] = aval * cos_val
-            g_imag[i_theta, l_idx] = aval * sin_val
+            g_real[i_theta, l_idx] = aval * plasma_surf.cos_ln_basis[i_theta, l_idx]
+            g_imag[i_theta, l_idx] = aval * plasma_surf.sin_ln_basis[i_theta, l_idx]
         end
     end
 
