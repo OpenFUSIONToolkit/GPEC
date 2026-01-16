@@ -83,6 +83,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct DconInternal
     dir_path::String = ""
@@ -108,6 +109,7 @@ A mutable struct holding internal state variables for stability calculations.
     q1lim::Float64 = 0.0
     locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
     debug_settings::DebugSettings = DebugSettings()
+    wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
 
 """

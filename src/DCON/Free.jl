@@ -1,5 +1,5 @@
 """
-    free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::Vacuum.WallShapeSettings) -> VacuumData
+    free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal) -> VacuumData
 
 Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
 in the Fortran code, except now all data is passed in memory instead of via files. This
@@ -7,7 +7,7 @@ modifies `odet` in place to normalize the eigenfunctions stored in `u_store` and
 and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
 and data dumping.
 """
-function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, wall_settings::Vacuum.WallShapeSettings)
+function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # Initializations and allocations
     vac = VacuumData(ctrl.mthvac, intr.mpert, intr.numpert_total)
@@ -28,26 +28,26 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     for ipert_n in 1:intr.npert
         # Set VACUUM run parameters and boundary shape
         n = ipert_n - 1 + intr.nlow
-        vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl.force_wv_symmetry, equil, intr)
+        vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
 
         # Output data for unit testing and benchmarking
         if intr.debug_settings.output_benchmark_data
             @info "Outputting top level vacuum debug data for n = $n"
-            farwall_flag = wall_settings.shape == "nowall" ? true : false
+            farwall_flag = intr.wall_settings.shape == "nowall" ? true : false
             benchmark_inputs = VacuumBenchmarkInputs(
                 wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac,
                 true, vac_inputs.kernelsign, false,
                 farwall_flag, vac.grri, vac.xzpts, "ahg2msc_dcon.out", intr.dir_path,
-                vac_inputs, wall_settings,
+                vac_inputs, intr.wall_settings,
                 n, ipert_n, intr.psilim
             )
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
 
         # Compute vacuum energy matrix
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
         # Equation 126 in Chance 1997 - scale by (m - n*q)(m' - n*q)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
@@ -125,7 +125,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 end
 
 """
-    compute_vacuum_inputs(psifac::Float64, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    compute_vacuum_inputs(psifac::Float64, n::Int, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
 Compute the necessary input paramters to the VACUUM code for computing the vacuum response matrix.
 Performs the same function as `free_write_msc` in the Fortran code, except we create a data struct
@@ -140,7 +140,7 @@ the r, z, and ν values at the plasma boundary, as well as mode numbers and numb
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
 """
-function compute_vacuum_inputs(psifac::Float64, n::Int, force_wv_symmetry::Bool, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+function compute_vacuum_inputs(psifac::Float64, n::Int, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Allocations
     theta_norm = Vector(equil.rzphi.ys)
@@ -175,7 +175,7 @@ function compute_vacuum_inputs(psifac::Float64, n::Int, force_wv_symmetry::Bool,
         mpert=intr.mpert,
         n=n,
         mtheta=ctrl.mthvac,
-        force_wv_symmetry=force_wv_symmetry
+        force_wv_symmetry=ctrl.force_wv_symmetry
     )
 end
 
@@ -223,8 +223,8 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         for ipert_n in 1:intr.npert
             # Compute vacuum matrix
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl.force_wv_symmetry, equil, intr)
-            wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
+            vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
+            wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling
             singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
