@@ -32,6 +32,9 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
 
+        # Compute block of vacuum energy matrix for one toroidal mode number
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+
         # Output data for unit testing and benchmarking
         if intr.debug_settings.output_benchmark_data
             @info "Outputting top level vacuum debug data for n = $n"
@@ -45,9 +48,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
             )
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
-
-        # Compute vacuum energy matrix
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
         # Equation 126 in Chance 1997 - scale by (m - n*q)(m' - n*q)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
@@ -136,7 +136,7 @@ the r, z, and ν values at the plasma boundary, as well as mode numbers and numb
 
   - `psifac`: Flux surface value at the plasma boundary (Float64)
   - `n`: Toroidal mode number (Int)
-  - `force_wv_symmetry`: Force response matrix symmetry in VACUUM (Bool)
+  - `ctrl`: DCON control parameters (DconControl)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
 """
