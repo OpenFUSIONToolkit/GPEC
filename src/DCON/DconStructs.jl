@@ -161,8 +161,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
-  - `nperq_edge::Int` - Number of points per q value at edge (not yet implemented)
-  - `wv_farwall_flag::Bool` - Force nowall gpec calculations while calculating mutual inductance with the wall, when set true.
   - `dcon_kin_threads::Int` - Number of threads for kinetic calculations (not yet implemented)
   - `parallel_threads::Int` - Number of parallel threads (not yet implemented)
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
@@ -216,8 +214,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
-    nperq_edge::Int = 20
-    wv_farwall_flag::Bool = true
     dcon_kin_threads::Int = 1
     parallel_threads::Int = 1
     diagnose::Bool = false
@@ -257,17 +253,17 @@ Populated in `Free.jl`.
 
 ## Fields
 
-- `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
-- `mpert::Int` - Number of poloidal modes
-- `numpert_total::Int` - Total number of modes (mpert × npert)
-- `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
-- `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
-- `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
-- `ep::Vector{ComplexF64}` - Plasma eigenvalues
-- `ev::Vector{ComplexF64}` - Vacuum eigenvalues
-- `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-- `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-- `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
+  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `mpert::Int` - Number of poloidal modes
+  - `numpert_total::Int` - Total number of modes (mpert × npert)
+  - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
+  - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
+  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+  - `ep::Vector{ComplexF64}` - Plasma eigenvalues
+  - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
+  - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+  - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
+  - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
     mthvac::Int
@@ -283,8 +279,8 @@ Populated in `Free.jl`.
 
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays
     # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)
-    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac + 5, 4)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
+    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
 end
 
 VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)
@@ -418,23 +414,23 @@ A struct to hold all inputs required for vacuum benchmarking between Fortran and
 
 ## Fields
 
-- `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
-- `mpert::Int` - Number of poloidal modes
-- `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
-- `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
-- `complex_flag::Bool` - Flag indicating if complex arithmetic is used
-- `kernelsign::Float64` - Sign of the kernel for vacuum calculation
-- `wall_flag::Bool` - Flag indicating presence of wall
-- `farwall_flag::Bool` - Flag indicating presence of far wall
-- `grri::Matrix{Float64}` - Green's function response matrix
-- `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
-- `ahg_file::String` - Filename for AHG data
-- `dir_path::String` - Directory path for input/output files
-- `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
-- `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
-- `n::Int` - Toroidal mode number
-- `ipert_n::Int` - Index of perturbed toroidal mode
-- `psifac::Float64` - Normalized flux coordinate
+  - `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
+  - `mpert::Int` - Number of poloidal modes
+  - `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
+  - `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
+  - `complex_flag::Bool` - Flag indicating if complex arithmetic is used
+  - `kernelsign::Float64` - Sign of the kernel for vacuum calculation
+  - `wall_flag::Bool` - Flag indicating presence of wall
+  - `farwall_flag::Bool` - Flag indicating presence of far wall
+  - `grri::Matrix{Float64}` - Green's function response matrix
+  - `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
+  - `ahg_file::String` - Filename for AHG data
+  - `dir_path::String` - Directory path for input/output files
+  - `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
+  - `n::Int` - Toroidal mode number
+  - `ipert_n::Int` - Index of perturbed toroidal mode
+  - `psifac::Float64` - Normalized flux coordinate
 """
 @kwdef struct VacuumBenchmarkInputs
     # Vacuum computation parameters
@@ -450,13 +446,13 @@ A struct to hold all inputs required for vacuum benchmarking between Fortran and
     xzpts::Matrix{Float64}
     ahg_file::String
     dir_path::String
-    
+
     # VacuumInput struct for Julia code
     vac_inputs::Vacuum.VacuumInput
-    
+
     # Wall settings
     wall_settings::Vacuum.WallShapeSettings
-    
+
     # Additional context
     n::Int
     ipert_n::Int
