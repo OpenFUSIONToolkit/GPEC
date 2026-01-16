@@ -144,8 +144,10 @@ function Main(path::String="./")
             ffit = make_kinetic_matrix(equil, intr, ctrl, metric, ffit) #this is Claude's conversion of fourfit_kinetic_matrix with a couple small modifications
         end
         sing_scan!(intr, ctrl, equil, ffit)
-        if ctrl.kin_flag #TODO: Write this funtion
-            # ksing_find()
+        #TODO: add resist_eval eventually for computing resistive surface quantities
+        if ctrl.kin_flag
+            #TODO: does ksing_find change any of these items? probably. which ones? probably ffit? need to reorder the function params and add ! to the function if it does
+            ksing_find(ctrl, intr, odet, ffit, equil, intr.DebugSettings.output_benchmark_data)
         end
     end
 
