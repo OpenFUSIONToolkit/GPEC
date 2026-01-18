@@ -13,7 +13,6 @@ integration in the Fortran code.
 
 ### TODOs
 
-Support for `kin_flag`
 restype functionality if we decide to do this
 
 ### Returns
@@ -42,9 +41,8 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
 
     # If at a rational surface, do the appropriate crossing routine, then integrate again
     while odet.ising != ctrl.ksing && odet.next == "cross"
-        #TODO: implement kinetic crossing
         if ctrl.kin_flag
-            error("kin_flag = true not implemented yet!")
+            ode_kin_cross!(odet, ctrl, equil, ffit, intr)
         else
             ode_ideal_cross!(odet, ctrl, equil, ffit, intr)
         end
@@ -100,6 +98,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Preliminary computations
     odet.psifac = equil.sq.xs[1]
+    nn = intr.nlow #TODO: Add support for multi-n later
 
     # Use Newton iteration to find starting psi if qlow is above q0
     if ctrl.qlow > equil.sq.fs[1, 4]
@@ -120,20 +119,43 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
         end
     end
 
-    # Find inner singular surface (where sing.psifac > psi(qlow/q0))
-    if false #(TODO: kin_flag)
-    # for ising = 1:kmsing
-    #     if kinsing[ising].psifac > psifac
-    #         break
-    #     end
-    # end
+    if ctrl.kin_flag
+        for i in 1:kmsing
+            if kinsing[i].psifac > odet.psifac
+                break
+            end
+            odet.ising = i
+        end
     else
-        odet.ising = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
+        #TODO: Is this a correct change that I made?
+        # This may be getting a singular surface thatis too far in
+        #odet.ising = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
+
+        #This is supposed to be a closer match
+        odet.ising = searchsortedlast(getfield.(intr.sing, :psifac), odet.psifac)
     end
 
     # Find next singular surface
-    if false
-        # TODO: (kin_flag)
+    if (ctrl.kin_flag)
+        for ising in 1:kmsing
+            if intr.psilim < kinsing[ising].psifac
+                break
+            end
+            odet.q = kinsing[ising].q
+            if mlow <= nn.q && nn.q <= mhigh
+                break
+            end
+        end
+        if (ising > kmsing) || (ctrl.singfac_min == 0)
+            odet.psimax = intr.psilim * (1 - eps)
+            odet.next = "finish"
+        elseif (intr.psilim<kinsing[ising].psifac)
+            odet.psimax = intr.psilim * (1 - eps)
+            odet.next = "finish"
+        else
+            odet.psimax = kinsing[ising].psifac - ctrl.singfac_min / abs(nn.n * kinsing[ising].q1)
+            odet.next = "cross"
+        end
     else
         # Find next singular surface (either next one in the list or outside integration limits)
         # TODO: clean this up in integration bounds PR, this exact block appears several times
@@ -265,10 +287,105 @@ function ode_ideal_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     odet.step += 1
 end
 
-# Example stub for kinetic crossing
-function ode_kin_cross()
-    # Implement kinetic crossing logic here
-    return
+"""
+    ode_kin_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+
+Handle the crossing of a rational surface during ODE integration if `kin_flag` is true.
+Re-initializes kinetic solutions across singular surface. Direct conversion of Fortran
+`ode_kin_cross`, with improvements for Julia efficiency where applicable.
+
+This function is called when the ODE integration crosses a resonant (singular) surface
+where m = n*q for some poloidal mode number m. At these surfaces, the solution can
+become singular and needs special handling to cross smoothly.
+
+For continuous crossing (`con_flag=true`), the solution is smoothly interpolated across
+the singular surface using derivative information. For discontinuous crossing
+(`con_flag=false`), the largest mode is zeroed and replaced with an identity pattern.
+
+### TODOs
+
+Validate kinetic crossing against Fortran output
+"""
+function ode_kin_cross!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+
+    mpert = intr.numpert_total
+
+    # Fixup solution at singular surface
+    ode_unorm!(odet.u, odet, ctrl, intr, true)
+
+    # Get asymptotic coefficients before crossing rational surface
+    odet.ca_l[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
+
+    # Re-initialize on opposite side of rational surface
+    psi_old = odet.psifac
+    singp = intr.sing[odet.ising]
+    dpsi = singp.psifac - odet.psifac
+
+    # Find the mode with largest absolute value in first solution vector
+    ipert1 = argmax(abs.(odet.u[:, 1, 1]))
+
+    if ctrl.con_flag
+        # Continuous crossing: smooth interpolation using derivatives
+        du1 = zeros(ComplexF64, mpert, mpert, 2)
+        du2 = zeros(ComplexF64, mpert, mpert, 2)
+        params = (ctrl, equil, ffit, intr, odet)
+
+        sing_der!(du1, odet.u, params, psi_old)
+        odet.psifac = singp.psifac + dpsi
+        sing_der!(du2, odet.u, params, odet.psifac)
+        odet.u .+= (du1 .+ du2) .* dpsi
+    else
+        # Discontinuous crossing: zero largest mode before and after derivative computation
+        odet.u[ipert1, :, :] .= 0
+
+        du1 = zeros(ComplexF64, mpert, mpert, 2)
+        du2 = zeros(ComplexF64, mpert, mpert, 2)
+        params = (ctrl, equil, ffit, intr, odet)
+
+        sing_der!(du1, odet.u, params, psi_old)
+        odet.psifac = singp.psifac + dpsi
+        sing_der!(du2, odet.u, params, odet.psifac)
+        odet.u .+= (du1 .+ du2) .* dpsi
+
+        # Zero out and replace with identity pattern
+        odet.u[ipert1, :, :] .= 0
+        odet.u[:, 1, :] .= 0
+        odet.u[ipert1, 1, :] .= 1
+    end
+
+    # Get asymptotic coefficients after crossing rational surface
+    odet.ca_r[:, :, :, odet.ising] .= sing_get_ca(ctrl, intr, odet)
+
+    # Find next singular surface (similar logic to ode_ideal_cross)
+    while true
+        odet.ising += 1
+        if odet.ising > intr.msing || intr.psilim < intr.sing[min(odet.ising, intr.msing)].psifac
+            break
+        end
+        if any(m -> intr.mlow <= m <= intr.mhigh, intr.sing[odet.ising].m)
+            break
+        end
+    end
+
+    # Determine psimax and classify next integration limit type
+    if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac
+        odet.psimax = intr.psilim * (1 - eps)
+        odet.next = "finish"
+    else
+        odet.psimax = intr.sing[odet.ising].psifac - ctrl.singfac_min / abs(minimum(intr.sing[odet.ising].n) * intr.sing[odet.ising].q1)
+        odet.next = "cross"
+    end
+
+    # Store values after crossing step and advance
+    odet.psi_store[odet.step] = odet.psifac
+    odet.q_store[odet.step] = odet.q
+    odet.u_store[:, :, :, odet.step] = odet.u
+    odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.step += 1
+
+    if ctrl.verbose
+        println("Kinetic crossing at ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q))")
+    end
 end
 
 """

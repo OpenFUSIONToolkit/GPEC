@@ -825,7 +825,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     du2 = @view(du[:, :, 2])
 
     mpert = intr.numpert_total
-    msol = size(u, 2)  # Number of solutions
+    msol = intr.numpert_total  # Number of solutions
 
     # Get safety factor and compute singularity factors
     q_val = Spl.spline_eval!(equil.sq, psieval)[4]
@@ -1256,7 +1256,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     du2 = @view(du[:, :, 2])
 
     mpert = intr.numpert_total
-    msol = size(u, 2)  # Number of solutions
+    msol = intr.numpert_total  # Number of solutions
     mband = intr.mband > 0 ? intr.mband : (intr.mhigh - intr.mlow)  # Compute if not set
 
     # Get safety factor and compute singularity factors
