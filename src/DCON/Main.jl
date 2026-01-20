@@ -130,7 +130,7 @@ function Main(path::String="./")
         ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag #TODO: verify this works --> also this is probably where we want to choose whether we are running PENTRC or using a dummy W matrix
-            action_matrices!(ffit, intr, equil, metric) #TODO: WIP version of this in Fourfit.jl
+            action_matrices!(ffit, intr, equil, ctrl, metric) #TODO: WIP version of this in Fourfit.jl
             if ctrl.verbose
                 println("Initializing PENTRC")
             end

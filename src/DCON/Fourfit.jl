@@ -64,6 +64,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     eqfun = equil.eqfun
     mpsi = length(rzphi.xs)
     mtheta = length(rzphi.ys)
+    chi1 = 2π * equil.psio
 
     # Set coordinate grids based on the input equilibrium
     # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
@@ -141,9 +142,9 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             fmodb.fs[ipsi, jtheta, 1] = jac*(p1+b2hp) - chi1^2*b2ht*(g12+q*g13)/(jac*b2h*2)
             fmodb.fs[ipsi, jtheta, 2] = chi1^2*b2ht*(g23 + q*g33)/(jac*b2h*2)
             fmodb.fs[ipsi, jtheta, 3] = jac*b2h*2
-            fmodb.fs[ipsi, jtheta, 4] = jac1*b2h*2 - chi1^2*b2h*2*eqfun.fy[2]
+            fmodb.fs[ipsi, jtheta, 4] = jac1*b2h*2 - chi1^2*b2h*2*eqfunfy[2]
             fmodb.fs[ipsi, jtheta, 5] = -2π*chi1^2/jac*(g12+q*g13)
-            fmodb.fs[ipsi, jtheta, 6] = chi1^2*b2h*2*eqfun.fy[3]
+            fmodb.fs[ipsi, jtheta, 6] = chi1^2*b2h*2*eqfunfy[3]
             fmodb.fs[ipsi, jtheta, 7] = 2π*chi1^2/jac*(g23 + q*g33)
             fmodb.fs[ipsi, jtheta, 8] = 2π*chi1^2/jac*(g22 + q*g23)
         end
@@ -338,7 +339,31 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: does F stay Hermitian in the 3D case, allowing us to use the lower representation?
         fmat .= cholesky(Hermitian(fmat)).L
 
-        # TODO: add kinetic matrices here
+        # Kinetic matrix corrections (Fortran lines 357-373). In 2D we have a single n,
+        # so reuse the lowest n to define nq for the kinetic pieces.
+        n = intr.nlow
+        nq = n * q
+        ipert = 0
+        for m1 in intr.mlow:intr.mhigh
+            ipert += 1
+            singfac1 = m1 - nq
+            for dm in max(1-ipert, -intr.mband):min(intr.mpert-ipert, intr.mband)
+                m2 = m1 + dm
+                singfac2 = m2 - nq
+                jpert = ipert + dm
+                dmidx = dm + mid
+                ipert_flat = ipert + (jpert - 1) * intr.numpert_total
+                dmats_flatview[ipert_flat] = chi1^2 * (g22[dmidx] + q * g23[dmidx] + q * (g23[dmidx] + q * g33[dmidx]))
+                emats_flatview[ipert_flat] = chi1^2 * (q1 * (g23[dmidx] + q * g33[dmidx]) - 2π * im * (g12[dmidx] + q * g31[dmidx]) * singfac2) +
+                                             p1 * jmat[dmidx]
+            end
+        end
+
+        #= Comment out cholesky and uncomment this and the comment block after the fit splines part to look at det(F) at each psi
+        q_diag = ((intr.mlow:intr.mhigh) .- q*intr.nlow)
+        fmat .= q_diag .* fmat .* q_diag' # Apply Q on both sides to get F = Q F̄ Qᴴ
+        =#
+
     end
 
     # --- Fit splines ---
@@ -352,6 +377,15 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     ffit.fmats_lower = Spl.CubicSpline(metric.xs, fmats_lower_flat; bctype="extrap")
     ffit.gmats = Spl.CubicSpline(metric.xs, gmats_flat; bctype="extrap")
     ffit.kmats = Spl.CubicSpline(metric.xs, kmats_flat; bctype="extrap")
+
+    #=
+    psi = metric.xs
+    q = equil.sq.fs[:,4]
+    fmats_frob = [det(reshape(fmats_lower_flat[ipsi, :], intr.numpert_total, intr.numpert_total)) for ipsi in 1:mpsi]
+    println(size(fmats_frob))
+    @save "fmat_frobenius_at_psi.jld2" fmats_frob psi q
+    error("Debug")
+    =#
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
@@ -411,6 +445,10 @@ function make_kinetic_matrix(
     mpsi = metric.mpsi
     chi1 = 2π * equil.psio
     nl = ctrl.kinetic.nl
+
+    if ctrl.nn_low == 0 #Safe guard
+        error("ctrl.nn_low must be nonzero for kinetic calculations")
+    end
 
     if ctrl.kingridtype != 0 #TODO - implement methods 1-4 from DCON (also document what each of these methods is)
         error("Only kingridtype = 0 (default) is implemented currently")
@@ -631,7 +669,7 @@ end
 
 """
     action_matrices!(ffit::FourFitVars, intr::DconInternal,
-                             equil::Equilibrium.PlasmaEquilibrium, metric::MetricData)
+                             equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, metric::MetricData)
 
 Compute equilibrium action matrices necessary to calculate perturbed modB.
 This is a conversion of the fourfit_action_matrix function.
@@ -645,6 +683,7 @@ calculations in MHD stability analysis.
   - `ffit::FourFitVars`: Structure to store the computed spline matrices
   - `intr::DconInternal`: Internal parameters including mband, mlow, mhigh, mpert
   - `equil::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data
+  - `ctrl::DconControl`: Control parameters for kinetic calculations like verbosity
   - `metric::MetricData`: Metric coefficients on the (ψ, θ) grid
 
 # Physical Meaning
@@ -660,13 +699,13 @@ where ξ is the plasma displacement vector and W is the Euler-Lagrange operator.
   - Matrices are stored as flat arrays and reshaped at each radial location before spline fitting
 """
 function action_matrices!(ffit::FourFitVars, intr::DconInternal,
-    equil::Equilibrium.PlasmaEquilibrium, metric::MetricData)
+    equil::Equilibrium.PlasmaEquilibrium, ctrl::DconControl, metric::MetricData)
 
-    if intr.verbose
+    if ctrl.verbose
         println("   Computing action matrices S, T, X, Y, Z")
     end
 
-    nn = intr.nn_low  # Single toroidal mode number for 2D DCON TODO: see what to do with more toroidal modes later
+    nn = intr.nlow  # Single toroidal mode number for 2D DCON TODO: see what to do with more toroidal modes later
     sq = equil.sq # Safety factor profile (I think)
     ifac = 1im # Imaginary unit factor
 
@@ -789,7 +828,7 @@ function action_matrices!(ffit::FourFitVars, intr::DconInternal,
     ffit.ymats = Spl.CubicSpline(metric.xs, ymats_flat; bctype="extrap")
     ffit.zmats = Spl.CubicSpline(metric.xs, zmats_flat; bctype="extrap")
 
-    if intr.verbose
+    if ctrl.verbose
         println("   Action matrices computed and splined")
     end
 end
