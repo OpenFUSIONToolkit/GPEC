@@ -53,15 +53,15 @@ The metric coefficients stored in `metric.fs` include:
 
 ### TODOs
 
-Add kinetic metric tensor components for kin_flag = true
 Remove mband if we decide to fully deprecate banded matrices
 """
 function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
 
-    # TODO: add kinetic metric tensor components
+    # TODO: ensure kinetic metric tensor components are working
 
     # --- Extract data from the PlasmaEquilibrium object ---
     rzphi = equil.rzphi
+    eqfun = equil.eqfun
     mpsi = length(rzphi.xs)
     mtheta = length(rzphi.ys)
 
@@ -71,17 +71,28 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     metric.xs .= Vector(rzphi.xs)
     metric.ys .= Vector(rzphi.ys .* 2π)
 
+    # Set up kinetic Fourier spline components
+    # The initial set up is identical to the ideal metric components
+    fmodb = MetricData(mpsi, mtheta)
+    fmodb.xs .= Vector(rzphi.xs)
+    fmodb.ys .= Vector(rzphi.ys .* 2π)
+
     # Temporary array for contravariant basis vectors
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
     for ipsi in 1:mpsi
         psi_norm = rzphi.xs[ipsi]
+        p1 = equil.sq.fs1[ipsi, 2]
+        q = equil.sq.fs[ipsi, 4]
         for jtheta in 1:mtheta
             theta_norm = rzphi.ys[jtheta] # θ is from 0 to 1
 
             # Evaluate the geometry spline to get (R,Z) and their derivatives
             f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
+
+            # Evaluate the geometry spline to get (R,Z) and their derivatives
+            eqfunf, eqfunfx, eqfunfy = Spl.bicube_deriv1!(eqfun, psi_norm, theta_norm)
 
             # Extract geometric quantities from the spline data
             # See EquilibriumAPI.txt for `rzphi` quantities
@@ -89,6 +100,9 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             eta_offset = f[2]
             jac = f[4]
             jac1 = fx[4] # ∂J/∂ψ
+            b2h = eqfunf[1]^2/2
+            b2hp = eqfunf[1]*eqfunfx[1] # ∂(B²/2)/∂ψ
+            b2ht = eqfunf[1]*eqfunfy[1] # ∂(B²/2)/∂θ
 
             rfac = sqrt(r_coord_sq)
             eta = 2π * (theta_norm + eta_offset)
@@ -105,8 +119,13 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             v[2, 2] = (1.0 + fy2) * 2π * rfac / jac
             v[2, 3] = fy3 * r_major / jac
             v[3, 3] = 2π * r_major / jac
+            g12 = sum(v[1, :] .* v[2, :])*jac^2
+            g13 = v[3, 3]*v[1, 3]*jac^2
+            g22 = sum(v[2, :] .^ 2)*jac^2
+            g23 = v[2, 3]*v[3, 3]*jac^2
+            g33 = v[3, 3]^2*jac^2
 
-            # Store results
+            # Store results (computer metric tensor components)
             v1 = @view v[1, :]
             v2 = @view v[2, :]
             metric.fs[ipsi, jtheta, 1] = dot(v1, v1) * jac
@@ -118,7 +137,15 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             metric.fs[ipsi, jtheta, 7] = jac
             metric.fs[ipsi, jtheta, 8] = jac1
 
-            # TODO: kinetic metric tensor here fmodb in Fortran
+            # Compute kinetic metric tensor components
+            fmodb.fs[ipsi, jtheta, 1] = jac*(p1+b2hp) - chi1^2*b2ht*(g12+q*g13)/(jac*b2h*2)
+            fmodb.fs[ipsi, jtheta, 2] = chi1^2*b2ht*(g23 + q*g33)/(jac*b2h*2)
+            fmodb.fs[ipsi, jtheta, 3] = jac*b2h*2
+            fmodb.fs[ipsi, jtheta, 4] = jac1*b2h*2 - chi1^2*b2h*2*eqfun.fy[2]
+            fmodb.fs[ipsi, jtheta, 5] = -2π*chi1^2/jac*(g12+q*g13)
+            fmodb.fs[ipsi, jtheta, 6] = chi1^2*b2h*2*eqfun.fy[3]
+            fmodb.fs[ipsi, jtheta, 7] = 2π*chi1^2/jac*(g23 + q*g33)
+            fmodb.fs[ipsi, jtheta, 8] = 2π*chi1^2/jac*(g22 + q*g23)
         end
     end
 
