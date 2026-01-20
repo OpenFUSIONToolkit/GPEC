@@ -48,7 +48,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         farwall_flag = wall_settings.shape == "nowall" ? true : false
 
         # Output data for unit testing and benchmarking
-        if intr.debug_settings.output_benchmark_data
+        if true #intr.debug_settings.output_benchmark_data
             @info "Outputting top level vacuum debug data for n = $n"
             benchmark_inputs = VacuumBenchmarkInputs(
                 wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac,
@@ -57,11 +57,11 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
                 vac_inputs, wall_settings,
                 n, ipert_n, intr.psilim
             )
-            @save "vacuum_response_inputs.jld2" benchmark_inputs
+            @save intr.dir_path*"/benchmark_inputs.jld2" benchmark_inputs
         end
 
         # Compute vacuum energy matrix
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response_plasma(vac_inputs, wall_settings)
+        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response_3D(vac_inputs)
 
         # Scale vacuum matrix by singfac = (m - n*qlim)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
@@ -148,48 +148,52 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
 
 ### Arguments
 
-  - `psifac`: Flux surface value at the plasma boundary (Float64)
+  - `ψ`: Flux surface value at the plasma boundary (Float64)
   - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
   - `intr`: Internal DCON parameters (DconInternal)
   - `ctrl`: DCON control parameters (DconControl)
 """
-function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
+function set_vacuum_inputs(ψ::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
     # Allocations
-    theta_norm = Vector(equil.rzphi.ys)
     mtheta = equil.config.control.mtheta
-    angle = zeros(Float64, mtheta + 1)
-    r = zeros(Float64, mtheta + 1)
-    z = zeros(Float64, mtheta + 1)
+    θ_SFL = zeros(Float64, mtheta + 1)
+    R = zeros(Float64, mtheta + 1)
+    Z = zeros(Float64, mtheta + 1)
     ν = zeros(Float64, mtheta + 1)
-    rfac = zeros(Float64, mtheta + 1)
+    r_minor = zeros(Float64, mtheta + 1)
 
-    # Compute output
-    for itheta in 1:(mtheta+1)
-        f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
-        rfac[itheta] = sqrt(f[1])
-        angle[itheta] = 2π * (theta_norm[itheta] + f[2])
-        ν[itheta] = f[3]
+    # Compute geometric quantities on plasma boundary
+    for (i, θ) in enumerate(equil.rzphi.ys)
+        f = Spl.bicube_eval!(equil.rzphi, ψ, θ)
+        r_minor[i] = sqrt(f[1])
+        θ_SFL[i] = 2π * (θ + f[2]) # f[2] = λ(ψ, θ) / 2π
+        ν[i] = f[3]
     end
-    r .= equil.ro .+ rfac .* cos.(angle)
-    z .= equil.zo .+ rfac .* sin.(angle)
+    # Compute R and Z on straight-fieldline θ grid
+    R .= equil.ro .+ r_minor .* cos.(θ_SFL)
+    Z .= equil.zo .+ r_minor .* sin.(θ_SFL)
 
-    # Invert values for n < 0
+    # Invert values for n < 0 # TODO: move this to VACUUM?
+    # This is here because the only thing that changes in 2D for n<0 is (mθ - nν)
+    # since Gⁿ = G⁻ⁿ and Kⁿ = K⁻ⁿ? Confirm later and generalize to 3D
     if n < 0
         ν .= -ν
         n = -n
     end
 
-    # For input to the Julia vacuum code
     return Vacuum.VacuumInput(;
-        r=reverse(r),
-        z=reverse(z),
+        r=reverse(R),
+        z=reverse(Z),
         ν=reverse(ν),
         mlow=intr.mlow,
         mpert=intr.mpert,
+        nlow=intr.nlow,
+        npert=intr.npert,
         n=n,
         mtheta=ctrl.mthvac,
+        nzeta=ctrl.nzvac,
         force_wv_symmetry=ctrl.force_wv_symmetry
     )
 end

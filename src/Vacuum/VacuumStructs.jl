@@ -21,8 +21,11 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
     ν::Vector{Float64} = Float64[]
     mlow::Int = 0
     mpert::Int = 0
+    nlow::Int = 0
+    npert::Int = 0
     n::Int = 0
     mtheta::Int = 1
+    nzeta::Int = 1
     kernelsign::Float64 = 1.0
     force_wv_symmetry::Bool = true
 end
@@ -41,16 +44,19 @@ of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
   - `z::Vector{Float64}`: Plasma surface Z-coordinate on VACUUM theta grid
   - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
   - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
-  - `sin_ln_basis::Matrix{Float64}`: sin(lθ - nν) basis functions for poloidal modes at plasma surface
-  - `cos_ln_basis::Matrix{Float64}`: cos(lθ - nν) basis functions for poloidal modes at plasma surface
+  - `sin_mn_basis::Matrix{Float64}`: sin(mθ - nν) basis functions for poloidal modes at plasma surface
+  - `cos_mn_basis::Matrix{Float64}`: cos(mθ - nν) basis functions for poloidal modes at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
     z::Vector{Float64}
+    ν::Vector{Float64}
     dx_dtheta::Vector{Float64}
     dz_dtheta::Vector{Float64}
-    sin_ln_basis::Matrix{Float64}
-    cos_ln_basis::Matrix{Float64}
+    sin_mn_basis::Matrix{Float64}
+    cos_mn_basis::Matrix{Float64}
+    sin_mn_basis3D::Matrix{Float64}
+    cos_mn_basis3D::Matrix{Float64}
 end
 
 """
@@ -145,35 +151,55 @@ the necessary plasma surface data for vacuum calculations.
 """
 function initialize_plasma_surface(inputs::VacuumInput)
 
-    (; mtheta, mpert, mlow, ν, r, z, n) = inputs
+    (; mtheta, mpert, mlow, nzeta, npert, nlow, ν, r, z, n) = inputs
     # Interpolate arrays from input onto mtheta grid
-    x_plasma = interp_to_new_grid(r, mtheta)
-    z_plasma = interp_to_new_grid(z, mtheta)
+    R = interp_to_new_grid(r, mtheta)
+    Z = interp_to_new_grid(z, mtheta)
     ν = interp_to_new_grid(ν, mtheta)
 
     # Plasma boundary theta derivative: length mth with θ = [0, 1)
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    dx_dtheta = periodic_cubic_deriv(θ_grid, x_plasma)
-    dz_dtheta = periodic_cubic_deriv(θ_grid, z_plasma)
+    dx_dtheta = periodic_cubic_deriv(θ_grid, R)
+    dz_dtheta = periodic_cubic_deriv(θ_grid, Z)
 
-    # Precompute Fourier transform terms, sin(lθ - nν) and cos(lθ - nν)
-    sin_ln_basis = zeros(Float64, mtheta, mpert)
-    cos_ln_basis = zeros(Float64, mtheta, mpert)
+    # Precompute Fourier transform terms, sin(mθ - nν) and cos(mθ - nν)
+    sin_mn_basis = zeros(mtheta, mpert)
+    cos_mn_basis = zeros(mtheta, mpert)
     for j in 1:mpert
         for i in 1:mtheta
-            l = mlow + j - 1
-            cos_ln_basis[i, j] = cos(l * θ_grid[i] - n * ν[i])
-            sin_ln_basis[i, j] = sin(l * θ_grid[i] - n * ν[i])
+            m = mlow + j - 1
+            cos_mn_basis[i, j] = cos(m * θ_grid[i] - n * ν[i])
+            sin_mn_basis[i, j] = sin(m * θ_grid[i] - n * ν[i])
+        end
+    end
+
+    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
+    sin_mn_basis3D = zeros(mtheta*nzeta, mpert*npert)
+    cos_mn_basis3D = zeros(mtheta*nzeta, mpert*npert)
+    ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+    for idx_n in 1:npert
+        n = nlow + idx_n - 1
+        for idx_m in 1:mpert
+            m = mlow + idx_m - 1
+            for j in 1:nzeta
+                for i in 1:mtheta
+                    cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
+                    sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
+                end
+            end
         end
     end
 
     return PlasmaGeometry(
-        x_plasma,
-        z_plasma,
+        R,
+        Z,
+        ν,
         dx_dtheta,
         dz_dtheta,
-        sin_ln_basis,
-        cos_ln_basis
+        sin_mn_basis,
+        cos_mn_basis,
+        sin_mn_basis3D,
+        cos_mn_basis3D
     )
 end
 

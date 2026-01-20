@@ -1,11 +1,13 @@
 module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
+using StaticArrays
+using ..BIEST
 
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")
 
-export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
+export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response, compute_vacuum_response_3D
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
@@ -239,8 +241,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_mn_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_mn_basis, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -256,8 +258,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_mn_basis, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_mn_basis, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -294,10 +296,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cos_ln_basis, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.sin_ln_basis, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.sin_ln_basis, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cos_ln_basis, 0, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cos_mn_basis, 0, 0)
+    fourier_inverse_transform!(aii, grri, plasma_surf.sin_mn_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.sin_mn_basis, 0, 0)
+    fourier_inverse_transform!(air, grri, plasma_surf.cos_mn_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii
@@ -322,10 +324,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     return wv, grri, xzpts
 end
 
-function compute_vacuum_response_plasma(inputs::VacuumInput, wall_settings::WallShapeSettings)
+function compute_vacuum_response_3D(inputs::VacuumInput)
 
     # Initialization and allocations
-    (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
+    (; mtheta, mpert, n, force_wv_symmetry, nzeta, npert) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     grri = zeros(mtheta, 2 * mpert)
     grad_greenfunction_mat = zeros(mtheta, mtheta)
@@ -334,42 +336,124 @@ function compute_vacuum_response_plasma(inputs::VacuumInput, wall_settings::Wall
     # Plasma–Plasma block
     kernel_plasma!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, n)
 
+    # Call BIEST to compute Green's function matrices for plasma boundary
+    # Use Nt toroidal points to properly discretize the 3D surface (must be >= 6 for BIEST)
+    num_gridpoints = nzeta * mtheta
+    num_modes = npert * mpert
+    green_3D = zeros(num_gridpoints, num_gridpoints)
+    gradgreen_3D = zeros(num_gridpoints, num_gridpoints)
+    grri_3D = zeros(num_gridpoints, 2 * num_modes)
+
+    # G = single-layer kernel, K = double-layer kernel
+    println("Calling BIEST with Nt=$nzeta, Np=$mtheta (total 3D points: $(num_gridpoints))...")
+    compute_green_matrices!(green_3D, gradgreen_3D, plasma_surf.x, plasma_surf.z, plasma_surf.ν, nzeta)
+
+    # Sum Green's function matrices over toroidal direction to recover 2D poloidal slice
+    # green_2D = zeros(ComplexF64, mtheta, mtheta)
+    # gradgreen_2D = zeros(ComplexF64, mtheta, mtheta)
+    # for i in 1:mtheta
+    #     for j in 1:mtheta
+    #         green_2D[i, j] = sum(green_3D[(k-1)*mtheta + i, (l-1)*mtheta + j] * exp(im * 2π * (k-l) / nzeta) for k in 1:nzeta, l in 1:nzeta) .* (1 / nzeta)
+    #         gradgreen_2D[i, j] = sum(gradgreen_3D[(k-1)*mtheta + i, (l-1)*mtheta + j] * exp(im * 2π * (k-l) / nzeta) for k in 1:nzeta, l in 1:nzeta) .* (1 / nzeta)
+    #     end
+    # end
+    # identity = Matrix{ComplexF64}(I, mtheta, mtheta)
+    # gradgreen_2D .+= identity .* 0.5  # Add identity*0.5 to double-layer kernel for jump condition
+    # println("Computes 2D single layer kernel matrix:")
+    # display(greenfunction_temp)
+    # println("Computes 2D double layer kernel matrix:")
+    # display(grad_greenfunction_mat)
+    # println("Sum over zeta entries of green_3D (single-layer):")
+    # display(green_2D)
+    # println("Sum over zeta entries of gradgreen_3D (double-layer):")
+    # display(gradgreen_2D)
+
+    identity = Matrix{Float64}(I, num_gridpoints, num_gridpoints)
+    gradgreen_3D .+= identity .* 0.5  # Add identity*0.5 to double-layer kernel for jump condition
+
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_mn_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_mn_basis, 0, mpert)
+    grri .*= 2π / mtheta  # Multiply by periodic trapezoidal quadrature weights
+
+    # Fourier transform plasma-plasma block
+    fourier_transform!(grri_3D, green_3D, plasma_surf.cos_mn_basis3D, 0, 0)
+    fourier_transform!(grri_3D, green_3D, plasma_surf.sin_mn_basis3D, 0, num_modes)
+    grri_3D .*= (2π / mtheta) * (2π / nzeta)  # Multiply by periodic trapezoidal quadrature weights in 3D
 
     # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997
     grri .= grad_greenfunction_mat \ grri
+    grri_3D .= gradgreen_3D \ grri_3D
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
     arr = zeros(mpert, mpert)
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cos_mn_basis, 0, 0)
+    fourier_inverse_transform!(aii, grri, plasma_surf.sin_mn_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.sin_mn_basis, 0, 0)
+    fourier_inverse_transform!(air, grri, plasma_surf.cos_mn_basis, 0, mpert)
+
+    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
+    arr3D = zeros(num_modes, num_modes)
+    aii3D = zeros(num_modes, num_modes)
+    ari3D = zeros(num_modes, num_modes)
+    air3D = zeros(num_modes, num_modes)
+    fourier_inverse_transform!(arr3D, grri_3D, plasma_surf.cos_mn_basis3D, 0, 0)
+    fourier_inverse_transform!(aii3D, grri_3D, plasma_surf.sin_mn_basis3D, 0, num_modes)
+    fourier_inverse_transform!(ari3D, grri_3D, plasma_surf.sin_mn_basis3D, 0, 0)
+    fourier_inverse_transform!(air3D, grri_3D, plasma_surf.cos_mn_basis3D, 0, num_modes)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     vacmat = arr .+ aii
     vacmti = air .- ari
     # Force symmetry of response matrix if desired
-    force_wv_symmetry && begin
-        for l1 in 1:mpert
-            for l2 in l1:mpert
-                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
-                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-            end
-        end
-    end
-    wv = complex.(vacmat, vacmti)
+    # force_wv_symmetry && begin
+    #     for l1 in 1:mpert
+    #         for l2 in l1:mpert
+    #             vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
+    #             vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
+    #         end
+    #     end
+    # end
+    wv = 2π .* complex.(vacmat, vacmti)
+    println("2D Vacuum response matrix wv:")
+    display(wv)
+
+    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
+    vacmat3D = arr3D .+ aii3D
+    vacmti3D = air3D .- ari3D
+    # Force symmetry of response matrix if desired
+    # force_wv_symmetry && begin
+    #     for l1 in 1:mpert*npert
+    #         for l2 in l1:mpert*npert
+    #             vacmat3D[l1, l2] = 0.5 * (vacmat3D[l1, l2] + vacmat3D[l2, l1])
+    #             vacmti3D[l1, l2] = 0.5 * (vacmti3D[l1, l2] - vacmti3D[l2, l1])
+    #         end
+    #     end
+    # end
+    wv3D = complex.(vacmat3D, vacmti3D)
+
+    println("3D Vacuum response matrix wv3D:")
+    display(wv3D)
+
+    println("Difference between 2D and 3D vacuum response matrices:")
+    display(wv .- wv3D)
+    display(norm(wv .- wv3D))
+
+    println("Maximum eigenvalues:")
+    display(maximum(real.(eigvals(wv))))
+    display(maximum(real.(eigvals(wv3D))))
+
+    println("Difference in maximum eigenvalue:")
+    display(maximum(real.(eigvals(wv))) - maximum(real.(eigvals(wv3D))))
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
     @views xzpts[:, 1] .= plasma_surf.x
     @views xzpts[:, 2] .= plasma_surf.z
-    return wv, grri, xzpts
+    return wv3D, grri, xzpts
 end
 
 """
