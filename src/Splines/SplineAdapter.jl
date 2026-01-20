@@ -360,15 +360,16 @@ function _compute_spline_coeffs(xs::Vector{Float64}, fs::Vector{T},
         yp_right = _estimate_endpoint_derivative(xs[(n-3):n], fs[(n-3):n], xs[n])
 
         # Modify boundary equations for clamped spline with estimated derivatives
-        # Left boundary: 2*h_1*c_1 + h_1*c_2 = 6*((f_2-f_1)/h_1 - yp_left)
+        # Left boundary: 2*h_1*m_1 + h_1*m_2 = 3*((f_2-f_1)/h_1 - yp_left)
+        # Note: Using factor of 3 (not 6) to match interior equations which solve for m = z/2
         d[1] = 2 * h[1]
         du[1] = h[1]
-        rhs[1] = 6 * ((fs[2] - fs[1]) / h[1] - yp_left)
+        rhs[1] = 3 * ((fs[2] - fs[1]) / h[1] - yp_left)
 
-        # Right boundary: h_{n-1}*c_{n-1} + 2*h_{n-1}*c_n = 6*(yp_right - (f_n-f_{n-1})/h_{n-1})
+        # Right boundary: h_{n-1}*m_{n-1} + 2*h_{n-1}*m_n = 3*(yp_right - (f_n-f_{n-1})/h_{n-1})
         dl[n-1] = h[n-1]
         d[n] = 2 * h[n-1]
-        rhs[n] = 6 * (yp_right - (fs[n] - fs[n-1]) / h[n-1])
+        rhs[n] = 3 * (yp_right - (fs[n] - fs[n-1]) / h[n-1])
     end
 
     # Solve tridiagonal system using Thomas algorithm
