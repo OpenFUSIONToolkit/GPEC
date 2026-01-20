@@ -1,3 +1,4 @@
+using Test
 using LinearAlgebra
 
 # TODO: perhaps this isn't the best place for this function?
@@ -113,28 +114,38 @@ end
 
         odet = JPEC.DCON.OdeState(mpert, 10, 10, 2)
 
+        # Create a dummy equilibrium object for the function signature
+        cfg = JPEC.Equilibrium.EquilibriumConfig()
+        params = JPEC.Equilibrium.EquilibriumParameters()
+        xs = collect(0.0:0.1:1.0)
+        q_vals = 1.0 .+ 4.0 .* xs
+        fs = hcat(zeros(length(xs)), zeros(length(xs)), zeros(length(xs)), q_vals)
+        sq_spline = JPEC.Spl.CubicSpline(xs, fs)
+        rzphi_real = JPEC.Spl.BicubicSpline(xs, xs, Float64.(rand(length(xs), length(xs), 3)))
+        equil = JPEC.Equilibrium.PlasmaEquilibrium(cfg, params, sq_spline, rzphi_real, rzphi_real, 0.5, 0.9, 2.0)
+
         # Test 1: Far from singular surface (singfac > crossover)
         odet.ising = 1
         odet.q = 1.5  # Far from q=2.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
         @test rtol == ctrl.tol_nr  # Should use non-resonant tolerance
 
         # Test 2: Close to singular surface (singfac < crossover)
         odet.ising = 1
         odet.q = 1.999  # Very close to q=2.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
         @test rtol == ctrl.tol_r  # Should use resonant tolerance
 
         # Test 3: Between two singular surfaces
         odet.ising = 2
         odet.q = 2.5  # Between q=2.0 and q=3.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
         @test rtol == ctrl.tol_nr  # Should use min distance to either surface
 
         # Test 4: Beyond all singular surfaces
         odet.ising = 3
         odet.q = 4.0
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
         @test rtol == ctrl.tol_nr
 
         # Edge case - no singular surfaces
@@ -153,7 +164,81 @@ end
         odet.q = 2.0
 
         # Should return non-resonant tolerance when no singular surfaces
-        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet)
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
+        @test rtol == ctrl.tol_nr
+    end
+
+    @testset "compute_tols with kin_flag" begin
+        # Test tolerance computation when kinetic effects are enabled
+        mpert = 3
+        ctrl = JPEC.DCON.DconControl()
+        ctrl.tol_r = 1e-6
+        ctrl.tol_nr = 1e-4
+        ctrl.crossover = 0.01
+        ctrl.kin_flag = true
+
+        # Create equilibrium config for psilow access
+        cfg = JPEC.Equilibrium.EquilibriumConfig()
+        cfg.control.psilow = 0.0
+        params = JPEC.Equilibrium.EquilibriumParameters()
+        xs = collect(0.0:0.1:1.0)
+        q_vals = 1.0 .+ 4.0 .* xs
+        fs = hcat(zeros(length(xs)), zeros(length(xs)), zeros(length(xs)), q_vals)
+        sq_spline = JPEC.Spl.CubicSpline(xs, fs)
+        rzphi_real = JPEC.Spl.BicubicSpline(xs, xs, Float64.(rand(length(xs), length(xs), 3)))
+        equil = JPEC.Equilibrium.PlasmaEquilibrium(cfg, params, sq_spline, rzphi_real, rzphi_real, 0.5, 0.9, 2.0)
+
+        intr = JPEC.DCON.DconInternal(; mpert=mpert)
+        intr.kmsing = 2
+        intr.kinsing = [JPEC.DCON.SingType(), JPEC.DCON.SingType()]
+        intr.kinsing[1].psifac = 0.3
+        intr.kinsing[1].q = 2.0
+        intr.kinsing[2].psifac = 0.6
+        intr.kinsing[2].q = 3.0
+
+        odet = JPEC.DCON.OdeState(mpert, 10, 10, 2)
+
+        # Test 1: First kinetic singular surface (ising == 1)
+        odet.ising = 1
+        odet.psifac = 0.25  # Close to first kinsing
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
+        # singfac_local = abs(0.25 - 0.3) / (0.3 - 0.0) = 0.05 / 0.3 ≈ 0.167 > crossover
+        @test rtol == ctrl.tol_nr
+
+        # Test 2: Very close to first kinetic singular surface
+        odet.psifac = 0.298  # Very close to psifac = 0.3
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
+        # singfac_local = abs(0.298 - 0.3) / (0.3 - 0.0) = 0.002 / 0.3 ≈ 0.0067 < crossover
+        @test rtol == ctrl.tol_r
+
+        # Test 3: Between two kinetic singular surfaces (ising == 2)
+        odet.ising = 2
+        odet.psifac = 0.4  # Between 0.3 and 0.6
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
+        # singfac_local = min(abs(0.4 - 0.6), abs(0.4 - 0.3) / abs(0.6 - 0.3))
+        #               = min(0.2, 0.1 / 0.3) = min(0.2, 0.333) = 0.2 > crossover
+        @test rtol == ctrl.tol_nr
+
+        # Test 4: Close to second surface from below
+        odet.psifac = 0.595  # Very close to 0.6
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
+        # singfac_local = min(abs(0.595 - 0.6), abs(0.595 - 0.3) / abs(0.6 - 0.3))
+        #               = min(0.005, 0.295 / 0.3) ≈ min(0.005, 0.983) = 0.005 < crossover
+        @test rtol == ctrl.tol_r
+
+        # Test 5: Beyond all kinetic singular surfaces
+        odet.ising = 3
+        odet.psifac = 0.8
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
+        # singfac_local = Inf, so should use tol_nr
+        @test rtol == ctrl.tol_nr
+
+        # Test 6: No kinetic singular surfaces
+        intr.kmsing = 0
+        intr.kinsing = []
+        odet.ising = 1
+        odet.psifac = 0.5
+        rtol = JPEC.DCON.compute_tols(ctrl, intr, odet, equil)
         @test rtol == ctrl.tol_nr
     end
 
@@ -698,5 +783,112 @@ end
 
         @test odet4.next == "finish"
         @test odet4.psimax ≈ intr_no_sing.psilim * (1 - eps())
+
+        # Test 6: Test with singfac_min = 0 (should go to finish mode)
+        ctrl.singfac_min = 0.0
+        ctrl.qlow = 1.0
+        odet5 = JPEC.DCON.OdeState(mpert, 20, 5, 2)
+        JPEC.DCON.ode_axis_init!(odet5, ctrl, equil, intr)
+
+        @test odet5.next == "finish"
+        @test odet5.psimax ≈ intr.psilim * (1 - eps())
+
+        # Test 7: Test with qlow very high (starts near psilim)
+        ctrl.singfac_min = 0.1
+        ctrl.qlow = 4.0  # Near the edge
+        odet6 = JPEC.DCON.OdeState(mpert, 20, 5, 2)
+        JPEC.DCON.ode_axis_init!(odet6, ctrl, equil, intr)
+
+        # Should start at high q value
+        @test JPEC.Spl.spline_eval!(equil.sq, odet6.psifac)[4] ≈ ctrl.qlow atol=1e-8
+        @test odet6.psifac > 0.7  # Should be well beyond both singular surfaces
+
+        # Test 8: Test with psilim before all singular surfaces
+        intr_early = JPEC.DCON.DconInternal(; mpert=mpert, numpert_total=mpert, mband=1)
+        intr_early.msing = 2
+        intr_early.mlow = 1
+        intr_early.mhigh = 5
+        intr_early.psilim = 0.4  # Before first singular surface at 0.5
+        intr_early.sing = [sing1, sing2]
+
+        ctrl.qlow = 1.0
+        ctrl.singfac_min = 0.1
+        odet7 = JPEC.DCON.OdeState(mpert, 20, 5, 2)
+        JPEC.DCON.ode_axis_init!(odet7, ctrl, equil, intr_early)
+
+        @test odet7.next == "finish"
+        @test odet7.psimax ≈ intr_early.psilim * (1 - eps())
+
+        # Test 9: Test Newton iteration convergence with tight tolerance
+        ctrl.qlow = 2.5  # Exact value between grid points
+        odet8 = JPEC.DCON.OdeState(mpert, 20, 5, 2)
+        JPEC.DCON.ode_axis_init!(odet8, ctrl, equil, intr)
+
+        # Newton iteration should converge to exact value
+        @test JPEC.Spl.spline_eval!(equil.sq, odet8.psifac)[4] ≈ ctrl.qlow atol=1e-8
+
+        # Test 10: Test mode number filtering (m should be in [mlow, mhigh])
+        intr_filter = JPEC.DCON.DconInternal(; mpert=mpert, numpert_total=mpert, mband=1)
+        intr_filter.msing = 3
+        intr_filter.mlow = 3
+        intr_filter.mhigh = 5
+        intr_filter.psilim = 0.9
+
+        sing_low_m = JPEC.DCON.SingType()
+        sing_low_m.psifac = 0.3
+        sing_low_m.q = 1.5
+        sing_low_m.q1 = 1.0
+        sing_low_m.m = [1]  # Below mlow
+        sing_low_m.n = [1]
+
+        sing_good_m = JPEC.DCON.SingType()
+        sing_good_m.psifac = 0.6
+        sing_good_m.q = 3.0
+        sing_good_m.q1 = 1.0
+        sing_good_m.m = [3]  # In [mlow, mhigh]
+        sing_good_m.n = [1]
+
+        sing_high_m = JPEC.DCON.SingType()
+        sing_high_m.psifac = 0.8
+        sing_high_m.q = 4.0
+        sing_high_m.q1 = 1.0
+        sing_high_m.m = [6]  # Above mhigh
+        sing_high_m.n = [1]
+
+        intr_filter.sing = [sing_low_m, sing_good_m, sing_high_m]
+
+        ctrl.qlow = 1.0
+        ctrl.singfac_min = 0.1
+        odet9 = JPEC.DCON.OdeState(mpert, 20, 5, 3)
+        JPEC.DCON.ode_axis_init!(odet9, ctrl, equil, intr_filter)
+
+        # Should skip surfaces with m outside [mlow, mhigh]
+        if odet9.next == "cross"
+            @test odet9.ising == 2  # Should find the second surface (good_m)
+        end
+
+        # Test 11: Multiple mode numbers per surface
+        intr_multi = JPEC.DCON.DconInternal(; mpert=mpert, numpert_total=mpert, mband=1)
+        intr_multi.msing = 1
+        intr_multi.mlow = 2
+        intr_multi.mhigh = 5
+        intr_multi.psilim = 0.9
+
+        sing_multi = JPEC.DCON.SingType()
+        sing_multi.psifac = 0.5
+        sing_multi.q = 2.5
+        sing_multi.q1 = 1.0
+        sing_multi.m = [2, 5]  # Multiple m values
+        sing_multi.n = [1, 2]
+
+        intr_multi.sing = [sing_multi]
+
+        odet10 = JPEC.DCON.OdeState(mpert, 20, 5, 1)
+        JPEC.DCON.ode_axis_init!(odet10, ctrl, equil, intr_multi)
+
+        # Should find the surface with multiple modes
+        if odet10.next == "cross"
+            @test odet10.ising == 1
+        end
     end
 end

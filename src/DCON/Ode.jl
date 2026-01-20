@@ -119,8 +119,9 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
         end
     end
 
+    #find the inner singular surface
     if ctrl.kin_flag
-        for i in 1:kmsing
+        for i in 1:intr.kmsing
             if kinsing[i].psifac > odet.psifac
                 break
             end
@@ -128,7 +129,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
         end
     else
         #TODO: Is this a correct change that I made?
-        # This may be getting a singular surface thatis too far in
+        # This may be getting a singular surface thatis too far in according to Claude, but this is what we had and it seemed to be working so I'm not sure
         #odet.ising = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
 
         #This is supposed to be a closer match
@@ -137,23 +138,20 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
 
     # Find next singular surface
     if (ctrl.kin_flag)
-        for ising in 1:kmsing
-            if intr.psilim < kinsing[ising].psifac
+        for odet.ising in 1:intr.kmsing
+            if intr.psilim < kinsing[odet.ising].psifac
                 break
             end
-            odet.q = kinsing[ising].q
-            if mlow <= nn.q && nn.q <= mhigh
+            odet.q = kinsing[odet.ising].q
+            if intr.mlow <= nn.q && nn.q <= intr.mhigh
                 break
             end
         end
-        if (ising > kmsing) || (ctrl.singfac_min == 0)
-            odet.psimax = intr.psilim * (1 - eps)
-            odet.next = "finish"
-        elseif (intr.psilim<kinsing[ising].psifac)
+        if (odet.ising > intr.kmsing) || (ctrl.singfac_min == 0 || intr.psilim<kinsing[odet.ising].psifac)
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
-            odet.psimax = kinsing[ising].psifac - ctrl.singfac_min / abs(nn.n * kinsing[ising].q1)
+            odet.psimax = kinsing[odet.ising].psifac - ctrl.singfac_min / abs(nn.n * kinsing[odet.ising].q1)
             odet.next = "cross"
         end
     else
@@ -414,7 +412,7 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
 
     # Advance differential equation to next singular surface or edge
-    rtol = compute_tols(ctrl, intr, odet) # initial tolerances
+    rtol = compute_tols(ctrl, intr, odet, equil) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (odet.psifac, odet.psimax), (ctrl, equil, ffit, intr, odet))
     sol = solve(prob, BS5(); reltol=rtol, callback=cb)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
@@ -437,10 +435,11 @@ and `ode_record_edge` post-integration using the saved data.
 """
 function integrator_callback!(integrator)
 
-    ctrl, _, _, intr, odet = integrator.p
+    # Unpack parameters (keep equil to pass into compute_tols)
+    ctrl, equil, _, intr, odet = integrator.p
 
-    # Update integration tolerances
-    integrator.opts.reltol = compute_tols(ctrl, intr, odet)
+    # Update integration tolerances using current equilibrium
+    integrator.opts.reltol = compute_tols(ctrl, intr, odet, equil)
     # integrator.opts.abstol = atol
 
     # Check if the solution norms are above a threshold, if so apply Gaussian reduction
@@ -460,7 +459,7 @@ function integrator_callback!(integrator)
 end
 
 """
-    compute_tols(ctrl::DconControl, intr::DconInternal, odet::OdeState)
+    compute_tols(ctrl::DconControl, intr::DconInternal, odet::OdeState, equil::Equilibrium.PlasmaEquilibrium)
 
 Compute relative and absolute tolerances for the ODE solver based on proximity
 to singular surfaces and magnitude of the solution vectors. In Fortran, this was
@@ -478,11 +477,16 @@ Add back absolute tolerance calculation if needed
 
   - rtol: Relative tolerance
 """
-function compute_tols(ctrl, intr, odet)
+function compute_tols(ctrl, intr, odet, equil) #TODO: We should either move psilow out of equil into a new data structure or we can keep the updated function signature that contains equil
     singfac_local = Inf
     # Relative tolerance
-    if false  # kin_flag (not implemented)
-    # Insert kin_flag branch if needed
+    if ctrl.kin_flag  # kin_flag- just implemented
+        if (odet.ising == 1 && intr.kmsing >= 1)
+            singfac_local = abs(odet.psifac - intr.kinsing[odet.ising].psifac)/(intr.kinsing[odet.ising].psifac - equil.config.control.psilow)
+        elseif (odet.ising <= intr.kmsing)
+            singfac_local = min(abs(odet.psifac - intr.kinsing[odet.ising].psifac),
+                abs(odet.psifac - intr.kinsing[odet.ising-1].psifac)/abs(intr.kinsing[odet.ising].psifac - intr.kinsing[odet.ising-1].psifac))
+        end
     else
         # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
         # Note: odet.q is updated within the derivative calculation
