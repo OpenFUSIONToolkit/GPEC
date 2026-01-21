@@ -240,7 +240,8 @@ function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, 
 
     # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
     # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
-    mul!(gll, cs', view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)))
+    dth = 2π / num_gridpoints
+    mul!(gll, cs', view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), 2π * dth, 0.0)
 end
 
 """
