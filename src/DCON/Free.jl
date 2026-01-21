@@ -37,7 +37,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Output data for unit testing and benchmarking
         if true #intr.debug_settings.output_benchmark_data
-            @info "Outputting top level vacuum debug data for n = $n"
             farwall_flag = intr.wall_settings.shape == "nowall" ? true : false
             benchmark_inputs = VacuumBenchmarkInputs(
                 wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac,
