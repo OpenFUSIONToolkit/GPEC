@@ -232,34 +232,36 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
-    grri = zeros(2 * mtheta, 2 * mpert)
-    grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
-    greenfunction_temp = zeros(mtheta, mtheta)
+    grad_green = zeros(2 * mtheta, 2 * mtheta)
+    green_temp = zeros(mtheta, mtheta)
+
+    # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first mtheta rows are plasma as observer, second are wall
+    # First mpert columns are real (cosine), second mpert are imaginary (sine)
+    green_fourier = zeros(2 * mtheta, 2 * mpert)
+    PLASMA_ROW_OFFSET = 0
+    WALL_ROW_OFFSET = mtheta
+    COS_COL_OFFSET = 0
+    SIN_COL_OFFSET = mpert
 
     # Plasma–Plasma block
-    j1, j2 = 1, 1
-    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
+    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_mn_basis, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_mn_basis, 0, mpert)
+    fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(green_fourier, green_temp, plasma_surf.sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
     !wall.nowall && begin
         # Plasma–Wall block
-        j1, j2 = 1, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, n)
+        kernel!(grad_green, green_temp, plasma_surf, wall, n)
 
         # Wall–Wall block
-        j1, j2 = 2, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, n)
-
+        kernel!(grad_green, green_temp, wall, wall, n)
         # Wall–Plasma block
-        j1, j2 = 2, 1
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
+        kernel!(grad_green, green_temp, wall, plasma_surf, n)
 
-        # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_mn_basis, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_mn_basis, mtheta, mpert)
+        # Fourier transform wall blocks into green_fourier
+        fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis, WALL_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_transform!(green_fourier, green_temp, plasma_surf.sin_mn_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -268,60 +270,48 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = wall.nowall ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
-            grad_greenfunction_mat[i, j] += cn0
+            grad_green[i, j] += cn0
         end
     end
 
     # Only needed for mutual inductance with the wall calculations
     (kernelsign < 0) && begin
-        grad_greenfunction_mat .*= kernelsign
+        grad_green .*= kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
         for i in 1:(2*mtheta)
-            grad_greenfunction_mat[i, i] += 2.0
+            grad_green[i, i] += 2.0
         end
     end
 
     # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        @views grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views green_fourier[1:mtheta, :] .= grad_green[1:mtheta, 1:mtheta] \ green_fourier[1:mtheta, :]
     else
-        grri .= grad_greenfunction_mat \ grri
+        green_fourier .= grad_green \ green_fourier
     end
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    arr = zeros(mpert, mpert)
-    aii = zeros(mpert, mpert)
-    ari = zeros(mpert, mpert)
-    air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cos_mn_basis, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.sin_mn_basis, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.sin_mn_basis, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cos_mn_basis, 0, mpert)
+    arr, aii, ari, air = ntuple(_ -> zeros(mpert, mpert), 4)
+    fourier_inverse_transform!(arr, green_fourier, plasma_surf.cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_inverse_transform!(aii, green_fourier, plasma_surf.sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+    fourier_inverse_transform!(ari, green_fourier, plasma_surf.sin_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_inverse_transform!(air, green_fourier, plasma_surf.cos_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    vacmat = arr .+ aii
-    vacmti = air .- ari
+    wv = complex.(arr .+ aii, air .- ari)
     # Force symmetry of response matrix if desired
-    force_wv_symmetry && begin
-        for l1 in 1:mpert
-            for l2 in l1:mpert
-                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
-                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-            end
-        end
-    end
-    wv = complex.(vacmat, vacmti)
+    force_wv_symmetry && hermitianpart!(wv)
 
     # Create xzpts array
-    xzpts = zeros(Float64, inputs.mtheta, 4)
+    xzpts = zeros(inputs.mtheta, 4)
     @views xzpts[:, 1] .= plasma_surf.x
     @views xzpts[:, 2] .= plasma_surf.z
     @views xzpts[:, 3] .= wall.x
     @views xzpts[:, 4] .= wall.z
-    return wv, grri, xzpts
+    return wv, green_fourier, xzpts
 end
 
 function compute_vacuum_response_3D(inputs::VacuumInput)
