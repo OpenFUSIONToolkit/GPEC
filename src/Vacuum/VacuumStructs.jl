@@ -163,15 +163,8 @@ function initialize_plasma_surface(inputs::VacuumInput)
     dz_dtheta = periodic_cubic_deriv(θ_grid, Z)
 
     # Precompute Fourier transform terms, sin(mθ - nν) and cos(mθ - nν)
-    sin_mn_basis = zeros(mtheta, mpert)
-    cos_mn_basis = zeros(mtheta, mpert)
-    for j in 1:mpert
-        for i in 1:mtheta
-            m = mlow + j - 1
-            cos_mn_basis[i, j] = cos(m * θ_grid[i] - n * ν[i])
-            sin_mn_basis[i, j] = sin(m * θ_grid[i] - n * ν[i])
-        end
-    end
+    sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
+    cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
 
     # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
     sin_mn_basis3D = zeros(mtheta*nzeta, mpert*npert)

@@ -107,11 +107,10 @@ function kernel!(
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
     log_correction = [log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2]
 
-    # Used for Z'_θ and X'_θ in eq.(51)
+    # TODO: this isn't the same as the periodic_cubic_deriv interpolation?
+    # We need to interpolate off-grid during Gaussian quadrature
     spline_x = cubic_spline_interpolation(theta_grid, source.x; extrapolation_bc=Interpolations.Periodic())
     spline_z = cubic_spline_interpolation(theta_grid, source.z; extrapolation_bc=Interpolations.Periodic())
-    dx_dtheta = [Interpolations.gradient(spline_x, t)[1] for t in theta_grid]
-    dz_dtheta = [Interpolations.gradient(spline_z, t)[1] for t in theta_grid]
 
     # Loop through observer points
     for j in 1:mtheta
@@ -129,7 +128,7 @@ function kernel!(
         # Perform Simpson integration for nonsingular source points
         for (isrc, wsimpson) in zip(nonsing_idx, simpson_weights)
             # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta[isrc], dz_dtheta[isrc], n)
+            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], source.dx_dtheta[isrc], source.dz_dtheta[isrc], n)
 
             # Sum contributions to Green's function matrices using Simpson weight
             greenfunction_mat[j, isrc] += G_n * wsimpson
