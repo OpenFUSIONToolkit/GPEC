@@ -83,6 +83,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct DconInternal
     dir_path::String = ""
@@ -108,6 +109,7 @@ A mutable struct holding internal state variables for stability calculations.
     q1lim::Float64 = 0.0
     locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
     debug_settings::DebugSettings = DebugSettings()
+    wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
 
 """
@@ -161,8 +163,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
-  - `nperq_edge::Int` - Number of points per q value at edge (not yet implemented)
-  - `wv_farwall_flag::Bool` - Force nowall gpec calculations while calculating mutual inductance with the wall, when set true.
   - `dcon_kin_threads::Int` - Number of threads for kinetic calculations (not yet implemented)
   - `parallel_threads::Int` - Number of parallel threads (not yet implemented)
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
@@ -217,8 +217,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
-    nperq_edge::Int = 20
-    wv_farwall_flag::Bool = true
     dcon_kin_threads::Int = 1
     parallel_threads::Int = 1
     diagnose::Bool = false
@@ -284,8 +282,8 @@ Populated in `Free.jl`.
 
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays
     # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)
-    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac + 5, 4)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
+    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
 end
 
 VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)

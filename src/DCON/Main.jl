@@ -11,16 +11,15 @@ function Main(path::String="./")
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
-        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
     else
-        wall_settings = Vacuum.WallShapeSettings()
+        intr.wall_settings = Vacuum.WallShapeSettings()
     end
     if "DEBUG" in keys(inputs)
-        debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
-        debug_settings = DebugSettings()
+        intr.debug_settings = DebugSettings()
     end
-    intr.debug_settings = debug_settings
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
@@ -108,10 +107,14 @@ function Main(path::String="./")
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             println("Run parameters:")
-            println("   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))")
+            println(
+                "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))"
+            )
             println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
             println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println("   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))")
+            println(
+                "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))"
+            )
             println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
         end
 
@@ -150,7 +153,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr, wall_settings)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
                 println("Free-boundary mode unstable for n = $nstring.")
@@ -171,7 +174,7 @@ function Main(path::String="./")
 
     end_time = time() - start_time
     println("----------------------------------")
-    println("Run time: $(@sprintf("%.3e", end_time)) seconds") 
+    println("Run time: $(@sprintf("%.3e", end_time)) seconds")
     println("Normal termination.")
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
@@ -191,9 +194,8 @@ vacuum data if `vac_flag` is true.
 ### TODOs
 
 Combine spline unpacking if possible, too many extra lines
-
 """
-function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
+function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
