@@ -258,7 +258,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, :, 2]
         out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, :, 3]
         out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, :, 4]
-        # Derivatives are computed on-the-fly by Interpolations.jl, not stored
+        # Derivatives are computed on-the-fly by FastInterpolations.jl, not stored
         # TODO: If derivative grids are needed, compute them here using deriv1!/deriv2!
 
         # Write local stability data

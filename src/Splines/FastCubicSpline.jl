@@ -8,20 +8,23 @@ interpolation with FastInterpolations doing the heavy lifting.
 The "extrap" boundary condition is implemented by computing endpoint derivatives
 via 4-point polynomial extrapolation, then using FastInterpolations' BCPair API.
 
-## Performance Comparison (FastInterpolations v0.2.2)
+## Performance Comparison (FastInterpolations v0.2.4)
 
-| Operation       | CubicSpline1D | FastCubicSpline1D | Notes                    |
-|-----------------|---------------|-------------------|--------------------------|
-| evaluate (1 pt) |      5.1 ns   |        9.3 ns     | Single point             |
-| deriv1 (1 pt)   |      5.2 ns   |        9.3 ns     | Single point             |
-| deriv2 (1 pt)   |      4.9 ns   |        8.1 ns     | Single point             |
-| deriv3 (1 pt)   |      4.6 ns   |        6.2 ns     | Single point             |
-| Monotonic loop  |      4.7 ns/pt|        8.9 ns/pt  | Best case for cached     |
-| Random loop     |     14.5 ns/pt|        8.8 ns/pt  | FastCubicSpline1D wins   |
+| Operation          | CubicSpline1D | FastCubicSpline1D | FastInterp direct | Notes                   |
+|--------------------|---------------|-------------------|-------------------|-------------------------|
+| evaluate (1 pt)    |      5.5 ns   |        9.4 ns     |        9.3 ns     | Single point            |
+| deriv1 (1 pt)      |      5.5 ns   |        9.2 ns     |        9.3 ns     | Single point            |
+| deriv2 (1 pt)      |      5.2 ns   |        8.2 ns     |        8.2 ns     | Single point            |
+| deriv3 (1 pt)      |      N/A      |        7.4 ns     |        7.4 ns     | Single point            |
+| Monotonic loop     |      4.3 ns/pt|        7.7 ns/pt  |        7.7 ns/pt  | CubicSpline1D cached    |
+| Monotonic w/ hint  |      N/A      |        2.9 ns/pt  |        2.9 ns/pt  | Use hint=Ref(1)         |
+| Random loop        |     19.6 ns/pt|        8.7 ns/pt  |        8.7 ns/pt  | FastCubicSpline1D wins  |
 
-**Summary**: CubicSpline1D with cached interval search is ~2x faster for monotonic
-access patterns (typical in ODE integration). FastCubicSpline1D is faster for random
-access but lacks multi-quantity support and cached interval optimization.
+**Summary**: CubicSpline1D with cached interval search is ~1.8x faster for monotonic
+access patterns (typical in ODE integration). FastCubicSpline1D is ~2.3x faster for
+random access. For monotonic access, use the `hint` keyword argument for fastest
+performance (2.9 ns/pt). The FastCubicSpline1D wrapper now supports all FastInterpolations
+v0.2.4 features including `search` and `hint` keyword arguments.
 """
 
 using FastInterpolations
@@ -31,7 +34,7 @@ using FastInterpolations
 # =============================================================================
 
 """
-    FastCubicSpline1D{T, I, D1, D2}
+    FastCubicSpline1D{T, I, D1, D2, D3}
 
 A 1D cubic spline interpolator wrapping FastInterpolations.jl for a single quantity.
 
@@ -44,8 +47,20 @@ multi-quantity variant FastCubicSpline1DMulti.
   - `I`: Interpolant type from FastInterpolations
   - `D1`: First derivative view type
   - `D2`: Second derivative view type
+  - `D3`: Third derivative view type
+
+# Keyword Arguments for Evaluation
+
+The main evaluation method `(spline)(x)` supports:
+
+  - `search`: Search strategy (default: `Binary()`). Use `LinearBinary()` for monotonic access.
+  - `hint`: Mutable `Ref{Int}` for interval index. Enables O(1) lookups for sequential access
+    (2.9 ns/pt vs 7.7 ns/pt). FastInterpolations auto-updates the hint after each call.
+
+Note: Derivative methods (`deriv1`, `deriv2`, `deriv3`) use FastInterpolations' DerivativeView
+which doesn't support search/hint kwargs.
 """
-struct FastCubicSpline1D{T<:Union{Float64,ComplexF64},I,D1,D2}
+struct FastCubicSpline1D{T<:Union{Float64,ComplexF64},I,D1,D2,D3}
     xs::Vector{Float64}
     fs::Vector{T}
     fs1::Vector{T}        # First derivatives at grid points
@@ -53,8 +68,7 @@ struct FastCubicSpline1D{T<:Union{Float64,ComplexF64},I,D1,D2}
     interp::I             # CubicInterpolant (or tuple for complex)
     d1_view::D1           # deriv1 view
     d2_view::D2           # deriv2 view
-    f3_coeffs::Vector{Float64}    # Pre-computed f'''(x) = (z[i+1]-z[i])/h for each interval
-    f3_coeffs_imag::Vector{Float64}  # Imaginary part for complex (empty for real)
+    d3_view::D3           # deriv3 view
 end
 
 """
@@ -138,22 +152,14 @@ function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{Float64};
     itp = cubic_interp(xs, fs; bc=bc)
     d1 = FastInterpolations.deriv1(itp)
     d2 = FastInterpolations.deriv2(itp)
+    d3 = FastInterpolations.deriv3(itp)
 
     # Pre-compute first derivatives at grid points
     fs1 = [d1(x) for x in xs]
     fsi = zeros(Float64, npts)
 
-    # Pre-compute third derivative coefficients for each interval
-    z = itp.z
-    f3_coeffs = Vector{Float64}(undef, npts - 1)
-    @inbounds for i in 1:(npts-1)
-        h_i = xs[i+1] - xs[i]
-        f3_coeffs[i] = (z[i+1] - z[i]) / h_i
-    end
-    f3_coeffs_imag = Float64[]
-
-    FastCubicSpline1D{Float64,typeof(itp),typeof(d1),typeof(d2)}(
-        xs, copy(fs), fs1, fsi, itp, d1, d2, f3_coeffs, f3_coeffs_imag
+    FastCubicSpline1D{Float64,typeof(itp),typeof(d1),typeof(d2),typeof(d3)}(
+        xs, copy(fs), fs1, fsi, itp, d1, d2, d3
     )
 end
 
@@ -178,27 +184,19 @@ function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{ComplexF64};
     d1_imag = FastInterpolations.deriv1(itp_imag)
     d2_real = FastInterpolations.deriv2(itp_real)
     d2_imag = FastInterpolations.deriv2(itp_imag)
+    d3_real = FastInterpolations.deriv3(itp_real)
+    d3_imag = FastInterpolations.deriv3(itp_imag)
 
     itp = (itp_real, itp_imag)
     d1 = (d1_real, d1_imag)
     d2 = (d2_real, d2_imag)
+    d3 = (d3_real, d3_imag)
 
     fs1 = [d1_real(x) + 1im * d1_imag(x) for x in xs]
     fsi = zeros(ComplexF64, npts)
 
-    # Pre-compute third derivative coefficients for each interval
-    z_real = itp_real.z
-    z_imag_arr = itp_imag.z
-    f3_coeffs = Vector{Float64}(undef, npts - 1)
-    f3_coeffs_imag = Vector{Float64}(undef, npts - 1)
-    @inbounds for i in 1:(npts-1)
-        h_i = xs[i+1] - xs[i]
-        f3_coeffs[i] = (z_real[i+1] - z_real[i]) / h_i
-        f3_coeffs_imag[i] = (z_imag_arr[i+1] - z_imag_arr[i]) / h_i
-    end
-
-    FastCubicSpline1D{ComplexF64,typeof(itp),typeof(d1),typeof(d2)}(
-        xs, copy(fs), fs1, fsi, itp, d1, d2, f3_coeffs, f3_coeffs_imag
+    FastCubicSpline1D{ComplexF64,typeof(itp),typeof(d1),typeof(d2),typeof(d3)}(
+        xs, copy(fs), fs1, fsi, itp, d1, d2, d3
     )
 end
 
@@ -206,26 +204,64 @@ end
 # Evaluation Methods
 # =============================================================================
 
+# Note: FastInterpolations' DerivativeView doesn't support search/hint kwargs,
+# only the main CubicInterpolant does. We provide a unified API but the kwargs
+# only affect the main interpolant evaluation (not derivative views).
+
 """
-    (spline)(x) -> T
+    (spline)(x; search=nothing, hint=nothing) -> T
 
 Evaluate the spline at point x.
+
+# Keyword Arguments
+
+  - `search`: Search strategy (e.g., `LinearBinary()` for monotonic access patterns).
+    Default uses binary search. Only affects this method, not derivative methods.
+  - `hint`: Mutable `Ref{Int}` for interval index. Use `hint=Ref(1)` and FastInterpolations
+    will automatically update it after each call, enabling O(1) lookups for sequential access.
+    Only affects this method, not derivative methods.
+
+# Example with hint for fast sequential access
+
+```julia
+spline = FastCubicSpline1D(xs, fs)
+hint = Ref(1)
+for x in sorted_points
+    y = spline(x; hint=hint)  # hint[] auto-updated after each call
+end
+```
 """
-@inline function (spline::FastCubicSpline1D{Float64})(x::Float64)
-    return spline.interp(x)
+@inline function (spline::FastCubicSpline1D{Float64})(x::Float64; search=nothing, hint=nothing)
+    if search === nothing && hint === nothing
+        return spline.interp(x)
+    elseif hint === nothing
+        return spline.interp(x; search=search)
+    elseif search === nothing
+        return spline.interp(x; hint=hint)
+    else
+        return spline.interp(x; search=search, hint=hint)
+    end
 end
 
-@inline function (spline::FastCubicSpline1D{ComplexF64})(x::Float64)
+@inline function (spline::FastCubicSpline1D{ComplexF64})(x::Float64; search=nothing, hint=nothing)
     itp_real, itp_imag = spline.interp
-    return itp_real(x) + 1im * itp_imag(x)
+    if search === nothing && hint === nothing
+        return itp_real(x) + 1im * itp_imag(x)
+    elseif hint === nothing
+        return itp_real(x; search=search) + 1im * itp_imag(x; search=search)
+    elseif search === nothing
+        return itp_real(x; hint=hint) + 1im * itp_imag(x; hint=hint)
+    else
+        return itp_real(x; search=search, hint=hint) + 1im * itp_imag(x; search=search, hint=hint)
+    end
 end
 
 """
-    evaluate(spline, x) -> T
+    evaluate(spline, x; search=nothing, hint=nothing) -> T
 
 Non-mutating evaluation (for API compatibility).
 """
-@inline evaluate(spline::FastCubicSpline1D, x::Float64) = spline(x)
+@inline evaluate(spline::FastCubicSpline1D, x::Float64; search=nothing, hint=nothing) = spline(x; search=search, hint=hint)
 
 """
     deriv1(spline, x) -> T
@@ -256,47 +292,18 @@ end
 end
 
 """
-    _fast_find_interval(xs, x) -> Int
-
-Find interval index i such that xs[i] <= x < xs[i+1].
-Custom binary search optimized for inlining.
-"""
-@inline function _fast_find_interval(xs::Vector{Float64}, x::Float64)
-    n = length(xs)
-    @inbounds begin
-        if x <= xs[1]
-            return 1
-        elseif x >= xs[end]
-            return n - 1
-        else
-            lo, hi = 1, n
-            while lo < hi - 1
-                mid = (lo + hi) >> 1
-                if xs[mid] <= x
-                    lo = mid
-                else
-                    hi = mid
-                end
-            end
-            return lo
-        end
-    end
-end
-
-"""
     deriv3(spline, x) -> T
 
 Evaluate third derivative at point x.
-For cubic splines, f'''(x) is constant within each interval (pre-computed during construction).
+For cubic splines, f'''(x) is constant within each interval.
 """
 @inline function deriv3(spline::FastCubicSpline1D{Float64}, x::Float64)
-    i = _fast_find_interval(spline.xs, x)
-    @inbounds return spline.f3_coeffs[i]
+    return spline.d3_view(x)
 end
 
 @inline function deriv3(spline::FastCubicSpline1D{ComplexF64}, x::Float64)
-    i = _fast_find_interval(spline.xs, x)
-    @inbounds return spline.f3_coeffs[i] + 1im * spline.f3_coeffs_imag[i]
+    d3_r, d3_i = spline.d3_view
+    return d3_r(x) + 1im * d3_i(x)
 end
 
 """

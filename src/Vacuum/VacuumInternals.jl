@@ -127,10 +127,15 @@ function kernel!(
     end
 
     # Used for Z'_θ and X'_θ in eq.(51)
-    spline_x = cubic_spline_interpolation(theta_grid, x_sourcepoints; extrapolation_bc=Interpolations.Periodic())
-    spline_z = cubic_spline_interpolation(theta_grid, z_sourcepoints; extrapolation_bc=Interpolations.Periodic())
-    dx_dtheta = [Interpolations.gradient(spline_x, t)[1] for t in theta_grid]
-    dz_dtheta = [Interpolations.gradient(spline_z, t)[1] for t in theta_grid]
+    # Close the loop for periodic BC by appending first point at the end
+    theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
+    x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
+    z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
+    spline_x = FastCubicSpline1D(theta_closed, x_closed; bctype="periodic")
+    spline_z = FastCubicSpline1D(theta_closed, z_closed; bctype="periodic")
+    theta_vec = collect(theta_grid)
+    dx_dtheta = spline_x.d1_view(theta_vec)
+    dz_dtheta = spline_z.d1_view(theta_vec)
 
     # Loop through observer points
     for j in 1:mtheta
@@ -212,9 +217,9 @@ function kernel!(
                 # Compute green function for this Gaussian point
                 theta_gauss0 = mod(theta_gauss[ig], 2π)
                 x_gauss = spline_x(theta_gauss0)
-                dx_dtheta_gauss = Interpolations.gradient(spline_x, theta_gauss0)[1]
+                dx_dtheta_gauss = deriv1(spline_x, theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
-                dz_dtheta_gauss = Interpolations.gradient(spline_z, theta_gauss0)[1]
+                dz_dtheta_gauss = deriv1(spline_z, theta_gauss0)
                 G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
@@ -341,8 +346,11 @@ end
 # Returns the array of derivatives at all x points, I think this acts like difspl
 # in the Fortran but need to check/consolidate spline routines later
 function periodic_cubic_deriv(theta, vals)
-    itp = scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
-    return first.(Interpolations.gradient.(Ref(itp), theta))
+    # Close the loop for periodic BC by appending first point at the end
+    theta_closed = vcat(collect(theta), theta[end] + (theta[2] - theta[1]))
+    vals_closed = vcat(vals, vals[1])
+    spline = FastCubicSpline1D(theta_closed, vals_closed; bctype="periodic")
+    return spline.d1_view(collect(theta))
 end
 
 """
@@ -472,15 +480,15 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
     end
 
     # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
-    θin = range(0.0, 1.0; length=mtheta_in)
-    itp = cubic_spline_interpolation(θin, vecin)
+    θin = collect(range(0.0, 1.0; length=mtheta_in))
+    spline = FastCubicSpline1D(θin, vecin; bctype="natural")
 
     # Interpolate to new grid with optional offsets
     vecout = zeros(mtheta)
     for i in 1:mtheta
         x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
         x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
-        vecout[i] = itp(x)
+        vecout[i] = spline(x)
     end
     return vecout
 end
