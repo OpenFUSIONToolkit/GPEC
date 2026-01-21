@@ -218,30 +218,26 @@ Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coeffici
   - `cs`: Fourier coefficient matrix (mtheta × mpert)
   - `m00`: Integer offset in the gil matrix (row offset)
   - `l00`: Integer offset in the gil matrix (column offset)
+  - `weight`: Quadrature weight factor
 
 # Notes
 
-  - Computes: `gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]`
+  - Computes: `gll[l2, l1] = weight * Σ_i cs[i, l2] * gil[i, l1]`
   - Performs the same function as fouranv in the Fortran code.
 
 # Returns
 
   - gll(l2,l1) : output matrix updated in-place (mpert × mpert)
 """
-function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-
-    # Zero out gll block
-    num_gridpoints, num_pert = size(cs)
-    fill!(view(gll, 1:num_pert, 1:num_pert), 0.0)
+function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int, weight::Float64)
 
     # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
-    # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
-    dth = 2π / num_gridpoints
-    mul!(gll, cs', view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), 2π * dth, 0.0)
+    num_gridpoints, num_pert = size(cs)
+    mul!(gll, cs', view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), weight, 0.0)
 end
 
 """
-    fourier_transform!(gil, gij, cs, m00, l00, mth, mpert)
+    fourier_transform!(gil, gij, cs, m00, l00)
 
     Purpose:
       This routine performs a truncated Fourier transform of gij onto gil
@@ -251,19 +247,14 @@ end
       gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
       cs(j,l)    : Fourier coefficient matrix (mth × mpert)
       m00, l00   : integer offsets in the gil matrix
-      mth        : number of θ-grid points (dimension of gij along i, j)
-      mpert      : number of Fourier modes
 
     Output:
       gil(i', l') : output matrix updated in-place (mth × mpert), where i' = m00 + i and l' = l00 + l
 """
 function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
 
-    # Zero out relevant gil block
-    num_gridpoints, num_pert = size(cs)
-    fill!(view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), 0.0)
-
     # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    num_gridpoints, num_pert = size(cs)
     mul!(view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), gij, cs)
 end
 

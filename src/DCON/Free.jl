@@ -33,7 +33,28 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.xzpts, 0.0)
 
         # Compute block of vacuum energy matrix for one toroidal mode number
-        wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+        wv, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+
+        wv3D, grri3D, xzpts3D = Vacuum.compute_vacuum_response_3D(vac_inputs, intr.wall_settings)
+
+        println("2D Vacuum response matrix wv:")
+        display(wv)
+
+        println("3D Vacuum response matrix wv3D:")
+        display(wv3D)
+
+        println("Difference between 2D and 3D vacuum response matrices:")
+        display(wv .- wv3D)
+        display(norm(wv .- wv3D))
+
+        println("Maximum eigenvalues:")
+        display(maximum(real.(eigvals(wv))))
+        display(maximum(real.(eigvals(wv3D))))
+
+        println("Difference in maximum eigenvalue:")
+        display(maximum(real.(eigvals(wv))) - maximum(real.(eigvals(wv3D))))
+
+        error("Vacuum response matrix computation complete.")
 
         # Output data for unit testing and benchmarking
         if true #intr.debug_settings.output_benchmark_data

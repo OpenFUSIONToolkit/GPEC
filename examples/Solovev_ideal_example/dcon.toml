@@ -16,7 +16,8 @@ nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 24                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+nzvac = 48
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kin_flag = false              # Kinetic EL equation (default: false)
@@ -36,14 +37,14 @@ tol_r = 1e-7                  # Relative tolerance of dynamic integration steps 
 crossover = 1e-2              # Fractional distance from rational q at which tol switches
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-force_wv_symmetry = true      # Forces vacuum energy matrix symmetry 
+force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
 
 [WALL]
-shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
+shape = "nowall"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
 a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
 aw = 0.05                     # Half-thickness of the wall.
 bw = 1.5                      # Elongation.
 cw = 0                        # Offset of the center of the wall from the major radius.
 dw = 0.5                      # Triangularity
 tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
-equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
+equal_arc_wall = false         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
