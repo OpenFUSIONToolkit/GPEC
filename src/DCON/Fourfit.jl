@@ -205,6 +205,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     # --- Extract inputs ---
     sq = equil.sq
     mpsi = metric.mpsi
+    intr.debug_settings.make_plots = true
+
+    # Storage for debug: keep fmat_full at each psi if needed
+    fmats_full_debug = intr.debug_settings.make_plots ? [zeros(ComplexF64, intr.numpert_total, intr.numpert_total) for _ in 1:mpsi] : nothing
 
     # Allocations (use flat storage for all matrices to fill splines)
     # TODO: This can be made more efficient for 2D equilibria by using block diagonals
@@ -334,6 +338,12 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         kmat .= emat .- (adjoint(kmat) * temp2)
         gmat .= hmat .- (adjoint(cmat) * temp2)
 
+        if intr.debug_settings.make_plots
+            fmat_full = reshape(fmats_lower_flatview, intr.numpert_total, intr.numpert_total) #Currently this is F̄
+            # Store a copy before factorization
+            fmats_full_debug[ipsi] .= fmat_full
+        end
+
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
         # TODO: does F stay Hermitian in the 3D case, allowing us to use the lower representation?
@@ -359,10 +369,18 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
             end
         end
 
-        #= Comment out cholesky and uncomment this and the comment block after the fit splines part to look at det(F) at each psi
-        q_diag = ((intr.mlow:intr.mhigh) .- q*intr.nlow)
-        fmat .= q_diag .* fmat .* q_diag' # Apply Q on both sides to get F = Q F̄ Qᴴ
-        =#
+        if intr.debug_settings.make_plots
+            # Comment out cholesky and uncomment this and the comment block after the fit splines part to look at det(F) at each psi
+            # Build the diagonal entries for each (m,n) block so multi-n runs still broadcast correctly
+            q_diag = zeros(eltype(fmat), intr.numpert_total)
+            offset = 0
+            for n in intr.nlow:intr.nhigh
+                m_diag = (intr.mlow:intr.mhigh) .- q * n
+                q_diag[offset .+ (1:intr.mpert)] .= m_diag
+                offset += intr.mpert
+            end
+            fmats_full_debug[ipsi] .= q_diag .* fmats_full_debug[ipsi] .* q_diag' # Apply Q on both sides to get F = Q F̄ Qᴴ
+        end
 
     end
 
@@ -378,14 +396,19 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     ffit.gmats = Spl.CubicSpline(metric.xs, gmats_flat; bctype="extrap")
     ffit.kmats = Spl.CubicSpline(metric.xs, kmats_flat; bctype="extrap")
 
-    #=
-    psi = metric.xs
-    q = equil.sq.fs[:,4]
-    fmats_frob = [det(reshape(fmats_lower_flat[ipsi, :], intr.numpert_total, intr.numpert_total)) for ipsi in 1:mpsi]
-    println(size(fmats_frob))
-    @save "fmat_frobenius_at_psi.jld2" fmats_frob psi q
-    error("Debug")
-    =#
+    if intr.debug_settings.make_plots
+        # Save det(F) at each psi to separate HDF5 file
+        println("Saving det(F) at each psi to fmat_debug.h5")
+        psi = metric.xs
+        q = equil.sq.fs[:, 4]
+        fmats_det = [det(fmats_full_debug[ipsi]) for ipsi in 1:mpsi]
+
+        h5open(joinpath(intr.dir_path, "fmat_debug.h5"), "w") do h5
+            h5["fmat_det"] = fmats_det
+            h5["psi"] = psi
+            h5["q"] = q
+        end
+    end
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

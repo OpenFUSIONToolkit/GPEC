@@ -50,3 +50,4 @@ a = 0.2415
 
 [DEBUG]
 output_benchmark_data = true      # Output benchmark data for comparison between codes
+make_plots = true                 # Makes another hdf5 file that can be used for plotting things like |F| vs psi

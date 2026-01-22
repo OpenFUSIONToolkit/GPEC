@@ -215,7 +215,14 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 
         # Store input parameters
         for (key, val) in zip(fieldnames(DconControl), getfield.(Ref(ctrl), fieldnames(DconControl)))
-            out_h5["input/DCON_CONTROL/$key"] = val
+            # Skip kinetic struct as HDF5 doesn't know how to serialize custom types
+            if key == :kinetic
+                for (kkey, kval) in zip(fieldnames(KineticParams), getfield.(Ref(ctrl.kinetic), fieldnames(KineticParams)))
+                    out_h5["input/DCON_CONTROL/kinetic/$kkey"] = kval
+                end
+            else
+                out_h5["input/DCON_CONTROL/$key"] = val
+            end
         end
         for (key, val) in zip(fieldnames(Equilibrium.EquilibriumControl), getfield.(Ref(equil.config.control), fieldnames(Equilibrium.EquilibriumControl)))
             out_h5["input/EQUIL_CONTROL/$key"] = val

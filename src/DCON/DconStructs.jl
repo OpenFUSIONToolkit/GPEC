@@ -52,6 +52,7 @@ A mutable struct containing settings for debugging and benchmarking output.
 """
 @kwdef mutable struct DebugSettings
     output_benchmark_data::Bool = false
+    make_plots::Bool = false
 end
 
 """
