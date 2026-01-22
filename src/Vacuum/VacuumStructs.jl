@@ -205,6 +205,7 @@ struct PlasmaGeometry3D
     x::Vector{Float64}
     y::Vector{Float64}
     z::Vector{Float64}
+    r::Matrix{Float64}
     n::Matrix{Float64}
     dA::Vector{Float64}
     # sin_mn_basis3D::Matrix{Float64}
@@ -241,6 +242,14 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
         z[idx] = Z[i]
     end
 
+    # r: (ntotal, 3) array of (x, y, z) coordinates for each surface point
+    r = zeros(ntotal, 3)
+    for idx in 1:ntotal
+        r[idx, 1] = x[idx]
+        r[idx, 2] = y[idx]
+        r[idx, 3] = z[idx]
+    end
+
     # Compute differential area elements dA via cross product of tangent vectors
     # Create temporary arrays including endpoints for spline interpolation
     X_temp = reshape(x, ntheta, nzeta)
@@ -275,6 +284,7 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
         x,
         y,
         z,
+        r,
         n,
         dA
     )

@@ -6,6 +6,7 @@ using ..BIEST
 
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")
+include("Vacuum3D.jl")
 
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response, compute_vacuum_response_3D
 export compute_vacuum_field
@@ -357,9 +358,15 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     # Plasma–Plasma block
     # G = single-layer kernel, K = double-layer kernel
     # Use Nt toroidal points to properly discretize the 3D surface (must be >= 6 for BIEST)
+    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf3D, plasma_surf3D)
+    display(green_temp)
+    display(grad_green)
+
     println("Calling BIEST with Nt=$nzeta, Np=$mtheta (total 3D points: $(num_gridpoints))...")
     # compute_green_matrices!(green_temp, grad_green, plasma_surf.x, plasma_surf.z, plasma_surf.ν, nzeta)
     compute_green_matrices!(green_temp, grad_green, plasma_surf3D)
+    display(green_temp)
+    display(grad_green)
 
     # Sum Green's function matrices over toroidal direction to recover 2D poloidal slice
     # green_2D = zeros(ComplexF64, mtheta, mtheta)
