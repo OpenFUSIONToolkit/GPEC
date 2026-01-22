@@ -320,10 +320,29 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     (; mtheta, mpert, n, kernelsign, force_wv_symmetry, nzeta, npert) = inputs
     num_gridpoints = nzeta * mtheta
     num_modes = npert * mpert
+
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
     grad_green = zeros(num_gridpoints, num_gridpoints) # for walls, this is 2*mtheta x 2*mtheta
     green_temp = zeros(num_gridpoints, num_gridpoints)
+
+    plasma_surf3D = PlasmaGeometry3D(plasma_surf, nzeta)
+
+    if false # dA debugging
+        a = 0.1
+        R0 = 10
+        ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+        θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+        analytic_dA = [a * (R0 + a * cos(θ)) * (4π^2 / mtheta / nzeta) for θ in θ_grid, ϕ in ϕ_grid]
+        println("Computed 3D plasma surface differential area elements dA: $(sum(plasma_surf3D.dA))")
+        println("Sum of analytic dA: $(sum(analytic_dA))")  # DEBUG
+        println("Analytic = $(4π^2 * a * R0)")  # DEBUG
+        println("Difference in analytic and computed dA:")  # DEBUG
+        display(analytic_dA - reshape(plasma_surf3D.dA, size(analytic_dA)))  # DEBUG
+        println("Max difference in dA: $(maximum(abs.(analytic_dA - reshape(plasma_surf3D.dA, size(analytic_dA)))))")  # DEBUG
+        println("Min difference in dA: $(minimum(abs.(analytic_dA - reshape(plasma_surf3D.dA, size(analytic_dA)))))")  # DEBUG
+        error("Debugging dA")  # DEBUG
+    end
 
     # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first num_gridpoints rows are plasma as observer, second are wall
     # First num_modes columns are real (cosine), second num_modes are imaginary (sine)
@@ -339,7 +358,8 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     # G = single-layer kernel, K = double-layer kernel
     # Use Nt toroidal points to properly discretize the 3D surface (must be >= 6 for BIEST)
     println("Calling BIEST with Nt=$nzeta, Np=$mtheta (total 3D points: $(num_gridpoints))...")
-    compute_green_matrices!(green_temp, grad_green, plasma_surf.x, plasma_surf.z, plasma_surf.ν, nzeta)
+    # compute_green_matrices!(green_temp, grad_green, plasma_surf.x, plasma_surf.z, plasma_surf.ν, nzeta)
+    compute_green_matrices!(green_temp, grad_green, plasma_surf3D)
 
     # Sum Green's function matrices over toroidal direction to recover 2D poloidal slice
     # green_2D = zeros(ComplexF64, mtheta, mtheta)

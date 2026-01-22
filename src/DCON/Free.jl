@@ -32,10 +32,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         fill!(vac.grri, 0.0)
         fill!(vac.xzpts, 0.0)
 
+        wv3D, grri3D, xzpts3D = Vacuum.compute_vacuum_response_3D(vac_inputs, intr.wall_settings)
+
         # Compute block of vacuum energy matrix for one toroidal mode number
         wv, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-
-        wv3D, grri3D, xzpts3D = Vacuum.compute_vacuum_response_3D(vac_inputs, intr.wall_settings)
 
         println("2D Vacuum response matrix wv:")
         display(wv)

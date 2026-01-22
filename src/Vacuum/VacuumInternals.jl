@@ -109,6 +109,12 @@ function kernel!(
 
     # TODO: this isn't the same as the periodic_cubic_deriv interpolation?
     # We need to interpolate off-grid during Gaussian quadrature
+    # THIS IS A BUG: extrapolations BC assumes both endpoints are included in the data, so this wraps at mtheta-1 to 0 instead of mtheta to 0
+    # The correct form is:
+    # theta_grid_periodic = range(; start=0, length=mtheta+1, step=dtheta)
+    # R_periodic = vcat(source.x, source.x[1])
+    # spline_x = cubic_spline_interpolation(theta_grid_periodic, R_periodic, bc = Periodic(OnGrid()); extrapolation_bc=Interpolations.Periodic())
+    # We can drop the extrapolation condition since we do mod(theta_gauss[ig], 2π) in the Gaussian quadrature loop below, or leave it here and drop that. They are redundant
     spline_x = cubic_spline_interpolation(theta_grid, source.x; extrapolation_bc=Interpolations.Periodic())
     spline_z = cubic_spline_interpolation(theta_grid, source.z; extrapolation_bc=Interpolations.Periodic())
 
@@ -261,7 +267,7 @@ end
 # Returns the array of derivatives at all x points, I think this acts like difspl
 # in the Fortran but need to check/consolidate spline routines later
 function periodic_cubic_deriv(theta, vals)
-    itp = cubic_spline_interpolation(theta, vals; extrapolation_bc=Interpolations.Periodic()) #scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
+    itp = cubic_spline_interpolation(theta, vals; bc=Periodic(OnGrid()))
     return first.(Interpolations.gradient.(Ref(itp), theta))
 end
 
@@ -368,8 +374,6 @@ function with optional offset parameters.
 
   - `vecin::Vector{Float64}`: Input array to be resampled
   - `mtheta::Int`: Desired length of the output array
-  - `dx0::Float64`: Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mtheta_in`)
-  - `dx1::Float64`: Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`)
 
 # Returns
 
@@ -378,28 +382,23 @@ function with optional offset parameters.
 # Notes
 
   - If `mtheta == length(vecin)`, returns the input vector unchanged
-  - Uses periodic cubic spline interpolation for resampling
-  - Input grid is normalized to [0, 1] for interpolation
 """
-function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
+function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int)
 
     # Initialize
     mtheta_in = length(vecin)
-
     # If mtheta == mtheta_in, just return the input vector
     if mtheta == mtheta_in
         return vecin
     end
 
-    # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
     θin = range(0.0, 1.0; length=mtheta_in)
-    itp = cubic_spline_interpolation(θin, vecin)
+    itp = cubic_spline_interpolation(θin, vecin; bc=Periodic(OnGrid()))
 
-    # Interpolate to new grid with optional offsets
+    # Interpolate to new grid
     vecout = zeros(mtheta)
     for i in 1:mtheta
-        x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
-        x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
+        x = (i - 1) / mtheta
         vecout[i] = itp(x)
     end
     return vecout

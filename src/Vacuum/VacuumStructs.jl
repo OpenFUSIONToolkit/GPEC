@@ -157,10 +157,13 @@ function initialize_plasma_surface(inputs::VacuumInput)
     Z = interp_to_new_grid(z, mtheta)
     ν = interp_to_new_grid(ν, mtheta)
 
-    # Plasma boundary theta derivative: length mth with θ = [0, 1)
+    # Plasma boundary theta derivative: for splines, need to add periodic point
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    dx_dtheta = periodic_cubic_deriv(θ_grid, R)
-    dz_dtheta = periodic_cubic_deriv(θ_grid, Z)
+    θ_grid_periodic = range(; start=0, length=mtheta+1, step=2π/mtheta)
+    R_periodic = vcat(R, R[1])
+    Z_periodic = vcat(Z, Z[1])
+    dx_dtheta = periodic_cubic_deriv(θ_grid_periodic, R_periodic)
+    dz_dtheta = periodic_cubic_deriv(θ_grid_periodic, Z_periodic)
 
     # Precompute Fourier transform terms, sin(mθ - nν) and cos(mθ - nν)
     sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
@@ -193,6 +196,87 @@ function initialize_plasma_surface(inputs::VacuumInput)
         cos_mn_basis,
         sin_mn_basis3D,
         cos_mn_basis3D
+    )
+end
+
+struct PlasmaGeometry3D
+    ntheta::Int
+    nzeta::Int
+    x::Vector{Float64}
+    y::Vector{Float64}
+    z::Vector{Float64}
+    n::Matrix{Float64}
+    dA::Vector{Float64}
+    # sin_mn_basis3D::Matrix{Float64}
+    # cos_mn_basis3D::Matrix{Float64}
+end
+
+function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry3D
+
+    # Extract 2D poloidal data
+    ntheta = length(plasma_2d.x)
+    ntotal = ntheta * nzeta
+    R = plasma_2d.x
+    Z = plasma_2d.z
+    ν = plasma_2d.ν
+
+    # Allocate output arrays
+    x = zeros(ntotal)
+    y = zeros(ntotal)
+    z = zeros(ntotal)
+    n = zeros(ntotal, 3)
+    dA = zeros(ntotal)
+
+    dθ = 2π / ntheta
+    dϕ = 2π / nzeta
+    θ_grid = range(; start=0, length=ntheta, step=dθ)
+    ϕ_grid = range(; start=0, length=nzeta, step=dϕ)
+
+    # Build surface point-by-point
+    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
+        # Linear index in flattened array
+        idx = i + (j - 1) * ntheta
+        x[idx] = R[i] * cos(ϕ + ν[i])
+        y[idx] = R[i] * sin(ϕ + ν[i])
+        z[idx] = Z[i]
+    end
+
+    # Compute differential area elements dA via cross product of tangent vectors
+    # Create temporary arrays including endpoints for spline interpolation
+    X_temp = reshape(x, ntheta, nzeta)
+    Y_temp = reshape(y, ntheta, nzeta)
+    Z_temp = reshape(z, ntheta, nzeta)
+
+    # Create splines with periodic data including endpoints
+    itpX = cubic_spline_interpolation((θ_grid, ϕ_grid), X_temp; bc=Periodic(OnGrid()))
+    itpY = cubic_spline_interpolation((θ_grid, ϕ_grid), Y_temp; bc=Periodic(OnGrid()))
+    itpZ = cubic_spline_interpolation((θ_grid, ϕ_grid), Z_temp; bc=Periodic(OnGrid()))
+    ∂r_dθ = SVector(3)
+    ∂r_dϕ = SVector(3)
+    # Evaluate derivatives at original (non-endpoint) grid points
+    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
+        idx = i + (j - 1) * ntheta
+        ∂X_dθ = Interpolations.gradient(itpX, θ, ϕ)[1]
+        ∂X_dϕ = Interpolations.gradient(itpX, θ, ϕ)[2]
+        ∂Y_dθ = Interpolations.gradient(itpY, θ, ϕ)[1]
+        ∂Y_dϕ = Interpolations.gradient(itpY, θ, ϕ)[2]
+        ∂Z_dθ = Interpolations.gradient(itpZ, θ, ϕ)[1]
+        ∂Z_dϕ = Interpolations.gradient(itpZ, θ, ϕ)[2]
+        ∂r_dθ = SVector(∂X_dθ, ∂Y_dθ, ∂Z_dθ)
+        ∂r_dϕ = SVector(∂X_dϕ, ∂Y_dϕ, ∂Z_dϕ)
+        dA[idx] = norm(cross(∂r_dθ, ∂r_dϕ))
+        n[idx, :] = cross(∂r_dθ, ∂r_dϕ) / dA[idx]
+    end
+    dA .*= dθ * dϕ
+
+    return PlasmaGeometry3D(
+        ntheta,
+        nzeta,
+        x,
+        y,
+        z,
+        n,
+        dA
     )
 end
 

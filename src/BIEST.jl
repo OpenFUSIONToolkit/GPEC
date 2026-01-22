@@ -59,6 +59,15 @@ function compute_green_matrices!(G::Matrix{Float64}, K::Matrix{Float64}, R::Vect
         R, Z, ν, Cint(length(R)), Cint(Nt), G, K)
 end
 
+function compute_green_matrices!(G::Matrix{Float64}, K::Matrix{Float64}, surf)
+    isfile(libbiest) || error("BIEST library not found at $libbiest. Build it with: cd src/BIEST && make")
+
+    # Call C++ wrapper which builds the surface from supplied coordinates
+    ccall((:biest_compute_green_matrices_from3D, libbiest), Cvoid,
+        (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cdouble}, Ptr{Cdouble}),
+        surf.x, surf.y, surf.z, Cint(surf.ntheta), Cint(surf.nzeta), G, K)
+end
+
 export compute_green_matrices!
 
 end # module BIEST
