@@ -2,6 +2,7 @@ module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 using StaticArrays
+using FastGaussQuadrature
 using ..BIEST
 
 include("VacuumStructs.jl")
