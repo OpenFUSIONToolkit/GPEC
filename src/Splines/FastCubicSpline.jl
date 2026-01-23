@@ -10,21 +10,20 @@ via 4-point polynomial extrapolation, then using FastInterpolations' BCPair API.
 
 ## Performance Comparison (FastInterpolations v0.2.4)
 
-| Operation          | CubicSpline1D | FastCubicSpline1D | FastInterp direct | Notes                   |
-|--------------------|---------------|-------------------|-------------------|-------------------------|
-| evaluate (1 pt)    |      5.5 ns   |        9.4 ns     |        9.3 ns     | Single point            |
-| deriv1 (1 pt)      |      5.5 ns   |        9.2 ns     |        9.3 ns     | Single point            |
-| deriv2 (1 pt)      |      5.2 ns   |        8.2 ns     |        8.2 ns     | Single point            |
-| deriv3 (1 pt)      |      N/A      |        7.4 ns     |        7.4 ns     | Single point            |
-| Monotonic loop     |      4.3 ns/pt|        7.7 ns/pt  |        7.7 ns/pt  | CubicSpline1D cached    |
-| Monotonic w/ hint  |      N/A      |        2.9 ns/pt  |        2.9 ns/pt  | Use hint=Ref(1)         |
-| Random loop        |     19.6 ns/pt|        8.7 ns/pt  |        8.7 ns/pt  | FastCubicSpline1D wins  |
+| Operation          | CubicSpline1D | FastCubicSpline1D | FastInterp direct | Notes                          |
+|--------------------|---------------|-------------------|-------------------|--------------------------------|
+| evaluate (1 pt)    |      5.5 ns   |        9.4 ns     |        9.3 ns     | Single point, binary search    |
+| deriv1 (1 pt)      |      5.5 ns   |        9.2 ns     |        9.3 ns     | Single point, binary search    |
+| deriv2 (1 pt)      |      5.2 ns   |        8.2 ns     |        8.2 ns     | Single point, binary search    |
+| deriv3 (1 pt)      |      5.0 ns   |        7.4 ns     |        7.4 ns     | Single point, binary search    |
+| Monotonic loop     |      4.3 ns/pt|        2.9 ns/pt  |        2.9 ns/pt  | hint + search=LinearBinary()   |
+| Random loop        |     19.6 ns/pt|        8.7 ns/pt  |        8.7 ns/pt  | FastCubicSpline1D wins         |
 
-**Summary**: CubicSpline1D with cached interval search is ~1.8x faster for monotonic
-access patterns (typical in ODE integration). FastCubicSpline1D is ~2.3x faster for
-random access. For monotonic access, use the `hint` keyword argument for fastest
-performance (2.9 ns/pt). The FastCubicSpline1D wrapper now supports all FastInterpolations
-v0.2.4 features including `search` and `hint` keyword arguments.
+**Summary**: For monotonic access patterns (typical in ODE integration), use
+`hint=Ref(1)` with `search=LinearBinary()` for optimal performance (2.9 ns/pt).
+CubicSpline1D uses cached interval search internally (4.3 ns/pt). FastCubicSpline1D
+is ~2.3x faster for random access. The FastCubicSpline1D wrapper supports all
+FastInterpolations v0.2.4 features including `search` and `hint` keyword arguments.
 """
 
 using FastInterpolations
@@ -125,7 +124,7 @@ function _make_bc(bctype::String, xs::Vector{Float64}, fs::Vector{Float64})
 end
 
 """
-    FastCubicSpline1D(xs, fs; bctype="extrap")
+    FastCubicSpline1D(xs, fs; bctype="extrap", extrap=:none)
 
 Create a 1D cubic spline interpolator using FastInterpolations.jl.
 
@@ -137,11 +136,18 @@ Create a 1D cubic spline interpolator using FastInterpolations.jl.
   - `bctype`: Boundary condition type:
 
       + `"natural"`: f''(x) = 0 at endpoints
-      + `"periodic"`: f and f' continuous across domain wrap
+      + `"periodic"`: f and f' continuous across domain wrap. FastInterpolations
+        requires exact endpoint matching: fs[end] must equal fs[1].
       + `"extrap"`: Endpoint derivatives from 4-point polynomial extrapolation
+  - `extrap`: Extrapolation behavior outside domain (FastInterpolations parameter):
+
+      + `:none`: Throw DomainError for queries outside domain (default)
+      + `:constant`: Return boundary value for out-of-domain queries
+      + `:extension`: Use polynomial extrapolation outside domain
+      + `:wrap`: Wrap around (only valid with periodic BC)
 """
 function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{Float64};
-    bctype::String="extrap")
+    bctype::String="extrap", extrap::Symbol=:none)
 
     npts = length(xs)
     @assert length(fs) == npts "xs and fs must have same length"
@@ -149,7 +155,7 @@ function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{Float64};
     @assert issorted(xs) "xs must be sorted ascending"
 
     bc = _make_bc(bctype, xs, fs)
-    itp = cubic_interp(xs, fs; bc=bc)
+    itp = cubic_interp(xs, fs; bc=bc, extrap=extrap)
     d1 = FastInterpolations.deriv1(itp)
     d2 = FastInterpolations.deriv2(itp)
     d3 = FastInterpolations.deriv3(itp)
@@ -165,7 +171,7 @@ end
 
 # Complex version - stores separate real/imag interpolants
 function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{ComplexF64};
-    bctype::String="extrap")
+    bctype::String="extrap", extrap::Symbol=:none)
 
     npts = length(xs)
     @assert length(fs) == npts "xs and fs must have same length"
@@ -178,8 +184,8 @@ function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{ComplexF64};
     bc_real = _make_bc(bctype, xs, fs_real)
     bc_imag = _make_bc(bctype, xs, fs_imag)
 
-    itp_real = cubic_interp(xs, fs_real; bc=bc_real)
-    itp_imag = cubic_interp(xs, fs_imag; bc=bc_imag)
+    itp_real = cubic_interp(xs, fs_real; bc=bc_real, extrap=extrap)
+    itp_imag = cubic_interp(xs, fs_imag; bc=bc_imag, extrap=extrap)
     d1_real = FastInterpolations.deriv1(itp_real)
     d1_imag = FastInterpolations.deriv1(itp_imag)
     d2_real = FastInterpolations.deriv2(itp_real)
@@ -331,3 +337,236 @@ function empty_FastCubicSpline1D(::Type{T}) where {T<:Union{Float64,ComplexF64}}
     fs = zeros(T, 5)
     FastCubicSpline1D(xs, fs; bctype="natural")
 end
+
+# =============================================================================
+# FastCubicSpline1DMulti - Multi-Quantity Version (CubicSpline1D-compatible interface)
+# =============================================================================
+
+"""
+    FastCubicSpline1DMulti{T, N, S}
+
+A multi-quantity 1D cubic spline interpolator wrapping multiple FastCubicSpline1D instances.
+Provides the same API as CubicSpline1D (returns vectors when evaluated).
+
+# Type Parameters
+
+  - `T`: Element type (Float64 or ComplexF64)
+  - `N`: Number of quantities
+  - `S`: Type of each FastCubicSpline1D
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared grid points
+  - `fs::Matrix{T}`: Function values, shape (npts, nqty)
+  - `fs1::Matrix{T}`: First derivatives at grid points
+  - `fsi::Matrix{T}`: Cumulative integrals at grid points
+  - `mx::Int`: Number of grid points
+  - `splines::NTuple{N, S}`: Tuple of FastCubicSpline1D for each quantity
+  - `_f, _f1, _f2, _f3::Vector{T}`: Work arrays for thread-unsafe evaluation
+"""
+struct FastCubicSpline1DMulti{T<:Union{Float64,ComplexF64},N,S<:FastCubicSpline1D{T}}
+    xs::Vector{Float64}
+    fs::Matrix{T}
+    fs1::Matrix{T}
+    fsi::Matrix{T}
+    mx::Int
+    splines::NTuple{N,S}
+    _f::Vector{T}
+    _f1::Vector{T}
+    _f2::Vector{T}
+    _f3::Vector{T}
+end
+
+"""
+    FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:none)
+
+Create a multi-quantity 1D cubic spline from a matrix of values.
+
+# Arguments
+
+  - `xs::Vector{Float64}`: Grid points (must be sorted ascending, at least 4 points)
+  - `fs::Matrix{T}`: Function values at grid points, shape (npts, nqty)
+  - `bctype`: Boundary condition type ("natural", "periodic", "extrap").
+    For periodic BC, FastInterpolations requires exact endpoint matching: fs[end, :] must equal fs[1, :].
+  - `extrap`: Extrapolation behavior outside domain (`:none`, `:constant`, `:extension`, `:wrap`)
+"""
+function FastCubicSpline1DMulti(xs::Vector{Float64}, fs::Matrix{T};
+    bctype::String="extrap", extrap::Symbol=:none) where {T<:Union{Float64,ComplexF64}}
+
+    npts, nqty = size(fs)
+    @assert length(xs) == npts "xs and fs rows must match"
+    @assert npts >= 4 "Need at least 4 points for spline"
+    @assert issorted(xs) "xs must be sorted ascending"
+
+    # Create individual splines for each quantity
+    splines = ntuple(q -> FastCubicSpline1D(xs, fs[:, q]; bctype=bctype, extrap=extrap), nqty)
+
+    # Gather fs1 from individual splines
+    fs1 = zeros(T, npts, nqty)
+    for q in 1:nqty
+        fs1[:, q] = splines[q].fs1
+    end
+
+    # Initialize fsi (computed on demand)
+    fsi = zeros(T, npts, nqty)
+
+    # Work arrays
+    _f = zeros(T, nqty)
+    _f1 = zeros(T, nqty)
+    _f2 = zeros(T, nqty)
+    _f3 = zeros(T, nqty)
+
+    FastCubicSpline1DMulti{T,nqty,eltype(splines)}(
+        xs, copy(fs), fs1, fsi, npts, splines, _f, _f1, _f2, _f3
+    )
+end
+
+"""
+    (spline::FastCubicSpline1DMulti)(x; search=nothing, hint=nothing) -> Vector{T}
+
+Evaluate the multi-quantity spline at point x, returning values for all quantities.
+
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Mutable `Ref{Int}` for interval caching. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
+"""
+@inline function (spline::FastCubicSpline1DMulti{T,N})(x::Float64; search=nothing, hint=nothing) where {T,N}
+    @inbounds for q in 1:N
+        spline._f[q] = spline.splines[q](x; search=search, hint=hint)
+    end
+    return spline._f
+end
+
+"""
+    evaluate!(spline::FastCubicSpline1DMulti, x; search=nothing, hint=nothing) -> Vector{T}
+
+Evaluate the spline at point x, returning values for all quantities.
+Results stored in work array (not thread-safe).
+
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Mutable `Ref{Int}` for interval caching. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
+"""
+@inline evaluate!(spline::FastCubicSpline1DMulti, x::Float64; search=nothing, hint=nothing) = spline(x; search=search, hint=hint)
+
+"""
+    deriv1!(spline::FastCubicSpline1DMulti, x) -> Vector{T}
+
+Evaluate first derivative at point x for all quantities.
+"""
+@inline function deriv1!(spline::FastCubicSpline1DMulti{T,N}, x::Float64) where {T,N}
+    @inbounds for q in 1:N
+        spline._f1[q] = deriv1(spline.splines[q], x)
+    end
+    return spline._f1
+end
+
+"""
+    deriv2!(spline::FastCubicSpline1DMulti, x) -> Vector{T}
+
+Evaluate second derivative at point x for all quantities.
+"""
+@inline function deriv2!(spline::FastCubicSpline1DMulti{T,N}, x::Float64) where {T,N}
+    @inbounds for q in 1:N
+        spline._f2[q] = deriv2(spline.splines[q], x)
+    end
+    return spline._f2
+end
+
+"""
+    deriv3!(spline::FastCubicSpline1DMulti, x) -> Vector{T}
+
+Evaluate third derivative at point x for all quantities.
+"""
+@inline function deriv3!(spline::FastCubicSpline1DMulti{T,N}, x::Float64) where {T,N}
+    @inbounds for q in 1:N
+        spline._f3[q] = deriv3(spline.splines[q], x)
+    end
+    return spline._f3
+end
+
+"""
+    integrate!(spline::FastCubicSpline1DMulti)
+
+Compute cumulative integrals at grid points for all quantities.
+"""
+function integrate!(spline::FastCubicSpline1DMulti{T,N}) where {T,N}
+    npts = spline.mx
+    @inbounds for q in 1:N
+        # Use the individual spline's integrate!
+        integrate!(spline.splines[q])
+        # Copy results to shared fsi matrix
+        spline.fsi[:, q] = spline.splines[q].fsi
+    end
+    return spline.fsi
+end
+
+"""
+    empty_FastCubicSpline1DMulti(T::Type, nqty::Int)
+
+Create an empty/placeholder FastCubicSpline1DMulti for type stability.
+"""
+function empty_FastCubicSpline1DMulti(::Type{T}, nqty::Int=4) where {T<:Union{Float64,ComplexF64}}
+    xs = collect(range(0.0, 1.0; length=5))
+    fs = zeros(T, 5, nqty)
+    FastCubicSpline1DMulti(xs, fs; bctype="natural")
+end
+
+# Aliases for compatibility
+spline_eval!(spline::FastCubicSpline1DMulti, x::Float64; search=nothing, hint=nothing) = evaluate!(spline, x; search=search, hint=hint)
+spline_deriv1!(spline::FastCubicSpline1DMulti, x::Float64) = deriv1!(spline, x)
+spline_deriv2!(spline::FastCubicSpline1DMulti, x::Float64) = deriv2!(spline, x)
+spline_deriv3!(spline::FastCubicSpline1DMulti, x::Float64) = deriv3!(spline, x)
+
+# =============================================================================
+# Compatibility with CubicSpline1D API (evaluate!, deriv1!, etc.)
+# These are provided for drop-in compatibility with code written for CubicSpline1D.
+# The "!" suffix is historical - FastCubicSpline1D doesn't mutate state.
+# =============================================================================
+
+"""
+    evaluate!(spline, x; search=nothing, hint=nothing) -> T
+
+CubicSpline1D-compatible API. For FastCubicSpline1D, this is equivalent to `spline(x; search=search, hint=hint)`.
+
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Mutable `Ref{Int}` for interval caching. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
+"""
+@inline evaluate!(spline::FastCubicSpline1D, x::Float64; search=nothing, hint=nothing) = spline(x; search=search, hint=hint)
+
+"""
+    deriv1!(spline, x) -> T
+
+CubicSpline1D-compatible API. For FastCubicSpline1D, this is equivalent to `deriv1(spline, x)`.
+Note: Derivative views in FastInterpolations do not support hint arguments.
+"""
+@inline deriv1!(spline::FastCubicSpline1D, x::Float64) = deriv1(spline, x)
+
+"""
+    deriv2!(spline, x) -> T
+
+CubicSpline1D-compatible API. For FastCubicSpline1D, this is equivalent to `deriv2(spline, x)`.
+Note: Derivative views in FastInterpolations do not support hint arguments.
+"""
+@inline deriv2!(spline::FastCubicSpline1D, x::Float64) = deriv2(spline, x)
+
+"""
+    deriv3!(spline, x) -> T
+
+CubicSpline1D-compatible API. For FastCubicSpline1D, this is equivalent to `deriv3(spline, x)`.
+Note: Derivative views in FastInterpolations do not support hint arguments.
+"""
+@inline deriv3!(spline::FastCubicSpline1D, x::Float64) = deriv3(spline, x)
+
+# Aliases used in some codebases - with optional search/hint support for evaluate
+spline_eval!(spline::FastCubicSpline1D, x::Float64; search=nothing, hint=nothing) = evaluate!(spline, x; search=search, hint=hint)
+spline_deriv1!(spline::FastCubicSpline1D, x::Float64) = deriv1!(spline, x)
+spline_deriv2!(spline::FastCubicSpline1D, x::Float64) = deriv2!(spline, x)
+spline_deriv3!(spline::FastCubicSpline1D, x::Float64) = deriv3!(spline, x)

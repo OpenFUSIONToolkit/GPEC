@@ -677,30 +677,36 @@ end
 """
     ComplexMatrixSpline{S}
 
-A wrapper providing matrix-shaped output from a single complex CubicSpline1D,
+A wrapper providing matrix-shaped output from a FastCubicSpline1DMulti,
 for complex-valued MHD stability matrix coefficients.
 
 This structure is used for interpolating the Fourier-decomposed perturbation
 matrices (A, B, C, D, E, F, G, H, K stability matrices in DCON) along the radial
-direction. Uses a single CubicSpline1D{ComplexF64} with nqty = n1*n2 for efficiency,
+direction. Uses FastCubicSpline1DMulti{ComplexF64} with nqty = n1*n2 for efficiency,
 with output reshaped to (n1, n2) matrix form.
 
 # Type Parameters
 
-  - `S`: The concrete CubicSpline1D{ComplexF64} type
+  - `S`: The concrete FastCubicSpline1DMulti{ComplexF64} type
 
 # Fields
 
-  - `spline::S`: Single complex spline with nqty = n1*n2 quantities
+  - `spline::S`: Complex multi-quantity spline with nqty = n1*n2 quantities
   - `n1::Int`: First dimension of output matrix
   - `n2::Int`: Second dimension of output matrix
   - `_out, _out1, _out2, _out3`: Work arrays for reshaped output
+  - `_hint::Base.RefValue{Int}`: Cached interval index for fast sequential access
 
 # Thread Safety
 
 The mutating evaluation functions use internal work arrays and are NOT thread-safe.
+
+# Performance Notes
+
+Supports interval hint caching via the `hint` keyword argument for O(1) lookups
+during sequential access patterns (e.g., ODE integration along radial coordinate).
 """
-struct ComplexMatrixSpline{S<:CubicSpline1D{ComplexF64}}
+struct ComplexMatrixSpline{S<:FastCubicSpline1DMulti{ComplexF64}}
     spline::S
     n1::Int
     n2::Int
@@ -708,6 +714,7 @@ struct ComplexMatrixSpline{S<:CubicSpline1D{ComplexF64}}
     _out1::Matrix{ComplexF64}
     _out2::Matrix{ComplexF64}
     _out3::Matrix{ComplexF64}
+    _hint::Base.RefValue{Int}
 end
 
 """
@@ -719,7 +726,7 @@ Create a ComplexMatrixSpline from a 3D array of complex data.
 
   - `xs::Vector{Float64}`: X-coordinates (typically normalized flux psi_N)
   - `data::Array{ComplexF64,3}`: Complex data of shape (npsi, n1, n2)
-  - `bctype`: Boundary condition type (passed to underlying CubicSpline1D)
+  - `bctype`: Boundary condition type (passed to underlying FastCubicSpline1DMulti)
 """
 function ComplexMatrixSpline(xs::Vector{Float64}, data::Array{ComplexF64,3};
     bctype::String="extrap")
@@ -729,8 +736,8 @@ function ComplexMatrixSpline(xs::Vector{Float64}, data::Array{ComplexF64,3};
     # Flatten (npsi, n1, n2) -> (npsi, n1*n2) using column-major order
     data_flat = reshape(data, npsi, n1 * n2)
 
-    # Create single complex spline with nqty = n1*n2
-    spline = CubicSpline1D(xs, data_flat; bctype=bctype)
+    # Create complex multi-quantity spline with nqty = n1*n2
+    spline = FastCubicSpline1DMulti(xs, data_flat; bctype=bctype)
 
     # Work arrays for reshaped output
     _out = zeros(ComplexF64, n1, n2)
@@ -738,7 +745,10 @@ function ComplexMatrixSpline(xs::Vector{Float64}, data::Array{ComplexF64,3};
     _out2 = zeros(ComplexF64, n1, n2)
     _out3 = zeros(ComplexF64, n1, n2)
 
-    ComplexMatrixSpline{typeof(spline)}(spline, n1, n2, _out, _out1, _out2, _out3)
+    # Interval hint for fast sequential access
+    _hint = Ref(1)
+
+    ComplexMatrixSpline{typeof(spline)}(spline, n1, n2, _out, _out1, _out2, _out3, _hint)
 end
 
 """
@@ -772,45 +782,66 @@ end
 end
 
 """
-    evaluate!(cms, x) -> Matrix{ComplexF64}
+    evaluate!(cms, x; search=nothing, hint=nothing) -> Matrix{ComplexF64}
 
 Evaluate the ComplexMatrixSpline at point x.
 Returns matrix of complex values (stored in work array, not thread-safe).
+
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Optional external `Ref{Int}` for interval caching. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
 """
-function evaluate!(cms::ComplexMatrixSpline, x::Float64)
-    f = evaluate!(cms.spline, x)
+function evaluate!(cms::ComplexMatrixSpline, x::Float64; search=nothing, hint=nothing)
+    h = hint === nothing ? cms._hint : hint
+    f = evaluate!(cms.spline, x; search=search, hint=h)
     _reshape_to_matrix!(cms._out, f, cms.n1)
     return cms._out
 end
 
 """
-    deriv1!(cms, x) -> f1
+    deriv1!(cms, x; hint=nothing) -> f1
 
 Evaluate ComplexMatrixSpline first derivative at point x.
+
+# Keyword Arguments
+
+  - `hint`: Optional external `Ref{Int}` for interval caching.
 """
-function deriv1!(cms::ComplexMatrixSpline, x::Float64)
+function deriv1!(cms::ComplexMatrixSpline, x::Float64; hint=nothing)
+    # Note: deriv methods don't use hints in FastCubicSpline1DMulti
+    # but we accept the argument for API consistency
     f1 = deriv1!(cms.spline, x)
     _reshape_to_matrix!(cms._out1, f1, cms.n1)
     return cms._out1
 end
 
 """
-    deriv2!(cms, x) -> f2
+    deriv2!(cms, x; hint=nothing) -> f2
 
 Evaluate ComplexMatrixSpline second derivative at point x.
+
+# Keyword Arguments
+
+  - `hint`: Optional external `Ref{Int}` for interval caching.
 """
-function deriv2!(cms::ComplexMatrixSpline, x::Float64)
+function deriv2!(cms::ComplexMatrixSpline, x::Float64; hint=nothing)
     f2 = deriv2!(cms.spline, x)
     _reshape_to_matrix!(cms._out2, f2, cms.n1)
     return cms._out2
 end
 
 """
-    deriv3!(cms, x) -> f3
+    deriv3!(cms, x; hint=nothing) -> f3
 
 Evaluate ComplexMatrixSpline third derivative at point x.
+
+# Keyword Arguments
+
+  - `hint`: Optional external `Ref{Int}` for interval caching.
 """
-function deriv3!(cms::ComplexMatrixSpline, x::Float64)
+function deriv3!(cms::ComplexMatrixSpline, x::Float64; hint=nothing)
     f3 = deriv3!(cms.spline, x)
     _reshape_to_matrix!(cms._out3, f3, cms.n1)
     return cms._out3
@@ -822,7 +853,8 @@ end
 Create an empty/placeholder ComplexMatrixSpline for type stability.
 """
 function empty_ComplexMatrixSpline(n1::Int=1, n2::Int=1)
-    xs = Float64[0.0, 1.0, 2.0, 3.0, 4.0]  # Need at least 4 points for extrap BC
+    # FastCubicSpline1DMulti requires at least 4 points for extrap BC
+    xs = collect(range(0.0, 1.0; length=5))
     data = zeros(ComplexF64, 5, n1, n2)
     ComplexMatrixSpline(xs, data)
 end

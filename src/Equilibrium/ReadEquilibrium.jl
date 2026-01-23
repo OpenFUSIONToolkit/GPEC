@@ -95,7 +95,7 @@ function read_efit(config::EquilibriumConfig)
         qprof_data,
         sqrt.(psi_norm_grid)
     )
-    sq_in = Spl.CubicSpline1D(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap")
+    sq_in = Spl.FastCubicSpline1DMulti(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap", extrap=:extension)
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -232,7 +232,7 @@ function read_chease2(config::EquilibriumConfig)
     fs[:, 2] .= zcppr
     fs[:, 3] .= zq
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    sq_in = Spl.CubicSpline1D(xs, fs; bctype="extrap")
+    sq_in = Spl.FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:extension)
     # --- Integrate pressure ---
     Spl.integrate!(sq_in)  # Integrate in-place, sq_in.fsi filled
     # Make a writable copy of the fs array
@@ -240,7 +240,7 @@ function read_chease2(config::EquilibriumConfig)
     # Normalize pressure integral column (2nd column)
     fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
     # Refit spline using the modified fs_copy
-    sq_in = Spl.CubicSpline1D(sq_in.xs, fs_copy; bctype="extrap")
+    sq_in = Spl.FastCubicSpline1DMulti(sq_in.xs, fs_copy; bctype="extrap", extrap=:extension)
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -348,11 +348,11 @@ function read_chease(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        sq_in = Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        sq_in = Spl.FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:extension)
         Spl.integrate!(sq_in)
         fs_copy = copy(sq_in.fs)
         fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.CubicSpline1D(sq_in.xs, fs_copy; bctype="extrap")
+        sq_in = Spl.FastCubicSpline1DMulti(sq_in.xs, fs_copy; bctype="extrap", extrap=:extension)
 
         # --- Setup parameters ---
         mtau = ntnova

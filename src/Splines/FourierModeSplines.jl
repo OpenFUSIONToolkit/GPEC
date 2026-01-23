@@ -40,6 +40,9 @@ using FFTW
 
 Fourier-based 2D interpolation: cubic in x (radial), Fourier series in y (poloidal).
 
+Uses FastCubicSpline1D for efficient radial interpolation with support for
+interval hint caching for O(1) lookups during sequential access.
+
 # Type Parameters
 
   - `S`: Type of the radial splines (for type stability)
@@ -55,6 +58,14 @@ Fourier-based 2D interpolation: cubic in x (radial), Fourier series in y (poloid
   - `sin_coeffs::Array{Float64,3}`: Sine coefficients (npsi × nmodes × nqty)
   - `cos_splines::Matrix{S}`: Splines for cosine coefficients [mode, qty]
   - `sin_splines::Matrix{S}`: Splines for sine coefficients [mode, qty]
+  - `_hint::Base.RefValue{Int}`: Cached interval index for fast sequential access
+
+# Performance Notes
+
+All radial splines share a common interval hint, enabling O(1) lookups when
+evaluating at the same x (psi) coordinate across all Fourier modes. Use the
+`hint` keyword argument to provide an external hint for even faster access
+when evaluating multiple FourierModeSplines at the same radial coordinate.
 """
 struct FourierModeSplines{S}
     xs::Vector{Float64}
@@ -73,6 +84,8 @@ struct FourierModeSplines{S}
     _fxx::Vector{Float64}
     _fxy::Vector{Float64}
     _fyy::Vector{Float64}
+    # Interval hint for fast sequential access
+    _hint::Base.RefValue{Int}
 end
 
 """
@@ -162,8 +175,8 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
     end
 
     # Create 1D splines for each Fourier coefficient in the radial direction
-    # First, create a template spline to get the type
-    template_spline = CubicSpline1D(xs, cos_coeffs[:, 1, 1]; bctype=bctype)
+    # Use FastCubicSpline1D for efficient evaluation with hint support
+    template_spline = FastCubicSpline1D(xs, cos_coeffs[:, 1, 1]; bctype=bctype)
     SplineType = typeof(template_spline)
 
     cos_splines = Matrix{SplineType}(undef, nmodes, nqty)
@@ -171,8 +184,8 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
 
     for m in 1:nmodes
         for iq in 1:nqty
-            cos_splines[m, iq] = CubicSpline1D(xs, cos_coeffs[:, m, iq]; bctype=bctype)
-            sin_splines[m, iq] = CubicSpline1D(xs, sin_coeffs[:, m, iq]; bctype=bctype)
+            cos_splines[m, iq] = FastCubicSpline1D(xs, cos_coeffs[:, m, iq]; bctype=bctype)
+            sin_splines[m, iq] = FastCubicSpline1D(xs, sin_coeffs[:, m, iq]; bctype=bctype)
         end
     end
 
@@ -184,10 +197,13 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
     _fxy = zeros(Float64, nqty)
     _fyy = zeros(Float64, nqty)
 
+    # Interval hint for fast sequential access
+    _hint = Ref(1)
+
     FourierModeSplines{SplineType}(xs, ys, period, actual_mband, nqty,
         cos_coeffs, sin_coeffs,
         cos_splines, sin_splines,
-        _f, _fx, _fy, _fxx, _fxy, _fyy)
+        _f, _fx, _fy, _fxx, _fxy, _fyy, _hint)
 end
 
 """
@@ -227,16 +243,26 @@ function _compute_trig_values(mband::Int, omega::Float64, y::Float64)
 end
 
 """
-    evaluate!(fms, x, y) -> Vector{Float64}
+    evaluate!(fms, x, y; search=nothing, hint=nothing) -> Vector{Float64}
 
 Evaluate the Fourier-mode spline at point (x, y).
 
 Uses trigonometric recurrence for efficient Fourier mode computation.
 
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Optional external `Ref{Int}` for interval caching. When provided,
+    this hint is used instead of the internal `_hint`. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
+
 Thread-safety: NOT thread-safe. Use separate instances per thread.
 """
-function evaluate!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
+function evaluate!(fms::FourierModeSplines{S}, x::Float64, y::Float64; search=nothing, hint=nothing) where {S}
     fill!(fms._f, 0.0)
+
+    # Use provided hint or internal hint
+    h = hint === nothing ? fms._hint : hint
 
     # Angular frequency
     omega = 2π / fms.period
@@ -245,13 +271,14 @@ function evaluate!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
     cos_vals, sin_vals = _compute_trig_values(fms.mband, omega, y)
 
     # Sum over Fourier modes
+    # All splines share the same hint since they're evaluated at the same x
     @inbounds for m in 0:fms.mband
         cos_my = cos_vals[m+1]
         sin_my = sin_vals[m+1]
 
         for iq in 1:fms.nqty
-            cm = evaluate!(fms.cos_splines[m+1, iq], x)[1]
-            sm = evaluate!(fms.sin_splines[m+1, iq], x)[1]
+            cm = fms.cos_splines[m+1, iq](x; search=search, hint=h)
+            sm = fms.sin_splines[m+1, iq](x; search=search, hint=h)
             fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
         end
     end
@@ -260,18 +287,27 @@ function evaluate!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
 end
 
 """
-    deriv1!(fms, x, y) -> (f, fx, fy)
+    deriv1!(fms, x, y; search=nothing, hint=nothing) -> (f, fx, fy)
 
 Evaluate Fourier-mode spline and first derivatives at point (x, y).
 
 Uses trigonometric recurrence for efficient Fourier mode computation.
 
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Optional external `Ref{Int}` for interval caching. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
+
 Thread-safety: NOT thread-safe. Use separate instances per thread.
 """
-function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
+function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64; search=nothing, hint=nothing) where {S}
     fill!(fms._f, 0.0)
     fill!(fms._fx, 0.0)
     fill!(fms._fy, 0.0)
+
+    # Use provided hint or internal hint
+    h = hint === nothing ? fms._hint : hint
 
     omega = 2π / fms.period
     cos_vals, sin_vals = _compute_trig_values(fms.mband, omega, y)
@@ -286,15 +322,11 @@ function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
         dsin_dy = m_omega * cos_my
 
         for iq in 1:fms.nqty
-            f_cm = evaluate!(fms.cos_splines[m+1, iq], x)
-            f_sm = evaluate!(fms.sin_splines[m+1, iq], x)
-            f1_cm = deriv1!(fms.cos_splines[m+1, iq], x)
-            f1_sm = deriv1!(fms.sin_splines[m+1, iq], x)
-
-            cm = f_cm[1]
-            sm = f_sm[1]
-            dcm_dx = f1_cm[1]
-            dsm_dx = f1_sm[1]
+            # FastCubicSpline1D returns scalars, use shared hint with LinearBinary search
+            cm = fms.cos_splines[m+1, iq](x; search=search, hint=h)
+            sm = fms.sin_splines[m+1, iq](x; search=search, hint=h)
+            dcm_dx = deriv1(fms.cos_splines[m+1, iq], x)
+            dsm_dx = deriv1(fms.sin_splines[m+1, iq], x)
 
             fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
             fms._fx[iq] = muladd(dcm_dx, cos_my, muladd(dsm_dx, sin_my, fms._fx[iq]))
@@ -306,22 +338,31 @@ function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
 end
 
 """
-    deriv2!(fms, x, y) -> (f, fx, fy, fxx, fxy, fyy)
+    deriv2!(fms, x, y; search=nothing, hint=nothing) -> (f, fx, fy, fxx, fxy, fyy)
 
 Evaluate Fourier-mode spline through second derivatives at point (x, y).
 Includes cross-derivative fxy.
 
 Uses trigonometric recurrence for efficient Fourier mode computation.
 
+# Keyword Arguments
+
+  - `search`: Search strategy. Use `LinearBinary()` for monotonic access patterns.
+  - `hint`: Optional external `Ref{Int}` for interval caching. For optimal performance with
+    monotonic access, use `search=LinearBinary()` together with `hint=Ref(1)`.
+
 Thread-safety: NOT thread-safe. Use separate instances per thread.
 """
-function deriv2!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
+function deriv2!(fms::FourierModeSplines{S}, x::Float64, y::Float64; search=nothing, hint=nothing) where {S}
     fill!(fms._f, 0.0)
     fill!(fms._fx, 0.0)
     fill!(fms._fy, 0.0)
     fill!(fms._fxx, 0.0)
     fill!(fms._fxy, 0.0)
     fill!(fms._fyy, 0.0)
+
+    # Use provided hint or internal hint
+    h = hint === nothing ? fms._hint : hint
 
     omega = 2π / fms.period
     cos_vals, sin_vals = _compute_trig_values(fms.mband, omega, y)
@@ -341,19 +382,13 @@ function deriv2!(fms::FourierModeSplines{S}, x::Float64, y::Float64) where {S}
         d2sin_dy2 = -m_omega_sq * sin_my
 
         for iq in 1:fms.nqty
-            f_cm = evaluate!(fms.cos_splines[m+1, iq], x)
-            f_sm = evaluate!(fms.sin_splines[m+1, iq], x)
-            f1_cm = deriv1!(fms.cos_splines[m+1, iq], x)
-            f1_sm = deriv1!(fms.sin_splines[m+1, iq], x)
-            f2_cm = deriv2!(fms.cos_splines[m+1, iq], x)
-            f2_sm = deriv2!(fms.sin_splines[m+1, iq], x)
-
-            cm = f_cm[1]
-            sm = f_sm[1]
-            dcm_dx = f1_cm[1]
-            dsm_dx = f1_sm[1]
-            d2cm_dx2 = f2_cm[1]
-            d2sm_dx2 = f2_sm[1]
+            # FastCubicSpline1D returns scalars, use shared hint with LinearBinary search
+            cm = fms.cos_splines[m+1, iq](x; search=search, hint=h)
+            sm = fms.sin_splines[m+1, iq](x; search=search, hint=h)
+            dcm_dx = deriv1(fms.cos_splines[m+1, iq], x)
+            dsm_dx = deriv1(fms.sin_splines[m+1, iq], x)
+            d2cm_dx2 = deriv2(fms.cos_splines[m+1, iq], x)
+            d2sm_dx2 = deriv2(fms.sin_splines[m+1, iq], x)
 
             # f = Σ [cm·cos(m·ω·y) + sm·sin(m·ω·y)]
             fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
@@ -404,11 +439,12 @@ end
     empty_FourierModeSplines()
 
 Create an empty/placeholder FourierModeSplines for type stability.
+Uses 5 points for x since FastCubicSpline1D requires at least 4 points.
 """
 function empty_FourierModeSplines()
-    xs = Float64[0.0, 1.0]
+    xs = collect(range(0.0, 1.0; length=5))
     ys = Float64[0.0, 0.5]
-    fs = zeros(Float64, 2, 2, 1)
+    fs = zeros(Float64, 5, 2, 1)
     FourierModeSplines(xs, ys, fs, 1)
 end
 

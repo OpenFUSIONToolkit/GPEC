@@ -56,7 +56,7 @@ function Main(path::String="./")
     end
 
     # Fit data to splines
-    intr.locstab = Spl.CubicSpline1D(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
+    intr.locstab = Spl.FastCubicSpline1DMulti(Vector(equil.sq.xs), locstab_fs; bctype="extrap", extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -263,8 +263,8 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 
         # Write local stability data
         if ctrl.mer_flag
-            out_h5["locstab/di"] = Vector(intr.locstab.fs[:, 1] ./ equil.sq.xs)
-            out_h5["locstab/dr"] = Vector(intr.locstab.fs[:, 2] ./ equil.sq.xs)
+            out_h5["locstab/di"] = intr.locstab.fs[:, 1] ./ intr.locstab.xs
+            out_h5["locstab/dr"] = intr.locstab.fs[:, 2] ./ intr.locstab.xs
             out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag

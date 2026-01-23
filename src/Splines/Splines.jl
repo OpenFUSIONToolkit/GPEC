@@ -1,8 +1,9 @@
 module SplinesMod
 
 # Pure Julia spline implementations
-include("SplineAdapter.jl")
+# FastCubicSpline.jl must come first as other modules depend on FastCubicSpline1D/Multi
 include("FastCubicSpline.jl")
+include("SplineAdapter.jl")
 include("BicubicSpline.jl")
 include("FourierModeSplines.jl")
 
@@ -12,6 +13,7 @@ using FastInterpolations: LinearBinary, Binary, HintedBinary
 # Exports
 export CubicSpline1D, empty_CubicSpline1D
 export FastCubicSpline1D, empty_FastCubicSpline1D
+export FastCubicSpline1DMulti, empty_FastCubicSpline1DMulti
 export evaluate!, deriv1!, deriv2!, deriv3!, integrate!
 export deriv1, deriv2, deriv3  # Non-mutating versions for FastCubicSpline1D
 export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation

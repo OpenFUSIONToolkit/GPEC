@@ -352,7 +352,7 @@
         @info "Testing FourierModeSplines empty constructor"
 
         empty_fms = JPEC.Spl.empty_FourierModeSplines()
-        @test length(empty_fms.xs) == 2
+        @test length(empty_fms.xs) == 5  # Requires 5 points for FastCubicSpline1D (4 minimum)
         @test length(empty_fms.ys) == 2
         @test empty_fms.mband == 1
         @test empty_fms.nqty == 1

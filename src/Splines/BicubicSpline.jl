@@ -166,6 +166,8 @@ function BicubicSpline(
     end
 
     # Fit 1D splines along y direction to get fsy (using stripped data)
+    # Keep using CubicSpline1D for BicubicSpline construction to maintain
+    # numerical consistency with the original algorithm
     for iq in 1:nqty
         for ix in 1:nx
             y_data = fs_fit_work[ix, :, iq]

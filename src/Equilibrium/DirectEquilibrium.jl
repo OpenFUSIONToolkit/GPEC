@@ -29,7 +29,7 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:Spl.CubicSpline1D}
+struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti}}
     ro::Float64
     zo::Float64
     psi_in::B
@@ -64,7 +64,7 @@ function direct_get_bfield!(
     r::Float64,
     z::Float64,
     psi_in::Spl.BicubicSpline,
-    sq_in::Spl.CubicSpline1D,
+    sq_in::Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},
     psio::Float64;
     derivs::Int=0
 )
@@ -463,7 +463,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             bfield.f * (y_out[:, 4] .- ff_x_nodes .* y_out[end, 4]),
             y_out[:, 2] ./ y_out[end, 2] .- ff_x_nodes
         )
-        ff = Spl.CubicSpline1D(ff_x_nodes, ff_fs_nodes; bctype="periodic")
+        # Enforce exact endpoint matching for periodic data (removes floating-point noise)
+        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+        ff = Spl.FastCubicSpline1DMulti(ff_x_nodes, ff_fs_nodes; bctype="periodic")
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
@@ -482,7 +484,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
 
     # Fit 1D profile spline `sq` and perform q-profile revision if needed
-    sq = Spl.CubicSpline1D(psi_nodes, sq_nodes; bctype="extrap")
+    sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bctype="extrap", extrap=:extension)
     q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
@@ -498,7 +500,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             rzphi_nodes[i, :, 3] .*= ffac
         end
         # Re-create the spline with the revised data
-        sq = Spl.CubicSpline1D(psi_nodes, sq_nodes; bctype="extrap")
+        sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bctype="extrap", extrap=:extension)
     end
 
     # Fit the geometric spline `rzphi` using bicubic spline with extrap/periodic BCs.

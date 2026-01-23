@@ -56,7 +56,7 @@ end
     psi = dri.psi_in
 
     # Spline types (using new Julia implementations)
-    @test isa(sq, JPEC.Spl.CubicSpline1D)
+    @test isa(sq, Union{JPEC.Spl.CubicSpline1D,JPEC.Spl.FastCubicSpline1DMulti})
     @test isa(psi, JPEC.Spl.BicubicSpline)
 
     # Domain monotonicity
@@ -94,11 +94,12 @@ end
 end
 
 @testset "sol_run extreme inputs" begin
-    # minimal grid
-    equil_inputs, sol_inputs = make_inputs(mr=1, mz=1, ma=1)
+    # minimal grid (FastCubicSpline1D requires at least 4 points for extrap BC)
+    # mr=3, mz=3 creates 4-point grids (mr+1 points)
+    equil_inputs, sol_inputs = make_inputs(mr=3, mz=3, ma=3)
     dri = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
-    @test length(dri.psi_in.xs) == 2
-    @test length(dri.psi_in.ys) == 2
+    @test length(dri.psi_in.xs) == 4
+    @test length(dri.psi_in.ys) == 4
 
     # very high aspect ratio
     equil_inputs, sol_inputs = make_inputs(e=0.8, a=0.1, r0=10.0)

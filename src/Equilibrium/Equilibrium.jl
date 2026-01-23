@@ -69,7 +69,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         # Example 1D spline setup
         xs = collect(0.0:0.1:1.0)
         fs = sin.(2π .* xs)  # vector of Float64
-        spline_ex = Spl.CubicSpline1D(xs, fs)
+        spline_ex = Spl.FastCubicSpline1D(xs, fs)
         #println(spline_ex)
         # Example 2D bicubic spline setup
         xs = 0.0:0.1:1.0
@@ -487,7 +487,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 1] = flux_fsx[ipsi+1, :, 1]
         fs_matrix[:, 2] = source[ipsi+1, :]
 
-        spline = Spl.CubicSpline1D(Vector(flux.ys), fs_matrix; bctype="periodic")
+        spline = Spl.FastCubicSpline1DMulti(Vector(flux.ys), fs_matrix; bctype="periodic")
         Spl.integrate!(spline)
 
         term[ipsi+1, :] .= spline.fsi[end, :]

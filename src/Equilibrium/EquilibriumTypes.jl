@@ -279,7 +279,7 @@ raw equilibrium data and preparing the initial splines.
 
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
-          * 1D profiles are represented by `CubicSpline1D`
+          * 1D profiles are represented by `FastCubicSpline1D`
           * 2D flux surfaces by `BicubicSpline`
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
@@ -287,9 +287,9 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput{S<:Spl.CubicSpline1D,B<:Spl.BicubicSpline}
+mutable struct DirectRunInput{S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},B<:Spl.BicubicSpline}
     config::EquilibriumConfig
-    sq_in::S       # 1D profile spline (CubicSpline1D)
+    sq_in::S       # 1D profile spline (FastCubicSpline1D or FastCubicSpline1DMulti for multi-quantity)
     psi_in::B      # 2D flux spline (BicubicSpline)
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
@@ -306,13 +306,13 @@ A container struct for inputs to the `inverse_run` function.
 ## Fields
 
   - `config::EquilibriumConfig` - The equilibrium configuration object
-  - `sq_in::CubicSpline1D` - 1D spline input profile (F*Bt, Pressure, q)
+  - `sq_in::FastCubicSpline1D` - 1D spline input profile (F*Bt, Pressure, q)
   - `rz_in::BicubicSpline` - 2D bicubic spline for (R,Z) geometry
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput{S<:Spl.CubicSpline1D,B<:Spl.BicubicSpline}
+mutable struct InverseRunInput{S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},B<:Spl.BicubicSpline}
     config::EquilibriumConfig
     sq_in::S   # 1D spline input profile (e.g. F*Bt, Pressure, q)
     rz_in::B   # 2D bicubic spline input for (R,Z) geometry
@@ -470,7 +470,7 @@ struct ProfileSplines{S}
 end
 
 """
-    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; bctype="extrap")
+    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; bctype="extrap", extrap=:extension)
 
 Create ProfileSplines from arrays of profile values.
 """
@@ -479,7 +479,8 @@ function ProfileSplines(xs::Vector{Float64},
     P_vals::Vector{Float64},
     dVdpsi_vals::Vector{Float64},
     q_vals::Vector{Float64};
-    bctype::String="extrap")
+    bctype::String="extrap",
+    extrap::Symbol=:extension)
     npts = length(xs)
     @assert length(F_vals) == npts
     @assert length(P_vals) == npts
@@ -487,10 +488,10 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(q_vals) == npts
 
     # Create individual splines
-    F_spline = Spl.CubicSpline1D(xs, F_vals; bctype=bctype)
-    P_spline = Spl.CubicSpline1D(xs, P_vals; bctype=bctype)
-    dVdpsi_spline = Spl.CubicSpline1D(xs, dVdpsi_vals; bctype=bctype)
-    q_spline = Spl.CubicSpline1D(xs, q_vals; bctype=bctype)
+    F_spline = Spl.FastCubicSpline1D(xs, F_vals; bctype=bctype, extrap=extrap)
+    P_spline = Spl.FastCubicSpline1D(xs, P_vals; bctype=bctype, extrap=extrap)
+    dVdpsi_spline = Spl.FastCubicSpline1D(xs, dVdpsi_vals; bctype=bctype, extrap=extrap)
+    q_spline = Spl.FastCubicSpline1D(xs, q_vals; bctype=bctype, extrap=extrap)
 
     # Extract cached derivatives from the splines
     F_derivs = vec(F_spline.fs1)
@@ -521,7 +522,7 @@ This object provides a complete representation of the processed plasma equilibri
     Computed equilibrium parameters and diagnostics.
   - `profiles::ProfileSplines`:
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
-  - `sq::CubicSpline1D`:
+  - `sq::FastCubicSpline1D`:
     1D profile spline with 4 quantities.
 
       + **x value:** normalized ψ
@@ -550,7 +551,7 @@ This object provides a complete representation of the processed plasma equilibri
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{S<:Spl.CubicSpline1D,P<:ProfileSplines,B1,B2}
+mutable struct PlasmaEquilibrium{S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},P<:ProfileSplines,B1,B2}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P

@@ -130,7 +130,7 @@ function equilibrium_solver(input::InverseRunInput)
     if grid_type == "ldp"
         xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
         fs = zeros(Float64, mpsi + 1, 4)
-        sq = Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        sq = Spl.FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end
@@ -163,7 +163,7 @@ function equilibrium_solver(input::InverseRunInput)
 
     # spl_xs = zeros(Float64,mtheta+1)
     # spl_fs = zeros(Float64,mtheta+1, 5)
-    # spl = Spl.spline_setup(spl_xs, spl_fs; bctype="extrap")
+    # spl = Spl.spline_setup(spl_xs, spl_fs; bctype="extrap", extrap=:extension)
 
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
@@ -213,7 +213,7 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[ipsi+1, 4] = spl.fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
     end
 
-    # # sq = Spl.spline_setup(sq.xs, sq.fs; bctype="extrap")
+    # # sq = Spl.spline_setup(sq.xs, sq.fs; bctype="extrap", extrap=:extension)
     # f = Spl.spline_eval!(sq, sq.xs[1])
     # _, f1 = Spl.spline_deriv1!(sq, sq.xs[1])
     # q0 = f[4] - f1[4] * sq.xs[1]
