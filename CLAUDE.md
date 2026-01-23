@@ -49,28 +49,35 @@ using JPEC
 
 ### Benchmarking
 
-When asked to run benchmarks, use the following defaults unless specific instructions override them:
+When asked to run benchmarks, use the following defaults unless specific instructions override them.
 
 **Default benchmark case:** `examples/DIIID-like_ideal_example`
 
-**Reference case:** The `origin/develop` branch. Always pull the latest developments before running the reference case:
-```bash
-git fetch origin develop
-```
+**Required metrics:**
+1. **Eigenmode energy (`et[1]`)** - First eigenvalue; verifies calculation correctness
+2. **Integration steps** - Total ODE solver steps
+3. **Runtime (warmed)** - Wall-clock time after JIT warmup (run example 2+ times first)
+4. **Commit hash** - Git commit of code tested; note if uncommitted changes exist
 
-**Required metrics to report:**
-1. **Least stable eigenmode energy** - The first value of `et` (eigenvalue array). This verifies consistency of stability calculation results.
-2. **Number of steps** - Total integration steps taken by the ODE solver
-3. **Runtime** - Wall-clock execution time
+**Reference baseline:** The `origin/develop` branch. Known results are recorded below to avoid re-running.
 
 **Benchmark procedure:**
-1. Fetch and checkout `origin/develop` for the reference run
-2. Run the benchmark example and record metrics
-3. Switch to the test branch/version
-4. Run the same benchmark example and record metrics
-5. Compare results, highlighting any differences in eigenmode energy (indicates potential bugs) and performance changes
 
-Assume these defaults apply unless told otherwise.
+1. **Feature branch**: Run the benchmark example with current code (including uncommitted edits) and record metrics
+2. **Check develop baseline**: Run `git fetch origin develop` and check latest commit hash
+3. **Compare to baseline**:
+   - If develop commit matches "Known Results" below → use recorded values
+   - If develop has new commits → checkout develop, run benchmark, update "Known Results" table
+4. **Report**: Compare feature vs develop, flagging eigenmode differences (possible bugs) and performance changes
+
+**JIT warmup requirement:** Julia's JIT compiler makes the first run slow. Always run the example 2+ times before recording runtime. Only the warmed (subsequent) runs are valid for comparison.
+
+**Known Benchmark Results** (`examples/DIIID-like_ideal_example`):
+
+| Branch  | Commit    | et[1]  | Steps | Runtime |
+|---------|-----------|--------|-------|---------|
+| develop | `bb65a5b` | 1.7005 | 911   | 6.62s   |
+
 
 ## Architecture
 
