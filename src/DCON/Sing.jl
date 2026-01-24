@@ -41,7 +41,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
+                    singfac = (m - n * Spl.evaluate!(equil.sq, psifac)[4]) * dm
                     abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
@@ -177,7 +177,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     psifac = singp.psifac
     q = singp.q
-    di0 = Spl.spline_eval!(intr.locstab, singp.psifac)[1] / singp.psifac
+    di0 = Spl.evaluate!(intr.locstab, singp.psifac)[1] / singp.psifac
     q1 = singp.q1
     rho = singp.rho
 
@@ -717,7 +717,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
-    odet.q = Spl.spline_eval!(equil.sq, psieval; search=Spl.LinearBinary(), hint=odet.spline_hint)[4]
+    odet.q = Spl.evaluate!(equil.sq, psieval; search=Spl.LinearBinary(), hint=odet.spline_hint)[4]
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # kinetic stuff - skip for now

@@ -63,7 +63,7 @@ function check_for_zero_crossings!(odet::OdeState, sq::Union{Spl.FastCubicSpline
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
-    dVdpsi = Spl.spline_eval!(sq, psi; search=Spl.LinearBinary(), hint=odet.spline_hint)[3]
+    dVdpsi = Spl.evaluate!(sq, psi; search=Spl.LinearBinary(), hint=odet.spline_hint)[3]
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
 
@@ -76,7 +76,7 @@ function check_for_zero_crossings!(odet::OdeState, sq::Union{Spl.FastCubicSpline
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
-        dVdpsi = Spl.spline_eval!(sq, psi_mid; search=Spl.LinearBinary(), hint=odet.spline_hint)[3]
+        dVdpsi = Spl.evaluate!(sq, psi_mid; search=Spl.LinearBinary(), hint=odet.spline_hint)[3]
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))

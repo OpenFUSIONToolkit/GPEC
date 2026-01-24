@@ -513,7 +513,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
-        fsq = Spl.spline_eval!(sq, psi_nodes[ipsi])
+        fsq = Spl.evaluate!(sq, psi_nodes[ipsi])
         q = fsq[4]
         f_val = fsq[1]
         for itheta in 1:(mtheta+1)

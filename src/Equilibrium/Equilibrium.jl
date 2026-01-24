@@ -352,7 +352,7 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
                     x = xcrit - delta
                     if 0 ≤ x < xmax
                         ψ = x0 + x
-                        fψ = Spl.spline_eval!(sq, ψ)
+                        fψ = Spl.evaluate!(sq, ψ)
                         push!(psiexl, ψ)
                         push!(qexl, fψ[4])
                     end
@@ -375,7 +375,7 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     qmax = max(maximum(qexl), qmax_edge)
     qa = sq.fs[end, 4] + sq.fs1[end, 4] * (1.0 - sq.xs[end])
 
-    f95 = Spl.spline_eval!(sq, 0.95)
+    f95 = Spl.evaluate!(sq, 0.95)
     q95 = f95[4]
 
     # Store derived values

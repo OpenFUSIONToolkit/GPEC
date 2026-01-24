@@ -521,11 +521,6 @@ function empty_FastCubicSpline1DMulti(::Type{T}, nqty::Int=4) where {T<:Union{Fl
     FastCubicSpline1DMulti(xs, fs; bctype="natural")
 end
 
-# Aliases for compatibility
-spline_eval!(spline::FastCubicSpline1DMulti, x::Float64; search=nothing, hint=nothing) = evaluate!(spline, x; search=search, hint=hint)
-spline_deriv1!(spline::FastCubicSpline1DMulti, x::Float64) = deriv1!(spline, x)
-spline_deriv2!(spline::FastCubicSpline1DMulti, x::Float64) = deriv2!(spline, x)
-spline_deriv3!(spline::FastCubicSpline1DMulti, x::Float64) = deriv3!(spline, x)
 
 # =============================================================================
 # Compatibility with CubicSpline1D API (evaluate!, deriv1!, etc.)
@@ -569,9 +564,3 @@ CubicSpline1D-compatible API. For FastCubicSpline1D, this is equivalent to `deri
 Note: Derivative views in FastInterpolations do not support hint arguments.
 """
 @inline deriv3!(spline::FastCubicSpline1D, x::Float64) = deriv3(spline, x)
-
-# Aliases used in some codebases - with optional search/hint support for evaluate
-spline_eval!(spline::FastCubicSpline1D, x::Float64; search=nothing, hint=nothing) = evaluate!(spline, x; search=search, hint=hint)
-spline_deriv1!(spline::FastCubicSpline1D, x::Float64) = deriv1!(spline, x)
-spline_deriv2!(spline::FastCubicSpline1D, x::Float64) = deriv2!(spline, x)
-spline_deriv3!(spline::FastCubicSpline1D, x::Float64) = deriv3!(spline, x)

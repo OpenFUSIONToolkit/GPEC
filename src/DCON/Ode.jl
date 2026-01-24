@@ -34,7 +34,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
     end
 
     if ctrl.verbose # mimicing output from ode_output_open
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" Spl.spline_eval!(equil.sq, odet.psifac)[4]))")
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" Spl.evaluate!(equil.sq, odet.psifac)[4]))")
     end
 
     # Always integrate once, even if no rational surfaces are crossed

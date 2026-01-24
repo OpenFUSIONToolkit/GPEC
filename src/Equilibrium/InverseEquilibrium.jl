@@ -167,12 +167,12 @@ function equilibrium_solver(input::InverseRunInput)
 
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
-        f_sq_in = Spl.spline_eval!(sq_in, psifac)
+        f_sq_in = Spl.evaluate!(sq_in, psifac)
         spl_xs .= rzphi_ys
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
             f_rz_in, fx_rz_in, fy_rz_in = Spl.deriv1!(new_rz_in, psifac, theta)
-            f_sq_in = Spl.spline_eval!(sq_in, psifac)
+            f_sq_in = Spl.evaluate!(sq_in, psifac)
 
             if f_rz_in[1] < 0
                 error("Invalid extrapolation near axis, rerun with larger value of psilow")
@@ -203,7 +203,7 @@ function equilibrium_solver(input::InverseRunInput)
 
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
-            fs = Spl.spline_eval!(spl, theta)
+            fs = Spl.evaluate!(spl, theta)
             rzphi_fs[ipsi+1, itheta+1, :] = fs[1:4]
         end
 
@@ -214,8 +214,8 @@ function equilibrium_solver(input::InverseRunInput)
     end
 
     # # sq = Spl.spline_setup(sq.xs, sq.fs; bctype="extrap", extrap=:extension)
-    # f = Spl.spline_eval!(sq, sq.xs[1])
-    # _, f1 = Spl.spline_deriv1!(sq, sq.xs[1])
+    # f = Spl.evaluate!(sq, sq.xs[1])
+    # f1 = Spl.deriv1!(sq, sq.xs[1])
     # q0 = f[4] - f1[4] * sq.xs[1]
 
     # if newq0 == -1

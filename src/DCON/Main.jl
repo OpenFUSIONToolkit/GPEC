@@ -265,7 +265,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         if ctrl.mer_flag
             out_h5["locstab/di"] = intr.locstab.fs[:, 1] ./ intr.locstab.xs
             out_h5["locstab/dr"] = intr.locstab.fs[:, 2] ./ intr.locstab.xs
-            out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
+            out_h5["singular/di0"] = [Spl.evaluate!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag
             out_h5["locstab/ca1"] = Vector(intr.locstab.fs[:, 4])
