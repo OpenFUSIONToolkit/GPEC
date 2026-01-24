@@ -85,7 +85,7 @@ struct BicubicSpline{T}
 end
 
 """
-    BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap", endpoint_inclusive_y=false)
+    BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
 
 Create a 2D bicubic spline interpolator.
 
@@ -94,11 +94,10 @@ Create a 2D bicubic spline interpolator.
   - `xs::Vector{Float64}`: X-coordinates (sorted, length nx)
   - `ys::Vector{Float64}`: Y-coordinates (sorted, length ny)
   - `fs::Array{T,3}`: Function values (nx × ny × nqty)
-  - `bctypex`: Boundary condition in x ("extrap", "periodic", "natural")
-  - `bctypey`: Boundary condition in y ("extrap", "periodic", "natural")
-  - `endpoint_inclusive_y`: If true and bctypey="periodic", the y data includes a
-    duplicated endpoint (e.g., both 0 and 2π for a 2π-periodic function). The endpoint
-    is stripped internally for proper periodic spline construction.
+  - `bctypex`: Boundary condition in x ("extrap", "periodic", "natural").
+    Periodic BC requires a closed grid with equal endpoint values.
+  - `bctypey`: Boundary condition in y ("extrap", "periodic", "natural").
+    Periodic BC requires a closed grid with equal endpoint values.
 
 # Example
 
@@ -115,7 +114,7 @@ bcs = BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
 """
 function BicubicSpline(
     xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3};
-    bctypex::String="extrap", bctypey::String="extrap", endpoint_inclusive_y::Bool=false
+    bctypex::String="extrap", bctypey::String="extrap"
 ) where {T<:Union{Float64,ComplexF64}}
 
     nx_orig, ny_orig, nqty = size(fs)
@@ -129,80 +128,22 @@ function BicubicSpline(
     periodic_x = (bctypex == "periodic")
     periodic_y = (bctypey == "periodic")
 
-    # Handle endpoint-inclusive periodic data
-    # For compatibility with code that accesses .ys and .fs directly, we store the
-    # endpoint-inclusive data. For spline fitting, we strip the endpoint since
-    # CubicSpline1D with periodic BC expects data WITHOUT endpoint duplication.
-    endpoint_stripped = endpoint_inclusive_y && periodic_y && ny_orig > 2
-
-    if endpoint_stripped
-        ys_fit = ys[1:(end-1)]       # For spline fitting (no endpoint)
-        fs_fit = fs[:, 1:(end-1), :] # For spline fitting
-        ny_fit = ny_orig - 1         # Size for spline fitting
-    else
-        ys_fit = ys
-        fs_fit = fs
-        ny_fit = ny_orig
-    end
-
-    # Store original (endpoint-inclusive) dimensions
+    # FastInterpolations expects periodic data to be closed (f[1] = f[end])
+    # We enforce exact closure below for periodic BC
     nx = nx_orig
     ny = ny_orig
 
-    # Allocate derivative arrays at ORIGINAL size (endpoint-inclusive)
+    # Allocate derivative arrays
     fsx = zeros(T, nx, ny, nqty)
     fsy = zeros(T, nx, ny, nqty)
     fsxy = zeros(T, nx, ny, nqty)
 
-    # Make a working copy of fs at fit size
-    fs_fit_work = copy(fs_fit)
+    # Dispatch to type-stable inner function based on BC types
+    # This avoids union-type instability from _make_bc
+    _fill_derivatives!(fsx, fsy, fsxy, xs, ys, fs, bctypex, bctypey)
 
-    # Enforce periodicity if needed (for non-endpoint-inclusive data)
-    if periodic_x
-        fs_fit_work[nx, :, :] .= fs_fit_work[1, :, :]
-    end
-    if periodic_y && !endpoint_stripped
-        fs_fit_work[:, ny_fit, :] .= fs_fit_work[:, 1, :]
-    end
-
-    # Fit 1D splines along y direction to get fsy (using stripped data)
-    # Keep using CubicSpline1D for BicubicSpline construction to maintain
-    # numerical consistency with the original algorithm
-    for iq in 1:nqty
-        for ix in 1:nx
-            y_data = fs_fit_work[ix, :, iq]
-            y_spline = CubicSpline1D(ys_fit, y_data; bctype=bctypey)
-            fsy[ix, 1:ny_fit, iq] .= @view y_spline.fs1[:, 1]
-        end
-    end
-
-    # Fit 1D splines along x direction to get fsx (using stripped data)
-    for iq in 1:nqty
-        for iy in 1:ny_fit
-            x_data = fs_fit_work[:, iy, iq]
-            x_spline = CubicSpline1D(xs, x_data; bctype=bctypex)
-            fsx[:, iy, iq] .= @view x_spline.fs1[:, 1]
-        end
-    end
-
-    # Fit 1D splines along x direction on fsy to get fsxy (mixed derivative)
-    for iq in 1:nqty
-        for iy in 1:ny_fit
-            xy_data = fsy[:, iy, iq]
-            xy_spline = CubicSpline1D(xs, xy_data; bctype=bctypex)
-            fsxy[:, iy, iq] .= @view xy_spline.fs1[:, 1]
-        end
-    end
-
-    # For endpoint-inclusive periodic data, copy endpoint derivatives from first point
-    if endpoint_stripped
-        fsx[:, ny, :] .= fsx[:, 1, :]
-        fsy[:, ny, :] .= fsy[:, 1, :]
-        fsxy[:, ny, :] .= fsxy[:, 1, :]
-    end
-
-    # Store the original (endpoint-inclusive) fs data
-    fs_work = copy(fs)
+    # Store a copy of fs for the struct
+    fs_stored = copy(fs)
 
     # Allocate work arrays
     _f = zeros(T, nqty)
@@ -216,10 +157,204 @@ function BicubicSpline(
 
     BicubicSpline{T}(
         xs, copy(ys), nqty, nx, ny,
-        fs_work, fsx, fsy, fsxy,
+        fs_stored, fsx, fsy, fsxy,
         periodic_x, periodic_y,
         _f, _fx, _fy, _fxx, _fxy, _fyy, _last_ix, _last_iy
     )
+end
+
+# Type-stable inner function for computing derivatives
+# Dispatches to concrete BC type to avoid union-type instability
+function _fill_derivatives!(
+    fsx::Array{T,3}, fsy::Array{T,3}, fsxy::Array{T,3},
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
+    bctypex::String, bctypey::String
+) where {T}
+    # Create concrete BC objects once
+    bc_x = _create_bc(bctypex)
+    bc_y = _create_bc(bctypey)
+
+    # Dispatch to type-stable implementation
+    _fill_derivatives_impl!(fsx, fsy, fsxy, xs, ys, fs, bc_x, bc_y)
+end
+
+# Create BC object (for non-extrap types that don't depend on data)
+_create_bc(bctype::String) = bctype == "natural" ? NaturalBC() :
+                             bctype == "periodic" ? PeriodicBC() :
+                             bctype == "extrap" ? :extrap :
+                             error("Unknown bctype: $bctype")
+
+# Implementation for natural/periodic BC - can use CubicSplineCache for efficiency
+function _fill_derivatives_impl!(
+    fsx::Array{T,3}, fsy::Array{T,3}, fsxy::Array{T,3},
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
+    bc_x::BC_X, bc_y::BC_Y
+) where {T,BC_X<:Union{NaturalBC,PeriodicBC},BC_Y<:Union{NaturalBC,PeriodicBC}}
+
+    nx, ny, nqty = size(fs)
+
+    # Create reusable caches for each direction (type-stable, no per-iteration allocation)
+    cache_x = CubicSplineCache(xs; bc=bc_x)
+    cache_y = CubicSplineCache(ys; bc=bc_y)
+
+    # Fit 1D splines along y direction to get fsy
+    for iq in 1:nqty
+        for ix in 1:nx
+            y_data = @view fs[ix, :, iq]
+            output = @view fsy[ix, :, iq]
+            cubic_interp!(output, cache_y, y_data, ys; deriv=1)
+        end
+    end
+
+    # Fit 1D splines along x direction to get fsx
+    for iq in 1:nqty
+        for iy in 1:ny
+            x_data = @view fs[:, iy, iq]
+            output = @view fsx[:, iy, iq]
+            cubic_interp!(output, cache_x, x_data, xs; deriv=1)
+        end
+    end
+
+    # Fit 1D splines along x direction on fsy to get fsxy (mixed derivative)
+    for iq in 1:nqty
+        for iy in 1:ny
+            xy_data = @view fsy[:, iy, iq]
+            output = @view fsxy[:, iy, iq]
+            cubic_interp!(output, cache_x, xy_data, xs; deriv=1)
+        end
+    end
+end
+
+# Implementation for extrap BC in x, natural/periodic in y
+function _fill_derivatives_impl!(
+    fsx::Array{T,3}, fsy::Array{T,3}, fsxy::Array{T,3},
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
+    bc_x::Symbol, bc_y::BC_Y
+) where {T,BC_Y<:Union{NaturalBC,PeriodicBC}}
+
+    @assert bc_x === :extrap
+    nx, ny, nqty = size(fs)
+
+    cache_y = CubicSplineCache(ys; bc=bc_y)
+
+    # fsy: use cache (y has fixed BC)
+    for iq in 1:nqty
+        for ix in 1:nx
+            y_data = @view fs[ix, :, iq]
+            output = @view fsy[ix, :, iq]
+            cubic_interp!(output, cache_y, y_data, ys; deriv=1)
+        end
+    end
+
+    # fsx: extrap BC depends on data, must compute BC each iteration
+    for iq in 1:nqty
+        for iy in 1:ny
+            x_data = @view fs[:, iy, iq]
+            output = @view fsx[:, iy, iq]
+            bc = _make_extrap_bc(xs, x_data)
+            cubic_interp!(output, xs, x_data, xs; deriv=1, bc=bc)
+        end
+    end
+
+    # fsxy: extrap BC depends on data
+    for iq in 1:nqty
+        for iy in 1:ny
+            xy_data = @view fsy[:, iy, iq]
+            output = @view fsxy[:, iy, iq]
+            bc = _make_extrap_bc(xs, xy_data)
+            cubic_interp!(output, xs, xy_data, xs; deriv=1, bc=bc)
+        end
+    end
+end
+
+# Implementation for natural/periodic BC in x, extrap in y
+function _fill_derivatives_impl!(
+    fsx::Array{T,3}, fsy::Array{T,3}, fsxy::Array{T,3},
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
+    bc_x::BC_X, bc_y::Symbol
+) where {T,BC_X<:Union{NaturalBC,PeriodicBC}}
+
+    @assert bc_y === :extrap
+    nx, ny, nqty = size(fs)
+
+    cache_x = CubicSplineCache(xs; bc=bc_x)
+
+    # fsy: extrap BC depends on data
+    for iq in 1:nqty
+        for ix in 1:nx
+            y_data = @view fs[ix, :, iq]
+            output = @view fsy[ix, :, iq]
+            bc = _make_extrap_bc(ys, y_data)
+            cubic_interp!(output, ys, y_data, ys; deriv=1, bc=bc)
+        end
+    end
+
+    # fsx: use cache (x has fixed BC)
+    for iq in 1:nqty
+        for iy in 1:ny
+            x_data = @view fs[:, iy, iq]
+            output = @view fsx[:, iy, iq]
+            cubic_interp!(output, cache_x, x_data, xs; deriv=1)
+        end
+    end
+
+    # fsxy: use cache (x direction)
+    for iq in 1:nqty
+        for iy in 1:ny
+            xy_data = @view fsy[:, iy, iq]
+            output = @view fsxy[:, iy, iq]
+            cubic_interp!(output, cache_x, xy_data, xs; deriv=1)
+        end
+    end
+end
+
+# Implementation for extrap BC in both directions
+function _fill_derivatives_impl!(
+    fsx::Array{T,3}, fsy::Array{T,3}, fsxy::Array{T,3},
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
+    bc_x::Symbol, bc_y::Symbol
+) where {T}
+
+    @assert bc_x === :extrap && bc_y === :extrap
+    nx, ny, nqty = size(fs)
+
+    # fsy: extrap BC
+    for iq in 1:nqty
+        for ix in 1:nx
+            y_data = @view fs[ix, :, iq]
+            output = @view fsy[ix, :, iq]
+            bc = _make_extrap_bc(ys, y_data)
+            cubic_interp!(output, ys, y_data, ys; deriv=1, bc=bc)
+        end
+    end
+
+    # fsx: extrap BC
+    for iq in 1:nqty
+        for iy in 1:ny
+            x_data = @view fs[:, iy, iq]
+            output = @view fsx[:, iy, iq]
+            bc = _make_extrap_bc(xs, x_data)
+            cubic_interp!(output, xs, x_data, xs; deriv=1, bc=bc)
+        end
+    end
+
+    # fsxy: extrap BC
+    for iq in 1:nqty
+        for iy in 1:ny
+            xy_data = @view fsy[:, iy, iq]
+            output = @view fsxy[:, iy, iq]
+            bc = _make_extrap_bc(xs, xy_data)
+            cubic_interp!(output, xs, xy_data, xs; deriv=1, bc=bc)
+        end
+    end
+end
+
+# Type-stable extrap BC creator (returns concrete BCPair type)
+@inline function _make_extrap_bc(xs::AbstractVector{Float64}, fs::AbstractVector{<:Union{Float64,ComplexF64}})
+    n = length(xs)
+    yp_left = _estimate_endpoint_derivative_fast(@view(xs[1:4]), @view(fs[1:4]), xs[1])
+    yp_right = _estimate_endpoint_derivative_fast(@view(xs[(n-3):n]), @view(fs[(n-3):n]), xs[n])
+    return BCPair(Deriv1(yp_left), Deriv1(yp_right))
 end
 
 """
@@ -540,9 +675,10 @@ end
 Create an empty/placeholder BicubicSpline for type stability.
 """
 function empty_BicubicSpline()
-    xs = Float64[0.0, 1.0]
-    ys = Float64[0.0, 1.0]
-    fs = zeros(Float64, 2, 2, 1)
+    # Need at least 4 points for extrap BC (endpoint derivative estimation)
+    xs = collect(range(0.0, 1.0; length=4))
+    ys = collect(range(0.0, 1.0; length=4))
+    fs = zeros(Float64, 4, 4, 1)
     BicubicSpline(xs, ys, fs)
 end
 

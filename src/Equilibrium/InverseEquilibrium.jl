@@ -114,7 +114,7 @@ function equilibrium_solver(input::InverseRunInput)
     rz_in_fs[:, :, 1] = r2
     rz_in_fs[:, :, 2] = deta
 
-    rz_spline = Spl.BicubicSpline(rz_in.xs, rz_in.ys, rz_in_fs; bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+    rz_spline = Spl.BicubicSpline(rz_in.xs, rz_in.ys, rz_in_fs; bctypex="extrap", bctypey="periodic")
 
     # c-----------------------------------------------------------------------
     # c     prepare new spline type for surface quantities.
@@ -156,9 +156,9 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun_ys = collect(0:mtheta) ./ mtheta
 
     rzphi = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, rzphi_fs;
-        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+        bctypex="extrap", bctypey="periodic")
     eqfun = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs;
-        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+        bctypex="extrap", bctypey="periodic")
 
 
     # spl_xs = zeros(Float64,mtheta+1)

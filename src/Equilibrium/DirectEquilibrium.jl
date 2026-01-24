@@ -504,9 +504,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
 
     # Fit the geometric spline `rzphi` using bicubic spline with extrap/periodic BCs.
-    # Uses endpoint_inclusive_y=true since theta_nodes includes both 0 and 1.
+    # theta_nodes includes both 0 and 1 (closed periodic grid).
     rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes;
-        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+        bctypex="extrap", bctypey="periodic")
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
@@ -555,7 +555,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
     # Create eqfun BicubicSpline - derivatives are computed internally
     eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes;
-        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+        bctypex="extrap", bctypey="periodic")
 
     # Create ProfileSplines from the sq_nodes data
     profiles = ProfileSplines(

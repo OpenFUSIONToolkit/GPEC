@@ -203,7 +203,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     end
 
     rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes;
-        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+        bctypex="extrap", bctypey="periodic")
 
     return InverseRunInput(equil_input, sq_in, rz_in, lar_r0, 0.0, psio)
 

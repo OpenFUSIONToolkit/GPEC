@@ -442,7 +442,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs;
-        bctypex="extrap", bctypey="periodic", endpoint_inclusive_y=true)
+        bctypex="extrap", bctypey="periodic")
     # Compute flux derivatives at all grid points for diagnostics
     for ipsi in 0:mpsi
         for itheta in 0:mtheta

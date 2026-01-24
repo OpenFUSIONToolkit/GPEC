@@ -10,20 +10,24 @@ via 4-point polynomial extrapolation, then using FastInterpolations' BCPair API.
 
 ## Performance Comparison (FastInterpolations v0.2.4)
 
+Benchmarks on 257-point grid, median times after JIT warmup, 0 allocations for all evaluations:
+
 | Operation          | CubicSpline1D | FastCubicSpline1D | FastInterp direct | Notes                          |
 |--------------------|---------------|-------------------|-------------------|--------------------------------|
-| evaluate (1 pt)    |      5.5 ns   |        9.4 ns     |        9.3 ns     | Single point, binary search    |
-| deriv1 (1 pt)      |      5.5 ns   |        9.2 ns     |        9.3 ns     | Single point, binary search    |
-| deriv2 (1 pt)      |      5.2 ns   |        8.2 ns     |        8.2 ns     | Single point, binary search    |
-| deriv3 (1 pt)      |      5.0 ns   |        7.4 ns     |        7.4 ns     | Single point, binary search    |
-| Monotonic loop     |      4.3 ns/pt|        2.9 ns/pt  |        2.9 ns/pt  | hint + search=LinearBinary()   |
-| Random loop        |     19.6 ns/pt|        8.7 ns/pt  |        8.7 ns/pt  | FastCubicSpline1D wins         |
+| Initialization     |      5.5 μs   |       10.2 μs     |       4.8 μs      | 257-point grid, natural BC     |
+| evaluate (1 pt)    |      5.5 ns   |       12.8 ns     |      12.8 ns      | Single point, binary search    |
+| deriv1 (1 pt)      |      5.5 ns   |       12.9 ns     |      12.8 ns      | Single point, binary search    |
+| deriv2 (1 pt)      |      5.2 ns   |       11.8 ns     |      11.8 ns      | Single point, binary search    |
+| deriv3 (1 pt)      |      4.9 ns   |       10.9 ns     |      10.9 ns      | Single point, binary search    |
+| Monotonic loop     |      6.7 ns/pt|        4.2 ns/pt  |       4.2 ns/pt   | hint + search=LinearBinary()   |
+| Random loop        |     37.9 ns/pt|       10.5 ns/pt  |      10.7 ns/pt   | FastInterpolations wins        |
 
-**Summary**: For monotonic access patterns (typical in ODE integration), use
-`hint=Ref(1)` with `search=LinearBinary()` for optimal performance (2.9 ns/pt).
-CubicSpline1D uses cached interval search internally (4.3 ns/pt). FastCubicSpline1D
-is ~2.3x faster for random access. The FastCubicSpline1D wrapper supports all
-FastInterpolations v0.2.4 features including `search` and `hint` keyword arguments.
+**Summary**: FastCubicSpline1D has zero runtime overhead vs direct FastInterpolations
+(identical timings within noise). For monotonic access patterns (typical in ODE
+integration), use `hint=Ref(1)` with `search=LinearBinary()` for optimal performance
+(~4 ns/pt vs CubicSpline1D's ~7 ns/pt). FastInterpolations is ~3.6x faster for random
+access. All evaluation methods are allocation-free. The wrapper only adds overhead at
+initialization (creates DerivativeViews and pre-computes grid derivatives).
 """
 
 using FastInterpolations
@@ -107,16 +111,17 @@ end
     _make_bc(bctype, xs, fs)
 
 Create the appropriate BC object for FastInterpolations.
+Accepts AbstractVector to allow views without allocation.
 """
-function _make_bc(bctype::String, xs::Vector{Float64}, fs::Vector{Float64})
+function _make_bc(bctype::String, xs::AbstractVector{Float64}, fs::AbstractVector{<:Union{Float64,ComplexF64}})
     if bctype == "natural"
         return NaturalBC()
     elseif bctype == "periodic"
         return PeriodicBC()
     elseif bctype == "extrap"
         n = length(xs)
-        yp_left = _estimate_endpoint_derivative_fast(xs[1:4], fs[1:4], xs[1])
-        yp_right = _estimate_endpoint_derivative_fast(xs[(n-3):n], fs[(n-3):n], xs[n])
+        yp_left = _estimate_endpoint_derivative_fast(@view(xs[1:4]), @view(fs[1:4]), xs[1])
+        yp_right = _estimate_endpoint_derivative_fast(@view(xs[(n-3):n]), @view(fs[(n-3):n]), xs[n])
         return BCPair(Deriv1(yp_left), Deriv1(yp_right))
     else
         error("Unknown bctype: $bctype. Valid: \"natural\", \"periodic\", \"extrap\"")
