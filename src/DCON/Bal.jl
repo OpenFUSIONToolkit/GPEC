@@ -290,11 +290,10 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     end
 
     # compute curvature terms using native cubic_interp with PeriodicBC
-    spl0_fs = hcat(1 ./ bsq, jac .* b1 ./ bsq)
-    spl0_interps = ntuple(k -> cubic_interp(theta_grid, spl0_fs[:, k]; bc=PeriodicBC()), 2)
-    # Create derivative views once, then evaluate at all theta points
-    spl0_d1_views = ntuple(k -> deriv1(spl0_interps[k]), 2)
-    spl0_fs1 = hcat(spl0_d1_views[1].(theta_grid), spl0_d1_views[2].(theta_grid))
+    spl0_interp = cubic_interp(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); search=LinearBinary(), bc=PeriodicBC())
+    spl0_d1 = deriv1(spl0_interp)
+    # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
+    spl0_fs1 = stack(spl0_d1.(theta_grid))
 
     kappas .= -spl0_fs1[:, 1] .* two_pi_f ./ (2 .* jac)
     kappan .= ((pressure_gradient ./ bsq .- fx_psi[4, :] ./ jac) ./ chi_prime .+
@@ -368,10 +367,10 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     spl2_fs_new = copy(spl2_fsi)
 
     # Compute derivatives of spl1 for second-order terms
-    spl1_interps = ntuple(k -> cubic_interp(theta_grid, spl1_fs[:, k]; bc=PeriodicBC()), 4)
-    spl1_d1_views = ntuple(k -> deriv1(spl1_interps[k]), 4)
-    spl1_fs1 = hcat(spl1_d1_views[1].(theta_grid), spl1_d1_views[2].(theta_grid),
-        spl1_d1_views[3].(theta_grid), spl1_d1_views[4].(theta_grid))
+    spl1_interp = cubic_interp(theta_grid, spl1_fs; search=LinearBinary(), bc=PeriodicBC())
+    spl1_d1 = deriv1(spl1_interp)
+    # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
+    spl1_fs1 = stack(spl1_d1.(theta_grid))
 
     # Compute derivatives for second-order terms
     spl3_fs = zeros(mtheta + 1, 4)
