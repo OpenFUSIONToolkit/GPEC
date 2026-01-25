@@ -5,7 +5,8 @@ import ..Spl
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
-using FastInterpolations
+import FastInterpolations
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary
 import StaticArrays: @MMatrix
 
 # --- Internal Module Structure ---
@@ -465,8 +466,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     for ipsi in 1:(mpsi+1)
         psi = profiles.xs[ipsi]
         s1 = profiles.F_spline.y[ipsi]
-        s1p = profiles.F_deriv(psi; hint=hint, search=LinearBinary())
-        s2p = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
+        s1p = profiles.F_deriv(psi; hint=hint)
+        s2p = profiles.P_deriv(psi; hint=hint)
         for itheta in 1:(mtheta+1)
             f4 = rzphi.fs[ipsi, itheta, 4]
             denom = (2π * r[ipsi, itheta])^2

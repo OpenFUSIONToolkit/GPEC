@@ -63,7 +63,7 @@ function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.Profile
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
-    dVdpsi = profiles.dVdpsi_spline(psi; search=LinearBinary(), hint=odet.spline_hint)
+    dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
 
@@ -76,7 +76,7 @@ function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.Profile
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
-        dVdpsi = profiles.dVdpsi_spline(psi_mid; search=LinearBinary(), hint=odet.spline_hint)
+        dVdpsi = profiles.dVdpsi_spline(psi_mid; hint=odet.spline_hint)
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))

@@ -467,7 +467,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
 
         # Create native interpolants for each column
-        ff_interps = ntuple(k -> cubic_interp(ff_x_nodes, ff_fs_nodes[:, k]; bc=PeriodicBC()), 4)
+        ff_interps = ntuple(k -> cubic_interp(ff_x_nodes, ff_fs_nodes[:, k]; bc=Spl.PeriodicBC()), 4)
         ff_derivs = ntuple(k -> deriv1(ff_interps[k]), 4)
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`

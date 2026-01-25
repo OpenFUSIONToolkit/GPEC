@@ -790,7 +790,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
-    odet.q = equil.profiles.q_spline(psieval; search=LinearBinary(), hint=odet.spline_hint)
+    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # kinetic stuff - skip for now

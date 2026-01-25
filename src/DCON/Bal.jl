@@ -210,9 +210,9 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     # surface quantities
     psi = profiles.xs[ipsi]
     two_pi_f = profiles.F_spline.y[ipsi]
-    pressure_gradient = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
+    pressure_gradient = profiles.P_deriv(psi; hint=hint)
     q = profiles.q_spline.y[ipsi]
-    q_derivative = profiles.q_deriv(psi; hint=hint, search=LinearBinary())
+    q_derivative = profiles.q_deriv(psi; hint=hint)
     chi_prime = 2pi * plasma_eq.psio
 
     # arrays to be filled

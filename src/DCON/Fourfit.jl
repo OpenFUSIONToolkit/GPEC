@@ -206,10 +206,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         kmats_flatview = @view kmats_flat[ipsi, :, :]
         # --- Profiles ---
         psi = profiles.xs[ipsi]
-        p1 = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
+        p1 = profiles.P_deriv(psi; hint=hint)
         q = profiles.q_spline.y[ipsi]
-        q1 = profiles.q_deriv(psi; hint=hint, search=LinearBinary())
-        jtheta = -profiles.F_deriv(psi; hint=hint, search=LinearBinary())
+        q1 = profiles.q_deriv(psi; hint=hint)
+        jtheta = -profiles.F_deriv(psi; hint=hint)
         chi1 = 2π * equil.psio
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)
