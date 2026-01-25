@@ -23,10 +23,12 @@ function compute_asymptotic_solutions(poloidal_angle::Float64, growth_parameter:
     asymptotic_matrix = zeros(Float64, 2, 2)
     first_order_correction = zeros(Float64, 2, 2)
 
-    # Evaluate asymptotic coefficients at poloidal_angle (allocation-free tuple indexing)
+    # Evaluate asymptotic coefficients at poloidal_angle (shared hint avoids redundant searches)
     itps = asymptotic_data.interps
-    a1, a2, a3, a4, a5 = itps[1](poloidal_angle), itps[2](poloidal_angle),
-    itps[3](poloidal_angle), itps[4](poloidal_angle), itps[5](poloidal_angle)
+    hint = Ref(1)
+    a1 = itps[1](poloidal_angle; hint=hint)
+    a2, a3, a4, a5 = itps[2](poloidal_angle; hint=hint), itps[3](poloidal_angle; hint=hint),
+    itps[4](poloidal_angle; hint=hint), itps[5](poloidal_angle; hint=hint)
     angle_offset = poloidal_angle - reference_angle
 
     # First-order terms from the asymptotic expansion
@@ -80,10 +82,12 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
     ode_coeff_data, reference_angle = parameters
 
-    # Evaluate spline coefficients at current poloidal angle (allocation-free tuple indexing)
+    # Evaluate spline coefficients at current poloidal angle (shared hint avoids redundant searches)
     itps = ode_coeff_data.interps
-    c1, c2, c3, c4, c5 = itps[1](poloidal_angle), itps[2](poloidal_angle),
-    itps[3](poloidal_angle), itps[4](poloidal_angle), itps[5](poloidal_angle)
+    hint = Ref(1)
+    c1 = itps[1](poloidal_angle; hint=hint)
+    c2, c3, c4, c5 = itps[2](poloidal_angle; hint=hint), itps[3](poloidal_angle; hint=hint),
+    itps[4](poloidal_angle; hint=hint), itps[5](poloidal_angle; hint=hint)
     angle_offset = poloidal_angle - reference_angle
 
     # ODE coefficient f: magnetic shear-related curvature term
