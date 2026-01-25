@@ -355,9 +355,12 @@ function read_chease(config::EquilibriumConfig)
         sq_in = Spl.MultiQuantityProfile(sq_in.xs, fs_copy; bc=:extrap, extrap=:extension)
 
         # --- Setup parameters ---
-        mtau = ntnova
+        # PeriodicBC requires a closed grid where fs[:, end, :] == fs[:, 1, :]
+        # The binary CHEASE format stores ntnova points (open grid), so we add
+        # one extra point to close the grid
+        mtau = ntnova + 1
 
-        # Allocate fs array (radial × poloidal × 2)
+        # Allocate fs array (radial × poloidal × 2) with closed grid
         fs = zeros(npsi1, mtau, 2)
 
         # Allocate buffer (Fortran: ALLOCATE(buffer(ntnova+3, npsi1)))
@@ -372,8 +375,10 @@ function read_chease(config::EquilibriumConfig)
             println("ro = $ro")
         end
 
-        # Fill with r-coordinates
-        fs[:, :, 1] .= transpose(buffer[1:ntnova, :])
+        # Fill with r-coordinates (open grid from file)
+        fs[:, 1:ntnova, 1] .= transpose(buffer[1:ntnova, :])
+        # Close the grid: θ=2π has same values as θ=0
+        fs[:, mtau, 1] .= fs[:, 1, 1]
 
         # --- Second read (Z data) ---
         read(io, UInt32)  # skip record length at start
@@ -384,10 +389,12 @@ function read_chease(config::EquilibriumConfig)
             println("zo = $zo")
         end
 
-        # Fill with z-coordinates
-        fs[:, :, 2] .= transpose(buffer[1:ntnova, :])
+        # Fill with z-coordinates (open grid from file)
+        fs[:, 1:ntnova, 2] .= transpose(buffer[1:ntnova, :])
+        # Close the grid: θ=2π has same values as θ=0
+        fs[:, mtau, 2] .= fs[:, 1, 2]
 
-        # Construct ys grid (0..2π, length = mtau)
+        # Construct ys grid (0..2π, closed with mtau points)
         ys = range(0, 2π; length=mtau) |> collect
 
         # Setup bicubic spline with periodic boundary conditions

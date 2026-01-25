@@ -70,6 +70,64 @@
     end
 end
 
+@testset "BicubicSpline - PeriodicBC" begin
+    # Test periodic boundary conditions for BicubicSpline
+    # This validates the fix for closed grid handling in ReadEquilibrium.jl
+
+    # Create a periodic test function: f(x, θ) where θ is periodic in [0, 2π]
+    nx = 20
+    ntheta = 32  # Number of poloidal points (open grid size)
+
+    xs = collect(range(0.0; stop=1.0, length=nx))
+    # Create CLOSED grid: ntheta+1 points from 0 to 2π (last point = first point position)
+    ys = collect(range(0.0; stop=2π, length=ntheta + 1))
+
+    # Periodic test functions: R(ψ, θ) and Z(ψ, θ) resembling tokamak geometry
+    R(x, θ) = 1.0 + 0.3 * x + 0.1 * (1 - x) * cos(θ)
+    Z(x, θ) = 0.15 * (1 - x) * sin(θ)
+
+    # Allocate with closed grid - fill open grid portion first
+    fs = zeros(nx, ntheta + 1, 2)
+    for (ix, x) in enumerate(xs), iy in 1:ntheta
+        θ = ys[iy]
+        fs[ix, iy, 1] = R(x, θ)
+        fs[ix, iy, 2] = Z(x, θ)
+    end
+    # Explicitly close the grid: copy first column to last (as done in ReadEquilibrium.jl)
+    fs[:, end, :] .= fs[:, 1, :]
+
+    # Verify closed grid property: data at θ=0 equals data at θ=2π
+    @test all(fs[:, 1, :] .== fs[:, end, :])
+
+    # Create BicubicSpline with PeriodicBC in y (poloidal) direction
+    bcspline = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, JPEC.Spl.PeriodicBC())
+
+    # Test value periodicity: f(x, 0) ≈ f(x, 2π) for interior x values
+    for x in [0.25, 0.5, 0.75]
+        f_at_0 = JPEC.Spl.evaluate!(bcspline, x, 0.0)
+        f_at_2π = JPEC.Spl.evaluate!(bcspline, x, 2π)
+        @test f_at_0[1] ≈ f_at_2π[1] atol = 1e-10
+        @test f_at_0[2] ≈ f_at_2π[2] atol = 1e-10
+    end
+
+    # Test derivative continuity across periodic boundary
+    for x in [0.25, 0.5, 0.75]
+        _, fx_0, fy_0 = JPEC.Spl.deriv1!(bcspline, x, 0.0)
+        _, fx_2π, fy_2π = JPEC.Spl.deriv1!(bcspline, x, 2π)
+        # Derivatives should match at periodic boundary
+        @test fx_0[1] ≈ fx_2π[1] atol = 1e-8
+        @test fy_0[1] ≈ fy_2π[1] atol = 1e-8
+        @test fx_0[2] ≈ fx_2π[2] atol = 1e-8
+        @test fy_0[2] ≈ fy_2π[2] atol = 1e-8
+    end
+
+    # Test interpolation accuracy at interior points
+    x_test, θ_test = 0.5, π / 3
+    f = JPEC.Spl.evaluate!(bcspline, x_test, θ_test)
+    @test abs(f[1] - R(x_test, θ_test)) < 1e-4
+    @test abs(f[2] - Z(x_test, θ_test)) < 1e-4
+end
+
 @testset "Empty Spline Constructors" begin
     @info "Testing empty spline constructors for type stability"
 
