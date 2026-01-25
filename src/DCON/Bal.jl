@@ -135,6 +135,10 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
         asymp_buffer, eigenfunctions, reference_angle)
     initial_condition = Vector{Float64}(asymptotic_start[:, 2]) * sinh(1.0)
 
+    # Pre-allocate buffer and hint for in-place interpolation (zero allocation in ODE RHS)
+    coeff_buffer = Vector{Float64}(undef, 5)
+    hint = Ref(1)
+
     # Set up and solve ODE problem
     ode_problem = ODEProblem(compute_ballooning_ode!, initial_condition,
         (theta_start, theta_max),
