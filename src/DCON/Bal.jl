@@ -101,7 +101,7 @@ end
 #   Integrates the ideal marginal ballooning equations
 # ======================================================================
 """
-    integrate_ballooning_ode(flux_surface_index, growth_parameter, ode_coeff_interp,
+    integrate_ballooning_ode(ipsi, growth_parameter, ode_coeff_interp,
                              asymptotic_interp, eigenfunctions, reference_angle, control) -> (Float64, Float64)
 
 Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK integration.
@@ -110,7 +110,7 @@ Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK inte
 
   - `(coefficient_1, coefficient_2)`: Asymptotic coefficients determining stability.
 """
-function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Float64,
+function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
     ode_coeff_interp::CubicSeriesInterpolant,
     asymptotic_interp::CubicSeriesInterpolant,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
@@ -134,10 +134,6 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
     asymptotic_start = compute_asymptotic_solutions(theta_start, growth_parameter, asymptotic_interp,
         asymp_buffer, eigenfunctions, reference_angle)
     initial_condition = Vector{Float64}(asymptotic_start[:, 2]) * sinh(1.0)
-
-    # Pre-allocate buffer and hint for in-place interpolation (zero allocation in ODE RHS)
-    coeff_buffer = Vector{Float64}(undef, 5)
-    hint = Ref(1)
 
     # Set up and solve ODE problem
     ode_problem = ODEProblem(compute_ballooning_ode!, initial_condition,
@@ -169,11 +165,11 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
 
             return coefficient_1, coefficient_2
         else
-            @warn "ODE integration failed for surface ipsi = $flux_surface_index (retcode: $(ode_solution.retcode))"
+            @warn "ODE integration failed for surface ipsi = $ipsi (retcode: $(ode_solution.retcode))"
             return NaN, NaN
         end
     catch e
-        @warn "ODE integration failed for surface ipsi = $flux_surface_index: $(e)"
+        @warn "ODE integration failed for surface ipsi = $ipsi: $(e)"
         return NaN, NaN
     end
 end
@@ -198,7 +194,7 @@ on a single magnetic flux surface.
   - `zeroth_order_eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2).
   - `reference_angle::Float64`: Reference poloidal angle.
 """
-function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
     # shorter aliases for equilibrium structs
     profiles = plasma_eq.profiles
     rzphi = plasma_eq.rzphi
@@ -206,10 +202,10 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     theta_grid = Vector(rzphi.ys)
 
     # surface quantities
-    two_pi_f = profiles.F_spline.y[flux_surface_index]
-    pressure_gradient = profiles.P_deriv.y[flux_surface_index] # p'
-    q = profiles.q_spline.y[flux_surface_index]
-    q_derivative = profiles.q_deriv.y[flux_surface_index] # q'
+    two_pi_f = profiles.F_spline.y[ipsi]
+    pressure_gradient = profiles.P_deriv.y[ipsi] # p'
+    q = profiles.q_spline.y[ipsi]
+    q_derivative = profiles.q_deriv.y[ipsi] # q'
     chi_prime = 2pi * plasma_eq.psio
 
     # arrays to be filled
@@ -228,7 +224,6 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     w = zeros(3, 3)  # covariant basis vectors
 
     # loop over poloidal angle using direct array access at grid points
-    ipsi = flux_surface_index
     for itheta in 1:(mtheta+1)
         # Direct array access for values and derivatives
         f1 = rzphi.fs[ipsi, itheta, 1]
@@ -467,22 +462,22 @@ function compute_ballooning_stability!(ctrl::DconControl, locstab_fs::Matrix{Flo
     num_psi = length(profiles.xs)
 
     # Loop over flux surfaces
-    for flux_surface_index in 1:num_psi
+    for ipsi in 1:num_psi
 
         # Prepare coefficients and check Mercier criterion
-        mercier_criterion, growth_param, ode_coeff_data, asymp_data, zeroth_eigs, ref_angle = prepare_ballooning_coefficients(flux_surface_index, plasma_eq)
+        mercier_criterion, growth_param, ode_coeff_interp, asymptotic_interp, zeroth_eigs, ref_angle = prepare_ballooning_coefficients(ipsi, plasma_eq)
 
         # Store Mercier criterion in locstab matrix (matches Fortran output)
-        locstab_fs[flux_surface_index, 1] = mercier_criterion * profiles.xs[flux_surface_index]
+        locstab_fs[ipsi, 1] = mercier_criterion * profiles.xs[ipsi]
 
         # If Mercier unstable, proceed with ballooning integration
-        if mercier_criterion <= 0 && mercier_criterion >= -1e4 && profiles.xs[flux_surface_index] <= 1.0
-            ca1, ca2 = integrate_ballooning_ode(flux_surface_index, growth_param, ode_coeff_data, asymp_data, zeroth_eigs, ref_angle, ctrl)
+        if mercier_criterion <= 0 && mercier_criterion >= -1e4 && profiles.xs[ipsi] <= 1.0
+            ca1, ca2 = integrate_ballooning_ode(ipsi, growth_param, ode_coeff_interp, asymptotic_interp, zeroth_eigs, ref_angle, ctrl)
 
             # Store final asymptotic coefficients if integration reached theta_max
             if isfinite(ca1) && isfinite(ca2)
-                locstab_fs[flux_surface_index, 4] = ca1
-                locstab_fs[flux_surface_index, 5] = ca2
+                locstab_fs[ipsi, 4] = ca1
+                locstab_fs[ipsi, 5] = ca2
             end
         end
     end

@@ -495,10 +495,10 @@ function ProfileSplines(xs::Vector{Float64},
     q_spline = cubic_interp(xs, q_vals; bc=Spl.extrap_bc(xs, q_vals), extrap=extrap)
 
     # Compute derivative values at grid points and create derivative interpolants
-    F_deriv_vals = [deriv1(F_spline)(x) for x in xs]
-    P_deriv_vals = [deriv1(P_spline)(x) for x in xs]
-    dVdpsi_deriv_vals = [deriv1(dVdpsi_spline)(x) for x in xs]
-    q_deriv_vals = [deriv1(q_spline)(x) for x in xs]
+    F_deriv_vals = deriv1(F_spline).(xs)
+    P_deriv_vals = deriv1(P_spline).(xs)
+    dVdpsi_deriv_vals = deriv1(dVdpsi_spline).(xs)
+    q_deriv_vals = deriv1(q_spline).(xs)
 
     F_deriv = cubic_interp(xs, F_deriv_vals; bc=Spl.extrap_bc(xs, F_deriv_vals), extrap=extrap)
     P_deriv = cubic_interp(xs, P_deriv_vals; bc=Spl.extrap_bc(xs, P_deriv_vals), extrap=extrap)
