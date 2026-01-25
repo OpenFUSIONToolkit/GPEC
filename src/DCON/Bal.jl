@@ -310,7 +310,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # initialize bg values
     spl0_bg_fs = -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2)
-    spl0_bg_fsi = Spl.cumulative_integral(theta_grid, spl0_bg_fs)
+    spl0_bg_fsi = Spl.cumulative_integral(theta_grid, spl0_bg_fs; bc=PeriodicBC())
     bg_fs = zeros(mtheta + 1, 5)
     bg_fs[:, 5] = spl0_bg_fsi .- spl0_bg_fsi[end]
 
@@ -328,9 +328,9 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         spl1_fs[itheta, 4] = -spl1_fs[itheta, 1]
     end
 
-    spl1_fsi = Spl.cumulative_integral(theta_grid, spl1_fs)
+    spl1_totals = Spl.total_integral(theta_grid, spl1_fs; bc=PeriodicBC())
 
-    d0bar = [spl1_fsi[end, 1] spl1_fsi[end, 2]; spl1_fsi[end, 3] spl1_fsi[end, 4]]
+    d0bar = [spl1_totals[1] spl1_totals[2]; spl1_totals[3] spl1_totals[4]]
 
     di = det(d0bar)
 
@@ -361,7 +361,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         spl2_fs[itheta, 4] = spl1_fs[itheta, 3] * v0[1, 2] + (spl1_fs[itheta, 4] + alpha) * v0[2, 2]
     end
 
-    spl2_fsi = Spl.cumulative_integral(theta_grid, spl2_fs)
+    spl2_fsi = Spl.cumulative_integral(theta_grid, spl2_fs; bc=PeriodicBC())
     # CRITICAL: Use integrated values as the new fs (matching Fortran's spl2%fs=spl2%fsi)
     spl2_fs_new = copy(spl2_fsi)
 
@@ -400,7 +400,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
                              d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
     end
 
-    spl3_fsi = Spl.cumulative_integral(theta_grid, spl3_fs)
+    spl3_totals = Spl.total_integral(theta_grid, spl3_fs; bc=PeriodicBC())
 
     # Compute first-order constants for both eigenfunctions
     # First eigenfunction (with -alpha correction)
@@ -412,15 +412,15 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     det_d = d[1, 1] * d[2, 2] - d[1, 2] * d[2, 1]
     v10 = zeros(2, 2)
-    v10[1, 1] = (d[1, 2] * spl3_fsi[end, 2] - d[2, 2] * spl3_fsi[end, 1]) / det_d
-    v10[2, 1] = (d[2, 1] * spl3_fsi[end, 1] - d[1, 1] * spl3_fsi[end, 2]) / det_d
+    v10[1, 1] = (d[1, 2] * spl3_totals[2] - d[2, 2] * spl3_totals[1]) / det_d
+    v10[2, 1] = (d[2, 1] * spl3_totals[1] - d[1, 1] * spl3_totals[2]) / det_d
 
     # Second eigenfunction (with +alpha correction)
     d[1, 1] = d0bar[1, 1] + 1 + alpha
     d[2, 2] = d0bar[2, 2] + 1 + alpha
     det_d = d[1, 1] * d[2, 2] - d[1, 2] * d[2, 1]
-    v10[1, 2] = (d[1, 2] * spl3_fsi[end, 4] - d[2, 2] * spl3_fsi[end, 3]) / det_d
-    v10[2, 2] = (d[2, 1] * spl3_fsi[end, 3] - d[1, 1] * spl3_fsi[end, 4]) / det_d
+    v10[1, 2] = (d[1, 2] * spl3_totals[4] - d[2, 2] * spl3_totals[3]) / det_d
+    v10[2, 2] = (d[2, 1] * spl3_totals[3] - d[1, 1] * spl3_totals[4]) / det_d
 
     # Assemble final bg with higher-order corrections
     bg_fs[:, 1] = spl2_fs_new[:, 1] .+ v10[1, 1]

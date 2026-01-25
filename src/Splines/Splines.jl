@@ -11,7 +11,7 @@ using FastInterpolations: LinearBinary, Binary, HintedBinary
 
 # Exports
 export MultiQuantityProfile, empty_MultiQuantityProfile
-export evaluate!, deriv1!, integrate!, cumulative_integral
+export evaluate!, deriv1!, integrate!, cumulative_integral, integrate_spline, total_integral, total_integral!
 export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation
 export BicubicSpline, empty_BicubicSpline, BicubicBC
 
