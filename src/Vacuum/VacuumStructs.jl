@@ -360,9 +360,11 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         z_closed = vcat(z_wall, z_wall[1])
         spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
         spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
+        d1_spline_x = deriv1(spline_x)
+        d1_spline_z = deriv1(spline_z)
         theta_vec = collect(theta_grid)
-        dx_dtheta = [deriv1(spline_x)(θ) for θ in theta_vec]
-        dz_dtheta = [deriv1(spline_z)(θ) for θ in theta_vec]
+        dx_dtheta = d1_spline_x.(theta_vec)
+        dz_dtheta = d1_spline_z.(theta_vec)
     else
         # used regular theta grid spacing to build wall
         theta_grid = range(0; stop=2π, length=mtheta + 1)[1:(end-1)] # length mtheta without endpoint

@@ -133,9 +133,12 @@ function kernel!(
     z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
     spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
     spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
+    # Create derivative views once, reuse for all evaluations (avoids allocation per call)
+    d1_spline_x = deriv1(spline_x)
+    d1_spline_z = deriv1(spline_z)
     theta_vec = collect(theta_grid)
-    dx_dtheta = [deriv1(spline_x)(θ) for θ in theta_vec]
-    dz_dtheta = [deriv1(spline_z)(θ) for θ in theta_vec]
+    dx_dtheta = d1_spline_x.(theta_vec)
+    dz_dtheta = d1_spline_z.(theta_vec)
 
     # Loop through observer points
     for j in 1:mtheta
@@ -217,9 +220,9 @@ function kernel!(
                 # Compute green function for this Gaussian point
                 theta_gauss0 = mod(theta_gauss[ig], 2π)
                 x_gauss = spline_x(theta_gauss0)
-                dx_dtheta_gauss = deriv1(spline_x)(theta_gauss0)
+                dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
-                dz_dtheta_gauss = deriv1(spline_z)(theta_gauss0)
+                dz_dtheta_gauss = d1_spline_z(theta_gauss0)
                 G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
@@ -351,7 +354,7 @@ function periodic_cubic_deriv(theta, vals)
     vals_closed = vcat(vals, vals[1])
     spline = cubic_interp(theta_closed, vals_closed; bc=PeriodicBC())
     d1 = deriv1(spline)
-    return [d1(θ) for θ in collect(theta)]
+    return d1.(collect(theta))
 end
 
 """

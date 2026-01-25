@@ -23,21 +23,23 @@ function compute_asymptotic_solutions(poloidal_angle::Float64, growth_parameter:
     asymptotic_matrix = zeros(Float64, 2, 2)
     first_order_correction = zeros(Float64, 2, 2)
 
-    # Evaluate asymptotic coefficients at poloidal_angle
-    asymptotic_coeffs = [itp(poloidal_angle) for itp in asymptotic_data.interps]
+    # Evaluate asymptotic coefficients at poloidal_angle (allocation-free tuple indexing)
+    itps = asymptotic_data.interps
+    a1, a2, a3, a4, a5 = itps[1](poloidal_angle), itps[2](poloidal_angle),
+    itps[3](poloidal_angle), itps[4](poloidal_angle), itps[5](poloidal_angle)
     angle_offset = poloidal_angle - reference_angle
 
     # First-order terms from the asymptotic expansion
-    first_order_correction[1, 1] = eigenfunctions[1, 1] + asymptotic_coeffs[1] / angle_offset
-    first_order_correction[2, 1] = eigenfunctions[2, 1] + asymptotic_coeffs[2] / angle_offset
-    first_order_correction[1, 2] = eigenfunctions[1, 2] + asymptotic_coeffs[3] / angle_offset
-    first_order_correction[2, 2] = eigenfunctions[2, 2] + asymptotic_coeffs[4] / angle_offset
+    first_order_correction[1, 1] = eigenfunctions[1, 1] + a1 / angle_offset
+    first_order_correction[2, 1] = eigenfunctions[2, 1] + a2 / angle_offset
+    first_order_correction[1, 2] = eigenfunctions[1, 2] + a3 / angle_offset
+    first_order_correction[2, 2] = eigenfunctions[2, 2] + a4 / angle_offset
 
     # Transformed solutions
     asymptotic_matrix[1, 1] = first_order_correction[1, 1]
     asymptotic_matrix[1, 2] = first_order_correction[1, 2]
-    asymptotic_matrix[2, 1] = asymptotic_coeffs[5] * first_order_correction[1, 1] + first_order_correction[2, 1]
-    asymptotic_matrix[2, 2] = asymptotic_coeffs[5] * first_order_correction[1, 2] + first_order_correction[2, 2]
+    asymptotic_matrix[2, 1] = a5 * first_order_correction[1, 1] + first_order_correction[2, 1]
+    asymptotic_matrix[2, 2] = a5 * first_order_correction[1, 2] + first_order_correction[2, 2]
 
     # CORRECTED: Match Fortran's thfac = ABS(dtheta)^(alpha+0.5) / dtheta
     # This equals: sign(dtheta) * |dtheta|^(alpha - 0.5)
@@ -78,15 +80,17 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
     ode_coeff_data, reference_angle = parameters
 
-    # Evaluate spline coefficients at current poloidal angle
-    coefficients = [itp(poloidal_angle) for itp in ode_coeff_data.interps]
+    # Evaluate spline coefficients at current poloidal angle (allocation-free tuple indexing)
+    itps = ode_coeff_data.interps
+    c1, c2, c3, c4, c5 = itps[1](poloidal_angle), itps[2](poloidal_angle),
+    itps[3](poloidal_angle), itps[4](poloidal_angle), itps[5](poloidal_angle)
     angle_offset = poloidal_angle - reference_angle
 
     # ODE coefficient f: magnetic shear-related curvature term
-    f_coefficient = coefficients[1] * (angle_offset + coefficients[2])^2 + coefficients[3]
+    f_coefficient = c1 * (angle_offset + c2)^2 + c3
 
     # ODE coefficient g: pressure-driven instability growth term
-    g_coefficient = coefficients[4] + angle_offset * coefficients[5]
+    g_coefficient = c4 + angle_offset * c5
 
     # RHS system
     derivatives[1] = solution[2] / f_coefficient
@@ -279,7 +283,9 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     # compute curvature terms using native cubic_interp with PeriodicBC
     spl0_fs = hcat(1 ./ bsq, jac .* b1 ./ bsq)
     spl0_interps = ntuple(k -> cubic_interp(theta_grid, spl0_fs[:, k]; bc=PeriodicBC()), 2)
-    spl0_fs1 = hcat([deriv1(spl0_interps[k])(x) for x in theta_grid] for k in 1:2)
+    # Create derivative views once, then evaluate at all theta points
+    spl0_d1_views = ntuple(k -> deriv1(spl0_interps[k]), 2)
+    spl0_fs1 = hcat(spl0_d1_views[1].(theta_grid), spl0_d1_views[2].(theta_grid))
 
     kappas .= -spl0_fs1[:, 1] .* two_pi_f ./ (2 .* jac)
     kappan .= ((pressure_gradient ./ bsq .- fx_psi[4, :] ./ jac) ./ chi_prime .+
@@ -356,7 +362,9 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # Compute derivatives of spl1 for second-order terms
     spl1_interps = ntuple(k -> cubic_interp(theta_grid, spl1_fs[:, k]; bc=PeriodicBC()), 4)
-    spl1_fs1 = hcat([deriv1(spl1_interps[k])(x) for x in theta_grid] for k in 1:4)
+    spl1_d1_views = ntuple(k -> deriv1(spl1_interps[k]), 4)
+    spl1_fs1 = hcat(spl1_d1_views[1].(theta_grid), spl1_d1_views[2].(theta_grid),
+        spl1_d1_views[3].(theta_grid), spl1_d1_views[4].(theta_grid))
 
     # Compute derivatives for second-order terms
     spl3_fs = zeros(mtheta + 1, 4)
