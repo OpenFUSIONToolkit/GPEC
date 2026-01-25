@@ -1,5 +1,6 @@
 using Test
 using JPEC
+using FastInterpolations
 
 # --- Helper constructors ---
 # Minimal valid inputs
@@ -24,7 +25,7 @@ end
 @testset "sol_run clamps p0fac to ≥ 1" begin
     equil_inputs, sol_inputs = make_inputs(p0fac=0.5)
     dri = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
-    @test all(dri.sq_in.fs[:, 2] .>= 0)  # no negative pressures
+    @test all(dri.sq_in.y[:, 2] .>= 0)  # no negative pressures
 end
 
 @testset "sol_run scalar relationships" begin
@@ -56,11 +57,11 @@ end
     psi = dri.psi_in
 
     # Spline types (using new Julia implementations)
-    @test isa(sq, JPEC.Spl.MultiQuantityProfile)
+    @test isa(sq, FastInterpolations.CubicSeriesInterpolant)
     @test isa(psi, JPEC.Spl.BicubicSpline)
 
     # Domain monotonicity
-    @test issorted(sq.xs)
+    @test issorted(sq.cache.x)
     @test issorted(psi.xs)
     @test issorted(psi.ys)
 

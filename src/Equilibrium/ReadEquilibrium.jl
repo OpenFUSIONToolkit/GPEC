@@ -95,7 +95,8 @@ function read_efit(config::EquilibriumConfig)
         qprof_data,
         sqrt.(psi_norm_grid)
     )
-    sq_in = Spl.MultiQuantityProfile(collect(psi_norm_grid), sq_fs_nodes; bc=:extrap, extrap=:extension)
+    sq_xs = collect(psi_norm_grid)
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=Spl.extrap_bc(sq_xs, sq_fs_nodes[:, 1]), extrap=:extension)
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -232,15 +233,13 @@ function read_chease2(config::EquilibriumConfig)
     fs[:, 2] .= zcppr
     fs[:, 3] .= zq
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    sq_in = Spl.MultiQuantityProfile(xs, fs; bc=:extrap, extrap=:extension)
-    # --- Integrate pressure ---
-    Spl.integrate!(sq_in)  # Integrate in-place, sq_in.fsi filled
-    # Make a writable copy of the fs array
-    fs_copy = copy(sq_in.fs)
-    # Normalize pressure integral column (2nd column)
-    fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-    # Refit spline using the modified fs_copy
-    sq_in = Spl.MultiQuantityProfile(sq_in.xs, fs_copy; bc=:extrap, extrap=:extension)
+    # Compute cumulative integral of pressure column for normalization
+    fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=Spl.extrap_bc(xs, fs[:, 2]))
+    # Make a writable copy and normalize pressure integral column (2nd column)
+    fs_copy = copy(fs)
+    fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
+    # Create final spline with modified data
+    sq_in = cubic_interp(xs, fs_copy; bc=Spl.extrap_bc(xs, fs_copy[:, 1]), extrap=:extension)
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -348,11 +347,13 @@ function read_chease(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        sq_in = Spl.MultiQuantityProfile(xs, fs; bc=:extrap, extrap=:extension)
-        Spl.integrate!(sq_in)
-        fs_copy = copy(sq_in.fs)
-        fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.MultiQuantityProfile(sq_in.xs, fs_copy; bc=:extrap, extrap=:extension)
+        # Compute cumulative integral of pressure column for normalization
+        fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=Spl.extrap_bc(xs, fs[:, 2]))
+        # Make a writable copy and normalize pressure integral column (2nd column)
+        fs_copy = copy(fs)
+        fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
+        # Create final spline with modified data
+        sq_in = cubic_interp(xs, fs_copy; bc=Spl.extrap_bc(xs, fs_copy[:, 1]), extrap=:extension)
 
         # --- Setup parameters ---
         # PeriodicBC requires a closed grid where fs[:, end, :] == fs[:, 1, :]

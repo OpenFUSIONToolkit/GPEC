@@ -82,7 +82,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `locstab::Spl.MultiQuantityProfile` - Spline for local stability analysis
+  - `locstab::CubicSeriesInterpolant` - Spline for local stability analysis
 """
 @kwdef mutable struct DconInternal
     dir_path::String = ""
@@ -106,7 +106,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::Spl.MultiQuantityProfile = Spl.empty_MultiQuantityProfile(5)
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
     debug_settings::DebugSettings = DebugSettings()
 end
 

@@ -81,33 +81,6 @@
         @test empty_bcs.nqty == 1
     end
 
-    @testset "MultiQuantityProfile - Basic" begin
-        @info "Testing MultiQuantityProfile"
-
-        xs = collect(range(0.0; stop=2π, length=50))
-        fs = hcat(sin.(xs), cos.(xs), xs .^ 2)
-        mqp = JPEC.Spl.MultiQuantityProfile(xs, fs)
-
-        x_test = π/4
-        f = JPEC.Spl.evaluate!(mqp, x_test)
-        f1 = JPEC.Spl.deriv1!(mqp, x_test)
-
-        @test abs(f[1] - sin(x_test)) < 1e-5
-        @test abs(f[2] - cos(x_test)) < 1e-5
-        @test abs(f[3] - x_test^2) < 1e-5
-
-        @test abs(f1[1] - cos(x_test)) < 1e-3
-        @test abs(f1[2] + sin(x_test)) < 1e-3
-        @test abs(f1[3] - 2*x_test) < 1e-3
-    end
-
-    @testset "MultiQuantityProfile - Empty Constructor" begin
-        @info "Testing MultiQuantityProfile empty constructor"
-
-        empty_mqp = JPEC.Spl.empty_MultiQuantityProfile()
-        @test length(empty_mqp.xs) >= 4
-    end
-
 end
 
 @testset "FourierCoefficients" begin

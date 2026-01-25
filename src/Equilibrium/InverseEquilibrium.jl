@@ -130,7 +130,7 @@ function equilibrium_solver(input::InverseRunInput)
     if grid_type == "ldp"
         xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
         fs = zeros(Float64, mpsi + 1, 4)
-        sq = Spl.MultiQuantityProfile(xs, fs; bc=:extrap, extrap=:extension)
+        sq = cubic_interp(xs, fs; bc=Spl.extrap_bc(xs, fs[:, 1]), extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end
@@ -167,12 +167,12 @@ function equilibrium_solver(input::InverseRunInput)
 
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
-        f_sq_in = Spl.evaluate!(sq_in, psifac)
+        f_sq_in = sq_in(psifac)
         spl_xs .= rzphi_ys
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
             f_rz_in, fx_rz_in, fy_rz_in = Spl.deriv1!(new_rz_in, psifac, theta)
-            f_sq_in = Spl.evaluate!(sq_in, psifac)
+            f_sq_in = sq_in(psifac)
 
             if f_rz_in[1] < 0
                 error("Invalid extrapolation near axis, rerun with larger value of psilow")

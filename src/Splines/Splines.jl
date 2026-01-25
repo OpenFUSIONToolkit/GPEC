@@ -1,8 +1,8 @@
 module SplinesMod
 
 # Pure Julia spline implementations
-# FastInterpolationsAdaptor.jl provides helpers and MultiQuantityProfile
-# The codebase uses native CubicInterpolant from FastInterpolations directly
+# FastInterpolationsAdaptor.jl provides helpers for FastInterpolations CubicInterpolant/CubicSeriesInterpolant
+# The codebase uses native interpolants from FastInterpolations directly
 include("FastInterpolationsAdaptor.jl")
 include("BicubicSpline.jl")
 
@@ -10,7 +10,6 @@ include("BicubicSpline.jl")
 using FastInterpolations: LinearBinary, Binary, HintedBinary
 
 # Exports
-export MultiQuantityProfile, empty_MultiQuantityProfile
 export evaluate!, deriv1!, integrate!, cumulative_integral, integrate_spline, total_integral, total_integral!
 export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation
 export BicubicSpline, empty_BicubicSpline, BicubicBC

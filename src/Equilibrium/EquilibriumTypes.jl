@@ -279,7 +279,7 @@ raw equilibrium data and preparing the initial splines.
 
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
-          * 1D profiles are represented by `CubicInterpolant` or `MultiQuantityProfile`
+          * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
           * 2D flux surfaces by `BicubicSpline`
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
@@ -287,9 +287,9 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput{S<:Union{FastInterpolations.CubicInterpolant,Spl.MultiQuantityProfile},B<:Spl.BicubicSpline}
+mutable struct DirectRunInput{S<:Union{FastInterpolations.CubicInterpolant,FastInterpolations.CubicSeriesInterpolant},B<:Spl.BicubicSpline}
     config::EquilibriumConfig
-    sq_in::S       # 1D profile spline (MultiQuantityProfile or legacy FastCubicSpline types)
+    sq_in::S       # 1D profile spline (CubicInterpolant or CubicSeriesInterpolant)
     psi_in::B      # 2D flux spline (BicubicSpline)
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
@@ -312,9 +312,9 @@ A container struct for inputs to the `inverse_run` function.
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput{S<:Union{FastInterpolations.CubicInterpolant,Spl.MultiQuantityProfile},B<:Spl.BicubicSpline}
+mutable struct InverseRunInput{S<:Union{FastInterpolations.CubicInterpolant,FastInterpolations.CubicSeriesInterpolant},B<:Spl.BicubicSpline}
     config::EquilibriumConfig
-    sq_in::S   # 1D spline input profile (MultiQuantityProfile or legacy FastCubicSpline types)
+    sq_in::S   # 1D spline input profile (CubicInterpolant or CubicSeriesInterpolant)
     rz_in::B   # 2D bicubic spline input for (R,Z) geometry
     ro::Float64          # R axis location
     zo::Float64          # Z axis location

@@ -57,7 +57,7 @@ function Main(path::String="./")
     end
 
     # Fit data to splines
-    intr.locstab = Spl.MultiQuantityProfile(Vector(profiles_xs), locstab_fs; bc=:extrap, extrap=:extension)
+    intr.locstab = cubic_interp(Vector(profiles_xs), locstab_fs; bc=Spl.extrap_bc(profiles_xs, locstab_fs[:, 1]), extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -263,12 +263,13 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 
         # Write local stability data
         if ctrl.mer_flag
-            out_h5["locstab/di"] = intr.locstab.fs[:, 1] ./ intr.locstab.xs
-            out_h5["locstab/dr"] = intr.locstab.fs[:, 2] ./ intr.locstab.xs
-            out_h5["singular/di0"] = [Spl.evaluate!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
+            locstab_xs = intr.locstab.cache.x
+            out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
+            out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
+            out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag
-            out_h5["locstab/ca1"] = Vector(intr.locstab.fs[:, 4])
+            out_h5["locstab/ca1"] = Vector(intr.locstab.y[:, 4])
         end
 
         # Write integration data

@@ -227,7 +227,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 
     psifac = singp.psifac
     q = singp.q
-    di0 = Spl.evaluate!(intr.locstab, singp.psifac)[1] / singp.psifac
+    di0 = intr.locstab(singp.psifac)[1] / singp.psifac
     q1 = singp.q1
     rho = singp.rho
 

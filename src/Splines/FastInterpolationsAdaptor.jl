@@ -5,7 +5,6 @@ This module provides:
 - extrap_bc: Helper to create BCPair for 4-point endpoint derivative extrapolation
 - extrap_bc_matrix: Per-column BCPairs for matrix of y-series
 - cumulative_integral: Exact spline integration (uses cubic spline coefficients)
-- MultiQuantityProfile: Multi-quantity 1D profile using native CubicInterpolant
 
 ## Boundary Conditions
 
@@ -141,15 +140,16 @@ Returns array where result[1] = 0 and result[i+1] = result[i] + ∫_{xs[i]}^{xs[
 where S(x) is the cubic spline interpolant.
 
 For FastInterpolations' moment formulation, the exact integral over interval [x_i, x_{i+1}] is:
-    ∫S(x)dx = h/2 * (y_i + y_{i+1}) - h³/24 * (z_i + z_{i+1})
+∫S(x)dx = h/2 * (y_i + y_{i+1}) - h³/24 * (z_i + z_{i+1})
 where h is the interval width, y are function values, and z are second derivatives (moments).
 
 This is more accurate than trapezoidal rule, matching the Fortran GPEC behavior.
 
 # Arguments
-- `xs`: Grid points (sorted ascending)
-- `fs`: Function values (vector or matrix with columns as quantities)
-- `bc`: Boundary condition for spline fitting (default: NaturalBC())
+
+  - `xs`: Grid points (sorted ascending)
+  - `fs`: Function values (vector or matrix with columns as quantities)
+  - `bc`: Boundary condition for spline fitting (default: NaturalBC())
 """
 function cumulative_integral(xs::AbstractVector{Float64}, fs::AbstractVector{T}; bc=NaturalBC()) where {T}
     npts = length(xs)
@@ -219,31 +219,35 @@ This is an optimized version of `cumulative_integral(xs, fs)[end, :]` that avoid
 allocating the full cumulative array.
 
 For the exact spline integration formula over interval [x_i, x_{i+1}]:
-    integral = h/2 * (y_i + y_{i+1}) - h^3/24 * (z_i + z_{i+1})
+integral = h/2 * (y_i + y_{i+1}) - h^3/24 * (z_i + z_{i+1})
 where h is the interval width, y are function values, and z are second derivatives (moments).
 
 # Arguments
-- `xs::AbstractVector{Float64}`: Grid points (sorted ascending)
-- `fs`: Function values - vector (returns scalar) or matrix (returns vector, one value per column)
-- `bc`: Boundary condition for spline fitting (default: NaturalBC())
+
+  - `xs::AbstractVector{Float64}`: Grid points (sorted ascending)
+  - `fs`: Function values - vector (returns scalar) or matrix (returns vector, one value per column)
+  - `bc`: Boundary condition for spline fitting (default: NaturalBC())
 
 # Returns
-- For vector `fs`: Returns a scalar Float64
-- For matrix `fs`: Returns a Vector{Float64} of length `size(fs, 2)`
+
+  - For vector `fs`: Returns a scalar Float64
+  - For matrix `fs`: Returns a Vector{Float64} of length `size(fs, 2)`
 
 # Performance
+
 Avoids allocating the full (npts,) or (npts, nqty) cumulative integral array.
 For matrix input, uses CubicSeriesInterpolant internally for efficiency.
 
 # Example
+
 ```julia
 xs = collect(0.0:0.01:1.0)
-fs = xs.^2
+fs = xs .^ 2
 total = total_integral(xs, fs)  # Returns approx 1/3
 
 # Matrix version
-Y = hcat(xs.^2, sin.(xs))
-totals = total_integral(xs, Y)  # Returns [1/3, 1-cos(1)] approximately
+Y = hcat(xs .^ 2, sin.(xs))
+totals = total_integral(xs, Y)  # Returns [1/3, 1-cos(1)] approximately    # Create spline to get second derivative coefficients
 ```
 """
 function total_integral(xs::AbstractVector{Float64}, fs::AbstractVector{Float64}; bc=NaturalBC())
@@ -289,7 +293,7 @@ In-place matrix version: compute total integral for each column of fs into pre-a
 Zero allocations beyond the spline creation.
 """
 function total_integral!(result::AbstractVector{Float64}, xs::AbstractVector{Float64},
-                         fs::AbstractMatrix{Float64}; bc=NaturalBC())
+    fs::AbstractMatrix{Float64}; bc=NaturalBC())
     npts, nqty = size(fs)
     @assert length(result) >= nqty "result vector must have at least $nqty elements"
 
@@ -314,120 +318,4 @@ function total_integral!(result::AbstractVector{Float64}, xs::AbstractVector{Flo
     end
 
     return result
-end
-
-# =============================================================================
-# MultiQuantityProfile - Native Multi-Quantity Spline
-# =============================================================================
-
-"""
-    MultiQuantityProfile{N}
-
-A multi-quantity 1D profile using native FastInterpolations CubicInterpolant.
-Provides direct access to grid (xs), values (fs), and interpolation/derivative evaluation.
-
-## Fields
-
-  - `xs::Vector{Float64}`: Grid points (same as interps[1].cache.x)
-  - `fs::Matrix{Float64}`: Function values at grid points (npts × nqty)
-  - `interps::NTuple{N,CubicInterpolant}`: Native interpolants for each quantity
-  - `derivs::NTuple{N,DerivativeView}`: First derivative views
-  - `fsi::Matrix{Float64}`: Integrated values (computed lazily via integrate!)
-  - `_eval_buf::Vector{Float64}`: Preallocated buffer for evaluation
-  - `_deriv_buf::Vector{Float64}`: Preallocated buffer for derivative evaluation
-"""
-mutable struct MultiQuantityProfile{N,I<:FastInterpolations.CubicInterpolant,D<:FastInterpolations.DerivativeView}
-    xs::Vector{Float64}
-    fs::Matrix{Float64}
-    interps::NTuple{N,I}
-    derivs::NTuple{N,D}
-    fsi::Matrix{Float64}
-    _eval_buf::Vector{Float64}
-    _deriv_buf::Vector{Float64}
-end
-
-"""
-    MultiQuantityProfile(xs, fs; bc=:extrap, extrap=:extension)
-
-Create a MultiQuantityProfile from grid points and values matrix.
-
-# Arguments
-
-  - `xs::Vector{Float64}`: Grid points (sorted ascending, at least 4 points)
-  - `fs::Matrix{Float64}`: Function values (npts × nqty)
-  - `bc`: Boundary condition - `:extrap` for GPEC-style extrapolation, or a BCPair/NaturalBC/PeriodicBC
-  - `extrap`: Extrapolation behavior (`:none`, `:constant`, `:extension`, `:wrap`)
-"""
-function MultiQuantityProfile(xs::Vector{Float64}, fs::Matrix{Float64};
-    bc=:extrap, extrap::Symbol=:extension)
-
-    npts, nqty = size(fs)
-    @assert length(xs) == npts "xs and fs rows must match"
-    @assert npts >= 4 "Need at least 4 points for spline"
-
-    # Create interpolants with appropriate BCs
-    if bc === :extrap
-        interps = ntuple(k -> cubic_interp(xs, fs[:, k]; bc=extrap_bc(xs, fs[:, k]), extrap=extrap), nqty)
-    else
-        interps = ntuple(k -> cubic_interp(xs, fs[:, k]; bc=bc, extrap=extrap), nqty)
-    end
-
-    # Create derivative views
-    derivs = ntuple(k -> FastInterpolations.deriv1(interps[k]), nqty)
-
-    # Initialize fsi as zeros (computed lazily)
-    fsi = zeros(Float64, npts, nqty)
-
-    # Preallocate buffers
-    eval_buf = zeros(Float64, nqty)
-    deriv_buf = zeros(Float64, nqty)
-
-    MultiQuantityProfile{nqty,eltype(interps),eltype(derivs)}(
-        xs, copy(fs), interps, derivs, fsi, eval_buf, deriv_buf
-    )
-end
-
-# Evaluation: returns vector of all quantities at x
-@inline function (mqp::MultiQuantityProfile{N})(x::Float64; search=nothing, hint=nothing) where {N}
-    @inbounds for k in 1:N
-        if search === nothing && hint === nothing
-            mqp._eval_buf[k] = mqp.interps[k](x)
-        elseif hint === nothing
-            mqp._eval_buf[k] = mqp.interps[k](x; search=search)
-        elseif search === nothing
-            mqp._eval_buf[k] = mqp.interps[k](x; hint=hint)
-        else
-            mqp._eval_buf[k] = mqp.interps[k](x; search=search, hint=hint)
-        end
-    end
-    return mqp._eval_buf
-end
-
-@inline evaluate!(mqp::MultiQuantityProfile, x::Float64; search=nothing, hint=nothing) = mqp(x; search=search, hint=hint)
-
-# First derivative evaluation
-@inline function deriv1!(mqp::MultiQuantityProfile{N}, x::Float64) where {N}
-    @inbounds for k in 1:N
-        mqp._deriv_buf[k] = mqp.derivs[k](x)
-    end
-    return mqp._deriv_buf
-end
-
-# Integration (trapezoidal, in-place)
-function integrate!(mqp::MultiQuantityProfile{N}) where {N}
-    npts = length(mqp.xs)
-    @inbounds for k in 1:N
-        mqp.fsi[1, k] = 0.0
-        for i in 1:(npts-1)
-            h = mqp.xs[i+1] - mqp.xs[i]
-            mqp.fsi[i+1, k] = mqp.fsi[i, k] + h * (mqp.fs[i, k] + mqp.fs[i+1, k]) / 2
-        end
-    end
-    return mqp.fsi
-end
-
-function empty_MultiQuantityProfile(nqty::Int=4)
-    xs = collect(range(0.0, 1.0; length=5))
-    fs = zeros(Float64, 5, nqty)
-    MultiQuantityProfile(xs, fs)
 end
