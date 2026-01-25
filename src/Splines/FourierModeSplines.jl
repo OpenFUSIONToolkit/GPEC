@@ -89,7 +89,12 @@ struct FourierModeSplines{S}
 end
 
 """
-    FourierModeSplines(xs, ys, fs, mband; bctype="extrap", period=nothing)
+Boundary condition type for FourierModeSplines: NaturalBC(), PeriodicBC(), or :extrap
+"""
+const FourierModeBC = Union{NaturalBC,PeriodicBC,Symbol}
+
+"""
+    FourierModeSplines(xs, ys, fs, mband; bc=:extrap, period=nothing)
 
 Create a Fourier-based 2D interpolator.
 
@@ -99,7 +104,7 @@ Create a Fourier-based 2D interpolator.
   - `ys::Vector{Float64}`: Poloidal coordinates (sorted, periodic domain)
   - `fs::Array{Float64,3}`: Function values (npsi × ntheta × nqty)
   - `mband::Int`: Number of Fourier modes to retain (0 to mband inclusive)
-  - `bctype`: Boundary condition for radial splines ("natural", "periodic", "extrap")
+  - `bc`: Boundary condition for radial splines - use `NaturalBC()`, `PeriodicBC()`, or `:extrap`
   - `period`: Angular period. If nothing, auto-detected from ys (2π if max > 2, else 1.0)
 
 # Bounds Checking
@@ -122,8 +127,8 @@ f, fx, fy = deriv1!(fms, 0.5, π/4)
 ```
 """
 function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
-    fs::Array{Float64,3}, mband::Int;
-    bctype::String="extrap", period::Union{Nothing,Float64}=nothing)
+    fs::Array{Float64,3}, mband::Int; bc::FourierModeBC=:extrap,
+    period::Union{Nothing,Float64}=nothing)
     npsi, ntheta, nqty = size(fs)
 
     @assert length(xs) == npsi "xs length must match first dimension of fs"
@@ -176,7 +181,13 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
 
     # Create 1D splines for each Fourier coefficient in the radial direction
     # Use FastCubicSpline1D for efficient evaluation with hint support
-    template_spline = FastCubicSpline1D(xs, cos_coeffs[:, 1, 1]; bctype=bctype)
+    # For :extrap BC, compute boundary conditions per-spline from data
+    if bc === :extrap
+        template_bc = extrap_bc(xs, cos_coeffs[:, 1, 1])
+    else
+        template_bc = bc
+    end
+    template_spline = FastCubicSpline1D(xs, cos_coeffs[:, 1, 1]; bc=template_bc)
     SplineType = typeof(template_spline)
 
     cos_splines = Matrix{SplineType}(undef, nmodes, nqty)
@@ -184,8 +195,15 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
 
     for m in 1:nmodes
         for iq in 1:nqty
-            cos_splines[m, iq] = FastCubicSpline1D(xs, cos_coeffs[:, m, iq]; bctype=bctype)
-            sin_splines[m, iq] = FastCubicSpline1D(xs, sin_coeffs[:, m, iq]; bctype=bctype)
+            if bc === :extrap
+                cos_bc = extrap_bc(xs, cos_coeffs[:, m, iq])
+                sin_bc = extrap_bc(xs, sin_coeffs[:, m, iq])
+            else
+                cos_bc = bc
+                sin_bc = bc
+            end
+            cos_splines[m, iq] = FastCubicSpline1D(xs, cos_coeffs[:, m, iq]; bc=cos_bc)
+            sin_splines[m, iq] = FastCubicSpline1D(xs, sin_coeffs[:, m, iq]; bc=sin_bc)
         end
     end
 

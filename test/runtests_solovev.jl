@@ -56,7 +56,7 @@ end
     psi = dri.psi_in
 
     # Spline types (using new Julia implementations)
-    @test isa(sq, Union{JPEC.Spl.CubicSpline1D,JPEC.Spl.FastCubicSpline1DMulti})
+    @test isa(sq, JPEC.Spl.FastCubicSpline1DMulti)
     @test isa(psi, JPEC.Spl.BicubicSpline)
 
     # Domain monotonicity

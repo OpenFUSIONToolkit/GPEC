@@ -114,7 +114,7 @@ function equilibrium_solver(input::InverseRunInput)
     rz_in_fs[:, :, 1] = r2
     rz_in_fs[:, :, 2] = deta
 
-    rz_spline = Spl.BicubicSpline(rz_in.xs, rz_in.ys, rz_in_fs; bctypex="extrap", bctypey="periodic")
+    rz_spline = Spl.BicubicSpline(rz_in.xs, rz_in.ys, rz_in_fs, :extrap, Spl.PeriodicBC())
 
     # c-----------------------------------------------------------------------
     # c     prepare new spline type for surface quantities.
@@ -130,7 +130,7 @@ function equilibrium_solver(input::InverseRunInput)
     if grid_type == "ldp"
         xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
         fs = zeros(Float64, mpsi + 1, 4)
-        sq = Spl.FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:extension)
+        sq = Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap, extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end
@@ -155,10 +155,10 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun_xs = copy(sq_xs)
     eqfun_ys = collect(0:mtheta) ./ mtheta
 
-    rzphi = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, rzphi_fs;
-        bctypex="extrap", bctypey="periodic")
-    eqfun = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs;
-        bctypex="extrap", bctypey="periodic")
+    rzphi = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, rzphi_fs,
+        :extrap, Spl.PeriodicBC())
+    eqfun = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs,
+        :extrap, Spl.PeriodicBC())
 
 
     # spl_xs = zeros(Float64,mtheta+1)

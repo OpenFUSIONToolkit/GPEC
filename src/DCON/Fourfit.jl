@@ -123,16 +123,14 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     end
 
     # --- Fit the grid data to a Fourier-cubic spline ---
-    # The bctype applies to the non-periodic radial (x) dimension.
+    # The BC applies to the non-periodic radial (x) dimension.
     # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
-    bctype_x = "extrap"
-
     metric.fspline = Spl.FourierModeSplines(
         metric.xs,
         metric.ys,
         metric.fs,
         mband;
-        bctype=bctype_x,
+        bc=:extrap,
         period=2π  # ys are in radians [0, 2π)
     )
     return metric
@@ -319,15 +317,15 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
 
     # --- Fit splines ---
     ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband)
-    ffit.amats = Spl.ComplexMatrixSpline(metric.xs, amats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.bmats = Spl.ComplexMatrixSpline(metric.xs, bmats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.cmats = Spl.ComplexMatrixSpline(metric.xs, cmats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.dmats = Spl.ComplexMatrixSpline(metric.xs, dmats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.emats = Spl.ComplexMatrixSpline(metric.xs, emats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.hmats = Spl.ComplexMatrixSpline(metric.xs, hmats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.fmats_lower = Spl.ComplexMatrixSpline(metric.xs, fmats_lower_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.gmats = Spl.ComplexMatrixSpline(metric.xs, gmats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
-    ffit.kmats = Spl.ComplexMatrixSpline(metric.xs, kmats_flat, intr.numpert_total, intr.numpert_total; bctype="extrap")
+    ffit.amats = Spl.ComplexMatrixSpline(metric.xs, amats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.bmats = Spl.ComplexMatrixSpline(metric.xs, bmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.cmats = Spl.ComplexMatrixSpline(metric.xs, cmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.dmats = Spl.ComplexMatrixSpline(metric.xs, dmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.emats = Spl.ComplexMatrixSpline(metric.xs, emats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.hmats = Spl.ComplexMatrixSpline(metric.xs, hmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.fmats_lower = Spl.ComplexMatrixSpline(metric.xs, fmats_lower_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.gmats = Spl.ComplexMatrixSpline(metric.xs, gmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    ffit.kmats = Spl.ComplexMatrixSpline(metric.xs, kmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

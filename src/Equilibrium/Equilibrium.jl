@@ -75,7 +75,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         xs = 0.0:0.1:1.0
         ys = 0.0:0.2:1.0
         fs = [sin(2π * x) * cos(2π * y) for x in xs, y in ys, _ in 1:1]
-        bicube_ex = Spl.BicubicSpline(collect(xs), collect(ys), fs; bctypex="extrap", bctypey="extrap")
+        bicube_ex = Spl.BicubicSpline(collect(xs), collect(ys), fs, :extrap, :extrap)
         #println(bicube_ex)
         eq_input = InverseRunInput(
             eq_config,
@@ -441,8 +441,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
-    flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs;
-        bctypex="extrap", bctypey="periodic")
+    flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs,
+        :extrap, Spl.PeriodicBC())
     # Compute flux derivatives at all grid points for diagnostics
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
@@ -487,7 +487,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 1] = flux_fsx[ipsi+1, :, 1]
         fs_matrix[:, 2] = source[ipsi+1, :]
 
-        spline = Spl.FastCubicSpline1DMulti(Vector(flux.ys), fs_matrix; bctype="periodic")
+        spline = Spl.FastCubicSpline1DMulti(Vector(flux.ys), fs_matrix; bc=Spl.PeriodicBC())
         Spl.integrate!(spline)
 
         term[ipsi+1, :] .= spline.fsi[end, :]

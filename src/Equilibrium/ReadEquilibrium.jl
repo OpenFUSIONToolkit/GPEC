@@ -95,7 +95,7 @@ function read_efit(config::EquilibriumConfig)
         qprof_data,
         sqrt.(psi_norm_grid)
     )
-    sq_in = Spl.FastCubicSpline1DMulti(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap", extrap=:extension)
+    sq_in = Spl.FastCubicSpline1DMulti(collect(psi_norm_grid), sq_fs_nodes; bc=:extrap, extrap=:extension)
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -113,7 +113,7 @@ function read_efit(config::EquilibriumConfig)
     zmin, zmax = extrema(z_grid)
 
     psi_proc_3d = reshape(psi_proc, (nw, nh, 1))
-    psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d; bctypex="extrap", bctypey="extrap")
+    psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d, :extrap, :extrap)
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
@@ -232,7 +232,7 @@ function read_chease2(config::EquilibriumConfig)
     fs[:, 2] .= zcppr
     fs[:, 3] .= zq
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    sq_in = Spl.FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:extension)
+    sq_in = Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap, extrap=:extension)
     # --- Integrate pressure ---
     Spl.integrate!(sq_in)  # Integrate in-place, sq_in.fsi filled
     # Make a writable copy of the fs array
@@ -240,7 +240,7 @@ function read_chease2(config::EquilibriumConfig)
     # Normalize pressure integral column (2nd column)
     fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
     # Refit spline using the modified fs_copy
-    sq_in = Spl.FastCubicSpline1DMulti(sq_in.xs, fs_copy; bctype="extrap", extrap=:extension)
+    sq_in = Spl.FastCubicSpline1DMulti(sq_in.xs, fs_copy; bc=:extrap, extrap=:extension)
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -254,7 +254,7 @@ function read_chease2(config::EquilibriumConfig)
 
 
     # Setup bicubic spline with periodic boundary conditions
-    rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
+    rz_in = Spl.BicubicSpline(xs, ys, fs, :extrap, Spl.PeriodicBC())
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
@@ -348,11 +348,11 @@ function read_chease(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        sq_in = Spl.FastCubicSpline1DMulti(xs, fs; bctype="extrap", extrap=:extension)
+        sq_in = Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap, extrap=:extension)
         Spl.integrate!(sq_in)
         fs_copy = copy(sq_in.fs)
         fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.FastCubicSpline1DMulti(sq_in.xs, fs_copy; bctype="extrap", extrap=:extension)
+        sq_in = Spl.FastCubicSpline1DMulti(sq_in.xs, fs_copy; bc=:extrap, extrap=:extension)
 
         # --- Setup parameters ---
         mtau = ntnova
@@ -391,7 +391,7 @@ function read_chease(config::EquilibriumConfig)
         ys = range(0, 2π; length=mtau) |> collect
 
         # Setup bicubic spline with periodic boundary conditions
-        rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
+        rz_in = Spl.BicubicSpline(xs, ys, fs, :extrap, Spl.PeriodicBC())
 
         if diagnostics
             # --- Print first 5 and last 5 entries of each slice ---

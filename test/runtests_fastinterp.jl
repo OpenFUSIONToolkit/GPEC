@@ -1,65 +1,64 @@
 @testset "FastInterpolations-based Splines" begin
 
-    @testset "CubicSpline1D - Basic Evaluation" begin
-        @info "Testing CubicSpline1D basic evaluation"
+    @testset "FastCubicSpline1D - Basic Evaluation" begin
+        @info "Testing FastCubicSpline1D basic evaluation"
 
-        # Test with sin(x) which is smoother and works well with natural BC
+        # Test with sin(x) which is smoother and works well with extrap BC
         xs = collect(range(0.0; stop=2π, length=51))
         fs = sin.(xs)
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        spline = JPEC.Spl.FastCubicSpline1D(xs, fs; bc=JPEC.Spl.extrap_bc(xs, fs))
 
         # Evaluate within the grid range
-        # Use 2e-5 tolerance to accommodate extrap BC boundary effects
         xs_fine = collect(range(0.2; stop=6.0, length=50))
         for x in xs_fine
             f = JPEC.Spl.evaluate!(spline, x)
-            @test abs(f[1] - sin(x)) < 2e-5
+            @test abs(f - sin(x)) < 2e-5
         end
     end
 
-    @testset "CubicSpline1D - First Derivative" begin
-        @info "Testing CubicSpline1D first derivative"
+    @testset "FastCubicSpline1D - First Derivative" begin
+        @info "Testing FastCubicSpline1D first derivative"
 
         # Test with sin(x): derivative is cos(x)
         xs = collect(range(0.0; stop=2π, length=51))
         fs = sin.(xs)
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        spline = JPEC.Spl.FastCubicSpline1D(xs, fs; bc=JPEC.Spl.extrap_bc(xs, fs))
 
         xs_fine = collect(range(0.3; stop=5.8, length=30))
         for x in xs_fine
             f = JPEC.Spl.evaluate!(spline, x)
             f1 = JPEC.Spl.deriv1!(spline, x)
-            @test abs(f[1] - sin(x)) < 1e-5
-            @test abs(f1[1] - cos(x)) < 1e-3
+            @test abs(f - sin(x)) < 1e-5
+            @test abs(f1 - cos(x)) < 1e-3
         end
     end
 
-    @testset "CubicSpline1D - Second Derivative" begin
-        @info "Testing CubicSpline1D second derivative"
+    @testset "FastCubicSpline1D - Second Derivative" begin
+        @info "Testing FastCubicSpline1D second derivative"
 
         # Test with sin(x): second derivative is -sin(x)
         xs = collect(range(0.0; stop=2π, length=51))
         fs = sin.(xs)
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        spline = JPEC.Spl.FastCubicSpline1D(xs, fs; bc=JPEC.Spl.extrap_bc(xs, fs))
 
         xs_fine = collect(range(0.5; stop=5.5, length=30))
         for x in xs_fine
             f = JPEC.Spl.evaluate!(spline, x)
             f1 = JPEC.Spl.deriv1!(spline, x)
             f2 = JPEC.Spl.deriv2!(spline, x)
-            @test abs(f[1] - sin(x)) < 1e-5
-            @test abs(f1[1] - cos(x)) < 1e-3
-            @test abs(f2[1] + sin(x)) < 1e-2
+            @test abs(f - sin(x)) < 1e-5
+            @test abs(f1 - cos(x)) < 1e-3
+            @test abs(f2 + sin(x)) < 1e-2
         end
     end
 
-    @testset "CubicSpline1D - Third Derivative" begin
-        @info "Testing CubicSpline1D third derivative (custom implementation)"
+    @testset "FastCubicSpline1D - Third Derivative" begin
+        @info "Testing FastCubicSpline1D third derivative"
 
         # Test with sin(x): third derivative is -cos(x)
         xs = collect(range(0.0; stop=2π, length=51))
         fs = sin.(xs)
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        spline = JPEC.Spl.FastCubicSpline1D(xs, fs; bc=JPEC.Spl.extrap_bc(xs, fs))
 
         xs_fine = collect(range(0.5; stop=5.5, length=30))
         for x in xs_fine
@@ -67,22 +66,20 @@
             f1 = JPEC.Spl.deriv1!(spline, x)
             f2 = JPEC.Spl.deriv2!(spline, x)
             f3 = JPEC.Spl.deriv3!(spline, x)
-            @test abs(f[1] - sin(x)) < 1e-5
-            @test abs(f1[1] - cos(x)) < 1e-3
-            @test abs(f2[1] + sin(x)) < 1e-2
+            @test abs(f - sin(x)) < 1e-5
+            @test abs(f1 - cos(x)) < 1e-3
+            @test abs(f2 + sin(x)) < 1e-2
             # Third derivative is piecewise constant, less accurate
-            @test abs(f3[1] + cos(x)) < 0.5
+            @test abs(f3 + cos(x)) < 0.5
         end
     end
 
-    @testset "CubicSpline1D - Polynomial Test" begin
-        @info "Testing CubicSpline1D with x^3 polynomial (check natural BC behavior)"
+    @testset "FastCubicSpline1D - Polynomial Test" begin
+        @info "Testing FastCubicSpline1D with x^3 polynomial"
 
-        # For x^3, natural BC (c''=0 at endpoints) causes small errors
-        # This test verifies the spline is reasonably accurate
         xs = collect(range(1.0; stop=2.0, length=51))
         fs = xs .^ 3
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        spline = JPEC.Spl.FastCubicSpline1D(xs, fs; bc=JPEC.Spl.extrap_bc(xs, fs))
 
         # Interior points should be more accurate
         xs_fine = collect(range(1.2; stop=1.8, length=30))
@@ -91,36 +88,36 @@
             f1 = JPEC.Spl.deriv1!(spline, x)
             f2 = JPEC.Spl.deriv2!(spline, x)
             f3 = JPEC.Spl.deriv3!(spline, x)
-            @test abs(f[1] - x^3) < 1e-4
-            @test abs(f1[1] - 3*x^2) < 1e-3
-            @test abs(f2[1] - 6*x) < 1e-2
+            @test abs(f - x^3) < 1e-4
+            @test abs(f1 - 3*x^2) < 1e-3
+            @test abs(f2 - 6*x) < 1e-2
             # Third derivative should be close to 6
-            @test abs(f3[1] - 6.0) < 0.5
+            @test abs(f3 - 6.0) < 0.5
         end
     end
 
-    @testset "CubicSpline1D - Integration" begin
-        @info "Testing CubicSpline1D cumulative integration"
+    @testset "FastCubicSpline1D - Integration" begin
+        @info "Testing FastCubicSpline1D cumulative integration"
 
         # Test with x^2: integral from 0 to x is x^3/3
         xs = collect(range(0.0; stop=2.0, length=101))
         fs = xs .^ 2
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
-        JPEC.Spl.integrate!(spline)
+        spline = JPEC.Spl.FastCubicSpline1D(xs, fs; bc=JPEC.Spl.extrap_bc(xs, fs))
+        fsi = JPEC.Spl.integrate!(spline)
 
         # Check cumulative integral at grid points
         for (i, x) in enumerate(xs)
             expected_integral = x^3 / 3
-            @test abs(spline.fsi[i, 1] - expected_integral) < 1e-4
+            @test abs(fsi[i] - expected_integral) < 2e-4  # Trapezoidal integration has some error
         end
     end
 
-    @testset "CubicSpline1D - Multiple Quantities" begin
-        @info "Testing CubicSpline1D with multiple quantities"
+    @testset "FastCubicSpline1DMulti - Multiple Quantities" begin
+        @info "Testing FastCubicSpline1DMulti with multiple quantities"
 
         xs = collect(range(0.0; stop=2π, length=50))
         fs = hcat(sin.(xs), cos.(xs), xs .^ 2)
-        spline = JPEC.Spl.CubicSpline1D(xs, fs; bctype="extrap")
+        spline = JPEC.Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap)
 
         x_test = π/4
         f = JPEC.Spl.evaluate!(spline, x_test)
@@ -135,16 +132,21 @@
         @test abs(f1[3] - 2*x_test) < 1e-3
     end
 
-    @testset "CubicSpline1D - Empty Constructor" begin
-        @info "Testing CubicSpline1D empty constructor"
+    @testset "FastCubicSpline1D - Empty Constructor" begin
+        @info "Testing FastCubicSpline1D empty constructor"
 
-        empty_spline = JPEC.Spl.empty_CubicSpline1D(Float64)
-        @test length(empty_spline.xs) == 2
-        @test size(empty_spline.fs) == (2, 1)
+        empty_spline = JPEC.Spl.empty_FastCubicSpline1D(Float64)
+        @test length(empty_spline.xs) >= 4
 
-        empty_spline_complex = JPEC.Spl.empty_CubicSpline1D(ComplexF64)
-        @test length(empty_spline_complex.xs) == 2
+        empty_spline_complex = JPEC.Spl.empty_FastCubicSpline1D(ComplexF64)
         @test eltype(empty_spline_complex.fs) == ComplexF64
+    end
+
+    @testset "FastCubicSpline1DMulti - Empty Constructor" begin
+        @info "Testing FastCubicSpline1DMulti empty constructor"
+
+        empty_spline = JPEC.Spl.empty_FastCubicSpline1DMulti(Float64)
+        @test length(empty_spline.xs) >= 4
     end
 
     @testset "ComplexMatrixSpline - Evaluation" begin
@@ -161,7 +163,7 @@
             data[ipsi, i, j] = exp(1im * xs[ipsi] * (i + j))
         end
 
-        cms = JPEC.Spl.ComplexMatrixSpline(xs, data)
+        cms = JPEC.Spl.ComplexMatrixSpline(xs, data; bc=:extrap)
 
         # Evaluate at interior point
         x_test = 0.5
@@ -191,7 +193,7 @@
             data[ipsi, :, :] .= slope * xs[ipsi]
         end
 
-        cms = JPEC.Spl.ComplexMatrixSpline(xs, data)
+        cms = JPEC.Spl.ComplexMatrixSpline(xs, data; bc=:extrap)
 
         x_test = 0.5
         f = JPEC.Spl.evaluate!(cms, x_test)
@@ -231,7 +233,7 @@
             fs[ix, iy, 1] = sin(x) * cos(y)
         end
 
-        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
+        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, :extrap)
 
         # Evaluate at interior point
         x_test, y_test = π/3, π/4
@@ -252,7 +254,7 @@
             fs[ix, iy, 1] = sin(x) * cos(y)
         end
 
-        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
+        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, :extrap)
 
         x_test, y_test = π/3, π/4
         f, fx, fy = JPEC.Spl.deriv1!(bcs, x_test, y_test)
@@ -276,7 +278,7 @@
             fs[ix, iy, 1] = sin(x) * cos(y)
         end
 
-        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
+        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, :extrap)
 
         x_test, y_test = π/3, π/4
         f, fx, fy, fxx, fxy, fyy = JPEC.Spl.deriv2!(bcs, x_test, y_test)
@@ -295,8 +297,8 @@
         @info "Testing BicubicSpline empty constructor"
 
         empty_bcs = JPEC.Spl.empty_BicubicSpline()
-        @test length(empty_bcs.xs) == 2
-        @test length(empty_bcs.ys) == 2
+        @test length(empty_bcs.xs) == 4  # Needs 4 points for extrap BC
+        @test length(empty_bcs.ys) == 4
         @test empty_bcs.nqty == 1
     end
 

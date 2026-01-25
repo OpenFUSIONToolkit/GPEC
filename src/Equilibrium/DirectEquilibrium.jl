@@ -189,7 +189,7 @@ function direct_position!(raw_profile::DirectRunInput)
     y_coords = Vector(raw_profile.psi_in.ys)
     new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs; bctypex="extrap", bctypey="extrap")
+    raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs, :extrap, :extrap)
 
     # Helper function for robust Newton-Raphson search with restarts
     function find_separatrix_crossing(start_r, end_r, label)
@@ -465,7 +465,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         )
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
-        ff = Spl.FastCubicSpline1DMulti(ff_x_nodes, ff_fs_nodes; bctype="periodic")
+        ff = Spl.FastCubicSpline1DMulti(ff_x_nodes, ff_fs_nodes; bc=Spl.PeriodicBC())
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
@@ -484,7 +484,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     end
 
     # Fit 1D profile spline `sq` and perform q-profile revision if needed
-    sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bctype="extrap", extrap=:extension)
+    sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bc=:extrap, extrap=:extension)
     q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
@@ -500,13 +500,13 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             rzphi_nodes[i, :, 3] .*= ffac
         end
         # Re-create the spline with the revised data
-        sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bctype="extrap", extrap=:extension)
+        sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bc=:extrap, extrap=:extension)
     end
 
     # Fit the geometric spline `rzphi` using bicubic spline with extrap/periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
-    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes;
-        bctypex="extrap", bctypey="periodic")
+    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes,
+        :extrap, Spl.PeriodicBC())
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
@@ -554,17 +554,16 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         end
     end
     # Create eqfun BicubicSpline - derivatives are computed internally
-    eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes;
-        bctypex="extrap", bctypey="periodic")
+    eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes,
+        :extrap, Spl.PeriodicBC())
 
-    # Create ProfileSplines from the sq_nodes data
+    # Create ProfileSplines from the sq_nodes data (uses extrap BC internally)
     profiles = ProfileSplines(
         psi_nodes,
         sq_nodes[:, 1],  # F * 2π
         sq_nodes[:, 2],  # P * μ₀
         sq_nodes[:, 3],  # dV/dψ
-        sq_nodes[:, 4];  # q
-        bctype="extrap"
+        sq_nodes[:, 4]   # q
     )
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles, sq, rzphi, eqfun, ro, zo, psio)

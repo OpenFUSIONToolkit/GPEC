@@ -85,7 +85,12 @@ struct BicubicSpline{T}
 end
 
 """
-    BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="extrap")
+Boundary condition type for BicubicSpline: NaturalBC(), PeriodicBC(), or :extrap
+"""
+const BicubicBC = Union{NaturalBC,PeriodicBC,Symbol}
+
+"""
+    BicubicSpline(xs, ys, fs, bcx, bcy)
 
 Create a 2D bicubic spline interpolator.
 
@@ -94,10 +99,8 @@ Create a 2D bicubic spline interpolator.
   - `xs::Vector{Float64}`: X-coordinates (sorted, length nx)
   - `ys::Vector{Float64}`: Y-coordinates (sorted, length ny)
   - `fs::Array{T,3}`: Function values (nx × ny × nqty)
-  - `bctypex`: Boundary condition in x ("extrap", "periodic", "natural").
-    Periodic BC requires a closed grid with equal endpoint values.
-  - `bctypey`: Boundary condition in y ("extrap", "periodic", "natural").
-    Periodic BC requires a closed grid with equal endpoint values.
+  - `bcx`: Boundary condition in x - use `NaturalBC()`, `PeriodicBC()`, or `:extrap`
+  - `bcy`: Boundary condition in y - use `NaturalBC()`, `PeriodicBC()`, or `:extrap`
 
 # Example
 
@@ -109,12 +112,12 @@ for i in 1:10, j in 1:20
     fs[i, j, 1] = sin(xs[i]) * cos(ys[j])
     fs[i, j, 2] = cos(xs[i]) * sin(ys[j])
 end
-bcs = BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
+bcs = BicubicSpline(xs, ys, fs, :extrap, PeriodicBC())
 ```
 """
 function BicubicSpline(
-    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3};
-    bctypex::String="extrap", bctypey::String="extrap"
+    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
+    bcx::BicubicBC=:extrap, bcy::BicubicBC=:extrap
 ) where {T<:Union{Float64,ComplexF64}}
 
     nx_orig, ny_orig, nqty = size(fs)
@@ -125,11 +128,9 @@ function BicubicSpline(
     @assert issorted(ys) "ys must be sorted in ascending order"
 
     # Set periodicity flags
-    periodic_x = (bctypex == "periodic")
-    periodic_y = (bctypey == "periodic")
+    periodic_x = (bcx isa PeriodicBC)
+    periodic_y = (bcy isa PeriodicBC)
 
-    # FastInterpolations expects periodic data to be closed (f[1] = f[end])
-    # We enforce exact closure below for periodic BC
     nx = nx_orig
     ny = ny_orig
 
@@ -139,8 +140,7 @@ function BicubicSpline(
     fsxy = zeros(T, nx, ny, nqty)
 
     # Dispatch to type-stable inner function based on BC types
-    # This avoids union-type instability from _make_bc
-    _fill_derivatives!(fsx, fsy, fsxy, xs, ys, fs, bctypex, bctypey)
+    _fill_derivatives_impl!(fsx, fsy, fsxy, xs, ys, fs, bcx, bcy)
 
     # Store a copy of fs for the struct
     fs_stored = copy(fs)
@@ -162,27 +162,6 @@ function BicubicSpline(
         _f, _fx, _fy, _fxx, _fxy, _fyy, _last_ix, _last_iy
     )
 end
-
-# Type-stable inner function for computing derivatives
-# Dispatches to concrete BC type to avoid union-type instability
-function _fill_derivatives!(
-    fsx::Array{T,3}, fsy::Array{T,3}, fsxy::Array{T,3},
-    xs::Vector{Float64}, ys::Vector{Float64}, fs::Array{T,3},
-    bctypex::String, bctypey::String
-) where {T}
-    # Create concrete BC objects once
-    bc_x = _create_bc(bctypex)
-    bc_y = _create_bc(bctypey)
-
-    # Dispatch to type-stable implementation
-    _fill_derivatives_impl!(fsx, fsy, fsxy, xs, ys, fs, bc_x, bc_y)
-end
-
-# Create BC object (for non-extrap types that don't depend on data)
-_create_bc(bctype::String) = bctype == "natural" ? NaturalBC() :
-                             bctype == "periodic" ? PeriodicBC() :
-                             bctype == "extrap" ? :extrap :
-                             error("Unknown bctype: $bctype")
 
 # Implementation for natural/periodic BC - can use CubicSplineCache for efficiency
 function _fill_derivatives_impl!(
@@ -352,8 +331,8 @@ end
 # Type-stable extrap BC creator (returns concrete BCPair type)
 @inline function _make_extrap_bc(xs::AbstractVector{Float64}, fs::AbstractVector{<:Union{Float64,ComplexF64}})
     n = length(xs)
-    yp_left = _estimate_endpoint_derivative_fast(@view(xs[1:4]), @view(fs[1:4]), xs[1])
-    yp_right = _estimate_endpoint_derivative_fast(@view(xs[(n-3):n]), @view(fs[(n-3):n]), xs[n])
+    yp_left = _estimate_endpoint_derivative(@view(xs[1:4]), @view(fs[1:4]), xs[1])
+    yp_right = _estimate_endpoint_derivative(@view(xs[(n-3):n]), @view(fs[(n-3):n]), xs[n])
     return BCPair(Deriv1(yp_left), Deriv1(yp_right))
 end
 

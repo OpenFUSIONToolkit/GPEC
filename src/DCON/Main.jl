@@ -56,7 +56,7 @@ function Main(path::String="./")
     end
 
     # Fit data to splines
-    intr.locstab = Spl.FastCubicSpline1DMulti(Vector(equil.sq.xs), locstab_fs; bctype="extrap", extrap=:extension)
+    intr.locstab = Spl.FastCubicSpline1DMulti(Vector(equil.sq.xs), locstab_fs; bc=:extrap, extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0

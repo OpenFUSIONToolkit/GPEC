@@ -279,7 +279,7 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         end
     end
 
-    return Spl.ComplexMatrixSpline(psi_array, wv_array; bctype="extrap")
+    return Spl.ComplexMatrixSpline(psi_array, wv_array; bc=:extrap)
 end
 
 """

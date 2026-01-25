@@ -470,16 +470,15 @@ struct ProfileSplines{S}
 end
 
 """
-    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; bctype="extrap", extrap=:extension)
+    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=:extension)
 
-Create ProfileSplines from arrays of profile values.
+Create ProfileSplines from arrays of profile values using extrap BC.
 """
 function ProfileSplines(xs::Vector{Float64},
     F_vals::Vector{Float64},
     P_vals::Vector{Float64},
     dVdpsi_vals::Vector{Float64},
     q_vals::Vector{Float64};
-    bctype::String="extrap",
     extrap::Symbol=:extension)
     npts = length(xs)
     @assert length(F_vals) == npts
@@ -487,11 +486,11 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(dVdpsi_vals) == npts
     @assert length(q_vals) == npts
 
-    # Create individual splines
-    F_spline = Spl.FastCubicSpline1D(xs, F_vals; bctype=bctype, extrap=extrap)
-    P_spline = Spl.FastCubicSpline1D(xs, P_vals; bctype=bctype, extrap=extrap)
-    dVdpsi_spline = Spl.FastCubicSpline1D(xs, dVdpsi_vals; bctype=bctype, extrap=extrap)
-    q_spline = Spl.FastCubicSpline1D(xs, q_vals; bctype=bctype, extrap=extrap)
+    # Create individual splines with extrap BC
+    F_spline = Spl.FastCubicSpline1D(xs, F_vals; bc=Spl.extrap_bc(xs, F_vals), extrap=extrap)
+    P_spline = Spl.FastCubicSpline1D(xs, P_vals; bc=Spl.extrap_bc(xs, P_vals), extrap=extrap)
+    dVdpsi_spline = Spl.FastCubicSpline1D(xs, dVdpsi_vals; bc=Spl.extrap_bc(xs, dVdpsi_vals), extrap=extrap)
+    q_spline = Spl.FastCubicSpline1D(xs, q_vals; bc=Spl.extrap_bc(xs, q_vals), extrap=extrap)
 
     # Extract cached derivatives from the splines
     F_derivs = vec(F_spline.fs1)
