@@ -81,64 +81,6 @@
         @test empty_bcs.nqty == 1
     end
 
-    @testset "FourierModeSplines - Basic Evaluation" begin
-        @info "Testing FourierModeSplines basic evaluation"
-
-        # Create 2D function with known Fourier content: cos(2*y)
-        npsi, ntheta = 20, 64
-        xs = collect(range(0.0; stop=1.0, length=npsi))
-        ys = collect(range(0.0; stop=1.0, length=ntheta+1)[1:(end-1)])  # Periodic domain
-
-        fs = zeros(Float64, npsi, ntheta, 1)
-        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
-            # f(psi, theta) = psi * cos(2 * 2π * theta)
-            fs[ix, iy, 1] = x * cos(2 * 2π * y)
-        end
-
-        fms = JPEC.Spl.FourierModeSplines(xs, ys, fs, 4)
-
-        # Evaluate at interior point
-        x_test, y_test = 0.5, 0.25
-        f = JPEC.Spl.evaluate!(fms, x_test, y_test)
-
-        expected = x_test * cos(2 * 2π * y_test)
-        @test abs(f[1] - expected) < 1e-2  # FFT + spline has some error
-    end
-
-    @testset "FourierModeSplines - First Derivatives" begin
-        @info "Testing FourierModeSplines first derivatives"
-
-        # Simple function: f(psi, theta) = psi
-        npsi, ntheta = 30, 32
-        xs = collect(range(0.0; stop=1.0, length=npsi))
-        ys = collect(range(0.0; stop=1.0, length=ntheta+1)[1:(end-1)])
-
-        fs = zeros(Float64, npsi, ntheta, 1)
-        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
-            fs[ix, iy, 1] = x  # Constant in theta
-        end
-
-        fms = JPEC.Spl.FourierModeSplines(xs, ys, fs, 4)
-
-        x_test, y_test = 0.5, 0.3
-        f, fx, fy = JPEC.Spl.deriv1!(fms, x_test, y_test)
-
-        # Derivative in x should be 1, in y should be 0
-        @test abs(f[1] - x_test) < 1e-4
-        @test abs(fx[1] - 1.0) < 1e-3
-        @test abs(fy[1]) < 1e-6
-    end
-
-    @testset "FourierModeSplines - Empty Constructor" begin
-        @info "Testing FourierModeSplines empty constructor"
-
-        empty_fms = JPEC.Spl.empty_FourierModeSplines()
-        @test length(empty_fms.xs) == 5  # Requires 5 points for CubicInterpolant (4 minimum)
-        @test length(empty_fms.ys) == 2
-        @test empty_fms.mband == 1
-        @test empty_fms.nqty == 1
-    end
-
     @testset "MultiQuantityProfile - Basic" begin
         @info "Testing MultiQuantityProfile"
 
@@ -166,4 +108,35 @@
         @test length(empty_mqp.xs) >= 4
     end
 
+end
+
+@testset "FourierCoefficients" begin
+    @info "Testing FourierCoefficients from Utilities module"
+
+    # Create 2D function with known Fourier content: cos(2*y)
+    npsi, ntheta = 20, 64
+    xs = collect(range(0.0; stop=1.0, length=npsi))
+    ys = collect(range(0.0; stop=1.0, length=ntheta+1)[1:(end-1)])  # Periodic domain
+
+    fs = zeros(Float64, npsi, ntheta, 1)
+    for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
+        # f(psi, theta) = psi * cos(2 * 2π * theta)
+        fs[ix, iy, 1] = x * cos(2 * 2π * y)
+    end
+
+    fc = JPEC.Util.FourierCoefficients(xs, ys, fs, 4)
+
+    # Check structure
+    @test fc.mband == 4
+    @test fc.nqty == 1
+    @test length(fc.xs) == npsi
+
+    # Mode 2 should have significant content at ipsi=10 (x=0.5)
+    c2 = JPEC.Util.get_complex_coeff(fc, 10, 2, 1)
+    @test abs(real(c2)) > 0.1  # Should have cosine content
+
+    # Get all coefficients
+    out = zeros(ComplexF64, 5)
+    JPEC.Util.get_complex_coeffs!(out, fc, 10, 1)
+    @test out[3] == c2  # Mode 2 is at index 3 (0-indexed mode)
 end

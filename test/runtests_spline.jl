@@ -68,27 +68,6 @@
         @test abs(fx[1] - cos(x_test) * cos(y_test)) < 1e-3
         @test abs(fy[1] + sin(x_test) * sin(y_test)) < 1e-3
     end
-
-    @testset "FourierModeSplines" begin
-        # Test Fourier mode splines for periodic theta data
-        xs = collect(range(0.0; stop=1.0, length=21))
-        ys = collect(range(0.0; stop=2 * Float64(pi), length=65))  # endpoint-inclusive
-        mband = 8
-
-        # Create test data: f(x, y) = x * cos(y) + x^2 * sin(2y)
-        fvals = Array{Float64}(undef, length(xs), length(ys), 1)
-        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
-            fvals[ix, iy, 1] = x * cos(y) + x^2 * sin(2 * y)
-        end
-
-        fspline = JPEC.Spl.FourierModeSplines(xs, ys, fvals, mband)
-
-        # Test evaluation (Fourier decomposition has inherent truncation error)
-        x_test, y_test = 0.5, Float64(pi) / 3
-        f = JPEC.Spl.evaluate!(fspline, x_test, y_test)
-        expected = x_test * cos(y_test) + x_test^2 * sin(2 * y_test)
-        @test abs(f[1] - expected) < 0.05  # Looser tolerance for Fourier truncation
-    end
 end
 
 @testset "Empty Spline Constructors" begin
@@ -104,8 +83,4 @@ end
     @test length(empty_bcs.xs) >= 2
     @test length(empty_bcs.ys) >= 2
     @test typeof(empty_bcs) <: JPEC.Spl.BicubicSpline
-
-    # Test empty FourierModeSplines
-    empty_fms = JPEC.Spl.empty_FourierModeSplines()
-    @test typeof(empty_fms) <: JPEC.Spl.FourierModeSplines
 end

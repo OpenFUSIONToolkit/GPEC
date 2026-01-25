@@ -5,7 +5,6 @@ module SplinesMod
 # The codebase uses native CubicInterpolant from FastInterpolations directly
 include("FastInterpolationsAdaptor.jl")
 include("BicubicSpline.jl")
-include("FourierModeSplines.jl")
 
 # Re-export FastInterpolations search strategies for use with CubicInterpolant hint/search kwargs
 using FastInterpolations: LinearBinary, Binary, HintedBinary
@@ -15,8 +14,6 @@ export MultiQuantityProfile, empty_MultiQuantityProfile
 export evaluate!, deriv1!, integrate!, cumulative_integral
 export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation
 export BicubicSpline, empty_BicubicSpline, BicubicBC
-export FourierModeSplines, empty_FourierModeSplines, FourierCoefficients
-export get_complex_coeff, get_complex_coeffs!
 
 # Export boundary condition types and helpers
 export extrap_bc, extrap_bc_matrix, NaturalBC, PeriodicBC, BCPair, Deriv1, Deriv2

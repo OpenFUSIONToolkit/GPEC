@@ -12,6 +12,7 @@ using FastInterpolations
 
 import ..Equilibrium
 import ..Spl
+import ..Util
 import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
