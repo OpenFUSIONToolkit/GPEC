@@ -130,7 +130,7 @@ function equilibrium_solver(input::InverseRunInput)
     if grid_type == "ldp"
         xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
         fs = zeros(Float64, mpsi + 1, 4)
-        sq = Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap, extrap=:extension)
+        sq = Spl.MultiQuantityProfile(xs, fs; bc=:extrap, extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end

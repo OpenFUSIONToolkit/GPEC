@@ -1,7 +1,7 @@
 module Vacuum
 
 using TOML, SpecialFunctions, LinearAlgebra, Printf
-using ..SplinesMod: FastCubicSpline1D, deriv1, PeriodicBC, NaturalBC
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 
 include("VacuumStructs.jl")
 include("VacuumInternals.jl")

@@ -131,11 +131,11 @@ function kernel!(
     theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
     x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
     z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
-    spline_x = FastCubicSpline1D(theta_closed, x_closed; bc=PeriodicBC())
-    spline_z = FastCubicSpline1D(theta_closed, z_closed; bc=PeriodicBC())
+    spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
+    spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
     theta_vec = collect(theta_grid)
-    dx_dtheta = spline_x.d1_view(theta_vec)
-    dz_dtheta = spline_z.d1_view(theta_vec)
+    dx_dtheta = [deriv1(spline_x)(θ) for θ in theta_vec]
+    dz_dtheta = [deriv1(spline_z)(θ) for θ in theta_vec]
 
     # Loop through observer points
     for j in 1:mtheta
@@ -217,9 +217,9 @@ function kernel!(
                 # Compute green function for this Gaussian point
                 theta_gauss0 = mod(theta_gauss[ig], 2π)
                 x_gauss = spline_x(theta_gauss0)
-                dx_dtheta_gauss = deriv1(spline_x, theta_gauss0)
+                dx_dtheta_gauss = deriv1(spline_x)(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
-                dz_dtheta_gauss = deriv1(spline_z, theta_gauss0)
+                dz_dtheta_gauss = deriv1(spline_z)(theta_gauss0)
                 G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
@@ -349,8 +349,9 @@ function periodic_cubic_deriv(theta, vals)
     # Close the loop for periodic BC by appending first point at the end
     theta_closed = vcat(collect(theta), theta[end] + (theta[2] - theta[1]))
     vals_closed = vcat(vals, vals[1])
-    spline = FastCubicSpline1D(theta_closed, vals_closed; bc=PeriodicBC())
-    return spline.d1_view(collect(theta))
+    spline = cubic_interp(theta_closed, vals_closed; bc=PeriodicBC())
+    d1 = deriv1(spline)
+    return [d1(θ) for θ in collect(theta)]
 end
 
 """
@@ -481,7 +482,7 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
 
     # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
     θin = collect(range(0.0, 1.0; length=mtheta_in))
-    spline = FastCubicSpline1D(θin, vecin)
+    spline = cubic_interp(θin, vecin)
 
     # Interpolate to new grid with optional offsets
     vecout = zeros(mtheta)

@@ -69,7 +69,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         # Example 1D spline setup
         xs = collect(0.0:0.1:1.0)
         fs = sin.(2π .* xs)  # vector of Float64
-        spline_ex = Spl.FastCubicSpline1D(xs, fs)
+        spline_ex = cubic_interp(xs, fs)
         #println(spline_ex)
         # Example 2D bicubic spline setup
         xs = 0.0:0.1:1.0
@@ -208,7 +208,7 @@ the same function as equil_out_global in the Fortran code.
 """
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     rzphi = pe.rzphi
-    sq = pe.sq
+    profiles = pe.profiles
     mpsi = size(rzphi.fs, 1) - 1
     mtheta = size(rzphi.fs, 2) - 1
 
@@ -222,7 +222,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
     dpsi = 1.0 - rzphi.xs[mpsi+1]
-    bt0 = (sq.fs[mpsi+1, 1] + sq.fs1[mpsi+1, 1] * dpsi) / (2π * rmean)
+    bt0 = (profiles.F_spline.y[mpsi+1] + profiles.F_deriv.y[mpsi+1] * dpsi) / (2π * rmean)
 
     pe.params.rmean = rmean
     pe.params.amean = amean
@@ -263,19 +263,21 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.crnt = crnt
     pe.params.bwall = bwall
 
-    # Flux surface integrals
-    hs1 = sq.fs[:, 2] .* sq.fs[:, 3]                 # p * dV/dpsi
-    hs2 = sq.fs[:, 3]                               # dV/dpsi
-    hs3 = sq.fs[:, 2] .^ 2 .* sq.fs[:, 3]              # p^2 * dV/dpsi
+    # Flux surface integrals (using profiles)
+    P_vals = profiles.P_spline.y
+    dVdpsi_vals = profiles.dVdpsi_spline.y
+    hs1 = P_vals .* dVdpsi_vals                   # p * dV/dpsi
+    hs2 = dVdpsi_vals                             # dV/dpsi
+    hs3 = P_vals .^ 2 .* dVdpsi_vals              # p^2 * dV/dpsi
 
-    dpsi_vec = diff(sq.xs)
+    dpsi_vec = diff(profiles.xs)
     fsi1 = sum((hs1[1:(end-1)] .+ hs1[2:end]) .* dpsi_vec) / 2
     fsi2 = sum((hs2[1:(end-1)] .+ hs2[2:end]) .* dpsi_vec) / 2
     fsi3 = sum((hs3[1:(end-1)] .+ hs3[2:end]) .* dpsi_vec) / 2
 
-    volume = sum((sq.fs[1:(end-1), 3] .+ sq.fs[2:end, 3]) .* dpsi_vec) / 2
+    volume = sum((dVdpsi_vals[1:(end-1)] .+ dVdpsi_vals[2:end]) .* dpsi_vec) / 2
 
-    p0 = sq.fs[1, 2] - sq.fs1[1, 2] * sq.xs[1]  # linear extrapolation
+    p0 = P_vals[1] - profiles.P_deriv.y[1] * profiles.xs[1]  # linear extrapolation
     betat = 2 * (fsi1 / fsi2) / bt0^2
     betaj = 2 * sqrt(fsi3 / fsi2) / bwall^2
     betan = 100 * amean * bt0 * betat / crnt
@@ -298,7 +300,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.psi_boundary_sign = -1
     pe.params.psi_boundary_zero = false
 
-    pe.params.q0 = sq.fs[1, 4]
+    pe.params.q0 = profiles.q_spline.y[1]
     pe.params.b0 = bt0
 
     pe.params.volume = volume
@@ -322,26 +324,32 @@ the same function as equil_out_qfind in the Fortran code.
 """
 function equilibrium_qfind!(equil::PlasmaEquilibrium)
 
-    sq = equil.sq
-    mpsi = length(sq.xs) - 1
+    profiles = equil.profiles
+    xs = profiles.xs
+    mpsi = length(xs) - 1
     psiexl = Float64[]
     qexl = Float64[]
 
+    # Create derivative views for q-spline
+    q_spline = profiles.q_spline
+    q_d1 = deriv1(q_spline)
+    q_d2 = deriv2(q_spline)
+    q_d3 = deriv3(q_spline)
+
     # Left endpoint
-    push!(psiexl, sq.xs[1])
-    push!(qexl, sq.fs[1, 4])
+    push!(psiexl, xs[1])
+    push!(qexl, q_spline.y[1])
 
     # Search for extrema in q(ψ)
     for ipsi in 1:mpsi
-        x0 = sq.xs[ipsi]
-        x1 = sq.xs[ipsi+1]
+        x0 = xs[ipsi]
+        x1 = xs[ipsi+1]
         xmax = x1 - x0
 
-        f = Spl.evaluate!(sq, x0)
-        f1 = Spl.deriv1!(sq, x0)
-        f2 = Spl.deriv2!(sq, x0)
-        f3 = Spl.deriv3!(sq, x0)
-        a, b, c, d = f[4], f1[4], f2[4], f3[4]
+        a = q_spline(x0)
+        b = q_d1(x0)
+        c = q_d2(x0)
+        d = q_d3(x0)
 
         if d != 0.0
             xcrit = -c / d
@@ -352,9 +360,8 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
                     x = xcrit - delta
                     if 0 ≤ x < xmax
                         ψ = x0 + x
-                        fψ = Spl.evaluate!(sq, ψ)
                         push!(psiexl, ψ)
-                        push!(qexl, fψ[4])
+                        push!(qexl, q_spline(ψ))
                     end
                 end
             end
@@ -362,21 +369,20 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     end
 
     # Right endpoint
-    push!(psiexl, sq.xs[end])
-    push!(qexl, sq.fs[end, 4])
+    push!(psiexl, xs[end])
+    push!(qexl, q_spline.y[end])
 
     equil.params.qextrema_psi = psiexl
     equil.params.qextrema_q = qexl
     equil.params.mextrema = length(psiexl)
     # Compute derived q-values
-    q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
-    qmax_edge = sq.fs[end, 4]
+    q0 = q_spline.y[1] - profiles.q_deriv.y[1] * xs[1]
+    qmax_edge = q_spline.y[end]
     qmin = min(minimum(qexl), q0)
     qmax = max(maximum(qexl), qmax_edge)
-    qa = sq.fs[end, 4] + sq.fs1[end, 4] * (1.0 - sq.xs[end])
+    qa = q_spline.y[end] + profiles.q_deriv.y[end] * (1.0 - xs[end])
 
-    f95 = Spl.evaluate!(sq, 0.95)
-    q95 = f95[4]
+    q95 = q_spline(0.95)
 
     # Store derived values
     equil.params.q0 = q0
@@ -396,7 +402,7 @@ Performs the same function as equil_out_gse in the Fortran code.
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     rzphi = equil.rzphi
-    sq = equil.sq
+    profiles = equil.profiles
     mpsi = length(rzphi.xs) - 1
     mtheta = length(rzphi.ys) - 1
     ro, zo = equil.ro, equil.zo
@@ -455,9 +461,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     # Compute source term using direct array access
     source = zeros(Float64, mpsi + 1, mtheta + 1)
     for ipsi in 1:(mpsi+1)
-        s1 = sq.fs[ipsi, 1]
-        s1p = sq.fs1[ipsi, 1]
-        s2p = sq.fs1[ipsi, 2]
+        s1 = profiles.F_spline.y[ipsi]
+        s1p = profiles.F_deriv.y[ipsi]
+        s2p = profiles.P_deriv.y[ipsi]
         for itheta in 1:(mtheta+1)
             f4 = rzphi.fs[ipsi, itheta, 4]
             denom = (2π * r[ipsi, itheta])^2
@@ -487,11 +493,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 1] = flux_fsx[ipsi+1, :, 1]
         fs_matrix[:, 2] = source[ipsi+1, :]
 
-        spline = Spl.FastCubicSpline1DMulti(Vector(flux.ys), fs_matrix; bc=Spl.PeriodicBC())
-        Spl.integrate!(spline)
-
-        term[ipsi+1, :] .= spline.fsi[end, :]
-        # spline will be automatically deallocated by finalizer
+        # Compute cumulative integral directly
+        fsi = Spl.cumulative_integral(Vector(flux.ys), fs_matrix)
+        term[ipsi+1, :] .= fsi[end, :]
     end
 
     totali = sum(term; dims=2)

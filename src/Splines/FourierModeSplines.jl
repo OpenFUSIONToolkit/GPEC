@@ -31,16 +31,15 @@ arrays and are NOT thread-safe. For multi-threaded usage:
 """
 
 using FFTW
-
-# Import from SplineAdapter (will be in same module)
-# CubicSpline1D is defined in SplineAdapter.jl
+import FastInterpolations
+using FastInterpolations: CubicInterpolant, cubic_interp, NaturalBC
 
 """
     FourierModeSplines{S}
 
 Fourier-based 2D interpolation: cubic in x (radial), Fourier series in y (poloidal).
 
-Uses FastCubicSpline1D for efficient radial interpolation with support for
+Uses CubicInterpolant for efficient radial interpolation with support for
 interval hint caching for O(1) lookups during sequential access.
 
 # Type Parameters
@@ -180,14 +179,14 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
     end
 
     # Create 1D splines for each Fourier coefficient in the radial direction
-    # Use FastCubicSpline1D for efficient evaluation with hint support
+    # Use native CubicInterpolant for efficient evaluation with hint support
     # For :extrap BC, compute boundary conditions per-spline from data
     if bc === :extrap
         template_bc = extrap_bc(xs, cos_coeffs[:, 1, 1])
     else
         template_bc = bc
     end
-    template_spline = FastCubicSpline1D(xs, cos_coeffs[:, 1, 1]; bc=template_bc)
+    template_spline = cubic_interp(xs, cos_coeffs[:, 1, 1]; bc=template_bc)
     SplineType = typeof(template_spline)
 
     cos_splines = Matrix{SplineType}(undef, nmodes, nqty)
@@ -202,8 +201,8 @@ function FourierModeSplines(xs::Vector{Float64}, ys::Vector{Float64},
                 cos_bc = bc
                 sin_bc = bc
             end
-            cos_splines[m, iq] = FastCubicSpline1D(xs, cos_coeffs[:, m, iq]; bc=cos_bc)
-            sin_splines[m, iq] = FastCubicSpline1D(xs, sin_coeffs[:, m, iq]; bc=sin_bc)
+            cos_splines[m, iq] = cubic_interp(xs, cos_coeffs[:, m, iq]; bc=cos_bc)
+            sin_splines[m, iq] = cubic_interp(xs, sin_coeffs[:, m, iq]; bc=sin_bc)
         end
     end
 
@@ -295,8 +294,9 @@ function evaluate!(fms::FourierModeSplines{S}, x::Float64, y::Float64; search=no
         sin_my = sin_vals[m+1]
 
         for iq in 1:fms.nqty
-            cm = fms.cos_splines[m+1, iq](x; search=search, hint=h)
-            sm = fms.sin_splines[m+1, iq](x; search=search, hint=h)
+            # Native CubicInterpolant doesn't accept search=nothing, so call conditionally
+            cm = search === nothing ? fms.cos_splines[m+1, iq](x; hint=h) : fms.cos_splines[m+1, iq](x; search=search, hint=h)
+            sm = search === nothing ? fms.sin_splines[m+1, iq](x; hint=h) : fms.sin_splines[m+1, iq](x; search=search, hint=h)
             fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
         end
     end
@@ -340,11 +340,11 @@ function deriv1!(fms::FourierModeSplines{S}, x::Float64, y::Float64; search=noth
         dsin_dy = m_omega * cos_my
 
         for iq in 1:fms.nqty
-            # FastCubicSpline1D returns scalars, use shared hint with LinearBinary search
-            cm = fms.cos_splines[m+1, iq](x; search=search, hint=h)
-            sm = fms.sin_splines[m+1, iq](x; search=search, hint=h)
-            dcm_dx = deriv1(fms.cos_splines[m+1, iq], x)
-            dsm_dx = deriv1(fms.sin_splines[m+1, iq], x)
+            # CubicInterpolant returns scalars, use shared hint
+            cm = search === nothing ? fms.cos_splines[m+1, iq](x; hint=h) : fms.cos_splines[m+1, iq](x; search=search, hint=h)
+            sm = search === nothing ? fms.sin_splines[m+1, iq](x; hint=h) : fms.sin_splines[m+1, iq](x; search=search, hint=h)
+            dcm_dx = FastInterpolations.deriv1(fms.cos_splines[m+1, iq])(x)
+            dsm_dx = FastInterpolations.deriv1(fms.sin_splines[m+1, iq])(x)
 
             fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
             fms._fx[iq] = muladd(dcm_dx, cos_my, muladd(dsm_dx, sin_my, fms._fx[iq]))
@@ -400,13 +400,13 @@ function deriv2!(fms::FourierModeSplines{S}, x::Float64, y::Float64; search=noth
         d2sin_dy2 = -m_omega_sq * sin_my
 
         for iq in 1:fms.nqty
-            # FastCubicSpline1D returns scalars, use shared hint with LinearBinary search
-            cm = fms.cos_splines[m+1, iq](x; search=search, hint=h)
-            sm = fms.sin_splines[m+1, iq](x; search=search, hint=h)
-            dcm_dx = deriv1(fms.cos_splines[m+1, iq], x)
-            dsm_dx = deriv1(fms.sin_splines[m+1, iq], x)
-            d2cm_dx2 = deriv2(fms.cos_splines[m+1, iq], x)
-            d2sm_dx2 = deriv2(fms.sin_splines[m+1, iq], x)
+            # CubicInterpolant returns scalars, use shared hint
+            cm = search === nothing ? fms.cos_splines[m+1, iq](x; hint=h) : fms.cos_splines[m+1, iq](x; search=search, hint=h)
+            sm = search === nothing ? fms.sin_splines[m+1, iq](x; hint=h) : fms.sin_splines[m+1, iq](x; search=search, hint=h)
+            dcm_dx = FastInterpolations.deriv1(fms.cos_splines[m+1, iq])(x)
+            dsm_dx = FastInterpolations.deriv1(fms.sin_splines[m+1, iq])(x)
+            d2cm_dx2 = FastInterpolations.deriv2(fms.cos_splines[m+1, iq])(x)
+            d2sm_dx2 = FastInterpolations.deriv2(fms.sin_splines[m+1, iq])(x)
 
             # f = Σ [cm·cos(m·ω·y) + sm·sin(m·ω·y)]
             fms._f[iq] = muladd(cm, cos_my, muladd(sm, sin_my, fms._f[iq]))
@@ -457,7 +457,7 @@ end
     empty_FourierModeSplines()
 
 Create an empty/placeholder FourierModeSplines for type stability.
-Uses 5 points for x since FastCubicSpline1D requires at least 4 points.
+Uses 5 points for x since CubicInterpolant requires at least 4 points.
 """
 function empty_FourierModeSplines()
     xs = collect(range(0.0, 1.0; length=5))

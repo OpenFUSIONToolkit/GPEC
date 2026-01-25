@@ -149,7 +149,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = Spl.FastCubicSpline1DMulti(xs_r, fs_r; bc=:extrap, extrap=:extension)
+    spl = Spl.MultiQuantityProfile(xs_r, fs_r; bc=:extrap, extrap=:extension)
 
     dr = lar_a / (ma + 1)
     r = 0.0
@@ -176,7 +176,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         sq_fs[ia, 3] = qval
     end
 
-    sq_in = Spl.FastCubicSpline1DMulti(sq_xs, sq_fs; bc=:extrap, extrap=:extension)
+    sq_in = Spl.MultiQuantityProfile(sq_xs, sq_fs; bc=:extrap, extrap=:extension)
 
     rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
@@ -267,7 +267,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
-    sq_in = Spl.FastCubicSpline1DMulti(psis, sqfs; bc=:extrap, extrap=:extension)
+    sq_in = Spl.MultiQuantityProfile(psis, sqfs; bc=:extrap, extrap=:extension)
 
     # Compute 2D data and spline
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]

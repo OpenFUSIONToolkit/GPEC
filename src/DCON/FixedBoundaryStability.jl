@@ -18,7 +18,7 @@ function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.Plasma
 
     # Loop over integration steps, computing crit/checking for zero crossings
     for istep in 1:odet.step
-        zero_cross, nonherm = check_for_zero_crossings!(odet, equil.sq, istep)
+        zero_cross, nonherm = check_for_zero_crossings!(odet, equil.profiles, istep)
         if zero_cross
             nzero += 1
         end
@@ -36,7 +36,7 @@ function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.Plasma
 end
 
 """
-    check_for_zero_crossings!(crit_store, odet, sq, istep) -> zero_cross, nonherm
+    check_for_zero_crossings!(odet, profiles, istep) -> zero_cross, nonherm
 
 Check if the critical eigenvalue (`crit`), i.e. the smallest eigenvalue of W⁻¹, changed
 signs between a given integration step `istep` and the previous step. We first compute
@@ -49,7 +49,7 @@ can do it post-integration rather than during and don't directly handle file out
 
 ### Arguments
 
-  - `sq::Union{Spl.FastCubicSpline1D, Spl.FastCubicSpline1DMulti}`: Spline object containing equilibrium profiles
+  - `profiles::ProfileSplines`: Profile splines containing equilibrium profiles
   - `istep::Int`: Current integration step index
 
 ### Returns
@@ -57,13 +57,13 @@ can do it post-integration rather than during and don't directly handle file out
   - `zero_cross::Bool`: True if a physical zero crossing was detected
   - `nonherm::Bool`: True if W⁻¹ was non-Hermitian beyond tolerance
 """
-function check_for_zero_crossings!(odet::OdeState, sq::Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti}, istep::Int)
+function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
 
     # Compute smallest eigenvalue (crit) at current step
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
     psi = odet.psi_store[istep]
     u = odet.u_store[:, :, :, istep]
-    dVdpsi = Spl.evaluate!(sq, psi; search=Spl.LinearBinary(), hint=odet.spline_hint)[3]
+    dVdpsi = profiles.dVdpsi_spline(psi; search=LinearBinary(), hint=odet.spline_hint)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
 
@@ -76,12 +76,12 @@ function check_for_zero_crossings!(odet::OdeState, sq::Union{Spl.FastCubicSpline
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
-        dVdpsi = Spl.evaluate!(sq, psi_mid; search=Spl.LinearBinary(), hint=odet.spline_hint)[3]
+        dVdpsi = profiles.dVdpsi_spline(psi_mid; search=LinearBinary(), hint=odet.spline_hint)
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
             zero_cross = true
-            println("Zero crossing detected at psi = $psi_mid, q = $q_mid")
+            println("Zero crossing detected at psi = $psi_mid")
         end
     end
     return zero_cross, nonherm

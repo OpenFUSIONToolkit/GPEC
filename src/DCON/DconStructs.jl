@@ -82,7 +82,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `locstab::Spl.FastCubicSpline1D` - Spline for local stability analysis
+  - `locstab::Spl.MultiQuantityProfile` - Spline for local stability analysis
 """
 @kwdef mutable struct DconInternal
     dir_path::String = ""
@@ -106,7 +106,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::Spl.FastCubicSpline1DMulti = Spl.empty_FastCubicSpline1DMulti(Float64, 5)
+    locstab::Spl.MultiQuantityProfile = Spl.empty_MultiQuantityProfile(5)
     debug_settings::DebugSettings = DebugSettings()
 end
 
@@ -432,7 +432,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 
-    # Shared hint for FastCubicSpline1D interval search optimization during ODE integration
+    # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
     spline_hint::Base.RefValue{Int} = Ref(1)
 end

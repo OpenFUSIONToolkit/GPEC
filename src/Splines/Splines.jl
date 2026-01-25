@@ -1,19 +1,18 @@
 module SplinesMod
 
 # Pure Julia spline implementations
-# FastInterpolationsAdaptor.jl provides FastCubicSpline1D and FastCubicSpline1DMulti
+# FastInterpolationsAdaptor.jl provides helpers and MultiQuantityProfile
+# The codebase uses native CubicInterpolant from FastInterpolations directly
 include("FastInterpolationsAdaptor.jl")
 include("BicubicSpline.jl")
 include("FourierModeSplines.jl")
 
-# Re-export FastInterpolations search strategies for use with FastCubicSpline1D hint/search kwargs
+# Re-export FastInterpolations search strategies for use with CubicInterpolant hint/search kwargs
 using FastInterpolations: LinearBinary, Binary, HintedBinary
 
 # Exports
-export FastCubicSpline1D, empty_FastCubicSpline1D
-export FastCubicSpline1DMulti, empty_FastCubicSpline1DMulti
-export evaluate!, deriv1!, deriv2!, deriv3!, integrate!
-export deriv1, deriv2, deriv3  # Non-mutating versions for FastCubicSpline1D
+export MultiQuantityProfile, empty_MultiQuantityProfile
+export evaluate!, deriv1!, integrate!, cumulative_integral
 export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation
 export BicubicSpline, empty_BicubicSpline, BicubicBC
 export FourierModeSplines, empty_FourierModeSplines, FourierCoefficients

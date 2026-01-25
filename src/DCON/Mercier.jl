@@ -8,20 +8,20 @@ in the Fortran code.
 function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
     # Shorthand
-    sq = plasma_eq.sq
+    profiles = plasma_eq.profiles
     rzphi = plasma_eq.rzphi
 
     # Allocate splines
     ff_fs = zeros(length(rzphi.ys), 5)
 
     # Compute surface quantities
-    for ipsi in 1:length(sq.xs)
-        twopif = sq.fs[ipsi, 1]
-        p1 = sq.fs1[ipsi, 2]
-        v1 = sq.fs[ipsi, 3]
-        v2 = sq.fs1[ipsi, 3]
-        q = sq.fs[ipsi, 4]
-        q1 = sq.fs1[ipsi, 4]
+    for ipsi in 1:length(profiles.xs)
+        twopif = profiles.F_spline.y[ipsi]
+        p1 = profiles.P_deriv.y[ipsi]
+        v1 = profiles.dVdpsi_spline.y[ipsi]
+        v2 = profiles.dVdpsi_deriv.y[ipsi]
+        q = profiles.q_spline.y[ipsi]
+        q1 = profiles.q_deriv.y[ipsi]
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian
@@ -59,11 +59,9 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        ff = Spl.FastCubicSpline1DMulti(Vector(rzphi.ys), ff_fs; bc=Spl.PeriodicBC())
-
-        # Integrate quantities with respect to theta
-        Spl.integrate!(ff)
-        avg = ff.fsi[end, :]
+        # Integrate quantities with respect to theta using cumulative integral
+        ff_fsi = Spl.cumulative_integral(Vector(rzphi.ys), ff_fs)
+        avg = ff_fsi[end, :]
 
         # Evaluate Mercier criterion and related quantities
         term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]
@@ -73,8 +71,8 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
 
         # Store results in output spline structure
-        locstab_fs[ipsi, 1] = di * sq.xs[ipsi]
-        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * sq.xs[ipsi]
+        locstab_fs[ipsi, 1] = di * profiles.xs[ipsi]
+        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * profiles.xs[ipsi]
         locstab_fs[ipsi, 3] = h
     end
 end

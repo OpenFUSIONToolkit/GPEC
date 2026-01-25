@@ -44,7 +44,8 @@ function Main(path::String="./")
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
-    locstab_fs = zeros(Float64, length(equil.sq.xs), 5)
+    profiles_xs = equil.profiles.xs
+    locstab_fs = zeros(Float64, length(profiles_xs), 5)
     if ctrl.mer_flag
         if ctrl.verbose
             println("Evaluating Mercier criterion")
@@ -56,7 +57,7 @@ function Main(path::String="./")
     end
 
     # Fit data to splines
-    intr.locstab = Spl.FastCubicSpline1DMulti(Vector(equil.sq.xs), locstab_fs; bc=:extrap, extrap=:extension)
+    intr.locstab = Spl.MultiQuantityProfile(Vector(profiles_xs), locstab_fs; bc=:extrap, extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -238,19 +239,18 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["equil/ro"] = equil.ro
         out_h5["equil/zo"] = equil.zo
 
-        # Write spline arrays
-        out_h5["splines/sq/xs"] = Vector(equil.sq.xs)
-        # TODO: getting errors when trying to dump just fs, so splitting for now, which adds so many lines
-        # This should be fixed if we separate these like Nik mentioned
-        out_h5["splines/sq/fs/2piF"] = equil.sq.fs[:, 1]
-        out_h5["splines/sq/fs/mu0p"] = equil.sq.fs[:, 2]
-        out_h5["splines/sq/fs/dVdpsi"] = equil.sq.fs[:, 3]
-        out_h5["splines/sq/fs/q"] = equil.sq.fs[:, 4]
-        out_h5["splines/sq/fs1/2piF"] = equil.sq.fs1[:, 1]
-        out_h5["splines/sq/fs1/mu0p"] = equil.sq.fs1[:, 2]
-        out_h5["splines/sq/fs1/dVdpsi"] = equil.sq.fs1[:, 3]
-        out_h5["splines/sq/fs1/q"] = equil.sq.fs1[:, 4]
-        out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
+        # Write spline arrays (using profiles with named splines)
+        profiles = equil.profiles
+        out_h5["splines/sq/xs"] = Vector(profiles.xs)
+        out_h5["splines/sq/fs/2piF"] = Vector(profiles.F_spline.y)
+        out_h5["splines/sq/fs/mu0p"] = Vector(profiles.P_spline.y)
+        out_h5["splines/sq/fs/dVdpsi"] = Vector(profiles.dVdpsi_spline.y)
+        out_h5["splines/sq/fs/q"] = Vector(profiles.q_spline.y)
+        out_h5["splines/sq/fs1/2piF"] = Vector(profiles.F_deriv.y)
+        out_h5["splines/sq/fs1/mu0p"] = Vector(profiles.P_deriv.y)
+        out_h5["splines/sq/fs1/dVdpsi"] = Vector(profiles.dVdpsi_deriv.y)
+        out_h5["splines/sq/fs1/q"] = Vector(profiles.q_deriv.y)
+        out_h5["splines/sq/xpower"] = 0
         out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
         out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
         # BicubicSpline stores fs as 3D array (nx × ny × nqty)

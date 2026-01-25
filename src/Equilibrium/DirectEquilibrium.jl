@@ -29,7 +29,7 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti}}
+struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:Union{FastInterpolations.CubicInterpolant,Spl.MultiQuantityProfile}}
     ro::Float64
     zo::Float64
     psi_in::B
@@ -64,7 +64,7 @@ function direct_get_bfield!(
     r::Float64,
     z::Float64,
     psi_in::Spl.BicubicSpline,
-    sq_in::Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},
+    sq_in::Union{FastInterpolations.CubicInterpolant,Spl.MultiQuantityProfile},
     psio::Float64;
     derivs::Int=0
 )
@@ -465,14 +465,16 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         )
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
-        ff = Spl.FastCubicSpline1DMulti(ff_x_nodes, ff_fs_nodes; bc=Spl.PeriodicBC())
+
+        # Create native interpolants for each column
+        ff_interps = ntuple(k -> cubic_interp(ff_x_nodes, ff_fs_nodes[:, k]; bc=PeriodicBC()), 4)
+        ff_derivs = ntuple(k -> deriv1(ff_interps[k]), 4)
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
-            f = Spl.evaluate!(ff, theta_nodes[itheta])
-            f1 = Spl.deriv1!(ff, theta_nodes[itheta])
-            @views rzphi_nodes[ipsi, itheta, 1:3] = f[1:3]
-            jac_term = (1.0 + f1[4]) * y_out[end, 2] * 2π * psio
+            theta = theta_nodes[itheta]
+            @views rzphi_nodes[ipsi, itheta, 1:3] .= (ff_interps[1](theta), ff_interps[2](theta), ff_interps[3](theta))
+            jac_term = (1.0 + ff_derivs[4](theta)) * y_out[end, 2] * 2π * psio
             rzphi_nodes[ipsi, itheta, 4] = jac_term
         end
 
@@ -483,24 +485,37 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
     end
 
-    # Fit 1D profile spline `sq` and perform q-profile revision if needed
-    sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bc=:extrap, extrap=:extension)
-    q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
+    # Create temporary ProfileSplines for q-profile revision calculation
+    profiles = ProfileSplines(
+        psi_nodes,
+        sq_nodes[:, 1],  # F * 2π
+        sq_nodes[:, 2],  # P * μ₀
+        sq_nodes[:, 3],  # dV/dψ
+        sq_nodes[:, 4]   # q
+    )
+    # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
+    q0 = profiles.q_spline.y[1] - profiles.q_deriv.y[1] * psi_nodes[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
     if equil_params.newq0 != 0.0
         println("Revising q-profile for newq0 = $(equil_params.newq0)...")
-        f0 = sq.fs[1, 1] - sq.fs1[1, 1] * sq.xs[1]
+        f0 = profiles.F_spline.y[1] - profiles.F_deriv.y[1] * psi_nodes[1]
         f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / sq.fs[i, 1]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
         end
-        # Re-create the spline with the revised data
-        sq = Spl.FastCubicSpline1DMulti(psi_nodes, sq_nodes; bc=:extrap, extrap=:extension)
+        # Re-create profiles with the revised data
+        profiles = ProfileSplines(
+            psi_nodes,
+            sq_nodes[:, 1],  # F * 2π
+            sq_nodes[:, 2],  # P * μ₀
+            sq_nodes[:, 3],  # dV/dψ
+            sq_nodes[:, 4]   # q
+        )
     end
 
     # Fit the geometric spline `rzphi` using bicubic spline with extrap/periodic BCs.
@@ -513,9 +528,8 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
-        fsq = Spl.evaluate!(sq, psi_nodes[ipsi])
-        q = fsq[4]
-        f_val = fsq[1]
+        q = profiles.q_spline.y[ipsi]
+        f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
             # Evaluate at grid point coordinates
@@ -557,14 +571,5 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes,
         :extrap, Spl.PeriodicBC())
 
-    # Create ProfileSplines from the sq_nodes data (uses extrap BC internally)
-    profiles = ProfileSplines(
-        psi_nodes,
-        sq_nodes[:, 1],  # F * 2π
-        sq_nodes[:, 2],  # P * μ₀
-        sq_nodes[:, 3],  # dV/dψ
-        sq_nodes[:, 4]   # q
-    )
-
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles, sq, rzphi, eqfun, ro, zo, psio)
+    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles, rzphi, eqfun, ro, zo, psio)
 end

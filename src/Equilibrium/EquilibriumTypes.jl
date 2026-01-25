@@ -279,7 +279,7 @@ raw equilibrium data and preparing the initial splines.
 
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
-          * 1D profiles are represented by `FastCubicSpline1D`
+          * 1D profiles are represented by `CubicInterpolant` or `MultiQuantityProfile`
           * 2D flux surfaces by `BicubicSpline`
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
@@ -287,9 +287,9 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput{S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},B<:Spl.BicubicSpline}
+mutable struct DirectRunInput{S<:Union{FastInterpolations.CubicInterpolant,Spl.MultiQuantityProfile},B<:Spl.BicubicSpline}
     config::EquilibriumConfig
-    sq_in::S       # 1D profile spline (FastCubicSpline1D or FastCubicSpline1DMulti for multi-quantity)
+    sq_in::S       # 1D profile spline (MultiQuantityProfile or legacy FastCubicSpline types)
     psi_in::B      # 2D flux spline (BicubicSpline)
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
@@ -306,15 +306,15 @@ A container struct for inputs to the `inverse_run` function.
 ## Fields
 
   - `config::EquilibriumConfig` - The equilibrium configuration object
-  - `sq_in::FastCubicSpline1D` - 1D spline input profile (F*Bt, Pressure, q)
+  - `sq_in::CubicInterpolant` - 1D spline input profile (F*Bt, Pressure, q)
   - `rz_in::BicubicSpline` - 2D bicubic spline for (R,Z) geometry
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput{S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},B<:Spl.BicubicSpline}
+mutable struct InverseRunInput{S<:Union{FastInterpolations.CubicInterpolant,Spl.MultiQuantityProfile},B<:Spl.BicubicSpline}
     config::EquilibriumConfig
-    sq_in::S   # 1D spline input profile (e.g. F*Bt, Pressure, q)
+    sq_in::S   # 1D spline input profile (MultiQuantityProfile or legacy FastCubicSpline types)
     rz_in::B   # 2D bicubic spline input for (R,Z) geometry
     ro::Float64          # R axis location
     zo::Float64          # Z axis location
@@ -435,7 +435,7 @@ end
 """
     ProfileSplines
 
-Named 1D splines for equilibrium profiles, replacing the monolithic `sq` spline.
+Named 1D splines for equilibrium profiles using native FastInterpolations types.
 Each profile is stored as a separate spline for code clarity.
 
 # Fields
@@ -446,33 +446,35 @@ Each profile is stored as a separate spline for code clarity.
   - `dVdpsi_spline`: dV/dψ (volume derivative)
   - `q_spline`: q (safety factor)
 
-# Cached Arrays (for efficient grid-point access)
+# Derivative Interpolants (for continuous derivative evaluation)
 
-  - `F_vals`, `P_vals`, `dVdpsi_vals`, `q_vals`: Values at grid points
-  - `F_derivs`, `P_derivs`, `dVdpsi_derivs`, `q_derivs`: First derivatives at grid points
+  - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
+
+# Notes
+
+  - Node values at grid points: Access via `spline.y[i]`
+  - Derivative at grid points: Access via `deriv.y[i]`
+  - Grid: Access via `xs` field or `spline.cache.x`
 """
-struct ProfileSplines{S}
+struct ProfileSplines{S,D}
     xs::Vector{Float64}
+    # Value interpolants
     F_spline::S
     P_spline::S
     dVdpsi_spline::S
     q_spline::S
-    # Cached values at grid points
-    F_vals::Vector{Float64}
-    P_vals::Vector{Float64}
-    dVdpsi_vals::Vector{Float64}
-    q_vals::Vector{Float64}
-    # Cached first derivatives at grid points
-    F_derivs::Vector{Float64}
-    P_derivs::Vector{Float64}
-    dVdpsi_derivs::Vector{Float64}
-    q_derivs::Vector{Float64}
+    # Derivative interpolants
+    F_deriv::D
+    P_deriv::D
+    dVdpsi_deriv::D
+    q_deriv::D
 end
 
 """
     ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=:extension)
 
 Create ProfileSplines from arrays of profile values using extrap BC.
+Uses native FastInterpolations CubicInterpolant types.
 """
 function ProfileSplines(xs::Vector{Float64},
     F_vals::Vector{Float64},
@@ -486,23 +488,27 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(dVdpsi_vals) == npts
     @assert length(q_vals) == npts
 
-    # Create individual splines with extrap BC
-    F_spline = Spl.FastCubicSpline1D(xs, F_vals; bc=Spl.extrap_bc(xs, F_vals), extrap=extrap)
-    P_spline = Spl.FastCubicSpline1D(xs, P_vals; bc=Spl.extrap_bc(xs, P_vals), extrap=extrap)
-    dVdpsi_spline = Spl.FastCubicSpline1D(xs, dVdpsi_vals; bc=Spl.extrap_bc(xs, dVdpsi_vals), extrap=extrap)
-    q_spline = Spl.FastCubicSpline1D(xs, q_vals; bc=Spl.extrap_bc(xs, q_vals), extrap=extrap)
+    # Create value interpolants with extrap BC
+    F_spline = cubic_interp(xs, F_vals; bc=Spl.extrap_bc(xs, F_vals), extrap=extrap)
+    P_spline = cubic_interp(xs, P_vals; bc=Spl.extrap_bc(xs, P_vals), extrap=extrap)
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=Spl.extrap_bc(xs, dVdpsi_vals), extrap=extrap)
+    q_spline = cubic_interp(xs, q_vals; bc=Spl.extrap_bc(xs, q_vals), extrap=extrap)
 
-    # Extract cached derivatives from the splines
-    F_derivs = vec(F_spline.fs1)
-    P_derivs = vec(P_spline.fs1)
-    dVdpsi_derivs = vec(dVdpsi_spline.fs1)
-    q_derivs = vec(q_spline.fs1)
+    # Compute derivative values at grid points and create derivative interpolants
+    F_deriv_vals = [deriv1(F_spline)(x) for x in xs]
+    P_deriv_vals = [deriv1(P_spline)(x) for x in xs]
+    dVdpsi_deriv_vals = [deriv1(dVdpsi_spline)(x) for x in xs]
+    q_deriv_vals = [deriv1(q_spline)(x) for x in xs]
 
-    ProfileSplines{typeof(F_spline)}(
+    F_deriv = cubic_interp(xs, F_deriv_vals; bc=Spl.extrap_bc(xs, F_deriv_vals), extrap=extrap)
+    P_deriv = cubic_interp(xs, P_deriv_vals; bc=Spl.extrap_bc(xs, P_deriv_vals), extrap=extrap)
+    dVdpsi_deriv = cubic_interp(xs, dVdpsi_deriv_vals; bc=Spl.extrap_bc(xs, dVdpsi_deriv_vals), extrap=extrap)
+    q_deriv = cubic_interp(xs, q_deriv_vals; bc=Spl.extrap_bc(xs, q_deriv_vals), extrap=extrap)
+
+    ProfileSplines{typeof(F_spline),typeof(F_deriv)}(
         xs,
         F_spline, P_spline, dVdpsi_spline, q_spline,
-        copy(F_vals), copy(P_vals), copy(dVdpsi_vals), copy(q_vals),
-        F_derivs, P_derivs, dVdpsi_derivs, q_derivs
+        F_deriv, P_deriv, dVdpsi_deriv, q_deriv
     )
 end
 
@@ -521,14 +527,8 @@ This object provides a complete representation of the processed plasma equilibri
     Computed equilibrium parameters and diagnostics.
   - `profiles::ProfileSplines`:
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
-  - `sq::FastCubicSpline1D`:
-    1D profile spline with 4 quantities.
-
-      + **x value:** normalized ψ
-      + **Quantity 1:** Toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
-      + **Quantity 2:** Pressure × μ₀, `P * μ₀`
-      + **Quantity 3:** dV/dψ
-      + **Quantity 4:** q
+    Access values at grid points via `profiles.F_spline.y[i]`, etc.
+    Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
   - `rzphi::BicubicSpline`:
     2D bicubic spline for flux-coordinate mapping with periodic boundary conditions in theta.
 
@@ -550,11 +550,10 @@ This object provides a complete representation of the processed plasma equilibri
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{S<:Union{Spl.FastCubicSpline1D,Spl.FastCubicSpline1DMulti},P<:ProfileSplines,B1,B2}
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,B1,B2}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
-    sq::S
     rzphi::B1
     eqfun::B2
     ro::Float64

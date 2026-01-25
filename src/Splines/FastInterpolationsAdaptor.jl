@@ -1,11 +1,11 @@
 """
-FastInterpolationsAdaptor - Wrappers around FastInterpolations.jl for JPEC
+FastInterpolationsAdaptor - Helpers and types for FastInterpolations.jl in JPEC
 
 This module provides:
-- FastCubicSpline1D: Single-quantity 1D cubic spline
-- FastCubicSpline1DMulti: Multi-quantity 1D cubic spline
 - extrap_bc: Helper to create BCPair for 4-point endpoint derivative extrapolation
 - extrap_bc_matrix: Per-column BCPairs for matrix of y-series
+- cumulative_integral: Trapezoidal integration helper
+- MultiQuantityProfile: Multi-quantity 1D profile using native CubicInterpolant
 
 ## Boundary Conditions
 
@@ -16,13 +16,8 @@ Use FastInterpolations' native BC types directly:
 
 ## Performance Notes
 
-All evaluation methods are allocation-free. For monotonic access patterns (typical in
-ODE integration), use `hint=Ref(1)` with `search=LinearBinary()` for optimal performance
-(~4 ns/pt).
-
-# Thread Safety
-Multi-quantity splines modify internal work arrays and are NOT thread-safe.
-For parallel evaluation, create separate spline instances per thread.
+For monotonic access patterns (typical in ODE integration), use `hint=Ref(1)` with
+`search=LinearBinary()` for optimal performance (~4 ns/pt).
 """
 
 using FastInterpolations
@@ -62,7 +57,7 @@ A `BCPair(Deriv1(yp_left), Deriv1(yp_right))` specifying first derivatives at en
 ```julia
 xs = collect(range(0, 1; length=100))
 fs = sin.(xs)
-spline = FastCubicSpline1D(xs, fs; bc=extrap_bc(xs, fs))
+spline = cubic_interp(xs, fs; bc=extrap_bc(xs, fs))
 ```
 """
 @inline function extrap_bc(xs::AbstractVector{Float64}, fs::AbstractVector{Float64})
@@ -134,335 +129,152 @@ function extrap_bc_matrix(xs::AbstractVector{Float64}, Y::Matrix{Float64})
     return bcs
 end
 
-
 # =============================================================================
-# FastCubicSpline1D - Single Quantity
+# Cumulative Integration Helper
 # =============================================================================
 
 """
-    FastCubicSpline1D{T, I, D1, D2, D3}
+    cumulative_integral(xs, fs) -> Vector
 
-A 1D cubic spline interpolator wrapping FastInterpolations.jl for a single quantity.
+Compute cumulative integral of fs over xs using trapezoidal rule.
+Returns vector where result[1] = 0 and result[i+1] = result[i] + ∫_{xs[i]}^{xs[i+1]} f dx.
 
-# Type Parameters
-
-  - `T`: Element type (Float64 or ComplexF64)
-  - `I`: Interpolant type from FastInterpolations
-  - `D1`, `D2`, `D3`: Derivative view types
-
-# Evaluation
-
-The callable `(spline)(x)` supports keyword arguments:
-
-  - `search`: Search strategy. Use `LinearBinary()` for monotonic access.
-  - `hint`: Mutable `Ref{Int}` for O(1) sequential lookups.
+For matrix fs (npts × nqty), returns matrix of same shape with cumulative integrals per column.
 """
-struct FastCubicSpline1D{T<:Union{Float64,ComplexF64},I,D1,D2,D3}
-    xs::Vector{Float64}
-    fs::Vector{T}
-    fs1::Vector{T}        # First derivatives at grid points
-    fsi::Vector{T}        # Cumulative integrals
-    interp::I             # CubicInterpolant (or tuple for complex)
-    d1_view::D1           # deriv1 view
-    d2_view::D2           # deriv2 view
-    d3_view::D3           # deriv3 view
-end
-
-"""
-    FastCubicSpline1D(xs, fs; bc=NaturalBC(), extrap=:none)
-
-Create a 1D cubic spline interpolator.
-
-# Arguments
-
-  - `xs::Vector{Float64}`: Grid points (sorted ascending, at least 4 points)
-  - `fs::Vector{T}`: Function values at grid points
-  - `bc`: Boundary condition - use `NaturalBC()`, `PeriodicBC()`, or `extrap_bc(xs, fs)`
-  - `extrap`: Extrapolation behavior (`:none`, `:constant`, `:extension`, `:wrap`)
-
-# Example
-
-```julia
-xs = collect(range(0, 2π; length=100))
-fs = sin.(xs)
-
-# Natural BC (default)
-spline = FastCubicSpline1D(xs, fs)
-
-# Periodic BC
-spline = FastCubicSpline1D(xs, fs; bc=PeriodicBC())
-
-# Extrap BC (GPEC-style)
-spline = FastCubicSpline1D(xs, fs; bc=extrap_bc(xs, fs))
-```
-"""
-function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{Float64};
-    bc=NaturalBC(), extrap::Symbol=:none)
-
+function cumulative_integral(xs::AbstractVector{Float64}, fs::AbstractVector{T}) where {T}
     npts = length(xs)
-    @assert length(fs) == npts "xs and fs must have same length"
-    @assert npts >= 4 "Need at least 4 points for spline"
-    @assert issorted(xs) "xs must be sorted ascending"
-
-    itp = cubic_interp(xs, fs; bc=bc, extrap=extrap)
-    d1 = FastInterpolations.deriv1(itp)
-    d2 = FastInterpolations.deriv2(itp)
-    d3 = FastInterpolations.deriv3(itp)
-
-    fs1 = [d1(x) for x in xs]
-    fsi = zeros(Float64, npts)
-
-    FastCubicSpline1D{Float64,typeof(itp),typeof(d1),typeof(d2),typeof(d3)}(
-        xs, copy(fs), fs1, fsi, itp, d1, d2, d3
-    )
-end
-
-# Complex version - stores separate real/imag interpolants
-function FastCubicSpline1D(xs::Vector{Float64}, fs::Vector{ComplexF64};
-    bc=NaturalBC(), extrap::Symbol=:none)
-
-    npts = length(xs)
-    @assert length(fs) == npts "xs and fs must have same length"
-    @assert npts >= 4 "Need at least 4 points for spline"
-    @assert issorted(xs) "xs must be sorted ascending"
-
-    fs_real = real.(fs)
-    fs_imag = imag.(fs)
-
-    # Handle different BC input formats
-    if bc isa Tuple{BCPair,BCPair}
-        # Pre-computed (bc_real, bc_imag) tuple from extrap_bc for complex data
-        bc_real, bc_imag = bc
-    elseif bc isa BCPair
-        # Single BCPair passed - recompute separate BCs for real/imag parts
-        bc_real = extrap_bc(xs, fs_real)
-        bc_imag = extrap_bc(xs, fs_imag)
-    else
-        # NaturalBC or PeriodicBC - use same for both
-        bc_real = bc
-        bc_imag = bc
-    end
-
-    itp_real = cubic_interp(xs, fs_real; bc=bc_real, extrap=extrap)
-    itp_imag = cubic_interp(xs, fs_imag; bc=bc_imag, extrap=extrap)
-    d1_real = FastInterpolations.deriv1(itp_real)
-    d1_imag = FastInterpolations.deriv1(itp_imag)
-    d2_real = FastInterpolations.deriv2(itp_real)
-    d2_imag = FastInterpolations.deriv2(itp_imag)
-    d3_real = FastInterpolations.deriv3(itp_real)
-    d3_imag = FastInterpolations.deriv3(itp_imag)
-
-    itp = (itp_real, itp_imag)
-    d1 = (d1_real, d1_imag)
-    d2 = (d2_real, d2_imag)
-    d3 = (d3_real, d3_imag)
-
-    fs1 = [d1_real(x) + 1im * d1_imag(x) for x in xs]
-    fsi = zeros(ComplexF64, npts)
-
-    FastCubicSpline1D{ComplexF64,typeof(itp),typeof(d1),typeof(d2),typeof(d3)}(
-        xs, copy(fs), fs1, fsi, itp, d1, d2, d3
-    )
-end
-
-# =============================================================================
-# FastCubicSpline1D Evaluation Methods
-# =============================================================================
-
-@inline function (spline::FastCubicSpline1D{Float64})(x::Float64; search=nothing, hint=nothing)
-    if search === nothing && hint === nothing
-        return spline.interp(x)
-    elseif hint === nothing
-        return spline.interp(x; search=search)
-    elseif search === nothing
-        return spline.interp(x; hint=hint)
-    else
-        return spline.interp(x; search=search, hint=hint)
-    end
-end
-
-@inline function (spline::FastCubicSpline1D{ComplexF64})(x::Float64; search=nothing, hint=nothing)
-    itp_real, itp_imag = spline.interp
-    if search === nothing && hint === nothing
-        return itp_real(x) + 1im * itp_imag(x)
-    elseif hint === nothing
-        return itp_real(x; search=search) + 1im * itp_imag(x; search=search)
-    elseif search === nothing
-        return itp_real(x; hint=hint) + 1im * itp_imag(x; hint=hint)
-    else
-        return itp_real(x; search=search, hint=hint) + 1im * itp_imag(x; search=search, hint=hint)
-    end
-end
-
-@inline evaluate(spline::FastCubicSpline1D, x::Float64; search=nothing, hint=nothing) = spline(x; search=search, hint=hint)
-
-@inline function deriv1(spline::FastCubicSpline1D{Float64}, x::Float64)
-    return spline.d1_view(x)
-end
-
-@inline function deriv1(spline::FastCubicSpline1D{ComplexF64}, x::Float64)
-    d1_r, d1_i = spline.d1_view
-    return d1_r(x) + 1im * d1_i(x)
-end
-
-@inline function deriv2(spline::FastCubicSpline1D{Float64}, x::Float64)
-    return spline.d2_view(x)
-end
-
-@inline function deriv2(spline::FastCubicSpline1D{ComplexF64}, x::Float64)
-    d2_r, d2_i = spline.d2_view
-    return d2_r(x) + 1im * d2_i(x)
-end
-
-@inline function deriv3(spline::FastCubicSpline1D{Float64}, x::Float64)
-    return spline.d3_view(x)
-end
-
-@inline function deriv3(spline::FastCubicSpline1D{ComplexF64}, x::Float64)
-    d3_r, d3_i = spline.d3_view
-    return d3_r(x) + 1im * d3_i(x)
-end
-
-function integrate!(spline::FastCubicSpline1D{T}) where {T}
-    npts = length(spline.xs)
-    spline.fsi[1] = zero(T)
+    fsi = zeros(T, npts)
     @inbounds for i in 1:(npts-1)
-        h = spline.xs[i+1] - spline.xs[i]
-        spline.fsi[i+1] = spline.fsi[i] + h * (spline.fs[i] + spline.fs[i+1]) / 2
+        h = xs[i+1] - xs[i]
+        fsi[i+1] = fsi[i] + h * (fs[i] + fs[i+1]) / 2
     end
-    return spline.fsi
+    return fsi
 end
 
-function empty_FastCubicSpline1D(::Type{T}) where {T<:Union{Float64,ComplexF64}}
-    xs = collect(range(0.0, 1.0; length=5))
-    fs = zeros(T, 5)
-    FastCubicSpline1D(xs, fs)
+function cumulative_integral(xs::AbstractVector{Float64}, fs::AbstractMatrix{T}) where {T}
+    npts, nqty = size(fs)
+    fsi = zeros(T, npts, nqty)
+    @inbounds for k in 1:nqty
+        for i in 1:(npts-1)
+            h = xs[i+1] - xs[i]
+            fsi[i+1, k] = fsi[i, k] + h * (fs[i, k] + fs[i+1, k]) / 2
+        end
+    end
+    return fsi
 end
-
-# Compatibility aliases
-@inline evaluate!(spline::FastCubicSpline1D, x::Float64; search=nothing, hint=nothing) = spline(x; search=search, hint=hint)
-@inline deriv1!(spline::FastCubicSpline1D, x::Float64) = deriv1(spline, x)
-@inline deriv2!(spline::FastCubicSpline1D, x::Float64) = deriv2(spline, x)
-@inline deriv3!(spline::FastCubicSpline1D, x::Float64) = deriv3(spline, x)
-
 
 # =============================================================================
-# FastCubicSpline1DMulti - Multi-Quantity Version
+# MultiQuantityProfile - Native Multi-Quantity Spline
 # =============================================================================
 
 """
-    FastCubicSpline1DMulti{T, N, S}
+    MultiQuantityProfile{N}
 
-A multi-quantity 1D cubic spline wrapping multiple FastCubicSpline1D instances.
-Returns vectors when evaluated.
+A multi-quantity 1D profile using native FastInterpolations CubicInterpolant.
+Provides direct access to grid (xs), values (fs), and interpolation/derivative evaluation.
+
+## Fields
+
+  - `xs::Vector{Float64}`: Grid points (same as interps[1].cache.x)
+  - `fs::Matrix{Float64}`: Function values at grid points (npts × nqty)
+  - `interps::NTuple{N,CubicInterpolant}`: Native interpolants for each quantity
+  - `derivs::NTuple{N,DerivativeView}`: First derivative views
+  - `fsi::Matrix{Float64}`: Integrated values (computed lazily via integrate!)
+  - `_eval_buf::Vector{Float64}`: Preallocated buffer for evaluation
+  - `_deriv_buf::Vector{Float64}`: Preallocated buffer for derivative evaluation
 """
-struct FastCubicSpline1DMulti{T<:Union{Float64,ComplexF64},N,S<:FastCubicSpline1D{T}}
+mutable struct MultiQuantityProfile{N,I<:FastInterpolations.CubicInterpolant,D<:FastInterpolations.DerivativeView}
     xs::Vector{Float64}
-    fs::Matrix{T}
-    fs1::Matrix{T}
-    fsi::Matrix{T}
-    mx::Int
-    splines::NTuple{N,S}
-    _f::Vector{T}
-    _f1::Vector{T}
-    _f2::Vector{T}
-    _f3::Vector{T}
+    fs::Matrix{Float64}
+    interps::NTuple{N,I}
+    derivs::NTuple{N,D}
+    fsi::Matrix{Float64}
+    _eval_buf::Vector{Float64}
+    _deriv_buf::Vector{Float64}
 end
 
 """
-    FastCubicSpline1DMulti(xs, fs; bc=NaturalBC(), extrap=:none)
+    MultiQuantityProfile(xs, fs; bc=:extrap, extrap=:extension)
 
-Create a multi-quantity 1D cubic spline.
+Create a MultiQuantityProfile from grid points and values matrix.
 
 # Arguments
 
   - `xs::Vector{Float64}`: Grid points (sorted ascending, at least 4 points)
-  - `fs::Matrix{T}`: Function values (npts × nqty)
-  - `bc`: Boundary condition - use `NaturalBC()`, `PeriodicBC()`, or `:extrap`
-    For `:extrap`, the BC is computed per-quantity from the data.
+  - `fs::Matrix{Float64}`: Function values (npts × nqty)
+  - `bc`: Boundary condition - `:extrap` for GPEC-style extrapolation, or a BCPair/NaturalBC/PeriodicBC
   - `extrap`: Extrapolation behavior (`:none`, `:constant`, `:extension`, `:wrap`)
 """
-function FastCubicSpline1DMulti(xs::Vector{Float64}, fs::Matrix{T};
-    bc=NaturalBC(), extrap::Symbol=:none) where {T<:Union{Float64,ComplexF64}}
+function MultiQuantityProfile(xs::Vector{Float64}, fs::Matrix{Float64};
+    bc=:extrap, extrap::Symbol=:extension)
 
     npts, nqty = size(fs)
     @assert length(xs) == npts "xs and fs rows must match"
     @assert npts >= 4 "Need at least 4 points for spline"
-    @assert issorted(xs) "xs must be sorted ascending"
 
-    # Create individual splines - compute BC per quantity if :extrap
+    # Create interpolants with appropriate BCs
     if bc === :extrap
-        if T === ComplexF64
-            # For complex data, extrap_bc returns (BCPair_real, BCPair_imag) tuple
-            # Pass tuple to FastCubicSpline1D which handles splitting internally
-            splines = ntuple(nqty) do q
-                fs_q = fs[:, q]
-                bc_tuple = extrap_bc(xs, fs_q)  # Returns (bc_real, bc_imag)
-                FastCubicSpline1D(xs, fs_q; bc=bc_tuple, extrap=extrap)
-            end
-        else
-            splines = ntuple(q -> FastCubicSpline1D(xs, fs[:, q]; bc=extrap_bc(xs, fs[:, q]), extrap=extrap), nqty)
-        end
+        interps = ntuple(k -> cubic_interp(xs, fs[:, k]; bc=extrap_bc(xs, fs[:, k]), extrap=extrap), nqty)
     else
-        splines = ntuple(q -> FastCubicSpline1D(xs, fs[:, q]; bc=bc, extrap=extrap), nqty)
+        interps = ntuple(k -> cubic_interp(xs, fs[:, k]; bc=bc, extrap=extrap), nqty)
     end
 
-    fs1 = zeros(T, npts, nqty)
-    for q in 1:nqty
-        fs1[:, q] = splines[q].fs1
-    end
+    # Create derivative views
+    derivs = ntuple(k -> FastInterpolations.deriv1(interps[k]), nqty)
 
-    fsi = zeros(T, npts, nqty)
-    _f = zeros(T, nqty)
-    _f1 = zeros(T, nqty)
-    _f2 = zeros(T, nqty)
-    _f3 = zeros(T, nqty)
+    # Initialize fsi as zeros (computed lazily)
+    fsi = zeros(Float64, npts, nqty)
 
-    FastCubicSpline1DMulti{T,nqty,eltype(splines)}(
-        xs, copy(fs), fs1, fsi, npts, splines, _f, _f1, _f2, _f3
+    # Preallocate buffers
+    eval_buf = zeros(Float64, nqty)
+    deriv_buf = zeros(Float64, nqty)
+
+    MultiQuantityProfile{nqty,eltype(interps),eltype(derivs)}(
+        xs, copy(fs), interps, derivs, fsi, eval_buf, deriv_buf
     )
 end
 
-@inline function (spline::FastCubicSpline1DMulti{T,N})(x::Float64; search=nothing, hint=nothing) where {T,N}
-    @inbounds for q in 1:N
-        spline._f[q] = spline.splines[q](x; search=search, hint=hint)
+# Evaluation: returns vector of all quantities at x
+@inline function (mqp::MultiQuantityProfile{N})(x::Float64; search=nothing, hint=nothing) where {N}
+    @inbounds for k in 1:N
+        if search === nothing && hint === nothing
+            mqp._eval_buf[k] = mqp.interps[k](x)
+        elseif hint === nothing
+            mqp._eval_buf[k] = mqp.interps[k](x; search=search)
+        elseif search === nothing
+            mqp._eval_buf[k] = mqp.interps[k](x; hint=hint)
+        else
+            mqp._eval_buf[k] = mqp.interps[k](x; search=search, hint=hint)
+        end
     end
-    return spline._f
+    return mqp._eval_buf
 end
 
-@inline evaluate!(spline::FastCubicSpline1DMulti, x::Float64; search=nothing, hint=nothing) = spline(x; search=search, hint=hint)
+@inline evaluate!(mqp::MultiQuantityProfile, x::Float64; search=nothing, hint=nothing) = mqp(x; search=search, hint=hint)
 
-@inline function deriv1!(spline::FastCubicSpline1DMulti{T,N}, x::Float64) where {T,N}
-    @inbounds for q in 1:N
-        spline._f1[q] = deriv1(spline.splines[q], x)
+# First derivative evaluation
+@inline function deriv1!(mqp::MultiQuantityProfile{N}, x::Float64) where {N}
+    @inbounds for k in 1:N
+        mqp._deriv_buf[k] = mqp.derivs[k](x)
     end
-    return spline._f1
+    return mqp._deriv_buf
 end
 
-@inline function deriv2!(spline::FastCubicSpline1DMulti{T,N}, x::Float64) where {T,N}
-    @inbounds for q in 1:N
-        spline._f2[q] = deriv2(spline.splines[q], x)
+# Integration (trapezoidal, in-place)
+function integrate!(mqp::MultiQuantityProfile{N}) where {N}
+    npts = length(mqp.xs)
+    @inbounds for k in 1:N
+        mqp.fsi[1, k] = 0.0
+        for i in 1:(npts-1)
+            h = mqp.xs[i+1] - mqp.xs[i]
+            mqp.fsi[i+1, k] = mqp.fsi[i, k] + h * (mqp.fs[i, k] + mqp.fs[i+1, k]) / 2
+        end
     end
-    return spline._f2
+    return mqp.fsi
 end
 
-@inline function deriv3!(spline::FastCubicSpline1DMulti{T,N}, x::Float64) where {T,N}
-    @inbounds for q in 1:N
-        spline._f3[q] = deriv3(spline.splines[q], x)
-    end
-    return spline._f3
-end
-
-function integrate!(spline::FastCubicSpline1DMulti{T,N}) where {T,N}
-    @inbounds for q in 1:N
-        integrate!(spline.splines[q])
-        spline.fsi[:, q] = spline.splines[q].fsi
-    end
-    return spline.fsi
-end
-
-function empty_FastCubicSpline1DMulti(::Type{T}, nqty::Int=4) where {T<:Union{Float64,ComplexF64}}
+function empty_MultiQuantityProfile(nqty::Int=4)
     xs = collect(range(0.0, 1.0; length=5))
-    fs = zeros(T, 5, nqty)
-    FastCubicSpline1DMulti(xs, fs)
+    fs = zeros(Float64, 5, nqty)
+    MultiQuantityProfile(xs, fs)
 end

@@ -1,12 +1,12 @@
 @testset "Test Spline Module" begin
     @info "Testing pure Julia spline implementations"
 
-    @testset "FastCubicSpline1DMulti - Polynomial" begin
+    @testset "MultiQuantityProfile - Polynomial" begin
         # Make x^3 spline - cubic splines can exactly represent cubics
         xs = collect(range(1.0; stop=2.0, length=21))
         fx3 = xs .^ 3
-        fs = reshape(fx3, :, 1)  # Make it a matrix for Multi
-        spline = JPEC.Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap)
+        fs = reshape(fx3, :, 1)  # Make it a matrix
+        spline = JPEC.Spl.MultiQuantityProfile(xs, fs)
 
         # Test value interpolation accuracy (primary use case)
         xs_fine = collect(range(1.1; stop=1.9, length=20))
@@ -22,11 +22,11 @@
         @test abs(f1[1] - 3 * 1.5^2) < 0.1
     end
 
-    @testset "FastCubicSpline1DMulti - Sine" begin
+    @testset "MultiQuantityProfile - Sine" begin
         # Make sine spline
         xs = collect(range(Float64(pi) / 8; stop=3 * Float64(pi) / 8, length=50))
         fs = reshape(sin.(xs), :, 1)
-        spline = JPEC.Spl.FastCubicSpline1DMulti(xs, fs; bc=:extrap)
+        spline = JPEC.Spl.MultiQuantityProfile(xs, fs)
 
         # Test value interpolation
         xs_fine = collect(range(Float64(pi) / 6; stop=Float64(pi) / 3, length=20))
@@ -40,45 +40,6 @@
         f = JPEC.Spl.evaluate!(spline, Float64(pi) / 4)
         @test abs(f[1] - sin(Float64(pi) / 4)) < 1e-6
         @test abs(f1[1] - cos(Float64(pi) / 4)) < 1e-4
-    end
-
-    @testset "FastCubicSpline1DMulti - Complex" begin
-        # Make e^-ix and e^ix complex valued spline
-        xs = collect(range(0.0; stop=6.0, length=100))
-        fm = exp.(-im .* xs)
-        fp = exp.(im .* xs)
-        fs_matrix = hcat(fm, fp)
-        spline = JPEC.Spl.FastCubicSpline1DMulti(xs, fs_matrix; bc=:extrap)
-
-        # Test value interpolation
-        xs_fine = collect(range(2.0; stop=2.5, length=10))
-        for x in xs_fine
-            f = JPEC.Spl.evaluate!(spline, x)
-            @test abs(f[1] - exp(-im * x)) < 1e-6
-            @test abs(f[2] - exp(im * x)) < 1e-6
-        end
-
-        # Test first derivative
-        f1 = JPEC.Spl.deriv1!(spline, 2.25)
-        @test abs(f1[1] + im * exp(-im * 2.25)) < 1e-4
-        @test abs(f1[2] - im * exp(im * 2.25)) < 1e-4
-    end
-
-    @testset "FastCubicSpline1DMulti - Periodic" begin
-        # Test periodic boundary conditions
-        xs = collect(range(0.0; stop=2 * Float64(pi), length=101))
-        fs = reshape(sin.(xs), :, 1)
-        spline = JPEC.Spl.FastCubicSpline1DMulti(xs, fs; bc=JPEC.Spl.PeriodicBC())
-
-        # Check continuity at boundary
-        f_start = JPEC.Spl.evaluate!(spline, 0.0)
-        f_end = JPEC.Spl.evaluate!(spline, 2 * Float64(pi))
-        @test abs(f_start[1] - f_end[1]) < 1e-10
-
-        # Check derivative continuity
-        f1_start = JPEC.Spl.deriv1!(spline, 0.0)
-        f1_end = JPEC.Spl.deriv1!(spline, 2 * Float64(pi))
-        @test abs(f1_start[1] - f1_end[1]) < 1e-10
     end
 
     @testset "BicubicSpline" begin
@@ -133,19 +94,10 @@ end
 @testset "Empty Spline Constructors" begin
     @info "Testing empty spline constructors for type stability"
 
-    # Test Float64 empty FastCubicSpline1D
-    empty_fcs_f64 = JPEC.Spl.empty_FastCubicSpline1D(Float64)
-    @test length(empty_fcs_f64.xs) >= 4  # Minimal for extrap BC
-    @test typeof(empty_fcs_f64) <: JPEC.Spl.FastCubicSpline1D
-
-    # Test ComplexF64 empty FastCubicSpline1D
-    empty_fcs_c64 = JPEC.Spl.empty_FastCubicSpline1D(ComplexF64)
-    @test typeof(empty_fcs_c64) <: JPEC.Spl.FastCubicSpline1D
-
-    # Test empty FastCubicSpline1DMulti
-    empty_fcsm = JPEC.Spl.empty_FastCubicSpline1DMulti(Float64)
-    @test length(empty_fcsm.xs) >= 4
-    @test typeof(empty_fcsm) <: JPEC.Spl.FastCubicSpline1DMulti
+    # Test empty MultiQuantityProfile
+    empty_mqp = JPEC.Spl.empty_MultiQuantityProfile()
+    @test length(empty_mqp.xs) >= 4
+    @test typeof(empty_mqp) <: JPEC.Spl.MultiQuantityProfile
 
     # Test empty BicubicSpline
     empty_bcs = JPEC.Spl.empty_BicubicSpline()

@@ -163,7 +163,7 @@ Set powers if necessary
 function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, metric::MetricData)
 
     # --- Extract inputs ---
-    sq = equil.sq
+    profiles = equil.profiles
     mpsi = metric.mpsi
 
     # Allocations (use flat storage for all matrices to fill splines)
@@ -204,10 +204,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         gmats_flatview = @view gmats_flat[ipsi, :, :]
         kmats_flatview = @view kmats_flat[ipsi, :, :]
         # --- Profiles ---
-        p1 = sq.fs1[ipsi, 2]
-        q = sq.fs[ipsi, 4]
-        q1 = sq.fs1[ipsi, 4]
-        jtheta = -sq.fs1[ipsi, 1]
+        p1 = profiles.P_deriv.y[ipsi]
+        q = profiles.q_spline.y[ipsi]
+        q1 = profiles.q_deriv.y[ipsi]
+        jtheta = -profiles.F_deriv.y[ipsi]
         chi1 = 2π * equil.psio
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)

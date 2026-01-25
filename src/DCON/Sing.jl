@@ -63,6 +63,9 @@ Performs the same function as `sing_find` in the Fortran code.
 """
 function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
+    q_spline = equil.profiles.q_spline
+    q_deriv_view = deriv1(q_spline)
+
     # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
         # Loop over extrema of q, find all rational values in between
@@ -85,7 +88,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * Spl.evaluate!(equil.sq, psifac)[4]) * dm
+                    singfac = (m - n * q_spline(psifac)) * dm
                     abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
@@ -104,7 +107,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=Spl.deriv1!(equil.sq, psifac)[4]
+                        q1=q_deriv_view(psifac)
                     ))
                     intr.msing += 1
                 end
@@ -137,9 +140,11 @@ or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are 
 """
 function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium)
 
+    profiles = equil.profiles
+
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = equil.sq.fs1[end, 4]
+    intr.q1lim = profiles.q_deriv.y[end]
     intr.psilim = equil.config.control.psihigh
 
     # Optionally override qlim based on dmlim
@@ -161,14 +166,15 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
     # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(equil.sq.fs[:, 4] .- intr.qlim))
+        _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
         jpsi = min(jpsi, equil.config.control.mpsi - 1)
 
         # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.evaluate!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.deriv1!(equil.sq, ψ)[4]
+        q_deriv_view = deriv1(profiles.q_spline)
+        qval(ψ) = profiles.q_spline(ψ)
+        q1val(ψ) = q_deriv_view(ψ)
 
-        intr.psilim = equil.sq.xs[jpsi]
+        intr.psilim = profiles.xs[jpsi]
         converged = false
         for _ in 1:itmax
             dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
@@ -308,6 +314,11 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 """
 function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
 
+    q_spline = equil.profiles.q_spline
+    q_d1 = deriv1(q_spline)
+    q_d2 = deriv2(q_spline)
+    q_d3 = deriv3(q_spline)
+
     # Initial allocations
     singp = intr.sing[ising]
     q = @MVector zeros(Float64, 4)
@@ -323,11 +334,11 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
-    # Evaluate cubic splines - get q and its derivatives (column 4 of sq spline)
-    q .= (Spl.evaluate!(equil.sq, singp.psifac)[4],
-        Spl.deriv1!(equil.sq, singp.psifac)[4],
-        Spl.deriv2!(equil.sq, singp.psifac)[4],
-        Spl.deriv3!(equil.sq, singp.psifac)[4])
+    # Evaluate q spline and its derivatives
+    q .= (q_spline(singp.psifac),
+        q_d1(singp.psifac),
+        q_d2(singp.psifac),
+        q_d3(singp.psifac))
 
     # Evaluate fmats_lower and derivatives using series interpolants
     _eval_complex_matrix!(@view(f_lower_interp[:, :, 1]), ffit._real_buf, ffit._imag_buf,
@@ -779,7 +790,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
-    odet.q = Spl.evaluate!(equil.sq, psieval; search=Spl.LinearBinary(), hint=odet.spline_hint)[4]
+    odet.q = equil.profiles.q_spline(psieval; search=LinearBinary(), hint=odet.spline_hint)
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # kinetic stuff - skip for now
