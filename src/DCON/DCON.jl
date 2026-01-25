@@ -8,6 +8,7 @@ using FFTW
 using OrdinaryDiffEq
 using HDF5
 using JLD2
+using FastInterpolations
 
 import ..Equilibrium
 import ..Spl

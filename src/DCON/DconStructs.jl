@@ -230,24 +230,50 @@ end
 @kwdef mutable struct FourFitVars
     mpert::Int
     mband::Int
+    numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
 
-    # Spline matrices (using ComplexMatrixSpline for complex-valued stability matrices)
-    amats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    bmats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    cmats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    dmats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    emats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    hmats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    fmats_lower::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    kmats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
-    gmats::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(mband + 1, mband + 1)
+    # Real/imag CubicSeriesInterpolant pairs for complex-valued stability matrices
+    # Each matrix is flattened to (npsi × numpert_total^2) series
+    amats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    amats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    bmats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    bmats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    cmats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    cmats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    dmats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    dmats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    emats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    emats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    hmats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    hmats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    fmats_lower_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    fmats_lower_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    kmats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    kmats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    gmats_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    gmats_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+
+    # Pre-allocated evaluation buffers
+    _real_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total^2)
+    _imag_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total^2)
+    _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+
+    # Shared hint for sequential evaluation (all splines evaluated at same psi)
+    _hint::Base.RefValue{Int} = Ref(1)
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
-# Convenience constructor that takes both mpert and mband
-FourFitVars(mpert::Int, mband::Int) = FourFitVars(; mpert, mband)
+# Helper to create empty series interpolant for default initialization
+function _empty_series_interp(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(Float64, 5, n_series)
+    return cubic_interp(xs, Y)
+end
+
+# Convenience constructor
+FourFitVars(mpert::Int, mband::Int, numpert_total::Int) = FourFitVars(; mpert, mband, numpert_total)
 
 """
     VacuumData
@@ -316,7 +342,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
-  - `wvmat_spline::Spl.CubicSpline{ComplexF64}` - Spline representation of precomputed wv matrices used by `free_test`/vacuum routines.
+  - `wvmat_real::CubicSeriesInterpolant{Float64}` - Real part of precomputed wv matrices used by `free_test`/vacuum routines.
+  - `wvmat_imag::CubicSeriesInterpolant{Float64}` - Imaginary part of precomputed wv matrices.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
@@ -367,7 +394,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat_spline::Spl.ComplexMatrixSpline = Spl.empty_ComplexMatrixSpline(numpert_total, numpert_total)
+    wvmat_real::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    wvmat_imag::CubicSeriesInterpolant{Float64} = _empty_series_interp(numpert_total^2)
+    _wv_real_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total^2)
+    _wv_imag_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total^2)
+    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 
     # Data for integrator
     psifac::Float64 = 0.0

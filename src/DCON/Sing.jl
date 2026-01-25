@@ -1,4 +1,48 @@
 """
+    _eval_complex_matrix!(out, real_buf, imag_buf, real_interp, imag_interp, x, hint)
+
+Evaluate complex matrix from real/imag series interpolants using shared buffers and hint.
+"""
+@inline function _eval_complex_matrix!(
+    out::AbstractMatrix{ComplexF64},
+    real_buf::Vector{Float64},
+    imag_buf::Vector{Float64},
+    real_interp::CubicSeriesInterpolant{Float64},
+    imag_interp::CubicSeriesInterpolant{Float64},
+    x::Float64,
+    hint::Base.RefValue{Int}
+)
+    real_interp(real_buf, x; hint=hint)
+    imag_interp(imag_buf, x; hint=hint)
+    @inbounds for i in eachindex(real_buf)
+        out[i] = real_buf[i] + im * imag_buf[i]
+    end
+    return out
+end
+
+"""
+    _eval_complex_matrix_deriv!(out, real_buf, imag_buf, real_interp, imag_interp, x, deriv)
+
+Evaluate derivative of complex matrix from real/imag series interpolants.
+"""
+@inline function _eval_complex_matrix_deriv!(
+    out::AbstractMatrix{ComplexF64},
+    real_buf::Vector{Float64},
+    imag_buf::Vector{Float64},
+    real_interp::CubicSeriesInterpolant{Float64},
+    imag_interp::CubicSeriesInterpolant{Float64},
+    x::Float64,
+    deriv::Int
+)
+    real_interp(real_buf, x; deriv=deriv)
+    imag_interp(imag_buf, x; deriv=deriv)
+    @inbounds for i in eachindex(real_buf)
+        out[i] = real_buf[i] + im * imag_buf[i]
+    end
+    return out
+end
+
+"""
     sing_scan!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
 
 Scan all singular surfaces and calculate asymptotic vmat and mmat matrices
@@ -284,18 +328,36 @@ function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
         Spl.deriv1!(equil.sq, singp.psifac)[4],
         Spl.deriv2!(equil.sq, singp.psifac)[4],
         Spl.deriv3!(equil.sq, singp.psifac)[4])
-    f_lower_interp[:, :, 1] .= Spl.evaluate!(ffit.fmats_lower, singp.psifac)
-    f_lower_interp[:, :, 2] .= Spl.deriv1!(ffit.fmats_lower, singp.psifac)
-    f_lower_interp[:, :, 3] .= Spl.deriv2!(ffit.fmats_lower, singp.psifac)
-    f_lower_interp[:, :, 4] .= Spl.deriv3!(ffit.fmats_lower, singp.psifac)
-    g_interp[:, :, 1] .= Spl.evaluate!(ffit.gmats, singp.psifac)
-    g_interp[:, :, 2] .= Spl.deriv1!(ffit.gmats, singp.psifac)
-    g_interp[:, :, 3] .= Spl.deriv2!(ffit.gmats, singp.psifac)
-    g_interp[:, :, 4] .= Spl.deriv3!(ffit.gmats, singp.psifac)
-    k_interp[:, :, 1] .= Spl.evaluate!(ffit.kmats, singp.psifac)
-    k_interp[:, :, 2] .= Spl.deriv1!(ffit.kmats, singp.psifac)
-    k_interp[:, :, 3] .= Spl.deriv2!(ffit.kmats, singp.psifac)
-    k_interp[:, :, 4] .= Spl.deriv3!(ffit.kmats, singp.psifac)
+
+    # Evaluate fmats_lower and derivatives using series interpolants
+    _eval_complex_matrix!(@view(f_lower_interp[:, :, 1]), ffit._real_buf, ffit._imag_buf,
+        ffit.fmats_lower_real, ffit.fmats_lower_imag, singp.psifac, ffit._hint)
+    _eval_complex_matrix_deriv!(@view(f_lower_interp[:, :, 2]), ffit._real_buf, ffit._imag_buf,
+        ffit.fmats_lower_real, ffit.fmats_lower_imag, singp.psifac, 1)
+    _eval_complex_matrix_deriv!(@view(f_lower_interp[:, :, 3]), ffit._real_buf, ffit._imag_buf,
+        ffit.fmats_lower_real, ffit.fmats_lower_imag, singp.psifac, 2)
+    _eval_complex_matrix_deriv!(@view(f_lower_interp[:, :, 4]), ffit._real_buf, ffit._imag_buf,
+        ffit.fmats_lower_real, ffit.fmats_lower_imag, singp.psifac, 3)
+
+    # Evaluate gmats and derivatives
+    _eval_complex_matrix!(@view(g_interp[:, :, 1]), ffit._real_buf, ffit._imag_buf,
+        ffit.gmats_real, ffit.gmats_imag, singp.psifac, ffit._hint)
+    _eval_complex_matrix_deriv!(@view(g_interp[:, :, 2]), ffit._real_buf, ffit._imag_buf,
+        ffit.gmats_real, ffit.gmats_imag, singp.psifac, 1)
+    _eval_complex_matrix_deriv!(@view(g_interp[:, :, 3]), ffit._real_buf, ffit._imag_buf,
+        ffit.gmats_real, ffit.gmats_imag, singp.psifac, 2)
+    _eval_complex_matrix_deriv!(@view(g_interp[:, :, 4]), ffit._real_buf, ffit._imag_buf,
+        ffit.gmats_real, ffit.gmats_imag, singp.psifac, 3)
+
+    # Evaluate kmats and derivatives
+    _eval_complex_matrix!(@view(k_interp[:, :, 1]), ffit._real_buf, ffit._imag_buf,
+        ffit.kmats_real, ffit.kmats_imag, singp.psifac, ffit._hint)
+    _eval_complex_matrix_deriv!(@view(k_interp[:, :, 2]), ffit._real_buf, ffit._imag_buf,
+        ffit.kmats_real, ffit.kmats_imag, singp.psifac, 1)
+    _eval_complex_matrix_deriv!(@view(k_interp[:, :, 3]), ffit._real_buf, ffit._imag_buf,
+        ffit.kmats_real, ffit.kmats_imag, singp.psifac, 2)
+    _eval_complex_matrix_deriv!(@view(k_interp[:, :, 4]), ffit._real_buf, ffit._imag_buf,
+        ffit.kmats_real, ffit.kmats_imag, singp.psifac, 3)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
@@ -724,13 +786,30 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     if false #(TODO: kin_flag)
         error("kin_flag not implemented yet")
     else
-        # Evaluate matrix splines at the current psi value
-        amat = Spl.evaluate!(ffit.amats, psieval)
-        bmat = Spl.evaluate!(ffit.bmats, psieval)
-        cmat = Spl.evaluate!(ffit.cmats, psieval)
-        fmat_lower = Spl.evaluate!(ffit.fmats_lower, psieval)
-        kmat = Spl.evaluate!(ffit.kmats, psieval)
-        gmat = Spl.evaluate!(ffit.gmats, psieval)
+        # Evaluate matrix splines at the current psi value using shared buffers and hint
+        amat = _eval_complex_matrix!(ffit._mat_out, ffit._real_buf, ffit._imag_buf,
+            ffit.amats_real, ffit.amats_imag, psieval, ffit._hint)
+
+        # Use odet temporary buffers for subsequent matrices to avoid overwriting amat
+        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+        _eval_complex_matrix!(bmat, ffit._real_buf, ffit._imag_buf,
+            ffit.bmats_real, ffit.bmats_imag, psieval, ffit._hint)
+
+        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
+        _eval_complex_matrix!(cmat, ffit._real_buf, ffit._imag_buf,
+            ffit.cmats_real, ffit.cmats_imag, psieval, ffit._hint)
+
+        fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
+        _eval_complex_matrix!(fmat_lower, ffit._real_buf, ffit._imag_buf,
+            ffit.fmats_lower_real, ffit.fmats_lower_imag, psieval, ffit._hint)
+
+        kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
+        _eval_complex_matrix!(kmat, ffit._real_buf, ffit._imag_buf,
+            ffit.kmats_real, ffit.kmats_imag, psieval, ffit._hint)
+
+        gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
+        _eval_complex_matrix!(gmat, ffit._real_buf, ffit._imag_buf,
+            ffit.gmats_real, ffit.gmats_imag, psieval, ffit._hint)
 
         odet.Afact = cholesky(Hermitian(amat))
         # bmat = A⁻¹ * bmat

@@ -4,8 +4,8 @@ FastInterpolationsAdaptor - Wrappers around FastInterpolations.jl for JPEC
 This module provides:
 - FastCubicSpline1D: Single-quantity 1D cubic spline
 - FastCubicSpline1DMulti: Multi-quantity 1D cubic spline
-- ComplexMatrixSpline: Matrix of splines for complex-valued stability data
 - extrap_bc: Helper to create BCPair for 4-point endpoint derivative extrapolation
+- extrap_bc_matrix: Per-column BCPairs for matrix of y-series
 
 ## Boundary Conditions
 
@@ -117,6 +117,21 @@ Estimate f'(x0) using cubic Lagrange interpolation through 4 points.
     L4_deriv = ((x0 - x1) * (x0 - x2) + (x0 - x1) * (x0 - x3) + (x0 - x2) * (x0 - x3)) / L4_denom
 
     return f1 * L1_deriv + f2 * L2_deriv + f3 * L3_deriv + f4 * L4_deriv
+end
+
+"""
+    extrap_bc_matrix(xs, Y::Matrix{Float64}) -> Vector{BCPair}
+
+Create per-column BCPairs for a matrix of y-series using extrap boundary conditions.
+Returns a vector of BCPairs, one per column of Y.
+"""
+function extrap_bc_matrix(xs::AbstractVector{Float64}, Y::Matrix{Float64})
+    n_series = size(Y, 2)
+    bcs = Vector{BCPair}(undef, n_series)
+    @inbounds for k in 1:n_series
+        bcs[k] = extrap_bc(xs, @view(Y[:, k]))
+    end
+    return bcs
 end
 
 
@@ -450,99 +465,4 @@ function empty_FastCubicSpline1DMulti(::Type{T}, nqty::Int=4) where {T<:Union{Fl
     xs = collect(range(0.0, 1.0; length=5))
     fs = zeros(T, 5, nqty)
     FastCubicSpline1DMulti(xs, fs)
-end
-
-
-# =============================================================================
-# ComplexMatrixSpline - Matrix of splines for stability matrices
-# =============================================================================
-
-"""
-    ComplexMatrixSpline{S}
-
-A wrapper providing matrix-shaped output from a FastCubicSpline1DMulti,
-for complex-valued MHD stability matrix coefficients.
-"""
-struct ComplexMatrixSpline{S<:FastCubicSpline1DMulti{ComplexF64}}
-    spline::S
-    n1::Int
-    n2::Int
-    _out::Matrix{ComplexF64}
-    _out1::Matrix{ComplexF64}
-    _out2::Matrix{ComplexF64}
-    _out3::Matrix{ComplexF64}
-    _hint::Base.RefValue{Int}
-end
-
-"""
-    ComplexMatrixSpline(xs, data; bc=NaturalBC())
-
-Create a ComplexMatrixSpline from a 3D array of complex data.
-
-# Arguments
-
-  - `xs::Vector{Float64}`: X-coordinates (psi grid)
-  - `data::Array{ComplexF64,3}`: Complex data (npsi × n1 × n2)
-  - `bc`: Boundary condition - use `NaturalBC()`, `PeriodicBC()`, or `:extrap`
-"""
-function ComplexMatrixSpline(xs::Vector{Float64}, data::Array{ComplexF64,3}; bc=NaturalBC())
-    npsi, n1, n2 = size(data)
-    @assert length(xs) == npsi "xs length must match first dimension of data"
-
-    data_flat = reshape(data, npsi, n1 * n2)
-    spline = FastCubicSpline1DMulti(xs, data_flat; bc=bc)
-
-    _out = zeros(ComplexF64, n1, n2)
-    _out1 = zeros(ComplexF64, n1, n2)
-    _out2 = zeros(ComplexF64, n1, n2)
-    _out3 = zeros(ComplexF64, n1, n2)
-    _hint = Ref(1)
-
-    ComplexMatrixSpline{typeof(spline)}(spline, n1, n2, _out, _out1, _out2, _out3, _hint)
-end
-
-function ComplexMatrixSpline(xs::Vector{Float64}, data_flat::Matrix{ComplexF64},
-    n1::Int, n2::Int; bc=NaturalBC())
-    npsi = length(xs)
-    @assert size(data_flat, 1) == npsi
-    @assert size(data_flat, 2) == n1 * n2
-    data = reshape(data_flat, npsi, n1, n2)
-    ComplexMatrixSpline(xs, data; bc=bc)
-end
-
-@inline function _reshape_to_matrix!(out::Matrix{ComplexF64}, flat::Vector{ComplexF64}, n1::Int)
-    @inbounds for j in axes(out, 2), i in axes(out, 1)
-        out[i, j] = flat[(j-1)*n1+i]
-    end
-end
-
-function evaluate!(cms::ComplexMatrixSpline, x::Float64; search=nothing, hint=nothing)
-    h = hint === nothing ? cms._hint : hint
-    f = evaluate!(cms.spline, x; search=search, hint=h)
-    _reshape_to_matrix!(cms._out, f, cms.n1)
-    return cms._out
-end
-
-function deriv1!(cms::ComplexMatrixSpline, x::Float64; hint=nothing)
-    f1 = deriv1!(cms.spline, x)
-    _reshape_to_matrix!(cms._out1, f1, cms.n1)
-    return cms._out1
-end
-
-function deriv2!(cms::ComplexMatrixSpline, x::Float64; hint=nothing)
-    f2 = deriv2!(cms.spline, x)
-    _reshape_to_matrix!(cms._out2, f2, cms.n1)
-    return cms._out2
-end
-
-function deriv3!(cms::ComplexMatrixSpline, x::Float64; hint=nothing)
-    f3 = deriv3!(cms.spline, x)
-    _reshape_to_matrix!(cms._out3, f3, cms.n1)
-    return cms._out3
-end
-
-function empty_ComplexMatrixSpline(n1::Int=1, n2::Int=1)
-    xs = collect(range(0.0, 1.0; length=5))
-    data = zeros(ComplexF64, 5, n1, n2)
-    ComplexMatrixSpline(xs, data)
 end

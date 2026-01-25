@@ -2,7 +2,7 @@
     MetricData
 
 A structure to hold the computed metric tensor components and their
-Fourier-spline representation. This is the Julia equivalent of the `fspline_type`
+Fourier representation. This is the Julia equivalent of the `fspline_type`
 named `metric` in the Fortran `fourfit_make_metric` subroutine.
 
 ### Fields
@@ -13,7 +13,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
   - `ys::Vector{Float64}`: Poloidal angle coordinates `θ` in radians (0 to 2π).
   - `fs::Array{Float64, 3}`: The raw metric data on the grid, size `(mpsi, mtheta, 8)`.
     The 8 quantities are: `g¹¹`, `g²²`, `g³³`, `g²³`, `g³¹`, `g¹²`, `J`, `∂J/∂ψ`.
-  - `fspline::Spl.FourierModeSplines`: The fitted Fourier-cubic spline object.
+  - `fourier_coeffs::Spl.FourierCoefficients`: The FFT coefficients (no spline interpolation needed).
 """
 @kwdef mutable struct MetricData
     mpsi::Int
@@ -21,7 +21,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
     xs::Vector{Float64} = zeros(mpsi)
     ys::Vector{Float64} = zeros(mtheta)
     fs::Array{Float64,3} = zeros(mpsi, mtheta, 8)
-    fspline::Union{Spl.FourierModeSplines,Nothing} = nothing
+    fourier_coeffs::Union{Spl.FourierCoefficients,Nothing} = nothing
 end
 
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
@@ -122,17 +122,8 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
         end
     end
 
-    # --- Fit the grid data to a Fourier-cubic spline ---
-    # The BC applies to the non-periodic radial (x) dimension.
-    # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
-    metric.fspline = Spl.FourierModeSplines(
-        metric.xs,
-        metric.ys,
-        metric.fs,
-        mband;
-        bc=:extrap,
-        period=2π  # ys are in radians [0, 2π)
-    )
+    # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
+    metric.fourier_coeffs = Spl.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
     return metric
 end
 
@@ -221,16 +212,16 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)
         # The 8 quantities are: g11, g22, g33, g23, g31, g12, jmat, jmat1
-        fspline = metric.fspline
+        fc = metric.fourier_coeffs
         for m in 0:intr.mband
-            g11[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 1)
-            g22[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 2)
-            g33[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 3)
-            g23[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 4)
-            g31[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 5)
-            g12[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 6)
-            jmat[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 7)
-            jmat1[mid-m] = Spl.get_complex_coeff(fspline, ipsi, m, 8)
+            g11[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 1)
+            g22[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 2)
+            g33[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 3)
+            g23[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 4)
+            g31[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 5)
+            g12[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 6)
+            jmat[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 7)
+            jmat1[mid-m] = Spl.get_complex_coeff(fc, ipsi, m, 8)
         end
 
         # Fill upper half (+1:mband) with conjugate symmetry
@@ -315,17 +306,40 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: add kinetic matrices here
     end
 
-    # --- Fit splines ---
-    ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband)
-    ffit.amats = Spl.ComplexMatrixSpline(metric.xs, amats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.bmats = Spl.ComplexMatrixSpline(metric.xs, bmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.cmats = Spl.ComplexMatrixSpline(metric.xs, cmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.dmats = Spl.ComplexMatrixSpline(metric.xs, dmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.emats = Spl.ComplexMatrixSpline(metric.xs, emats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.hmats = Spl.ComplexMatrixSpline(metric.xs, hmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.fmats_lower = Spl.ComplexMatrixSpline(metric.xs, fmats_lower_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.gmats = Spl.ComplexMatrixSpline(metric.xs, gmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
-    ffit.kmats = Spl.ComplexMatrixSpline(metric.xs, kmats_flat, intr.numpert_total, intr.numpert_total; bc=:extrap)
+    # --- Fit splines using native FastInterpolations CubicSeriesInterpolant ---
+    ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband, numpert_total=intr.numpert_total)
+
+    # Pre-allocate shared buffers for real/imag extraction (reused for all 9 matrices)
+    npsi, n_series = size(amats_flat)
+    re_buf = Matrix{Float64}(undef, npsi, n_series)
+    im_buf = Matrix{Float64}(undef, npsi, n_series)
+
+    # Helper to extract real/imag into pre-allocated buffers (avoids broadcast allocation)
+    @inline function extract_real_imag!(re::Matrix{Float64}, im::Matrix{Float64}, z::Matrix{ComplexF64})
+        @inbounds for i in eachindex(z)
+            re[i] = real(z[i])
+            im[i] = imag(z[i])
+        end
+    end
+
+    # Helper to create interpolant pair from complex matrix
+    @inline function make_interp_pair(xs, z_flat, re_buf, im_buf)
+        extract_real_imag!(re_buf, im_buf, z_flat)
+        re_interp = cubic_interp(xs, re_buf; bc=Spl.extrap_bc_matrix(xs, re_buf), extrap=:extension, search=LinearBinary())
+        im_interp = cubic_interp(xs, im_buf; bc=Spl.extrap_bc_matrix(xs, im_buf), extrap=:extension, search=LinearBinary())
+        return (re_interp, im_interp)
+    end
+
+    # Create series interpolants with per-column extrap BC
+    ffit.amats_real, ffit.amats_imag = make_interp_pair(metric.xs, amats_flat, re_buf, im_buf)
+    ffit.bmats_real, ffit.bmats_imag = make_interp_pair(metric.xs, bmats_flat, re_buf, im_buf)
+    ffit.cmats_real, ffit.cmats_imag = make_interp_pair(metric.xs, cmats_flat, re_buf, im_buf)
+    ffit.dmats_real, ffit.dmats_imag = make_interp_pair(metric.xs, dmats_flat, re_buf, im_buf)
+    ffit.emats_real, ffit.emats_imag = make_interp_pair(metric.xs, emats_flat, re_buf, im_buf)
+    ffit.hmats_real, ffit.hmats_imag = make_interp_pair(metric.xs, hmats_flat, re_buf, im_buf)
+    ffit.fmats_lower_real, ffit.fmats_lower_imag = make_interp_pair(metric.xs, fmats_lower_flat, re_buf, im_buf)
+    ffit.gmats_real, ffit.gmats_imag = make_interp_pair(metric.xs, gmats_flat, re_buf, im_buf)
+    ffit.kmats_real, ffit.kmats_imag = make_interp_pair(metric.xs, kmats_flat, re_buf, im_buf)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

@@ -530,3 +530,120 @@ function get_complex_coeffs!(out::AbstractVector{ComplexF64}, fms::FourierModeSp
 
     return out
 end
+
+
+# =============================================================================
+# FourierCoefficients - Lightweight FFT-only version (no spline overhead)
+# =============================================================================
+
+"""
+    FourierCoefficients
+
+Lightweight container for Fourier coefficients without spline interpolation.
+Use this when you only need to access coefficients at original grid points.
+
+# Fields
+
+  - `xs::Vector{Float64}`: Radial coordinates
+  - `mband::Int`: Number of Fourier modes (0 to mband inclusive)
+  - `nqty::Int`: Number of quantities
+  - `cos_coeffs::Array{Float64,3}`: Cosine coefficients (npsi × nmodes × nqty)
+  - `sin_coeffs::Array{Float64,3}`: Sine coefficients (npsi × nmodes × nqty)
+"""
+struct FourierCoefficients
+    xs::Vector{Float64}
+    mband::Int
+    nqty::Int
+    cos_coeffs::Array{Float64,3}
+    sin_coeffs::Array{Float64,3}
+end
+
+"""
+    FourierCoefficients(xs, ys, fs, mband)
+
+Compute Fourier coefficients via FFT without creating splines.
+
+# Arguments
+
+  - `xs::Vector{Float64}`: Radial coordinates
+  - `ys::Vector{Float64}`: Poloidal coordinates (periodic domain)
+  - `fs::Array{Float64,3}`: Function values (npsi × ntheta × nqty)
+  - `mband::Int`: Number of Fourier modes to retain
+"""
+function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
+    fs::Array{Float64,3}, mband::Int)
+    npsi, ntheta, nqty = size(fs)
+
+    @assert length(xs) == npsi "xs length must match first dimension of fs"
+    @assert length(ys) == ntheta "ys length must match second dimension of fs"
+    @assert mband >= 0 "mband must be non-negative"
+
+    # Clamp mband to Nyquist limit
+    nyquist_limit = ntheta ÷ 2
+    actual_mband = min(mband, nyquist_limit)
+
+    nmodes = actual_mband + 1
+
+    # Compute Fourier coefficients using batched FFT
+    fs_reshaped = reshape(permutedims(fs, (2, 1, 3)), ntheta, npsi * nqty)
+    fft_results = fft(fs_reshaped, 1)
+
+    # Extract and normalize coefficients
+    cos_coeffs = zeros(Float64, npsi, nmodes, nqty)
+    sin_coeffs = zeros(Float64, npsi, nmodes, nqty)
+
+    for iq in 1:nqty
+        for ipsi in 1:npsi
+            col_idx = (iq - 1) * npsi + ipsi
+            fft_col = fft_results[:, col_idx]
+
+            # Mode 0 (DC component)
+            @inbounds cos_coeffs[ipsi, 1, iq] = real(fft_col[1]) / ntheta
+
+            # Higher modes
+            @inbounds for m in 1:actual_mband
+                cos_coeffs[ipsi, m+1, iq] = 2 * real(fft_col[m+1]) / ntheta
+                sin_coeffs[ipsi, m+1, iq] = -2 * imag(fft_col[m+1]) / ntheta
+            end
+        end
+    end
+
+    FourierCoefficients(xs, actual_mband, nqty, cos_coeffs, sin_coeffs)
+end
+
+"""
+    get_complex_coeff(fc::FourierCoefficients, ipsi, mode, qty)
+
+Get normalized complex FFT coefficient at grid point.
+"""
+function get_complex_coeff(fc::FourierCoefficients, ipsi::Int, mode::Int, qty::Int)
+    @boundscheck begin
+        @assert 1 <= ipsi <= length(fc.xs) "ipsi out of bounds"
+        @assert 0 <= mode <= fc.mband "mode out of bounds"
+        @assert 1 <= qty <= fc.nqty "qty out of bounds"
+    end
+    if mode == 0
+        return complex(fc.cos_coeffs[ipsi, 1, qty], 0.0)
+    else
+        return complex(fc.cos_coeffs[ipsi, mode+1, qty] / 2,
+            -fc.sin_coeffs[ipsi, mode+1, qty] / 2)
+    end
+end
+
+"""
+    get_complex_coeffs!(out, fc::FourierCoefficients, ipsi, qty)
+
+Fill vector with normalized complex FFT coefficients for modes 0:mband.
+"""
+function get_complex_coeffs!(out::AbstractVector{ComplexF64}, fc::FourierCoefficients,
+    ipsi::Int, qty::Int)
+    nmodes = fc.mband + 1
+    @assert length(out) >= nmodes "output vector too short"
+
+    @inbounds out[1] = complex(fc.cos_coeffs[ipsi, 1, qty], 0.0)
+    @inbounds for m in 1:fc.mband
+        out[m+1] = complex(fc.cos_coeffs[ipsi, m+1, qty] / 2,
+            -fc.sin_coeffs[ipsi, m+1, qty] / 2)
+    end
+    return out
+end
