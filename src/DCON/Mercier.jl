@@ -15,13 +15,15 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
     ff_fs = zeros(length(rzphi.ys), 5)
 
     # Compute surface quantities
+    hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:length(profiles.xs)
+        psi = profiles.xs[ipsi]
         twopif = profiles.F_spline.y[ipsi]
-        p1 = profiles.P_deriv.y[ipsi]
+        p1 = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
         v1 = profiles.dVdpsi_spline.y[ipsi]
-        v2 = profiles.dVdpsi_deriv.y[ipsi]
+        v2 = profiles.dVdpsi_deriv(psi; hint=hint, search=LinearBinary())
         q = profiles.q_spline.y[ipsi]
-        q1 = profiles.q_deriv.y[ipsi]
+        q1 = profiles.q_deriv(psi; hint=hint, search=LinearBinary())
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian

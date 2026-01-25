@@ -192,6 +192,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     imat = zeros(ComplexF64, 2 * intr.mband + 1)
     imat[mid] = 1 + 0im
 
+    hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
         amats_flatview = @view amats_flat[ipsi, :, :]
@@ -204,10 +205,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         gmats_flatview = @view gmats_flat[ipsi, :, :]
         kmats_flatview = @view kmats_flat[ipsi, :, :]
         # --- Profiles ---
-        p1 = profiles.P_deriv.y[ipsi]
+        psi = profiles.xs[ipsi]
+        p1 = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
         q = profiles.q_spline.y[ipsi]
-        q1 = profiles.q_deriv.y[ipsi]
-        jtheta = -profiles.F_deriv.y[ipsi]
+        q1 = profiles.q_deriv(psi; hint=hint, search=LinearBinary())
+        jtheta = -profiles.F_deriv(psi; hint=hint, search=LinearBinary())
         chi1 = 2π * equil.psio
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)

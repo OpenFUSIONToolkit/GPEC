@@ -453,7 +453,7 @@ Each profile is stored as a separate spline for code clarity.
 # Notes
 
   - Node values at grid points: Access via `spline.y[i]`
-  - Derivative at grid points: Access via `deriv.y[i]`
+  - Derivative at any point: Call `deriv(x)` (derivative views are callable)
   - Grid: Access via `xs` field or `spline.cache.x`
 """
 struct ProfileSplines{S,D}
@@ -463,7 +463,7 @@ struct ProfileSplines{S,D}
     P_spline::S
     dVdpsi_spline::S
     q_spline::S
-    # Derivative interpolants
+    # Derivative views (callable, share data with value interpolants)
     F_deriv::D
     P_deriv::D
     dVdpsi_deriv::D
@@ -474,7 +474,7 @@ end
     ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=:extension)
 
 Create ProfileSplines from arrays of profile values using extrap BC.
-Uses native FastInterpolations CubicInterpolant types.
+Uses native FastInterpolations CubicInterpolant types with DerivativeView for derivatives.
 """
 function ProfileSplines(xs::Vector{Float64},
     F_vals::Vector{Float64},
@@ -483,6 +483,7 @@ function ProfileSplines(xs::Vector{Float64},
     q_vals::Vector{Float64};
     extrap::Symbol=:extension)
     npts = length(xs)
+    npts_minus_1 = npts - 1
     @assert length(F_vals) == npts
     @assert length(P_vals) == npts
     @assert length(dVdpsi_vals) == npts
@@ -494,16 +495,11 @@ function ProfileSplines(xs::Vector{Float64},
     dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=Spl.extrap_bc(xs, dVdpsi_vals), extrap=extrap)
     q_spline = cubic_interp(xs, q_vals; bc=Spl.extrap_bc(xs, q_vals), extrap=extrap)
 
-    # Compute derivative values at grid points and create derivative interpolants
-    F_deriv_vals = deriv1(F_spline).(xs)
-    P_deriv_vals = deriv1(P_spline).(xs)
-    dVdpsi_deriv_vals = deriv1(dVdpsi_spline).(xs)
-    q_deriv_vals = deriv1(q_spline).(xs)
-
-    F_deriv = cubic_interp(xs, F_deriv_vals; bc=Spl.extrap_bc(xs, F_deriv_vals), extrap=extrap)
-    P_deriv = cubic_interp(xs, P_deriv_vals; bc=Spl.extrap_bc(xs, P_deriv_vals), extrap=extrap)
-    dVdpsi_deriv = cubic_interp(xs, dVdpsi_deriv_vals; bc=Spl.extrap_bc(xs, dVdpsi_deriv_vals), extrap=extrap)
-    q_deriv = cubic_interp(xs, q_deriv_vals; bc=Spl.extrap_bc(xs, q_deriv_vals), extrap=extrap)
+    # Create derivative views (these share data with value interpolants, no extra storage)
+    F_deriv = deriv1(F_spline)
+    P_deriv = deriv1(P_spline)
+    dVdpsi_deriv = deriv1(dVdpsi_spline)
+    q_deriv = deriv1(q_spline)
 
     ProfileSplines{typeof(F_spline),typeof(F_deriv)}(
         xs,

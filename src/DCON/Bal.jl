@@ -180,10 +180,16 @@ end
 #   computes coefficients for the ideal marginal ballooning equations.
 # ----------------------------------------------------------------------
 """
-    prepare_ballooning_coefficients(...) -> (di, alpha, ode_coeff_interp, asymptotic_interp, v0, theta0)
+    prepare_ballooning_coefficients(ipsi, plasma_eq, hint) -> (di, alpha, ode_coeff_interp, asymptotic_interp, v0, theta0)
 
 Prepares all coefficients and splines required for the ballooning stability analysis
 on a single magnetic flux surface.
+
+## Arguments
+
+  - `ipsi::Int`: Flux surface index.
+  - `plasma_eq::PlasmaEquilibrium`: Plasma equilibrium data.
+  - `hint::Ref{Int}`: Spline search hint for sequential ipsi access.
 
 ## Returns
 
@@ -194,7 +200,7 @@ on a single magnetic flux surface.
   - `zeroth_order_eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2).
   - `reference_angle::Float64`: Reference poloidal angle.
 """
-function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.PlasmaEquilibrium, hint::Ref{Int})
     # shorter aliases for equilibrium structs
     profiles = plasma_eq.profiles
     rzphi = plasma_eq.rzphi
@@ -202,10 +208,11 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     theta_grid = Vector(rzphi.ys)
 
     # surface quantities
+    psi = profiles.xs[ipsi]
     two_pi_f = profiles.F_spline.y[ipsi]
-    pressure_gradient = profiles.P_deriv.y[ipsi] # p'
+    pressure_gradient = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
     q = profiles.q_spline.y[ipsi]
-    q_derivative = profiles.q_deriv.y[ipsi] # q'
+    q_derivative = profiles.q_deriv(psi; hint=hint, search=LinearBinary())
     chi_prime = 2pi * plasma_eq.psio
 
     # arrays to be filled
@@ -462,10 +469,11 @@ function compute_ballooning_stability!(ctrl::DconControl, locstab_fs::Matrix{Flo
     num_psi = length(profiles.xs)
 
     # Loop over flux surfaces
+    hint = Ref(1)  # Shared hint for sequential psi access
     for ipsi in 1:num_psi
 
         # Prepare coefficients and check Mercier criterion
-        mercier_criterion, growth_param, ode_coeff_interp, asymptotic_interp, zeroth_eigs, ref_angle = prepare_ballooning_coefficients(ipsi, plasma_eq)
+        mercier_criterion, growth_param, ode_coeff_interp, asymptotic_interp, zeroth_eigs, ref_angle = prepare_ballooning_coefficients(ipsi, plasma_eq, hint)
 
         # Store Mercier criterion in locstab matrix (matches Fortran output)
         locstab_fs[ipsi, 1] = mercier_criterion * profiles.xs[ipsi]

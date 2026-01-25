@@ -144,7 +144,7 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = profiles.q_deriv.y[end]
+    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.control.psihigh
 
     # Optionally override qlim based on dmlim

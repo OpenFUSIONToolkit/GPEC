@@ -494,13 +494,13 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq_nodes[:, 4]   # q
     )
     # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
-    q0 = profiles.q_spline.y[1] - profiles.q_deriv.y[1] * psi_nodes[1]
+    q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
     if equil_params.newq0 != 0.0
         println("Revising q-profile for newq0 = $(equil_params.newq0)...")
-        f0 = profiles.F_spline.y[1] - profiles.F_deriv.y[1] * psi_nodes[1]
+        f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
         f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
             ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)

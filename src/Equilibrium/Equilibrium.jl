@@ -222,7 +222,8 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
     dpsi = 1.0 - rzphi.xs[mpsi+1]
-    bt0 = (profiles.F_spline.y[mpsi+1] + profiles.F_deriv.y[mpsi+1] * dpsi) / (2π * rmean)
+    psi_edge = profiles.xs[end]
+    bt0 = (profiles.F_spline.y[end] + profiles.F_deriv(psi_edge; hint=Ref(profiles.npts_minus_1)) * dpsi) / (2π * rmean)
 
     pe.params.rmean = rmean
     pe.params.amean = amean
@@ -277,7 +278,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
 
     volume = sum((dVdpsi_vals[1:(end-1)] .+ dVdpsi_vals[2:end]) .* dpsi_vec) / 2
 
-    p0 = P_vals[1] - profiles.P_deriv.y[1] * profiles.xs[1]  # linear extrapolation
+    p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
     betat = 2 * (fsi1 / fsi2) / bt0^2
     betaj = 2 * sqrt(fsi3 / fsi2) / bwall^2
     betan = 100 * amean * bt0 * betat / crnt
@@ -376,11 +377,11 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     equil.params.qextrema_q = qexl
     equil.params.mextrema = length(psiexl)
     # Compute derived q-values
-    q0 = q_spline.y[1] - profiles.q_deriv.y[1] * xs[1]
+    q0 = q_spline.y[1] - profiles.q_deriv(xs[1]; hint=Ref(1)) * xs[1]
     qmax_edge = q_spline.y[end]
     qmin = min(minimum(qexl), q0)
     qmax = max(maximum(qexl), qmax_edge)
-    qa = q_spline.y[end] + profiles.q_deriv.y[end] * (1.0 - xs[end])
+    qa = q_spline.y[end] + profiles.q_deriv(xs[end]; hint=Ref(profiles.npts_minus_1)) * (1.0 - xs[end])
 
     q95 = q_spline(0.95)
 
@@ -460,10 +461,12 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     # Compute source term using direct array access
     source = zeros(Float64, mpsi + 1, mtheta + 1)
+    hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:(mpsi+1)
+        psi = profiles.xs[ipsi]
         s1 = profiles.F_spline.y[ipsi]
-        s1p = profiles.F_deriv.y[ipsi]
-        s2p = profiles.P_deriv.y[ipsi]
+        s1p = profiles.F_deriv(psi; hint=hint, search=LinearBinary())
+        s2p = profiles.P_deriv(psi; hint=hint, search=LinearBinary())
         for itheta in 1:(mtheta+1)
             f4 = rzphi.fs[ipsi, itheta, 4]
             denom = (2π * r[ipsi, itheta])^2
