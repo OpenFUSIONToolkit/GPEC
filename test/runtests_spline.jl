@@ -128,6 +128,44 @@ end
     @test abs(f[2] - Z(x_test, θ_test)) < 1e-4
 end
 
+@testset "Exact Spline Integration" begin
+    # Test that cumulative_integral uses exact spline integration formula
+    # For periodic functions with PeriodicBC, the spline can match well
+
+    # Test with periodic function (sin) and PeriodicBC - spline fits well
+    xs_periodic = collect(range(0.0, 2π; length=65))  # Closed grid
+    fs_periodic = sin.(xs_periodic)
+    fs_periodic[end] = fs_periodic[1]  # Ensure closed
+
+    fsi_periodic = JPEC.Spl.cumulative_integral(xs_periodic, fs_periodic; bc=JPEC.Spl.PeriodicBC())
+
+    # ∫sin(x)dx = -cos(x), so cumulative from 0 should be -cos(x) + cos(0) = 1 - cos(x)
+    exact_periodic = 1.0 .- cos.(xs_periodic)
+
+    # Spline integration should be very accurate for smooth periodic functions
+    @test maximum(abs.(fsi_periodic .- exact_periodic)) < 1e-6
+
+    # Compare accuracy: spline vs trapezoidal for periodic case
+    fsi_trap = zeros(length(xs_periodic))
+    for i in 1:(length(xs_periodic)-1)
+        h = xs_periodic[i+1] - xs_periodic[i]
+        fsi_trap[i+1] = fsi_trap[i] + h * (fs_periodic[i] + fs_periodic[i+1]) / 2
+    end
+    trap_error = maximum(abs.(fsi_trap .- exact_periodic))
+    spline_error = maximum(abs.(fsi_periodic .- exact_periodic))
+
+    # Exact spline integration should be more accurate than trapezoidal
+    @test spline_error < trap_error
+
+    # Test integrate_spline function for total integral
+    using FastInterpolations: cubic_interp
+    itp = cubic_interp(xs_periodic, fs_periodic; bc=JPEC.Spl.PeriodicBC())
+    total_integral = JPEC.Spl.integrate_spline(itp)
+
+    # ∫₀^{2π} sin(x)dx = 0
+    @test abs(total_integral) < 1e-10
+end
+
 @testset "Empty Spline Constructors" begin
     @info "Testing empty spline constructors for type stability"
 

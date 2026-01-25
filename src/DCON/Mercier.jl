@@ -61,9 +61,8 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        # Integrate quantities with respect to theta using cumulative integral
-        ff_fsi = Spl.cumulative_integral(Vector(rzphi.ys), ff_fs)
-        avg = ff_fsi[end, :]
+        # Integrate quantities with respect to theta using exact spline integral
+        avg = Spl.total_integral(Vector(rzphi.ys), ff_fs; bc=Spl.PeriodicBC())
 
         # Evaluate Mercier criterion and related quantities
         term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]

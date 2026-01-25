@@ -491,14 +491,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     # Integrated error criterion
     term = zeros(Float64, mpsi + 1, 2)
-    for ipsi in 0:mpsi
+    for ipsi in 1:mpsi+1
         fs_matrix = zeros(Float64, mtheta + 1, 2)
-        fs_matrix[:, 1] = flux_fsx[ipsi+1, :, 1]
-        fs_matrix[:, 2] = source[ipsi+1, :]
+        fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
+        fs_matrix[:, 2] = source[ipsi, :]
 
-        # Compute cumulative integral directly
-        fsi = Spl.cumulative_integral(Vector(flux.ys), fs_matrix)
-        term[ipsi+1, :] .= fsi[end, :]
+        # Compute total integral using exact spline integration (only final value needed)
+        term[ipsi, :] .= Spl.total_integral(Vector(flux.ys), fs_matrix; bc=Spl.PeriodicBC())
     end
 
     totali = sum(term; dims=2)
