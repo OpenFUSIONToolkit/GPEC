@@ -1,5 +1,5 @@
 """
-    compute_asymptotic_solutions(poloidal_angle, growth_parameter, asymptotic_data, eigenfunctions, reference_angle) -> Matrix{Float64}
+    compute_asymptotic_solutions(poloidal_angle, growth_parameter, asymptotic_interp, eigenfunctions, reference_angle) -> Matrix{Float64}
 
 Computes the asymptotic pseudo-solutions (alpha series) for the ballooning equation
 at a given extended poloidal angle. These solutions are used as boundary conditions for
@@ -9,7 +9,7 @@ the numerical ODE integration.
 
   - `poloidal_angle::Float64`: Extended poloidal angle θ.
   - `growth_parameter::Float64`: Growth parameter α (from Mercier criterion).
-  - `asymptotic_data::NamedTuple`: Contains fs (node values) and interps (interpolants).
+  - `asymptotic_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 asymptotic coefficients.
   - `eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2 matrix).
   - `reference_angle::Float64`: Reference poloidal angle (usually 0).
 
@@ -18,17 +18,13 @@ the numerical ODE integration.
   - `asymptotic_matrix::Matrix{Float64}`: 2×2 matrix where each column is an asymptotic solution.
 """
 function compute_asymptotic_solutions(poloidal_angle::Float64, growth_parameter::Float64,
-    asymptotic_data::NamedTuple,
+    asymptotic_interp::CubicSeriesInterpolant,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64)
     asymptotic_matrix = zeros(Float64, 2, 2)
     first_order_correction = zeros(Float64, 2, 2)
 
-    # Evaluate asymptotic coefficients at poloidal_angle (shared hint avoids redundant searches)
-    itps = asymptotic_data.interps
-    hint = Ref(1)
-    a1 = itps[1](poloidal_angle; hint=hint)
-    a2, a3, a4, a5 = itps[2](poloidal_angle; hint=hint), itps[3](poloidal_angle; hint=hint),
-    itps[4](poloidal_angle; hint=hint), itps[5](poloidal_angle; hint=hint)
+    # Evaluate all asymptotic coefficients at poloidal_angle via SeriesInterpolant
+    a1, a2, a3, a4, a5 = asymptotic_interp(poloidal_angle)
     angle_offset = poloidal_angle - reference_angle
 
     # First-order terms from the asymptotic expansion
@@ -80,14 +76,10 @@ where y₁ is the solution and y₂ = f·dy/dθ.
   - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
 """
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
-    ode_coeff_data, reference_angle = parameters
+    ode_coeff_interp, reference_angle = parameters
 
-    # Evaluate spline coefficients at current poloidal angle (shared hint avoids redundant searches)
-    itps = ode_coeff_data.interps
-    hint = Ref(1)
-    c1 = itps[1](poloidal_angle; hint=hint)
-    c2, c3, c4, c5 = itps[2](poloidal_angle; hint=hint), itps[3](poloidal_angle; hint=hint),
-    itps[4](poloidal_angle; hint=hint), itps[5](poloidal_angle; hint=hint)
+    # Evaluate all ODE coefficients at poloidal_angle via SeriesInterpolant
+    c1, c2, c3, c4, c5 = ode_coeff_interp(poloidal_angle)
     angle_offset = poloidal_angle - reference_angle
 
     # ODE coefficient f: magnetic shear-related curvature term
@@ -106,8 +98,8 @@ end
 #   Integrates the ideal marginal ballooning equations
 # ======================================================================
 """
-    integrate_ballooning_ode(flux_surface_index, growth_parameter, ode_coeff_data,
-                             asymptotic_data, eigenfunctions, reference_angle, control) -> (Float64, Float64)
+    integrate_ballooning_ode(flux_surface_index, growth_parameter, ode_coeff_interp,
+                             asymptotic_interp, eigenfunctions, reference_angle, control) -> (Float64, Float64)
 
 Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK integration.
 
@@ -116,30 +108,29 @@ Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK inte
   - `(coefficient_1, coefficient_2)`: Asymptotic coefficients determining stability.
 """
 function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Float64,
-    ode_coeff_data::NamedTuple,
-    asymptotic_data::NamedTuple,
+    ode_coeff_interp::CubicSeriesInterpolant,
+    asymptotic_interp::CubicSeriesInterpolant,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
     control::DconControl)
-
 
     TOLERANCE = 1e-5
     MINIMUM_STEP = 1e-10
 
-    # Determine integration limits
-    curvature_ratio = ode_coeff_data.fs[:, 3] ./ ode_coeff_data.fs[:, 1]
+    # Determine integration limits (access grid values from SeriesInterpolant)
+    curvature_ratio = ode_coeff_interp.y[:, 3] ./ ode_coeff_interp.y[:, 1]
     theta_max_absolute = sqrt(maximum(abs.(curvature_ratio))) * 10.0 * control.thmax0
     theta_max = min(theta_max_absolute, 100.0)
 
     # Initial conditions from asymptotic solution
     theta_start = -theta_max
-    asymptotic_start = compute_asymptotic_solutions(theta_start, growth_parameter, asymptotic_data,
+    asymptotic_start = compute_asymptotic_solutions(theta_start, growth_parameter, asymptotic_interp,
         eigenfunctions, reference_angle)
     initial_condition = Vector{Float64}(asymptotic_start[:, 2]) * sinh(1.0)
 
     # Set up and solve ODE problem
     ode_problem = ODEProblem(compute_ballooning_ode!, initial_condition,
         (theta_start, theta_max),
-        (ode_coeff_data, reference_angle))
+        (ode_coeff_interp, reference_angle))
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
@@ -181,7 +172,7 @@ end
 #   computes coefficients for the ideal marginal ballooning equations.
 # ----------------------------------------------------------------------
 """
-    bal_prep(...) -> (di, alpha, bf_data, bg_data, v0, theta0)
+    prepare_ballooning_coefficients(...) -> (di, alpha, ode_coeff_interp, asymptotic_interp, v0, theta0)
 
 Prepares all coefficients and splines required for the ballooning stability analysis
 on a single magnetic flux surface.
@@ -190,8 +181,8 @@ on a single magnetic flux surface.
 
   - `mercier_criterion::Float64`: Mercier criterion di. If > 0, surface is stable.
   - `growth_parameter::Float64`: Growth rate exponent α.
-  - `ode_coeff_data::NamedTuple`: Data for ODE coefficients (fs, interps).
-  - `asymptotic_data::NamedTuple`: Data for asymptotic matching (fs, interps).
+  - `ode_coeff_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 ODE coefficients.
+  - `asymptotic_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 asymptotic coefficients.
   - `zeroth_order_eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2).
   - `reference_angle::Float64`: Reference poloidal angle.
 """
@@ -303,8 +294,7 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     bf_fs[:, 3] = (dbdb2 - dbdb1 .^ 2 ./ (4 .* dbdb0)) ./ (bsq .* jacfac)
     bf_fs[:, 4] = 2 .* kappan .* pressure_gradient ./ chi_prime .* jacfac
     bf_fs[:, 5] = -2 .* kappas .* pressure_gradient ./ chi_prime .* q_derivative .* jacfac
-    bf_interps = ntuple(k -> cubic_interp(theta_grid, bf_fs[:, k]; bc=PeriodicBC()), 5)
-    ode_coeff_data = (fs=bf_fs, interps=bf_interps)
+    ode_coeff_interp = cubic_interp(theta_grid, bf_fs; bc=PeriodicBC())
 
     # initialize bg values
     spl0_bg_fs = -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2)
@@ -334,9 +324,8 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # if stable by Mercier, no more work to do - return empty asymptotic data
     if di > 0
-        bg_interps = ntuple(k -> cubic_interp(theta_grid, bg_fs[:, k]; bc=PeriodicBC()), 5)
-        asymptotic_data = (fs=bg_fs, interps=bg_interps)
-        return di, NaN, ode_coeff_data, asymptotic_data, zeros(2, 2), 0.0
+        asymptotic_interp = cubic_interp(theta_grid, bg_fs; bc=PeriodicBC())
+        return di, NaN, ode_coeff_interp, asymptotic_interp, zeros(2, 2), 0.0
     end
 
     alpha = sqrt(-di)
@@ -427,11 +416,10 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     bg_fs[:, 3] = spl2_fs_new[:, 3] .+ v10[1, 2]
     bg_fs[:, 4] = spl2_fs_new[:, 4] .+ v10[2, 2]
 
-    bg_interps = ntuple(k -> cubic_interp(theta_grid, bg_fs[:, k]; bc=PeriodicBC()), 5)
-    asymptotic_data = (fs=bg_fs, interps=bg_interps)
+    asymptotic_interp = cubic_interp(theta_grid, bg_fs; bc=PeriodicBC())
 
     reference_angle = 0.0 # Central poloidal angle (typically 0)
-    return di, alpha, ode_coeff_data, asymptotic_data, v0, reference_angle
+    return di, alpha, ode_coeff_interp, asymptotic_interp, v0, reference_angle
 end
 
 
