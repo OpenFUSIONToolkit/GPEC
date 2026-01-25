@@ -1,5 +1,5 @@
 """
-    compute_asymptotic_solutions(poloidal_angle, growth_parameter, asymptotic_interp, eigenfunctions, reference_angle) -> Matrix{Float64}
+    compute_asymptotic_solutions(poloidal_angle, growth_parameter, asymptotic_interp, asymp_buffer, eigenfunctions, reference_angle) -> Matrix{Float64}
 
 Computes the asymptotic pseudo-solutions (alpha series) for the ballooning equation
 at a given extended poloidal angle. These solutions are used as boundary conditions for
@@ -10,6 +10,7 @@ the numerical ODE integration.
   - `poloidal_angle::Float64`: Extended poloidal angle θ.
   - `growth_parameter::Float64`: Growth parameter α (from Mercier criterion).
   - `asymptotic_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 asymptotic coefficients.
+  - `asymp_buffer::Vector{Float64}`: Pre-allocated buffer for in-place interpolation.
   - `eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2 matrix).
   - `reference_angle::Float64`: Reference poloidal angle (usually 0).
 
@@ -18,13 +19,14 @@ the numerical ODE integration.
   - `asymptotic_matrix::Matrix{Float64}`: 2×2 matrix where each column is an asymptotic solution.
 """
 function compute_asymptotic_solutions(poloidal_angle::Float64, growth_parameter::Float64,
-    asymptotic_interp::CubicSeriesInterpolant,
+    asymptotic_interp::CubicSeriesInterpolant, asymp_buffer::Vector{Float64},
     eigenfunctions::Matrix{Float64}, reference_angle::Float64)
     asymptotic_matrix = zeros(Float64, 2, 2)
     first_order_correction = zeros(Float64, 2, 2)
 
-    # Evaluate all asymptotic coefficients at poloidal_angle via SeriesInterpolant
-    a1, a2, a3, a4, a5 = asymptotic_interp(poloidal_angle)
+    # Evaluate all asymptotic coefficients in-place (zero allocation)
+    asymptotic_interp(asymp_buffer, poloidal_angle)
+    a1, a2, a3, a4, a5 = asymp_buffer[1], asymp_buffer[2], asymp_buffer[3], asymp_buffer[4], asymp_buffer[5]
     angle_offset = poloidal_angle - reference_angle
 
     # First-order terms from the asymptotic expansion
@@ -72,14 +74,15 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 
   - `derivatives::Vector{Float64}`: Output vector [dy₁/dθ, dy₂/dθ].
   - `solution::Vector{Float64}`: Current state vector [y₁, y₂].
-  - `parameters::Tuple`: (ode_coeff_data, reference_angle).
+  - `parameters::Tuple`: (ode_coeff_interp, reference_angle, coeff_buffer, hint).
   - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
 """
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
-    ode_coeff_interp, reference_angle = parameters
+    ode_coeff_interp, reference_angle, coeff_buffer, hint = parameters
 
-    # Evaluate all ODE coefficients at poloidal_angle via SeriesInterpolant
-    c1, c2, c3, c4, c5 = ode_coeff_interp(poloidal_angle)
+    # Evaluate all ODE coefficients in-place (zero allocation)
+    ode_coeff_interp(coeff_buffer, poloidal_angle; hint=hint)
+    c1, c2, c3, c4, c5 = coeff_buffer[1], coeff_buffer[2], coeff_buffer[3], coeff_buffer[4], coeff_buffer[5]
     angle_offset = poloidal_angle - reference_angle
 
     # ODE coefficient f: magnetic shear-related curvature term
@@ -121,16 +124,21 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
     theta_max_absolute = sqrt(maximum(abs.(curvature_ratio))) * 10.0 * control.thmax0
     theta_max = min(theta_max_absolute, 100.0)
 
+    # Pre-allocate buffers for in-place interpolation (zero allocation)
+    coeff_buffer = Vector{Float64}(undef, 5)
+    asymp_buffer = Vector{Float64}(undef, 5)
+    hint = Ref(1)
+
     # Initial conditions from asymptotic solution
     theta_start = -theta_max
     asymptotic_start = compute_asymptotic_solutions(theta_start, growth_parameter, asymptotic_interp,
-        eigenfunctions, reference_angle)
+        asymp_buffer, eigenfunctions, reference_angle)
     initial_condition = Vector{Float64}(asymptotic_start[:, 2]) * sinh(1.0)
 
     # Set up and solve ODE problem
     ode_problem = ODEProblem(compute_ballooning_ode!, initial_condition,
         (theta_start, theta_max),
-        (ode_coeff_interp, reference_angle))
+        (ode_coeff_interp, reference_angle, coeff_buffer, hint))
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
@@ -144,8 +152,8 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
             end
 
             # Asymptotic matching
-            asymptotic_final = compute_asymptotic_solutions(theta_final, growth_parameter, asymptotic_data,
-                eigenfunctions, reference_angle)
+            asymptotic_final = compute_asymptotic_solutions(theta_final, growth_parameter, asymptotic_interp,
+                asymp_buffer, eigenfunctions, reference_angle)
 
             det_asymptotic = asymptotic_final[1, 1] * asymptotic_final[2, 2] -
                              asymptotic_final[1, 2] * asymptotic_final[2, 1]
