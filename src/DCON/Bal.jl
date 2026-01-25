@@ -72,14 +72,15 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 
   - `derivatives::Vector{Float64}`: Output vector [dy₁/dθ, dy₂/dθ].
   - `solution::Vector{Float64}`: Current state vector [y₁, y₂].
-  - `parameters::Tuple`: (ode_coeff_data, reference_angle).
+  - `parameters::Tuple`: (ode_coeff_interp, reference_angle, coeff_buffer, hint).
   - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
 """
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
-    ode_coeff_interp, reference_angle = parameters
+    ode_coeff_interp, reference_angle, coeff_buffer, hint = parameters
 
-    # Evaluate all ODE coefficients at poloidal_angle via SeriesInterpolant
-    c1, c2, c3, c4, c5 = ode_coeff_interp(poloidal_angle)
+    # Evaluate all ODE coefficients in-place (zero allocation)
+    ode_coeff_interp(coeff_buffer, poloidal_angle; hint=hint)
+    c1, c2, c3, c4, c5 = coeff_buffer[1], coeff_buffer[2], coeff_buffer[3], coeff_buffer[4], coeff_buffer[5]
     angle_offset = poloidal_angle - reference_angle
 
     # ODE coefficient f: magnetic shear-related curvature term
@@ -127,10 +128,14 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
         eigenfunctions, reference_angle)
     initial_condition = Vector{Float64}(asymptotic_start[:, 2]) * sinh(1.0)
 
+    # Pre-allocate buffer and hint for in-place interpolation (zero allocation in ODE RHS)
+    coeff_buffer = Vector{Float64}(undef, 5)
+    hint = Ref(1)
+
     # Set up and solve ODE problem
     ode_problem = ODEProblem(compute_ballooning_ode!, initial_condition,
         (theta_start, theta_max),
-        (ode_coeff_interp, reference_angle))
+        (ode_coeff_interp, reference_angle, coeff_buffer, hint))
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
