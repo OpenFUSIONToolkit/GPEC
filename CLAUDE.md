@@ -76,7 +76,7 @@ When asked to run benchmarks, use the following defaults unless specific instruc
 
 | Branch  | Commit    | et[1]  | Steps | Runtime |
 |---------|-----------|--------|-------|---------|
-| develop | `bb65a5b` | 1.7005 | 911   | 6.62s   |
+| develop | `bb65a5b` | 1.7005 | 911   | 2.73s   |
 
 
 ## Architecture
