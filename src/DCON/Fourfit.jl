@@ -209,6 +209,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
 
     # Storage for debug: keep fmat_full at each psi if needed
     fmats_full_debug = intr.debug_settings.make_plots ? [zeros(ComplexF64, intr.numpert_total, intr.numpert_total) for _ in 1:mpsi] : nothing
+    fbarmats_debug = intr.debug_settings.make_plots ? [zeros(ComplexF64, intr.numpert_total, intr.numpert_total) for _ in 1:mpsi] : nothing
 
     # Allocations (use flat storage for all matrices to fill splines)
     # TODO: This can be made more efficient for 2D equilibria by using block diagonals
@@ -342,6 +343,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
             fmat_full = reshape(fmats_lower_flatview, intr.numpert_total, intr.numpert_total) #Currently this is F̄
             # Store a copy before factorization
             fmats_full_debug[ipsi] .= fmat_full
+            fbarmats_debug[ipsi] .= fmat_full # This is F̄
         end
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
@@ -402,11 +404,13 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         psi = metric.xs
         q = equil.sq.fs[:, 4]
         fmats_det = [det(fmats_full_debug[ipsi]) for ipsi in 1:mpsi]
+        fbarmats_det = [det(fbarmats_debug[ipsi]) for ipsi in 1:mpsi]
 
         h5open(joinpath(intr.dir_path, "fmat_debug.h5"), "w") do h5
             h5["fmat_det"] = fmats_det
             h5["psi"] = psi
             h5["q"] = q
+            h5["fbarmat_det"] = fbarmats_det
         end
     end
 
