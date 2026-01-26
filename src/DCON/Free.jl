@@ -213,12 +213,11 @@ same function as `free_wvmats` in the Fortran code.
 """
 function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
-    q_spline = equil.profiles.q_spline
-    q_deriv_view = deriv1(q_spline)
+    profiles = equil.profiles
 
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = q_spline(ctrl.psiedge)
+    qedge = profiles.q_spline(ctrl.psiedge)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psii = ctrl.psiedge
     psi_array = zeros(Float64, npsi + 1)
@@ -228,15 +227,11 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         # Space points evenly in q
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
-        # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = q_spline(ψ)
-        q1val(ψ) = q_deriv_view(ψ)
-
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         converged = false
         for _ in 1:itmax
-            dpsi = (qi - qval(psii)) / q1val(psii)
+            dpsi = (qi - profiles.q_spline(psii)) / profiles.q_deriv(psii)
             psii += dpsi
             if abs(dpsi) < eps * abs(psii)
                 converged = true
