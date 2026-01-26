@@ -4,6 +4,7 @@ mat_flag = true               # Construct coefficient matrices for diagnostic pu
 ode_flag = true              # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
+surf_flag = true              # Include surface energy contribution to deltaW
 
 set_psilim_via_dmlim = true   # Safety factor (q) limit determined as q_ir+dmlim...
 dmlim = 0.2                   # See set_psilim_via_dmlim

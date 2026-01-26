@@ -71,7 +71,9 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
                 if ctrl.verbose && ipert_n == 1
                     println("   Computing surface energy (p_edge = $(@sprintf("%.3e", p_edge)))")
                 end
-                ws_block = compute_surface_matrix(n, intr.psilim, equil, intr)
+                # Use psifac slightly inside edge to avoid X-point singularity
+                psifac_surf = min(intr.psilim, 0.99)
+                ws_block = compute_surface_matrix(n, psifac_surf, equil, intr, ctrl)
             else
                 fill!(ws_block, 0.0)
             end
