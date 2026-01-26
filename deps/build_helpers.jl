@@ -16,8 +16,14 @@ function build_fortran()
         ENV["LIBS"] = "-framework Accelerate"
         ENV["LIBSUFFIX"] = ".dylib"
     elseif Sys.islinux()
-        ENV["LIBS"] = "-lopenblas"
+        mkl_root = get(ENV, "MKLROOT", "")
+        ENV["FFLAGS"] = "-fPIC -fallow-argument-mismatch -frecursive -finit-local-zero -std=legacy"
         ENV["LIBSUFFIX"] = ".so"
+        if mkl_root != ""
+            ENV["LIBS"] = "-L$(mkl_root)/lib/intel64 -lmkl_gf_lp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl"
+        else
+            ENV["LIBS"] = "-lblas -llapack"
+        end
     elseif Sys.iswindows()
         error("Unsupported OS for Fortran build- try using WSL")
         #ENV["LIBS"] = "-lopenblas"
@@ -25,10 +31,10 @@ function build_fortran()
     else
         error("Unsupported OS for Fortran build")
     end
-    ENV["RECURSFLAG"] = "-frecursive"
-    ENV["LEGACYFLAG"] = "-std=legacy"
-    ENV["ZEROFLAG"] = "-finit-local-zero"
-    ENV["FFLAGS"] = "-fPIC"
+    # ENV["RECURSFLAG"] = "-frecursive"
+    # ENV["LEGACYFLAG"] = "-std=legacy"
+    # ENV["ZEROFLAG"] = "-finit-local-zero"
+    # ENV["FFLAGS"] = "-fPIC"
     ENV["LDFLAGS"] = "-shared"
 
     results = [
@@ -48,7 +54,7 @@ end
 function build_spline_fortran()
     dir = joinpath(parent_dir, "Splines", "fortran")
     try
-        run(pipeline(`make -C $dir`))
+        run(`make -C $dir FC=$(ENV["FC"]) FFLAGS=$(ENV["FFLAGS"]) LIBS=$(ENV["LIBS"]) LIBSUFFIX=$(ENV["LIBSUFFIX"]) LDFLAGS=$(ENV["LDFLAGS"])`)
         @info "Splines-fortran compiled well"
         return true
     catch e
@@ -60,14 +66,23 @@ end
 function build_vacuum_fortran()
     dir = joinpath(parent_dir, "Vacuum", "fortran")
     try
-        run(pipeline(`make -C $dir`))
+        run(`make -C $dir clean`)
+
+        cmd = `make -C $dir 
+                FC=$(ENV["FC"]) 
+                FFLAGS=$(ENV["FFLAGS"]) 
+                CFLAGS="-fPIC"
+                LIBS=$(ENV["LIBS"]) 
+                LIBSUFFIX=$(ENV["LIBSUFFIX"]) 
+                LDFLAGS=$(ENV["LDFLAGS"])`
+        
+        run(cmd)
         @info "Vacuum-fortran compiled well"
         return true
     catch e
         @error "Failed to build Vacuum-fortran: $e"
         return false
     end
-
 end
 
 # Example for including more fortran:

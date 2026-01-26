@@ -170,6 +170,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `surf_flag::Bool` - Calculate surface energy contribution (finite pressure edge)
 """
 @kwdef mutable struct DconControl
     verbose::Bool = true
@@ -177,6 +178,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     mat_flag::Bool = false
     ode_flag::Bool = false
     vac_flag::Bool = false
+    surf_flag::Bool = false
     mer_flag::Bool = false
     fft_flag::Bool = false
     mthvac::Int = 480
@@ -263,9 +265,11 @@ Populated in `Free.jl`.
 - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
 - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
 - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+- `ws::Array{ComplexF64, 2}` - Surface energy matrix (numpert_total × numpert_total)
 - `ep::Vector{ComplexF64}` - Plasma eigenvalues
 - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
-- `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+- `es::Vector{ComplexF64}` - Surface eigenvalues
+- `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum + surface
 - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
 - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
@@ -277,8 +281,10 @@ Populated in `Free.jl`.
     wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wt0::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wv::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
+    ws::Array{ComplexF64,2} = zeros(ComplexF64, numpert_total, numpert_total)
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+    es::Vector{ComplexF64} = zeros(ComplexF64, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
 
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays

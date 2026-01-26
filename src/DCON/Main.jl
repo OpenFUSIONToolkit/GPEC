@@ -312,6 +312,15 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
             out_h5["vacuum/z_plasma"] = vac.xzpts[:, 2]
             out_h5["vacuum/x_wall"] = vac.xzpts[:, 3]
             out_h5["vacuum/z_wall"] = vac.xzpts[:, 4]
+            
+            # Write surface energy data if enabled
+            if ctrl.surf_flag
+                out_h5["vacuum/ws"] = vac.ws
+                out_h5["vacuum/es"] = vac.es
+                # Save edge pressure for reference
+                p_edge = Spl.spline_eval!(equil.sq, intr.psilim)[2]
+                out_h5["vacuum/p_edge"] = p_edge
+            end
         end
     end
 end

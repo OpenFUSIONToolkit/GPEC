@@ -25,6 +25,7 @@ include("Sing.jl")
 include("Fourfit.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
+include("Surface.jl")
 include("Free.jl")
 
 # These are used for various small tolerances and root finders throughout DCON

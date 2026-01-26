@@ -1,0 +1,839 @@
+\documentclass[8pt]{beamer}
+\usetheme{Madrid} % 기본 파랑색이 보이는 깔끔한 테마
+
+% 색상 지정 (필요시)
+\setbeamercolor{frametitle}{fg=white}
+\setbeamercolor{titlelike}{fg=white} % 제목(타이틀) 전체에 흰색 적용
+
+% 여백 설정 (오른쪽 여백 확장)
+\setbeamersize{text margin left=10pt, text margin right=25pt}
+
+\title{\color{white}Vacuum.f90 Review}
+\author{Jaebeom Cho, 3DST, SNU}
+\date{November 2025}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+\begin{frame}{\color{white}Introduction}
+    \begin{itemize}
+        \item This note targets a review of the vacuum code and its numerical solvers, as developed by Morrell S. Chance.
+        \item Morrell S. Chance (PPPL) was a lifelong contributor to the study of tokamak MHD stability, including both ideal and resistive models covering a broad range of toroidal mode numbers $n$.
+        \item The vacuum code, however, stands apart from other MHD studies because it does not treat the plasma region, instead solving the Laplace equation for the magnetic scalar potential in the vacuum.
+        \item However, since this is an essential part of obtaining $\delta W$, this paper summarizes Chance's work to make it more accessible and to correct a few minor errors.
+        \item In vacuum, due to zero currents in vacuum region, the magnetic fields are both divergence-free and curl-free.
+    
+        \begin{align}
+            \nabla \times \vec{B} &= \mu_0 \vec{J} =\vec{0}
+        \end{align}
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white}Introduction}
+\begin{itemize}
+
+    \item From here, we can define the scalar potential, $\chi$, in the vacuum region. Subscript 1 in $\vec{B_1}$ refers to the first-order perturbed quantity.
+
+    \begin{align}
+        \vec{B_{1,v}} = \nabla \chi , \nabla^2 \chi = 0 \label{eq:ODE_Eqaution}
+    \end{align}
+
+    \item So, the vacuum perturbed energy from perturbed magnetic field $\vec{B_1}$ can be rewritten using $\chi$
+    
+    \begin{align}
+        \delta W_v = \frac{1}{2\mu_0} \int \vec{B_1} \cdot \vec{B_1} dV = \frac{1}{2\mu_0} \int (\nabla \chi )^* \cdot \nabla \chi dV \label{eq:3}
+    \end{align}
+
+    which is always a positive semidefinite thus stabilizing plasma. 
+    
+    \item We have to determine $\chi$ in the vacuum region to obtain value of $\delta W_v$. 
+    
+    \item For this, equation \eqref{eq:ODE_Eqaution} is used and Neumann boundary condition from wall and plasma since vacuum region surrounded by plasma surface and vacuum wall. 
+    \item It's straightforward to set wall boundary condition as $\nabla \chi = 0$ because there is no radial component of the perturbed magnetic field $\vec{B_1}$ at an ideal wall.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white}Introduction}
+\begin{itemize}
+    \item For plasma region, $\vec{B_1}$ is expressed in terms of the plasma displacement vector $\xi$ and equilibrium magnetic field $\vec{B}$ : $\vec{B_{1,p}} = \nabla \times (\vec{\xi} \times \vec{B})$. 
+    \item Assuming cylindrical coordinate system, displacement vector has only radial component $\vec{\xi} = \xi \hat{r}$ and wave vector is $\vec{k} = 0\hat{r} + \frac{m}{r}\hat{\theta}-\frac{n}{R_0}\hat{\phi}$. 
+    \item The radial plasma perturbed B in plasma region is thus 
+    
+    \begin{align}
+        B_{1r,p} &= \hat{r} \cdot i\vec{k} \times [\xi \hat{r} \times \left( B_\theta \hat{\theta} +B_\phi \hat{\phi} \right)] \\
+        &= i\left(-\frac{n}{R_0}\xi B_\theta + \frac{m}{r}\xi B_\phi \right) \\
+        &= i \frac{B_\theta}{r}(m-nq)\xi = iF\xi
+    \end{align}
+
+    \item So whole process in vacuum code is to solve ODE $\left( \nabla^2 \chi = 0 \right)$ for boundary condition of ideal wall : $\nabla \chi = 0$, and plasma : $\hat{r} \cdot \nabla \chi = iF\xi$, while $\xi$ here stands only for radial component. 
+    \item To solve laplace equation in 2D tokamak cross section region, we use fredholm second kind equation and green function of toroidal geometry. 
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Assumptions before start}
+\begin{itemize}
+
+    \item $\chi$ can have multiple values because there is periodic $\vec{B_1} = \nabla \chi$ both poloidally and toroidally 
+    \item But here we suppose that there are only single value $\chi$ for single position. 
+    \item Also, surface energy $\delta W_s$ is ignored here by assuming there is no skin current. 
+    \item If there is no skin current on plasma surface, continuous curvature makes $\delta W_s = 0$ since
+    
+    \begin{align}
+        \delta W_s = \frac{1}{2}\int ( \vec{n} \cdot \vec{\xi} )^2 \vec{n} \cdot \left[ \nabla \left( P + \frac{1}{2} B^2 \right)\right]
+    \end{align}
+    
+    while $[ \cdot ]$ means discontinuity and inner term is closely related to magnetic curvature, $\vec{\kappa}$.
+    
+    \begin{align}
+        \vec{n}\cdot \left[ \nabla\left( P + \frac{1}{2}B^2\right)\right] = 
+        B^2 \vec{n}\cdot\vec{\kappa}
+    \end{align}
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Fredholm 2nd kind}
+\begin{itemize}
+    \item The 2D Laplace equation can be solved using numerical methods like FEM, FDM, and BEM, which leverage modern computational power.
+    \item Many equilibrium solvers (e.g., TOKAMAKER) are implemented using FEM.
+    \item For the vacuum code, we use the Fredholm second-kind integral equation, a type of BEM.
+    \item This has the advantage of computational speed because surface integration is replaced by a summation over boundary elements.
+    \item However, the Green's function (and its derivative) requires a significant amount of analytical work.
+    \item Using the divergence theorem (Green's second identity), for any scalar functions $\varphi$ and $\vartheta$:
+    \begin{align}
+        \int_V \left( \varphi \nabla^2 \vartheta - \vartheta \nabla^2 \varphi \right) dV = \int_S \left( \varphi \nabla \vartheta - \vartheta \nabla \varphi \right) \cdot dS
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Fredholm 2nd kind}
+\begin{itemize}
+    \item We replace $\varphi$ with the scalar potential $\chi$.
+    \item We replace $\vartheta$ with the free space 3D Green's function $G(\vec{r},\vec{r'}) = \frac{1}{|\vec{r} - \vec{r'}|}$.
+    \item This yields:
+    \begin{align}
+        \int_V \left( \chi \nabla^2 G(\vec{r},\vec{r'}) - G(\vec{r},\vec{r'}) \nabla^2 \chi \right) dV = \int_S \left( \chi \nabla G(\vec{r},\vec{r'}) - G(\vec{r},\vec{r'}) \nabla \chi \right) \cdot dS
+    \end{align}
+    \item Since $\chi$ is the scalar potential in a source-free region (vacuum), it satisfies the Laplace equation: $\nabla^2 \chi = 0$.
+    \item The equation simplifies to:
+    \begin{align}
+        \int_V  \chi \nabla^2 G(\vec{r},\vec{r'})  dV = \int_{S_p \cap S_C} \left( \chi \nabla G(\vec{r},\vec{r'}) - G(\vec{r},\vec{r'}) \nabla \chi \right) \cdot dS
+    \end{align}
+    \item The surface integral is over the plasma ($S_p$) and conducting wall ($S_C$) surfaces.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Green function in Fredholm 2nd kind}
+\begin{itemize}
+    \item Our approach uses the property $\nabla^2G = -4\pi\delta(\vec{r} - \vec{r'})$.
+    \item Also, the boundary condition on the ideal conducting wall $S_C$ is $\nabla \chi = 0$.
+    \item This causes the term $\int_{S_C} G(\vec{r},\vec{r'}) \nabla \chi(\vec{r'}) \cdot dS'$ to vanish.
+    \item Applying these conditions, the equation becomes:
+    \begin{align}
+         - 4\pi \bar{\chi}(\vec{r}) = \int_{S_p \cap S_C}  \bar{\chi}(\vec{r'}) \nabla' G(\vec{r},\vec{r'}) \cdot dS' - \int_{S_p} G(\vec{r},\vec{r'}) \nabla' \bar{\chi}(\vec{r'}) \cdot dS'
+    \end{align}
+    \item Note: $\bar{\chi}$ is the non-symmetrized 3D potential, and $\nabla'$ is the derivative normal to the surface.
+    \item We introduce toroidal symmetry by decomposing the potential: $\bar{\chi}(\vec{r})$ becomes $\chi_n(\vec{\rho})e^{-in\phi}$.
+    \item Radial dependence is omitted as the integration is over the surfaces ($\vec{r} \equiv \vec{r}(\theta,\phi)$, $\vec{\rho} \equiv \vec{\rho}(\theta)$).
+    \item The integral equation becomes:
+    \begin{align}
+         2 \chi_n(\vec\rho) +\frac{1}{2\pi}\int_{S_p \cap S_C} e^{-in(\phi - \phi')}  \chi_n(\vec{\rho}) \nabla' G(\vec{r},\vec{r'}) \cdot dS' \nonumber \\
+         = \frac{1}{2\pi} \int_{S_p} e^{-in(\phi - \phi')} G(\vec{r},\vec{r'}) \nabla' \chi_n(\vec{\rho'}) \cdot dS'
+         \label{eq:21}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Green function in Fredholm 2nd kind}
+\begin{itemize}
+    \item The RHS is related to plasma boundary conditions (contains $\nabla' \chi_n$).
+    \item The surface element is $dS' = \mathcal{J} \nabla'\mathcal{L} d \theta' d\phi'$, where $\nabla'\mathcal{L}$ is normal to the vacuum surface.
+    \item Substituting $dS'$:
+    \begin{align}
+         2 \chi_n(\vec\rho) +\frac{1}{2\pi}\int_{S_p \cap S_C} e^{-in(\phi - \phi')}  \chi_n(\vec{\rho'}) \nabla' G(\vec{r},\vec{r'}) \cdot  \nabla'\mathcal{L} \mathcal{J}d \theta' d\phi' \nonumber \\
+         = \frac{1}{2\pi} \int_{S_p} e^{-in(\phi - \phi')} G(\vec{r},\vec{r'}) \nabla' \chi_n(\vec{\rho'}) \cdot \nabla'\mathcal{L} \mathcal{J}d \theta' d\phi' \label{eq:fredholm_2nd_kind_results}
+    \end{align}
+    \item We can extract the $\phi$ direction integral, separating it from the $\theta'$ integral:
+    \begin{align}
+         2 \chi_n(\vec\rho) +\int_{C_p \cap C_C} \left(\frac{1}{2\pi}\oint e^{-in(\phi - \phi')} \nabla' G(\vec{r},\vec{r'}) \cdot  \nabla'\mathcal{L} \mathcal{J} d\phi' \right) \chi_n(\vec{\rho'(\theta')}) d \theta' \nonumber \\
+         = \int_{C_p} \left( \frac{1}{2\pi} \oint e^{-in(\phi - \phi')} G(\vec{r},\vec{r'})  d\phi'\right) \left(\mathcal{J}\nabla' \chi_n(\vec{\rho'(\theta')}) \cdot \nabla'\mathcal{L} \right)d \theta' \label{eq:21-2}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Three major kernels in Vacuum}
+\begin{itemize}
+    \item We can define new kernels for the integral terms:
+    \begin{align}
+         \mathcal{G}^n(\rho,\theta') &\equiv \frac{1}{2\pi}\oint G(\vec{r},\vec{r'}) e^{in(\phi - \phi')} d\phi' \label{eq:G_kernel} \\
+         \mathcal{H}^n (\vec{\rho}, \theta') &\equiv \frac{1}{2\pi} \oint \mathcal{J}\nabla'G(\vec{r},\vec{r'}) \cdot \nabla' \mathcal{L}e^{-in(\phi - \phi')} d\phi' \label{eq:H_kernel} \\
+         \mathcal{B}(\theta') &\equiv \mathcal{J}\nabla'\chi\cdot\nabla'\mathcal{L} \label{eq:B_kernel}
+    \end{align}
+    
+    Note: $\vec{\rho} \equiv \vec{\rho}(\theta)$ is still in the integrand.
+
+    \item \textbf{Green kernel ($\mathcal{G}^n$):} Represents the Green's function for toroidal mode number $n$. It is determined by the plasma boundary and wall geometry.
+    \item \textbf{Gradient Green kernel ($\mathcal{H}^n$):} Represents the radial gradient of the Green's function, also determined by the boundary geometry.
+    Note : Since both $\mathcal{G}^n$ and $\mathcal{H}^n$ depend only on geometry, they can be merged into a single kernel $\mathcal{C}$.
+    \item \textbf{Source kernel ($\mathcal{B}$):} This is the source term, arising from the radial perturbation of the plasma boundary (as it contains the $\nabla \chi$ term).
+\end{itemize}
+\end{frame}
+
+
+
+\begin{frame}{\color{white} Coupled Integral Equations}
+\begin{itemize}
+    \item Using the definition of the kernels, equation (\ref{eq:21-2}) is written as
+    \begin{align}
+         2\chi(\vec{\rho}) + \int_C \chi(\theta')\mathcal{H}(\vec{\rho}, \theta')d\theta' = \int_{C_p} \mathcal{G}(\vec{\rho}, \theta')\mathcal{B}(\theta')d\theta' \label{eq:22}
+    \end{align}
+    for each toroidal mode number.
+    \item To proceed, we have to calculate $\chi$ on the surface. Since the kernels in the integrands are singular, one needs to be careful and take the appropriate analytic continuation.
+    \item Separately denoting $\chi$ on the plasma contour ($C_p$) and conducting wall contour ($C_c$) by $\chi_p$ and $\chi_c$, we arrive at a set of coupled integral equations.
+    \item We consider two cases: when $\vec{\rho}(\theta)$ lies on the plasma surface, and when it lies on the wall. This gives the \textbf{Kernel equation with conducting wall}:
+    \begin{align}
+         2\chi_p(\theta_p) + \left( \oint_{C_p} \chi_p(\theta'_p) \mathcal{H}(\theta_p, \theta'_p) d\theta'_p - \textcolor{red}{\chi_p(\theta_p)} \right)
+         +  \oint_{C_c} \chi_c(\theta'_c) \mathcal{H}(\theta_p, \theta'_c) d\theta'_c  \nonumber\\
+         = \oint \mathcal{G}(\theta_p, \theta'_p) \mathcal{B}(\theta'_p) d\theta'_p \label{eq:26}\\ 
+         2\chi_c(\theta_c) + \left( \oint_{C_c} \chi_c(\theta'_c) \mathcal{H}(\theta_c, \theta'_c) d\theta'_c - \textcolor{red}{\chi_c(\theta_c)} \right)
+         + \oint_{C_p} \chi_p(\theta'_p) \mathcal{H}(\theta_c, \theta'_p) d\theta'_p \nonumber\\
+         = \oint \mathcal{G}(\theta_c, \theta'_p) \mathcal{B}(\theta'_p) d\theta'_p \label{eq:27}
+    \end{align}
+    \item The \textcolor{red}{residue} from the analytic continuation has cancelled \textcolor{red}{one factor of $\chi_p$ and $\chi_c$}, respectively.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Response Kernels $\mathcal{C}$ and $\mathcal{R}$}
+\begin{itemize}
+    \item When the wall is far enough ($\chi_C \xrightarrow{} 0$), we get the \textbf{Kernel equation for no wall}:
+    \begin{align}
+         \chi_p(\theta_p) +  \oint_{C_p} \chi_p(\theta'_p) \mathcal{H}(\theta_p, \theta'_p) d\theta'_p 
+         = \oint \mathcal{G}(\theta_p, \theta'_p) \mathcal{B}(\theta'_p) d\theta'_p \\
+         \oint_{C_p} \chi_p(\theta'_p) \mathcal{H}(\theta_c, \theta'_p) d\theta'_p 
+         = \oint \mathcal{G}(\theta_c, \theta'_p) \mathcal{B}(\theta'_p) d\theta'_p
+    \end{align}
+    \item The kernels $\mathcal{H}$ \& $\mathcal{G}$ can be combined into a single composite kernel $\mathcal{C}$, the \textbf{Response kernel of $\chi$}, which connects the source $\mathcal{B}$ to the output $\chi$.
+    \begin{align}
+         \chi(\theta) = \oint \mathcal{C}(\theta,\theta') \mathcal{B}(\theta') d\theta' \label{eq:C_kernel}
+    \end{align}
+    \item $\delta W_v$ can also be expressed with kernels. Using $\nabla^2 \bar{\chi} = 0$ and the divergence theorem:
+    \begin{align}
+         2\delta W_v = \int_v \nabla \cdot ( \bar{\chi}^* \nabla \bar{\chi}) dV = \int_{S_p} \bar{\chi}^* \nabla \bar{\chi} \cdot dS
+    \end{align}
+    \item Using $dS' = \mathcal{J} \nabla'\mathcal{L} d \theta' d\phi'$ and $\bar{\chi}(\theta,\phi) = \chi(\theta) e^{-in\phi}$:
+    \begin{align}
+         2\delta W_v &= \int_{S_p} \bar{\chi_p}^* \nabla \bar{\chi_p} \cdot \mathcal{J} \nabla'\mathcal{L} d \theta' d\phi' = 2\pi \int_{C_p} \chi^*_p(\theta') \mathcal{B}(\theta')d\theta'
+    \end{align}
+    \item Using (\ref{eq:C_kernel}), we connect $\delta W_v$ to the source kernel $\mathcal{B}$:
+    \begin{align}
+         2\delta W_v = 2\pi \int_{C_p} d\theta' \int_{C_p} d\theta'' \mathcal{C}(\theta',\theta'') \mathcal{B}^*(\theta') \mathcal{B}(\theta'') \label{deltaW=CB}  
+    \end{align}
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Collocation Method}
+\section{Collocation Method}
+\begin{itemize}
+    \item We define a new kernel $\mathcal{R}$, the \textbf{Responsive kernel for $\delta W_v$} or \textbf{Collocation of $\mathcal{C}$}, to change this integral into a summation:
+    \begin{align}
+         2 \delta W_v = \sum_{ik}^p \mathcal{R}_{ik} \mathcal{B}^*(\theta'_k) \mathcal{B}(\theta'_i) \label{eq:deltaW_R}
+    \end{align}
+    \item The collocation method changes integrals into summations. For an arbitrary function $f(x)$:
+    \begin{align}
+         \int f(x)dx = \sum w_i f_i
+    \end{align}
+    where $w_i$ is the weight factor (e.g., grid interval). This is based on the Euler–Maclaurin formula.
+    \item Let's rewrite equations (\ref{eq:26}) and (\ref{eq:27}) (with residue cancelled) for a single mode $n$:
+    \begin{align}
+         \chi_p(\theta_p) + \oint_{C_p} \chi_p(\theta'_p) \mathcal{H}^n(\theta_p, \theta'_p) d\theta'_p  
+         +  \oint_{C_c} \chi_c(\theta'_c) \mathcal{H}^n(\theta_p, \theta'_c) d\theta'_c  \nonumber\\
+         = \oint \mathcal{G}^n(\theta_p, \theta'_p) \mathcal{B}(\theta'_p) d\theta'_p \label{eq:26-rewritten}\\ 
+         \chi_c(\theta_c) + \oint_{C_c} \chi_c(\theta'_c) \mathcal{H}^n(\theta_c, \theta'_c) d\theta'_c  
+         + \oint_{C_p} \chi_p(\theta'_p) \mathcal{H}^n(\theta_c, \theta'_p) d\theta'_p \nonumber\\
+         = \oint \mathcal{G}^n(\theta_c, \theta'_p) \mathcal{B}(\theta'_p) d\theta'_p \label{eq:27-rewritten}
+    \end{align}
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Collocation: Matrix Formulation}
+\begin{itemize}
+    \item Using the collocation method, each term is discretized at points $j$:
+    \begin{align}
+         \left[\chi_p(\theta_p) \right]_j &\xrightarrow{} \chi_{p_j} = \delta_{ji}\chi_{p_i}\\
+         \left[\chi_p(\theta_p') \mathcal{H}^n(\theta_p, \theta'_p) \right]_j &\xrightarrow{} \left[\chi_p(\theta_p') \right]_i \left[ \mathcal{H}^n(\theta_p, \theta'_p) \right]_{ij} = \chi_{p_i} \mathcal{H}^n_{ij}(p,p') \\
+         \left[\chi_c(\theta_c') \mathcal{H}^n(\theta_p, \theta'_c) \right]_j &\xrightarrow{} \left[\chi_c(\theta_c') \right]_i \left[ \mathcal{H}^n(\theta_p, \theta'_c) \right]_{ij} = \chi_{c_i} \mathcal{H}^n_{ij}(p,c') \\
+         \left[\mathcal{G}^n(\theta_c, \theta'_p) \mathcal{B}(\theta_p')  \right]_j &\xrightarrow{} \left[\mathcal{B}(\theta_p') \right]_k \left[ \mathcal{G}^n(\theta_k, \theta'_j) \right]_{kj} = \mathcal{B}_k(\theta_p') \mathcal{G}^n_{jk}(c,p')
+    \end{align}
+    \item The discretized equations can be written using linear algebra (summing over repeated indices $i, k$):
+    \begin{align}
+    \begin{bmatrix}
+    \delta_{ji} + \mathcal{H}_{ji}^{n}(p,p') & \mathcal{H}_{ji}^{n}(p,c') \\
+    \mathcal{H}_{ji}^{n}(c,p') & \delta_{ji} + \mathcal{H}_{ji}^{n}(c,c')
+    \end{bmatrix}
+    \begin{bmatrix}
+    \chi_{p_i} \\
+    \chi_{c_i}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+    \mathcal{G}_{jk}^{n}(p,p') \\
+    \mathcal{G}_{jk}^{n}(c,p')
+    \end{bmatrix}
+    \mathcal{B}_{k}(\theta'_{p'}) \label{eq:nonsingular_matrix}
+    \end{align}
+    \item The summation over $i$ and $k$ is calculated using the weight function ($w$):
+    \begin{align}
+         \mathcal{H}^n_{ji}(c,p') = w_i \mathcal{H}^n(\theta_{p_j},\theta_{c_i}) \\
+         \mathcal{G}^n_{jk}(c,p') = w_k \mathcal{G}^n(\theta_{c_j},\theta_{p_k}) \\
+         etc,... \nonumber
+    \end{align}
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Collocation: Matrix Formulation}
+\begin{itemize}
+    \item The weight function $w$ is chosen appropriately for the quadratures.
+    \item Due to the high accuracy of the Euler-Maclaurin effect, \textbf{trapezoidal weights} are used for periodic integrands.
+    \item Otherwise, \textbf{Simpson's weights} are used for non-periodic integrands.
+    \item Actuality, this method of collocation cannot be directly applied because of the singular nature of the kernels. 
+    \item However, the technique described in the next section to integrate over the singularities ensure that the advantage of the collocative method is preserved.
+\end{itemize}
+\end{frame}
+
+\section{Green function}
+
+\begin{frame}{\color{white} Green function $\mathcal{G}^n$ Derivation}
+\section{Green function}
+\begin{itemize}
+    \item For 3D free space, $G(\vec{r},\vec{r'}) = \frac{1}{|\vec{r}-\vec{r'}|}$. By definition from eq. (\ref{eq:G_kernel}), $\mathcal{G}^n$ is
+    \begin{align}
+         \mathcal{G}^n(\theta, \theta') \equiv \frac{1}{2\pi} \oint G(\vec{r}, \vec{r}') e^{in(\phi - \phi')} d\phi'
+    \end{align}
+    \item With observation point $\vec{r} \equiv \vec{r}(X\cos(\phi),X\sin(\phi), Z)$ and source point $\vec{r}' \equiv \vec{r}'(X'\cos(\phi'),X'\sin(\phi'), Z')$, we find $|\mathbf{r} - \mathbf{r}'|^2$:
+    \begin{align}
+         |\mathbf{r} - \mathbf{r}'|^2 &= (X - X')^2 + (Z - Z')^2 + 4XX'\sin^2\left(\frac{\phi - \phi'}{2}\right) \nonumber \\
+         &= \rho^2 + 4XX'\sin^2\left(\frac{\phi - \phi'}{2}\right) \quad \text{using} \quad \rho^2 \equiv (X - X')^2 + (Z - Z')^2
+    \end{align}
+    \item The $\mathcal{G}^n$ kernel can then be represented as:
+    \begin{align}
+         2\pi\mathcal{G}^n(\theta, \theta') &= \oint d\phi \frac{e^{-in\phi}}{\sqrt{\rho^2 + 4XX' \sin^2(\phi/2)}} \label{eq:G_kernel_rho}\\
+         &= \frac{2}{\sqrt{XX'}} \int_0^{\pi/2} d\phi \frac{\cos 2n\phi}{\sqrt{h^2 + \sin^2 \phi}} \\
+         &= \frac{2\pi^{1/2}\Gamma(1/2-n)}{R} P_{-1/2}^n(s) \label{eq:G_kernel_legendre}
+    \end{align}
+    Using $h^2 = \rho^2/XX', R^2 = \sqrt{\rho^2(\rho^2+4XX')}, s = \frac{X^2+X'^2+(Z-Z')^2}{R^2} $
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Green function $\mathcal{G}^n$ Properties}
+\begin{itemize}
+    \item Using $\hat{\rho}^2 = \frac{\rho^2}{4XX'}$ and $2\hat{\rho}^2+1 = \frac{s}{\sqrt{s^2-1}}$, we can get a recursive relationship for the kernel:
+    \begin{align}
+         \mathcal{G}^{n+1} = \frac{4n(2\hat{\rho}^2+1)}{2n+1} \mathcal{G}^n - \frac{2n-1}{2n+1}\mathcal{G}^{n-1} \label{eq:recursive_G}
+    \end{align}
+    \item $\mathcal{G}^n$ is symmetric with respect to the interchange of $(X,Z)$ and $(X',Z')$, so the Heisenberg matrices formed from $\mathcal{G}^n$ will also have this property.
+    \item We also need to derive the gradient of $\mathcal{G}^n$ for $\mathcal{H}^n$. This is done by differentiating equation (\ref{eq:G_kernel_legendre}) with respect to $(X',Z')$.
+    \begin{align}
+    \nabla' \mathcal{G}^n &= \hat{\mathbf{e}}_x \frac{\partial \mathcal{G}^n}{\partial X'} + \hat{\mathbf{e}}_z \frac{\partial \mathcal{G}^n}{\partial Z'} \\
+    &= \frac{2\pi^{1/2}\Gamma(1/2-n)}{2\pi R^5} \left[ \dots \right] \nonumber % Shortened for brevity on slide
+    \end{align}
+    \item Using $\zeta = Z-Z'$, $\left(s^2 - 1\right) \frac{d P_\nu^\mu}{ds}(s) = \left(s^2 - 1\right)^{1/2} P_\nu^{\mu+1}(s) + \mu s P_\nu^\mu(s)$, and $s^2 - 1 = \frac{(2XX')^2}{R^4}$.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Gradient Kernel $\mathcal{H}^n$ Derivation}
+\begin{itemize}
+    \item The full expression for the gradient $\nabla' \mathcal{G}^n$ is:
+    \begin{align}
+    \nabla' \mathcal{G}^n 
+    &= \frac{2\pi^{1/2}\Gamma(1/2-n)}{2\pi R^5} \left[ \frac{\hat{\mathbf{e}}_x}{X'} \left\{ 2XX'(X'^2 - X^2 + \zeta^2)P_{-1/2}^{n+1}(s) \right. \right. \nonumber \\
+    & \qquad \left. + \left[ n(X^2+X'^2+\zeta^2)(X'^2-X^2+\zeta^2) - X'^2(X'^2-X^2+\zeta^2) \right]P_{-1/2}^{n} \right\} \nonumber \\
+    & \qquad \left. + \hat{\mathbf{e}}_z \zeta \left\{ 4XX'P_{-1/2}^{n+1}(s) + (2n+1)(X^2+X'^2+\zeta^2)P_{-1/2}^{n}(s) \right\} \right]
+    \end{align}
+    \item Now we can get the term $\mathcal{J}\nabla'\mathcal{G}^n \cdot\nabla'\mathcal{L}$ needed for the kernel $\mathcal{H}^n$ in equation (\ref{eq:H_kernel}):
+    \begin{align}
+         \mathcal{J}\nabla'\mathcal{G}^n\cdot\nabla'\mathcal{L} &= \mathcal{J}\left( \frac{ \partial \mathcal{G}^n}{\partial X' }, \frac{\partial \mathcal{G}^n}{ \partial Z'} \right) \cdot(-\frac{\partial Z'}{\partial \theta}\frac{X'}{\mathcal{J}},\frac{\partial X'}{\partial \theta}\frac{X'}{\mathcal{J}}) \\
+         &= -X'\left[ \frac{\partial Z'}{\partial \theta'}\frac{\partial\mathcal{G}^n}{\partial X'} - \frac{\partial X'}{\partial \theta'} \frac{\partial \mathcal{G}^n}{\partial Z'} \right]
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Singular Points Handling}
+\section{Singular points}
+\begin{itemize}
+    \item There are two types of singular points, one from $\mathcal{G}^n$ and the other from $\mathcal{H}^n$.
+    \item Singularity of $\mathcal{G}^n$ is handled in $\int_{C_p} \mathcal{G}^n (\rho,\theta') \mathcal{B}(\theta') d \theta' $.
+    \item Singularity of $\mathcal{H}^n$ is handled in $\int_C \chi(\theta') \mathcal{H}(\rho,\theta') d\theta'$.
+
+\subsection{Singular from kernel $\mathcal{G}^n$, $\lim\limits_{X \to X'} \mathcal{G}^n$}
+    \item This singularity occurs when the observation point $X(\theta)$ and source point $X'(\theta')$ approach each other.
+    \item Integrating $\int \mathcal{G}^n(\theta_j,\theta')f(\theta')d\theta'$ becomes tricky near the singular point $\theta_j$.
+    \item The singular region is $\left[\theta_{j-I}, \theta_{j+I}\right]$. We use a $2I+1$ point Legendre interpolation for the unknown function $f$.
+\end{itemize}
+\begin{figure}
+     \centering
+     \includegraphics[width=0.7\linewidth]{images/singularity_legendre_function.png}
+     \caption{Use Lagrange interpolation in singular range. There are 5 points in this range because $I=2$ was used.}
+     \label{fig:use_lagrange_interpolation}
+\end{figure}
+\end{frame}
+
+\begin{frame}{\color{white} $\mathcal{G}^n$ Singularity }
+\begin{itemize}
+    \item To analyze the singularity, we look at eq. (\ref{eq:G_kernel_rho}) as $X \to X'$ (so $\rho \to 0$):
+    \begin{align}
+         \mathcal{G}^n(\theta,\theta')&=\frac{1}{2\pi\sqrt{XX'}}\int_{-\pi/2}^{\pi/2} d\phi \frac{cos(2n\phi)}{\sqrt{\hat{\rho}^2+ \sin^2(\phi)}} \label{G_kernel_reg_plus_sing}
+    \end{align}
+    \item The singular behavior occurs when $\hat{\rho} \to 0$ and $\phi \to 0$. We extract the leading singular term:
+    \begin{align}
+         2\pi\sqrt{XX'}\mathcal{G}^n &= \int_{-\pi/2}^{\pi/2} d\phi' \frac{\cos(2n\phi') - \cos(\phi')}{\sqrt{\hat{\rho}^2 + \sin^2\phi'}} + \int_{-\pi/2}^{\pi/2} d\phi' \frac{\cos(\phi')}{\sqrt{\hat{\rho}^2 + \sin^2\phi'}} \label{G_kernel_sum}\\
+         &\equiv 2\pi\sqrt{XX'}[\mathcal{G}_{\text{reg}} + \mathcal{G}_{\text{sing}}]
+    \end{align}
+    \item $\mathcal{G}_{\text{reg}}$ is now regular (non-infinite) as $\rho \to 0$.
+    \item $\mathcal{G}_{\text{sing}}$ can be evaluated analytically:
+    \begin{align}
+         2\pi\sqrt{XX'} \mathcal{G}^n_{sing} = 2 \left[ -\log(\hat{\rho}) + \log(1+\sqrt{\hat{\rho}^2+1}) \right]
+    \end{align}
+    \item Thus, the leading singular behavior is logarithmic:
+    \begin{align}
+         \mathcal{G}^n \xrightarrow{\rho\to0} - \frac{1}{\pi \sqrt{XX'}}\log(\rho)
+    \end{align}
+    \item Using $\rho \propto (\theta-\theta')$, we can write the final form for numerical handling:
+    \begin{align}
+         2 \pi \mathcal{G}^n(\theta,\theta') = \left[ 2\pi \mathcal{G}^n(\theta,\theta') + \frac{1}{X'}\log(\theta-\theta')^2 \right]_{reg} -\frac{1}{X'}\log(\theta-\theta')^2 \label{eq:Singualr_equation}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} $\mathcal{G}^n$ Singularity (Implementation)}
+\begin{itemize}
+    \item The method above (eq. \ref{G_kernel_sum}) was for a prior version. The first term ($\mathcal{G}_{\text{reg}}$) is unfortunately not periodic.
+    \item Instead, we replace the $\cos(\phi)$ term with unity ($1$):
+    \begin{align}
+         2\pi\sqrt{XX'}\mathcal{G}^n &= \int_{-\pi/2}^{\pi/2} d\phi' \frac{\cos(2n\phi') - 1}{\sqrt{\hat{\rho}^2 + \sin^2\phi'}} + \int_{-\pi/2}^{\pi/2} d\phi' \frac{1}{\sqrt{\hat{\rho}^2 + \sin^2\phi'}}
+    \end{align}
+    \item In this case, the singular part is:
+    \begin{align}
+         \mathcal{G}^n_{sing} = \frac{1}{\pi\sqrt{XX'}\sqrt{\hat{\rho}^2 + 1}} K(k)
+    \end{align}
+    where $K(k)$ is the complete elliptic integral of the first kind.
+    \item A previous "middle version" used the recursive relation (\ref{eq:recursive_G}), but it diverged for high $n$ due to the non-periodic integral issue.
+    \item By handling the singularity this way and increasing the grid number, the newest vacuum code converges with more precise values.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Singular treatment for kernel $\mathcal{G}^n$}
+\subsection{Singular treatment for kernel $\mathcal{G}^n$ }
+\begin{itemize}
+    \item To treat singular points for integrating equation (\ref{eq:21-2}), we use Lagrange polynomials near the singular point.
+    \item For an unknown function $f$, and $f_i=f(\theta_i)$, we can use the Lagrange polynomial function:
+    \begin{align}
+         f(\theta') = \sum^{I}_{i=-I} \alpha_i(\theta')f_i
+    \end{align}
+    while $\alpha_i$ is
+    \begin{align}
+         \alpha_i(\theta') = \prod_{\substack{-I \le m \le I \\ m \ne i}} \frac{\theta' - \theta_m}{\theta_i - \theta_m} \label{eq:alpha}
+    \end{align}
+    \item From equation (\ref{eq:21-2}) and letting $f(\theta') = \mathcal{J} \nabla'\mathcal{L}\cdot\nabla'\chi(\theta')$ for simplicity, we can write:
+    \begin{align}
+         S_1(\theta_j) &= \int^{\theta_{j+I}}_{\theta_{j-I}} \mathcal{G}^n(\theta_j,\theta')f(\theta')d\theta'\\
+         &= \sum_{i=-I}^{I} f_{j+i} \int^{\theta_{j+I}}_{\theta_{j-I}} \mathcal{G}^n(\theta_j,\theta')\alpha_i(\theta') d\theta'
+    \end{align}
+
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Singular treatment for kernel $\mathcal{G}^n$}
+\begin{itemize}
+    \item We handle only the singular part from the RHS of equation (\ref{eq:Singualr_equation}):
+    \begin{align}
+         S_1(\theta_j) 
+         &=\sum_{i=-I}^{I} f_{j+i} \int^{\theta_{j+I}}_{\theta_{j-I}} \left( -\frac{1}{X_j}\log(\theta_j-\theta')^2\right)\alpha_i(\theta') d\theta' \\
+         &= -\sum_{i=-I}^{I} f_{j+i} \frac{1}{X_j}\int^{\theta_{j+I}}_{\theta_{j-I}} \alpha_i(\theta') \log(\theta_j-\theta')^2 d\theta'\\
+         &= -\sum_{i=-I}^{I} f_{j+i} \frac{1}{X_j}S_{1_i}(\theta_j) \label{eq:S1} \\
+         &= \sum_{i=-I}^{I} f_{j+i} \mathcal{G}^n (\theta_j, \theta'_{j+i})
+    \end{align}
+
+\end{itemize}
+\end{frame}
+
+
+\begin{frame}{\color{white} $\mathcal{G}^n$ Singularity: Coefficients}
+\begin{itemize}
+    \item Let the intervals of polynomial grids be $\Delta$. Using the definition from equation (\ref{eq:alpha}), we get (for $I=2$):
+    \begin{align}
+         \alpha_{-2} = \frac{(\theta-\Delta)(\theta+0)(\theta+\Delta)(\theta+2\Delta)}{(-\Delta)(-2\Delta)(-3\Delta)(-4\Delta)}
+    \end{align}
+    \item For $p \equiv \frac{\theta}{\Delta}$, $\alpha_i$ can be summarized in Table (\ref{table:alpha_i}).
+\end{itemize}
+    \begin{table}[h!]
+     \centering
+     \caption{Coefficients $\alpha_i$}
+     \label{table:alpha_i}
+     \begin{tabular}{cc}
+     \hline
+     $i$ & $\alpha_i$ \\
+     \hline
+     -2 & $(p-1)p(p+1)(p+2)/24$ \\
+     -1 & $-(p-2)p(p+1)(p+2)/6$  \\
+     0 & $(p^2-1)(p^2-4)/4$ \\
+     1 & $-(p-2)(p-1)p(p+2)/6$ \\
+     2 & $(p-2)(p-1)p(p+1)/24$ \\
+     \hline
+     \end{tabular}
+    \end{table}
+\end{frame}
+
+\begin{frame}{\color{white} $\mathcal{G}^n$ Singularity: Analytical Integration}
+\begin{itemize}
+    \item Let's derive $S_{1_i}$ analytically. Integrating by substitution with $\theta = \theta_j-\theta'$ from equation (\ref{eq:S1}):
+    \begin{align}
+         S_{1_i}(\theta_j) &= \int_{-2\Delta}^{2\Delta} \alpha_i(\theta_j - \theta) \log(\theta^2) d\theta \\
+         &= \int_{0}^{2\Delta} \left[\alpha_i(\theta_j-\theta) + \alpha_i(\theta_j+\theta) \right] \log(\theta^2) d\theta \\
+         &= \int_{0}^{2\Delta} A_i(\theta) \log(\theta^2) d\theta
+    \end{align}
+    \item $A_i(\theta) \equiv \alpha_i(\theta_j - \theta) + \alpha_i(\theta_j + \theta)$. Note $i$ in $\alpha_i$ is $\{-2,..,2\}$, while $i$ in $A_i$ is $\{0,1,2\}$ due to summation.
+\end{itemize}
+    \begin{table}[h!]
+     \centering
+     \caption{Values of $A_i$ and $S_{1,i}$}
+     \label{table:A_i_and_S_i}
+     \begin{tabular}{ccc}
+     \hline
+     $i$ & $A_i$ & $S_{1,i}$ \\
+     \hline
+     0 & $(p^2-1)(p^2-4)/2$ & $16\Delta(\log 2\Delta - 68/15)/15$ \\
+     1 & $-p^2(p^2-4)/3$ & $128\Delta(\log 2\Delta - 8/15)/45$\\
+     2 & $p^2(p^2-1)/12$ & $28\Delta(\log 2\Delta - 11/105)/45$ \\
+     \hline
+     \end{tabular}
+    \end{table}
+\begin{itemize}
+    \item Specific derivations are in the appendix (via MATHEMATICA).
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Singular points for $\mathcal{H}^n$}
+\subsection{Singular points for $\mathcal{H}^n$}
+\begin{itemize}
+    \item The singularity of $\mathcal{H}^n$ maximizes when $n=0$. We must handle this $n=0$ dominant singular behavior specially.
+    \item Using the Gauss theorem and the definition of $\mathcal{H}^0$, it shows that:
+    \begin{align}
+         \oint \mathcal{H}^0 (\theta, \theta')d\theta' \equiv \mathcal{H}^0_{\text{Res}}
+    \end{align}
+    \item 'Res' refers to the residue. The value is $\pm 2$ for a full $2\pi$ loop (depending on direction) and $\pm 1$ for a half loop (passing the singularity).
+    \item The residue value depends on whether the vacuum chamber is enclosing the plasma or not.
+\end{itemize}
+\begin{table}[h!]
+\centering
+\caption{Residues, $\mathcal{H}^0_{\text{Res}}$, for source contours ($\theta'$) and observer coordinate ($\theta$).}
+\label{tab:residues}
+\begin{tabular}{c c c c c}
+\hline\hline
+& \multicolumn{2}{c}{Enclosing shell} & \multicolumn{2}{c}{Open type shell} \\
+\cline{2-5}
+& $\theta'_{p}$ & $\theta'_{c}$ & $\theta'_{p}$ & $\theta'_{c}$ \\
+\hline
+$\theta_{p}$ & 1 & $-2$ & 1 & 0 \\
+$\theta_{c}$ & 0 & $-1$ & 0 & 1 \\
+\hline\hline
+\end{tabular}
+\end{table}
+\end{frame}
+
+\begin{frame}{\color{white} $\mathcal{H}^n$ Singularity: Integral Treatment}
+\begin{itemize}
+    \item The $\mathcal{H}^n$ integral term in (\ref{eq:21-2}) can be divided into converging and diverging terms:
+    \begin{align}
+         I(\theta) &= \oint \chi(\theta') \mathcal{H}^{n}(\theta, \theta') d\theta' \\
+         &=\oint [\chi(\theta')\mathcal{H}^{n}(\theta,\theta') - \chi(\theta'_{s})\mathcal{H}^{0}(\theta,\theta')]d\theta' + \mathcal{H}^{0}_{\text{Res}}\chi(\theta'_{s}) \\
+         &= I(\theta)_{\text{Reg}} + I(\theta)_{\text{Sing}} + \mathcal{H}^{0}_{\text{Res}}\chi(\theta'_{s}) \label{eq:I_integral}
+    \end{align}
+    \item The restricted (regular) term $I_{\text{Reg}}$ is changed into a collocation summation \textbf{excluding the singular region} $\left[ \theta_{j-I}, \theta_{j+I} \right]$:
+    \begin{align}
+         I_{\text{Reg}}(\theta_j) = \sum_i w_i \left[ \mathcal{H}^n(\theta_j, \theta_i') - \delta_{ji} \mathcal{H}^0 (\theta_j, \theta_k') \right] \chi(\theta_i')
+    \end{align}
+    \item In the singular region, $\chi$ is expanded using interpolating polynomials $\alpha_i(\theta)$:
+    \begin{align}
+    I_{\text{Sing}}(\theta_{j}) &= \sum_{i=-I}^{I} \chi(\theta'_{j+i}) \int_{\theta_{j-I}}^{\theta_{j+I}} \mathcal{H}^{n}(\theta_{j}, \theta') \alpha_{i}(\theta') d\theta' - \chi(\theta'_{j}) \int_{\theta_{j-I}}^{\theta_{j+I}} \mathcal{H}^{0}(\theta_{j}, \theta') d\theta' \\
+    &= \sum_{i=-I}^{I} \chi(\theta'_{j+i}) \int_{\theta_{j-I}}^{\theta_{j+I}} \left\{ \mathcal{H}^{n}(\theta_{j},\theta')\alpha_{i}(\theta') - \delta_{i,0}\mathcal{H}^{0}(\theta_{j},\theta') \right\} d\theta' \label{eq:I_sing}
+    \end{align}
+    \item We use Lagrange polynomials (which satisfy $\alpha_i(\theta_j) = \delta_{ij}$) and eight-point Gaussian quadratures for high accuracy.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} $\mathcal{H}^n$ Singularity: Matrix Formulation}
+\begin{itemize}
+    \item We add the singularity treatment of $\mathcal{H}^n$ (Eq. \ref{eq:I_sing}) and the residue (Eq. \ref{eq:I_integral}) to the collocation matrix equation (\ref{eq:nonsingular_matrix}).
+    \begin{align}
+    \begin{bmatrix}
+    \delta_{ji} + \mathcal{H}_{ji}^{n}(p,p') & \mathcal{H}_{ji}^{n}(p,c') \\
+    \mathcal{H}_{ji}^{n}(c,p') & \delta_{ji} + \mathcal{H}_{ji}^{n}(c,c')
+    \end{bmatrix}
+    \begin{bmatrix}
+    \chi_{p_i} \\
+    \chi_{c_i}
+    \end{bmatrix}
+    +
+    \mathcal{H^0_{\text{Res}}}
+    \begin{bmatrix}
+    \chi_{p_i} \\
+    \chi_{c_i}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+    \mathcal{G}_{jk}^{n}(p,p') \\
+    \mathcal{G}_{jk}^{n}(c,p')
+    \end{Gmatrix}
+    \mathcal{B}_{k}(\theta'_{p'}) 
+    \end{align}
+    \item For \textbf{enclosing conductors} (using Table \ref{tab:residues}):
+    \begin{align}
+    \begin{bmatrix}
+    2\delta_{ji} + \mathcal{H}_{ji}^{n}(p,p') &-2 \delta_{ji}+ \mathcal{H}_{ji}^{n}(p,c') \\
+    \mathcal{H}_{ji}^{n}(c,p') & + \mathcal{H}_{ji}^{n}(c,c')
+    \end{bmatrix}
+    \begin{bmatrix}
+    \chi_{p_i} \\
+    \chi_{c_i}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+    \mathcal{G}_{jk}^{n}(p,p') \\
+    \mathcal{G}_{jk}^{n}(c,p')
+    \end{Gmatrix}
+    \mathcal{B}_{k}(\theta'_{p'})
+    \end{align}
+    \item For \textbf{opened conductors}:
+    \begin{align}
+    \begin{bmatrix}
+    2\delta_{ji} + \mathcal{H}_{ji}^{n}(p,p') & \mathcal{H}_{ji}^{n}(p,c') \\
+    \mathcal{H}_{ji}^{n}(c,p') & 2\delta_{ji} + \mathcal{H}_{ji}^{n}(c,c')
+    \end{bmatrix}
+    \begin{bmatrix}
+    \chi_{p_i} \\
+    \chi_{c_i}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+    \mathcal{G}_{jk}^{n}(p,p') \\
+    \mathcal{G}_{jk}^{n}(c,p')
+    \end{Gmatrix}
+    \mathcal{B}_{k}(\theta'_{p'})
+    \end{align}
+    \item Let's define the new singularity-considered $\mathcal{H}^n$ matrix as \textbf{$A$}.
+    \begin{align}
+    A^n_{ij}
+    \begin{bmatrix}
+    \chi_{p_i} \\
+    \chi_{c_i}
+    \end{bmatrix}
+    =
+    \begin{bmatrix}
+    \mathcal{G}_{jk}^{n}(p,p') \\
+    \mathcal{G}_{jk}^{n}(c,p')
+    \end{bmatrix}
+    \mathcal{B}_{k}(\theta'_{p'})
+    \label{eq:non_discretized_A_ij}
+    \end{align}
+\end{itemize}
+\end{frame}
+\begin{frame}{\color{white} Coefficient matrix and $\mathcal{C}^n$}
+\section{Coefficient matrix and Fourier analysis}
+
+\subsection{Coefficient matrix}
+\begin{itemize}
+    \item Given geometrical information for the wall and plasma, we get the full information for matrix $A_{ij}$ by integrating $\mathcal{H}^n$. This includes $(X,Z)$ points and whether the conductor is enclosing.
+    \item Writing the discretized form of equation (\ref{eq:non_discretized_A_ij}) for collocation:
+    \begin{align}
+         \sum_i A^n_{ij}\chi(\theta_i) = \oint_{C_p} \mathcal{G}^n(\theta_j, \theta') \mathcal{B}^n (\theta') d\theta'
+    \end{align}
+    \item This can be solved directly for $\chi$ by inverting $A^n_{ij}$:
+    \begin{align}
+         \chi(\theta_i) =\sum_j (A^n_{ji})^{-1} \oint \mathcal{G}^n(\theta_j, \theta') \mathcal{B}^n (\theta') d\theta' 
+    \end{align}
+    \item Comparing with equation (\ref{eq:C_kernel}), we find the response kernel $\mathcal{C}^n$:
+    \begin{align}
+         \mathcal{C}^n(\theta_i,\theta') &= \sum_j (A^n_{ji})^{-1} \mathcal{G}^n(\theta_j,\theta') \\
+         \text{collocation} \to \mathcal{C}_{ik} &= w_i w_k \mathcal{C}^n(\theta_i, \theta_k') = \sum_j (A^n_{ij})^{-1}\mathcal{G}^n_{kj}
+         \label{eq:C_kernel_def}
+    \end{align}
+    \item The kernel $\mathcal{C}^n$ now includes all geometry information ($\mathcal{G}^n, \mathcal{H}^n$).
+    \item Note: The matrix $A_{ji}$ can have singularities (especially when $n=0$) if $\chi$ contributions are not eliminated carefully.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Response Kernel $\mathcal{R}$ and $\delta W_v$}
+\begin{itemize}
+    \item Let's get $\delta W_v$ from this $\mathcal{C}^n$ kernel. Substituting equation (\ref{eq:C_kernel_def}) into equation (\ref{deltaW=CB}):
+    \begin{align}
+         2\delta W_v &= 2\pi \int_{C_p} d\theta' \int_{C_p} d\theta'' \mathcal{C}(\theta',\theta'') \mathcal{B}^*(\theta') \mathcal{B}(\theta'') \\
+         &= 2\pi \sum_{i,k}^{N_{plasma}} \mathcal{C}_{ik} \mathcal{B^*}(\theta'_i) \mathcal{B}(\theta_k') \\
+         &= \sum_{i,k}^{N_{plasma}} (2 \pi w_i w_k \mathcal{C}(\theta_i,\theta'_k)) \mathcal{B^*}(\theta'_i) \mathcal{B}(\theta_k') \label{eq:G_kernel3}\\
+         &= \sum_{i,k}^{N_{plasma}} \mathcal{R}_{ik} \mathcal{B^*}(\theta'_i) \mathcal{B}(\theta_k') \label{eq:G_kernel2}
+    \end{align}
+    \item This shows the \textbf{response kernel $\mathcal{R}$} is defined either using $\mathcal{C}^n$ (eq. \ref{eq:C_kernel_def}) or $A_{ij} \& \mathcal{G}^n$ (eq. \ref{eq:G_kernel3}, \ref{eq:G_kernel2}).
+    \item $\mathcal{R}^n$ is the response kernel for $\delta W_v$. The summation is only over $N_{plasma}$ since the source $\mathcal{B}(\theta)$ is on the plasma surface.
+    \item Although $\mathcal{G}^n$ is symmetric, $A_{ji}$ is not (due to the residues). However, the final response function $\mathcal{R}$ is symmetric.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Fourier Analysis}
+\subsection{Fourier Analysis}
+\begin{itemize}
+    \item We start with PEST coordinates ($\theta, \zeta$) for straight field lines, as inputs are Fourier analyzed in this system.
+    \item We define a new coordinate $\zeta$:
+    \begin{align}
+         \zeta = \phi + \nu(\theta) = \phi + q(\psi)(\theta-\theta_p)
+    \end{align}
+    \item $\nu(\theta)$ makes $\zeta$ a straight field line coordinate.
+    \item Linear perturbed quantities are assumed to have the form:
+    \begin{align}
+         ~e^{i(m\theta - n \zeta)} = e^{i[m\theta-n(\phi+\nu(\theta))]} = e^{i[m\theta - n\nu(\theta)]-in\phi}
+    \end{align}
+    \item The $\theta$ dependency is included in the Fourier decomposition:
+    \begin{align}
+         \mathcal{B}(\theta') = \sum_m \mathcal{B}_m e^{i[m\theta'-n\nu(\theta')]}
+    \end{align}
+    \item The equation for $\delta W_v$ (eq. \ref{eq:G_kernel2}) can be written in Fourier form:
+    \begin{align}
+         2 \delta W_v &= 2\pi \sum_{mm'} \mathcal{B}_{m'}^* \mathcal{B}_m \sum_{i,k}^{N_{plasma}} w_i w_k \sum_j (A^n_{ji})^{-1} \mathcal{G}(\theta_j, \theta_k') \nonumber \\
+         &\times e^{-i[m'\theta_k' - n\nu(\theta_k')]} e^{i[m\theta_i' - n\nu(\theta_i')]}\\
+         &= \sum_{mm'} \mathcal{R}_{mm'} \mathcal{B}_{m'}^* \mathcal{B}_m \label{eq:deltaW_collocation}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Fourier Response Function $\mathcal{R}_{mm'}$}
+\begin{itemize}
+    \item The response function $\mathcal{R}_{mm'}$ in Fourier form is:
+    \begin{align}
+         \mathcal{R}_{mm'} = 2\pi \sum_{ik}^{N_{plasma}} w_i w_k \sum_j (A^n_{ji})^{-1} \mathcal{G}(\theta_j, \theta_k') e^{-i[m'\theta_k' - n\nu(\theta_k')]} \times e^{i[m\theta_i' - n\nu(\theta_i')]} \label{eq:R_{mm'}}
+    \end{align}
+    or using $\mathcal{C}$:
+    \begin{align}
+         \mathcal{R}_{mm'} = 2\pi \sum_{ik}^{N_{plasma}} w_i w_k \mathcal{C}(\theta_i, \theta_k') e^{-i[m'\theta_k' - n\nu(\theta_k')]} \times e^{i[m\theta_i' - n\nu(\theta_i')]}
+    \end{align}
+    \item In practice, to save storage, the sum over $k$ is carried out early:
+    \begin{align}
+         \mathcal{R}_{mm'} &= 2\pi \sum_{i}^{N_{plasma}} w_i\sum_j (A^n_{ji})^{-1}  e^{i[m\theta_i' - n\nu(\theta_i')]} \left(\sum_{k}^{N_{plasma}}  w_k \mathcal{G}^n(\theta_j, \theta_k') e^{-i[m'\theta_k' - n\nu(\theta_k')]}\right) \\
+         &= 2\pi \sum_{i}^{N_{plasma}} w_i\sum_j (A^n_{ji})^{-1}  e^{i[m\theta_i' - n\nu(\theta_i')]} \left(\mathcal{G}^{*,R}_{m'}(\theta_j) + i\mathcal{G}^{*,I}_{m'}(\theta_j) \right) \\
+         &= \sum_{i}^{N_{plasma}} 2\pi w_i e^{i[m\theta_i' - n\nu(\theta_i')]} \left(\mathcal{C}^{*,R}_{m'}(\theta_i) + i\mathcal{C}^{*,I}_{m'}(\theta_i) \right) \\
+         &= [\mathcal{A}^{RR}_{mm'}+\mathcal{A}^{II}_{mm'}] +i[\mathcal{A}^{IR}_{mm'}-\mathcal{A}^{RI}_{mm'}] \label{eq:R_kernle_from_A}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} $\mathcal{A}$ Kernels and Source Kernel $\mathcal{B}_m$}
+\begin{itemize}
+    \item The $\mathcal{A}$ kernels are defined as:
+    \begin{align}
+         \mathcal{A}_{mm'}^{RR} = 2\pi \sum_{i}^{p} w_i \cos[m\theta'_i - n\nu(\theta'_i)]\mathcal{C}_{m'}^{R}(\theta_i) \nonumber \\
+         \mathcal{A}_{mm'}^{II} = 2\pi \sum_{i}^{p} w_i \sin[m\theta'_i - n\nu(\theta'_i)]\mathcal{C}_{m'}^{I}(\theta_i) \nonumber\\
+         \mathcal{A}_{mm'}^{IR} = 2\pi \sum_{i}^{p} w_i \sin[m\theta'_i - n\nu(\theta'_i)]\mathcal{C}_{m'}^{R}(\theta_i) \nonumber\\
+         \mathcal{A}_{mm'}^{RI} = 2\pi \sum_{i}^{p} w_i \cos[m\theta'_i - n\nu(\theta'_i)]\mathcal{C}_{m'}^{I}(\theta_i) \label{eq:A_kernel_def}
+    \end{align}
+    \item Where $\mathcal{C}_m(\theta_i) = \sum_j (A^n_{ij})^{-1} \mathcal{G}_m(\theta_j) = \mathcal{C}^R_m(\theta_i) + i\mathcal{C}^I_l(\theta_i)$.
+    \item For vertically symmetric configurations, $\mathcal{A}_{mm'}^{IR}$ and $\mathcal{A}_{mm'}^{RI}$ vanish.
+    \item Finally, we reformulate the source kernel $\mathcal{B}$ (eq. \ref{eq:B_kernel}) for the plasma boundary source ($\mathcal{L} =\psi$, $B_{1,r} = \nabla'\chi$):
+    \begin{align}
+         \bar{\mathcal{B}}(\theta') = \mathcal{J}\bar{\vec{B_{1,r}}} \cdot \nabla\psi = \mathcal{J} \vec{B_0} \cdot \nabla \bar{\xi_\psi} = i \sum_m (m-nq) \xi_m e^{i[m\theta-n\zeta]}
+    \end{align}
+    \item From $\mathcal{B}(\theta') = \sum_m \mathcal{B}_m e^{i(m\theta - n \zeta)}$, we get the Fourier component:
+    \begin{align}
+         \mathcal{B}_m = i(m-nq)\xi_m \label{eq:B_kernel2}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Final $\delta W_v$ and DCON Interface}
+\begin{itemize}
+    \item Now all components are prepared to find $\delta W_v$:
+    \begin{align}
+         2\delta W_v = \sum_{mm'} (m-nq)(m-nq')\mathcal{R}_{mm'}\xi_m'^*\xi_m 
+    \end{align}
+    \item Connecting this to DCON.f90, the matrix $V_{mm'}$ (which is $W_v$ in vacuum notation) is sent to DCON:
+    \begin{align}
+         V_{mm'} = (m-nq)(m'-nq)\mathcal{R}_{mm'}
+    \end{align}
+    \item With this matrix, $\delta W_v$ can be obtained directly:
+     \begin{align}
+         2\delta W_v = \sum_{mm'} V_{mm'} \xi_m^*\xi_{m'}
+     \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Vacuum.f90 Workflow}
+\section{Vacuum.f90}
+\begin{figure}[H]
+     \centering
+     \includegraphics[width=0.9\linewidth]{images/full_vacuum_code_scheme.png}
+     \caption{Full Vacuum.f90 code workflow}
+     \label{fig:full_vacuum_code_scheme}
+\end{figure}
+\end{frame}
+
+\begin{frame}{\color{white} Vacuum.f90 Workflow (Steps)}
+\begin{enumerate}
+     \item For each poloidal mode $m$, the \textbf{source kernel $\mathcal{B}_m$} is calculated from $\xi_m$ using Eq. (\ref{eq:B_kernel2}). $n$ is given by DCON/PEST.
+
+     \item Using geometry, the \textbf{Green's kernel $\mathcal{G}^n$} is calculated (\texttt{green} function). Singular points are skipped and handled using Eq. (\ref{eq:Singualr_equation}).
+
+     \item From geometry, the \textbf{gradient Green's kernel $\mathcal{H}^n$} is calculated. Singularities are extracted with $\mathcal{H}^0$ (Eq. \ref{eq:I_sing}). After checking for enclosing conductor, matrix $A_{ji}$ is obtained from $\mathcal{H}^n$ (Eq. \ref{eq:non_discretized_A_ij}).
+
+     \item From $A_{ji}$ and $\mathcal{G}^n$, the \textbf{response function $\mathcal{C}^n$} is obtained (Eq. \ref{eq:C_kernel_def}). From $\mathcal{C}^n$, the \textbf{kernel $\mathcal{A}$} (Eq. \ref{eq:A_kernel_def}) is derived.
+
+     \item From $\mathcal{A}$, the \textbf{response kernel $\mathcal{R}$} (for $\delta W_V$) is obtained (Eq. \ref{eq:R_kernle_from_A}).
+
+     \item \textbf{$\delta W_v$} is derived from all components using Eq. (\ref{eq:deltaW_collocation}).
+
+     \item Additionally, \textbf{$\chi$} can be obtained with:
+     \begin{align}
+         \chi(\theta_i) = \sum_m \mathcal{C}^n_{m}(\theta_i) \mathcal{B}_m
+     \end{align}
+
+     \item The primary output for DCON is $\delta W_v$, or the \textbf{vacuum response matrix} $V_{mm'}$. With $V_{mm'}$, DCON can calculate $\delta W_v$ directly without recalling the vacuum code.
+     
+     \item As an additional calculation, \textbf{surface eddy currents} on the shell can be obtained from $\chi_C$ using $\vec{K} = \tilde{n} \times \nabla \chi_C$.
+\end{enumerate}
+\end{frame}
+
+
+\begin{frame}{\color{white} 3D Expansion}
+\section{3D expansion}
+\begin{itemize}
+    \item Extending the 2D code to a full 3D implementation  requires a fundamental shift from a semi-analytic to a large-scale numerical one.
+    \item The loss of toroidal symmetry invalidates the use of specialized 2D Green's kernels ($\mathcal{G}^n, \mathcal{H}^n$).
+    \item The methodology must be based on the fundamental \textbf{3D free-space Green's function}, $\frac{1}{|\vec{r}-\vec{r'}|}$, applied over a \textbf{2D surface mesh}.
+    \item This transforms the problem into a full Boundary Element Method (BEM), resulting in a significantly larger and dense linear system.
+    \item It introduces stronger kernel singularities (order $1/r$ or $1/r^2$) compared to the 2D logarithmic singularity, necessitating more sophisticated numerical integration.
+    \item From equation (\ref{eq:fredholm_2nd_kind_results}) and the no-wall condition:
+    \begin{align}
+         &\chi_{p,mn}(\theta_p,\zeta_p) + \frac{1}{2\pi}\int_{S_p} \chi_{p,mn}(\theta_p', \zeta_p') \nabla' G(\theta_p, \zeta_p, \theta_p', \zeta_p') \cdot \mathcal{J} \nabla' \mathcal{L} d\theta_p' d\zeta_p' \nonumber \\
+         &= \frac{1}{2\pi}\int_{S_p} G(\theta_p, \zeta_p, \theta_p', \zeta_p') \nabla' \chi_{p,mn}(\theta_p', \zeta_p') \cdot \mathcal{J}\nabla'\mathcal{L} d\theta_p' d\zeta_p'
+    \end{align}
+    \item This is in PEST coordinates ($e^{i(m\theta - n\zeta)} = e^{i(m\theta - n\phi +\nu(\theta,\phi))}$).
+    \item Assuming a stellarator boundary defined in Paul Garabedian format:
+    \begin{align}
+         R_s - iZ_s = \Sigma_{mn} \Delta_{mn} e^{i(m\theta - n \phi)}
+    \end{align}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{\color{white} Appendix: $S_{1_j}$ Integration}
+\section{Appendix}
+
+\begin{figure} [H]
+     \centering
+     \includegraphics[width=1\linewidth]{images/S1_integration.png}
+     \caption{$S_{1_j}$ integration using mathematica}
+     \label{fig:S1_integration}
+\end{figure}
+\end{frame}
+
+\end{document}

@@ -25,6 +25,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wst = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
     v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
@@ -36,6 +37,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Compute vacuum response matrix
     wv_block = zeros(ComplexF64, intr.mpert, intr.mpert)
+    ws_block = zeros(ComplexF64, intr.mpert, intr.mpert)
     for ipert_n in 1:intr.npert
         n = ipert_n - 1 + intr.nlow
         
@@ -62,21 +64,42 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Compute vacuum energy matrix
         wv_block, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
 
-        # Scale vacuum matrix by singfac = (m - n*qlim)
+        # Compute surface energy matrix if enabled
+        if ctrl.surf_flag
+            p_edge = Spl.spline_eval!(equil.sq, intr.psilim)[2]
+            if abs(p_edge) > 1e-12
+                if ctrl.verbose && ipert_n == 1
+                    println("   Computing surface energy (p_edge = $(@sprintf("%.3e", p_edge)))")
+                end
+                ws_block = compute_surface_matrix(n, intr.psilim, equil, intr)
+            else
+                fill!(ws_block, 0.0)
+            end
+        else
+            fill!(ws_block, 0.0)
+        end
+
+        # Scale vacuum and surface matrices by singfac = (m - n*qlim)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
         @inbounds for ipert in 1:intr.mpert
             @views wv_block[ipert, :] .*= singfac[ipert]
             @views wv_block[:, ipert] .*= singfac[ipert]
+            if ctrl.surf_flag
+                @views ws_block[ipert, :] .*= singfac[ipert]
+                @views ws_block[:, ipert] .*= singfac[ipert]
+            end
         end
 
-        # Store block in full wv matrix
-        @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
+        # Store blocks in full matrices
+        idx_range = (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert
+        @views vac.wv[idx_range, idx_range] .= wv_block
+        @views vac.ws[idx_range, idx_range] .= ws_block
 
         Vacuum.unset_dcon_params()
     end
 
     # Compute complex energy eigenvalues and vectors
-    vac.wt .= wp .+ vac.wv
+    vac.wt .= wp .+ vac.wv .+ vac.ws
     vac.wt0 .= vac.wt
     Ev = eigen(vac.wt)
     vac.et .= Ev.values
@@ -112,13 +135,15 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         vac.wt[:, isol] .*= phase
     end
 
-    # Compute plasma and vacuum contributions.
-    # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
+    # Compute plasma, vacuum, and surface contributions.
+    # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt  ; wst = wt' * ws * wt
     wpt .= adjoint(vac.wt) * (wp * vac.wt)
     wvt .= adjoint(vac.wt) * (vac.wv * vac.wt)
+    wst .= adjoint(vac.wt) * (vac.ws * vac.wt)
     for ipert in 1:intr.numpert_total
         vac.ep[ipert] = wpt[ipert, ipert]
         vac.ev[ipert] = wvt[ipert, ipert]
+        vac.es[ipert] = wst[ipert, ipert]
     end
 
     # Normalize eigenvectors based on scaled wt
@@ -133,9 +158,12 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Write energies to screen
     if ctrl.verbose
         println("Least Stable Eigenmode Energies:")
-        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))
-        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))
-        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))
+        println("  Plasma  = ", (@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))
+        if ctrl.surf_flag && abs(vac.es[1]) > 1e-15
+            println("  Surface = ", (@sprintf "%+.3e %+.3ei" real(vac.es[1]) imag(vac.es[1])))
+        end
+        println("  Vacuum  = ", (@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))
+        println("  Total   = ", (@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))
     end
 
     return vac
