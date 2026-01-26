@@ -29,7 +29,7 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:Union{FastInterpolations.CubicInterpolant,FastInterpolations.CubicSeriesInterpolant}}
+struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:FastInterpolations.CubicSeriesInterpolant}
     ro::Float64
     zo::Float64
     psi_in::B
@@ -64,7 +64,7 @@ function direct_get_bfield!(
     r::Float64,
     z::Float64,
     psi_in::Spl.BicubicSpline,
-    sq_in::Union{FastInterpolations.CubicInterpolant,FastInterpolations.CubicSeriesInterpolant},
+    sq_in::FastInterpolations.CubicSeriesInterpolant,
     psio::Float64;
     derivs::Int=0
 )
