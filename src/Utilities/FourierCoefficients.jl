@@ -44,6 +44,15 @@ struct FourierCoefficients
 end
 
 """
+    empty_FourierCoefficients()
+
+Create an empty FourierCoefficients for initialization purposes.
+"""
+function empty_FourierCoefficients()
+    FourierCoefficients(Float64[], 0, 0, zeros(Float64, 0, 1, 0), zeros(Float64, 0, 1, 0))
+end
+
+"""
     FourierCoefficients(xs, ys, fs, mband)
 
 Compute Fourier coefficients via FFT without creating splines.

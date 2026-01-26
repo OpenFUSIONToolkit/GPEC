@@ -429,7 +429,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
+    Afact::Cholesky{ComplexF64,Matrix{ComplexF64}} = cholesky(Matrix{ComplexF64}(I, numpert_total, numpert_total))
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration

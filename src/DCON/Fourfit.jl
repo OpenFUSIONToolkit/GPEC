@@ -21,7 +21,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
     xs::Vector{Float64} = zeros(mpsi)
     ys::Vector{Float64} = zeros(mtheta)
     fs::Array{Float64,3} = zeros(mpsi, mtheta, 8)
-    fourier_coeffs::Union{Util.FourierCoefficients,Nothing} = nothing
+    fourier_coeffs::Util.FourierCoefficients = Util.empty_FourierCoefficients()
 end
 
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
