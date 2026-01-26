@@ -1,5 +1,5 @@
 """
-    evaluate_stability_criterion!(odet, equil) -> nzero
+    evaluate_stability_criterion!(odet, profiles) -> nzero
 
 Evaluate the stability criterion over the entire integration, counting the number of
 zero crossings of the critical eigenvalue which indicate instability. This acts as an
@@ -9,7 +9,7 @@ the `crit_store` in `odet` in place, and return the total number of zero crossin
 If the W inverse matrix was non-Hermitian beyond tolerance at any integration steps,
 a warning is printed with the total count.
 """
-function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.PlasmaEquilibrium)
+function evaluate_stability_criterion!(odet::OdeState, profiles::Equilibrium.ProfileSplines)
 
     # Initialization
     resize!(odet.crit_store, odet.step)
@@ -18,7 +18,7 @@ function evaluate_stability_criterion!(odet::OdeState, equil::Equilibrium.Plasma
 
     # Loop over integration steps, computing crit/checking for zero crossings
     for istep in 1:odet.step
-        zero_cross, nonherm = check_for_zero_crossings!(odet, equil.profiles, istep)
+        zero_cross, nonherm = check_for_zero_crossings!(odet, profiles, istep)
         if zero_cross
             nzero += 1
         end
