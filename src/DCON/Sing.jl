@@ -170,8 +170,9 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
 
         intr.psilim = profiles.xs[jpsi]
         converged = false
+        hint = Ref(jpsi)
         for _ in 1:itmax
-            dpsi = (intr.qlim - profiles.q_spline(intr.psilim)) / profiles.q_deriv(intr.psilim)
+            dpsi = (intr.qlim - profiles.q_spline(intr.psilim; hint=hint)) / profiles.q_deriv(intr.psilim; hint=hint)
             intr.psilim += dpsi
             if abs(dpsi) < eps * abs(intr.psilim)
                 converged = true
@@ -219,14 +220,8 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
     singp.n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
     singp.n2 = vec([i + j * intr.numpert_total for j in 0:1, i in singp.n1])
 
-    psifac = singp.psifac
-    q = singp.q
-    di0 = intr.locstab(singp.psifac)[1] / singp.psifac
-    q1 = singp.q1
-    rho = singp.rho
-
     # Compute Mercier criterion and singular power
-    sing_mmat!(intr, ctrl, equil, ffit, ising)
+    sing_mmat!(intr, ctrl, equil.profiles, ffit, ising)
     # TODO: My approach for the following logic is to mimic the existing code but go block by block
     # in m0mat (i.e. looping through each resonance). I think it works for 2D, probably not 3D
     # Note: We only need the transpose here because the third dimension corresponds to the bottom half of the 2N X 2N matrix
@@ -277,7 +272,7 @@ function sing_vmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pl
 end
 
 """
-    sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+    sing_mmat!(intr::DconInternal, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, ising::Int)
 
 Calculate asymptotic mmat matrix for singular surface `ising`. Performs the same
 function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
@@ -306,10 +301,10 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-function sing_mmat!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+function sing_mmat!(intr::DconInternal, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, ising::Int)
 
-    q_spline = equil.profiles.q_spline
-    q_d1 = deriv1(q_spline)
+    q_spline = profiles.q_spline
+    q_d1 = profiles.q_deriv
     q_d2 = deriv2(q_spline)
     q_d3 = deriv3(q_spline)
 
