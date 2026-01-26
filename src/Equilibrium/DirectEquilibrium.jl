@@ -29,11 +29,12 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:FastInterpolations.CubicSeriesInterpolant}
+struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:FastInterpolations.CubicSeriesInterpolant,D}
     ro::Float64
     zo::Float64
     psi_in::B
     sq_in::S
+    sq_in_deriv::D
     psio::Float64
     power_bp::Int
     power_b::Int
@@ -42,7 +43,7 @@ struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:FastInterpolations.CubicSeri
 end
 
 """
-    direct_get_bfield!(bf_out, r, z, psi_in, sq_in, psio; derivs=0)
+    direct_get_bfield!(bf_out, r, z, psi_in, sq_in, sq_in_deriv, psio; derivs=0)
 
 Calculates the magnetic field and its derivatives at a given (R,Z) point.
 The results are stored in-place in the `bf_out` object. This is equivalent
@@ -56,6 +57,7 @@ the Julia spline implementation.
   - `z`: Z-coordinate to evaluate at
   - `psi_in`: 2D bicubic spline for poloidal flux `ψ(R,Z)`
   - `sq_in`: 1D cubic spline for profiles `F(ψ_norm)` and `P(ψ_norm)`
+  - `sq_in_deriv`: Pre-computed derivative view of sq_in
   - `psio`: total toroidal flux
   - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
 """
@@ -65,6 +67,7 @@ function direct_get_bfield!(
     z::Float64,
     psi_in::Spl.BicubicSpline,
     sq_in::FastInterpolations.CubicSeriesInterpolant,
+    sq_in_deriv,
     psio::Float64;
     derivs::Int=0
 )
@@ -92,7 +95,7 @@ function direct_get_bfield!(
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
     f_sq = sq_in(psi_norm)
-    f1_sq = deriv1(sq_in)(psi_norm)
+    f1_sq = sq_in_deriv(psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
     bf_out.f1 = f1_sq[1] # dF/dψ
     bf_out.p = f_sq[2]  # μ0*Pressure
@@ -139,6 +142,7 @@ function direct_position!(raw_profile::DirectRunInput)
 
     bfield = DirectBField()
     max_iterations = 200
+    sq_in_deriv = deriv1(raw_profile.sq_in)
 
     # For an axis initial guess, we find zero crossing of Bz on the midplane
     # Note the Fortran had this wrapped in a if ro == 0 block, which we omit here
@@ -148,7 +152,7 @@ function direct_position!(raw_profile::DirectRunInput)
     dr = (raw_profile.rmax - raw_profile.rmin) / 20.0
 
     for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=1)
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
         if bfield.bz >= 0.0
             break
         end
@@ -161,7 +165,7 @@ function direct_position!(raw_profile::DirectRunInput)
     # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0
     dr, dz = 0.0, 0.0
     for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=2)
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
         det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
         if abs(det) < 1e-20
             error("Jacobian matrix is singular near ($r, $z).")
@@ -184,7 +188,7 @@ function direct_position!(raw_profile::DirectRunInput)
     end
 
     # Renormalize psi based on the value at the magnetic axis
-    direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=0)
+    direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
     x_coords = raw_profile.psi_in.xs
     y_coords = raw_profile.psi_in.ys
     new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
@@ -199,7 +203,7 @@ function direct_position!(raw_profile::DirectRunInput)
             r_sep = (start_r * (3.0 - 0.5 * ird) + end_r) / (4.0 - 0.5 * ird)
             for _ in 1:max_iterations
 
-                direct_get_bfield!(bfield, r_sep, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=1)
+                direct_get_bfield!(bfield, r_sep, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
                 if abs(bfield.psir) < 1e-14
                     @warn "d(psi)/dr is near zero."
                     break
@@ -260,11 +264,12 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     r = ro + sqrt(psifac) * (rs2 - ro)
     z = zo
     bfield = DirectBField()
+    sq_in_deriv = deriv1(raw_profile.sq_in)
 
     # Refine starting R using Newton's method
     dr = 0.0
     for _ in 1:10
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=1)
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
         dr = (psi0 - bfield.psi) / bfield.psir
         r += dr
         if abs(dr) <= 1e-12 * r
@@ -273,7 +278,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     end
     !(abs(dr) <= 1e-12 * r) && error("Failed to refine starting R on flux surface.")
 
-    direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=2)
+    direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
     psi0 = bfield.psi
 
     # Set up and solve the ODE for fieldline following
@@ -283,7 +288,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
 
     bfield = DirectBField()
     equil_input = raw_profile.config.control
-    params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio,
+    params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
         equil_input.power_bp, equil_input.power_b, equil_input.power_r, bfield)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
@@ -323,7 +328,7 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     cos_eta, sin_eta = cos(eta), sin(eta)
     r = params.ro + y[2] * cos_eta
     z = params.zo + y[2] * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.psio; derivs=1)
+    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
 
     bp = sqrt(params.bfield.br^2 + params.bfield.bz^2)
     bt = params.bfield.f / r
@@ -373,7 +378,7 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
     cos_eta, sin_eta = cos(eta), sin(eta)
     r = params.ro + rfac * cos_eta
     z = params.zo + rfac * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.psio; derivs=1)
+    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
     dpsi = params.bfield.psi - psi0
 
     for _ in 1:max_iter
@@ -387,7 +392,7 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
         rfac += drfac
         r = params.ro + rfac * cos_eta
         z = params.zo + rfac * sin_eta
-        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.psio; derivs=1)
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
         dpsi = params.bfield.psi - psi0
 
         if abs(dpsi) <= 1e-12 * psi0 || abs(drfac) <= 1e-12 * abs(rfac)
@@ -466,16 +471,18 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
 
-        # Create native interpolants for each column
-        ff_interps = ntuple(k -> cubic_interp(ff_x_nodes, ff_fs_nodes[:, k]; bc=Spl.PeriodicBC()), 4)
-        ff_derivs = ntuple(k -> deriv1(ff_interps[k]), 4)
+        # Create series interpolant for all columns
+        ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=Spl.PeriodicBC())
+        ff_deriv = deriv1(ff_interp)
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
-            @views rzphi_nodes[ipsi, itheta, 1:3] .= (ff_interps[1](theta), ff_interps[2](theta), ff_interps[3](theta))
-            jac_term = (1.0 + ff_derivs[4](theta)) * y_out[end, 2] * 2π * psio
-            rzphi_nodes[ipsi, itheta, 4] = jac_term
+            ff_val = ff_interp(theta)
+            rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+            rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+            rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv(theta)[4]) * y_out[end, 2] * 2π * psio
         end
 
         # Store surface-averaged quantities for the `sq` spline
