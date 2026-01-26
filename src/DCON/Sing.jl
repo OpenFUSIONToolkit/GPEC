@@ -63,8 +63,7 @@ Performs the same function as `sing_find` in the Fortran code.
 """
 function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
-    q_spline = equil.profiles.q_spline
-    q_deriv_view = deriv1(q_spline)
+    profiles = equil.profiles
 
     # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
@@ -88,7 +87,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * q_spline(psifac)) * dm
+                    singfac = (m - n * profiles.q_spline(psifac)) * dm
                     abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
@@ -107,7 +106,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=q_deriv_view(psifac)
+                        q1=profiles.q_deriv(psifac)
                     ))
                     intr.msing += 1
                 end
@@ -169,19 +168,14 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
         jpsi = min(jpsi, equil.config.control.mpsi - 1)
 
-        # Shorthand to evaluate q/q1 inside newton iteration
-        q_deriv_view = deriv1(profiles.q_spline)
-        qval(ψ) = profiles.q_spline(ψ)
-        q1val(ψ) = q_deriv_view(ψ)
-
         intr.psilim = profiles.xs[jpsi]
         converged = false
         for _ in 1:itmax
-            dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
+            dpsi = (intr.qlim - profiles.q_spline(intr.psilim)) / profiles.q_deriv(intr.psilim)
             intr.psilim += dpsi
             if abs(dpsi) < eps * abs(intr.psilim)
                 converged = true
-                intr.q1lim = q1val(intr.psilim)
+                intr.q1lim = profiles.q_deriv(intr.psilim)
                 break
             end
         end

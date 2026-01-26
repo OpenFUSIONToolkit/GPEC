@@ -95,28 +95,21 @@ Support for `kin_flag`
 function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     profiles = equil.profiles
-    q_spline = profiles.q_spline
-    q_deriv_view = deriv1(q_spline)
-
-    # Shorthand to evaluate q/q1 inside newton iteration
-    qval = psi -> q_spline(psi)
-    q1val = psi -> q_deriv_view(psi)
 
     # Preliminary computations
     odet.psifac = profiles.xs[1]
 
     # Use Newton iteration to find starting psi if qlow is above q0
-    if ctrl.qlow > q_spline.y[1]
+    if ctrl.qlow > profiles.q_spline.y[1]
         # Find last index where q < qlow
-        mpsi = length(profiles.xs) - 1
-        idx = findlast(jpsi -> q_spline.y[jpsi-1] < ctrl.qlow, 2:mpsi)
+        idx = findlast(jpsi -> profiles.q_spline.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
         # Refine psifac using Newton iteration
         converged = false
         for _ in 1:itmax
-            dpsi = (ctrl.qlow - qval(odet.psifac)) / q1val(odet.psifac)
+            dpsi = (ctrl.qlow - profiles.q_spline(odet.psifac)) / profiles.q_deriv(odet.psifac)
             odet.psifac += dpsi
             abs(dpsi) < eps * abs(odet.psifac) && (converged=true; break)
         end

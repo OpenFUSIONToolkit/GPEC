@@ -458,7 +458,8 @@ Each profile is stored as a separate spline for code clarity.
 """
 struct ProfileSplines{S,D}
     xs::Vector{Float64}
-    npts_minus_1::Int  # length(xs) - 1, for hint at last interval
+    npts::Int          # length(xs), avoids redundant length() calls
+    npts_minus_1::Int  # npts - 1, for hint at last interval
     # Value interpolants
     F_spline::S
     P_spline::S
@@ -503,7 +504,7 @@ function ProfileSplines(xs::Vector{Float64},
     q_deriv = deriv1(q_spline)
 
     ProfileSplines{typeof(F_spline),typeof(F_deriv)}(
-        xs, npts_minus_1,
+        xs, npts, npts_minus_1,
         F_spline, P_spline, dVdpsi_spline, q_spline,
         F_deriv, P_deriv, dVdpsi_deriv, q_deriv
     )
