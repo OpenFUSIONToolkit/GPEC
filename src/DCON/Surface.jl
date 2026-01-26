@@ -15,12 +15,6 @@ function compute_surface_matrix(n::Int, psifac::Float64,
     
     mpert = intr.mpert
     
-    # --- [KEY FIX] Use high-resolution grid for surface integration ---
-    # Problem: High-m modes (m~34) need sufficient grid points to avoid aliasing
-    # Solution: Use dedicated fine grid (independent of equilibrium mtheta)
-    # Nyquist criterion: n_grid > 2 * max_mode_number
-    # For accurate derivatives: n_grid > 10 * max_mode_number (recommended)
-    
     max_m_diff = abs(intr.mlow) + mpert  # Maximum mode number range
     n_int_grid = max(512, nextpow(2, 10 * max_m_diff))  # Power of 2 for efficiency
     
@@ -187,14 +181,13 @@ function compute_surface_matrix(n::Int, psifac::Float64,
         end
         
         integral_val = trapz(theta_norm, integrand)
-        
-        # Calculate matrix element
-            # NOTE: Must normalize by psio^2 to match plasma energy normalization
-            # wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2 (Free.jl line 35)
-            # Since wp DIVIDES by psio^2, and surface integral is naturally LARGER,
-            # we need to MULTIPLY ws by psio^2 to bring it to same scale as wp
-            ws_element = isfinite(integral_val) ? 0.5 * integral_val * equil.psio^2 / v1 : 0.0        # Debug explosive elements - check max integrand value
+        # NOTE: Must normalize by psio^2 to match plasma energy normalization
+        # wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2 (Free.jl line 35)
+        # Since wp DIVIDES by psio^2, and surface integral is naturally LARGER,
+        # we need to MULTIPLY ws by psio^2 to bring it to same scale as wp
+        ws_element = isfinite(integral_val) ? 0.5 * integral_val * equil.psio^2 / v1 : 0.0
         max_integrand = maximum(abs, integrand)
+
         if max_integrand > 1e20
             println("   EXPLOSION in integrand: [$(im),$(jm)] m=$(m_val), mp=$(mp_val)")
             println("     Max integrand = $(Printf.@sprintf("%.3e", max_integrand))")
@@ -225,6 +218,8 @@ function compute_surface_matrix(n::Int, psifac::Float64,
     end
     
     max_ws = maximum(abs, ws_block)
+    mu0 = 4 * pi * 1e-7  
+    ws_block .*= mu0
     if max_ws > 1e10
         @warn "Surface matrix explosion (max=$(max_ws)) - zeroing. Try psifac=0.99 or check units."
         fill!(ws_block, 0.0)
