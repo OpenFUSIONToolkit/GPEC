@@ -16,7 +16,7 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
 
     # Compute surface quantities
     hint = Ref(1)  # Linear search hint for sequential psi access
-    for ipsi in 1:length(profiles.xs)
+    for ipsi in 1:profiles.npts
         psi = profiles.xs[ipsi]
         twopif = profiles.F_spline.y[ipsi]
         p1 = profiles.P_deriv(psi; hint=hint)

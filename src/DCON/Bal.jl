@@ -465,7 +465,7 @@ function compute_ballooning_stability!(ctrl::DconControl, locstab_fs::Matrix{Flo
     end
 
     profiles = plasma_eq.profiles
-    num_psi = length(profiles.xs)
+    num_psi = profiles.npts
 
     # Loop over flux surfaces
     hint = Ref(1)  # Shared hint for sequential psi access

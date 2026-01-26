@@ -108,8 +108,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     # Use Newton iteration to find starting psi if qlow is above q0
     if ctrl.qlow > q_spline.y[1]
         # Find last index where q < qlow
-        mpsi = length(profiles.xs) - 1
-        idx = findlast(jpsi -> q_spline.y[jpsi-1] < ctrl.qlow, 2:mpsi)
+        idx = findlast(jpsi -> q_spline.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
