@@ -66,26 +66,6 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         end
 
         eq_input = sol_run(eq_config, additional_input)
-    elseif eq_type == "inverse_testing"
-        # Example 1D spline setup
-        xs = collect(0.0:0.1:1.0)
-        fs = sin.(2π .* xs)  # vector of Float64
-        spline_ex = cubic_interp(xs, fs)
-        #println(spline_ex)
-        # Example 2D bicubic spline setup
-        xs = 0.0:0.1:1.0
-        ys = 0.0:0.2:1.0
-        fs = [sin(2π * x) * cos(2π * y) for x in xs, y in ys, _ in 1:1]
-        bicube_ex = Spl.BicubicSpline(collect(xs), collect(ys), fs, :extrap, :extrap)
-        #println(bicube_ex)
-        eq_input = InverseRunInput(
-            eq_config,
-            spline_ex, #sq_in
-            bicube_ex, #rz_in
-            0.0, #ro
-            0.0, #zo
-            1.0 #psio
-        )
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
@@ -492,7 +472,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     # Integrated error criterion
     term = zeros(Float64, mpsi + 1, 2)
-    for ipsi in 1:mpsi+1
+    for ipsi in 1:(mpsi+1)
         fs_matrix = zeros(Float64, mtheta + 1, 2)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]

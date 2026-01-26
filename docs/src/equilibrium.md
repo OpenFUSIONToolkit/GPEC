@@ -93,8 +93,6 @@ Notes:
 	expects `[EQUIL_CONTROL]` to contain at minimum `eq_filename` and
 	`eq_type` fields. Paths that are not absolute are resolved relative
 	to the TOML file location.
-- When `eq_type == "inverse_testing"` a small example inverse run is
-	constructed (useful in tests and examples).
 
 ## Notes and Caveats
 
@@ -112,5 +110,3 @@ Notes:
 - `docs/src/vacuum.md` — coupling between equilibrium and vacuum solvers
 
 ```
-
-
