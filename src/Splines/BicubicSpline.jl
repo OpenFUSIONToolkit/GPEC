@@ -156,7 +156,7 @@ function BicubicSpline(
     _last_iy = Ref(1)
 
     BicubicSpline{T}(
-        xs, copy(ys), nqty, nx, ny,
+        copy(xs), copy(ys), nqty, nx, ny,
         fs_stored, fsx, fsy, fsxy,
         periodic_x, periodic_y,
         _f, _fx, _fy, _fxx, _fxy, _fyy, _last_ix, _last_iy
