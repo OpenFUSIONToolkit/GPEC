@@ -67,6 +67,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
     # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
+        hint = Ref(1)
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
             dq = equil.params.qextrema_q[iex] - equil.params.qextrema_q[iex-1]
@@ -78,7 +79,6 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
             # Loop over possible m's in interval
             while (m - n * equil.params.qextrema_q[iex-1]) * (m - n * equil.params.qextrema_q[iex]) <= 0
-                it = 0
                 psi0 = equil.params.qextrema_psi[iex-1]
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
@@ -87,7 +87,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * profiles.q_spline(psifac)) * dm
+                    singfac = (m - n * profiles.q_spline(psifac; hint=hint)) * dm
                     abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
@@ -106,7 +106,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=profiles.q_deriv(psifac)
+                        q1=profiles.q_deriv(psifac; hint=hint)
                     ))
                     intr.msing += 1
                 end
