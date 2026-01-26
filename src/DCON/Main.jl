@@ -57,7 +57,7 @@ function Main(path::String="./")
     end
 
     # Fit data to splines
-    intr.locstab = cubic_interp(Vector(profiles_xs), locstab_fs; bc=Spl.extrap_bc_matrix(profiles_xs, locstab_fs), extrap=:extension)
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=Spl.extrap_bc_matrix(profiles_xs, locstab_fs), extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
