@@ -149,7 +149,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, fs_r; bc=Spl.extrap_bc_matrix(xs_r, fs_r), extrap=:extension)
+    spl = cubic_interp(xs_r, fs_r; bc=Spl.extrap_bc_matrix(xs_r, fs_r), search=LinearBinary(), extrap=:extension)
     spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
@@ -159,41 +159,28 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sq_xs = zeros(ma + 1)
     sq_fs = zeros(ma + 1, 3)
     r_nodes = zeros(ma + 1)
-
-    for ia in 1:(ma+1)
-        r += dr
-        r_nodes[ia] = r
-        f = spl(r)
-        f1 = spl_deriv(r)
-        ψ = f[3]
-        Bphi = f[2]
-        pval = f[6]
-        qval = f[8]
-        dψdr = f1[3]
-        r2 = -(f[4] * r / f[8]) / dψdr
-        sq_xs[ia] = ψ / psio
-        sq_fs[ia, 1] = lar_r0 * Bphi
-        sq_fs[ia, 2] = pval
-        sq_fs[ia, 3] = qval
-    end
-
-    sq_in = cubic_interp(sq_xs, sq_fs; bc=Spl.extrap_bc_matrix(sq_xs, sq_fs), extrap=:extension)
-
     rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
 
+    hint = Ref(1)
     for ia in 1:(ma+1)
-        r = r_nodes[ia]
-        f = spl(r)
-        f1 = spl_deriv(r)
-        y4 = f[4]
-        q = f[8]
+        r += dr
+        r_nodes[ia] = r
+        f = spl(r; hint=hint)
+        f1 = spl_deriv(r; hint=hint)
         dψdr = f1[3]
-        r2 = -(y4 * r / q) / dψdr
+
+        # Fill spline data for sq_in
+        sq_xs[ia] = f[3] / psio  # ψ / psio
+        sq_fs[ia, 1] = lar_r0 * f[2]  # F = R0 * Bphi
+        sq_fs[ia, 2] = f[6]  # P
+        sq_fs[ia, 3] = f[8]  # q
+
+        # Compute Shafranov shift and fill rzphi grid
+        r2 = -(f[4] * r / f[8]) / dψdr
         if lar_input.zeroth
             r2 = 0.0
         end
-
         for itau in 1:(mtau+1)
             θ = 2π * (itau - 1) / mtau
             cosθ, sinθ = cos(θ), sin(θ)
@@ -203,6 +190,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
+    sq_in = cubic_interp(sq_xs, sq_fs; bc=Spl.extrap_bc_matrix(sq_xs, sq_fs), search=LinearBinary(), extrap=:extension)
     rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes,
         :extrap, Spl.PeriodicBC())
 
