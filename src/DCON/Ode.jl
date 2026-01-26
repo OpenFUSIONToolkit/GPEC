@@ -25,7 +25,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        ode_axis_init!(odet, ctrl, equil, intr)
+        ode_axis_init!(odet, ctrl, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
         # ode_sing_init!(ctrl, equil, intr, odet)
@@ -74,7 +74,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
     if ctrl.verbose
         println("Evaluating fixed-boundary stability criterion")
     end
-    odet.nzero = evaluate_stability_criterion!(odet, equil)
+    odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
     # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
     transform_u!(odet, intr)
@@ -83,7 +83,7 @@ function ode_run(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::
 end
 
 """
-    ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    ode_axis_init!(odet::OdeState, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, intr::DconInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization). This includes
 determining `psifac`, `psimax`, `ising`, `singfac`, and initializing `u`.
@@ -92,9 +92,7 @@ determining `psifac`, `psimax`, `ising`, `singfac`, and initializing `u`.
 
 Support for `kin_flag`
 """
-function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
-
-    profiles = equil.profiles
+function ode_axis_init!(odet::OdeState, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, intr::DconInternal)
 
     # Preliminary computations
     odet.psifac = profiles.xs[1]
