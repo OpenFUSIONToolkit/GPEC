@@ -215,16 +215,16 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     q_derivative = profiles.q_deriv(psi; hint=hint)
     chi_prime = 2pi * plasma_eq.psio
 
-    # arrays to be filled
-    jac = zeros(mtheta + 1)
-    b1 = zeros(mtheta + 1)
-    bsq = zeros(mtheta + 1)
-    dbdb0 = zeros(mtheta + 1)
-    dbdb1 = zeros(mtheta + 1)
-    dbdb2 = zeros(mtheta + 1)
-    kappan = zeros(mtheta + 1)
-    kappas = zeros(mtheta + 1)
-    fx_psi = zeros(4, mtheta + 1)  # Store fx values (4 components) for each theta point
+    # arrays to be filled (use undef since all elements are written in the loop)
+    jac = Vector{Float64}(undef, mtheta + 1)
+    b1 = Vector{Float64}(undef, mtheta + 1)
+    bsq = Vector{Float64}(undef, mtheta + 1)
+    dbdb0 = Vector{Float64}(undef, mtheta + 1)
+    dbdb1 = Vector{Float64}(undef, mtheta + 1)
+    dbdb2 = Vector{Float64}(undef, mtheta + 1)
+    kappan = Vector{Float64}(undef, mtheta + 1)
+    kappas = Vector{Float64}(undef, mtheta + 1)
+    fx_psi = Matrix{Float64}(undef, 4, mtheta + 1)  # Store fx values (4 components) for each theta point
 
     # Pre-allocate basis vector matrices (reused each iteration)
     v = zeros(3, 3)  # contravariant basis vectors
