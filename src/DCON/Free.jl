@@ -312,9 +312,9 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from series interpolants
-    odet.wvmat_real(odet._wv_real_buf, odet.psifac; hint=odet.spline_hint)
-    odet.wvmat_imag(odet._wv_imag_buf, odet.psifac; hint=odet.spline_hint)
+    # Compute vacuum matrix from series interpolants (use separate hint for wv grid)
+    odet.wvmat_real(odet._wv_real_buf, odet.psifac; hint=odet.wv_hint)
+    odet.wvmat_imag(odet._wv_imag_buf, odet.psifac; hint=odet.wv_hint)
     @inbounds for i in eachindex(odet._wv_real_buf)
         odet._wv_out[i] = odet._wv_real_buf[i] + im * odet._wv_imag_buf[i]
     end

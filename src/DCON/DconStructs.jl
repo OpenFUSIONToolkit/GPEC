@@ -435,6 +435,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
     spline_hint::Base.RefValue{Int} = Ref(1)
+    # Separate hint for wvmat splines (different grid size than equilibrium profiles)
+    wv_hint::Base.RefValue{Int} = Ref(1)
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization
