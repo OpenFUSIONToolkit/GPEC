@@ -68,8 +68,8 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # Set coordinate grids based on the input equilibrium
     # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= Vector(rzphi.xs)
-    metric.ys .= Vector(rzphi.ys .* 2π)
+    metric.xs .= rzphi.xs
+    metric.ys .= rzphi.ys .* 2π
 
     # Temporary array for contravariant basis vectors
     v = @MMatrix zeros(Float64, 3, 3)

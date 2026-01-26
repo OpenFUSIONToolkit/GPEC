@@ -158,7 +158,7 @@ Performs the same function as `free_write_msc` in the Fortran code, except we wi
 function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, ctrl::DconControl)
 
     # Allocations
-    theta_norm = Vector(equil.rzphi.ys)
+    theta_norm = equil.rzphi.ys
     mtheta = equil.config.control.mtheta
     angle = zeros(Float64, mtheta + 1)
     r = zeros(Float64, mtheta + 1)

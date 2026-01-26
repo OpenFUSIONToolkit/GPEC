@@ -185,8 +185,8 @@ function direct_position!(raw_profile::DirectRunInput)
 
     # Renormalize psi based on the value at the magnetic axis
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=0)
-    x_coords = Vector(raw_profile.psi_in.xs)
-    y_coords = Vector(raw_profile.psi_in.ys)
+    x_coords = raw_profile.psi_in.xs
+    y_coords = raw_profile.psi_in.ys
     new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs, :extrap, :extrap)

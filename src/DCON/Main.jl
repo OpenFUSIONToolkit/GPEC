@@ -241,18 +241,18 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
 
         # Write spline arrays (using profiles with named splines)
         profiles = equil.profiles
-        out_h5["splines/sq/xs"] = Vector(profiles.xs)
-        out_h5["splines/sq/fs/2piF"] = Vector(profiles.F_spline.y)
-        out_h5["splines/sq/fs/mu0p"] = Vector(profiles.P_spline.y)
-        out_h5["splines/sq/fs/dVdpsi"] = Vector(profiles.dVdpsi_spline.y)
-        out_h5["splines/sq/fs/q"] = Vector(profiles.q_spline.y)
+        out_h5["splines/sq/xs"] = profiles.xs
+        out_h5["splines/sq/fs/2piF"] = profiles.F_spline.y
+        out_h5["splines/sq/fs/mu0p"] = profiles.P_spline.y
+        out_h5["splines/sq/fs/dVdpsi"] = profiles.dVdpsi_spline.y
+        out_h5["splines/sq/fs/q"] = profiles.q_spline.y
         out_h5["splines/sq/fs1/2piF"] = profiles.F_deriv.(profiles.xs)
         out_h5["splines/sq/fs1/mu0p"] = profiles.P_deriv.(profiles.xs)
         out_h5["splines/sq/fs1/dVdpsi"] = profiles.dVdpsi_deriv.(profiles.xs)
         out_h5["splines/sq/fs1/q"] = profiles.q_deriv.(profiles.xs)
         out_h5["splines/sq/xpower"] = 0
-        out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
-        out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
+        out_h5["splines/rzphi/xs"] = equil.rzphi.xs
+        out_h5["splines/rzphi/ys"] = equil.rzphi.ys
         # BicubicSpline stores fs as 3D array (nx × ny × nqty)
         out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, :, 1]
         out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, :, 2]

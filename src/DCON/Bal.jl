@@ -205,7 +205,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     profiles = plasma_eq.profiles
     rzphi = plasma_eq.rzphi
     mtheta = length(rzphi.ys) - 1
-    theta_grid = Vector(rzphi.ys)
+    theta_grid = rzphi.ys
 
     # surface quantities
     psi = profiles.xs[ipsi]
