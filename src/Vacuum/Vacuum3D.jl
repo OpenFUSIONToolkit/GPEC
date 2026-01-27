@@ -378,7 +378,7 @@ function compute_3D_kernel_matrix!(
             # Evaluate kernels at grid points
             idx_src = i_src + (j_src - 1) * source.ntheta
             K_single = laplace_single_layer(r_obs, source.r[idx_src, :])
-            K_double = laplace_double_layer(r_obs, source.r[idx_src, :], source.n[idx_src, :])
+            K_double = laplace_double_layer(r_obs, source.r[idx_src, :], source.normal[idx_src, :])
 
             # Apply area element (periodic trapezoidal rule: w = dA = J∇ψdθdζ)
             greenfunction[idx_obs, idx_src] = K_single * source.dA[idx_src]
@@ -436,7 +436,7 @@ function compute_3D_kernel_matrix!(
             idx_src = idx_pol + source.ntheta * (idx_tor - 1)
 
             # Remainder of far-field contribution on the singular grid: -χGᵢⱼdA
-            r_src, n_src, dA_src = source.r[idx_src, :], source.n[idx_src, :], source.dA[idx_src]
+            r_src, n_src, dA_src = source.r[idx_src, :], source.normal[idx_src, :], source.dA[idx_src]
             far_single = laplace_single_layer(r_obs, r_src) * dA_src * Gpou[i, j]
             far_double = laplace_double_layer(r_obs, r_src, n_src) * dA_src * Gpou[i, j]
 

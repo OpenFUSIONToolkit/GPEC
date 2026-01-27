@@ -199,110 +199,110 @@ function initialize_plasma_surface(inputs::VacuumInput)
     )
 end
 
-struct PlasmaGeometry3D
+"""
+    PlasmaGeometry3D
+
+3D toroidal surface geometry for vacuum boundary integral calculations.
+
+Built by toroidally extruding a 2D poloidal contour (`PlasmaGeometry`) and computing
+Cartesian coordinates, tangent vectors, normals, and differential area elements. Note
+that the gradient/area elements are scaled by dθ and dζ.
+
+# Fields
+
+  - `ntheta::Int`: Number of poloidal grid points
+  - `nzeta::Int`: Number of toroidal grid points
+  - `num_gridpoints::Int`: Total number of surface grid points (ntheta * nzeta)
+  - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_gridpoints, 3)
+  - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
+  - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
+  - `n::Matrix{Float64}`: Outward unit normal vectors, shape (num_gridpoints, 3)
+  - `dA::Vector{Float64}`: Differential area elements |∂r/∂θ × ∂r/∂ζ| dθ dζ, length num_gridpoints
+"""
+@kwdef struct PlasmaGeometry3D
     ntheta::Int
     nzeta::Int
-    x::Vector{Float64}
-    y::Vector{Float64}
-    z::Vector{Float64}
+    num_gridpoints::Int
     r::Matrix{Float64}
-    n::Matrix{Float64}
-    dA::Vector{Float64}
     dr_dθ::Matrix{Float64}
     dr_dζ::Matrix{Float64}
+    normal::Matrix{Float64}
+    dA::Vector{Float64}
 end
 
+"""
+    PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int) -> PlasmaGeometry3D
+
+Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
+
+# Algorithm
+
+ 1. Map 2D (R, Z, ν) to 3D Cartesian: X = R cos(ϕ+ν), Y = R sin(ϕ+ν), Z = Z
+ 2. Fit periodic bicubic splines to (X, Y, Z) on (θ, ϕ) grid
+ 3. Compute tangent vectors via spline gradients
+ 4. Compute normals and area elements via cross product: n × dA = ∂r/∂θ × ∂r/∂ζ
+
+# Arguments
+
+  - `plasma_2d`: 2D poloidal plasma geometry
+  - `nzeta`: Number of toroidal grid points
+
+# Returns
+
+  - `PlasmaGeometry3D`: Complete 3D surface description
+"""
 function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry3D
 
     # Extract 2D poloidal data
     ntheta = length(plasma_2d.x)
-    ntotal = ntheta * nzeta
-    R = plasma_2d.x
-    Z = plasma_2d.z
-    ν = plasma_2d.ν
-
-    # Allocate output arrays
-    x = zeros(ntotal)
-    y = zeros(ntotal)
-    z = zeros(ntotal)
-    n = zeros(ntotal, 3)
-    dA = zeros(ntotal)
-    dr_dθ = zeros(ntotal, 3)  # Tangent vector ∂r/∂θ
-    dr_dζ = zeros(ntotal, 3)   # Tangent vector ∂r/∂ζ
-
+    num_gridpoints = ntheta * nzeta
+    (; R, Z, ν) = plasma_2d
     dθ = 2π / ntheta
     dϕ = 2π / nzeta
     θ_grid = range(; start=0, length=ntheta, step=dθ)
     ϕ_grid = range(; start=0, length=nzeta, step=dϕ)
 
-    # Build surface point-by-point
-    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
-        # Linear index in flattened array
-        idx = i + (j - 1) * ntheta
-        x[idx] = R[i] * cos(ϕ + ν[i])
-        y[idx] = R[i] * sin(ϕ + ν[i])
-        z[idx] = Z[i]
-    end
+    # Allocate output arrays
+    r = zeros(num_gridpoints, 3)
+    normal = zeros(num_gridpoints, 3)
+    dA = zeros(num_gridpoints)
+    dr_dθ = zeros(num_gridpoints, 3)
+    dr_dζ = zeros(num_gridpoints, 3)
 
-    # r: (ntotal, 3) array of (x, y, z) coordinates for each surface point
-    r = zeros(ntotal, 3)
-    for idx in 1:ntotal
-        r[idx, 1] = x[idx]
-        r[idx, 2] = y[idx]
-        r[idx, 3] = z[idx]
-    end
-
-    # Compute tangent vectors and differential area elements via spline interpolation
-    # Create temporary arrays for spline interpolation
-    X_temp = reshape(x, ntheta, nzeta)
-    Y_temp = reshape(y, ntheta, nzeta)
-    Z_temp = reshape(z, ntheta, nzeta)
-
-    # Create splines with periodic boundary conditions
-    itpX = cubic_spline_interpolation((θ_grid, ϕ_grid), X_temp; bc=Periodic(OnGrid()))
-    itpY = cubic_spline_interpolation((θ_grid, ϕ_grid), Y_temp; bc=Periodic(OnGrid()))
-    itpZ = cubic_spline_interpolation((θ_grid, ϕ_grid), Z_temp; bc=Periodic(OnGrid()))
-
-    # Evaluate derivatives at grid points and store tangent vectors
+    # Build 3D surface point-by-point from 2D contour
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
         idx = i + (j - 1) * ntheta
+        r[idx, :] .= [R[i] * cos(ϕ + ν[i]), R[i] * sin(ϕ + ν[i]), Z[i]]
+    end
 
-        # Compute gradient components
-        ∂X_dθ = Interpolations.gradient(itpX, θ, ϕ)[1]
-        ∂X_dϕ = Interpolations.gradient(itpX, θ, ϕ)[2]
-        ∂Y_dθ = Interpolations.gradient(itpY, θ, ϕ)[1]
-        ∂Y_dϕ = Interpolations.gradient(itpY, θ, ϕ)[2]
-        ∂Z_dθ = Interpolations.gradient(itpZ, θ, ϕ)[1]
-        ∂Z_dϕ = Interpolations.gradient(itpZ, θ, ϕ)[2]
+    # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions
+    r_grid = reshape(r, ntheta, nzeta, 3)
+    itps = [cubic_spline_interpolation((θ_grid, ϕ_grid), r_grid[:, :, k]; bc=Periodic(OnGrid())) for k in 1:3]
 
-        # Store tangent vectors
-        dr_dθ[idx, :] = [∂X_dθ, ∂Y_dθ, ∂Z_dθ]
-        dr_dζ[idx, :] = [∂X_dϕ, ∂Y_dϕ, ∂Z_dϕ]
-
-        # Compute cross product for normal and area element
-        ∂r_dθ = SVector(∂X_dθ, ∂Y_dθ, ∂Z_dθ)
-        ∂r_dϕ = SVector(∂X_dϕ, ∂Y_dϕ, ∂Z_dϕ)
-        cross_prod = cross(∂r_dθ, ∂r_dϕ)
+    # Compute tangent vectors, unit normals, and differential area elements via spline interpolation
+    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
+        idx = i + (j - 1) * ntheta
+        dr_dθ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[1] for k in 1:3]
+        dr_dζ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[2] for k in 1:3]
+        cross_prod = cross(dr_dθ[idx, :], dr_dζ[idx, :])
         dA[idx] = norm(cross_prod)
-        n[idx, :] = cross_prod / dA[idx]
+        normal[idx, :] .= cross_prod / dA[idx]
     end
 
-    # Multipy by scalings
+    # Multiply by scalings
     dA .*= dθ * dϕ
     dr_dθ .*= dθ
     dr_dζ .*= dϕ
 
-    return PlasmaGeometry3D(
+    return PlasmaGeometry3D(;
         ntheta,
         nzeta,
-        x,
-        y,
-        z,
+        num_gridpoints,
         r,
-        n,
-        dA,
         dr_dθ,
-        dr_dζ
+        dr_dζ,
+        normal,
+        dA
     )
 end
 

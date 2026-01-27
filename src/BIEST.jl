@@ -65,7 +65,7 @@ function compute_green_matrices!(G::Matrix{Float64}, K::Matrix{Float64}, surf)
     # Call C++ wrapper which builds the surface from supplied coordinates
     ccall((:biest_compute_green_matrices_from3D, libbiest), Cvoid,
         (Ptr{Cdouble}, Ptr{Cdouble}, Ptr{Cdouble}, Cint, Cint, Ptr{Cdouble}, Ptr{Cdouble}),
-        surf.x, surf.y, surf.z, Cint(surf.ntheta), Cint(surf.nzeta), G, K)
+        surf.r[:, 1], surf.r[:, 2], surf.r[:, 3], Cint(surf.ntheta), Cint(surf.nzeta), G, K)
 end
 
 export compute_green_matrices!
