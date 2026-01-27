@@ -208,8 +208,8 @@ struct PlasmaGeometry3D
     r::Matrix{Float64}
     n::Matrix{Float64}
     dA::Vector{Float64}
-    # sin_mn_basis3D::Matrix{Float64}
-    # cos_mn_basis3D::Matrix{Float64}
+    dr_dθ::Matrix{Float64}
+    dr_dζ::Matrix{Float64}
 end
 
 function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry3D
@@ -227,6 +227,8 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
     z = zeros(ntotal)
     n = zeros(ntotal, 3)
     dA = zeros(ntotal)
+    dr_dθ = zeros(ntotal, 3)  # Tangent vector ∂r/∂θ
+    dr_dζ = zeros(ntotal, 3)   # Tangent vector ∂r/∂ζ
 
     dθ = 2π / ntheta
     dϕ = 2π / nzeta
@@ -250,33 +252,45 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
         r[idx, 3] = z[idx]
     end
 
-    # Compute differential area elements dA via cross product of tangent vectors
-    # Create temporary arrays including endpoints for spline interpolation
+    # Compute tangent vectors and differential area elements via spline interpolation
+    # Create temporary arrays for spline interpolation
     X_temp = reshape(x, ntheta, nzeta)
     Y_temp = reshape(y, ntheta, nzeta)
     Z_temp = reshape(z, ntheta, nzeta)
 
-    # Create splines with periodic data including endpoints
+    # Create splines with periodic boundary conditions
     itpX = cubic_spline_interpolation((θ_grid, ϕ_grid), X_temp; bc=Periodic(OnGrid()))
     itpY = cubic_spline_interpolation((θ_grid, ϕ_grid), Y_temp; bc=Periodic(OnGrid()))
     itpZ = cubic_spline_interpolation((θ_grid, ϕ_grid), Z_temp; bc=Periodic(OnGrid()))
-    ∂r_dθ = SVector(3)
-    ∂r_dϕ = SVector(3)
-    # Evaluate derivatives at original (non-endpoint) grid points
+
+    # Evaluate derivatives at grid points and store tangent vectors
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
         idx = i + (j - 1) * ntheta
+
+        # Compute gradient components
         ∂X_dθ = Interpolations.gradient(itpX, θ, ϕ)[1]
         ∂X_dϕ = Interpolations.gradient(itpX, θ, ϕ)[2]
         ∂Y_dθ = Interpolations.gradient(itpY, θ, ϕ)[1]
         ∂Y_dϕ = Interpolations.gradient(itpY, θ, ϕ)[2]
         ∂Z_dθ = Interpolations.gradient(itpZ, θ, ϕ)[1]
         ∂Z_dϕ = Interpolations.gradient(itpZ, θ, ϕ)[2]
+
+        # Store tangent vectors
+        dr_dθ[idx, :] = [∂X_dθ, ∂Y_dθ, ∂Z_dθ]
+        dr_dζ[idx, :] = [∂X_dϕ, ∂Y_dϕ, ∂Z_dϕ]
+
+        # Compute cross product for normal and area element
         ∂r_dθ = SVector(∂X_dθ, ∂Y_dθ, ∂Z_dθ)
         ∂r_dϕ = SVector(∂X_dϕ, ∂Y_dϕ, ∂Z_dϕ)
-        dA[idx] = norm(cross(∂r_dθ, ∂r_dϕ))
-        n[idx, :] = cross(∂r_dθ, ∂r_dϕ) / dA[idx]
+        cross_prod = cross(∂r_dθ, ∂r_dϕ)
+        dA[idx] = norm(cross_prod)
+        n[idx, :] = cross_prod / dA[idx]
     end
+
+    # Multipy by scalings
     dA .*= dθ * dϕ
+    dr_dθ .*= dθ
+    dr_dζ .*= dϕ
 
     return PlasmaGeometry3D(
         ntheta,
@@ -286,7 +300,9 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
         z,
         r,
         n,
-        dA
+        dA,
+        dr_dθ,
+        dr_dζ
     )
 end
 

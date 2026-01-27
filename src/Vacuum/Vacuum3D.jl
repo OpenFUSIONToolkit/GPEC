@@ -56,7 +56,6 @@ Conversion references:
 function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int=6)
 
     # Total size of square patch extracted around singular point (odd number: 2*PATCH_DIM0+1)
-    INTERP_ORDER = 2
     PATCH_DIM = 2 * PATCH_RAD + 1
     @assert INTERP_ORDER <= PATCH_DIM "Must have INTERP_ORDER <= PATCH_DIM"
     # Number of angular quadrature nodes in polar coordinates (uniformly distributed around circle)
@@ -229,18 +228,17 @@ Conversion references:
 
   - Mirrors patch extraction used inside SingularCorrection::SetPatch in biest/singular_correction.hpp
 """
-function extract_patch(data::Matrix{Float64}, Nt::Int, Np::Int, t0::Int, p0::Int, PATCH_DIM::Int)
+function extract_patch(data::Matrix{Float64}, idx_pol_center::Int, idx_tor_center::Int, npol::Int, ntor::Int, PATCH_DIM::Int)
 
     PATCH_RAD = (PATCH_DIM - 1) ÷ 2
     dof = size(data, 2)  # Number of components (3 for coords, 1 for scalars)
     patch = zeros(PATCH_DIM, PATCH_DIM, dof)
     for i in 1:PATCH_DIM, j in 1:PATCH_DIM
         # Enforce periodicity
-        t = mod1(t0 - PATCH_RAD + i - 1, Nt)
-        p = mod1(p0 - PATCH_RAD + j - 1, Np)
+        idx_pol = mod1(idx_pol_center - PATCH_RAD + i - 1, npol)
+        idx_tor = mod1(idx_tor_center - PATCH_RAD + j - 1, ntor)
         # Copy data to the patch
-        idx_in = p + Np * (t - 1)
-        @views patch[i, j, :] .= data[idx_in, :]
+        @views patch[i, j, :] .= data[idx_pol+npol*(idx_tor-1), :]
     end
     return patch # (PATCH_DIM, PATCH_DIM, dof)
 end
@@ -278,100 +276,46 @@ function interpolate_to_polar(patch::Array{Float64,3}, quad_data::SingularQuadra
 end
 
 """
-    compute_singular_correction!(
-        greenfunction, grad_greenfunction,
-        obs_idx, source_geom, quad_data,
-        PATCH_DIM, RAD_DIM
-    )
+    compute_dA_and_normal_polar(dr_dθ_polar, dr_dζ_polar)
 
-Compute singular correction for observer point using polar quadrature.
-Follows BIEST's approach: extract patch, interpolate to polar coordinates,
-evaluate kernels with POU weighting, distribute back to grid.
+Compute area elements at polar quadrature points from interpolated tangent vectors.
+
+The area element is |∂r/∂θ × ∂r/∂ζ| dθ dζ, computed from the cross product of
+the interpolated tangent vectors.
 
 # Arguments
 
-  - `greenfunction`: Single-layer matrix to update
-  - `grad_greenfunction`: Double-layer matrix to update
-  - `obs_idx`: Linear index of observer point
-  - `source_geom`: Source geometry (PlasmaGeometry3D)
-  - `quad_data`: Precomputed quadrature data
-  - `RAD_DIM`: Radial quadrature order
+  - `dr_dθ_polar`: Interpolated ∂r/∂θ at polar points (RAD_DIM × ANG_DIM × 3)
+  - `dr_dζ_polar`: Interpolated ∂r/∂ζ at polar points (RAD_DIM × ANG_DIM × 3)
 
-Conversion references:
+# Returns
 
-  - Patch → polar correction mirrors SingularCorrection operator in biest/singular_correction.hpp
-  - Subtract/add near-field correction follows EvalSurfInteg flow in biest/surface_op.txx
+  - `dA_polar`: Area element at each polar point (RAD_DIM × ANG_DIM)
+  - `n_polar`: Unit normal vector at each polar point (RAD_DIM × ANG_DIM × 3)
 """
-function compute_singular_correction!(
-    greenfunction::Matrix{Float64},
-    grad_greenfunction::Matrix{Float64},
-    obs_idx::Int,
-    obs_geom::PlasmaGeometry3D,
-    source_geom::PlasmaGeometry3D,
-    quad_data::SingularQuadratureData,
-    t0::Int, p0::Int
-)
-    (; nzeta, ntheta, r, n, dA) = source_geom
-    (; PATCH_DIM, PATCH_RAD, INTERP_ORDER, ANG_DIM, RAD_DIM, qw, Ppou, Gpou, M_G2P, I_G2P) = quad_data
-    # Observer position
-    r_obs = obs_geom.r[obs_idx, :]
+function compute_dA_and_normal_polar(dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3})
 
-    # Extract patches of source geometry (size = PATCH_DIM x PATCH_DIM x dof)
-    r_patch = extract_patch(r, nzeta, ntheta, t0, p0, PATCH_DIM)
-    n_patch = extract_patch(n, nzeta, ntheta, t0, p0, PATCH_DIM)
-    dA_patch = extract_patch(reshape(dA, :, 1), nzeta, ntheta, t0, p0, PATCH_DIM)
-
-    # Interpolate to polar quadrature points (size = RAD_DIM x ANG_DIM x dof)
-    r_polar = interpolate_to_polar(r_patch, quad_data)
-    n_polar = interpolate_to_polar(n_patch, quad_data)
-    dA_polar = interpolate_to_polar(dA_patch, quad_data)[:, :, 1]
-
-    # TODO: Compute area elements at polar points (cross product of tangent vectors)
-
-    # Evaluate kernels at polar points with POU weighting
-    M_polar_single = zeros(RAD_DIM, ANG_DIM)
-    M_polar_double = zeros(RAD_DIM, ANG_DIM)
-    Δθ = 2π / ANG_DIM
+    RAD_DIM, ANG_DIM, _ = size(dr_dθ)
+    dA_polar = zeros(RAD_DIM, ANG_DIM)
+    n_polar = zeros(RAD_DIM, ANG_DIM, 3)
     for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-        # Evaluate kernels
-        r_src, n_src = r_polar[ir, ia, :], n_polar[ir, ia, :]
-        K_single = laplace_single_layer(r_obs, r_src)
-        K_double = laplace_double_layer(r_obs, r_src, n_src)
+        # Extract tangent vectors at this polar point
+        t_θ = @view dr_dθ[ir, ia, :]
+        t_ζ = @view dr_dζ[ir, ia, :]
 
-        # Apply quadrature weights: radial weight × angular weight × area element × POU
-        wt = qw[ir] * Δθ * dA_polar[ir, ia] * Ppou[ir, ia]
-        M_polar_single[ir, ia] = K_single * wt
-        M_polar_double[ir, ia] = K_double * wt
-    end
+        # Cross product: ∂r/∂θ × ∂r/∂ζ
+        cross_prod = cross(t_θ, t_ζ)
 
-    # Distribute corrections back to Cartesian grid using interpolation matrix
-    # Correction at grid point = sum over polar points of (kernel_value * interp_weight)
-    M_grid_single = zeros(PATCH_DIM, PATCH_DIM)
-    M_grid_double = zeros(PATCH_DIM, PATCH_DIM)
-    for ir in 1:RAD_DIM, ia in 1:ANG_DIM
-        ycorner = I_G2P[ir, ia, :]
-        for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
-            M_grid_single[ycorner[1]+i0, ycorner[2]+i1] += M_G2P[ir, ia, i0, i1] * M_polar_single[ir, ia]
-            M_grid_double[ycorner[1]+i0, ycorner[2]+i1] += M_G2P[ir, ia, i0, i1] * M_polar_double[ir, ia]
+        # Magnitude gives area element
+        dA_polar[ir, ia] = norm(cross_prod)
+
+        # Unit normal (handle zero jacobian gracefully)
+        if dA_polar[ir, ia] > 1e-30
+            n_polar[ir, ia, :] .= cross_prod ./ dA_polar[ir, ia]
         end
     end
 
-    # Add far-field POU contribution (Gpou = -χ on grid) and near-field polar quadrature result
-    for j in 1:PATCH_DIM, i in 1:PATCH_DIM
-        # Map back to global indices
-        it = mod1(t0 - PATCH_RAD + i - 1, nzeta)
-        ip = mod1(p0 - PATCH_RAD + j - 1, ntheta)
-        idx_src = ip + ntheta * (it - 1)
-
-        # Far-field contribution (computed with rectangle rule)
-        r_src, n_src, dA_src = r[idx_src, :], n[idx_src, :], dA[idx_src]
-        far_single = laplace_single_layer(r_obs, r_src) * dA_src * Gpou[i, j]
-        far_double = laplace_double_layer(r_obs, r_src, n_src) * dA_src * Gpou[i, j]
-
-        # Apply far + near contributions
-        greenfunction[obs_idx, idx_src] += M_grid_single[i, j] + far_single
-        grad_greenfunction[obs_idx, idx_src] += M_grid_double[i, j] + far_double
-    end
+    return dA_polar, n_polar
 end
 
 """
@@ -417,11 +361,9 @@ function compute_3D_kernel_matrix!(
 
     # Initialize quadrature data (cached)
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM)
-    @assert observer.ntheta ≥ quad_data.PATCH_DIM
-    @assert observer.nzeta ≥ quad_data.PATCH_DIM
-
-    # Helper for periodic distance
-    @inline periodic_dist(i, j, n) = min(abs(i - j), n - abs(i - j))
+    (; PATCH_DIM, PATCH_RAD, INTERP_ORDER, ANG_DIM, RAD_DIM, qw, Ppou, Gpou, M_G2P, I_G2P) = quad_data
+    @assert observer.ntheta ≥ PATCH_DIM
+    @assert observer.nzeta ≥ PATCH_DIM
 
     # Loop through observer points
     for j_obs in 1:observer.nzeta, i_obs in 1:observer.ntheta
@@ -446,14 +388,65 @@ function compute_3D_kernel_matrix!(
         # ============================================
         # NEAR FIELD: Polar quadrature with singular correction
         # ============================================
-        compute_singular_correction!(
-            greenfunction, grad_greenfunction,
-            idx_obs, observer, source,
-            quad_data, j_obs, i_obs
-        )
+        # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
+        r_patch = extract_patch(source.r, i_obs, j_obs, source.ntheta, source.nzeta, PATCH_DIM)
+        dr_dθ_patch = extract_patch(source.dr_dθ, i_obs, j_obs, source.ntheta, source.nzeta, PATCH_DIM)
+        dr_dζ_patch = extract_patch(source.dr_dζ, i_obs, j_obs, source.ntheta, source.nzeta, PATCH_DIM)
+
+        # Interpolate coordinates and tangent vectors to polar quadrature points
+        r_polar = interpolate_to_polar(r_patch, quad_data)
+        dr_dθ_polar = interpolate_to_polar(dr_dθ_patch, quad_data)
+        dr_dζ_polar = interpolate_to_polar(dr_dζ_patch, quad_data)
+
+        # Compute area elements and unit normals at polar points from interpolated tangent vectors
+        dA_polar, n_polar = compute_dA_and_normal_polar(dr_dθ_polar, dr_dζ_polar)
+
+        # Evaluate kernels at polar points with POU weighting
+        M_polar_single = zeros(RAD_DIM, ANG_DIM)
+        M_polar_double = zeros(RAD_DIM, ANG_DIM)
+        for ia in 1:ANG_DIM, ir in 1:RAD_DIM
+            # Evaluate kernels using recomputed normal
+            r_src, n_src = r_polar[ir, ia, :], n_polar[ir, ia, :]
+            K_single = laplace_single_layer(r_obs, r_src)
+            K_double = laplace_double_layer(r_obs, r_src, n_src)
+
+            # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
+            wt = dA_polar[ir, ia] * Ppou[ir, ia]
+            M_polar_single[ir, ia] = K_single * wt
+            M_polar_double[ir, ia] = K_double * wt
+        end
+
+        # Distribute corrections back to Cartesian grid using interpolation matrix
+        # Correction at grid point = sum over polar points of (kernel_value * interp_weight)
+        M_grid_single = zeros(PATCH_DIM, PATCH_DIM)
+        M_grid_double = zeros(PATCH_DIM, PATCH_DIM)
+        for ir in 1:RAD_DIM, ia in 1:ANG_DIM
+            ycorner = I_G2P[ir, ia, :]
+            for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
+                M_grid_single[ycorner[1]+i0, ycorner[2]+i1] += M_G2P[ir, ia, i0, i1] * M_polar_single[ir, ia]
+                M_grid_double[ycorner[1]+i0, ycorner[2]+i1] += M_G2P[ir, ia, i0, i1] * M_polar_double[ir, ia]
+            end
+        end
+
+        # Add far-field POU contribution (Gpou = -χ on grid) and near-field polar quadrature result
+        for j in 1:PATCH_DIM, i in 1:PATCH_DIM
+            # Map back to global indices
+            idx_pol = mod1(i_obs - PATCH_RAD + i - 1, source.ntheta)
+            idx_tor = mod1(j_obs - PATCH_RAD + j - 1, source.nzeta)
+            idx_src = idx_pol + source.ntheta * (idx_tor - 1)
+
+            # Remainder of far-field contribution on the singular grid: -χGᵢⱼdA
+            r_src, n_src, dA_src = source.r[idx_src, :], source.n[idx_src, :], source.dA[idx_src]
+            far_single = laplace_single_layer(r_obs, r_src) * dA_src * Gpou[i, j]
+            far_double = laplace_double_layer(r_obs, r_src, n_src) * dA_src * Gpou[i, j]
+
+            # Apply far + near contributions
+            greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single
+            grad_greenfunction[idx_obs, idx_src] += M_grid_double[i, j] + far_double
+        end
     end
 
     # Account for normal direction pointing out of vacuum integration region in 𝒦ⁿ ⋅ dS
     # Negative for plasma since dS = ∇ψ J dθdζ and ∇ψ points outward but outward normal is inward
-    @views grad_greenfunction .*= (source isa PlasmaGeometry3D ? -1 : 1)
+    # @views grad_greenfunction .*= (source isa PlasmaGeometry3D ? -1 : 1)
 end

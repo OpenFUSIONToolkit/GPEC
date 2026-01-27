@@ -357,17 +357,29 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     !wall.nowall && error("No walls yet!") # DEBUG
 
     # Plasma–Plasma block
-    # G = single-layer kernel, K = double-layer kernel
-    # Use Nt toroidal points to properly discretize the 3D surface (must be >= 6 for BIEST)
-    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf3D, plasma_surf3D)
-    display(green_temp)
-    display(grad_green)
-
     println("Calling BIEST with Nt=$nzeta, Np=$mtheta (total 3D points: $(num_gridpoints))...")
     # compute_green_matrices!(green_temp, grad_green, plasma_surf.x, plasma_surf.z, plasma_surf.ν, nzeta)
     compute_green_matrices!(green_temp, grad_green, plasma_surf3D)
-    display(green_temp)
-    display(grad_green)
+    # display(green_temp)
+    # display(grad_green)
+    green_BIEST = copy(green_temp)
+    grad_green_BIEST = copy(grad_green)
+
+    # G = single-layer kernel, K = double-layer kernel
+    # Use Nt toroidal points to properly discretize the 3D surface (must be >= 6 for BIEST)
+    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf3D, plasma_surf3D)
+    # display(green_temp)
+    # display(grad_green)
+
+    # Compare BIEST and regular kernel matrices
+    println("\n=== Comparing BIEST vs Regular Kernel Matrices ===")
+    println("\nDifference single layer (regular - BIEST):")
+    display(green_temp - green_BIEST)
+    println("Max difference in green_temp: $(maximum(abs.(green_temp - green_BIEST)))")
+
+    println("\nDifference double layer (regular - BIEST):")
+    display(grad_green - grad_green_BIEST)
+    println("Max difference in grad_green: $(maximum(abs.(grad_green - grad_green_BIEST)))")
 
     # Sum Green's function matrices over toroidal direction to recover 2D poloidal slice
     # green_2D = zeros(ComplexF64, mtheta, mtheta)
