@@ -247,6 +247,18 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Plasma–Plasma block
     kernel!(grad_green, green_temp, plasma_surf, plasma_surf, n)
+    # println("2D green_temp (single-layer) matrix:")
+    # display(green_temp ./2)
+    # println("2D grad_green (double-layer) matrix:")
+    # gg_temp = grad_green[1:mtheta, 1:mtheta] ./ 2 - 0.5 * I
+    # display(gg_temp)
+    B = ones(mtheta)
+    green_test = green_temp * B
+    println("2D Green's integral with a unit source:")
+    display(real.(green_test))
+    green_test = (grad_green[1:mtheta, 1:mtheta]) * B # account for 2D green's function being 1/r (not 1/4πr)
+    println("2D Grad Green's integral with a unit source:")
+    display(real.(green_test))
 
     # Fourier transform plasma-plasma block
     fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
@@ -328,7 +340,7 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     grad_green = zeros(num_gridpoints, num_gridpoints) # for walls, this is 2*mtheta x 2*mtheta
     green_temp = zeros(num_gridpoints, num_gridpoints)
 
-    plasma_surf3D = PlasmaGeometry3D(plasma_surf, nzeta)
+    plasma_surf3D = PlasmaGeometry3D(plasma_surf, inputs)
 
     if false # dA debugging
         a = 0.1
@@ -357,55 +369,63 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     !wall.nowall && error("No walls yet!") # DEBUG
 
     # Plasma–Plasma block
-    println("Calling BIEST with Nt=$nzeta, Np=$mtheta (total 3D points: $(num_gridpoints))...")
+    # println("Calling BIEST with Nt=$nzeta, Np=$mtheta (total 3D points: $(num_gridpoints))...")
     # compute_green_matrices!(green_temp, grad_green, plasma_surf.x, plasma_surf.z, plasma_surf.ν, nzeta)
-    compute_green_matrices!(green_temp, grad_green, plasma_surf3D)
-    # display(green_temp)
-    # display(grad_green)
-    green_BIEST = copy(green_temp)
-    grad_green_BIEST = copy(grad_green)
+    # compute_green_matrices!(green_temp, grad_green, plasma_surf3D)
+    # # display(green_temp)
+    # # display(grad_green)
+    # green_BIEST = copy(green_temp)
+    # grad_green_BIEST = copy(grad_green)
 
     # G = single-layer kernel, K = double-layer kernel
-    # Use Nt toroidal points to properly discretize the 3D surface (must be >= 6 for BIEST)
-    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf3D, plasma_surf3D)
+    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf3D, plasma_surf3D; INTERP_ORDER=6)
     # display(green_temp)
     # display(grad_green)
 
     # Compare BIEST and regular kernel matrices
-    println("\n=== Comparing BIEST vs Regular Kernel Matrices ===")
-    println("\nDifference single layer (regular - BIEST):")
-    display(green_temp - green_BIEST)
-    println("Max difference in green_temp: $(maximum(abs.(green_temp - green_BIEST)))")
+    # println("\n=== Comparing BIEST vs Regular Kernel Matrices ===")
+    # println("\nRelative difference single layer (regular - BIEST):")
+    # display((green_temp .- green_BIEST) ./ green_BIEST)
+    # println("Max relative difference in green_temp: $(maximum(abs.((green_temp - green_BIEST) ./ green_BIEST)))")
 
-    println("\nDifference double layer (regular - BIEST):")
-    display(grad_green - grad_green_BIEST)
-    println("Max difference in grad_green: $(maximum(abs.(grad_green - grad_green_BIEST)))")
+    # println("\nRelative difference double layer (regular - BIEST):")
+    # display((grad_green .- grad_green_BIEST) ./ grad_green_BIEST)
+    # println("Max relative difference in grad_green: $(maximum(abs.((grad_green - grad_green_BIEST) ./ grad_green_BIEST)))")
 
     # Sum Green's function matrices over toroidal direction to recover 2D poloidal slice
     # green_2D = zeros(ComplexF64, mtheta, mtheta)
     # gradgreen_2D = zeros(ComplexF64, mtheta, mtheta)
-    # for i in 1:mtheta
+    # dζ = 2π / nzeta
+    # # Perform Fourier integral over zeta to get 2D kernels G_2D = 1/2π ∫ G_3D e^{i n (ζ - ζ')} dζ'
+    # for ipol_obs in 1:mtheta
+    #     itor_obs = 1
+    #     idx = (itor_obs - 1) * mtheta + ipol_obs
     #     for j in 1:mtheta
-    #         green_2D[i, j] = sum(green_3D[(k-1)*mtheta + i, (l-1)*mtheta + j] * exp(im * 2π * (k-l) / nzeta) for k in 1:nzeta, l in 1:nzeta) .* (1 / nzeta)
-    #         gradgreen_2D[i, j] = sum(gradgreen_3D[(k-1)*mtheta + i, (l-1)*mtheta + j] * exp(im * 2π * (k-l) / nzeta) for k in 1:nzeta, l in 1:nzeta) .* (1 / nzeta)
+    #         green_2D[idx, j] = 1/2π * sum(green_temp[idx, (l-1)*mtheta + j] * exp(im * n * (itor_obs - l) * dζ) for l in 1:nzeta)
+    #         gradgreen_2D[idx, j] = 1/2π * sum(grad_green[idx, (l-1)*mtheta + j] * exp(im * n * (itor_obs - l) * dζ) for l in 1:nzeta)
     #     end
     # end
-    # identity = Matrix{ComplexF64}(I, mtheta, mtheta)
-    # gradgreen_2D .+= identity .* 0.5  # Add identity*0.5 to double-layer kernel for jump condition
-    # println("Computes 2D single layer kernel matrix:")
-    # display(greenfunction_temp)
-    # println("Computes 2D double layer kernel matrix:")
-    # display(grad_greenfunction_mat)
+    # Test Green's function by applying to unit source: green_test[i] = ∫ G B dθ' ≈ Σⱼ Gᵢⱼ Bⱼ Δθ'
+    # B = ones(mtheta)
+    # green_test = ((4π .* green_2D)) * B # account for 2D green's function being 1/r (not 1/4πr)
+    # println("3D Green's integral with a unit source:")
+    # display(real.(green_test))
+    # green_test = ((4π .* gradgreen_2D) + I) * B # account for 2D green's function being 1/r (not 1/4πr)
+    # println("3D Grad Green's integral with a unit source:")
+    # display(real.(green_test))
     # println("Sum over zeta entries of green_3D (single-layer):")
-    # display(green_2D)
+    # display(real.(green_2D))
     # println("Sum over zeta entries of gradgreen_3D (double-layer):")
-    # display(gradgreen_2D)
+    # display(real.(gradgreen_2D[1:mtheta, 1:mtheta]))
+    # display(real.(gradgreen_2D[mtheta+1:2*mtheta, 1:mtheta])) # confirmed that this is the same as the first mtheta rows
+    # identity = Matrix{ComplexF64}(I, mtheta, mtheta)
+    # gradgreen_2D[1:mtheta, 1:mtheta] .+= identity .* 0.5  # Add identity*0.5 to double-layer kernel for jump condition
 
     grad_green += I * 0.5  # Add 0.5I to double-layer kernel for jump condition
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
-    fourier_transform!(green_fourier, green_temp, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+    fourier_transform!(green_fourier, green_temp, plasma_surf3D.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(green_fourier, green_temp, plasma_surf3D.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
     !wall.nowall && error("No walls yet!")
 
@@ -418,7 +438,7 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
     # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        @views green_fourier[1:mtheta, :] .= grad_green[1:mtheta, 1:mtheta] \ green_fourier[1:mtheta, :]
+        @views green_fourier[1:num_gridpoints, :] .= grad_green[1:num_gridpoints, 1:num_gridpoints] \ green_fourier[1:num_gridpoints, :]
     else
         error("No walls yet!")
         green_fourier .= grad_green \ green_fourier
@@ -426,10 +446,10 @@ function compute_vacuum_response_3D(inputs::VacuumInput, wall_settings::WallShap
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
     arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-    fourier_inverse_transform!(arr, green_fourier, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, 4π^2 / num_gridpoints)
-    fourier_inverse_transform!(aii, green_fourier, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, 4π^2 / num_gridpoints)
-    fourier_inverse_transform!(ari, green_fourier, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, 4π^2 / num_gridpoints)
-    fourier_inverse_transform!(air, green_fourier, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, 4π^2 / num_gridpoints)
+    fourier_inverse_transform!(arr, green_fourier, plasma_surf3D.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, 4π^2 / num_gridpoints)
+    fourier_inverse_transform!(aii, green_fourier, plasma_surf3D.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, 4π^2 / num_gridpoints)
+    fourier_inverse_transform!(ari, green_fourier, plasma_surf3D.sin_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, 4π^2 / num_gridpoints)
+    fourier_inverse_transform!(air, green_fourier, plasma_surf3D.cos_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, 4π^2 / num_gridpoints)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     wv = complex.(arr .+ aii, air .- ari)

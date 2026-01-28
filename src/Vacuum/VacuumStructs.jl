@@ -55,8 +55,6 @@ struct PlasmaGeometry
     dz_dtheta::Vector{Float64}
     sin_mn_basis::Matrix{Float64}
     cos_mn_basis::Matrix{Float64}
-    sin_mn_basis3D::Matrix{Float64}
-    cos_mn_basis3D::Matrix{Float64}
 end
 
 """
@@ -169,23 +167,6 @@ function initialize_plasma_surface(inputs::VacuumInput)
     sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
     cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
 
-    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
-    sin_mn_basis3D = zeros(mtheta*nzeta, mpert*npert)
-    cos_mn_basis3D = zeros(mtheta*nzeta, mpert*npert)
-    ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
-    for idx_n in 1:npert
-        n = nlow + idx_n - 1
-        for idx_m in 1:mpert
-            m = mlow + idx_m - 1
-            for j in 1:nzeta
-                for i in 1:mtheta
-                    cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
-                    sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
-                end
-            end
-        end
-    end
-
     return PlasmaGeometry(
         R,
         Z,
@@ -193,9 +174,7 @@ function initialize_plasma_surface(inputs::VacuumInput)
         dx_dtheta,
         dz_dtheta,
         sin_mn_basis,
-        cos_mn_basis,
-        sin_mn_basis3D,
-        cos_mn_basis3D
+        cos_mn_basis
     )
 end
 
@@ -210,17 +189,19 @@ that the gradient/area elements are scaled by dθ and dζ.
 
 # Fields
 
-  - `ntheta::Int`: Number of poloidal grid points
+  - `mtheta::Int`: Number of poloidal grid points
   - `nzeta::Int`: Number of toroidal grid points
-  - `num_gridpoints::Int`: Total number of surface grid points (ntheta * nzeta)
+  - `num_gridpoints::Int`: Total number of surface grid points (mtheta * nzeta)
   - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_gridpoints, 3)
   - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
   - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
   - `n::Matrix{Float64}`: Outward unit normal vectors, shape (num_gridpoints, 3)
   - `dA::Vector{Float64}`: Differential area elements |∂r/∂θ × ∂r/∂ζ| dθ dζ, length num_gridpoints
+  - `sin_mn_basis3D::Matrix{Float64}`: sin(mθ - nν - nϕ) basis functions at plasma surface
+  - `cos_mn_basis3D::Matrix{Float64}`: cos(mθ - nν - nϕ) basis functions at plasma surface
 """
 @kwdef struct PlasmaGeometry3D
-    ntheta::Int
+    mtheta::Int
     nzeta::Int
     num_gridpoints::Int
     r::Matrix{Float64}
@@ -228,6 +209,8 @@ that the gradient/area elements are scaled by dθ and dζ.
     dr_dζ::Matrix{Float64}
     normal::Matrix{Float64}
     dA::Vector{Float64}
+    sin_mn_basis3D::Matrix{Float64}
+    cos_mn_basis3D::Matrix{Float64}
 end
 
 """
@@ -251,15 +234,15 @@ Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
 
   - `PlasmaGeometry3D`: Complete 3D surface description
 """
-function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry3D
+function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, inputs::VacuumInput)::PlasmaGeometry3D
 
     # Extract 2D poloidal data
-    ntheta = length(plasma_2d.x)
-    num_gridpoints = ntheta * nzeta
-    (; R, Z, ν) = plasma_2d
-    dθ = 2π / ntheta
+    (; mtheta, npert, nlow, mlow, nzeta, mpert) = inputs
+    num_gridpoints = mtheta * nzeta
+    (; x, z, ν) = plasma_2d
+    dθ = 2π / mtheta
     dϕ = 2π / nzeta
-    θ_grid = range(; start=0, length=ntheta, step=dθ)
+    θ_grid = range(; start=0, length=mtheta, step=dθ)
     ϕ_grid = range(; start=0, length=nzeta, step=dϕ)
 
     # Allocate output arrays
@@ -271,17 +254,17 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
 
     # Build 3D surface point-by-point from 2D contour
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
-        idx = i + (j - 1) * ntheta
-        r[idx, :] .= [R[i] * cos(ϕ + ν[i]), R[i] * sin(ϕ + ν[i]), Z[i]]
+        idx = i + (j - 1) * mtheta
+        r[idx, :] .= [x[i] * cos(ϕ + ν[i]), x[i] * sin(ϕ + ν[i]), z[i]]
     end
 
     # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions
-    r_grid = reshape(r, ntheta, nzeta, 3)
+    r_grid = reshape(r, mtheta, nzeta, 3)
     itps = [cubic_spline_interpolation((θ_grid, ϕ_grid), r_grid[:, :, k]; bc=Periodic(OnGrid())) for k in 1:3]
 
     # Compute tangent vectors, unit normals, and differential area elements via spline interpolation
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
-        idx = i + (j - 1) * ntheta
+        idx = i + (j - 1) * mtheta
         dr_dθ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[1] for k in 1:3]
         dr_dζ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[2] for k in 1:3]
         cross_prod = cross(dr_dθ[idx, :], dr_dζ[idx, :])
@@ -294,15 +277,33 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)::PlasmaGeometry
     dr_dθ .*= dθ
     dr_dζ .*= dϕ
 
+    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
+    sin_mn_basis3D = zeros(num_gridpoints, mpert*npert)
+    cos_mn_basis3D = zeros(num_gridpoints, mpert*npert)
+    for idx_n in 1:npert
+        n = nlow + idx_n - 1
+        for idx_m in 1:mpert
+            m = mlow + idx_m - 1
+            for j in 1:nzeta
+                for i in 1:mtheta
+                    cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
+                    sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
+                end
+            end
+        end
+    end
+
     return PlasmaGeometry3D(;
-        ntheta,
+        mtheta,
         nzeta,
         num_gridpoints,
         r,
         dr_dθ,
         dr_dζ,
         normal,
-        dA
+        dA,
+        sin_mn_basis3D,
+        cos_mn_basis3D
     )
 end
 

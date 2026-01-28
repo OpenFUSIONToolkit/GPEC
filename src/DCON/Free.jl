@@ -45,11 +45,12 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         println("Difference between 2D and 3D vacuum response matrices:")
         display(wv .- wv3D)
+
+        println("Norm of difference between 2D and 3D vacuum response matrices:")
         display(norm(wv .- wv3D))
 
-        println("Maximum eigenvalues:")
-        display(maximum(real.(eigvals(wv))))
-        display(maximum(real.(eigvals(wv3D))))
+        println("Maximum relative difference between 2D and 3D vacuum response matrices:")
+        display(maximum(abs.(wv .- wv3D)) / maximum(abs.(wv)))
 
         println("Difference in maximum eigenvalue:")
         display(maximum(real.(eigvals(wv))) - maximum(real.(eigvals(wv3D))))
