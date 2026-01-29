@@ -255,7 +255,7 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, inputs::VacuumInput)::Plasm
     # Build 3D surface point-by-point from 2D contour
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
         idx = i + (j - 1) * mtheta
-        r[idx, :] .= [x[i] * cos(ϕ + ν[i]), x[i] * sin(ϕ + ν[i]), z[i]]
+        r[idx, :] .= [x[i] * cos(ϕ), x[i] * sin(ϕ), z[i]]
     end
 
     # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions

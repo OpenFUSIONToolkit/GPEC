@@ -247,18 +247,6 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Plasma–Plasma block
     kernel!(grad_green, green_temp, plasma_surf, plasma_surf, n)
-    # println("2D green_temp (single-layer) matrix:")
-    # display(green_temp ./2)
-    # println("2D grad_green (double-layer) matrix:")
-    # gg_temp = grad_green[1:mtheta, 1:mtheta] ./ 2 - 0.5 * I
-    # display(gg_temp)
-    B = ones(mtheta)
-    green_test = green_temp * B
-    println("2D Green's integral with a unit source:")
-    display(real.(green_test))
-    green_test = (grad_green[1:mtheta, 1:mtheta]) * B # account for 2D green's function being 1/r (not 1/4πr)
-    println("2D Grad Green's integral with a unit source:")
-    display(real.(green_test))
 
     # Fourier transform plasma-plasma block
     fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
