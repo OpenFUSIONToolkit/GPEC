@@ -8,11 +8,11 @@ Initialized once on first use.
     - `qw::Vector{Float64}`: Radial quadrature weights
     - `Gpou::Matrix{Float64}`: Partition of unity on Cartesian grid (PATCH_DIM × PATCH_DIM)
     - `Ppou::Matrix{Float64}`: Partition of unity on polar grid (RAD_DIM × ANG_DIM)
-    - `M_G2P::Array{Float64, 4}`: 2D tensor-product Lagrange basis function values for interpolating from the Cartesian patch grid to polar quadrature points (RAD_DIM × ANG_DIM × INTERP_ORDER × INTERP_ORDER)
-    - `I_G2P::Array{Int, 3}`: Indices of lower-left corner of INTERP_ORDER × INTERP_ORDER stencil in PATCH_DIM × PATCH_DIM grid
+    - `P2G::SparseMatrixCSC{Float64,Int}`: Sparse interpolation matrix (Ngrid × Npolar) mapping polar quadrature points to Cartesian grid
+        - Forward (patch→polar): `polar = P2G' * patch`
+        - Backward (polar→grid): `grid = P2G * polar`.
     - `PATCH_DIM::Int`: Patch dimension (odd integer)
     - `PATCH_RAD::Int`: Patch radius (number of points adjacent to source point treated as singular)
-    - `INTERP_ORDER::Int`: Interpolation order
     - `ANG_DIM::Int`: Number of angular quadrature points
     - `RAD_DIM::Int`: Number of radial quadrature points
 """
@@ -21,11 +21,9 @@ struct SingularQuadratureData
     qw::Vector{Float64}
     Gpou::Matrix{Float64}
     Ppou::Matrix{Float64}
-    M_G2P::Array{Float64,4}
-    I_G2P::Array{Int,3}
+    P2G::SparseMatrixCSC{Float64,Int}
     PATCH_DIM::Int
     PATCH_RAD::Int
-    INTERP_ORDER::Int
     ANG_DIM::Int
     RAD_DIM::Int
 end
@@ -61,7 +59,7 @@ function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::In
     # Number of angular quadrature nodes in polar coordinates (uniformly distributed around circle)
     ANG_DIM = 2 * RAD_DIM
 
-    # Setup radial quadrature (Gauss-Legendre transformed to [0,1])
+    # Setup radial quadrature
     qx_raw, qw_raw = FastGaussQuadrature.gausslegendre(RAD_DIM) # points on [-1,1]
     qx = (qx_raw .+ 1) ./ 2  # Map [-1, 1] to [0, 1]
     qw = qw_raw ./ 2         # Adjust weights for interval change
@@ -88,8 +86,9 @@ function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::In
 
     # Spacing between Lagrange interpolation nodes in [0,1] for INTERP_ORDER-point stencil
     h = 1.0 / (INTERP_ORDER - 1)
-    # Compute 2D tensor-product Lagrange basis function at (x0, x1) in local stencil coordinates
-    # for basis node (i0, i1) on uniform grid with spacing h
+
+    # Compute 2D tensor-product Lagrange basis function at (x0, x1) in local
+    # stencil coordinates for basis node (i0, i1) on uniform grid with spacing h
     @inline function lagrange_interp(x0::Float64, x1::Float64, i0::Int, i1::Int)
         Lx = Ly = 1.0
         ξ0 = x0 / h
@@ -103,9 +102,23 @@ function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::In
         return Lx * Ly
     end
 
-    # Build Lagrange interpolation matrix from Cartesian grid to polar (G2P) points
-    M_G2P = zeros(RAD_DIM, ANG_DIM, INTERP_ORDER, INTERP_ORDER)
-    I_G2P = zeros(Int, RAD_DIM, ANG_DIM, 2)  # y0,y1 indices of lower-left corner of stencil in PATCH_DIM × PATCH_DIM grid
+    # Build sparse interpolation operator P2G ∈ ℝ^{Ngrid × Npolar}
+    #   grid_values  = P2G  * polar_values
+    #   polar_values = P2G' * grid_values
+    # Each column of P2G contains the INTERP_ORDER² Lagrange weights
+    # mapping one polar sample to its surrounding Cartesian grid stencil.
+    Ngrid = PATCH_DIM * PATCH_DIM
+    Npolar = RAD_DIM * ANG_DIM
+
+    # Preallocate COO storage:
+    #   I_coo[k], J_coo[k] = (row, column) index of kth nonzero
+    #   V_coo[k]           = interpolation weight
+    nnz_per_polar = INTERP_ORDER^2
+    I_coo = Vector{Int}(undef, Npolar * nnz_per_polar)
+    J_coo = Vector{Int}(undef, Npolar * nnz_per_polar)
+    V_coo = Vector{Float64}(undef, Npolar * nnz_per_polar)
+
+    idx = 1
     for ir in 1:RAD_DIM, ia in 1:ANG_DIM
         # Map polar node to unit square: x0, x1 ∈ [0,1] × [0,1]
         x0 = 0.5 + 0.5 * qx[ir] * cos(dθ * (ia - 1))
@@ -119,16 +132,24 @@ function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::In
         z0 = (x0 * (PATCH_DIM - 1) - y0) * h
         z1 = (x1 * (PATCH_DIM - 1) - y1) * h
 
-        # Indices of lower-left corner of INTERP_ORDER × INTERP_ORDER stencil in PATCH_DIM × PATCH_DIM grid
-        I_G2P[ir, ia, :] .= [y0, y1]
+        # Polar point index (column in P2G)
+        j_polar = ir + RAD_DIM * (ia - 1)
 
-        # 2D tensor-product Lagrange basis function values on the polar grid
-        for j0 in 1:INTERP_ORDER, j1 in 1:INTERP_ORDER
-            M_G2P[ir, ia, j0, j1] = lagrange_interp(z0, z1, j0 - 1, j1 - 1)
+        # Populate stencil contributions for this polar node
+        for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
+            # Grid point index (row in P2G), using column-major layout
+            i_grid = (y0 + i0) + PATCH_DIM * (y1 + i1 - 1)
+            I_coo[idx] = i_grid
+            J_coo[idx] = j_polar
+            V_coo[idx] = lagrange_interp(z0, z1, i0 - 1, i1 - 1)
+            idx += 1
         end
     end
 
-    return SingularQuadratureData(qx, qw, Gpou, Ppou, M_G2P, I_G2P, PATCH_DIM, PATCH_RAD, INTERP_ORDER, ANG_DIM, RAD_DIM)
+    # Assemble sparse interpolation matrix
+    P2G = sparse(I_coo, J_coo, V_coo, Ngrid, Npolar)
+
+    return SingularQuadratureData(qx, qw, Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM)
 end
 
 """
@@ -237,7 +258,7 @@ end
 """
     interpolate_to_polar(patch, quad_data)
 
-Interpolate Cartesian patch data to polar quadrature points using precomputed matrix.
+Interpolate Cartesian patch data to polar quadrature points using sparse matrix multiply.
 
 # Arguments
 
@@ -250,16 +271,13 @@ Interpolate Cartesian patch data to polar quadrature points using precomputed ma
 """
 function interpolate_to_polar(patch::Array{Float64,3}, quad_data::SingularQuadratureData)
 
-    (; M_G2P, I_G2P, INTERP_ORDER, RAD_DIM, ANG_DIM) = quad_data
+    (; P2G, RAD_DIM, ANG_DIM) = quad_data
     dof = size(patch, 3)
-    polar_data = zeros(RAD_DIM, ANG_DIM, dof)
-    for ir in 1:RAD_DIM, ia in 1:ANG_DIM
-        ycorner = I_G2P[ir, ia, :]
-        for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
-            polar_data[ir, ia, :] .+= M_G2P[ir, ia, i0, i1] .* patch[ycorner[1]+i0, ycorner[2]+i1, :]
-        end
-    end
-    return polar_data
+
+    # Flatten patch to (Ngrid × dof), apply P2G' to get (Npolar × dof)
+    patch_flat = reshape(patch, :, dof)
+    polar_flat = P2G' * patch_flat
+    return reshape(polar_flat, RAD_DIM, ANG_DIM, dof)
 end
 
 """
@@ -279,7 +297,7 @@ Compute normal vector (= ∂r/∂θ × ∂r/∂ζ) at polar quadrature points fr
 function compute_polar_normal(dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3})
 
     n_polar = similar(dr_dθ)
-    @views @inbounds for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
+    @views for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
         n_polar[ir, ia, :] .= cross(dr_dθ[ir, ia, :], dr_dζ[ir, ia, :])
     end
     return n_polar
@@ -314,8 +332,8 @@ where each entry is φ(x_obs, x_src).
 function compute_3D_kernel_matrix!(
     grad_greenfunction::Matrix{Float64},
     greenfunction::Matrix{Float64},
-    observer::PlasmaGeometry3D,
-    source::PlasmaGeometry3D;
+    observer::Union{PlasmaGeometry3D,WallGeometry3D},
+    source::Union{PlasmaGeometry3D,WallGeometry3D};
     PATCH_RAD::Int=3,
     RAD_DIM::Int=15,
     INTERP_ORDER::Int=6
@@ -327,7 +345,7 @@ function compute_3D_kernel_matrix!(
 
     # Initialize quadrature data (cached)
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-    (; PATCH_DIM, PATCH_RAD, INTERP_ORDER, ANG_DIM, RAD_DIM, Ppou, Gpou, M_G2P, I_G2P) = quad_data
+    (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
     @assert observer.mtheta ≥ PATCH_DIM
     @assert observer.nzeta ≥ PATCH_DIM
     dθdζ = (2π / observer.mtheta) * (2π / observer.nzeta)
@@ -382,17 +400,10 @@ function compute_3D_kernel_matrix!(
             M_polar_double[ir, ia] = K_double * Ppou[ir, ia] * dθdζ
         end
 
-        # Distribute polar singular corrections back to Cartesian grid using interpolation matrix
-        # Correction at grid point = sum over polar points of (kernel_value * interp_weight)
-        M_grid_single = zeros(PATCH_DIM, PATCH_DIM)
-        M_grid_double = zeros(PATCH_DIM, PATCH_DIM)
-        for ir in 1:RAD_DIM, ia in 1:ANG_DIM
-            ycorner = I_G2P[ir, ia, :]
-            for i0 in 1:INTERP_ORDER, i1 in 1:INTERP_ORDER
-                M_grid_single[ycorner[1]+i0, ycorner[2]+i1] += M_G2P[ir, ia, i0, i1] * M_polar_single[ir, ia]
-                M_grid_double[ycorner[1]+i0, ycorner[2]+i1] += M_G2P[ir, ia, i0, i1] * M_polar_double[ir, ia]
-            end
-        end
+        # Distribute polar singular corrections back to Cartesian grid using sparse matrix
+        # grid = P2G * polar (maps Npolar → Ngrid)
+        M_grid_single = reshape(P2G * vec(M_polar_single), PATCH_DIM, PATCH_DIM)
+        M_grid_double = reshape(P2G * vec(M_polar_double), PATCH_DIM, PATCH_DIM)
 
         # Compute remaining far-field POU contribution and near-field polar quadrature result
         # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
