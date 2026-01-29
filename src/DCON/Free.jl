@@ -10,7 +10,7 @@ and data dumping.
 function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
     # Initializations and allocations
-    vac = VacuumData(ctrl.mthvac, intr.mpert, intr.numpert_total)
+    vac = VacuumData(ctrl.mthvac, ctrl.nzvac, intr.numpert_total)
     etemp = zeros(ComplexF64, intr.numpert_total)
     wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
@@ -29,40 +29,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Set VACUUM run parameters and boundary shape
         n = ipert_n - 1 + intr.nlow
         vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
-        fill!(vac.grri, 0.0)
-        fill!(vac.xzpts, 0.0)
-
-        wv3D, grri3D, xzpts3D = Vacuum.compute_vacuum_response_3D(vac_inputs, intr.wall_settings)
+        fill!(vac.green_fourier, 0.0)
 
         # Compute block of vacuum energy matrix for one toroidal mode number
-        wv, vac.grri, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-
-        println("2D Vacuum response matrix wv:")
-        display(wv)
-
-        println("3D Vacuum response matrix wv3D:")
-        display(wv3D)
-
-        println("Maximum relative difference between 2D and 3D vacuum response matrices:")
-        display(maximum(abs.(wv .- wv3D)) / maximum(abs.(wv)))
-
-        println("Relative difference in maximum eigenvalue:")
-        display((maximum(real.(eigvals(wv))) - maximum(real.(eigvals(wv3D)))) / maximum(real.(eigvals(wv))))
-
-        error("Vacuum response matrix computation complete.")
-
-        # Output data for unit testing and benchmarking
-        if true #intr.debug_settings.output_benchmark_data
-            farwall_flag = intr.wall_settings.shape == "nowall" ? true : false
-            benchmark_inputs = VacuumBenchmarkInputs(
-                wv_block, intr.mpert, equil.config.control.mtheta, ctrl.mthvac,
-                true, vac_inputs.kernelsign, false,
-                farwall_flag, vac.grri, vac.xzpts, "ahg2msc_dcon.out", intr.dir_path,
-                vac_inputs, intr.wall_settings,
-                n, ipert_n, intr.psilim
-            )
-            @save intr.dir_path*"/benchmark_inputs.jld2" benchmark_inputs
-        end
+        wv_block, vac.green_fourier, vac.plasma_coords, vac.wall_coords = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
         # Equation 126 in Chance 1997 - scale by (m - n*q)(m' - n*q)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
@@ -73,6 +43,39 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         # Store block in full wv matrix
         @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
+    end
+
+    if ctrl.nzvac > 1
+        if ctrl.verbose
+            println("Computing 3D vacuum response matrix in addition to 2D matrix with nzvac = $(ctrl.nzvac)")
+        end
+
+        # Compute 3D vacuum response matrix
+        vac_inputs = compute_vacuum_inputs(intr.psilim, 1, ctrl, equil, intr)
+        vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, intr.nlow, intr.npert)
+        wv3D, _, _, _ = Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
+
+        # Scale by (m - n*q)(m' - n'*q)
+        singfac = vec((intr.mlow:intr.mhigh) .- intr.qlim .* (intr.nlow:intr.nhigh)')
+        @inbounds for ipert in 1:intr.numpert_total
+            @views wv3D[ipert, :] .*= singfac[ipert]
+            @views wv3D[:, ipert] .*= singfac[ipert]
+        end
+
+        # DEBUG
+        println("2D Vacuum response matrix wv:")
+        display(vac.wv)
+        println("3D Vacuum response matrix wv3D:")
+        display(wv3D)
+        println("Maximum relative difference between 2D and 3D vacuum response matrices:")
+        display(maximum(abs.(vac.wv .- wv3D)) / maximum(abs.(vac.wv)))
+        println("Maximum difference between 2D and 3D vacuum response matrices:")
+        display(maximum(abs.(vac.wv .- wv3D)))
+        println("Relative difference in maximum eigenvalue:")
+        display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))) / maximum(real.(eigvals(vac.wv))))
+        println("Difference in maximum eigenvalue:")
+        display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))))
+        error("Vacuum response matrix computation complete.")
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -111,7 +114,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     end
 
     # Compute plasma and vacuum contributions.
-    # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
     wpt .= adjoint(vac.wt) * (wp * vac.wt)
     wvt .= adjoint(vac.wt) * (vac.wv * vac.wt)
     for ipert in 1:intr.numpert_total
@@ -158,12 +160,12 @@ the r, z, and ν values at the plasma boundary, as well as mode numbers and numb
 function compute_vacuum_inputs(ψ::Float64, n::Int, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Allocations
-    mtheta = equil.config.control.mtheta
-    θ_SFL = zeros(Float64, mtheta + 1)
-    R = zeros(Float64, mtheta + 1)
-    Z = zeros(Float64, mtheta + 1)
-    ν = zeros(Float64, mtheta + 1)
-    r_minor = zeros(Float64, mtheta + 1)
+    mtheta = equil.config.control.mtheta + 1
+    θ_SFL = zeros(Float64, mtheta)
+    R = zeros(Float64, mtheta)
+    Z = zeros(Float64, mtheta)
+    ν = zeros(Float64, mtheta)
+    r_minor = zeros(Float64, mtheta)
 
     # Compute geometric quantities on plasma boundary
     for (i, θ) in enumerate(equil.rzphi.ys)
@@ -172,6 +174,7 @@ function compute_vacuum_inputs(ψ::Float64, n::Int, ctrl::DconControl, equil::Eq
         θ_SFL[i] = 2π * (θ + f[2]) # f[2] = λ(ψ, θ) / 2π
         ν[i] = f[3]
     end
+
     # Compute R and Z on straight-fieldline θ grid
     R .= equil.ro .+ r_minor .* cos.(θ_SFL)
     Z .= equil.zo .+ r_minor .* sin.(θ_SFL)
@@ -190,11 +193,8 @@ function compute_vacuum_inputs(ψ::Float64, n::Int, ctrl::DconControl, equil::Eq
         ν=reverse(ν),
         mlow=intr.mlow,
         mpert=intr.mpert,
-        nlow=intr.nlow,
-        npert=intr.npert,
         n=n,
         mtheta=ctrl.mthvac,
-        nzeta=ctrl.nzvac,
         force_wv_symmetry=ctrl.force_wv_symmetry
     )
 end

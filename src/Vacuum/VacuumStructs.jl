@@ -21,6 +21,38 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
     ν::Vector{Float64} = Float64[]
     mlow::Int = 0
     mpert::Int = 0
+    n::Int = 0
+    mtheta::Int = 1
+    kernelsign::Float64 = 1.0
+    force_wv_symmetry::Bool = true
+end
+
+"""
+    VacuumInput3D
+
+Struct holding 2D plasma boundary for a 3D VACUUM run `and mode data as provided from DCON namelist and computed quantities.
+2D contour becomes a 3D axisymmetric surface by toroidal extrusion.
+
+# Fields
+
+  - `x::Vector{Float64}`: Plasma boundary X-coordinate on DCON theta grid
+  - `z::Vector{Float64}`: Plasma boundary Z-coordinate on DCON theta grid
+  - `ν::Vector{Float64}`: Free parameter in specifying toroidal angle, ϕ = 2πζ + ν(ψ, θ), on DCON theta grid
+  - `mlow::Int`: Lower poloidal mode number
+  - `mpert::Int`: Number of poloidal modes
+  - `nlow::Int`: Lower toroidal mode number
+  - `npert::Int`: Number of toroidal modes
+  - `mtheta::Int`: Number of poloidal collocation points
+  - `nzeta::Int`: Number of toroidal collocation points
+  - `kernelsign::Float64`: Sign for kernel; +1 or -1, only ≠ 1 for mutual inductance calculations
+  - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
+"""
+@kwdef struct VacuumInput3D
+    x::Vector{Float64} = Float64[]
+    z::Vector{Float64} = Float64[]
+    ν::Vector{Float64} = Float64[]
+    mlow::Int = 0
+    mpert::Int = 0
     nlow::Int = 0
     npert::Int = 0
     n::Int = 0
@@ -31,54 +63,25 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
 end
 
 """
-    PlasmaGeometry
+    VacuumInput3D(inputs_2D::VacuumInput, nzeta::Int, nlow::Int, npert::Int)
 
-Struct holding plasma geometry data on the mtheta grid for vacuum calculations. Arrays are
-of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
-It also precomputes trigonometric basis functions needed for Fourier calculations into matrices
-of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
-
-# Fields
-
-  - `x::Vector{Float64}`: Plasma surface R-coordinate on VACUUM theta grid
-  - `z::Vector{Float64}`: Plasma surface Z-coordinate on VACUUM theta grid
-  - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
-  - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
-  - `sin_mn_basis::Matrix{Float64}`: sin(mθ - nν) basis functions for poloidal modes at plasma surface
-  - `cos_mn_basis::Matrix{Float64}`: cos(mθ - nν) basis functions for poloidal modes at plasma surface
+Convenience constructor for a 3D VacuumInput3D struct from a 2D VacuumInput with the additional
+required parameters for the toroidal grid/modes.
 """
-struct PlasmaGeometry
-    x::Vector{Float64}
-    z::Vector{Float64}
-    ν::Vector{Float64}
-    dx_dtheta::Vector{Float64}
-    dz_dtheta::Vector{Float64}
-    sin_mn_basis::Matrix{Float64}
-    cos_mn_basis::Matrix{Float64}
-end
-
-"""
-    WallGeometry
-
-Struct holding wall geometry data for vacuum calculations. Arrays are of length
-`mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
-
-# Fields
-
-  - `nowall::Bool`: Boolean flag indicating if there is no wall
-  - `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
-  - `x::Vector{Float64}`: Wall R-coordinates
-  - `z::Vector{Float64}`: Wall Z-coordinates
-  - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at wall
-  - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at wall
-"""
-struct WallGeometry
-    nowall::Bool
-    is_closed_toroidal::Bool
-    x::Vector{Float64}
-    z::Vector{Float64}
-    dx_dtheta::Vector{Float64}
-    dz_dtheta::Vector{Float64}
+function VacuumInput3D(inputs_2D::VacuumInput, nzeta::Int, nlow::Int, npert::Int)
+    return VacuumInput3D(;
+        x=inputs_2D.r,
+        z=inputs_2D.z,
+        ν=inputs_2D.ν,
+        mlow=inputs_2D.mlow,
+        mpert=inputs_2D.mpert,
+        nlow=nlow,
+        npert=npert,
+        mtheta=inputs_2D.mtheta,
+        nzeta=nzeta,
+        kernelsign=inputs_2D.kernelsign,
+        force_wv_symmetry=inputs_2D.force_wv_symmetry
+    )
 end
 
 """
@@ -124,9 +127,36 @@ Struct containing input settings for vacuum wall geometry.
 end
 
 """
-    initialize_plasma_surface(inputs::VacuumInput) -> PlasmaGeometry
+    PlasmaGeometry
 
-Initialize the plasma surface geometry based on the provided vacuum inputs.
+Struct holding plasma geometry data on the mtheta grid for vacuum calculations. Arrays are
+of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
+It also precomputes trigonometric basis functions needed for Fourier calculations into matrices
+of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
+
+# Fields
+
+  - `x::Vector{Float64}`: Plasma surface R-coordinate on VACUUM theta grid
+  - `z::Vector{Float64}`: Plasma surface Z-coordinate on VACUUM theta grid
+  - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
+  - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
+  - `sin_mn_basis::Matrix{Float64}`: sin(mθ - nν) basis functions for poloidal modes at plasma surface
+  - `cos_mn_basis::Matrix{Float64}`: cos(mθ - nν) basis functions for poloidal modes at plasma surface
+"""
+struct PlasmaGeometry
+    x::Vector{Float64}
+    z::Vector{Float64}
+    ν::Vector{Float64}
+    dx_dtheta::Vector{Float64}
+    dz_dtheta::Vector{Float64}
+    sin_mn_basis::Matrix{Float64}
+    cos_mn_basis::Matrix{Float64}
+end
+
+"""
+    PlasmaGeometry(inputs::VacuumInput)
+
+Contructor to initialize the plasma surface geometry based on the provided vacuum inputs.
 
 This function performs functionality from `readahg`, `arrays`, and `funint` in the
 original Fortran VACUUM code. It returns a `PlasmaGeometry` struct containing
@@ -147,9 +177,9 @@ the necessary plasma surface data for vacuum calculations.
 
   - `PlasmaGeometry`: Struct containing plasma surface coordinates, derivatives, and basis functions
 """
-function initialize_plasma_surface(inputs::VacuumInput)
+function PlasmaGeometry(inputs::VacuumInput)
 
-    (; mtheta, mpert, mlow, nzeta, npert, nlow, ν, r, z, n) = inputs
+    (; mtheta, mpert, mlow, ν, r, z, n) = inputs
     # Interpolate arrays from input onto mtheta grid
     R = interp_to_new_grid(r, mtheta)
     Z = interp_to_new_grid(z, mtheta)
@@ -195,35 +225,33 @@ that the gradient/area elements are scaled by dθ and dζ.
   - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_gridpoints, 3)
   - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
   - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
-  - `n::Matrix{Float64}`: Outward unit normal vectors, shape (num_gridpoints, 3)
-  - `dA::Vector{Float64}`: Differential area elements |∂r/∂θ × ∂r/∂ζ| dθ dζ, length num_gridpoints
+  - `n::Matrix{Float64}`: Outward normal vectors, shape (num_gridpoints, 3)
   - `sin_mn_basis3D::Matrix{Float64}`: sin(mθ - nν - nϕ) basis functions at plasma surface
   - `cos_mn_basis3D::Matrix{Float64}`: cos(mθ - nν - nϕ) basis functions at plasma surface
 """
 @kwdef struct PlasmaGeometry3D
     mtheta::Int
     nzeta::Int
-    num_gridpoints::Int
     r::Matrix{Float64}
     dr_dθ::Matrix{Float64}
     dr_dζ::Matrix{Float64}
     normal::Matrix{Float64}
-    dA::Vector{Float64}
     sin_mn_basis3D::Matrix{Float64}
     cos_mn_basis3D::Matrix{Float64}
 end
 
 """
-    PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int) -> PlasmaGeometry3D
+    PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)
 
 Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
 
 # Algorithm
 
+ 0. Interpolate 2D arrays onto mtheta grid
  1. Map 2D (R, Z, ν) to 3D Cartesian: X = R cos(ϕ+ν), Y = R sin(ϕ+ν), Z = Z
  2. Fit periodic bicubic splines to (X, Y, Z) on (θ, ϕ) grid
  3. Compute tangent vectors via spline gradients
- 4. Compute normals and area elements via cross product: n × dA = ∂r/∂θ × ∂r/∂ζ
+ 4. Compute normals via cross product: n = ∂r/∂θ × ∂r/∂ζ
 
 # Arguments
 
@@ -234,12 +262,11 @@ Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
 
   - `PlasmaGeometry3D`: Complete 3D surface description
 """
-function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, inputs::VacuumInput)::PlasmaGeometry3D
+function PlasmaGeometry3D(inputs::VacuumInput3D)
 
     # Extract 2D poloidal data
-    (; mtheta, npert, nlow, mlow, nzeta, mpert) = inputs
+    (; mtheta, nzeta, npert, nlow, mlow, mpert) = inputs
     num_gridpoints = mtheta * nzeta
-    (; x, z, ν) = plasma_2d
     dθ = 2π / mtheta
     dϕ = 2π / nzeta
     θ_grid = range(; start=0, length=mtheta, step=dθ)
@@ -251,6 +278,11 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, inputs::VacuumInput)::Plasm
     dA = zeros(num_gridpoints)
     dr_dθ = zeros(num_gridpoints, 3)
     dr_dζ = zeros(num_gridpoints, 3)
+
+    # Interpolate arrays from input onto mtheta grid (same as 2D)
+    x = interp_to_new_grid(inputs.x, mtheta)
+    z = interp_to_new_grid(inputs.z, mtheta)
+    ν = interp_to_new_grid(inputs.ν, mtheta)
 
     # Build 3D surface point-by-point from 2D contour
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
@@ -267,15 +299,8 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, inputs::VacuumInput)::Plasm
         idx = i + (j - 1) * mtheta
         dr_dθ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[1] for k in 1:3]
         dr_dζ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[2] for k in 1:3]
-        cross_prod = cross(dr_dθ[idx, :], dr_dζ[idx, :])
-        dA[idx] = norm(cross_prod)
-        normal[idx, :] .= cross_prod / dA[idx]
+        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
     end
-
-    # Multiply by scalings
-    dA .*= dθ * dϕ
-    dr_dθ .*= dθ
-    dr_dζ .*= dϕ
 
     # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
     sin_mn_basis3D = zeros(num_gridpoints, mpert*npert)
@@ -296,21 +321,43 @@ function PlasmaGeometry3D(plasma_2d::PlasmaGeometry, inputs::VacuumInput)::Plasm
     return PlasmaGeometry3D(;
         mtheta,
         nzeta,
-        num_gridpoints,
         r,
         dr_dθ,
         dr_dζ,
         normal,
-        dA,
         sin_mn_basis3D,
         cos_mn_basis3D
     )
 end
 
 """
-    initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings) -> WallGeometry
+    WallGeometry
 
-Initialize the wall geometry based on the provided vacuum inputs and wall shape settings.
+Struct holding wall geometry data for vacuum calculations. Arrays are of length
+`mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
+
+# Fields
+
+  - `nowall::Bool`: Boolean flag indicating if there is no wall
+  - `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
+  - `x::Vector{Float64}`: Wall R-coordinates
+  - `z::Vector{Float64}`: Wall Z-coordinates
+  - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at wall
+  - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at wall
+"""
+@kwdef struct WallGeometry
+    nowall::Bool
+    is_closed_toroidal::Bool
+    x::Vector{Float64}
+    z::Vector{Float64}
+    dx_dtheta::Vector{Float64}
+    dz_dtheta::Vector{Float64}
+end
+
+"""
+    WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
+
+Contructor to initialize the wall geometry based on the provided vacuum inputs and wall shape settings.
 
 This performs functionality similar to portions of the `arrays` function in the original
 Fortran VACUUM code. It returns a `WallGeometry` struct containing the necessary wall
@@ -331,7 +378,7 @@ surface data for vacuum calculations.
   - Supports multiple wall shapes: nowall, conformal, elliptical, dee, mod_dee, from_file
   - Optionally redistributes wall points to equal arc length spacing if `equal_arc_wall=true`
 """
-function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
+function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings)
 
     # Basic wall flags
     nowall = wall_settings.shape == "nowall"
@@ -461,94 +508,102 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
     end
 
-    return WallGeometry(
-        nowall,
-        is_closed_toroidal,
-        x_wall,
-        z_wall,
-        dx_dtheta,
-        dz_dtheta
+    return WallGeometry(;
+        nowall=nowall,
+        is_closed_toroidal=is_closed_toroidal,
+        x=x_wall,
+        z=z_wall,
+        dx_dtheta=dx_dtheta,
+        dz_dtheta=dz_dtheta
     )
 end
 
 """
-    distribute_to_equal_arc_grid(xin, zin, mw1)
+    WallGeometry3D
 
-Perform arc length re-parameterization of a 2D curve.
+Struct holding wall geometry data for vacuum calculations. Arrays are of length
+`mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
 
-Takes an input curve defined by `(xin, zin)` coordinates and re-samples it such that
-the new points `(xout, zout)` are equally spaced in arc length along the curve.
+# Fields
+
+  - `nowall::Bool`: Boolean flag indicating if there is no wall
+  - `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
+  - `mtheta::Int`: Number of poloidal grid points
+  - `nzeta::Int`: Number of toroidal grid points
+  - `r::Matrix{Float64}`: (x, y, z) wall coordinates at each grid point
+  - `dr_dθ::Matrix{Float64}`: Derivative dR/dθ at wall
+  - `dr_dζ::Matrix{Float64}`: Derivative dR/dζ at wall
+  - `normal::Matrix{Float64}`: Outward unit normal vectors at wall
+  - `dA::Vector{Float64}`: Differential area elements at wall
+"""
+@kwdef struct WallGeometry3D
+    nowall::Bool
+    is_closed_toroidal::Bool
+    mtheta::Int
+    nzeta::Int
+    r::Matrix{Float64}
+    dr_dθ::Matrix{Float64}
+    dr_dζ::Matrix{Float64}
+    normal::Matrix{Float64}
+    dA::Vector{Float64}
+end
+
+"""
+    WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wall_settings::WallShapeSettings)
+
+Contructor to initialize the 3D wall geometry based on the provided vacuum inputs and wall shape settings.
+
+This performs functionality similar to portions of the `arrays` function in the original
+Fortran VACUUM code. It returns a `WallGeometry` struct containing the necessary wall
+surface data for vacuum calculations.
 
 # Arguments
 
-  - `xin::Vector{Float64}`: Array of x-coordinates of the input curve
-  - `zin::Vector{Float64}`: Array of z-coordinates of the input curve
-  - `mw1::Int`: Number of points in the input and output curves
+  - `inputs::VacuumInput3D`: Struct containing vacuum calculation parameters
+  - `plasma_surf::PlasmaGeometry3D`: Struct with plasma surface geometry (used for reference)
+  - `wall_settings::WallShapeSettings`: Struct specifying wall shape and parameters
 
 # Returns
 
-  - `xout::Vector{Float64}`: Array of x-coordinates of the arc-length re-parameterized curve
-  - `zout::Vector{Float64}`: Array of z-coordinates of the arc-length re-parameterized curve
-  - `ell::Vector{Float64}`: Array of cumulative arc lengths for the input curve
-  - `thgr::Vector{Float64}`: Array of re-parameterized 'theta' values corresponding to equal arc lengths
-  - `thlag::Vector{Float64}`: Array of normalized 'theta' values for the input curve (0 to 1)
+  - `WallGeometry`: Struct containing wall surface coordinates and derivatives
 
 # Notes
 
-  - Uses Lagrange interpolation for calculating arc length and resampling
-  - Ensures uniform spacing in arc length for improved numerical stability
+  - Supports multiple wall shapes: nowall, conformal, elliptical, dee, mod_dee, from_file
+  - Optionally redistributes wall points to equal arc length spacing if `equal_arc_wall=true`
 """
-function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}, mtheta::Int)
+function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wall_settings::WallShapeSettings)
 
-    # Temporary arrays for interpolation and arc-length calculation
-    theta_in = zeros(Float64, mtheta) # Normalized input parameter [0, 1)
-    theta_out = zeros(Float64, mtheta) # New parameter distribution for equal spacing
-    xout = zeros(Float64, mtheta) # Uniformly spaced R-coordinates
-    zout = zeros(Float64, mtheta) # Uniformly spaced Z-coordinates
+    # Basic wall flags
+    nowall = wall_settings.shape == "nowall"
+    is_closed_toroidal = true
 
-    # Define initial normalized parameter theta_in
-    dt = 1.0 / mtheta
-    theta_in .= range(; start=0, length=mtheta, step=dt) # θ ∈ [0, 1)
-    # we need a closed loop for arc length calculation
-    mtheta1 = mtheta + 1
-    xin1 = vcat(xin, xin[1])
-    zin1 = vcat(zin, zin[1])
-    theta_in1 = vcat(theta_in, [1.0])
-    ell = zeros(Float64, mtheta1) # Cumulative arc length of closed loop
+    # All of these arrays are of length mtheta with θ = [0, 1)
+    (; mtheta, nzeta) = inputs
+    num_gridpoints = mtheta * nzeta
 
-    # Calculate cumulative arc length using numerical integration
-    # We use a mid-point derivative approximation to find the path length
-    for iw in 2:mtheta1
-        # Evaluate derivative at the midpoint of the interval
-        theta = (theta_in1[iw] + theta_in1[iw-1]) / 2.0
+    # Output wall coordinate arrays
+    r = zeros(num_gridpoints, 3)
+    normal = zeros(num_gridpoints, 3)
+    dA = zeros(num_gridpoints)
+    dr_dθ = zeros(num_gridpoints, 3)
+    dr_dζ = zeros(num_gridpoints, 3)
 
-        # Calculate dx/dt and dz/dt using Lagrange interpolation (order 3)
-        _, d_xin = lagrange1d(theta_in1, xin1, mtheta1, 3, theta, 1)
-        _, d_zin = lagrange1d(theta_in1, zin1, mtheta1, 3, theta, 1)
-
-        # Instantaneous speed (ds/dt)
-        ds_dt = sqrt(d_xin^2 + d_zin^2)
-
-        # Accumulate length: ds = (ds/dt) * dt
-        ell[iw] = ell[iw-1] + ds_dt * dt
+    if wall_settings.shape == "nowall"
+        @info "Using no wall"
+    else
+        error("3D wall shapes other than 'nowall' are not yet implemented.")
     end
 
-    # Re-parameterize based on equal arc-length segments
-    ell_targets = collect(range(0; step=ell[end]/mtheta, length=mtheta)) # [0, Length) for open loop result
-    for i in 2:mtheta
-        # Find the value of 'theta_in' that corresponds to the target arc length 's'
-        f_th, _ = lagrange1d(ell, theta_in1, mtheta1, 3, ell_targets[i], 0)
-        theta_out[i] = f_th
-    end
-
-    # Interpolate the original (x,z) data at the new parameter points to get (xout, zout)
-    # Chance interpolates in theta_out to get xin, zin but this introduces small errors in arc lengths
-    for i in 1:mtheta
-        f_x, _ = lagrange1d(ell, xin1, mtheta1, 3, ell_targets[i], 0)
-        f_z, _ = lagrange1d(ell, zin1, mtheta1, 3, ell_targets[i], 0)
-        xout[i] = f_x
-        zout[i] = f_z
-    end
-
-    return xout, zout, ell, theta_out, theta_in
+    return WallGeometry3D(
+        nowall,
+        is_closed_toroidal,
+        mtheta,
+        nzeta,
+        r,
+        dr_dθ,
+        dr_dζ,
+        normal,
+        dA
+    )
 end
