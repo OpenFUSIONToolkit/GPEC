@@ -12,7 +12,6 @@ include("Vacuum3D.jl")
 
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response, compute_vacuum_response_3D
 export compute_vacuum_field
-export kernel!
 export WallShapeSettings
 
 # ======================================================================
@@ -228,10 +227,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Initialization and allocations
     (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
-    plasma_surf = PlasmaGeometry(inputs)
-    wall = WallGeometry(inputs, plasma_surf, wall_settings)
     grad_green = zeros(2 * mtheta, 2 * mtheta)
     green_temp = zeros(mtheta, mtheta)
+    plasma_surf = PlasmaGeometry(inputs)
+    wall = WallGeometry(inputs, plasma_surf, wall_settings)
 
     # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first mtheta rows are plasma as observer, second are wall
     # First mpert columns are real (cosine), second mpert are imaginary (sine)
@@ -341,12 +340,11 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     (; mtheta, mpert, n, force_wv_symmetry, kernelsign, nzeta, npert) = inputs
     num_gridpoints = nzeta * mtheta
     num_modes = npert * mpert
-
+    grad_green = zeros(num_gridpoints, num_gridpoints) # for walls, this is 2*mtheta x 2*mtheta
+    green_temp = zeros(num_gridpoints, num_gridpoints)
     # TODO: Currently only supports axisymmetric surfaces
     plasma_surf = PlasmaGeometry3D(inputs)
     wall = WallGeometry3D(inputs, plasma_surf, wall_settings)
-    grad_green = zeros(num_gridpoints, num_gridpoints) # for walls, this is 2*mtheta x 2*mtheta
-    green_temp = zeros(num_gridpoints, num_gridpoints)
 
     # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first num_gridpoints rows are plasma as observer, second are wall
     # First num_modes columns are real (cosine), second num_modes are imaginary (sine)

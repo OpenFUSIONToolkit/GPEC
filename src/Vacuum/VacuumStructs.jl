@@ -268,14 +268,13 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     (; mtheta, nzeta, npert, nlow, mlow, mpert) = inputs
     num_gridpoints = mtheta * nzeta
     dθ = 2π / mtheta
-    dϕ = 2π / nzeta
+    dζ = 2π / nzeta
     θ_grid = range(; start=0, length=mtheta, step=dθ)
-    ϕ_grid = range(; start=0, length=nzeta, step=dϕ)
+    ϕ_grid = range(; start=0, length=nzeta, step=dζ)
 
     # Allocate output arrays
     r = zeros(num_gridpoints, 3)
     normal = zeros(num_gridpoints, 3)
-    dA = zeros(num_gridpoints)
     dr_dθ = zeros(num_gridpoints, 3)
     dr_dζ = zeros(num_gridpoints, 3)
 
@@ -300,6 +299,16 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
         dr_dθ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[1] for k in 1:3]
         dr_dζ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[2] for k in 1:3]
         normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
+    end
+
+    # Warn if grid spacing is highly anisotropic
+    spacing_θ = sqrt(sum(abs2, dr_dθ) / size(dr_dθ, 1)) * dθ
+    spacing_ζ = sqrt(sum(abs2, dr_dζ) / size(dr_dζ, 1)) * dζ
+    aspect_ratio = max(spacing_θ, spacing_ζ) / min(spacing_θ, spacing_ζ)
+    @info "Average grid spacing: dθ=$(round(spacing_θ, digits=4)), dζ=$(round(spacing_ζ, digits=4)), aspect ratio=$(round(aspect_ratio, digits=2))"
+    if aspect_ratio > 2.0
+        @warn "Grid spacing aspect ratio is $(round(aspect_ratio, digits=2)). " *
+              "Singular correction assumes roughly isotropic patches; accuracy may degrade for highly anisotropic grids."
     end
 
     # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
