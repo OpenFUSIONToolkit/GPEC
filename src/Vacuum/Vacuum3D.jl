@@ -1,3 +1,5 @@
+const INV_4PI = 1.0 / (4π)
+
 """
 Precomputed data for singular correction quadrature following BIEST approach.
 Initialized once on first use.
@@ -189,17 +191,24 @@ The single-layer kernel φ is the fundamental solution to Laplace's equation:
 
   - `Float64`: Kernel value φ(x_obs, x_src)
 """
-function laplace_single_layer(x_obs::Vector{Float64}, x_src::Vector{Float64})::Float64
+function laplace_single_layer(x_obs::Vector{Float64}, x_src::Vector{Float64})
     # Single-layer kernel: 1/(4π r)
-    r = norm(x_obs - x_src)
-    return r < 1e-30 ? 0.0 : 1.0 / (4π * r)
+    @inbounds begin
+        dx = x_obs[1] - x_src[1]
+        dy = x_obs[2] - x_src[2]
+        dz = x_obs[3] - x_src[3]
+    end
+    r2 = dx*dx + dy*dy + dz*dz
+    r2 < 1e-30 && return 0.0
+    return INV_4PI * inv(sqrt(r2))
 end
 
 """
     laplace_double_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}, n_src::Vector{Float64}) -> Float64
 
 Evaluate the Laplace double-layer (DxU) kernel between a point and a surface element. Returns
-0.0 if the observation point coincides with the source point to avoid singularity.
+0.0 if the observation point coincides with the source point to avoid singularity. Allocation-free
+scalar arithmetic is used for maximum performance.
 
 The double-layer kernel K is the normal derivative of the fundamental solution:
 
@@ -218,10 +227,21 @@ K(x_obs, x_src, n_src) = ∇_{x_src} φ · n̂_src
 
   - `Float64`: Kernel value K(x_obs, x_src, n_src)
 """
-function laplace_double_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}, n_src::Vector{Float64})::Float64
+function laplace_double_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}, n_src::Vector{Float64})
     # Double-layer kernel: -1/(4π) * (r·n) / r³
-    r = norm(x_obs - x_src)
-    return r < 1e-30 ? 0.0 : -dot(x_obs - x_src, n_src) / (4π * r^3)
+    @inbounds begin
+        dx = x_obs[1] - x_src[1]
+        dy = x_obs[2] - x_src[2]
+        dz = x_obs[3] - x_src[3]
+        nx = n_src[1]
+        ny = n_src[2]
+        nz = n_src[3]
+    end
+    r2 = dx*dx + dy*dy + dz*dz
+    r2 < 1e-30 && return 0.0
+    rinv = inv(sqrt(r2))
+    r3inv = rinv * rinv * rinv
+    return -(dx*nx + dy*ny + dz*nz) * (r3inv * INV_4PI)
 end
 
 """
