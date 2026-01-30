@@ -1,6 +1,15 @@
 const INV_4PI = 1.0 / (4π)
 
 """
+    periodic_wrap(x, n) -> Int
+
+Fast periodic wrapping for indices near the valid range [1, n].
+Equivalent to `mod1(x, n)` but avoids division for small offsets.
+Only valid when `x` is within one period of the valid range (i.e., `1-n < x < 2n`).
+"""
+@inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
+
+"""
 Precomputed data for singular correction quadrature following BIEST approach.
 Initialized once on first use.
 
@@ -262,8 +271,8 @@ function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_
     PATCH_RAD = (PATCH_DIM - 1) ÷ 2
     @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
         # Enforce periodicity
-        idx_pol = mod1(idx_pol_center - PATCH_RAD + i - 1, npol)
-        idx_tor = mod1(idx_tor_center - PATCH_RAD + j - 1, ntor)
+        idx_pol = periodic_wrap(idx_pol_center - PATCH_RAD + i - 1, npol)
+        idx_tor = periodic_wrap(idx_tor_center - PATCH_RAD + j - 1, ntor)
         # Copy data to the patch using direct indexing (avoids view allocation)
         src_idx = idx_pol + npol * (idx_tor - 1)
         patch[i, j, 1] = data[src_idx, 1]
@@ -407,6 +416,7 @@ function compute_3D_kernel_matrix!(
 
     # Allocate thread-local workspaces (one per thread)
     nthreads = Threads.nthreads()
+    @info "Computing 3D kernel matrix with $nthreads threads..."
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:nthreads]
 
     # Total number of observer points for linear indexing
@@ -458,7 +468,7 @@ function compute_3D_kernel_matrix!(
         compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
 
         # Evaluate kernels at polar points with POU weighting
-        fill!(M_polar_single, 0.0);
+        fill!(M_polar_single, 0.0)
         fill!(M_polar_double, 0.0)
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
             # Evaluate kernels using recomputed normal (use @view to avoid allocation)
@@ -483,8 +493,8 @@ function compute_3D_kernel_matrix!(
         # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
         @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
             # Map back to global indices
-            idx_pol = mod1(i_obs - PATCH_RAD + i - 1, source.mtheta)
-            idx_tor = mod1(j_obs - PATCH_RAD + j - 1, source.nzeta)
+            idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
+            idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
             # Remainder of far-field contribution on the singular grid: Gpou = -χ (use @view to avoid allocation)

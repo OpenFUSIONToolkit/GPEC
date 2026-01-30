@@ -296,8 +296,12 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     # Compute tangent vectors, unit normals, and differential area elements via spline interpolation
     for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
         idx = i + (j - 1) * mtheta
-        dr_dθ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[1] for k in 1:3]
-        dr_dζ[idx, :] .= [Interpolations.gradient(itps[k], θ, ϕ)[2] for k in 1:3]
+        # Compute gradients directly to avoid list comprehension allocation
+        for k in 1:3
+            g = Interpolations.gradient(itps[k], θ, ϕ)
+            dr_dθ[idx, k] = g[1]
+            dr_dζ[idx, k] = g[2]
+        end
         normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
     end
 
