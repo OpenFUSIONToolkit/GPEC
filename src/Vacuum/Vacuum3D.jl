@@ -171,7 +171,7 @@ function get_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int
 end
 
 """
-    laplace_single_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}) -> Float64
+    laplace_single_layer(x_obs, x_src) -> Float64
 
 Evaluate the Laplace single-layer (FxU) kernel between two 3D points. Returns
 0.0 if the observation point coincides with the source point to avoid singularity.
@@ -184,14 +184,14 @@ The single-layer kernel φ is the fundamental solution to Laplace's equation:
 
 # Arguments
 
-  - `x_obs::Vector{Float64}`: Observation point (3D Cartesian coordinates)
-  - `x_src::Vector{Float64}`: Source point (3D Cartesian coordinates)
+  - `x_obs`: Observation point (3D Cartesian coordinates, any AbstractVector)
+  - `x_src`: Source point (3D Cartesian coordinates, any AbstractVector)
 
 # Returns
 
   - `Float64`: Kernel value φ(x_obs, x_src)
 """
-function laplace_single_layer(x_obs::Vector{Float64}, x_src::Vector{Float64})
+function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real})
     # Single-layer kernel: 1/(4π r)
     @inbounds begin
         dx = x_obs[1] - x_src[1]
@@ -204,7 +204,7 @@ function laplace_single_layer(x_obs::Vector{Float64}, x_src::Vector{Float64})
 end
 
 """
-    laplace_double_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}, n_src::Vector{Float64}) -> Float64
+    laplace_double_layer(x_obs, x_src, n_src) -> Float64
 
 Evaluate the Laplace double-layer (DxU) kernel between a point and a surface element. Returns
 0.0 if the observation point coincides with the source point to avoid singularity. Allocation-free
@@ -219,15 +219,15 @@ K(x_obs, x_src, n_src) = ∇_{x_src} φ · n̂_src
 
 # Arguments
 
-  - `x_obs::Vector{Float64}`: Observation point (3D Cartesian coordinates)
-  - `x_src::Vector{Float64}`: Source point on surface (3D Cartesian coordinates)
-  - `n_src::Vector{Float64}`: Outward UNIT normal at source point (must be normalized!)
+  - `x_obs`: Observation point (3D Cartesian coordinates, any AbstractVector)
+  - `x_src`: Source point on surface (3D Cartesian coordinates, any AbstractVector)
+  - `n_src`: Outward UNIT normal at source point (must be normalized!, any AbstractVector)
 
 # Returns
 
   - `Float64`: Kernel value K(x_obs, x_src, n_src)
 """
-function laplace_double_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}, n_src::Vector{Float64})
+function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real}, n_src::AbstractVector{<:Real})
     # Double-layer kernel: -1/(4π) * (r·n) / r³
     @inbounds begin
         dx = x_obs[1] - x_src[1]
@@ -259,14 +259,16 @@ Extract a PATCH_DIM × PATCH_DIM patch of data centered at (t0, p0) with periodi
 """
 function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_center::Int, idx_tor_center::Int, npol::Int, ntor::Int, PATCH_DIM::Int)
 
-    fill!(patch, 0.0)
     PATCH_RAD = (PATCH_DIM - 1) ÷ 2
-    for i in 1:PATCH_DIM, j in 1:PATCH_DIM
+    @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
         # Enforce periodicity
         idx_pol = mod1(idx_pol_center - PATCH_RAD + i - 1, npol)
         idx_tor = mod1(idx_tor_center - PATCH_RAD + j - 1, ntor)
-        # Copy data to the patch (for each dof)
-        @views patch[i, j, :] .= data[idx_pol+npol*(idx_tor-1), :]
+        # Copy data to the patch using direct indexing (avoids view allocation)
+        src_idx = idx_pol + npol * (idx_tor - 1)
+        patch[i, j, 1] = data[src_idx, 1]
+        patch[i, j, 2] = data[src_idx, 2]
+        patch[i, j, 3] = data[src_idx, 3]
     end
 end
 
@@ -312,10 +314,50 @@ function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,
 end
 
 """
-    compute_3D_kernel_matrix!(grad_greenfunction, greenfunction, observer, source; PATCH_RAD=3, RAD_DIM=12, INTERP_ORDER=6)
+Thread-local workspace for `compute_3D_kernel_matrix!` to enable parallel execution.
+Each thread gets its own workspace to avoid data races on temporary arrays.
+"""
+struct KernelWorkspace
+    r_patch::Array{Float64,3}
+    dr_dθ_patch::Array{Float64,3}
+    dr_dζ_patch::Array{Float64,3}
+    r_polar::Array{Float64,3}
+    dr_dθ_polar::Array{Float64,3}
+    dr_dζ_polar::Array{Float64,3}
+    n_polar::Array{Float64,3}
+    M_polar_single::Matrix{Float64}
+    M_polar_double::Matrix{Float64}
+    M_grid_single_flat::Vector{Float64}
+    M_grid_double_flat::Vector{Float64}
+end
+
+"""
+    KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM)
+
+Create a new workspace with pre-allocated arrays for kernel matrix computation.
+"""
+function KernelWorkspace(PATCH_DIM::Int, RAD_DIM::Int, ANG_DIM::Int)
+    return KernelWorkspace(
+        zeros(PATCH_DIM, PATCH_DIM, 3),      # r_patch
+        zeros(PATCH_DIM, PATCH_DIM, 3),      # dr_dθ_patch
+        zeros(PATCH_DIM, PATCH_DIM, 3),      # dr_dζ_patch
+        zeros(RAD_DIM, ANG_DIM, 3),          # r_polar
+        zeros(RAD_DIM, ANG_DIM, 3),          # dr_dθ_polar
+        zeros(RAD_DIM, ANG_DIM, 3),          # dr_dζ_polar
+        zeros(RAD_DIM, ANG_DIM, 3),          # n_polar
+        zeros(RAD_DIM, ANG_DIM),             # M_polar_single
+        zeros(RAD_DIM, ANG_DIM),             # M_polar_double
+        zeros(PATCH_DIM^2),                  # M_grid_single_flat
+        zeros(PATCH_DIM^2)                   # M_grid_double_flat
+    )
+end
+
+"""
+    compute_3D_kernel_matrix!(grad_greenfunction, greenfunction, observer, source; PATCH_RAD=3, RAD_DIM=15, INTERP_ORDER=6)
 
 Compute boundary integral kernel matrices for 3D geometries with the singular correction
-algorithm from Malhotra et al. 2019.
+algorithm from Malhotra et al. 2019. Uses multi-threading for parallel computation over
+observer points.
 
   - Far regions: Rectangle rule with uniform weights (1/N)
   - Singular regions: Polar quadrature with partition-of-unity blending
@@ -334,8 +376,13 @@ where each entry is φ(x_obs, x_src).
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular (default 3)
 
       + Total patch size in # of gridpoints = (2 * PATCH_RAD + 1) x (2 * PATCH_RAD + 1)
-  - `RAD_DIM`: Polar radial quadrature order (default 12). Angular order = 2 * RAD_DIM
+  - `RAD_DIM`: Polar radial quadrature order (default 15). Angular order = 2 * RAD_DIM
   - `INTERP_ORDER`: Lagrange interpolation order (default 6)
+
+# Threading
+
+This function automatically uses all available threads (`Threads.nthreads()`).
+Start Julia with `julia -t auto` or set `JULIA_NUM_THREADS` to enable multi-threading.
 """
 function compute_3D_kernel_matrix!(
     grad_greenfunction::Matrix{Float64},
@@ -358,33 +405,36 @@ function compute_3D_kernel_matrix!(
     @assert observer.nzeta ≥ PATCH_DIM
     dθdζ = (2π / observer.mtheta) * (2π / observer.nzeta)
 
-    # Allocate temporary arrays
-    r_patch = zeros(PATCH_DIM, PATCH_DIM, 3)
-    dr_dθ_patch = zeros(PATCH_DIM, PATCH_DIM, 3)
-    dr_dζ_patch = zeros(PATCH_DIM, PATCH_DIM, 3)
-    r_polar = zeros(RAD_DIM, ANG_DIM, 3)
-    dr_dθ_polar = zeros(RAD_DIM, ANG_DIM, 3)
-    dr_dζ_polar = zeros(RAD_DIM, ANG_DIM, 3)
-    n_polar = zeros(RAD_DIM, ANG_DIM, 3)
-    M_polar_single = zeros(RAD_DIM, ANG_DIM)
-    M_polar_double = zeros(RAD_DIM, ANG_DIM)
-    M_grid_single_flat = zeros(PATCH_DIM^2)
-    M_grid_double_flat = zeros(PATCH_DIM^2)
+    # Allocate thread-local workspaces (one per thread)
+    nthreads = Threads.nthreads()
+    workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:nthreads]
 
-    # Loop through observer points
-    for j_obs in 1:observer.nzeta, i_obs in 1:observer.mtheta
-        idx_obs = i_obs + (j_obs - 1) * observer.mtheta
-        r_obs = observer.r[idx_obs, :]
+    # Total number of observer points for linear indexing
+    n_obs = observer.mtheta * observer.nzeta
+
+    # Parallel loop through observer points
+    Threads.@threads for idx_obs in 1:n_obs
+        # Get thread-local workspace
+        ws = workspaces[Threads.threadid()]
+        (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
+            n_polar, M_polar_single, M_polar_double, M_grid_single_flat, M_grid_double_flat) = ws
+
+        # Convert linear index to 2D indices
+        i_obs = mod1(idx_obs, observer.mtheta)
+        j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
+        r_obs = @view observer.r[idx_obs, :]
 
         # ============================================================
         # FAR FIELD: Trapezoidal rule for nonsingular source points
         # Note: kernels return zero for r_src = r_obs
         # ============================================================
-        for j_src in 1:source.nzeta, i_src in 1:source.mtheta
+        @inbounds for j_src in 1:source.nzeta, i_src in 1:source.mtheta
             # Evaluate kernels at grid points
             idx_src = i_src + (j_src - 1) * source.mtheta
-            K_single = laplace_single_layer(r_obs, source.r[idx_src, :])
-            K_double = laplace_double_layer(r_obs, source.r[idx_src, :], source.normal[idx_src, :])
+            r_src = @view source.r[idx_src, :]
+            n_src = @view source.normal[idx_src, :]
+            K_single = laplace_single_layer(r_obs, r_src)
+            K_double = laplace_double_layer(r_obs, r_src, n_src)
 
             # Apply weights (periodic trapezoidal rule = constant weights)
             greenfunction[idx_obs, idx_src] = K_single * dθdζ
@@ -410,9 +460,10 @@ function compute_3D_kernel_matrix!(
         # Evaluate kernels at polar points with POU weighting
         fill!(M_polar_single, 0.0);
         fill!(M_polar_double, 0.0)
-        for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            # Evaluate kernels using recomputed normal
-            r_src, n_src = r_polar[ir, ia, :], n_polar[ir, ia, :]
+        @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
+            # Evaluate kernels using recomputed normal (use @view to avoid allocation)
+            r_src = @view r_polar[ir, ia, :]
+            n_src = @view n_polar[ir, ia, :]
             K_single = laplace_single_layer(r_obs, r_src)
             K_double = laplace_double_layer(r_obs, r_src, n_src)
 
@@ -430,14 +481,15 @@ function compute_3D_kernel_matrix!(
 
         # Compute remaining far-field POU contribution and near-field polar quadrature result
         # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
-        for j in 1:PATCH_DIM, i in 1:PATCH_DIM
+        @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
             # Map back to global indices
             idx_pol = mod1(i_obs - PATCH_RAD + i - 1, source.mtheta)
             idx_tor = mod1(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
-            # Remainder of far-field contribution on the singular grid: Gpou = -χ
-            r_src, n_src = source.r[idx_src, :], source.normal[idx_src, :]
+            # Remainder of far-field contribution on the singular grid: Gpou = -χ (use @view to avoid allocation)
+            r_src = @view source.r[idx_src, :]
+            n_src = @view source.normal[idx_src, :]
             far_single = laplace_single_layer(r_obs, r_src) * Gpou[i, j] * dθdζ
             far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[i, j] * dθdζ
 
