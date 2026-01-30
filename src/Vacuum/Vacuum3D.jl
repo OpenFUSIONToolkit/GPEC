@@ -245,26 +245,22 @@ function laplace_double_layer(x_obs::Vector{Float64}, x_src::Vector{Float64}, n_
 end
 
 """
-    extract_patch(data, Nt, Np, t0, p0, PATCH_DIM)
+    extract_patch!(patch, data, Nt, Np, t0, p0, PATCH_DIM)
 
 Extract a PATCH_DIM × PATCH_DIM patch of data centered at (t0, p0) with periodic wrapping.
 
 # Arguments
 
+  - `patch`: Preallocated output array for data around the singular point (PATCH_DIM × PATCH_DIM × dof)
   - `data`: Source data array (can be coordinates, normals, or area elements)
   - `Nt, Np`: Grid dimensions (toroidal, poloidal)
   - `t0, p0`: Center indices (1-based)
   - `PATCH_DIM`: Patch size (must be odd)
-
-# Returns
-
-  - `patch`: Extracted patch of data around the singular point (PATCH_DIM × PATCH_DIM × dof)
 """
-function extract_patch(data::Matrix{Float64}, idx_pol_center::Int, idx_tor_center::Int, npol::Int, ntor::Int, PATCH_DIM::Int)
+function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_center::Int, idx_tor_center::Int, npol::Int, ntor::Int, PATCH_DIM::Int)
 
+    fill!(patch, 0.0)
     PATCH_RAD = (PATCH_DIM - 1) ÷ 2
-    dof = size(data, 2)  # Number of components (3 for coords, 1 for scalars)
-    patch = zeros(PATCH_DIM, PATCH_DIM, dof)
     for i in 1:PATCH_DIM, j in 1:PATCH_DIM
         # Enforce periodicity
         idx_pol = mod1(idx_pol_center - PATCH_RAD + i - 1, npol)
@@ -272,55 +268,47 @@ function extract_patch(data::Matrix{Float64}, idx_pol_center::Int, idx_tor_cente
         # Copy data to the patch (for each dof)
         @views patch[i, j, :] .= data[idx_pol+npol*(idx_tor-1), :]
     end
-    return patch # (PATCH_DIM, PATCH_DIM, dof)
 end
 
 """
-    interpolate_to_polar(patch, quad_data)
+    interpolate_to_polar!(polar_data, patch, quad_data)
 
 Interpolate Cartesian patch data to polar quadrature points using sparse matrix multiply.
 
 # Arguments
 
+  - `polar_data`: Preallocated output array for polar data (RAD_DIM × ANG_DIM × dof)
   - `patch`: Patch data (PATCH_DIM × PATCH_DIM × dof)
-  - `quad_data`: Precomputed quadrature data
-
-# Returns
-
-  - `polar_data`: Interpolated data at polar points (RAD_DIM × ANG_DIM × dof)
+  - `P2G`: Sparse interpolation matrix
 """
-function interpolate_to_polar(patch::Array{Float64,3}, quad_data::SingularQuadratureData)
-
-    (; P2G, RAD_DIM, ANG_DIM) = quad_data
-    dof = size(patch, 3)
+function interpolate_to_polar!(polar_data::Array{Float64,3}, patch::Array{Float64,3}, P2G::SparseMatrixCSC{Float64,Int})
 
     # Flatten patch to (Ngrid × dof), apply P2G' to get (Npolar × dof)
-    patch_flat = reshape(patch, :, dof)
-    polar_flat = P2G' * patch_flat
-    return reshape(polar_flat, RAD_DIM, ANG_DIM, dof)
+    fill!(polar_data, 0.0)
+    patch_flat = reshape(patch, :, size(patch, 3))
+    mul!(reshape(polar_data, :, size(patch, 3)), P2G', patch_flat)
 end
 
 """
-    compute_polar_normal(dr_dθ_polar, dr_dζ_polar)
+    compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
 
 Compute normal vector (= ∂r/∂θ × ∂r/∂ζ) at polar quadrature points from interpolated tangent vectors.
 
 # Arguments
 
+  - `n_polar`: Preallocation unit normal vector at each polar point (RAD_DIM × ANG_DIM × 3)
   - `dr_dθ_polar`: Interpolated ∂r/∂θ at polar points (RAD_DIM × ANG_DIM × 3)
   - `dr_dζ_polar`: Interpolated ∂r/∂ζ at polar points (RAD_DIM × ANG_DIM × 3)
-
-# Returns
-
-  - `n_polar`: Unit normal vector at each polar point (RAD_DIM × ANG_DIM × 3)
 """
-function compute_polar_normal(dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3})
+function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3})
 
-    n_polar = similar(dr_dθ)
-    @views for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
-        n_polar[ir, ia, :] .= cross(dr_dθ[ir, ia, :], dr_dζ[ir, ia, :])
+    fill!(n_polar, 0.0)
+    # Inline cross product to avoid slice allocation
+    @inbounds for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
+        n_polar[ir, ia, 1] = dr_dθ[ir, ia, 2] * dr_dζ[ir, ia, 3] - dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 2]
+        n_polar[ir, ia, 2] = dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 1] - dr_dθ[ir, ia, 1] * dr_dζ[ir, ia, 3]
+        n_polar[ir, ia, 3] = dr_dθ[ir, ia, 1] * dr_dζ[ir, ia, 2] - dr_dθ[ir, ia, 2] * dr_dζ[ir, ia, 1]
     end
-    return n_polar
 end
 
 """
@@ -363,12 +351,25 @@ function compute_3D_kernel_matrix!(
     fill!(grad_greenfunction, 0.0)
     fill!(greenfunction, 0.0)
 
-    # Initialize quadrature data (cached)
+    # Initialize quadrature data
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
     @assert observer.mtheta ≥ PATCH_DIM
     @assert observer.nzeta ≥ PATCH_DIM
     dθdζ = (2π / observer.mtheta) * (2π / observer.nzeta)
+
+    # Allocate temporary arrays
+    r_patch = zeros(PATCH_DIM, PATCH_DIM, 3)
+    dr_dθ_patch = zeros(PATCH_DIM, PATCH_DIM, 3)
+    dr_dζ_patch = zeros(PATCH_DIM, PATCH_DIM, 3)
+    r_polar = zeros(RAD_DIM, ANG_DIM, 3)
+    dr_dθ_polar = zeros(RAD_DIM, ANG_DIM, 3)
+    dr_dζ_polar = zeros(RAD_DIM, ANG_DIM, 3)
+    n_polar = zeros(RAD_DIM, ANG_DIM, 3)
+    M_polar_single = zeros(RAD_DIM, ANG_DIM)
+    M_polar_double = zeros(RAD_DIM, ANG_DIM)
+    M_grid_single_flat = zeros(PATCH_DIM^2)
+    M_grid_double_flat = zeros(PATCH_DIM^2)
 
     # Loop through observer points
     for j_obs in 1:observer.nzeta, i_obs in 1:observer.mtheta
@@ -394,21 +395,21 @@ function compute_3D_kernel_matrix!(
         # NEAR FIELD: Polar quadrature with singular correction
         # ============================================================
         # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
-        r_patch = extract_patch(source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
-        dr_dθ_patch = extract_patch(source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
-        dr_dζ_patch = extract_patch(source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        extract_patch!(r_patch, source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        extract_patch!(dr_dθ_patch, source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        extract_patch!(dr_dζ_patch, source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
 
         # Interpolate coordinates and tangent vectors to polar quadrature points
-        r_polar = interpolate_to_polar(r_patch, quad_data)
-        dr_dθ_polar = interpolate_to_polar(dr_dθ_patch, quad_data)
-        dr_dζ_polar = interpolate_to_polar(dr_dζ_patch, quad_data)
+        interpolate_to_polar!(r_polar, r_patch, P2G)
+        interpolate_to_polar!(dr_dθ_polar, dr_dθ_patch, P2G)
+        interpolate_to_polar!(dr_dζ_polar, dr_dζ_patch, P2G)
 
         # Compute normal vectors at polar points from interpolated tangent vectors
-        n_polar = compute_polar_normal(dr_dθ_polar, dr_dζ_polar)
+        compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
 
         # Evaluate kernels at polar points with POU weighting
-        M_polar_single = zeros(RAD_DIM, ANG_DIM)
-        M_polar_double = zeros(RAD_DIM, ANG_DIM)
+        fill!(M_polar_single, 0.0);
+        fill!(M_polar_double, 0.0)
         for ia in 1:ANG_DIM, ir in 1:RAD_DIM
             # Evaluate kernels using recomputed normal
             r_src, n_src = r_polar[ir, ia, :], n_polar[ir, ia, :]
@@ -422,8 +423,10 @@ function compute_3D_kernel_matrix!(
 
         # Distribute polar singular corrections back to Cartesian grid using sparse matrix
         # grid = P2G * polar (maps Npolar → Ngrid)
-        M_grid_single = reshape(P2G * vec(M_polar_single), PATCH_DIM, PATCH_DIM)
-        M_grid_double = reshape(P2G * vec(M_polar_double), PATCH_DIM, PATCH_DIM)
+        mul!(M_grid_single_flat, P2G, vec(M_polar_single))
+        mul!(M_grid_double_flat, P2G, vec(M_polar_double))
+        M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
+        M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
 
         # Compute remaining far-field POU contribution and near-field polar quadrature result
         # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
