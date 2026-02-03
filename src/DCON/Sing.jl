@@ -705,7 +705,19 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
 
     # Compute singfac = 1 / (m - nq)
     odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
-    odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
+    singfac_den = ComplexF64.((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
+    # ϵ_res = 1e-10
+    ϵ_res = 1e-2
+    # Add 1j * eps * norm to denominators near resonance to avoid singularity
+    for (j, n) in enumerate(intr.nlow:intr.nhigh)
+        mres = clamp(round(Int, odet.q * n), intr.mlow, intr.mhigh)
+        i = mres - intr.mlow + 1
+        x = abs(singfac_den[i, j])
+        gauss_norm = exp(- (x / (5 * ϵ_res))^2)
+        singfac_den[i, j] += 1im * ϵ_res * gauss_norm
+    end
+
+    odet.singfac_vec .= vec(1.0 ./ singfac_den)
 
     # kinetic stuff - skip for now
     if false #(TODO: kin_flag)

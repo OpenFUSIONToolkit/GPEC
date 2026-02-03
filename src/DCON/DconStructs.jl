@@ -397,7 +397,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
-    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+    singfac_vec::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization

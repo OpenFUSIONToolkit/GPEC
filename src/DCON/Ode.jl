@@ -152,7 +152,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
             end
         end
         # Determine psimax and classify next integration limit type
-        if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0
+        if odet.ising > intr.msing || intr.psilim < intr.sing[odet.ising].psifac || ctrl.singfac_min == 0 || true
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
@@ -294,7 +294,7 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Callback to be run at every step, handles fixups, tolerances, and data storage
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
-
+    @info "step!: Integrating from ψ = $((@sprintf "%.3f" odet.psifac)) to ψ = $((@sprintf "%.3f" odet.psimax))"
     # Advance differential equation to next singular surface or edge
     rtol = compute_tols(ctrl, intr, odet) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (odet.psifac, odet.psimax), (ctrl, equil, ffit, intr, odet))
