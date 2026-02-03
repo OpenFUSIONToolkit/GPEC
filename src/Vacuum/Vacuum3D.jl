@@ -3,13 +3,15 @@ const INV_4PI = 1.0 / (4π)
 """
     periodic_wrap(x, n) -> Int
 
-Fast periodic wrapping for indices near the valid range [1, n].
+Inline function for fast periodic wrapping for indices near the valid range [1, n].
 Equivalent to `mod1(x, n)` but avoids division for small offsets.
 Only valid when `x` is within one period of the valid range (i.e., `1-n < x < 2n`).
 """
 @inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
 
 """
+    SingularQuadratureData
+
 Precomputed data for singular correction quadrature following BIEST approach.
 Initialized once on first use.
 
@@ -26,6 +28,7 @@ Initialized once on first use.
     - `PATCH_RAD::Int`: Patch radius (number of points adjacent to source point treated as singular)
     - `ANG_DIM::Int`: Number of angular quadrature points
     - `RAD_DIM::Int`: Number of radial quadrature points
+    - `INTERP_ORDER::Int`: Lagrange interpolation order
 """
 struct SingularQuadratureData
     qx::Vector{Float64}
@@ -37,20 +40,14 @@ struct SingularQuadratureData
     PATCH_RAD::Int
     ANG_DIM::Int
     RAD_DIM::Int
+    INTERP_ORDER::Int
 end
 
-# Global cache for quadrature data (initialized on first use)
-const SINGULAR_QUAD_CACHE = Ref{Union{Nothing,SingularQuadratureData}}(nothing)
-
 """
-    init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
+    SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
-Initialize quadrature points, weights, partition-of-unity functions, and
-interpolation matrices for singular correction. Follows BIEST's approach.
-
-Conversion references:
-
-  - Quadrature/Patch setup adapted from biest/singular_correction.hpp
+Constructor which initializes quadrature points, weights, partition-of-unity functions, and
+interpolation matrices for singular correction based on input parameters. Follows BIEST's approach.
 
 # Arguments
 
@@ -62,7 +59,7 @@ Conversion references:
 
   - `SingularQuadratureData`: Precomputed quadrature data
 """
-function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
+function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
     # Total size of square patch extracted around singular point (odd number: 2*PATCH_DIM0+1)
     PATCH_DIM = 2 * PATCH_RAD + 1
@@ -160,22 +157,33 @@ function init_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::In
     # Assemble sparse interpolation matrix
     P2G = sparse(I_coo, J_coo, V_coo, Ngrid, Npolar)
 
-    return SingularQuadratureData(qx, qw, Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM)
+    return SingularQuadratureData(qx, qw, Gpou, Ppou, P2G, PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, INTERP_ORDER)
 end
+
+# Global cache for quadrature data (initialized on first use)
+const SINGULAR_QUAD_CACHE = Ref{Union{Nothing,SingularQuadratureData}}(nothing)
 
 """
     get_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
-Get cached singular quadrature data, initializing if necessary.
-
-Conversion references:
-
-  - Follows caching pattern used around FieldPeriodBIOp setup in biest/boundary_integ_op.hpp
+Get cached singular quadrature data, initializing if necessary. Returns cached data
+if parameters match the cached initialization; reinitializes if parameters differ.
+This allows the user to change quadrature parameters between calls, but prevents
+redundant reinitialization when parameters are unchanged.
 """
 function get_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
-    if isnothing(SINGULAR_QUAD_CACHE[])
-        SINGULAR_QUAD_CACHE[] = init_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
+
+    # Check if cache exists and parameters match
+    cached = SINGULAR_QUAD_CACHE[]
+    if !isnothing(cached) &&
+       cached.PATCH_RAD == PATCH_RAD &&
+       cached.RAD_DIM == RAD_DIM &&
+       cached.INTERP_ORDER == INTERP_ORDER
+        return cached
     end
+
+    # Reinitialize if parameters changed or cache is empty
+    SINGULAR_QUAD_CACHE[] = SingularQuadratureData(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     return SINGULAR_QUAD_CACHE[]
 end
 
@@ -211,7 +219,6 @@ function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     r2 < 1e-30 && return 0.0
     return INV_4PI * inv(sqrt(r2))
 end
-
 """
     laplace_double_layer(x_obs, x_src, n_src) -> Float64
 
@@ -250,7 +257,7 @@ function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     r2 < 1e-30 && return 0.0
     rinv = inv(sqrt(r2))
     r3inv = rinv * rinv * rinv
-    return -(dx*nx + dy*ny + dz*nz) * (r3inv * INV_4PI)
+    return -(dx*nx + dy*ny + dz*nz) * (INV_4PI * r3inv)
 end
 
 """
@@ -323,6 +330,8 @@ function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,
 end
 
 """
+    KernelWorkspace
+
 Thread-local workspace for `compute_3D_kernel_matrix!` to enable parallel execution.
 Each thread gets its own workspace to avoid data races on temporary arrays.
 """
@@ -382,11 +391,13 @@ where each entry is φ(x_obs, x_src).
   - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc) filled in place
   - `observer`: Observer geometry (PlasmaGeometry3D)
   - `source`: Source geometry (PlasmaGeometry3D)
-  - `PATCH_RAD`: Number of points adjacent to source point to treat as singular (default 3)
+  - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
 
       + Total patch size in # of gridpoints = (2 * PATCH_RAD + 1) x (2 * PATCH_RAD + 1)
-  - `RAD_DIM`: Polar radial quadrature order (default 15). Angular order = 2 * RAD_DIM
-  - `INTERP_ORDER`: Lagrange interpolation order (default 6)
+  - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
+  - `INTERP_ORDER`: Lagrange interpolation order
+
+      + Must be ≤ (2 * PATCH_RAD + 1)
 
 # Threading
 
@@ -398,14 +409,22 @@ function compute_3D_kernel_matrix!(
     greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D};
-    PATCH_RAD::Int=3,
-    RAD_DIM::Int=15,
-    INTERP_ORDER::Int=6
+    PATCH_RAD::Int,
+    RAD_DIM::Int,
+    INTERP_ORDER::Int
 )
 
     # Zero out matrices
-    fill!(grad_greenfunction, 0.0)
     fill!(greenfunction, 0.0)
+
+    # Get block of grad_green matrix
+    col_index = (source isa PlasmaGeometry ? 1 : 2)
+    row_index = (observer isa PlasmaGeometry ? 1 : 2)
+    grad_greenfunction_block = view(
+        grad_greenfunction,
+        ((row_index-1)*mtheta+1):(row_index*mtheta),
+        ((col_index-1)*mtheta+1):(col_index*mtheta)
+    )
 
     # Initialize quadrature data
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
@@ -416,7 +435,6 @@ function compute_3D_kernel_matrix!(
 
     # Allocate thread-local workspaces (one per thread)
     nthreads = Threads.nthreads()
-    @info "Computing 3D kernel matrix with $nthreads threads..."
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:nthreads]
 
     # Total number of observer points for linear indexing
@@ -448,64 +466,67 @@ function compute_3D_kernel_matrix!(
 
             # Apply weights (periodic trapezoidal rule = constant weights)
             greenfunction[idx_obs, idx_src] = K_single * dθdζ
-            grad_greenfunction[idx_obs, idx_src] = K_double * dθdζ
+            grad_greenfunction_block[idx_obs, idx_src] = K_double * dθdζ
         end
 
         # ============================================================
         # NEAR FIELD: Polar quadrature with singular correction
+        # Only needed if observer points lies on source surface
         # ============================================================
-        # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
-        extract_patch!(r_patch, source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
-        extract_patch!(dr_dθ_patch, source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
-        extract_patch!(dr_dζ_patch, source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        if typeof(observer) == typeof(source)
+            # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
+            extract_patch!(r_patch, source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+            extract_patch!(dr_dθ_patch, source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+            extract_patch!(dr_dζ_patch, source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
 
-        # Interpolate coordinates and tangent vectors to polar quadrature points
-        interpolate_to_polar!(r_polar, r_patch, P2G)
-        interpolate_to_polar!(dr_dθ_polar, dr_dθ_patch, P2G)
-        interpolate_to_polar!(dr_dζ_polar, dr_dζ_patch, P2G)
+            # Interpolate coordinates and tangent vectors to polar quadrature points
+            interpolate_to_polar!(r_polar, r_patch, P2G)
+            interpolate_to_polar!(dr_dθ_polar, dr_dθ_patch, P2G)
+            interpolate_to_polar!(dr_dζ_polar, dr_dζ_patch, P2G)
 
-        # Compute normal vectors at polar points from interpolated tangent vectors
-        compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
+            # Compute normal vectors at polar points from interpolated tangent vectors
+            compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
 
-        # Evaluate kernels at polar points with POU weighting
-        fill!(M_polar_single, 0.0)
-        fill!(M_polar_double, 0.0)
-        @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            # Evaluate kernels using recomputed normal (use @view to avoid allocation)
-            r_src = @view r_polar[ir, ia, :]
-            n_src = @view n_polar[ir, ia, :]
-            K_single = laplace_single_layer(r_obs, r_src)
-            K_double = laplace_double_layer(r_obs, r_src, n_src)
+            # Evaluate kernels at polar points with POU weighting
+            fill!(M_polar_single, 0.0)
+            fill!(M_polar_double, 0.0)
+            @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
+                # Evaluate kernels using recomputed normal (use @view to avoid allocation)
+                r_src = @view r_polar[ir, ia, :]
+                n_src = @view n_polar[ir, ia, :]
+                K_single = laplace_single_layer(r_obs, r_src)
+                K_double = laplace_double_layer(r_obs, r_src, n_src)
 
-            # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
-            M_polar_single[ir, ia] = K_single * Ppou[ir, ia] * dθdζ
-            M_polar_double[ir, ia] = K_double * Ppou[ir, ia] * dθdζ
-        end
+                # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
+                M_polar_single[ir, ia] = K_single * Ppou[ir, ia] * dθdζ
+                M_polar_double[ir, ia] = K_double * Ppou[ir, ia] * dθdζ
+            end
 
-        # Distribute polar singular corrections back to Cartesian grid using sparse matrix
-        # grid = P2G * polar (maps Npolar → Ngrid)
-        mul!(M_grid_single_flat, P2G, vec(M_polar_single))
-        mul!(M_grid_double_flat, P2G, vec(M_polar_double))
-        M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
-        M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
+            # Distribute polar singular corrections back to Cartesian grid using sparse matrix
+            # grid = P2G * polar (maps Npolar → Ngrid)
+            mul!(M_grid_single_flat, P2G, vec(M_polar_single))
+            mul!(M_grid_double_flat, P2G, vec(M_polar_double))
+            M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
+            M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
 
-        # Compute remaining far-field POU contribution and near-field polar quadrature result
-        # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
-        @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
-            # Map back to global indices
-            idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
-            idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
-            idx_src = idx_pol + source.mtheta * (idx_tor - 1)
+            # Compute remaining far-field POU contribution and near-field polar quadrature result
+            # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
+            @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
+                # Map back to global indices
+                idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
+                idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
+                idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
-            # Remainder of far-field contribution on the singular grid: Gpou = -χ (use @view to avoid allocation)
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            far_single = laplace_single_layer(r_obs, r_src) * Gpou[i, j] * dθdζ
-            far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[i, j] * dθdζ
+                # Remainder of far-field contribution on the singular grid: Gpou = -χ (use @view to avoid allocation)
+                r_src = @view source.r[idx_src, :]
+                n_src = @view source.normal[idx_src, :]
+                far_single = laplace_single_layer(r_obs, r_src) * Gpou[i, j] * dθdζ
+                far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[i, j] * dθdζ
 
-            # Apply near + far contributions
-            greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single
-            grad_greenfunction[idx_obs, idx_src] += M_grid_double[i, j] + far_double
+                # Apply near + far contributions
+                greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single
+                grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
+            end
         end
     end
 

@@ -334,7 +334,7 @@ It returns the relevant arrays: `wv`, `green_fourier`, `plasma_coords`, and `wal
   - `plasma_coords`: Cartesian coordinate array (mtheta * nzeta × 3) of the plasma surface
   - `wall_coords`: Cartesian coordinate array (mtheta * nzeta × 3) of the wall
 """
-function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallShapeSettings)
+function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallShapeSettings; PATCH_RAD::Int=11, RAD_DIM::Int=20, INTERP_ORDER::Int=5)
 
     # Initialization and allocations
     (; mtheta, mpert, n, force_wv_symmetry, kernelsign, nzeta, npert) = inputs
@@ -357,7 +357,7 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     !wall.nowall && error("No walls yet!") # DEBUG
 
     # Plasma–Plasma block
-    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, plasma_surf; INTERP_ORDER=6)
+    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
     grad_green += I * 0.5
 
     # Fourier transform plasma-plasma block
