@@ -122,7 +122,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     #find the inner singular surface
     if ctrl.kin_flag
         for i in 1:intr.kmsing
-            if kinsing[i].psifac > odet.psifac
+            if intr.kinsing[i].psifac > odet.psifac
                 break
             end
             odet.ising = i
@@ -137,21 +137,21 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
     end
 
     # Find next singular surface
-    if (ctrl.kin_flag)
+    if (ctrl.kin_flag) && (intr.kmsing > 0)
         for odet.ising in 1:intr.kmsing
-            if intr.psilim < kinsing[odet.ising].psifac
+            if intr.psilim < intr.kinsing[odet.ising].psifac
                 break
             end
-            odet.q = kinsing[odet.ising].q
+            odet.q = intr.kinsing[odet.ising].q
             if intr.mlow <= nn.q && nn.q <= intr.mhigh
                 break
             end
         end
-        if (odet.ising > intr.kmsing) || (ctrl.singfac_min == 0 || intr.psilim<kinsing[odet.ising].psifac)
+        if (odet.ising > intr.kmsing) || (ctrl.singfac_min == 0 || intr.psilim<intr.kinsing[odet.ising].psifac)
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
-            odet.psimax = kinsing[odet.ising].psifac - ctrl.singfac_min / abs(nn.n * kinsing[odet.ising].q1)
+            odet.psimax = intr.kinsing[odet.ising].psifac - ctrl.singfac_min / abs(nn.n * intr.kinsing[odet.ising].q1)
             odet.next = "cross"
         end
     else

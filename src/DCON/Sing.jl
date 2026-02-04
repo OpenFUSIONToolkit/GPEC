@@ -689,7 +689,7 @@ more simplistic code with similar performance.
 
 ### TODOs
 
-Implement kin_flag functionality
+Some of the kinetic part is a little sketchy
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
@@ -704,28 +704,311 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     du1 = @view(du[:, :, 1])
     du2 = @view(du[:, :, 2])
 
+    ifac = 1im # Imaginary unit factor
+    chi1 = 2π * equil.psio
+    nn = intr.nlow # Later for multiple surfaces we'll have to loop over nn
+
     # Compute singfac = 1 / (m - nq)
     odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # Evaluate matrix splines at the current psi value
     if ctrl.kin_flag
-        # Evaluate kinetic matrices (infrastructure ready, ODE formulation not yet implemented)
-        Spl.spline_eval!(odet.amat, ffit.akmats, psieval)
-        Spl.spline_eval!(odet.bmat, ffit.bkmats, psieval)
-        Spl.spline_eval!(odet.cmat, ffit.ckmats, psieval)
-        Spl.spline_eval!(odet.fmat_lower, ffit.f0mats, psieval)
-        Spl.spline_eval!(odet.kmat, ffit.kkmats, psieval)
-        Spl.spline_eval!(odet.gmat, ffit.gaats, psieval)
-
-        # TODO: Kinetic ODE formulation differs from ideal MHD
-        # Will need pmats, paats, r1mats, r2mats, r3mats, kkaats for complete implementation
-        error("Kinetic ODE integration not yet implemented - matrix infrastructure ready")
-    else
         # Evaluate ideal MHD matrix splines at the current psi value
         Spl.spline_eval!(odet.amat, ffit.amats, psieval)
         Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
         Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
+        Spl.spline_eval!(odet.dmat, ffit.dmats, psieval)
+        Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
+
+        # Evaluate kinetic matrices into OdeState workspace
+        Spl.spline_eval!(odet.emat, ffit.emats, psieval)
+        Spl.spline_eval!(odet.hmat, ffit.hmats, psieval)
+        Spl.spline_eval!(odet.dbat, ffit.dmats, psieval) #TODO: Verify this is correct
+        Spl.spline_eval!(odet.ebat, ffit.emats, psieval) #TODO: Verify this is correct
+
+        # if kwmat and ktmat not allocated or wrong size, allocate them
+        if size(odet.kwmat, 1) != intr.numpert_total || size(odet.kwmat, 2) != intr.numpert_total
+            odet.kwmat = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 6)
+            odet.ktmat = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 6)
+        end
+        for i in 1:6
+            kwmat_temp = zeros(ComplexF64, intr.numpert_total^2)
+            ktmat_temp = zeros(ComplexF64, intr.numpert_total^2)
+            Spl.spline_eval!(kwmat_temp, ffit.kwmats[i], psieval)
+            Spl.spline_eval!(ktmat_temp, ffit.ktmats[i], psieval)
+            odet.kwmat[:, :, i] .= reshape(kwmat_temp, intr.numpert_total, intr.numpert_total)
+            odet.ktmat[:, :, i] .= reshape(ktmat_temp, intr.numpert_total, intr.numpert_total)
+        end
+
+        # Evaluate kinetic matrices (infrastructure ready, ODE formulation not yet implemented)
+        if intr.fkg_kmats_flag
+            # Make local storage for kinetic matrices- TODO: should these be included in a struct? I don't think they have to be passed around
+            f0mat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            pmat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            paat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            kkmat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            kkaat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            r1mat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            r2mat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            r3mat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+            gaat = Vector{ComplexF64}(undef, intr.numpert_total^2)
+
+            Spl.spline_eval!(odet.amat, ffit.akmats, psieval)
+            Spl.spline_eval!(odet.bmat, ffit.bkmats, psieval)
+            Spl.spline_eval!(odet.cmat, ffit.ckmats, psieval)
+            Spl.spline_eval!(f0mat, ffit.f0mats, psieval)
+            Spl.spline_eval!(pmat, ffit.pmats, psieval)
+            Spl.spline_eval!(paat, ffit.paats, psieval)
+            Spl.spline_eval!(kkmat, ffit.kkmats, psieval)
+            Spl.spline_eval!(kkaat, ffit.kkaats, psieval)
+            Spl.spline_eval!(r1mat, ffit.r1mats, psieval)
+            Spl.spline_eval!(r2mat, ffit.r2mats, psieval)
+            Spl.spline_eval!(r3mat, ffit.r3mats, psieval)
+            Spl.spline_eval!(gaat, ffit.gaamats, psieval)
+
+            # Initialize the banded matrix storage
+            amatlu = zeros(ComplexF64, 3*intr.mband+1, intr.numpert_total)
+
+            # Fill the banded matrix storage
+            for jpert in 1:intr.numpert_total
+                for ipert in 1:intr.numpert_total
+                    amatlu[(2*intr.mband+1+ipert-jpert, jpert)]=odet.amat(ipert, jpert)
+                end
+            end
+
+            # Perform LU factorization
+            amatlu_fact, ipiv = LAPACK.gbtrf!(intr.mband, intr.mband, intr.numpert_total, amatlu)
+            amatlu .= amatlu_fact
+
+            # gbtrf! modifies amatlu in-place and returns (ab_modified, ipiv)
+        else
+            # Kinetic matrix computation using OdeState workspace
+            # Note: baat, caat, eaat are computed as matrices for operations
+            odet.amat .=
+                odet.amat .+ vec(reshape(odet.kwmat[:, :, 1], intr.numpert_total, intr.numpert_total) .+ reshape(odet.ktmat[:, :, 1], intr.numpert_total, intr.numpert_total))
+            odet.bmat .=
+                odet.bmat .+ vec(reshape(odet.kwmat[:, :, 2], intr.numpert_total, intr.numpert_total) .+ reshape(odet.ktmat[:, :, 2], intr.numpert_total, intr.numpert_total))
+            odet.cmat .=
+                odet.cmat .+ vec(reshape(odet.kwmat[:, :, 3], intr.numpert_total, intr.numpert_total) .+ reshape(odet.ktmat[:, :, 3], intr.numpert_total, intr.numpert_total))
+            odet.dmat .=
+                odet.dmat .+ vec(reshape(odet.kwmat[:, :, 4], intr.numpert_total, intr.numpert_total) .+ reshape(odet.ktmat[:, :, 4], intr.numpert_total, intr.numpert_total))
+            odet.emat .=
+                odet.emat .+ vec(reshape(odet.kwmat[:, :, 5], intr.numpert_total, intr.numpert_total) .+ reshape(odet.ktmat[:, :, 5], intr.numpert_total, intr.numpert_total))
+            odet.hmat .=
+                odet.hmat .+ vec(reshape(odet.kwmat[:, :, 6], intr.numpert_total, intr.numpert_total) .+ reshape(odet.ktmat[:, :, 6], intr.numpert_total, intr.numpert_total))
+            baat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total) .- 2 .* odet.ktmat[:, :, 2]
+            caat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total) .- 2 .* odet.ktmat[:, :, 3]
+            eaat = reshape(odet.emat, intr.numpert_total, intr.numpert_total) - 2*odet.ktmat[:, :, 5]
+            odet.b1mat = ifac * odet.dbat
+
+            # Initialize the banded matrix storage
+            amatlu = zeros(ComplexF64, 3*intr.mband+1, intr.numpert_total)
+            umat = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+
+            # Convert amat vector to banded matrix format
+            amat_reshaped = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
+            for jpert in 1:intr.numpert_total
+                for ipert in 1:intr.numpert_total
+                    amatlu[2*intr.mband+1+ipert-jpert, jpert] = amat_reshaped[ipert, jpert]
+                    if ipert == jpert
+                        umat[ipert, jpert] = 1.0
+                    end
+                end
+            end
+
+            # Perform LU factorization
+            amatlu_fact, ipiv = LAPACK.gbtrf!(intr.mband, intr.mband, intr.numpert_total, amatlu)
+            amatlu .= amatlu_fact  # Copy factorized matrix back
+
+            # gbtrf! returns (ab_modified, ipiv)
+
+            # Compute f0mat = fmat - conj(transpose(dbat)) * A^{-1} * dbat
+            # Need to solve A * X = dbat where dbat is a matrix (stored as flat vector)
+            dbat_mat = reshape(odet.dbat, intr.numpert_total, intr.numpert_total)
+            temp1_mat = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+            for j in 1:intr.numpert_total
+                temp1_col = copy(dbat_mat[:, j])
+                LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp1_col)
+                temp1_mat[:, j] .= temp1_col
+            end
+            f0mat_result = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total) .- (adjoint(dbat_mat) * temp1_mat)
+            odet.f0mat .= reshape(f0mat_result, intr.numpert_total^2)
+
+            # Compute aamat = conj(transpose(A^{-1} * amat))
+            # Need to solve A^H * X = amat where amat is a matrix (stored as flat vector)
+            amat_mat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
+            temp2_mat = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+            for j in 1:intr.numpert_total #TODO: Is this loop needed? See line 1005ish of Fortran sing_der
+                temp2_col = copy(amat_mat[:, j])
+                LAPACK.gbtrs!('C', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp2_col)
+                temp2_mat[:, j] .= temp2_col
+            end
+            odet.aamat .= reshape(adjoint(temp2_mat), intr.numpert_total^2)
+            umat .-= reshape(odet.aamat, intr.numpert_total, intr.numpert_total)
+
+            #TODO: This implementation seems really inefficient compared to Fortran- can we optimize?
+            # Compute pmat and paat using bkmat and bkaat
+            bkmat_mat = odet.kwmat[:, :, 2] .+ odet.ktmat[:, :, 2] .+ (ifac*chi1/(2π*nn)) .* (odet.kwmat[:, :, 1] .+ odet.ktmat[:, :, 1])
+            bkaat_mat = odet.kwmat[:, :, 2] .- odet.ktmat[:, :, 2] .+ (ifac*chi1/(2π*nn)) .* (odet.kwmat[:, :, 1] .+ odet.ktmat[:, :, 1])
+            odet.bkmat .= reshape(bkmat_mat, intr.numpert_total^2)
+            odet.bkaat .= reshape(bkaat_mat, intr.numpert_total^2)
+
+            # Solve A * X = bkmat column by column
+            bkmat_solved = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+            for j in 1:intr.numpert_total
+                temp_col = copy(bkmat_mat[:, j])
+                LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp_col)
+                bkmat_solved[:, j] .= temp_col
+            end
+            odet.pmat .= reshape(adjoint(reshape(odet.b1mat, intr.numpert_total, intr.numpert_total)) * bkmat_solved, intr.numpert_total^2)
+
+            # Solve A * X = b1mat column by column
+            b1mat_mat = reshape(odet.b1mat, intr.numpert_total, intr.numpert_total)
+            b1mat_solved = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+            for j in 1:intr.numpert_total
+                temp_col = copy(b1mat_mat[:, j])
+                LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp_col)
+                b1mat_solved[:, j] .= temp_col
+            end
+            paat_mat = adjoint(bkaat_mat) * b1mat_solved .- (ifac*chi1/(2π*nn)) .* (umat * b1mat_mat)
+            odet.paat .= reshape(adjoint(paat_mat), intr.numpert_total^2)
+
+            # Compute r1mat
+            temp1_mat = odet.kwmat[:, :, 1] .+ odet.ktmat[:, :, 1]
+            # Reuse bkmat_solved from previous computation
+            r1mat_result =
+                odet.kwmat[:, :, 4] .+ odet.ktmat[:, :, 4] .- ((chi1/(2π*nn))^2) .* adjoint(temp1_mat) .+
+                (ifac*chi1/(2π*nn)) .* adjoint(bkaat_mat) .-
+                (ifac*chi1/(2π*nn)) .* (reshape(odet.aamat, intr.numpert_total, intr.numpert_total) * bkmat_mat) .-
+                (adjoint(bkaat_mat) * bkmat_solved)
+            odet.r1mat .= reshape(r1mat_result, intr.numpert_total^2)
+
+            # Compute r2mat
+            temp1_mat = odet.kwmat[:, :, 5] .+ odet.ktmat[:, :, 5] .- (ifac*chi1/(2π*nn)) .* (odet.kwmat[:, :, 3] .+ odet.ktmat[:, :, 3])
+            # Solve A * X = cmat column by column
+            cmat_mat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
+            cmat_solved = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+            for j in 1:intr.numpert_total
+                temp_col = copy(cmat_mat[:, j])
+                LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp_col)
+                cmat_solved[:, j] .= temp_col
+            end
+            r2mat_result = temp1_mat .+ (ifac*chi1/(2π*nn)) .* (umat * cmat_mat) .-
+                           (adjoint(bkaat_mat) * cmat_solved)
+            odet.r2mat .= reshape(r2mat_result, intr.numpert_total^2)
+
+            # Compute r3mat
+            temp1_mat = odet.kwmat[:, :, 5] .- odet.ktmat[:, :, 5] .- (ifac*chi1/(2π*nn)) .* (odet.kwmat[:, :, 3] .- odet.ktmat[:, :, 3])
+            # Reuse bkmat_solved from previous computation
+            r3mat_result = adjoint(temp1_mat) .- (adjoint(caat) * bkmat_solved)
+            odet.r3mat .= reshape(r3mat_result, intr.numpert_total^2)
+
+            # Compute kkmat and kkaat
+            # Reuse cmat_solved from previous computation
+            kkmat_result = reshape(odet.ebat, intr.numpert_total, intr.numpert_total) .- (adjoint(b1mat_mat) * cmat_solved)
+            odet.kkmat .= reshape(kkmat_result, intr.numpert_total^2)
+
+            # Reuse b1mat_solved from previous computation
+            kkaat_result = adjoint(reshape(odet.ebat, intr.numpert_total, intr.numpert_total)) .- (adjoint(caat) * b1mat_solved)
+            odet.kkaat .= reshape(kkaat_result, intr.numpert_total^2)
+
+            # Reuse cmat_solved from previous computation
+            gaat_result = reshape(odet.hmat, intr.numpert_total, intr.numpert_total) .- (adjoint(caat) * cmat_solved)
+            odet.gaat .= reshape(gaat_result, intr.numpert_total^2)
+        end
+        # Solve A * X = bmat column by column (overwriting bmat with solution)
+        bmat_mat_final = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+        bmat_solved_final = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+        for j in 1:intr.numpert_total
+            temp_col = copy(bmat_mat_final[:, j])
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp_col)
+            bmat_solved_final[:, j] .= temp_col
+        end
+        #TODO: are we missing lines 1076-1079ish after the end of the if statement from the Fortran code?
+
+        odet.bmat .= reshape(bmat_solved_final, intr.numpert_total^2)
+
+        # Solve A * X = cmat column by column (overwriting cmat with solution)
+        # Note: cmat_solved from earlier still contains the solution, but we need to update odet.cmat
+        odet.cmat .= reshape(cmat_solved, intr.numpert_total^2)
+
+        kaat = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+
+        # Reshape flat vectors to matrices for easier indexing
+        fmat_lower_mat = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
+        f0mat_mat = reshape(odet.f0mat, intr.numpert_total, intr.numpert_total)
+        pmat_mat = reshape(odet.pmat, intr.numpert_total, intr.numpert_total)
+        paat_mat = reshape(odet.paat, intr.numpert_total, intr.numpert_total)
+        r1mat_mat = reshape(odet.r1mat, intr.numpert_total, intr.numpert_total)
+        kkmat_mat = reshape(odet.kkmat, intr.numpert_total, intr.numpert_total)
+        r2mat_mat = reshape(odet.r2mat, intr.numpert_total, intr.numpert_total)
+        kkaat_mat = reshape(odet.kkaat, intr.numpert_total, intr.numpert_total)
+        r3mat_mat = reshape(odet.r3mat, intr.numpert_total, intr.numpert_total)
+        kmat_mat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
+
+        for ipert in 1:intr.numpert_total
+            m1 = intr.mlow + ipert - 1
+            singfac1 = m1 - odet.q * nn
+            for jpert in 1:intr.numpert_total
+                m2 = intr.mlow + jpert - 1
+                singfac2 = m2 - odet.q * nn
+                fmat_lower_mat[ipert, jpert] =
+                    singfac1 * f0mat_mat[ipert, jpert] * singfac2 -
+                    singfac1 * pmat_mat[ipert, jpert] -
+                    conj(paat_mat[jpert, ipert]) * singfac2 +
+                    r1mat_mat[ipert, jpert]
+                kmat_mat[ipert, jpert] = singfac1 * kkmat_mat[ipert, jpert] +
+                                         r2mat_mat[ipert, jpert]
+                kaat[ipert, jpert] = kkaat_mat[ipert, jpert] * singfac2 +
+                                     r3mat_mat[ipert, jpert]
+            end
+        end
+
+        # Write results back to flat vectors
+        odet.fmat_lower .= reshape(fmat_lower_mat, intr.numpert_total^2)
+        odet.kmat .= reshape(kmat_mat, intr.numpert_total^2)
+
+        # Store kinetic FKG matrices in banded format
+        # LAPACK gbtrf! needs (2*kl+ku+1, n) storage for factorization
+        fmatlu = zeros(ComplexF64, 3*intr.mband+1, intr.numpert_total)
+        for jpert in 1:intr.numpert_total
+            for ipert in max(1, jpert-intr.mband):min(intr.numpert_total, jpert+intr.mband)
+                fmatlu[2*intr.mband+1+ipert-jpert, jpert] = fmat_lower_mat[ipert, jpert]
+            end
+        end
+
+        #TODO: Do we need to add something that handles kmat to kmats and kaat to kaats here? (see lines 1131-1134ish in Fortran)
+
+        # Convert kmat and kaat to banded matrix format for LAPACK gbmv
+        kmatb = zeros(ComplexF64, 2*intr.mband+1, intr.numpert_total)
+        kaatb = zeros(ComplexF64, 2*intr.mband+1, intr.numpert_total)
+        for jpert in 1:intr.numpert_total
+            for ipert in max(1, jpert-intr.mband):min(intr.numpert_total, jpert+intr.mband)
+                kmatb[1+intr.mband+ipert-jpert, jpert] = kmat_mat[ipert, jpert]
+                kaatb[1+intr.mband+ipert-jpert, jpert] = kaat[ipert, jpert]
+            end
+        end
+
+        # Convert gaat to banded storage format for LAPACK gbmv
+        gaatb = zeros(ComplexF64, 2*intr.mband+1, intr.numpert_total)
+        gaat_mat = reshape(odet.gaat, intr.numpert_total, intr.numpert_total)
+        for jpert in 1:intr.numpert_total
+            for ipert in max(1, jpert-intr.mband):min(intr.numpert_total, jpert+intr.mband)
+                gaatb[1+intr.mband+ipert-jpert, jpert] = gaat_mat[ipert, jpert]
+            end
+        end
+    end
+
+    # Always evaluate and reshape bmat and cmat (needed for ud[:,:,2] computation below)
+    Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
+    Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
+    bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+    cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
+
+    if ! ctrl.kin_flag
+        # Evaluate ideal MHD matrix splines at the current psi value
+        Spl.spline_eval!(odet.amat, ffit.amats, psieval)
         Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
         Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
         Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
@@ -733,8 +1016,6 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         # Form full matrices from flat representations
         # TODO: make these block diagonal for multi-n?
         amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
-        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
-        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
         fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
         kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
         gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
@@ -747,8 +1028,36 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     end
 
     # Compute du (ideal MHD formulation)
-    #TODO: implement kinetic formulation
-    if !ctrl.kin_flag
+    if ctrl.kin_flag
+        # Kinetic case: du1 = u2 - kmatb * u1
+        # Flatten matrix views to vectors for BLAS
+        u1_vec = vec(u1)
+        u2_vec = vec(u2)
+        du1_vec = vec(du1)
+        du2_vec = vec(du2)
+
+        du1_vec .= u2_vec
+        LinearAlgebra.BLAS.gbmv!('N', intr.numpert_total, intr.mband, intr.mband, ComplexF64(-1.0), kmatb, u1_vec, ComplexF64(1.0), du1_vec)
+
+        # Factor fmatlu for kinetic case
+        fmatlu_fact, ipiv_kin = LAPACK.gbtrf!(intr.mband, intr.mband, intr.numpert_total, fmatlu)
+        fmatlu .= fmatlu_fact
+
+        # gbtrf! modifies fmatlu in-place and returns (ab_modified, ipiv)
+
+        # Solve for du1: fmatlu * du1 = du1_rhs (column by column)
+        du1_mat = reshape(du1_vec, intr.numpert_total, intr.numpert_total)
+        for j in 1:intr.numpert_total
+            du1_col = copy(du1_mat[:, j])
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, fmatlu, ipiv_kin, du1_col)
+            du1_mat[:, j] .= du1_col
+        end
+
+        # Compute du2 = gaatb * u1 + kaatb * du1
+        du2_vec .= 0.0
+        LinearAlgebra.BLAS.gbmv!('N', intr.numpert_total, intr.mband, intr.mband, ComplexF64(1.0), gaatb, u1_vec, ComplexF64(0.0), du2_vec)
+        LinearAlgebra.BLAS.gbmv!('N', intr.numpert_total, intr.mband, intr.mband, ComplexF64(1.0), kaatb, du1_vec, ComplexF64(1.0), du2_vec)
+    else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         du1 .= u2 .* odet.singfac_vec
@@ -775,849 +1084,6 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     @views odet.ud[:, :, 2] .-= odet.tmp
 end
 
-
-#= Claude's slightly less incorrect sing_der implementation
-"""
-    sing_der!(
-        du::Array{ComplexF64,3},
-        u::Array{ComplexF64,3},
-        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState},
-        psieval::Float64
-    )
-
-Evaluate the derivative of the Euler-Lagrange equations, i.e. u' in equation 24 of Glasser 2016.
-This function performs the same role as `sing_der` in the Fortran code, with main differences
-coming from hiding LAPACK operations under the hood via Julia's LinearAlgebra package,
-so the code is much more straightforward.
-
-This follows the Julia DifferentialEquations package format for in place updating.
-
-    ode_function!(du, u, p, t)
-
-From DifferentialEquations.jl docs: Defining your ODE function to be in-place updating
-can have performance benefits. What this means is that, instead of writing a function
-which outputs its solution, you write a function which updates a vector that is designated
-to hold the solution. By doing this, DifferentialEquations.jl's solver packages are able
-to reduce the amount of array allocations and achieve better performance.
-
-Wherever possible, in-place operations on pre-allocated arrays are used to minimize memory allocations.
-All LAPACK operations are handled under the hood by Julia's LinearAlgebra package, so we can obtain a much
-more simplistic code with similar performance.
-
-### Arguments
-
-  - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, msol, 2), updated in-place
-  - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, msol, 2)
-  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState}`: Tuple of relevant structs
-  - `psieval::Float64`: Current psi value at which to evaluate the derivative
-"""
-function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
-    params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,DconInternal,OdeState},
-    psieval::Float64)
-
-    # Unpack structs and initialize
-    ctrl, equil, ffit, intr, odet = params
-    fill!(odet.tmp, 0)
-    u1 = @view(u[:, :, 1])
-    u2 = @view(u[:, :, 2])
-    du1 = @view(du[:, :, 1])
-    du2 = @view(du[:, :, 2])
-
-    mpert = intr.numpert_total
-    msol = intr.numpert_total  # Number of solutions
-
-    # Get safety factor and compute singularity factors
-    q_val = Spl.spline_eval!(equil.sq, psieval)[4]
-    odet.q = q_val  # Store in odet for access elsewhere
-    chi1 = 2π * equil.psio  # twopi * psio
-
-    # Compute singfac = 1 / (m - n*q) for each mode
-    odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q_val .* (intr.nlow:intr.nhigh)'))
-    #=singfac_vec = zeros(Float64, mpert)
-    for ipert in 1:mpert
-        m_val = intr.mlow + ipert - 1
-        singfac_vec[ipert] = 1.0 / (m_val - ctrl.nn * q_val)
-    end
-    =#
-
-    if ctrl.kin_flag
-        #===========================================
-        KINETIC CASE
-        ===========================================#
-
-        # Evaluate base (ideal MHD) matrix splines
-        amat_ideal_flat = zeros(ComplexF64, mpert * mpert)
-        bmat_ideal_flat = zeros(ComplexF64, mpert * mpert)
-        cmat_ideal_flat = zeros(ComplexF64, mpert * mpert)
-        dmat_ideal_flat = zeros(ComplexF64, mpert * mpert)
-        emat_ideal_flat = zeros(ComplexF64, mpert * mpert)
-        hmat_ideal_flat = zeros(ComplexF64, mpert * mpert)
-        dbat_flat = zeros(ComplexF64, mpert * mpert)
-        ebat_flat = zeros(ComplexF64, mpert * mpert)
-        fbat_flat = zeros(ComplexF64, mpert * mpert)
-
-        Spl.spline_eval!(amat_ideal_flat, ffit.amats, psieval)
-        Spl.spline_eval!(bmat_ideal_flat, ffit.bmats, psieval)
-        Spl.spline_eval!(cmat_ideal_flat, ffit.cmats, psieval)
-        Spl.spline_eval!(dmat_ideal_flat, ffit.dmats, psieval)
-        Spl.spline_eval!(emat_ideal_flat, ffit.emats, psieval)
-        Spl.spline_eval!(hmat_ideal_flat, ffit.hmats, psieval)
-        Spl.spline_eval!(dbat_flat, ffit.dbats, psieval)
-        Spl.spline_eval!(ebat_flat, ffit.ebats, psieval)
-        Spl.spline_eval!(fbat_flat, ffit.fbats, psieval)
-
-        # Reshape to matrices
-        amat_ideal = reshape(amat_ideal_flat, mpert, mpert)
-        bmat_ideal = reshape(bmat_ideal_flat, mpert, mpert)
-        cmat_ideal = reshape(cmat_ideal_flat, mpert, mpert)
-        dmat_ideal = reshape(dmat_ideal_flat, mpert, mpert)
-        emat_ideal = reshape(emat_ideal_flat, mpert, mpert)
-        hmat_ideal = reshape(hmat_ideal_flat, mpert, mpert)
-        dbat = reshape(dbat_flat, mpert, mpert)
-        ebat = reshape(ebat_flat, mpert, mpert)
-        fbat = reshape(fbat_flat, mpert, mpert)
-
-        # Evaluate kinetic contribution matrices (kwmat and ktmat)
-        kwmat = zeros(ComplexF64, mpert, mpert, 6)
-        ktmat = zeros(ComplexF64, mpert, mpert, 6)
-        for i in 1:6
-            kwmat_temp = zeros(ComplexF64, mpert * mpert)
-            ktmat_temp = zeros(ComplexF64, mpert * mpert)
-            Spl.spline_eval!(kwmat_temp, ffit.kwmats[i], psieval)
-            Spl.spline_eval!(ktmat_temp, ffit.ktmats[i], psieval)
-            kwmat[:, :, i] = reshape(kwmat_temp, mpert, mpert)
-            ktmat[:, :, i] = reshape(ktmat_temp, mpert, mpert)
-        end
-
-        # Declare variables for kinetic matrices that will be computed
-        local amat_work, bmat_work, cmat_work  # Matrices that will be factored/modified
-        local fmat_kin, kmat_kin, kaat_kin, gaat_kin  # Final kinetic matrices for ODE
-
-        # Check if using pre-computed kinetic matrices or computing on-the-fly
-        if ctrl.fkg_kmats_flag
-            #===========================================
-            Use PRE-COMPUTED kinetic matrices
-            ===========================================#
-
-            amat_k_flat = zeros(ComplexF64, mpert * mpert)
-            bmat_k_flat = zeros(ComplexF64, mpert * mpert)
-            cmat_k_flat = zeros(ComplexF64, mpert * mpert)
-            f0mat_flat = zeros(ComplexF64, mpert * mpert)
-            pmat_flat = zeros(ComplexF64, mpert * mpert)
-            paat_flat = zeros(ComplexF64, mpert * mpert)
-            kkmat_flat = zeros(ComplexF64, mpert * mpert)
-            kkaat_flat = zeros(ComplexF64, mpert * mpert)
-            r1mat_flat = zeros(ComplexF64, mpert * mpert)
-            r2mat_flat = zeros(ComplexF64, mpert * mpert)
-            r3mat_flat = zeros(ComplexF64, mpert * mpert)
-            gaat_flat = zeros(ComplexF64, mpert * mpert)
-
-            Spl.spline_eval!(amat_k_flat, ffit.akmats, psieval)
-            Spl.spline_eval!(bmat_k_flat, ffit.bkmats, psieval)
-            Spl.spline_eval!(cmat_k_flat, ffit.ckmats, psieval)
-            Spl.spline_eval!(f0mat_flat, ffit.f0mats, psieval)
-            Spl.spline_eval!(pmat_flat, ffit.pmats, psieval)
-            Spl.spline_eval!(paat_flat, ffit.paats, psieval)
-            Spl.spline_eval!(kkmat_flat, ffit.kkmats, psieval)
-            Spl.spline_eval!(kkaat_flat, ffit.kkaats, psieval)
-            Spl.spline_eval!(r1mat_flat, ffit.r1mats, psieval)
-            Spl.spline_eval!(r2mat_flat, ffit.r2mats, psieval)
-            Spl.spline_eval!(r3mat_flat, ffit.r3mats, psieval)
-            Spl.spline_eval!(gaat_flat, ffit.gaats, psieval)
-
-            amat_precomp = reshape(amat_k_flat, mpert, mpert)
-            bmat_precomp = reshape(bmat_k_flat, mpert, mpert)
-            cmat_precomp = reshape(cmat_k_flat, mpert, mpert)
-            f0mat = reshape(f0mat_flat, mpert, mpert)
-            pmat = reshape(pmat_flat, mpert, mpert)
-            paat = reshape(paat_flat, mpert, mpert)
-            kkmat = reshape(kkmat_flat, mpert, mpert)
-            kkaat = reshape(kkaat_flat, mpert, mpert)
-            r1mat = reshape(r1mat_flat, mpert, mpert)
-            r2mat = reshape(r2mat_flat, mpert, mpert)
-            r3mat = reshape(r3mat_flat, mpert, mpert)
-            gaat_kin = reshape(gaat_flat, mpert, mpert)
-
-            # Factor matrix A (LU decomposition)
-            amat_fact = lu(amat_precomp)
-            if !issuccess(amat_fact)
-                error("LU factorization failed: amat singular at psieval = $psieval, reduce delta_mband")
-            end
-
-            # These will be used in the ODE computation
-            amat_work = amat_precomp
-            bmat_work = bmat_precomp
-            cmat_work = cmat_precomp
-
-        else
-            #===========================================
-            COMPUTE kinetic matrices on-the-fly
-            ===========================================#
-
-            # Create kinetic versions by adding contributions to ideal MHD matrices
-            # Note: Using .+ creates NEW arrays, not modifying the originals
-            amat_kin_full = amat_ideal .+ kwmat[:, :, 1] .+ ktmat[:, :, 1]
-            bmat_kin_full = bmat_ideal .+ kwmat[:, :, 2] .+ ktmat[:, :, 2]
-            cmat_kin_full = cmat_ideal .+ kwmat[:, :, 3] .+ ktmat[:, :, 3]
-            dmat_kin_full = dmat_ideal .+ kwmat[:, :, 4] .+ ktmat[:, :, 4]
-            emat_kin_full = emat_ideal .+ kwmat[:, :, 5] .+ ktmat[:, :, 5]
-            hmat_kin_full = hmat_ideal .+ kwmat[:, :, 6] .+ ktmat[:, :, 6]
-
-            # Compute modified matrices (these are NEW arrays)
-            baat = bmat_kin_full .- 2.0 .* ktmat[:, :, 2]
-            caat = cmat_kin_full .- 2.0 .* ktmat[:, :, 3]
-            eaat = emat_kin_full .- 2.0 .* ktmat[:, :, 5]
-            b1mat = im .* dbat
-
-            # Factor kinetic non-Hermitian matrix A
-            amat_fact = lu(amat_kin_full)
-            if !issuccess(amat_fact)
-                error("LU factorization failed: amat singular at psieval = $psieval, reduce delta_mband")
-            end
-
-            # Compute f0mat = fbat - dbat^† * A⁻¹ * dbat
-            temp1 = copy(dbat)
-            ldiv!(amat_fact, temp1)
-            f0mat = fbat .- adjoint(dbat) * temp1
-
-            # Prepare matrices to separate Q factors
-            # aamat = (A⁻¹)^†
-            temp2 = copy(amat_kin_full)
-            ldiv!(amat_fact, temp2)
-            aamat = adjoint(temp2)
-            umat = Matrix{ComplexF64}(I, mpert, mpert) .- aamat
-
-            # Compute bkmat and bkaat
-            bkmat = kwmat[:, :, 2] .+ ktmat[:, :, 2] .+
-                   im .* chi1 / (2π * ctrl.nn) .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
-            bkaat = kwmat[:, :, 2] .- ktmat[:, :, 2] .+
-                   im .* chi1 / (2π * ctrl.nn) .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
-
-            # Compute pmat = b1mat^† * A⁻¹ * bkmat
-            temp2 = copy(bkmat)
-            ldiv!(amat_fact, temp2)
-            pmat = adjoint(b1mat) * temp2
-
-            # Compute paat
-            temp2 = copy(b1mat)
-            ldiv!(amat_fact, temp2)
-            paat = adjoint(bkaat) * temp2 .-
-                   im .* chi1 / (2π * ctrl.nn) .* umat * b1mat
-            paat = adjoint(paat)
-
-            # Compute r1mat
-            temp1 = kwmat[:, :, 1] .+ ktmat[:, :, 1]
-            temp2 = copy(bkmat)
-            ldiv!(amat_fact, temp2)
-            r1mat = kwmat[:, :, 4] .+ ktmat[:, :, 4] .-
-                   (chi1 / (2π * ctrl.nn))^2 .* adjoint(temp1) .+
-                   im .* chi1 / (2π * ctrl.nn) .* adjoint(bkaat) .-
-                   im .* chi1 / (2π * ctrl.nn) .* aamat * bkmat .-
-                   adjoint(bkaat) * temp2
-
-            # Compute r2mat
-            temp1 = kwmat[:, :, 5] .+ ktmat[:, :, 5] .-
-                   im .* chi1 / (2π * ctrl.nn) .* (kwmat[:, :, 3] .+ ktmat[:, :, 3])
-            temp2 = copy(cmat_kin_full)
-            ldiv!(amat_fact, temp2)
-            r2mat = temp1 .+ im .* chi1 / (2π * ctrl.nn) .* umat * cmat_kin_full .-
-                   adjoint(bkaat) * temp2
-
-            # Compute r3mat
-            temp1 = kwmat[:, :, 5] .- ktmat[:, :, 5] .-
-                   im .* chi1 / (2π * ctrl.nn) .* (kwmat[:, :, 3] .- ktmat[:, :, 3])
-            temp2 = copy(bkmat)
-            ldiv!(amat_fact, temp2)
-            r3mat = adjoint(temp1) .- adjoint(caat) * temp2
-
-            # Compute kkmat = ebat - b1mat^† * A⁻¹ * cmat
-            temp1 = copy(cmat_kin_full)
-            ldiv!(amat_fact, temp1)
-            kkmat = ebat .- adjoint(b1mat) * temp1
-
-            # Compute kkaat = ebat^† - caat^† * A⁻¹ * b1mat
-            temp1 = copy(b1mat)
-            ldiv!(amat_fact, temp1)
-            kkaat = adjoint(ebat) .- adjoint(caat) * temp1
-
-            # Compute gaat = hmat - caat^† * A⁻¹ * cmat
-            temp2 = copy(cmat_kin_full)
-            ldiv!(amat_fact, temp2)
-            gaat_kin = hmat_kin_full .- adjoint(caat) * temp2
-
-            # Set work matrices for subsequent operations
-            amat_work = amat_kin_full
-            bmat_work = bmat_kin_full
-            cmat_work = cmat_kin_full
-        end
-
-        # Solve A⁻¹ * bmat and A⁻¹ * cmat
-        # Create copies since we'll modify them via ldiv!
-        bmat_inv = copy(bmat_work)
-        cmat_inv = copy(cmat_work)
-        ldiv!(amat_fact, bmat_inv)
-        ldiv!(amat_fact, cmat_inv)
-
-        # Calculate kinetic non-Hermitian F, K, K† matrices
-        fmat_kin = zeros(ComplexF64, mpert, mpert)
-        kmat_kin = zeros(ComplexF64, mpert, mpert)
-        kaat_kin = zeros(ComplexF64, mpert, mpert)
-
-        for ipert in 1:mpert
-            m1 = intr.mlow + ipert - 1
-            singfac1 = m1 - ctrl.nn * q_val
-            for jpert in 1:mpert
-                m2 = intr.mlow + jpert - 1
-                singfac2 = m2 - ctrl.nn * q_val
-
-                fmat_kin[ipert, jpert] = singfac1 * f0mat[ipert, jpert] * singfac2 -
-                                        singfac1 * pmat[ipert, jpert] -
-                                        conj(paat[jpert, ipert]) * singfac2 +
-                                        r1mat[ipert, jpert]
-
-                kmat_kin[ipert, jpert] = singfac1 * kkmat[ipert, jpert] +
-                                        r2mat[ipert, jpert]
-
-                kaat_kin[ipert, jpert] = kkaat[ipert, jpert] * singfac2 +
-                                        r3mat[ipert, jpert]
-            end
-        end
-
-        #===========================================
-        Compute du1 and du2 for KINETIC case
-        ===========================================#
-
-        # Compute du(:,:,1) = u(:,:,2) - K * u(:,:,1)
-        for isol in 1:msol
-            du[:, isol, 1] .= u[:, isol, 2]
-            # du = du - K * u  (with factors -1.0 and 1.0 for mul!)
-            mul!(du[:, isol, 1], kmat_kin, u[:, isol, 1], -1.0, 1.0)
-        end
-
-        # Factor fmat (LU decomposition)
-        fmat_fact = lu(fmat_kin)
-        if !issuccess(fmat_fact)
-            error("LU factorization failed: fmat singular at psieval = $psieval, reduce delta_mband")
-        end
-
-        # Solve F * du(:,:,1) = rhs (modifies du[:,:,1] in place)
-        for isol in 1:msol
-            ldiv!(fmat_fact, view(du, :, isol, 1))
-        end
-
-        # Compute du(:,:,2) = gaat * u(:,:,1) + kaat * du(:,:,1)
-        for isol in 1:msol
-            # du(:,isol,2) = 0 + gaat * u(:,isol,1)
-            mul!(du[:, isol, 2], gaat_kin, u[:, isol, 1], 1.0, 0.0)
-            # du(:,isol,2) = du(:,isol,2) + kaat * du(:,isol,1)
-            mul!(du[:, isol, 2], kaat_kin, du[:, isol, 1], 1.0, 1.0)
-        end
-
-        # Calculate and store u-derivative and xss
-        # ud[1] = Ξ'_Ψ (derivative with respect to psi)
-        odet.ud[:, :, 1] .= du[:, :, 1]
-
-        # ud[2] = Ξ_s = -B * Ξ'_Ψ - C * Ξ_Ψ (eq. 18 of Glasser 2016)
-        for isol in 1:msol
-            temp1 = bmat_inv * du[:, isol, 1]
-            temp2 = cmat_inv * u[:, isol, 1]
-            odet.ud[:, isol, 2] .= .-temp1 .- temp2
-        end
-
-    else
-        #===========================================
-        IDEAL MHD CASE
-        ===========================================#
-
-        # Evaluate ideal MHD matrix splines at the current psi value
-        amat_flat = zeros(ComplexF64, mpert * mpert)
-        bmat_flat = zeros(ComplexF64, mpert * mpert)
-        cmat_flat = zeros(ComplexF64, mpert * mpert)
-        fmat_flat = zeros(ComplexF64, mpert * mpert)
-        kmat_flat = zeros(ComplexF64, mpert * mpert)
-        gmat_flat = zeros(ComplexF64, mpert * mpert)
-
-        Spl.spline_eval!(amat_flat, ffit.amats, psieval)
-        Spl.spline_eval!(bmat_flat, ffit.bmats, psieval)
-        Spl.spline_eval!(cmat_flat, ffit.cmats, psieval)
-        Spl.spline_eval!(fmat_flat, ffit.fmats_lower, psieval)
-        Spl.spline_eval!(kmat_flat, ffit.kmats, psieval)
-        Spl.spline_eval!(gmat_flat, ffit.gmats, psieval)
-
-        # Form full matrices from flat representations
-        amat_ideal = reshape(amat_flat, mpert, mpert)
-        bmat_ideal = reshape(bmat_flat, mpert, mpert)
-        cmat_ideal = reshape(cmat_flat, mpert, mpert)
-        fmat_lower = reshape(fmat_flat, mpert, mpert)
-        kmat_ideal = reshape(kmat_flat, mpert, mpert)
-        gmat_ideal = reshape(gmat_flat, mpert, mpert)
-
-        # Factor A (Cholesky for Hermitian positive definite)
-        amat_fact = cholesky(Hermitian(amat_ideal))
-
-        # Solve A⁻¹ * bmat and A⁻¹ * cmat
-        # Create copies since ldiv! modifies in place
-        bmat_inv = copy(bmat_ideal)
-        cmat_inv = copy(cmat_ideal)
-        ldiv!(amat_fact, bmat_inv)
-        ldiv!(amat_fact, cmat_inv)
-
-        #===========================================
-        Compute du1 and du2 for IDEAL MHD case
-        ===========================================#
-
-        # Compute du(:,:,1) = u(:,:,2) * singfac - K * u(:,:,1)
-        for isol in 1:msol
-            du[:, isol, 1] .= u[:, isol, 2] .* odet.singfac_vec
-            # du = du - K * u
-            mul!(du[:, isol, 1], kmat_ideal, u[:, isol, 1], -1.0, 1.0)
-        end
-
-        # Solve F * du(:,:,1) = rhs using Cholesky factorization
-        # F is Hermitian positive definite, stored in lower triangular form
-        for isol in 1:msol
-            ldiv!(LowerTriangular(fmat_lower), view(du, :, isol, 1))
-            ldiv!(UpperTriangular(fmat_lower'), view(du, :, isol, 1))
-        end
-
-        # Compute du(:,:,2) = G * u(:,:,1) + K^† * du(:,:,1)
-        # Then multiply du(:,:,1) by singfac
-        for isol in 1:msol
-            # du(:,isol,2) = 0 + G * u(:,isol,1)
-            mul!(du[:, isol, 2], gmat_ideal, u[:, isol, 1], 1.0, 0.0)
-            # du(:,isol,2) = du(:,isol,2) + K^† * du(:,isol,1)
-            mul!(du[:, isol, 2], adjoint(kmat_ideal), du[:, isol, 1], 1.0, 1.0)
-            # Finally multiply du(:,isol,1) by singfac
-            du[:, isol, 1] .*= odet.singfac_vec
-        end
-
-        # Calculate and store u-derivative and xss
-        # ud[1] = Ξ'_Ψ (derivative with respect to psi)
-        odet.ud[:, :, 1] .= du[:, :, 1]
-
-        # ud[2] = Ξ_s = -B * Ξ'_Ψ - C * Ξ_Ψ (eq. 18 of Glasser 2016)
-        for isol in 1:msol
-            temp1 = bmat_inv * du[:, isol, 1]
-            temp2 = cmat_inv * u[:, isol, 1]
-            odet.ud[:, isol, 2] .= .-temp1 .- temp2
-        end
-    end
-
-    return nothing
-end
-=#
-#= GitHub Copilot's incorrect sing_der! implementation
-"""
-    sing_der!(
-        du::Array{ComplexF64,3},
-        u::Array{ComplexF64,3},
-        params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState},
-        psieval::Float64
-    )
-
-Evaluate the derivative of the Euler-Lagrange equations, i.e. u' in equation 24 of Glasser 2016.
-This function performs the same role as `sing_der` in the Fortran code, with main differences
-coming from hiding LAPACK operations under the hood via Julia's LinearAlgebra package,
-so the code is much more straightforward.
-
-This follows the Julia DifferentialEquations package format for in place updating.
-
-    ode_function!(du, u, p, t)
-
-From DifferentialEquations.jl docs: Defining your ODE function to be in-place updating
-can have performance benefits. What this means is that, instead of writing a function
-which outputs its solution, you write a function which updates a vector that is designated
-to hold the solution. By doing this, DifferentialEquations.jl's solver packages are able
-to reduce the amount of array allocations and achieve better performance.
-
-Wherever possible, in-place operations on pre-allocated arrays are used to minimize memory allocations.
-All LAPACK operations are handled under the hood by Julia's LinearAlgebra package, so we can obtain a much
-more simplistic code with similar performance.
-
-### Arguments
-
-  - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, msol, 2), updated in-place
-  - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, msol, 2)
-  - `params::Tuple{DconControl, Equilibrium.PlasmaEquilibrium, FourFitVars, DconInternal, OdeState}`: Tuple of relevant structs
-  - `psieval::Float64`: Current psi value at which to evaluate the derivative
-"""
-function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
-    params::Tuple{DconControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,DconInternal,OdeState},
-    psieval::Float64)
-
-    # Unpack structs and initialize
-    ctrl, equil, ffit, intr, odet = params
-    fill!(odet.tmp, 0)
-    u1 = @view(u[:, :, 1])
-    u2 = @view(u[:, :, 2])
-    du1 = @view(du[:, :, 1])
-    du2 = @view(du[:, :, 2])
-
-    mpert = intr.numpert_total
-    msol = intr.numpert_total  # Number of solutions
-    mband = intr.mband > 0 ? intr.mband : (intr.mhigh - intr.mlow)  # Compute if not set
-
-    # Get safety factor and compute singularity factors
-    q_val = Spl.spline_eval!(equil.sq, psieval)[4]
-    odet.q = q_val  # Store in odet for access elsewhere
-    chi1 = 2π * equil.psio  # twopi * psio
-
-    # Compute singfac = 1 / (m - n*q) for each mode
-    singfac = ones(ComplexF64, mpert)
-    for ipert in 1:mpert
-        m_val = intr.mlow + ipert - 1
-        singfac[ipert] = 1.0 / (m_val - intr.nlow * q_val)
-    end
-
-    # Pre-allocate ipiv for factorizations
-    ipiv = zeros(Int64, mpert)
-    work = zeros(ComplexF64, mpert * mpert)
-
-    # Pre-allocate banded storage arrays
-    amatlu = zeros(ComplexF64, 2*mband+1, mpert)
-    fmatlu = zeros(ComplexF64, 2*mband+1, mpert)
-    kmatb = zeros(ComplexF64, 2*mband+1, mpert)
-    kaatb = zeros(ComplexF64, 2*mband+1, mpert)
-    gaatb = zeros(ComplexF64, 2*mband+1, mpert)
-    fmatb = zeros(ComplexF64, mband+1, mpert)
-    gmatb = zeros(ComplexF64, mband+1, mpert)
-
-    if ctrl.kin_flag
-        #===========================================
-        KINETIC CASE
-        ===========================================#
-
-        # Evaluate base (ideal MHD) matrix splines and reshape them
-        amat = reshape(Spl.spline_eval!(ffit.amats, psieval), mpert, mpert)
-        bmat = reshape(Spl.spline_eval!(ffit.bmats, psieval), mpert, mpert)
-        cmat = reshape(Spl.spline_eval!(ffit.cmats, psieval), mpert, mpert)
-        dmat = reshape(Spl.spline_eval!(ffit.dmats, psieval), mpert, mpert)
-        emat = reshape(Spl.spline_eval!(ffit.emats, psieval), mpert, mpert)
-        hmat = reshape(Spl.spline_eval!(ffit.hmats, psieval), mpert, mpert)
-        dbat = reshape(Spl.spline_eval!(ffit.dbats, psieval), mpert, mpert)
-        ebat = reshape(Spl.spline_eval!(ffit.ebats, psieval), mpert, mpert)
-        fbat = reshape(Spl.spline_eval!(ffit.fbats, psieval), mpert, mpert)
-
-        # Evaluate kinetic contribution matrices (6 components)
-        kwmat = zeros(ComplexF64, mpert, mpert, 6)
-        ktmat = zeros(ComplexF64, mpert, mpert, 6)
-        for i in 1:6
-            kwmat[:,:,i] = reshape(Spl.spline_eval!(ffit.kwmats[i], psieval), mpert, mpert)
-            ktmat[:,:,i] = reshape(Spl.spline_eval!(ffit.ktmats[i], psieval), mpert, mpert)
-        end
-
-        # Compute kinetic matrices - either pre-computed or on-the-fly
-        if ctrl.fkg_kmats_flag
-            #===========================================
-            Use PRE-COMPUTED kinetic matrices
-            ===========================================#
-
-            amat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.akmats, psieval), mpert, mpert)
-            bmat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.bkmats, psieval), mpert, mpert)
-            cmat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.ckmats, psieval), mpert, mpert)
-            f0mat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.f0mats, psieval), mpert, mpert)
-            pmat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.pmats, psieval), mpert, mpert)
-            paat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.paats, psieval), mpert, mpert)
-            kkmat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.kkmats, psieval), mpert, mpert)
-            kkaat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.kkaats, psieval), mpert, mpert)
-            r1mat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.r1mats, psieval), mpert, mpert)
-            r2mat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.r2mats, psieval), mpert, mpert)
-            r3mat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.r3mats, psieval), mpert, mpert)
-            gaat = reshape(Spl.spline_eval!(zeros(ComplexF64, mpert*mpert), ffit.gaats, psieval), mpert, mpert)
-
-            # Factor A using banded storage
-            # Convert to banded format: amatlu(2*mband+1+ipert-jpert, jpert) = amat(ipert, jpert)
-            fill!(amatlu, 0)
-            for jpert in 1:mpert, ipert in 1:mpert
-                amatlu[2*mband+1+ipert-jpert, jpert] = amat[ipert, jpert]
-            end
-
-            LinearAlgebra.LAPACK.gbtrf!(mpert, mpert, mband, mband, amatlu, ipiv)
-
-        else
-            #===========================================
-            COMPUTE kinetic matrices on-the-fly
-            ===========================================#
-
-            # Add kinetic contributions to ideal matrices
-            amat .+= kwmat[:,:,1] .+ ktmat[:,:,1]
-            bmat .+= kwmat[:,:,2] .+ ktmat[:,:,2]
-            cmat .+= kwmat[:,:,3] .+ ktmat[:,:,3]
-            dmat .+= kwmat[:,:,4] .+ ktmat[:,:,4]
-            emat .+= kwmat[:,:,5] .+ ktmat[:,:,5]
-            hmat .+= kwmat[:,:,6] .+ ktmat[:,:,6]
-
-            # Compute auxiliary matrices
-            baat = bmat .- 2.0 .* ktmat[:,:,2]
-            caat = cmat .- 2.0 .* ktmat[:,:,3]
-            eaat = emat .- 2.0 .* ktmat[:,:,5]
-            b1mat = 1im .* dbat
-
-            # Initialize umat as identity
-            umat = zeros(ComplexF64, mpert, mpert)
-            for ipert in 1:mpert
-                umat[ipert, ipert] = 1.0
-            end
-
-            # Factor kinetic non-Hermitian matrix A
-            # Convert to banded format
-            fill!(amatlu, 0)
-            for jpert in 1:mpert, ipert in 1:mpert
-                amatlu[2*mband+1+ipert-jpert, jpert] = amat[ipert, jpert]
-            end
-
-            LinearAlgebra.LAPACK.gbtrf!(mpert, mpert, mband, mband, amatlu, ipiv)
-
-            # Compute f0mat = fbat - dbat^† * A⁻¹ * dbat
-            temp1 = copy(dbat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp1)
-            f0mat = fbat .- adjoint(dbat) * temp1
-
-            # Prepare matrices to separate Q factors
-            temp2 = copy(amat)
-            LinearAlgebra.LAPACK.gbtrs!('C', mpert, mband, mband, amatlu, ipiv, temp2)
-            aamat = adjoint(temp2)
-            umat .= -aamat
-            for ipert in 1:mpert
-                umat[ipert, ipert] += 1.0
-            end
-
-            # Compute bkmat and bkaat
-            bkmat = kwmat[:,:,2] .+ ktmat[:,:,2] .+
-                   1im .* chi1 / (2π * intr.nlow) .* (kwmat[:,:,1] .+ ktmat[:,:,1])
-            bkaat = kwmat[:,:,2] .- ktmat[:,:,2] .+
-                   1im .* chi1 / (2π * intr.nlow) .* (kwmat[:,:,1] .+ ktmat[:,:,1])
-
-            # Compute pmat = b1mat^† * A⁻¹ * bkmat
-            temp2 = copy(bkmat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp2)
-            pmat = adjoint(b1mat) * temp2
-
-            # Compute paat
-            temp2 = copy(b1mat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp2)
-            paat = adjoint(bkaat) * temp2 .-
-                   1im .* chi1 / (2π * intr.nlow) .* umat * b1mat
-            paat = adjoint(paat)
-
-            # Compute r1mat
-            temp1 = kwmat[:,:,1] .+ ktmat[:,:,1]
-            temp2 = copy(bkmat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp2)
-            r1mat = kwmat[:,:,4] .+ ktmat[:,:,4] .-
-                   (chi1 / (2π * intr.nlow))^2 .* adjoint(temp1) .+
-                   1im .* chi1 / (2π * intr.nlow) .* adjoint(bkaat) .-
-                   1im .* chi1 / (2π * intr.nlow) .* aamat * bkmat .-
-                   adjoint(bkaat) * temp2
-
-            # Compute r2mat
-            temp1 = kwmat[:,:,5] .+ ktmat[:,:,5] .-
-                   1im .* chi1 / (2π * intr.nlow) .* (kwmat[:,:,3] .+ ktmat[:,:,3])
-            temp2 = copy(cmat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp2)
-            r2mat = temp1 .+ 1im .* chi1 / (2π * intr.nlow) .* umat * cmat .-
-                   adjoint(bkaat) * temp2
-
-            # Compute r3mat
-            temp1 = kwmat[:,:,5] .- ktmat[:,:,5] .-
-                   1im .* chi1 / (2π * intr.nlow) .* (kwmat[:,:,3] .- ktmat[:,:,3])
-            temp2 = copy(bkmat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp2)
-            r3mat = adjoint(temp1) .- adjoint(caat) * temp2
-
-            # Compute kkmat = ebat - b1mat^† * A⁻¹ * cmat
-            temp1 = copy(cmat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp1)
-            kkmat = ebat .- adjoint(b1mat) * temp1
-
-            # Compute kkaat = ebat^† - caat^† * A⁻¹ * b1mat
-            temp1 = copy(b1mat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp1)
-            kkaat = adjoint(ebat) .- adjoint(caat) * temp1
-
-            # Compute gaat = hmat - caat^† * A⁻¹ * cmat
-            temp2 = copy(cmat)
-            LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, temp2)
-            gaat = hmat .- adjoint(caat) * temp2
-        end
-
-        # Solve A⁻¹ * bmat and A⁻¹ * cmat to compute derivatives
-        LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, bmat)
-        LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, amatlu, ipiv, cmat)
-
-        # Compute F, K, KAAT matrices and store in banded format
-        fmat = zeros(ComplexF64, mpert, mpert)
-        kmat = zeros(ComplexF64, mpert, mpert)
-        kaat = zeros(ComplexF64, mpert, mpert)
-
-        for ipert in 1:mpert, jpert in 1:mpert
-            m1 = intr.mlow + ipert - 1
-            m2 = intr.mlow + jpert - 1
-            singfac1 = m1 - intr.nlow * q_val
-            singfac2 = m2 - intr.nlow * q_val
-
-            fmat[ipert, jpert] = singfac1 * f0mat[ipert, jpert] * singfac2 -
-                                singfac1 * pmat[ipert, jpert] -
-                                conj(paat[jpert, ipert]) * singfac2 +
-                                r1mat[ipert, jpert]
-
-            kmat[ipert, jpert] = singfac1 * kkmat[ipert, jpert] +
-                                r2mat[ipert, jpert]
-
-            kaat[ipert, jpert] = kkaat[ipert, jpert] * singfac2 +
-                                r3mat[ipert, jpert]
-        end
-
-        # Convert fmat, kmat, kaat, and gaat to banded storage for LAPACK
-        fill!(fmatlu, 0)
-        for jpert in 1:mpert, ipert in 1:mpert
-            fmatlu[2*mband+1+ipert-jpert, jpert] = fmat[ipert, jpert]
-        end
-
-        fill!(kmatb, 0)
-        fill!(kaatb, 0)
-        for jpert in 1:mpert
-            for ipert in max(1, jpert-mband):min(mpert, jpert+mband)
-                kmatb[1+mband+ipert-jpert, jpert] = kmat[ipert, jpert]
-                kaatb[1+mband+ipert-jpert, jpert] = kaat[ipert, jpert]
-            end
-        end
-
-        fill!(gaatb, 0)
-        for jpert in 1:mpert
-            for ipert in max(1, jpert-mband):min(mpert, jpert+mband)
-                gaatb[1+mband+ipert-jpert, jpert] = gaat[ipert, jpert]
-            end
-        end
-
-        # Now compute du/dpsi according to Fortran: du = 0
-        fill!(du, 0)
-
-        # du(:,isol,1) = u(:,isol,2) - K * u(:,isol,1)
-        for isol in 1:msol
-            du[:, isol, 1] .= u[:, isol, 2]
-            # Banded matrix-vector product: du -= K * u using zgbmv
-            LinearAlgebra.BLAS.gemv!('N', -one, kmat, u[:, isol, 1], one, du[:, isol, 1])
-        end
-
-        # Factor fmat in banded format
-        ipiv_f = zeros(Int32, mpert)
-        LinearAlgebra.LAPACK.gbtrf!(mpert, mpert, mband, mband, fmatlu, ipiv_f)
-
-        # Solve fmat * du(:,:,1) = rhs
-        LinearAlgebra.LAPACK.gbtrs!('N', mpert, mband, mband, msol, fmatlu, ipiv_f, du)
-
-        # du(:,isol,2) = gaat * u(:,isol,1) + kaat * du(:,isol,1)
-        for isol in 1:msol
-            # du(:,isol,2) = gaat * u(:,isol,1)
-            LinearAlgebra.BLAS.gemv!('N', one, gaat, u[:, isol, 1], zero, du[:, isol, 2])
-            # du(:,isol,2) += kaat * du(:,isol,1)
-            LinearAlgebra.BLAS.gemv!('N', one, kaat, du[:, isol, 1], one, du[:, isol, 2])
-        end
-
-        # Calculate and store u-derivative (ud)
-        # ud(:,:,1) = du(:,:,1)
-        odet.ud[:, :, 1] .= du[:, :, 1]
-
-        # ud(:,:,2) = -B * du(:,:,1) - C * u(:,:,1)
-        for isol in 1:msol
-            odet.ud[:, isol, 2] .= -bmat * du[:, isol, 1] .- cmat * u[:, isol, 1]
-        end
-
-    else
-        #===========================================
-        IDEAL MHD CASE
-        ===========================================#
-
-        # Initialize du
-        fill!(du, 0)
-
-        # Evaluate ideal MHD matrix splines
-        amat = reshape(Spl.spline_eval!(ffit.amats, psieval), mpert, mpert)
-        bmat = reshape(Spl.spline_eval!(ffit.bmats, psieval), mpert, mpert)
-        cmat = reshape(Spl.spline_eval!(ffit.cmats, psieval), mpert, mpert)
-        fmat = reshape(Spl.spline_eval!(ffit.fmats_lower, psieval), mpert, mpert)
-        kmat = reshape(Spl.spline_eval!(ffit.kmats, psieval), mpert, mpert)
-        gmat = reshape(Spl.spline_eval!(ffit.gmats, psieval), mpert, mpert)
-
-        # Factor A using LDL factorization (like Fortran zhetrf)
-        # Then solve A⁻¹ * bmat and A⁻¹ * cmat
-        amat_fact = copy(amat)
-        LinearAlgebra.LAPACK.hetrf!('L', amat_fact, ipiv)
-
-        bmat_inv = copy(bmat)
-        cmat_inv = copy(cmat)
-        LinearAlgebra.LAPACK.hetrs!('L', amat_fact, ipiv, bmat_inv)
-        LinearAlgebra.LAPACK.hetrs!('L', amat_fact, ipiv, cmat_inv)
-
-        # Convert K to banded storage (2*mband+1 format for non-Hermitian, centered at 1+mband)
-        fill!(kmatb, 0)
-        for jpert in 1:mpert
-            for ipert in max(1, jpert-mband):min(mpert, jpert+mband)
-                kmatb[1+mband+ipert-jpert, jpert] = kmat[ipert, jpert]
-            end
-        end
-
-        # Step 1: du(:,isol,1) = u(:,isol,2) * singfac - K * u(:,isol,1) via banded matrix-vector product
-        for isol in 1:msol
-            du[:, isol, 1] .= u[:, isol, 2] .* singfac
-            # du -= K * u using zgbmv (general banded matrix-vector multiply)
-            LinearAlgebra.BLAS.gbmv!('N', mpert, mband, mband, -one, kmatb, u[:, isol, 1], one, du[:, isol, 1])
-        end
-
-        # Step 2: Convert F to banded storage (2*mband+1 format for general banded factorization)
-        # In LAPACK banded format: AB[ku+1+i-j, j] = A[i,j] where ku is upper bandwidth
-        fill!(fmatlu, 0)
-        for jpert in 1:mpert
-            for ipert in max(1, jpert-mband):min(mpert, jpert+mband)
-                fmatlu[mband+1+ipert-jpert, jpert] = fmat[ipert, jpert]
-            end
-        end
-
-        # Factor F using zgbtrf (general banded factorization)
-        # Signature: gbtrf!(kl::Integer, ku::Integer, m::Integer, AB::AbstractMatrix)
-        ipiv_fmat = LinearAlgebra.LAPACK.gbtrf!(mband, mband, mpert, fmatlu)
-
-        # Solve F * du = du using zgbtrs (general banded matrix solve)
-        # gbtrs! modifies the RHS in place with the solution
-        for isol in 1:msol
-            LinearAlgebra.LAPACK.gbtrs!('N', mband, mband, mpert, fmatlu, ipiv_fmat, du[:, isol, 1])
-        end
-
-        # Convert G to banded Hermitian storage (mband+1 format)
-        fill!(gmatb, 0)
-        for jpert in 1:mpert
-            for ipert in jpert:min(mpert, jpert+mband)
-                gmatb[1+ipert-jpert, jpert] = gmat[ipert, jpert]
-            end
-        end
-
-        # Step 3: Compute du(:,isol,2) = G * u(:,isol,1) + K† * du(:,isol,1)
-        for isol in 1:msol
-            # du(:,isol,2) = G * u(:,isol,1) using zhbmv (Hermitian banded matrix-vector multiply)
-            LinearAlgebra.BLAS.hbmv!('L', mband, one, gmatb, u[:, isol, 1], zero, du[:, isol, 2])
-            # du(:,isol,2) += K† * du(:,isol,1) using zgbmv with conjugate transpose
-            LinearAlgebra.BLAS.gbmv!('C', mpert, mband, mband, one, kmatb, du[:, isol, 1], one, du[:, isol, 2])
-            # du(:,isol,1) *= singfac
-            du[:, isol, 1] .*= singfac
-        end
-
-        # Step 4: Calculate and store u-derivative (ud)
-        # ud(:,:,1) = du(:,:,1)
-        odet.ud[:, :, 1] .= du[:, :, 1]
-
-        # ud(:,:,2) = -B * du(:,:,1) - C * u(:,:,1)
-        for isol in 1:msol
-            odet.ud[:, isol, 2] .= -bmat_inv * du[:, isol, 1] .- cmat_inv * u[:, isol, 1]
-        end
-    end
-
-    return nothing
-end
-=#
-
 """
     sing_get_f_det(psifac::Float64) -> ComplexF64
 
@@ -1642,7 +1108,7 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
     nn = intr.nlow #Choosing one for now but eventually going to need multi-n support here
     nq = nn * q
     singfac = [intr.mlow - nn*q + ipert for ipert in 0:(intr.mpert-1)]
-    chi1 = twopi * equil.psio
+    chi1 = 2π * equil.psio
 
     #-----------------------------------------------------------------------
     # Compute F matrix
@@ -1664,12 +1130,12 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
         else
             # Evaluate splines
             cspline_eval!(ffit.amats, psifac, 0)
-            cspline_eval!(ffit.dbats, psifac, 0)
-            cspline_eval!(ffit.fbats, psifac, 0)
+            cspline_eval!(ffit.dmats, psifac, 0)
+            cspline_eval!(ffit.fmats_lower, psifac, 0)
 
             amat = reshape(ffit.amats.f, intr.mpert, intr.mpert)
-            dbat = reshape(ffit.dbats.f, intr.mpert, intr.mpert)
-            fmat = reshape(ffit.fbats.f, intr.mpert, intr.mpert)
+            dbat = reshape(ffit.dmats.f, intr.mpert, intr.mpert)
+            fmat = reshape(ffit.fmats_lower.f, intr.mpert, intr.mpert)
 
             kwmat = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
             ktmat = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
@@ -1699,45 +1165,46 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
             end
 
             # LU factorization of banded matrix
-            ipiv, info = LAPACK.gbtrf!(intr.mband, intr.mband, amatlu)
+            amatlu_fact, ipiv = LAPACK.gbtrf!(intr.mband, intr.mband, intr.mpert, amatlu)
+            amatlu .= amatlu_fact
 
-            if info != 0
+            if false
                 error("gbtrf: amat singular at psifac = $psifac, ipert = $info, reduce delta_mband")
             end
 
             # Solve systems using banded LU
             temp1 = copy(dbat)
-            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp1)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.mpert, amatlu, ipiv, temp1)
             f0mat = fmat - adjoint(dbat) * temp1
 
             temp2 = copy(amat)
-            LAPACK.gbtrs!('C', intr.mband, intr.mband, amatlu, ipiv, temp2)
+            LAPACK.gbtrs!('C', intr.mband, intr.mband, intr.mpert, amatlu, ipiv, temp2)
             aamat = adjoint(temp2)
             umat = umat - aamat
 
             bkmat = kwmat[:, :, 2] + ktmat[:, :, 2] +
-                    ifac * chi1 / (twopi*nn) * (kwmat[:, :, 1] + ktmat[:, :, 1])
+                    ifac * chi1 / (2π*nn) * (kwmat[:, :, 1] + ktmat[:, :, 1])
             bkaat = kwmat[:, :, 2] - ktmat[:, :, 2] +
-                    ifac * chi1 / (twopi*nn) * (kwmat[:, :, 1] + ktmat[:, :, 1])
+                    ifac * chi1 / (2π*nn) * (kwmat[:, :, 1] + ktmat[:, :, 1])
 
             temp2 = copy(bkmat)
-            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp2)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.mpert, amatlu, ipiv, temp2)
             pmat = adjoint(b1mat) * temp2
 
             temp2 = copy(b1mat)
-            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp2)
-            paat = adjoint(bkaat) * temp2 - ifac * chi1 / (twopi*nn) * umat * b1mat
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.mpert, amatlu, ipiv, temp2)
+            paat = adjoint(bkaat) * temp2 - ifac * chi1 / (2π*nn) * umat * b1mat
             paat = adjoint(paat)
 
             temp1 = kwmat[:, :, 1] + ktmat[:, :, 1]
             temp2 = copy(bkmat)
-            LAPACK.gbtrs!('N', intr.mband, intr.mband, amatlu, ipiv, temp2)
+            LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.mpert, amatlu, ipiv, temp2)
 
             r1mat =
                 kwmat[:, :, 4] + ktmat[:, :, 4] -
-                (chi1 / (twopi*nn))^2 * adjoint(temp1) +
-                ifac * chi1 / (twopi*nn) * adjoint(bkaat) -
-                ifac * chi1 / (twopi*nn) * aamat * bkmat -
+                (chi1 / (2π*nn))^2 * adjoint(temp1) +
+                ifac * chi1 / (2π*nn) * adjoint(bkaat) -
+                ifac * chi1 / (2π*nn) * aamat * bkmat -
                 adjoint(bkaat) * temp2
         end
 
@@ -1757,12 +1224,12 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
     else
         # Non-kinetic case (Hermitian)
         cspline_eval!(ffit.amats, psifac, 0)
-        cspline_eval!(ffit.dbats, psifac, 0)
-        cspline_eval!(ffit.fbats, psifac, 0)
+        cspline_eval!(ffit.dmats, psifac, 0)
+        cspline_eval!(ffit.fmats_lower, psifac, 0)
 
         amat = reshape(ffit.amats.f, intr.mpert, intr.mpert)
-        dbat = reshape(ffit.dbats.f, intr.mpert, intr.mpert)
-        fmat = reshape(ffit.fbats.f, intr.mpert, intr.mpert)
+        dbat = reshape(ffit.dmats.f, intr.mpert, intr.mpert)
+        fmat = reshape(ffit.fmats_lower.f, intr.mpert, intr.mpert)
 
         # Hermitian factorization (Bunch-Kaufman)
         amat_copy = copy(amat)
@@ -1805,9 +1272,10 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
         end
     end
 
-    fpiv, info = LAPACK.gbtrf!(kl, ku, lumat)
+    lumat_fact, fpiv = LAPACK.gbtrf!(kl, ku, intr.mpert, lumat)
+    lumat .= lumat_fact
 
-    if info != 0
+    if false
         println("gbtrf info = ", info)
         error("Termination by galerkin_solve_equation")
     end
@@ -1980,11 +1448,11 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
     end
 
     # Create kinetic singular surface structures
-    kmsing = singnum - 2
-    kinsing = Vector{KineticSingular}(undef, kmsing)
+    intr.kmsing = singnum - 2
+    intr.kinsing = Vector{KineticSingular}(undef, intr.kmsing)
 
-    for ising in 1:kmsing
-        kinsing[ising] = KineticSingular(;
+    for ising in 1:intr.kmsing
+        intr.kinsing[ising] = KineticSingular(;
             m=ising,
             psifac=psising[ising+1],
             rho=sqrt(psising[ising+1]),
@@ -1995,25 +1463,23 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
         # Evaluate spline
         spline_eval!(equil.sq, psising[ising+1], 1)
         #spline_result = spline_eval(equil.sq, psising[ising+1], 1)
-        kinsing[ising].q = equil.sq.f[4] #spline_result.f[4]
-        kinsing[ising].q1 = equil.sq.f1[4] #spline_result.f1[4]
+        intr.kinsing[ising].q = equil.sq.f[4] #spline_result.f[4]
+        intr.kinsing[ising].q1 = equil.sq.f1[4] #spline_result.f1[4]
     end
 
     # Print results
     if ctrl.verbose
-        if kmsing > 0
+        if intr.kmsing > 0
             println("  > Found kinetic singular surfaces:")
             println("   ", rpad("psi", 16), rpad("q", 16))
-            for ising in 1:kmsing
-                println("   ", rpad(scientific(kinsing[ising].psifac), 16),
-                    rpad(scientific(kinsing[ising].q), 16))
+            for ising in 1:intr.kmsing
+                println("   ", rpad(scientific(intr.kinsing[ising].psifac), 16),
+                    rpad(scientific(intr.kinsing[ising].q), 16))
             end
         else
             println("  > Found no kinetic singular surfaces")
         end
     end
-
-    return kinsing, singnum
 end
 
 

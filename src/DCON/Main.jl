@@ -145,10 +145,6 @@ function Main(path::String="./")
         end
         sing_scan!(intr, ctrl, equil, ffit)
         #TODO: add resist_eval eventually for computing resistive surface quantities
-        if ctrl.kin_flag
-            #TODO: does ksing_find change any of these items? probably. which ones? probably ffit? need to reorder the function params and add ! to the function if it does
-            ksing_find(ctrl, intr, odet, ffit, equil, intr.DebugSettings.output_benchmark_data)
-        end
     end
 
     # Integrate Euler-Lagrange Equation
@@ -159,6 +155,12 @@ function Main(path::String="./")
         odet = ode_run(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             println("Fixed-boundary mode unstable for n = $nstring.")
+        end
+    end
+    if ctrl.mat_flag || ctrl.ode_flag
+        if ctrl.kin_flag
+            #TODO: does ksing_find change any of these items? probably. which ones? probably ffit? definitely intr need to reorder the function params and add ! to the function if it does
+            ksing_find(ctrl, intr, odet, ffit, equil, intr.DebugSettings.output_benchmark_data)
         end
     end
 

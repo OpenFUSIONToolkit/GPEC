@@ -388,12 +388,32 @@ and a small set of temporary matrices and factors used to compute singular-layer
       + `amat::Vector{ComplexF64}` - Flattened A matrix (length `numpert_total^2`)
       + `bmat::Vector{ComplexF64}` - Flattened B matrix (length `numpert_total^2`)
       + `cmat::Vector{ComplexF64}` - Flattened C matrix (length `numpert_total^2`)
+      + `dmat::Vector{ComplexF64}` - Flattened D matrix (length `numpert_total^2`)
       + `fmat_lower::Vector{ComplexF64}` - Lower-triangle factor of F (length `numpert_total^2`)
       + `kmat::Vector{ComplexF64}` - Flattened K matrix (length `numpert_total^2`)
       + `gmat::Vector{ComplexF64}` - Flattened G matrix (length `numpert_total^2`)
       + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
       + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
       + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
+  - Kinetic workspace matrices (only used if `kin_flag=true`):
+
+      + `emat::Vector{ComplexF64}` - Flattened E matrix (length `numpert_total^2`)
+      + `hmat::Vector{ComplexF64}` - Flattened H matrix (length `numpert_total^2`)
+      + `dbat::Vector{ComplexF64}` - Flattened D-bar matrix (length `numpert_total^2`)
+      + `ebat::Vector{ComplexF64}` - Flattened E-bar matrix (length `numpert_total^2`)
+      + `b1mat::Vector{ComplexF64}` - Flattened B1 matrix (length `numpert_total^2`)
+      + `f0mat::Vector{ComplexF64}` - Kinetic F0 matrix (length `numpert_total^2`)
+      + `aamat::Vector{ComplexF64}` - Kinetic AA matrix (length `numpert_total^2`)
+      + `bkmat::Vector{ComplexF64}` - Kinetic BK matrix (length `numpert_total^2`)
+      + `bkaat::Vector{ComplexF64}` - Kinetic BK adjoint matrix (length `numpert_total^2`)
+      + `pmat::Vector{ComplexF64}` - Kinetic P matrix (length `numpert_total^2`)
+      + `paat::Vector{ComplexF64}` - Kinetic P adjoint matrix (length `numpert_total^2`)
+      + `r1mat::Vector{ComplexF64}` - Kinetic R1 matrix (length `numpert_total^2`)
+      + `r2mat::Vector{ComplexF64}` - Kinetic R2 matrix (length `numpert_total^2`)
+      + `r3mat::Vector{ComplexF64}` - Kinetic R3 matrix (length `numpert_total^2`)
+      + `kkmat::Vector{ComplexF64}` - Kinetic KK matrix (length `numpert_total^2`)
+      + `kkaat::Vector{ComplexF64}` - Kinetic KK adjoint matrix (length `numpert_total^2`)
+      + `gaat::Vector{ComplexF64}` - Kinetic G adjoint matrix (length `numpert_total^2`)
 """
 @kwdef mutable struct OdeState
     # Initialization parameters
@@ -441,12 +461,34 @@ and a small set of temporary matrices and factors used to compute singular-layer
     amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    dmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
     Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+
+    # Kinetic workspace matrices (only used if kin_flag=true)
+    emat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    hmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    dbat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    ebat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    b1mat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    f0mat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    aamat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    bkmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    bkaat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    pmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    paat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    r1mat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    r2mat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    r3mat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    kkmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    kkaat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    gaat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    kwmat::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 6)
+    ktmat::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 6)
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization
