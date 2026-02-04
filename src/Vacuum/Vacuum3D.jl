@@ -209,7 +209,6 @@ The single-layer kernel φ is the fundamental solution to Laplace's equation:
   - `Float64`: Kernel value φ(x_obs, x_src)
 """
 function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real})
-    # Single-layer kernel: 1/(4π r)
     @inbounds begin
         dx = x_obs[1] - x_src[1]
         dy = x_obs[2] - x_src[2]
@@ -244,7 +243,6 @@ K(x_obs, x_src, n_src) = ∇_{x_src} φ · n̂_src
   - `Float64`: Kernel value K(x_obs, x_src, n_src)
 """
 function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real}, n_src::AbstractVector{<:Real})
-    # Double-layer kernel: -1/(4π) * (r·n) / r³
     @inbounds begin
         dx = x_obs[1] - x_src[1]
         dy = x_obs[2] - x_src[2]
@@ -281,10 +279,10 @@ function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_
         idx_pol = periodic_wrap(idx_pol_center - PATCH_RAD + i - 1, npol)
         idx_tor = periodic_wrap(idx_tor_center - PATCH_RAD + j - 1, ntor)
         # Copy data to the patch using direct indexing (avoids view allocation)
-        src_idx = idx_pol + npol * (idx_tor - 1)
-        patch[i, j, 1] = data[src_idx, 1]
-        patch[i, j, 2] = data[src_idx, 2]
-        patch[i, j, 3] = data[src_idx, 3]
+        idx_src = idx_pol + npol * (idx_tor - 1)
+        patch[i, j, 1] = data[idx_src, 1]
+        patch[i, j, 2] = data[idx_src, 2]
+        patch[i, j, 3] = data[idx_src, 3]
     end
 end
 
@@ -292,6 +290,8 @@ end
     interpolate_to_polar!(polar_data, patch, quad_data)
 
 Interpolate Cartesian patch data to polar quadrature points using sparse matrix multiply.
+Overwrites `polar_data` using mul! function arguments, mul!(C, A, B, α, β) -> C where
+C = α * A * B + β * C.
 
 # Arguments
 
@@ -300,11 +300,9 @@ Interpolate Cartesian patch data to polar quadrature points using sparse matrix 
   - `P2G`: Sparse interpolation matrix
 """
 function interpolate_to_polar!(polar_data::Array{Float64,3}, patch::Array{Float64,3}, P2G::SparseMatrixCSC{Float64,Int})
-
     # Flatten patch to (Ngrid × dof), apply P2G' to get (Npolar × dof)
-    fill!(polar_data, 0.0)
     patch_flat = reshape(patch, :, size(patch, 3))
-    mul!(reshape(polar_data, :, size(patch, 3)), P2G', patch_flat)
+    mul!(reshape(polar_data, :, size(patch, 3)), P2G', patch_flat, 1.0, 0.0)
 end
 
 """
@@ -319,8 +317,6 @@ Compute normal vector (= ∂r/∂θ × ∂r/∂ζ) at polar quadrature points fr
   - `dr_dζ_polar`: Interpolated ∂r/∂ζ at polar points (RAD_DIM × ANG_DIM × 3)
 """
 function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3})
-
-    fill!(n_polar, 0.0)
     # Inline cross product to avoid slice allocation
     @inbounds for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
         n_polar[ir, ia, 1] = dr_dθ[ir, ia, 2] * dr_dζ[ir, ia, 3] - dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 2]
@@ -408,40 +404,40 @@ function compute_3D_kernel_matrix!(
     grad_greenfunction::Matrix{Float64},
     greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
-    source::Union{PlasmaGeometry3D,WallGeometry3D};
+    source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
     RAD_DIM::Int,
     INTERP_ORDER::Int
 )
+    num_points = observer.mtheta * observer.nzeta
+    dθdζ = 4π^2 / (num_points)
 
-    # Zero out matrices
-    fill!(greenfunction, 0.0)
-
-    # Get block of grad_green matrix
-    col_index = (source isa PlasmaGeometry ? 1 : 2)
-    row_index = (observer isa PlasmaGeometry ? 1 : 2)
+    # Get block of grad green function matrix
+    col_index = (source isa PlasmaGeometry3D ? 1 : 2)
+    row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
     grad_greenfunction_block = view(
         grad_greenfunction,
-        ((row_index-1)*mtheta+1):(row_index*mtheta),
-        ((col_index-1)*mtheta+1):(col_index*mtheta)
+        ((row_index-1)*num_points+1):(row_index*num_points),
+        ((col_index-1)*num_points+1):(col_index*num_points)
     )
+
+    # Zero out green function matrix
+    fill!(greenfunction, 0.0)
+    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    populate_greenfunction = source isa PlasmaGeometry3D
 
     # Initialize quadrature data
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
     @assert observer.mtheta ≥ PATCH_DIM
     @assert observer.nzeta ≥ PATCH_DIM
-    dθdζ = (2π / observer.mtheta) * (2π / observer.nzeta)
 
     # Allocate thread-local workspaces (one per thread)
     nthreads = Threads.nthreads()
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:nthreads]
 
-    # Total number of observer points for linear indexing
-    n_obs = observer.mtheta * observer.nzeta
-
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:n_obs
+    Threads.@threads for idx_obs in 1:num_points
         # Get thread-local workspace
         ws = workspaces[Threads.threadid()]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
@@ -456,77 +452,75 @@ function compute_3D_kernel_matrix!(
         # FAR FIELD: Trapezoidal rule for nonsingular source points
         # Note: kernels return zero for r_src = r_obs
         # ============================================================
-        @inbounds for j_src in 1:source.nzeta, i_src in 1:source.mtheta
+        @inbounds for idx_src in 1:num_points
             # Evaluate kernels at grid points
-            idx_src = i_src + (j_src - 1) * source.mtheta
             r_src = @view source.r[idx_src, :]
             n_src = @view source.normal[idx_src, :]
             K_single = laplace_single_layer(r_obs, r_src)
             K_double = laplace_double_layer(r_obs, r_src, n_src)
 
             # Apply weights (periodic trapezoidal rule = constant weights)
-            greenfunction[idx_obs, idx_src] = K_single * dθdζ
+            if populate_greenfunction
+                greenfunction[idx_obs, idx_src] = K_single * dθdζ
+            end
             grad_greenfunction_block[idx_obs, idx_src] = K_double * dθdζ
         end
 
         # ============================================================
         # NEAR FIELD: Polar quadrature with singular correction
-        # Only needed if observer points lies on source surface
         # ============================================================
-        if typeof(observer) == typeof(source)
-            # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
-            extract_patch!(r_patch, source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
-            extract_patch!(dr_dθ_patch, source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
-            extract_patch!(dr_dζ_patch, source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        # Extract patches of source data around the singular point (size = PATCH_DIM x PATCH_DIM x dof)
+        extract_patch!(r_patch, source.r, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        extract_patch!(dr_dθ_patch, source.dr_dθ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
+        extract_patch!(dr_dζ_patch, source.dr_dζ, i_obs, j_obs, source.mtheta, source.nzeta, PATCH_DIM)
 
-            # Interpolate coordinates and tangent vectors to polar quadrature points
-            interpolate_to_polar!(r_polar, r_patch, P2G)
-            interpolate_to_polar!(dr_dθ_polar, dr_dθ_patch, P2G)
-            interpolate_to_polar!(dr_dζ_polar, dr_dζ_patch, P2G)
+        # Interpolate coordinates and tangent vectors to polar quadrature points
+        interpolate_to_polar!(r_polar, r_patch, P2G)
+        interpolate_to_polar!(dr_dθ_polar, dr_dθ_patch, P2G)
+        interpolate_to_polar!(dr_dζ_polar, dr_dζ_patch, P2G)
 
-            # Compute normal vectors at polar points from interpolated tangent vectors
-            compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
+        # Compute normal vectors at polar points from interpolated tangent vectors
+        compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
 
-            # Evaluate kernels at polar points with POU weighting
-            fill!(M_polar_single, 0.0)
-            fill!(M_polar_double, 0.0)
-            @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-                # Evaluate kernels using recomputed normal (use @view to avoid allocation)
-                r_src = @view r_polar[ir, ia, :]
-                n_src = @view n_polar[ir, ia, :]
-                K_single = laplace_single_layer(r_obs, r_src)
-                K_double = laplace_double_layer(r_obs, r_src, n_src)
+        # Evaluate kernels at polar points with POU weighting
+        @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
+            # Evaluate kernels using recomputed normal (use @view to avoid allocation)
+            r_src = @view r_polar[ir, ia, :]
+            n_src = @view n_polar[ir, ia, :]
+            K_single = laplace_single_layer(r_obs, r_src)
+            K_double = laplace_double_layer(r_obs, r_src, n_src)
 
-                # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
-                M_polar_single[ir, ia] = K_single * Ppou[ir, ia] * dθdζ
-                M_polar_double[ir, ia] = K_double * Ppou[ir, ia] * dθdζ
-            end
+            # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
+            M_polar_single[ir, ia] = K_single * Ppou[ir, ia] * dθdζ
+            M_polar_double[ir, ia] = K_double * Ppou[ir, ia] * dθdζ
+        end
 
-            # Distribute polar singular corrections back to Cartesian grid using sparse matrix
-            # grid = P2G * polar (maps Npolar → Ngrid)
-            mul!(M_grid_single_flat, P2G, vec(M_polar_single))
-            mul!(M_grid_double_flat, P2G, vec(M_polar_double))
-            M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
-            M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
+        # Distribute polar singular corrections back to Cartesian grid using sparse matrix
+        # grid = P2G * polar (maps Npolar → Ngrid)
+        mul!(M_grid_single_flat, P2G, vec(M_polar_single))
+        mul!(M_grid_double_flat, P2G, vec(M_polar_double))
+        M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
+        M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
 
-            # Compute remaining far-field POU contribution and near-field polar quadrature result
-            # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
-            @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
-                # Map back to global indices
-                idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
-                idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
-                idx_src = idx_pol + source.mtheta * (idx_tor - 1)
+        # Compute remaining far-field POU contribution and near-field polar quadrature result
+        # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
+        @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
+            # Map back to global indices
+            idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
+            idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
+            idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
-                # Remainder of far-field contribution on the singular grid: Gpou = -χ (use @view to avoid allocation)
-                r_src = @view source.r[idx_src, :]
-                n_src = @view source.normal[idx_src, :]
-                far_single = laplace_single_layer(r_obs, r_src) * Gpou[i, j] * dθdζ
-                far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[i, j] * dθdζ
+            # Remainder of far-field contribution on the singular grid: Gpou = -χ
+            r_src = @view source.r[idx_src, :]
+            n_src = @view source.normal[idx_src, :]
+            far_single = laplace_single_layer(r_obs, r_src) * Gpou[i, j] * dθdζ
+            far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[i, j] * dθdζ
 
-                # Apply near + far contributions
+            # Apply near + far contributions
+            if populate_greenfunction
                 greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single
-                grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
             end
+            grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
         end
     end
 
@@ -535,5 +529,5 @@ function compute_3D_kernel_matrix!(
     # orient for this later for generalization.
     # Account for normal direction pointing out of vacuum integration region in 𝒦ⁿ ⋅ dS
     # Negative for plasma since dS = ∇ψ J dθdζ and ∇ψ points outward but outward normal is inward
-    # @views grad_greenfunction .*= (source isa PlasmaGeometry3D ? -1 : 1)
+    @views grad_greenfunction_block .*= (source isa PlasmaGeometry3D ? 1 : -1)
 end

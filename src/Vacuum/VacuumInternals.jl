@@ -1,10 +1,3 @@
-# Gaussian quadrature weights and points for 8-point integration (used for kernel! function)
-const GAUSSIANWEIGHTS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
-    0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
-
-const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
-    0.183434642495650, 0.525532409916329, 0.796666477413627, 0.960289856497536]
-
 # 32-point Gaussian quadrature abscissae (used for Pn_minus_half_2007 function when nρ̂>0.1)
 const GAUSSIANWEIGHTS32 = [
     0.007018610009470096600, 0.016274394730905670605,
@@ -44,6 +37,54 @@ const GAUSSIANPOINTS32 = [
     0.985611511545268335400, 0.997263861849481563545
 ]
 
+# Cache for Lagrange stencils keyed by Gaussian order
+const LAGRANGE_STENCIL_CACHE = Dict{Int,Tuple{Vector{SVector{5,Float64}},Vector{SVector{5,Float64}}}}()
+
+"""
+    precompute_lagrange_stencils(gaussian_points)
+
+Precompute 5-point Lagrange interpolation stencils for Gaussian quadrature points.
+
+Returns a tuple `(left, right)` where each entry is a Vector of SVector{5,Float64}
+containing the stencil weights for points on the left/right panel.
+"""
+function precompute_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
+    stencil_points = SVector(-2, -1, 0, 1, 2)
+    npts = length(gaussian_points)
+    left = Vector{SVector{5,Float64}}(undef, npts)
+    right = Vector{SVector{5,Float64}}(undef, npts)
+
+    for ig in 1:npts
+        p_left = -1.0 + gaussian_points[ig]
+        p_right = 1.0 + gaussian_points[ig]
+
+        left[ig] = ntuple(5) do i
+            xi = stencil_points[i]
+            prod(j -> j == i ? 1.0 : (p_left - stencil_points[j]) / (xi - stencil_points[j]), 1:5)
+        end |> SVector
+
+        right[ig] = ntuple(5) do i
+            xi = stencil_points[i]
+            prod(j -> j == i ? 1.0 : (p_right - stencil_points[j]) / (xi - stencil_points[j]), 1:5)
+        end |> SVector
+    end
+
+    return left, right
+end
+
+"""
+    get_lagrange_stencils(gaussian_points)
+
+Return cached 5-point Lagrange stencils keyed by Gaussian order. Initializes
+and caches the stencils on first use for a given order.
+"""
+function get_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
+    order = length(gaussian_points)
+    return get!(LAGRANGE_STENCIL_CACHE, order) do
+        precompute_lagrange_stencils(gaussian_points)
+    end
+end
+
 """
     kernel!(grad_greenfunction_mat, greenfunction_mat, observer, source, n)
 
@@ -78,7 +119,8 @@ function kernel!(
     greenfunction_mat::Matrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
-    n::Int
+    n::Int;
+    GAUSS_ORDER::Int=8
 )
 
     mtheta = length(observer.x)
@@ -94,18 +136,28 @@ function kernel!(
         ((col_index-1)*mtheta+1):(col_index*mtheta)
     )
 
-    # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
+    # Zero out greenfunction_mat at start of each kernel call
     fill!(greenfunction_mat, 0.0)
-
-    if mtheta != length(observer.z) || mtheta != length(source.x) || mtheta != length(source.z)
-        error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
-    end
+    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    populate_greenfunction = source isa PlasmaGeometry
 
     # S₁ᵢ in Chance 1997, eq.(78)
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
     log_correction = [log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2]
+
+    # Precompute composite Simpson's 1/3 rule weights, excluding singular points
+    # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+    nsrc = mtheta - 3
+    simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
+
+    # Precompute quantities for Gaussian quadrature
+    GAUSSIANPOINTS, GAUSSIANWEIGHTS = FastGaussQuadrature.gausslegendre(GAUSS_ORDER) # on [-1, 1]
+    wgauss = GAUSSIANWEIGHTS .* dtheta # scale to [-Δθ, Δθ]
+    xgauss_left = -dtheta .+ GAUSSIANPOINTS .* dtheta # [-2Δθ, 0]
+    xgauss_right = dtheta .+ GAUSSIANPOINTS .* dtheta # [0, 2Δθ]
+    lagrange_left, lagrange_right = get_lagrange_stencils(GAUSSIANPOINTS)
 
     # TODO: this isn't the same as the periodic_cubic_deriv interpolation?
     # We need to interpolate off-grid during Gaussian quadrature
@@ -120,24 +172,20 @@ function kernel!(
 
     # Loop through observer points
     for j in 1:mtheta
-        # Initialize variables
+        # Get observer coordinates
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
         # Obtain nonsingular region (endpoints at j+2 and j-2, so exclude j-1, j, and j+1)
         nonsing_idx = mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
 
-        # Compute composite Simpson's 1/3 rule weights (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
-        # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-        nsrc = length(nonsing_idx)
-        simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
-
         # Perform Simpson integration for nonsingular source points
         for (isrc, wsimpson) in zip(nonsing_idx, simpson_weights)
-            # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
             G_n, coupling_n, coupling_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], source.dx_dtheta[isrc], source.dz_dtheta[isrc], n)
 
             # Sum contributions to Green's function matrices using Simpson weight
-            greenfunction_mat[j, isrc] += G_n * wsimpson
+            if populate_greenfunction
+                greenfunction_mat[j, isrc] += G_n * wsimpson
+            end
             grad_greenfunction_block[j, isrc] += coupling_n * wsimpson
             # Subtract regular integral component of δⱼᵢK⁰ in eq. 83
             grad_greenfunction_block[j, j] -= coupling_0 * wsimpson
@@ -148,10 +196,10 @@ function kernel!(
         sing_idx = mod1.(j .+ ((mtheta-2):(mtheta+2)), mtheta)
         # Integrate region of length 2 * dtheta on left/right of singularity
         for region in ["left", "right"]
-            gauss_mid = theta_obs + (region == "left" ? -dtheta : dtheta)
-            theta_gauss = gauss_mid .+ GAUSSIANPOINTS .* dtheta
-            wgauss = GAUSSIANWEIGHTS .* dtheta
-            for ig in 1:8 # 8-point Gaussian quadrature
+            # Get precomputed quadrature data
+            lagrange_stencil = (region == "left") ? lagrange_left : lagrange_right
+            theta_gauss = theta_obs .+ (region == "left" ? xgauss_left : xgauss_right)
+            for ig in 1:GAUSS_ORDER
                 # Compute green function for this Gaussian point
                 theta_gauss0 = mod(theta_gauss[ig], 2π)
                 x_gauss = spline_x(theta_gauss0)
@@ -160,44 +208,35 @@ function kernel!(
                 dz_dtheta_gauss = Interpolations.gradient(spline_z, theta_gauss0)[1]
                 G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
-                # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
-                if observer isa PlasmaGeometry && source isa PlasmaGeometry # previously iops
-                    G_n += log((theta_obs - theta_gauss[ig])^2) / x_obs
-                end
-
-                p = (theta_gauss[ig] - theta_obs) / dtheta # p = θ/Δ = (θⱼ - θ')/Δ
-                stencil_points = SVector(-2, -1, 0, 1, 2)
-                lagrange_stencil = ntuple(5) do i
-                    xi = stencil_points[i]
-                    prod(j -> j == i ? 1.0 : (p - stencil_points[j])/(xi - stencil_points[j]), 1:5)
-                end |> SVector
-
-                # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
-                if source isa PlasmaGeometry # previously iopw
-                    @. @views greenfunction_mat[j, sing_idx] += wgauss[ig] * G_n * lagrange_stencil
+                # First type of singularity: 𝒢ⁿ (Eq. 75: 2π𝒢ⁿ + log(θ-θ')²/X')
+                if populate_greenfunction
+                    if observer isa PlasmaGeometry
+                        # Remove singular behavior by adding on leading-order term, Chance eq.(75)
+                        G_n += log((theta_obs - theta_gauss[ig])^2) / x_obs
+                    end
+                    @. @views greenfunction_mat[j, sing_idx] += wgauss[ig] * G_n * lagrange_stencil[ig]
                 end
 
                 # Second type of singularity: 𝒦ⁿ (Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰)
-                @. @views grad_greenfunction_block[j, sing_idx] += wgauss[ig] * coupling_n * lagrange_stencil
-                # Subtract off the diverging singular n=0 component
+                @. @views grad_greenfunction_block[j, sing_idx] += wgauss[ig] * coupling_n * lagrange_stencil[ig]
                 grad_greenfunction_block[j, j] -= coupling_0 * wgauss[ig]
             end
         end
 
-        # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
-        if observer isa PlasmaGeometry && source isa PlasmaGeometry
+        # Add analytic singular integral (first type) from Chance eq. 78
+        if populate_greenfunction && observer isa PlasmaGeometry
             @. @views greenfunction_mat[j, sing_idx] -= log_correction / x_obs
         end
     end
 
     # Account for normal direction pointing out of vacuum integration region in 𝒦ⁿ ⋅ dS, previously isgn
     # Negative for plasma since dS = ∇ψ J dθdζ and ∇ψ points outward but outward normal is inward
-    @views grad_greenfunction_block .*= (source isa PlasmaGeometry ? -1 : 1)
+    grad_greenfunction_block .*= (source isa PlasmaGeometry ? -1 : 1)
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
     greenfunction_mat ./= 2π
 
-    # Determine residue based on logic similar to Table I of Chance 1997 + existing δⱼᵢ in eq. 69
+    # Add analytic singular integral (second type) from Table I of Chance 1997 + existing δⱼᵢ in eq. 69
     # Would need to pass in wall geometry to generalize this to open walls
     is_closed_toroidal = true
     if is_closed_toroidal # Chance eq. 89
@@ -219,9 +258,9 @@ Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coeffici
 
 # Arguments
 
-  - `gll`: Output matrix (mpert × mpert) updated in-place
-  - `gil`: Input matrix (mtheta × mpert) containing Fourier-space data
-  - `cs`: Fourier coefficient matrix (mtheta × mpert)
+  - `gll`: Output matrix (num_pert × num_pert) updated in-place
+  - `gil`: Input matrix (num_points × num_pert) containing Fourier-space data
+  - `cs`: Fourier coefficient matrix (num_points × num_pert)
   - `m00`: Integer offset in the gil matrix (row offset)
   - `l00`: Integer offset in the gil matrix (column offset)
   - `weight`: Quadrature weight factor
@@ -236,10 +275,9 @@ Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coeffici
   - gll(l2,l1) : output matrix updated in-place (mpert × mpert)
 """
 function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int, weight::Float64)
-
     # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
-    num_gridpoints, num_pert = size(cs)
-    mul!(gll, cs', view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), weight, 0.0)
+    num_points, num_pert = size(cs)
+    mul!(gll, cs', view(gil, (m00+1):(m00+num_points), (l00+1):(l00+num_pert)), weight, 0.0)
 end
 
 """
@@ -250,18 +288,17 @@ end
       using Fourier coefficients stored in cs.
 
     Inputs:
-      gij(i,j)   : input matrix of size (mth × mth), the "physical-space" data
-      cs(j,l)    : Fourier coefficient matrix (mth × mpert)
+      gij(i,j)   : input matrix of size (num_points × num_points), the "physical-space" data
+      cs(j,l)    : Fourier coefficient matrix (num_points × num_pert)
       m00, l00   : integer offsets in the gil matrix
 
     Output:
-      gil(i', l') : output matrix updated in-place (mth × mpert), where i' = m00 + i and l' = l00 + l
+      gil(i', l') : output matrix updated in-place (num_points × num_pert), where i' = m00 + i and l' = l00 + l
 """
 function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-
     # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
-    num_gridpoints, num_pert = size(cs)
-    mul!(view(gil, (m00+1):(m00+num_gridpoints), (l00+1):(l00+num_pert)), gij, cs)
+    num_points, num_pert = size(cs)
+    mul!(view(gil, (m00+1):(m00+num_points), (l00+1):(l00+num_pert)), gij, cs)
 end
 
 # Returns the array of derivatives at all x points, I think this acts like difspl
