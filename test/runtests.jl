@@ -16,7 +16,7 @@ else
     include("./runtests_spline.jl")
     include("./runtests_vacuum_julia.jl")
     include("./runtests_solovev.jl")
-    include("./runtests_ode.jl")
+    include("./runtests_eulerlagrange.jl")
     include("./runtests_sing.jl")
     include("./runtests_fullruns.jl")
 end
