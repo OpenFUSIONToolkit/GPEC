@@ -47,6 +47,31 @@ using Revise
 using JPEC
 ```
 
+### Benchmarking
+
+When asked to run benchmarks, use the following defaults unless specific instructions override them:
+
+**Default benchmark case:** `examples/DIIID-like_ideal_example`
+
+**Reference case:** The `origin/develop` branch. Always pull the latest developments before running the reference case:
+```bash
+git fetch origin develop
+```
+
+**Required metrics to report:**
+1. **Least stable eigenmode energy** - The first value of `et` (eigenvalue array). This verifies consistency of stability calculation results.
+2. **Number of steps** - Total integration steps taken by the ODE solver
+3. **Runtime** - Wall-clock execution time
+
+**Benchmark procedure:**
+1. Fetch and checkout `origin/develop` for the reference run
+2. Run the benchmark example and record metrics
+3. Switch to the test branch/version
+4. Run the same benchmark example and record metrics
+5. Compare results, highlighting any differences in eigenmode energy (indicates potential bugs) and performance changes
+
+Assume these defaults apply unless told otherwise.
+
 ## Architecture
 
 ### Module Structure
@@ -140,6 +165,7 @@ This format is used for compiling release notes, so tags should be human-readabl
 
 - Julia 1.11 is the target version
 - Tests include both Fortran and Julia implementations to ensure parity during conversion
+- **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
 - The Vacuum module is actively being converted from Fortran to Julia (see `vacuum_julia` branch)
 - When modifying equilibrium code, remember to update diagnostic outputs (gsec.h5, gse.h5, gsei.h5)
 - The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing

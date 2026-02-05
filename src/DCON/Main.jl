@@ -11,16 +11,15 @@ function Main(path::String="./")
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
-        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
     else
-        wall_settings = Vacuum.WallShapeSettings()
+        intr.wall_settings = Vacuum.WallShapeSettings()
     end
     if "DEBUG" in keys(inputs)
-        debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
-        debug_settings = DebugSettings()
+        intr.debug_settings = DebugSettings()
     end
-    intr.debug_settings = debug_settings
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
@@ -51,11 +50,10 @@ function Main(path::String="./")
         end
         mercier_scan!(locstab_fs, equil)
     end
-    # TODO: ballooning stability
-    #IF(bal_flag)THEN
-    #   IF(ctrl.verbose) WRITE(*,*)"Evaluating ballooning criterion"
-    #   CALL bal_scan
-    #ENDIF
+    if ctrl.bal_flag
+        compute_ballooning_stability!(ctrl, locstab_fs, equil)
+    end
+
     # Fit data to splines
     intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
 
@@ -160,7 +158,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr, wall_settings)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
                 println("Free-boundary mode unstable for n = $nstring.")
@@ -287,7 +285,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
             out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag
-            out_h5["locstab/ca1"] = Vector(locstab_fs[:, 4])
+            out_h5["locstab/ca1"] = Vector(intr.locstab.fs[:, 4])
         end
 
         # Write integration data

@@ -19,6 +19,7 @@ import StaticArrays: @MVector, @MMatrix
 include("DconStructs.jl")
 include("Main.jl")
 include("Mercier.jl")
+include("Bal.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")
