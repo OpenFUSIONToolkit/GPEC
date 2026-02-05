@@ -424,9 +424,23 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
 end
 
 """
+    dummy_kinetic_matrices(numpert::Int, mpsi::Int, sigma::Float64) -> Tuple{Vector{Matrix{ComplexF64}}, Vector{Matrix{ComplexF64}}}
+
+Builds dummy kinetic matrix data for each of the 6 kinetic components.
+Each entry is a `(mpsi, numpert^2)` matrix where each row is a flattened
+`numpert × numpert` identity scaled by `sigma`.
+"""
+function dummy_kinetic_matrices(numpert::Int, mpsi::Int, sigma::Float64)
+    kwmats = [sigma*Matrix{ComplexF64}(I, mpsi, numpert^2) for _ in 1:6]
+    ktmats = [sigma*Matrix{ComplexF64}(I, mpsi, numpert^2) for _ in 1:6]
+    return kwmats, ktmats
+end
+
+"""
     make_kinetic_matrix(equil, intr, ctrl, metric, ffit) -> FourFitVars
 
 Computes kinetic damping matrices and extends FourFitVars with kinetic terms.
+Supports alternate kinetic sources via `ctrl.kin_source`.
 Implements Fortran fourfit_kinetic_matrix method 0 (lines 983-1275).
 
 # Arguments
@@ -481,15 +495,27 @@ function make_kinetic_matrix(
         error("Only kingridtype = 0 (default) is implemented currently")
     end
 
-    # Determine particle type flag
-    ft = if ctrl.passing_flag && ctrl.trapped_flag
-        "f"  # full distribution
-    elseif ctrl.trapped_flag
-        "t"  # trapped only
-    elseif ctrl.passing_flag
-        "p"  # passing only
+    use_dummy = ctrl.kin_source == "dummy"
+    use_files = ctrl.kin_source == "file"
+    use_pentrc = ctrl.kin_source == "pentrc"
+
+    if !(use_dummy || use_files || use_pentrc)
+        error("Unknown kin_source: $(ctrl.kin_source). Use \"pentrc\", \"dummy\", or \"file\".")
+    end
+
+    # Determine particle type flag (PENTRC only)
+    ft = if use_pentrc
+        if ctrl.passing_flag && ctrl.trapped_flag
+            "f"  # full distribution
+        elseif ctrl.trapped_flag
+            "t"  # trapped only
+        elseif ctrl.passing_flag
+            "p"  # passing only
+        else
+            error("Kinetic calculations require passing_flag and/or trapped_flag")
+        end
     else
-        error("Kinetic calculations require passing_flag and/or trapped_flag")
+        ""
     end
 
     # Allocate flat storage arrays (for spline fitting)
@@ -512,42 +538,59 @@ function make_kinetic_matrix(
     r3mats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     gaats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
 
+    # Optional kinetic source data (dummy or files)
+    dummy_kwmats = nothing
+    dummy_ktmats = nothing
+    if use_dummy
+        println("Using dummy kinetic matrices with sigma = $(ctrl.kin_dummy_sigma)")
+        dummy_kwmats, dummy_ktmats = dummy_kinetic_matrices(intr.numpert_total, mpsi, ctrl.kin_dummy_sigma)
+    elseif use_files
+        error("kin_source = :file not implemented yet")
+    end
+
     # Parallel loop over radial surfaces (matches Fortran OMP PARALLEL DO)
     # TODO: the above is Claude's claim- verify this is true
     Threads.@threads for ipsi in 1:mpsi
         psifac = metric.xs[ipsi]
 
         # Accumulate kinetic contributions over ell (sequential per thread)
-        kwmat_sum = zeros(ComplexF64, intr.mpert, intr.mpert, 6)
-        ktmat_sum = zeros(ComplexF64, intr.mpert, intr.mpert, 6)
+        kwmat_sum = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 6)
+        ktmat_sum = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 6)
 
-        for ell in (-nl):nl
-            # Ions
-            if ctrl.ion_flag
-                kwmat_l, _ = compute_tpsi_matrices(
-                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
-                    is_electron=false, particle_type=ft*"wmm"
-                )
-                _, ktmat_l = compute_tpsi_matrices(
-                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
-                    is_electron=false, particle_type=ft*"tmm"
-                )
-                kwmat_sum .+= kwmat_l
-                ktmat_sum .+= ktmat_l
+        if use_dummy
+            for i in 1:6
+                kwmat_sum[:, :, i] .= reshape(dummy_kwmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
+                ktmat_sum[:, :, i] .= reshape(dummy_ktmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
             end
+        else
+            for ell in (-nl):nl
+                # Ions
+                if ctrl.ion_flag
+                    kwmat_l, _ = compute_tpsi_matrices(
+                        psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                        is_electron=false, particle_type=ft*"wmm"
+                    )
+                    _, ktmat_l = compute_tpsi_matrices(
+                        psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                        is_electron=false, particle_type=ft*"tmm"
+                    )
+                    kwmat_sum .+= kwmat_l
+                    ktmat_sum .+= ktmat_l
+                end
 
-            # Electrons
-            if ctrl.electron_flag
-                kwmat_l, _ = compute_tpsi_matrices(
-                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
-                    is_electron=true, particle_type=ft*"wmm"
-                )
-                _, ktmat_l = compute_tpsi_matrices(
-                    psifac, ctrl.nn_low, ell, equil, ctrl, intr,
-                    is_electron=true, particle_type=ft*"tmm"
-                )
-                kwmat_sum .+= kwmat_l
-                ktmat_sum .+= ktmat_l
+                # Electrons
+                if ctrl.electron_flag
+                    kwmat_l, _ = compute_tpsi_matrices(
+                        psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                        is_electron=true, particle_type=ft*"wmm"
+                    )
+                    _, ktmat_l = compute_tpsi_matrices(
+                        psifac, ctrl.nn_low, ell, equil, ctrl, intr,
+                        is_electron=true, particle_type=ft*"tmm"
+                    )
+                    kwmat_sum .+= kwmat_l
+                    ktmat_sum .+= ktmat_l
+                end
             end
         end
 

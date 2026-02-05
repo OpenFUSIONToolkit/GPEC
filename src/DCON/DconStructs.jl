@@ -90,7 +90,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
   - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
+  - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
@@ -114,7 +114,7 @@ A mutable struct holding internal state variables for stability calculations.
     keq_out::Bool = false
     theta_out::Bool = false
     xlmda_out::Bool = false
-    fkg_kmats_flag::Bool = false
+    fkg_kmats_flag::Bool = true #TODO: in Fortran this is set false by default until method 0 is selected (which is the only one we have implemented right now) then it gets flipped to true
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
@@ -164,6 +164,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kin_flag::Bool` - Enable kinetic effects
+  - `kin_source::String` - Source of kinetic matrices ("pentrc", "dummy", "file")
+  - `kin_dummy_sigma::Float64` - Scale factor for dummy kinetic matrices
   - `con_flag::Bool` - Continue integration through rationals without zeroing singular solutions
   - `kinfac1::Float64` - First kinetic scaling factor (not yet implemented)
   - `kinfac2::Float64` - Second kinetic scaling factor (not yet implemented)
@@ -220,6 +222,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
+    kin_source::String = "pentrc"
+    kin_dummy_sigma::Float64 = 1e-2
     con_flag::Bool = false
     kinfac1::Float64 = 1.0
     kinfac2::Float64 = 1.0

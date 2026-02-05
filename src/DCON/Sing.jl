@@ -741,7 +741,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
             odet.ktmat[:, :, i] .= reshape(ktmat_temp, intr.numpert_total, intr.numpert_total)
         end
 
-        # Evaluate kinetic matrices (infrastructure ready, ODE formulation not yet implemented)
+        # Evaluate kinetic matrices
         if intr.fkg_kmats_flag
             # Make local storage for kinetic matrices- TODO: should these be included in a struct? I don't think they have to be passed around
             f0mat = Vector{ComplexF64}(undef, intr.numpert_total^2)
@@ -765,15 +765,16 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
             Spl.spline_eval!(r1mat, ffit.r1mats, psieval)
             Spl.spline_eval!(r2mat, ffit.r2mats, psieval)
             Spl.spline_eval!(r3mat, ffit.r3mats, psieval)
-            Spl.spline_eval!(gaat, ffit.gaamats, psieval)
+            Spl.spline_eval!(gaat, ffit.gaats, psieval)
 
             # Initialize the banded matrix storage
             amatlu = zeros(ComplexF64, 3*intr.mband+1, intr.numpert_total)
+            amat_reshaped = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
 
             # Fill the banded matrix storage
             for jpert in 1:intr.numpert_total
                 for ipert in 1:intr.numpert_total
-                    amatlu[(2*intr.mband+1+ipert-jpert, jpert)]=odet.amat(ipert, jpert)
+                    amatlu[2*intr.mband+1+ipert-jpert, jpert] = amat_reshaped[ipert, jpert]
                 end
             end
 
@@ -782,7 +783,16 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
             amatlu .= amatlu_fact
 
             # gbtrf! modifies amatlu in-place and returns (ab_modified, ipiv)
-        else
+
+            # Precompute cmat_solved for later use
+            cmat_mat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
+            cmat_solved = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+            for j in 1:intr.numpert_total
+                temp_col = copy(cmat_mat[:, j])
+                LAPACK.gbtrs!('N', intr.mband, intr.mband, intr.numpert_total, amatlu, ipiv, temp_col)
+                cmat_solved[:, j] .= temp_col
+            end
+        else #TODO: This may be very inefficient- we need to figure out if this is necessary
             # Kinetic matrix computation using OdeState workspace
             # Note: baat, caat, eaat are computed as matrices for operations
             odet.amat .=
@@ -1103,8 +1113,7 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
     #-----------------------------------------------------------------------
     # Compute q and singfac
     #-----------------------------------------------------------------------
-    spline_eval!(equil.sq, psifac, 0)
-    q = equil.sq.f[4]
+    q = Spl.spline_eval!(equil.sq, psifac)[4]
     nn = intr.nlow #Choosing one for now but eventually going to need multi-n support here
     nq = nn * q
     singfac = [intr.mlow - nn*q + ipert for ipert in 0:(intr.mpert-1)]
@@ -1118,33 +1127,22 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
     if ctrl.kin_flag
         if intr.fkg_kmats_flag
             # Evaluate splines
-            cspline_eval!(ffit.f0mats, psifac, 0)
-            cspline_eval!(ffit.pmats, psifac, 0)
-            cspline_eval!(ffit.paats, psifac, 0)
-            cspline_eval!(ffit.r1mats, psifac, 0)
-
-            f0mat = reshape(ffit.f0mats.f, intr.mpert, intr.mpert)
-            pmat = reshape(ffit.pmats.f, intr.mpert, intr.mpert)
-            paat = reshape(ffit.paats.f, intr.mpert, intr.mpert)
-            r1mat = reshape(ffit.r1mats.f, intr.mpert, intr.mpert)
+            f0mat = reshape(Spl.spline_eval!(ffit.f0mats, psifac), intr.mpert, intr.mpert)
+            pmat = reshape(Spl.spline_eval!(ffit.pmats, psifac), intr.mpert, intr.mpert)
+            paat = reshape(Spl.spline_eval!(ffit.paats, psifac), intr.mpert, intr.mpert)
+            r1mat = reshape(Spl.spline_eval!(ffit.r1mats, psifac), intr.mpert, intr.mpert)
         else
             # Evaluate splines
-            cspline_eval!(ffit.amats, psifac, 0)
-            cspline_eval!(ffit.dmats, psifac, 0)
-            cspline_eval!(ffit.fmats_lower, psifac, 0)
-
-            amat = reshape(ffit.amats.f, intr.mpert, intr.mpert)
-            dbat = reshape(ffit.dmats.f, intr.mpert, intr.mpert)
-            fmat = reshape(ffit.fmats_lower.f, intr.mpert, intr.mpert)
+            amat = reshape(Spl.spline_eval!(ffit.amats, psifac), intr.mpert, intr.mpert)
+            dbat = reshape(Spl.spline_eval!(ffit.dmats, psifac), intr.mpert, intr.mpert)
+            fmat = reshape(Spl.spline_eval!(ffit.fmats_lower, psifac), intr.mpert, intr.mpert)
 
             kwmat = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
             ktmat = zeros(ComplexF64, intr.mpert, intr.mpert, 4)
 
             for i in 1:4
-                cspline_eval!(ffit.kwmats[i], psifac, 0)
-                cspline_eval!(ffit.ktmats[i], psifac, 0)
-                kwmat[:, :, i] = reshape(ffit.kwmats[i].f, intr.mpert, intr.mpert)
-                ktmat[:, :, i] = reshape(ffit.ktmats[i].f, intr.mpert, intr.mpert)
+                kwmat[:, :, i] = reshape(Spl.spline_eval!(ffit.kwmats[i], psifac), intr.mpert, intr.mpert)
+                ktmat[:, :, i] = reshape(Spl.spline_eval!(ffit.ktmats[i], psifac), intr.mpert, intr.mpert)
             end
 
             amat = amat + kwmat[:, :, 1] + ktmat[:, :, 1]
@@ -1223,13 +1221,9 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
         end
     else
         # Non-kinetic case (Hermitian)
-        cspline_eval!(ffit.amats, psifac, 0)
-        cspline_eval!(ffit.dmats, psifac, 0)
-        cspline_eval!(ffit.fmats_lower, psifac, 0)
-
-        amat = reshape(ffit.amats.f, intr.mpert, intr.mpert)
-        dbat = reshape(ffit.dmats.f, intr.mpert, intr.mpert)
-        fmat = reshape(ffit.fmats_lower.f, intr.mpert, intr.mpert)
+        amat = reshape(Spl.spline_eval!(ffit.amats, psifac), intr.mpert, intr.mpert)
+        dbat = reshape(Spl.spline_eval!(ffit.dmats, psifac), intr.mpert, intr.mpert)
+        fmat = reshape(Spl.spline_eval!(ffit.fmats_lower, psifac), intr.mpert, intr.mpert)
 
         # Hermitian factorization (Bunch-Kaufman)
         amat_copy = copy(amat)
@@ -1327,12 +1321,12 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
     i_depth = 0
     i_record = 0
     x0 = equil.config.control.psilow  #We should probably put this somewhere else
-    x1 = ctrl.psilim
+    x1 = intr.psilim
 
     #-----------------------------------------------------------------------
     # Adaptively search the singular point
     #-----------------------------------------------------------------------
-    odet.sing_flag = false
+    sing_flag = Ref(false)
     det0 = sing_get_f_det!(ffit, x0, intr, equil, ctrl)
     det1 = sing_get_f_det!(ffit, x1, intr, equil, ctrl)
 
@@ -1341,7 +1335,7 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
     singnum += 1
     psising[singnum] = x0
     sing_det = det0
-    odet.sing_flag = true
+    sing_flag[] = true
 
     #= TODO: We are getting rid of all this writng stuff, right?
     # Open output files
@@ -1358,13 +1352,15 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
     #TODO: convert
     adp_find_sing!(x0, x1, det_max, det0, det1, psising,
         Ref(singnum), Ref(i_recur), Ref(i_depth), Ref(i_record),
-        tol, Ref(sing_det), Ref(odet.sing_flag), tmp_record,
+        tol, Ref(sing_det), sing_flag, tmp_record,
         ffit, equil, intr, ctrl)
 
     # bin_close(bin_unit)
 
     # Allocate and copy data
     sing_detf = tmp_record[:, 1:i_record]
+
+    psilow = equil.config.control.psilow
 
     # Adjust boundaries
     if psising[1] > psilow
@@ -1373,9 +1369,9 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
         singnum += 1
     end
 
-    if psising[singnum] < psilim
+    if psising[singnum] < intr.psilim
         singnum += 1
-        psising[singnum] = psilim
+        psising[singnum] = intr.psilim
     end
 
     #-----------------------------------------------------------------------
@@ -1386,7 +1382,9 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
 
     for i in 2:(singnum-1)
         x1 = psising[i]
-        x1 = sing_newton(det_func, x1, psising[i-1], psising[i+1]) #TODO: convert this function and what is going on with the nested function call
+        x1_ref = Ref(x1)
+        sing_newton!(det_func, x1_ref, psising[i-1], psising[i+1])
+        x1 = x1_ref[]
         det0 = sing_get_f_det!(ffit, psising[i], intr, equil, ctrl)
         det1 = sing_get_f_det!(ffit, x1, intr, equil, ctrl)
 
@@ -1404,8 +1402,8 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
     singnum = 1
 
     if ctrl.verbose
-        println("Looking for singularities below ", scientific(keps1),
-            "x the maximum determinant of ", scientific(abs(det_max)))
+        println("Looking for singularities below ", @sprintf("%.3e", keps1),
+            "x the maximum determinant of ", @sprintf("%.3e", abs(det_max)))
     end
 
     psising[1] = psising_check[1]
@@ -1419,14 +1417,14 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
             singnum += 1
             psising[singnum] = psising_check[i]
             if debug
-                println("  > psi ", scientific(psising_check[i]),
+                println("  > psi ", @sprintf("%.3e", abs(psising_check[i])),
                     " is singular")
             end
         else
             if debug
-                println("  - psi ", scientific(psising_check[i]),
+                println("  - psi ", @sprintf("%.3e", abs(psising_check[i])),
                     " is not singular. Determinant is ",
-                    scientific(abs(det0) / (abs(det_max) * eps)),
+                    @sprintf("%.3e", abs(abs(det0) / (abs(det_max) * eps))),
                     "x the threshold")
             end
         end
@@ -1449,22 +1447,21 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
 
     # Create kinetic singular surface structures
     intr.kmsing = singnum - 2
-    intr.kinsing = Vector{KineticSingular}(undef, intr.kmsing)
+    intr.kinsing = Vector{SingType}(undef, intr.kmsing)
 
     for ising in 1:intr.kmsing
-        intr.kinsing[ising] = KineticSingular(;
-            m=ising,
+        intr.kinsing[ising] = SingType(;
+            m=[ising],
             psifac=psising[ising+1],
             rho=sqrt(psising[ising+1]),
             q=0.0,      # Will be set below
             q1=0.0      # Will be set below
         )
 
-        # Evaluate spline
-        spline_eval!(equil.sq, psising[ising+1], 1)
-        #spline_result = spline_eval(equil.sq, psising[ising+1], 1)
-        intr.kinsing[ising].q = equil.sq.f[4] #spline_result.f[4]
-        intr.kinsing[ising].q1 = equil.sq.f1[4] #spline_result.f1[4]
+        # Evaluate spline and first derivative
+        f, f1 = Spl.spline_deriv1!(equil.sq, psising[ising+1])
+        intr.kinsing[ising].q = f[4]
+        intr.kinsing[ising].q1 = f1[4]
     end
 
     # Print results
@@ -1473,8 +1470,8 @@ function ksing_find(ctrl::DconControl, intr::DconInternal, odet::OdeState, ffit:
             println("  > Found kinetic singular surfaces:")
             println("   ", rpad("psi", 16), rpad("q", 16))
             for ising in 1:intr.kmsing
-                println("   ", rpad(scientific(intr.kinsing[ising].psifac), 16),
-                    rpad(scientific(intr.kinsing[ising].q), 16))
+                println("   ", rpad(@sprintf("%.3e", intr.kinsing[ising].psifac), 16),
+                    rpad(@sprintf("%.3e", intr.kinsing[ising].q), 16))
             end
         else
             println("  > Found no kinetic singular surfaces")

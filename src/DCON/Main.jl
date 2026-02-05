@@ -160,7 +160,7 @@ function Main(path::String="./")
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.kin_flag
             #TODO: does ksing_find change any of these items? probably. which ones? probably ffit? definitely intr need to reorder the function params and add ! to the function if it does
-            ksing_find(ctrl, intr, odet, ffit, equil, intr.DebugSettings.output_benchmark_data)
+            ksing_find(ctrl, intr, odet, ffit, equil; debug=intr.debug_settings.output_benchmark_data)
         end
     end
 
@@ -253,7 +253,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         # Write derived equilibrium parameters
         for (key, val) in zip(fieldnames(Equilibrium.EquilibriumParameters), getfield.(Ref(equil.params), fieldnames(Equilibrium.EquilibriumParameters)))
             if val !== nothing # TODO: looks like ro, zo, psio, and b_norm are not set, so skipping those for now but should fix eventually
-                out_h5["equil/$key"] = val
+                out_h5["equil/$key"] = val isa Symbol ? String(val) : val
             end
         end
         out_h5["equil/psio"] = equil.psio

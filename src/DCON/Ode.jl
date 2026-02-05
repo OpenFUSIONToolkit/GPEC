@@ -614,7 +614,7 @@ end
     findmax_dW_edge!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
 
 Records the total dW in the integration region between `ctrl.psiedge` and
-`ctrl.psilim`. This performs the same function as `ode_record_edge` in the
+`intr.psilim`. This performs the same function as `ode_record_edge` in the
 Fortran, but everything is now done post-integration which cleans up the logic,
 i.e. no "_edge" arrays.
 
