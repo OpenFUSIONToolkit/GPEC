@@ -310,10 +310,12 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
             out_h5["vacuum/ep"] = vac.ep
             out_h5["vacuum/ev"] = vac.ev
             out_h5["vacuum/et"] = vac.et
-            out_h5["vacuum/x_plasma"] = vac.xzpts[:, 1]
-            out_h5["vacuum/z_plasma"] = vac.xzpts[:, 2]
-            out_h5["vacuum/x_wall"] = vac.xzpts[:, 3]
-            out_h5["vacuum/z_wall"] = vac.xzpts[:, 4]
+            out_h5["vacuum/x_plasma"] = vac.plasma_coords[:, 1]
+            out_h5["vacuum/y_plasma"] = vac.plasma_coords[:, 2]
+            out_h5["vacuum/z_plasma"] = vac.plasma_coords[:, 3]
+            out_h5["vacuum/x_wall"] = vac.wall_coords[:, 1]
+            out_h5["vacuum/y_wall"] = vac.wall_coords[:, 2]
+            out_h5["vacuum/z_wall"] = vac.wall_coords[:, 3]
         end
     end
 end

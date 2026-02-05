@@ -53,6 +53,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         # Compute 3D vacuum response matrix
         vac_inputs = compute_vacuum_inputs(intr.psilim, 1, ctrl, equil, intr) # n doesn't matter here
         vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, intr.nlow, intr.npert)
+        t_3d = @elapsed wv3D, _, _, _ = Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
+        if ctrl.verbose
+            println("3D vacuum response computation time: $(round(t_3d, digits=4))s")
+        end
         wv3D, _, _, _ = Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
 
         # Scale by (m - n*q)(m' - n'*q)

@@ -405,7 +405,8 @@ function compute_3D_kernel_matrix!(
     greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
-    PATCH_RAD::Int,
+    PATCH_RAD_POL::Int,
+    PATCH_RAD_TOR::Int,
     RAD_DIM::Int,
     INTERP_ORDER::Int
 )
@@ -427,7 +428,7 @@ function compute_3D_kernel_matrix!(
     populate_greenfunction = source isa PlasmaGeometry3D
 
     # Initialize quadrature data
-    quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    quad_data = get_singular_quadrature(PATCH_RAD_POL, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
     @assert observer.mtheta ≥ PATCH_DIM
     @assert observer.nzeta ≥ PATCH_DIM

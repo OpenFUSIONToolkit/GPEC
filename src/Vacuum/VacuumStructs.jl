@@ -143,14 +143,14 @@ of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
   - `sin_mn_basis::Matrix{Float64}`: sin(mθ - nν) basis functions for poloidal modes at plasma surface
   - `cos_mn_basis::Matrix{Float64}`: cos(mθ - nν) basis functions for poloidal modes at plasma surface
 """
-struct PlasmaGeometry
-    x::Vector{Float64}
-    z::Vector{Float64}
-    ν::Vector{Float64}
-    dx_dtheta::Vector{Float64}
-    dz_dtheta::Vector{Float64}
-    sin_mn_basis::Matrix{Float64}
-    cos_mn_basis::Matrix{Float64}
+@kwdef struct PlasmaGeometry
+    x::Vector{Float64} = Float64[]
+    z::Vector{Float64} = Float64[]
+    ν::Vector{Float64} = Float64[]
+    dx_dtheta::Vector{Float64} = Float64[]
+    dz_dtheta::Vector{Float64} = Float64[]
+    sin_mn_basis::Matrix{Float64} = zeros(1, 1)
+    cos_mn_basis::Matrix{Float64} = zeros(1, 1)
 end
 
 """
@@ -225,19 +225,21 @@ that the gradient/area elements are scaled by dθ and dζ.
   - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_gridpoints, 3)
   - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
   - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
-  - `n::Matrix{Float64}`: Outward normal vectors, shape (num_gridpoints, 3)
+  - `normal::Matrix{Float64}`: Outward normal vectors, shape (num_gridpoints, 3)
   - `sin_mn_basis3D::Matrix{Float64}`: sin(mθ - nν - nϕ) basis functions at plasma surface
   - `cos_mn_basis3D::Matrix{Float64}`: cos(mθ - nν - nϕ) basis functions at plasma surface
+  - `aspect_ratio::Float64`: Ratio of max to min grid spacing for anisotropy analysis
 """
 @kwdef struct PlasmaGeometry3D
-    mtheta::Int
-    nzeta::Int
-    r::Matrix{Float64}
-    dr_dθ::Matrix{Float64}
-    dr_dζ::Matrix{Float64}
-    normal::Matrix{Float64}
-    sin_mn_basis3D::Matrix{Float64}
-    cos_mn_basis3D::Matrix{Float64}
+    mtheta::Int = 1
+    nzeta::Int = 1
+    r::Matrix{Float64} = zeros(1, 3)
+    dr_dθ::Matrix{Float64} = zeros(1, 3)
+    dr_dζ::Matrix{Float64} = zeros(1, 3)
+    normal::Matrix{Float64} = zeros(1, 3)
+    sin_mn_basis3D::Matrix{Float64} = zeros(1, 1)
+    cos_mn_basis3D::Matrix{Float64} = zeros(1, 1)
+    aspect_ratio::Float64 = 1.0
 end
 
 """
@@ -308,23 +310,19 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     # Warn if grid spacing is highly anisotropic
     spacing_θ = sqrt(sum(abs2, dr_dθ) / size(dr_dθ, 1)) * dθ
     spacing_ζ = sqrt(sum(abs2, dr_dζ) / size(dr_dζ, 1)) * dζ
-    aspect_ratio = max(spacing_θ, spacing_ζ) / min(spacing_θ, spacing_ζ)
+    aspect_ratio = spacing_ζ / spacing_θ
     @info "Average grid spacing [m]: dθ=$(round(spacing_θ, digits=4)), dζ=$(round(spacing_ζ, digits=4)), aspect ratio=$(round(aspect_ratio, digits=2))"
     aspect_ratio > 10.0 && @warn "Grid aspect ratio is highly anisotropic, which may degrade quadrature accuracy"
 
     # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
     sin_mn_basis3D = zeros(num_points, mpert*npert)
     cos_mn_basis3D = zeros(num_points, mpert*npert)
-    for idx_n in 1:npert
+    for idx_n in 1:npert, idx_m in 1:mpert
         n = nlow + idx_n - 1
-        for idx_m in 1:mpert
-            m = mlow + idx_m - 1
-            for j in 1:nzeta
-                for i in 1:mtheta
-                    cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
-                    sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ_grid[i] - n * (ν[i] + ϕ_grid[j]))
-                end
-            end
+        m = mlow + idx_m - 1
+        for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
+            cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
+            sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
         end
     end
 
@@ -336,7 +334,8 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
         dr_dζ,
         normal,
         sin_mn_basis3D,
-        cos_mn_basis3D
+        cos_mn_basis3D,
+        aspect_ratio
     )
 end
 
@@ -356,12 +355,12 @@ Struct holding wall geometry data for vacuum calculations. Arrays are of length
   - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at wall
 """
 @kwdef struct WallGeometry
-    nowall::Bool
-    is_closed_toroidal::Bool
-    x::Vector{Float64}
-    z::Vector{Float64}
-    dx_dtheta::Vector{Float64}
-    dz_dtheta::Vector{Float64}
+    nowall::Bool = true
+    is_closed_toroidal::Bool = true
+    x::Vector{Float64} = Float64[]
+    z::Vector{Float64} = Float64[]
+    dx_dtheta::Vector{Float64} = Float64[]
+    dz_dtheta::Vector{Float64} = Float64[]
 end
 
 """
@@ -533,14 +532,14 @@ Struct holding wall geometry data for vacuum calculations. Arrays are of length
   - `normal::Matrix{Float64}`: Outward normal vectors at wall
 """
 @kwdef struct WallGeometry3D
-    nowall::Bool
-    is_closed_toroidal::Bool
-    mtheta::Int
-    nzeta::Int
-    r::Matrix{Float64}
-    dr_dθ::Matrix{Float64}
-    dr_dζ::Matrix{Float64}
-    normal::Matrix{Float64}
+    nowall::Bool = true
+    is_closed_toroidal::Bool = true
+    mtheta::Int = 1
+    nzeta::Int = 1
+    r::Matrix{Float64} = zeros(1, 3)
+    dr_dθ::Matrix{Float64} = zeros(1, 3)
+    dr_dζ::Matrix{Float64} = zeros(1, 3)
+    normal::Matrix{Float64} = zeros(1, 3)
 end
 
 """
