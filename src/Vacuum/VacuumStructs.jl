@@ -625,13 +625,13 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
         centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
         for (j, ϕ) in enumerate(ϕ_grid), i in 1:mtheta
             idx = i + (j - 1) * mtheta
-            k_prev = mod1(i - 1, mtheta)
-            k_next = mod1(i + 1, mtheta)
-            # Compute normal direction in poloidal plane
-            alph = atan(x_plasma[k_next] - x_plasma[k_prev], z_plasma[k_prev] - z_plasma[k_next])
-            # Wall radius in cylindrical coordinates
-            R_wall = max(centerstack_min, x_plasma[i] + dx * cos(alph))
-            Z_wall = z_plasma[i] + dx * sin(alph)
+            prev = mod1(i - 1, mtheta)
+            next = mod1(i + 1, mtheta)
+            # Approximate local tangent t = (dx, dz) using centered finite differences, t ≈ (dx, dz)
+            # Then, extend in normal direction, n = (-dz, dx)
+            alph = -atan(x_plasma[next] - x_plasma[prev], z_plasma[next] - z_plasma[prev])
+            R_wall = max(centerstack_min, x_plasma[i] + a * r_minor * cos(alph))
+            Z_wall = z_plasma[i] + a * r_minor * sin(alph)
             # Map to Cartesian (X, Y, Z)
             r[idx, :] .= [R_wall * cos(ϕ), R_wall * sin(ϕ), Z_wall]
         end
@@ -647,7 +647,7 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
         bw_eff = (zh * cosh(zmuw)) / a
         for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
             idx = i + (j - 1) * mtheta
-            r[idx, :] .= [(r_major + a * cos(θ)) * cos(ϕ), (r_major + a * cos(θ)) * sin(ϕ), -bw_eff * a * sin(θ)]
+            r[idx, :] .= [(r_major + a * cos(θ)) * cos(ϕ), (r_major + a * cos(θ)) * sin(ϕ), bw_eff * a * sin(θ)]
         end
     elseif wall_settings.shape == "dee"
         error("Dee-shaped walls not yet implemented for 3D walls.")

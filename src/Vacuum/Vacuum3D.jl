@@ -527,9 +527,4 @@ function compute_3D_kernel_matrix!(
             grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
         end
     end
-
-    # Account for normal direction pointing out of vacuum integration region in 𝒦ⁿ ⋅ dS
-    # Negative for plasma since dS = ∇ψ J dθdζ and ∇ψ points outward but outward normal is inward
-    # grad_greenfunction_block .*= (source isa PlasmaGeometry3D ? -1 : 1)
-    # grad_greenfunction_block .*= source.normal_orient
 end
