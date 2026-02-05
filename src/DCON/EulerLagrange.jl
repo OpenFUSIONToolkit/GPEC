@@ -366,6 +366,7 @@ and `ode_record_edge` post-integration using the saved data.
 """
 function integrator_callback!(integrator)
 
+    # unpack parameters. Note the 2 unused items are needed to match the signature in the integrand sing_der!
     ctrl, _, _, intr, odet, chunk = integrator.p
 
     # Update integration tolerances

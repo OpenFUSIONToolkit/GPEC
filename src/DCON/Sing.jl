@@ -701,6 +701,7 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     psieval::Float64)
 
     # Unpack structs and initialize
+    # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
     _, equil, ffit, intr, odet, _ = params
     fill!(odet.tmp, 0)
     u1 = @view(u[:, :, 1])
