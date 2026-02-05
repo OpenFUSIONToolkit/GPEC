@@ -169,7 +169,317 @@ Clone it from GitHub directly to your virtual machine.
 
 ## On macOS
 
-(Setup instructions to be added)
+### Prerequisites
+
+Before starting, you'll need a Terminal app to enter commands. You can find it by:
+- Press `Cmd + Space` to open Spotlight
+- Type "Terminal" and press Enter
+
+Keep this Terminal window open throughout the installation process.
+
+### 1. Install Xcode Command Line Tools
+
+These tools provide the compilers needed to build Fortran code.
+
+1. Open Terminal and run:
+   ```bash
+   xcode-select --install
+   ```
+
+2. A dialog will appear asking you to install the tools. Click "Install" and wait for it to complete (this may take several minutes).
+
+3. Verify installation:
+   ```bash
+   gcc --version
+   ```
+   You should see output showing the GCC version.
+
+### 2. Install Homebrew (Package Manager)
+
+Homebrew makes it easy to install software on macOS. If you already have Homebrew installed, skip to step 3.
+
+1. Install Homebrew by running this command in Terminal:
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+2. Follow the on-screen instructions. You may need to enter your Mac password.
+
+3. After installation completes, the installer will show you two commands to run to add Homebrew to your PATH. They will look something like:
+   ```bash
+   echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+   eval "$(/opt/homebrew/bin/brew shellenv)"
+   ```
+   **Important:** Copy and run these exact commands from your Terminal output.
+
+4. Verify Homebrew is installed:
+   ```bash
+   brew --version
+   ```
+
+### 3. Install Fortran Compiler
+
+The Fortran compiler is needed to build JPEC's Fortran components.
+
+1. Install GCC (which includes gfortran):
+   ```bash
+   brew install gcc
+   ```
+   This may take several minutes to complete.
+
+2. Verify gfortran is installed:
+   ```bash
+   gfortran --version
+   ```
+
+### 4. Install Julia
+
+Julia is the programming language JPEC is written in.
+
+**Option A: Install via Homebrew (Recommended for beginners)**
+
+1. Install Julia:
+   ```bash
+   brew install julia
+   ```
+
+2. Verify Julia is installed:
+   ```bash
+   julia --version
+   ```
+   You should see something like `julia version 1.11.x`.
+
+**Option B: Install via Official Installer**
+
+1. Go to [https://julialang.org/downloads/](https://julialang.org/downloads/)
+
+2. Download the macOS installer (`.dmg` file) for the latest stable version (1.11 or higher)
+
+3. Open the downloaded `.dmg` file and drag Julia to your Applications folder
+
+4. Add Julia to your PATH by running in Terminal:
+   ```bash
+   sudo mkdir -p /usr/local/bin
+   sudo ln -s /Applications/Julia-1.11.app/Contents/Resources/julia/bin/julia /usr/local/bin/julia
+   ```
+   Replace `1.11` with your actual version if different.
+
+5. Verify Julia is installed:
+   ```bash
+   julia --version
+   ```
+
+### 5. Install Python and Jupyter (For Running Notebooks)
+
+Jupyter notebooks (`.ipynb` files) require Python. If you only want to run Julia scripts and not notebooks, you can skip this step.
+
+1. Install Python via Homebrew:
+   ```bash
+   brew install python
+   ```
+
+2. Install Jupyter:
+   ```bash
+   pip3 install jupyter jupyterlab notebook ipykernel
+   ```
+
+3. Verify Jupyter is installed:
+   ```bash
+   jupyter --version
+   ```
+
+### 6. Clone the JPEC Repository
+
+Now we'll download the JPEC code from GitHub.
+
+1. Choose where you want to put JPEC. For example, your home directory:
+   ```bash
+   cd ~
+   ```
+   Or create a Code folder:
+   ```bash
+   mkdir -p ~/Code
+   cd ~/Code
+   ```
+
+2. Clone JPEC from GitHub:
+   ```bash
+   git clone https://github.com/OpenFUSIONToolkit/JPEC.git
+   ```
+   If you don't have `git` installed, macOS will prompt you to install it.
+
+3. Enter the JPEC directory:
+   ```bash
+   cd JPEC
+   ```
+
+### 7. Build Fortran Dependencies
+
+JPEC includes Fortran code that needs to be compiled into libraries.
+
+1. Navigate to the Splines Fortran source folder:
+   ```bash
+   cd ~/Code/JPEC/src/Splines/fortran
+   ```
+   **Note:** Adjust the path if you cloned JPEC to a different location (e.g., `~/JPEC` instead of `~/Code/JPEC`).
+
+2. Clean any previous builds:
+   ```bash
+   make clean
+   ```
+
+3. Build the Fortran library:
+   ```bash
+   make
+   ```
+   You should see compilation messages and eventually "Build complete!"
+
+4. Verify the spline library was created:
+   ```bash
+   ls -l ../../../deps/libspline.dylib
+   ```
+   You should see the file listed.
+
+5. Build the Vacuum Fortran library:
+   ```bash
+   cd ~/Code/JPEC/src/Vacuum/fortran
+   make clean
+   make
+   ```
+
+6. Verify the vacuum library was created:
+   ```bash
+   ls -l ../../../deps/libvac.dylib
+   ```
+
+7. Return to the JPEC root directory:
+   ```bash
+   cd ~/Code/JPEC
+   ```
+
+### 8. Install Julia Packages
+
+Now we'll install all the Julia packages that JPEC depends on.
+
+1. Launch Julia from the JPEC directory:
+   ```bash
+   julia --project=.
+   ```
+   The `--project=.` flag tells Julia to use the JPEC project environment.
+
+2. You should now see the Julia prompt: `julia>`
+
+3. Install all dependencies by typing these commands in the Julia prompt:
+   ```julia
+   using Pkg
+   Pkg.instantiate()
+   ```
+   This will download and install all required packages. It may take several minutes the first time.
+
+4. Build the Julia kernel for Jupyter (if you installed Jupyter):
+   ```julia
+   Pkg.add("IJulia")
+   Pkg.build("IJulia")
+   ```
+
+5. Precompile all packages (optional, but speeds up first use):
+   ```julia
+   Pkg.precompile()
+   ```
+
+6. Test that JPEC loads correctly:
+   ```julia
+   using JPEC
+   ```
+   If you see no errors, everything is working!
+
+7. Exit Julia:
+   ```julia
+   exit()
+   ```
+
+### 9. Run the Example Notebook
+
+Now you're ready to run the example!
+
+1. Make sure you're in the JPEC directory:
+   ```bash
+   cd ~/Code/JPEC
+   ```
+
+2. Start Jupyter:
+   ```bash
+   jupyter notebook
+   ```
+   This will open Jupyter in your web browser.
+
+3. In the Jupyter interface, navigate to:
+   ```
+   examples/DIIID-like_ideal_example/run_and_analyze.ipynb
+   ```
+   Click on the notebook to open it.
+
+4. Select the Julia kernel:
+   - If prompted to select a kernel, choose "Julia 1.11" (or whatever version you installed)
+   - If the kernel is already selected, you're ready to go!
+
+5. Run the notebook:
+   - Click "Cell" → "Run All" from the menu, or
+   - Press `Shift + Enter` to run each cell one at a time
+
+   The first time you run the notebook, it will take a few minutes to compile. Subsequent runs will be faster.
+
+### 10. Troubleshooting
+
+**If you get an error about missing libraries:**
+
+Make sure the Fortran libraries are built. Run from the JPEC directory:
+```bash
+ls deps/
+```
+You should see `libspline.dylib` and `libvac.dylib`. If not, repeat step 7.
+
+**If Julia can't find packages:**
+
+Make sure you're running Julia with the project environment:
+```bash
+cd ~/Code/JPEC
+julia --project=.
+```
+
+**If the Jupyter kernel isn't found:**
+
+Rebuild IJulia:
+```bash
+julia --project=. -e 'using Pkg; Pkg.build("IJulia")'
+```
+Then restart Jupyter.
+
+**If you get permission errors:**
+
+Make sure you have write permissions in the JPEC directory. You may need to use `sudo` for some Homebrew commands, but avoid using `sudo` with Julia commands.
+
+### Alternative: Using VS Code (Optional)
+
+If you prefer using VS Code instead of Jupyter in the browser:
+
+1. Install VS Code from [https://code.visualstudio.com/](https://code.visualstudio.com/)
+
+2. Install the Julia extension:
+   - Open VS Code
+   - Click the Extensions icon (or press `Cmd + Shift + X`)
+   - Search for "Julia" and install the official Julia extension
+   - Search for "Jupyter" and install the Jupyter extension
+
+3. Open the JPEC folder in VS Code:
+   - Click File → Open Folder
+   - Navigate to and select your JPEC directory
+
+4. Open the notebook `examples/DIIID-like_ideal_example/run_and_analyze.ipynb`
+
+5. Click "Select Kernel" in the top right and choose "Julia 1.11"
+
+6. Run the cells using `Shift + Enter`
 
 ## Pre-commit Hooks (Optional Developer Tools)
 
