@@ -239,9 +239,9 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     # First mpert columns are real (cosine), second mpert are imaginary (sine)
     green_fourier_rows = wall.nowall ? mtheta : 2 * mtheta
     green_fourier = zeros(green_fourier_rows, 2 * mpert)
-    PLASMA_ROW_OFFSET = 0;
+    PLASMA_ROW_OFFSET = 0
     WALL_ROW_OFFSET = mtheta
-    COS_COL_OFFSET = 0;
+    COS_COL_OFFSET = 0
     SIN_COL_OFFSET = mpert
 
     # Plasma–Plasma block
@@ -353,9 +353,9 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     # First num_modes columns are real (cosine), second num_modes are imaginary (sine)
     green_fourier_rows = wall.nowall ? num_points : 2 * num_points
     green_fourier = zeros(green_fourier_rows, 2 * num_modes)
-    PLASMA_ROW_OFFSET = 0;
+    PLASMA_ROW_OFFSET = 0
     WALL_ROW_OFFSET = num_points
-    COS_COL_OFFSET = 0;
+    COS_COL_OFFSET = 0
     SIN_COL_OFFSET = num_modes
 
     # Plasma–Plasma block

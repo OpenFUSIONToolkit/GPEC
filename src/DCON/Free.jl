@@ -57,7 +57,6 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         if ctrl.verbose
             println("3D vacuum response computation time: $(round(t_3d, digits=4))s")
         end
-        wv3D, _, _, _ = Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
 
         # Scale by (m - n*q)(m' - n'*q)
         singfac = vec((intr.mlow:intr.mhigh) .- intr.qlim .* (intr.nlow:intr.nhigh)')
@@ -81,6 +80,9 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))))
         error("Vacuum response matrix computation complete.")
     end
+
+    println("2D Vacuum response matrix wv:")
+    display(vac.wv)
 
     # Compute complex energy eigenvalues and vectors
     vac.wt .= wp .+ vac.wv
@@ -192,9 +194,9 @@ function compute_vacuum_inputs(ψ::Float64, n::Int, ctrl::DconControl, equil::Eq
     end
 
     return Vacuum.VacuumInput(;
-        r=reverse(R),
-        z=reverse(Z),
-        ν=reverse(ν),
+        r=R,
+        z=Z,
+        ν=ν,
         mlow=intr.mlow,
         mpert=intr.mpert,
         n=n,

@@ -86,7 +86,7 @@ function get_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
 end
 
 """
-    kernel!(grad_greenfunction_mat, greenfunction_mat, observer, source, n)
+    kernel!(grad_greenfunction, greenfunction, observer, source, n)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
 
@@ -95,17 +95,17 @@ The residue calculation needs to be updated for open walls.**
 
 # Arguments
 
-  - `grad_greenfunction_mat`: Gradient Green's function matrix (output)
-  - `greenfunction_mat`: Green's function matrix (output)
+  - `grad_greenfunction`: Gradient Green's function matrix (output)
+  - `greenfunction`: Green's function matrix (output)
   - `observer`: Observer geometry struct (PlasmaGeometry or WallGeometry)
   - `source`: Source geometry struct (PlasmaGeometry or WallGeometry)
   - `n`: Toroidal mode number
 
 # Returns
 
-Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
-Note that greenfunction_mat is zeroed each time this function is called,
-but grad_greenfunction_mat is not since it fills a different block of the
+Modifies `grad_greenfunction` and `greenfunction` in place.
+Note that greenfunction is zeroed each time this function is called,
+but grad_greenfunction is not since it fills a different block of the
 (2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
@@ -115,8 +115,8 @@ but grad_greenfunction_mat is not since it fills a different block of the
   - Implements analytical singularity removal following Chance 1997
 """
 function kernel!(
-    grad_greenfunction_mat::Matrix{Float64},
-    greenfunction_mat::Matrix{Float64},
+    grad_greenfunction::Matrix{Float64},
+    greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int;
@@ -127,17 +127,17 @@ function kernel!(
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
-    # Take a view of the corresponding block of the grad_greenfunction_mat
+    # Take a view of the corresponding block of the grad_greenfunction
     col_index = (source isa PlasmaGeometry ? 1 : 2)
     row_index = (observer isa PlasmaGeometry ? 1 : 2)
     grad_greenfunction_block = view(
-        grad_greenfunction_mat,
+        grad_greenfunction,
         ((row_index-1)*mtheta+1):(row_index*mtheta),
         ((col_index-1)*mtheta+1):(col_index*mtheta)
     )
 
-    # Zero out greenfunction_mat at start of each kernel call
-    fill!(greenfunction_mat, 0.0)
+    # Zero out greenfunction at start of each kernel call
+    fill!(greenfunction, 0.0)
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
 
@@ -180,15 +180,15 @@ function kernel!(
 
         # Perform Simpson integration for nonsingular source points
         for (isrc, wsimpson) in zip(nonsing_idx, simpson_weights)
-            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], source.dx_dtheta[isrc], source.dz_dtheta[isrc], n)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], source.dx_dtheta[isrc], source.dz_dtheta[isrc], n)
 
             # Sum contributions to Green's function matrices using Simpson weight
             if populate_greenfunction
-                greenfunction_mat[j, isrc] += G_n * wsimpson
+                greenfunction[j, isrc] += G_n * wsimpson
             end
-            grad_greenfunction_block[j, isrc] += coupling_n * wsimpson
+            grad_greenfunction_block[j, isrc] += gradG_n * wsimpson
             # Subtract regular integral component of δⱼᵢK⁰ in eq. 83
-            grad_greenfunction_block[j, j] -= coupling_0 * wsimpson
+            grad_greenfunction_block[j, j] -= gradG_0 * wsimpson
         end
 
         # Perform Gaussian quadrature for singular points (source = obs point)
@@ -206,7 +206,7 @@ function kernel!(
                 dx_dtheta_gauss = Interpolations.gradient(spline_x, theta_gauss0)[1]
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = Interpolations.gradient(spline_z, theta_gauss0)[1]
-                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # First type of singularity: 𝒢ⁿ (Eq. 75: 2π𝒢ⁿ + log(θ-θ')²/X')
                 if populate_greenfunction
@@ -214,27 +214,30 @@ function kernel!(
                         # Remove singular behavior by adding on leading-order term, Chance eq.(75)
                         G_n += log((theta_obs - theta_gauss[ig])^2) / x_obs
                     end
-                    @. @views greenfunction_mat[j, sing_idx] += wgauss[ig] * G_n * lagrange_stencil[ig]
+                    @. @views greenfunction[j, sing_idx] += wgauss[ig] * G_n * lagrange_stencil[ig]
                 end
 
                 # Second type of singularity: 𝒦ⁿ (Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰)
-                @. @views grad_greenfunction_block[j, sing_idx] += wgauss[ig] * coupling_n * lagrange_stencil[ig]
-                grad_greenfunction_block[j, j] -= coupling_0 * wgauss[ig]
+                @. @views grad_greenfunction_block[j, sing_idx] += wgauss[ig] * gradG_n * lagrange_stencil[ig]
+                grad_greenfunction_block[j, j] -= gradG_0 * wgauss[ig]
             end
         end
 
         # Add analytic singular integral (first type) from Chance eq. 78
         if populate_greenfunction && observer isa PlasmaGeometry
-            @. @views greenfunction_mat[j, sing_idx] -= log_correction / x_obs
+            @. @views greenfunction[j, sing_idx] -= log_correction / x_obs
         end
     end
 
-    # Account for normal direction pointing out of vacuum integration region in 𝒦ⁿ ⋅ dS, previously isgn
-    # Negative for plasma since dS = ∇ψ J dθdζ and ∇ψ points outward but outward normal is inward
-    grad_greenfunction_block .*= (source isa PlasmaGeometry ? -1 : 1)
+    # Normals need to point outward from vacuum region. In CCW θ convention, normal points
+    # out of vacuum for plasma but inward for wall, so we multiply by -1 for wall sources
+    if source isa WallGeometry
+        grad_greenfunction_block .*= -1
+    end
+
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
-    greenfunction_mat ./= 2π
+    greenfunction ./= 2π
 
     # Add analytic singular integral (second type) from Table I of Chance 1997 + existing δⱼᵢ in eq. 69
     # Would need to pass in wall geometry to generalize this to open walls

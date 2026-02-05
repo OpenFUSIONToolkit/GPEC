@@ -228,8 +228,7 @@ scalar arithmetic is used for maximum performance.
 The double-layer kernel K is the normal derivative of the fundamental solution:
 
 ```
-K(x_obs, x_src, n_src) = ∇_{x_src} φ · n̂_src
-                       = -1/(4π) * (x_obs - x_src) · n̂_src / |x_obs - x_src|³
+K(x_obs, x_src, n_src) = ∇_{x_src} φ · n_src = 1/(4π) * (x_obs - x_src) · n_src / |x_obs - x_src|³
 ```
 
 # Arguments
@@ -255,7 +254,7 @@ function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     r2 < 1e-30 && return 0.0
     rinv = inv(sqrt(r2))
     r3inv = rinv * rinv * rinv
-    return -(dx*nx + dy*ny + dz*nz) * (INV_4PI * r3inv)
+    return (dx*nx + dy*ny + dz*nz) * (INV_4PI * r3inv)
 end
 
 """
@@ -309,20 +308,24 @@ end
     compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
 
 Compute normal vector (= ∂r/∂θ × ∂r/∂ζ) at polar quadrature points from interpolated tangent vectors.
+We already scaled the normals by normal_orient in the geometry construction, so we need to reapply
+that here since we are recomputing the normals from the derivatives.
 
 # Arguments
 
   - `n_polar`: Preallocation unit normal vector at each polar point (RAD_DIM × ANG_DIM × 3)
   - `dr_dθ_polar`: Interpolated ∂r/∂θ at polar points (RAD_DIM × ANG_DIM × 3)
   - `dr_dζ_polar`: Interpolated ∂r/∂ζ at polar points (RAD_DIM × ANG_DIM × 3)
+  - `normal_orient`: Multiplier applied to normals to make them orient out of vacuum region (+1 or -1)
 """
-function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3})
+function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3}, normal_orient::Int)
     # Inline cross product to avoid slice allocation
     @inbounds for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
         n_polar[ir, ia, 1] = dr_dθ[ir, ia, 2] * dr_dζ[ir, ia, 3] - dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 2]
         n_polar[ir, ia, 2] = dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 1] - dr_dθ[ir, ia, 1] * dr_dζ[ir, ia, 3]
         n_polar[ir, ia, 3] = dr_dθ[ir, ia, 1] * dr_dζ[ir, ia, 2] - dr_dθ[ir, ia, 2] * dr_dζ[ir, ia, 1]
     end
+    n_polar .*= normal_orient
 end
 
 """
@@ -481,7 +484,7 @@ function compute_3D_kernel_matrix!(
         interpolate_to_polar!(dr_dζ_polar, dr_dζ_patch, P2G)
 
         # Compute normal vectors at polar points from interpolated tangent vectors
-        compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
+        compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar, source.normal_orient)
 
         # Evaluate kernels at polar points with POU weighting
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
@@ -525,10 +528,8 @@ function compute_3D_kernel_matrix!(
         end
     end
 
-    # TODO: Don't delete this yet - signs might change depending on convention. I think it might be -1 for wall,
-    # since we calculate n = dr_dθ × dr_dζ which points inward for a toroidal surface. Should add in normal
-    # orient for this later for generalization.
     # Account for normal direction pointing out of vacuum integration region in 𝒦ⁿ ⋅ dS
     # Negative for plasma since dS = ∇ψ J dθdζ and ∇ψ points outward but outward normal is inward
-    @views grad_greenfunction_block .*= (source isa PlasmaGeometry3D ? 1 : -1)
+    # grad_greenfunction_block .*= (source isa PlasmaGeometry3D ? -1 : 1)
+    # grad_greenfunction_block .*= source.normal_orient
 end
