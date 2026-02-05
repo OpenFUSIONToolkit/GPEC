@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Setup · JPEC.jl</title><meta name="title" content="Setup · JPEC.jl"/><meta property="og:title" content="Setup · JPEC.jl"/><meta property="twitter:title" content="Setup · JPEC.jl"/><meta name="description" content="Documentation for JPEC.jl."/><meta property="og:description" content="Documentation for JPEC.jl."/><meta property="twitter:description" content="Documentation for JPEC.jl."/><meta property="og:url" content="https://OpenFUSIONToolkit.github.io/JPEC/set_up/"/><meta property="twitter:url" content="https://OpenFUSIONToolkit.github.io/JPEC/set_up/"/><link rel="canonical" href="https://OpenFUSIONToolkit.github.io/JPEC/set_up/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">JPEC.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Setup</a><ul class="internal"><li><a class="tocitem" href="#On-Windows-via-WSL-(Ubuntu)"><span>On Windows via WSL (Ubuntu)</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-pre-commit-(requires-Python/pip)"><span>Install pre-commit (requires Python/pip)</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)"><span>Install JuliaFormatter globally (required for Julia code formatting hook)</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-the-git-hooks-in-your-local-repository"><span>Install the git hooks in your local repository</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-on-all-files-in-the-repository"><span>Run on all files in the repository</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-only-on-currently-staged-files"><span>Run only on currently staged files</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-nbstripout-globally"><span>Install nbstripout globally</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-filter-for-this-repository"><span>Install filter for this repository</span></a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../splines/">Splines</a></li><li><a class="tocitem" href="../vacuum/">Vacuum</a></li><li><a class="tocitem" href="../equilibrium/">Equilibrium</a></li></ul></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../examples/splines/">Spline Examples</a></li><li><a class="tocitem" href="../examples/vacuum/">Vacuum Examples</a></li><li><a class="tocitem" href="../examples/equilibrium/">Equilibrium Examples</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Setup</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Setup</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC/blob/develop/docs/src/set_up.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Setting-up-JPEC"><a class="docs-heading-anchor" href="#Setting-up-JPEC">Setting up JPEC</a><a id="Setting-up-JPEC-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-up-JPEC" title="Permalink"></a></h1><ul><li><a href="#setting-up-jpec">Setting up JPEC</a><ul><li><a href="#on-windows-via-wsl-ubuntu">On Windows via WSL (Ubuntu)</a></li><li><a href="#on-macos">On macOS</a></li><li><a href="#pre-commit-hooks-optional-developer-tools">Pre-commit Hooks (Optional Developer Tools)</a></li></ul></li></ul><h2 id="On-Windows-via-WSL-(Ubuntu)"><a class="docs-heading-anchor" href="#On-Windows-via-WSL-(Ubuntu)">On Windows via WSL (Ubuntu)</a><a id="On-Windows-via-WSL-(Ubuntu)-1"></a><a class="docs-heading-anchor-permalink" href="#On-Windows-via-WSL-(Ubuntu)" title="Permalink"></a></h2><ol><li><p>Install WSL and Ubuntu If you don&#39;t already have WSL and Ubuntu installed, set this up. <a href="https://learn.microsoft.com/en-us/windows/wsl/install">This page</a> gives detailed instructions on how to complete the installation. In the Windows Powershell,</p><ol><li>Make sure WSL is installed:   <code>PowerShell   wsl --install</code></li><li>Set Ubuntu as your default WSL distro:   <code>PowerShell   wsl --set-default Ubuntu</code></li><li>Launch Ubuntu and update:   <code>PowerShell   sudo apt update &amp;&amp; sudo apt upgrade -y</code></li></ol></li><li><p>Install build tools in WSL  <code>shell  sudo apt install build-essential gfortran cmake -y</code></p><p><code>build-essential</code> → GCC, make</p><p><code>gfortran</code> → Fortran compiler</p><p><code>cmake</code> → sometimes needed by dependencies</p></li><li><p>Install Julia in WSL</p><ol><li><p>Download the latest Linux tarball from the official site <a href="https://julialang.org/downloads/">Julia downloads</a>. It will look like  <code>shell  wget https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.3-linux-x86_64.tar.gz</code></p><p>☆ Replace the URL with the latest stable version.</p></li><li><p>Extract and move it to /opt (or any path):</p><p><code>shell  tar -xvzf julia-1.11.3-linux-x86_64.tar.gz  sudo mv julia-1.11.3 /opt/</code></p><p>☆ Ensure these commands match the tarball you installed. These commands match the above tarball and might need to be modified for you installation.</p></li><li><p>Add Julia to PATH:</p><p><code>shell  echo &#39;export PATH=/opt/julia-1.11.3/bin:$PATH&#39; &gt;&gt; ~/.bashrc  source ~/.bashrc</code></p></li><li><p>Test it is properly installed</p><p><code>shell  julia --version</code></p></li></ol></li><li><p>Install Python/Jupyter in WSL</p><p>This step is only really required if you want to run the <code>.ipynb</code> test notebooks. You do not necessarily need Python3 installed, but Jupyter runs on a Python server. If you do not want to install Python3 and Jupyter, you can install the &quot;IJulia&quot; package to your Julia environment instead and run the command &#39;notebook()&#39; in the terminal.</p><ol><li>To install Python3 and Jupyter notebooks, use these commands   <code>shell   sudo apt install python3-pip python3-venv -y   python3 -m pip install --user jupyter jupyterlab notebook ipykernel</code></li></ol><p>⚠ Important: Add local Python scripts to PATH:</p><pre><code class="nohighlight hljs"> ```shell
+ echo &#39;export PATH=$HOME/.local/bin:$PATH&#39; &gt;&gt; ~/.bashrc
+ source ~/.bashrc
+ ```</code></pre><ol><li><p>Verify it is properly installed</p><p><code>shell  jupyter --version</code></p></li></ol></li><li><p>Clone JPEC into your WSL home folder.</p></li></ol><p>Clone it from GitHub directly to your virtual machine.</p><pre><code class="language-shell hljs">    git clone https://github.com/OpenFUSIONToolkit/JPEC.git
+    cd JPEC
+    ```
+
+6. Build Fortran dependencies (libspline.so)
+    1. Go to the spline source folder:
+        ```shell
+        cd ~/JPEC/src/Splines/fortran
+        ```
+
+    2. Clean previous builds using
+        ```shell
+        make clean
+        ```
+
+    3. Build
+        ```shell
+        make
+        ```
+
+    4. Verify the library exists using
+        ```shell
+        ls ../../../deps/libspline.so
+        ```
+
+    5. Export library path so Julia can find it
+        ```shell
+        export LD_LIBRARY_PATH=~/JPEC/deps:$LD_LIBRARY_PATH
+        ```
+
+        Optional: add to `~/.bashrc` for persistence.
+
+7. Install the Julia packages for JPEC
+    1. Launch Julia:
+        ```shell
+        julia
+        ```
+    2. In Julia REPL:
+        ``` julia
+        using Pkg
+        Pkg.instantiate()       # install recorded dependencies
+        Pkg.add(&quot;Preferences&quot;)  # install missing dependency if needed
+        Pkg.build(&quot;IJulia&quot;)     # rebuild kernel
+        Pkg.precompile()        # precompile all packages - probably unnecessary
+        ```
+
+8. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
+    1. To open a .ipynb notebook
+        1. Launch Jupyter from WSL, make sure you have exited Julia using the `exit()` command and then type in the shell
+        ```shell
+        jupyter notebook --no-browser
+        ```
+        It will print a URL with a token.
+
+        2. Copy the URL into your Windows browser **OR** open the notebook in VS Code using the **Remote - WSL** extension.
+
+    2. (Optionally) Integrate WSL with VS Code
+        1. Install **Remote - WSL** extension in VS Code.
+        2. Open VS Code → Connect To → Connect to WSL.
+        3. Click Open Folder and then navigate to the JPEC folder on your VM. Open your JPEC folder from WSL: ~/JPEC.
+
+        If this is not working, you can launch vscode from the WSL shell you have using the command `code .`
+
+        4. Open a terminal inside VS Code — it will automatically use WSL/Ubuntu.
+        5. You can now run:
+            ```shell
+            make        # rebuild libspline.so if needed
+            julia       # run scripts
+            jupyter notebook --no-browser
+            ```
+
+        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the &quot;Select Kernel&quot; button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL.All dependencies (libspline.so, Julia packages) are accessible.
+    3.  Run JPEC
+        1. Make sure you are in WSL terminal, with `LD_LIBRARY_PATH` set to include deps.
+        2. Launch Julia and run your scripts as usual:
+            ```shell
+            include(&quot;path/to/jpec_script.jl&quot;)
+            ```
+
+## On macOS
+
+### Prerequisites
+
+Before starting, you&#39;ll need a Terminal app to enter commands. You can find it by:
+- Press `Cmd + Space` to open Spotlight
+- Type &quot;Terminal&quot; and press Enter
+
+Keep this Terminal window open throughout the installation process.
+
+### 1. Install Xcode Command Line Tools
+
+These tools provide the compilers needed to build Fortran code.
+
+1. Open Terminal and run:
+   ```bash
+   xcode-select --install
+   ```
+
+2. A dialog will appear asking you to install the tools. Click &quot;Install&quot; and wait for it to complete (this may take several minutes).
+
+3. Verify installation:
+   ```bash
+   gcc --version
+   ```
+   You should see output showing the GCC version.
+
+### 2. Install Homebrew (Package Manager)
+
+Homebrew makes it easy to install software on macOS. If you already have Homebrew installed, skip to step 3.
+
+1. Install Homebrew by running this command in Terminal:
+   ```bash
+   /bin/bash -c &quot;$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)&quot;
+   ```
+
+2. Follow the on-screen instructions. You may need to enter your Mac password.
+
+3. After installation completes, the installer will show you two commands to run to add Homebrew to your PATH. They will look something like:
+   ```bash
+   echo &#39;eval &quot;$(/opt/homebrew/bin/brew shellenv)&quot;&#39; &gt;&gt; ~/.zprofile
+   eval &quot;$(/opt/homebrew/bin/brew shellenv)&quot;
+   ```
+   **Important:** Copy and run these exact commands from your Terminal output.
+
+4. Verify Homebrew is installed:
+   ```bash
+   brew --version
+   ```
+
+### 3. Install Fortran Compiler
+
+The Fortran compiler is needed to build JPEC&#39;s Fortran components.
+
+1. Install GCC (which includes gfortran):
+   ```bash
+   brew install gcc
+   ```
+   This may take several minutes to complete.
+
+2. Verify gfortran is installed:
+   ```bash
+   gfortran --version
+   ```
+
+### 4. Install Julia
+
+Julia is the programming language JPEC is written in.
+
+**Option A: Install via Homebrew (Recommended for beginners)**
+
+1. Install Julia:
+   ```bash
+   brew install julia
+   ```
+
+2. Verify Julia is installed:
+   ```bash
+   julia --version
+   ```
+   You should see something like `julia version 1.11.x`.
+
+**Option B: Install via Official Installer**
+
+1. Go to [https://julialang.org/downloads/](https://julialang.org/downloads/)
+
+2. Download the macOS installer (`.dmg` file) for the latest stable version (1.11 or higher)
+
+3. Open the downloaded `.dmg` file and drag Julia to your Applications folder
+
+4. Add Julia to your PATH by running in Terminal:
+   ```bash
+   sudo mkdir -p /usr/local/bin
+   sudo ln -s /Applications/Julia-1.11.app/Contents/Resources/julia/bin/julia /usr/local/bin/julia
+   ```
+   Replace `1.11` with your actual version if different.
+
+5. Verify Julia is installed:
+   ```bash
+   julia --version
+   ```
+
+### 5. Install Python and Jupyter (For Running Notebooks)
+
+Jupyter notebooks (`.ipynb` files) require Python. If you only want to run Julia scripts and not notebooks, you can skip this step.
+
+1. Install Python via Homebrew:
+   ```bash
+   brew install python
+   ```
+
+2. Install Jupyter:
+   ```bash
+   pip3 install jupyter jupyterlab notebook ipykernel
+   ```
+
+3. Verify Jupyter is installed:
+   ```bash
+   jupyter --version
+   ```
+
+### 6. Clone the JPEC Repository
+
+Now we&#39;ll download the JPEC code from GitHub.
+
+1. Choose where you want to put JPEC. For example, your home directory:
+   ```bash
+   cd ~
+   ```
+   Or create a Code folder:
+   ```bash
+   mkdir -p ~/Code
+   cd ~/Code
+   ```
+
+2. Clone JPEC from GitHub:
+   ```bash
+   git clone https://github.com/OpenFUSIONToolkit/JPEC.git
+   ```
+   If you don&#39;t have `git` installed, macOS will prompt you to install it.
+
+3. Enter the JPEC directory:
+   ```bash
+   cd JPEC
+   ```
+
+### 7. Build Fortran Dependencies
+
+JPEC includes Fortran code that needs to be compiled into libraries.
+
+1. Navigate to the Splines Fortran source folder:
+   ```bash
+   cd ~/Code/JPEC/src/Splines/fortran
+   ```
+   **Note:** Adjust the path if you cloned JPEC to a different location (e.g., `~/JPEC` instead of `~/Code/JPEC`).
+
+2. Clean any previous builds:
+   ```bash
+   make clean
+   ```
+
+3. Build the Fortran library:
+   ```bash
+   make
+   ```
+   You should see compilation messages and eventually &quot;Build complete!&quot;
+
+4. Verify the spline library was created:
+   ```bash
+   ls -l ../../../deps/libspline.dylib
+   ```
+   You should see the file listed.
+
+5. Build the Vacuum Fortran library:
+   ```bash
+   cd ~/Code/JPEC/src/Vacuum/fortran
+   make clean
+   make
+   ```
+
+6. Verify the vacuum library was created:
+   ```bash
+   ls -l ../../../deps/libvac.dylib
+   ```
+
+7. Return to the JPEC root directory:
+   ```bash
+   cd ~/Code/JPEC
+   ```
+
+### 8. Install Julia Packages
+
+Now we&#39;ll install all the Julia packages that JPEC depends on.
+
+1. Launch Julia from the JPEC directory:
+   ```bash
+   julia --project=.
+   ```
+   The `--project=.` flag tells Julia to use the JPEC project environment.
+
+2. You should now see the Julia prompt: `julia&gt;`
+
+3. Install all dependencies by typing these commands in the Julia prompt:
+   ```julia
+   using Pkg
+   Pkg.instantiate()
+   ```
+   This will download and install all required packages. It may take several minutes the first time.
+
+4. Build the Julia kernel for Jupyter (if you installed Jupyter):
+   ```julia
+   Pkg.add(&quot;IJulia&quot;)
+   Pkg.build(&quot;IJulia&quot;)
+   ```
+
+5. Precompile all packages (optional, but speeds up first use):
+   ```julia
+   Pkg.precompile()
+   ```
+
+6. Test that JPEC loads correctly:
+   ```julia
+   using JPEC
+   ```
+   If you see no errors, everything is working!
+
+7. Exit Julia:
+   ```julia
+   exit()
+   ```
+
+### 9. Run the Example Notebook
+
+Now you&#39;re ready to run the example!
+
+1. Make sure you&#39;re in the JPEC directory:
+   ```bash
+   cd ~/Code/JPEC
+   ```
+
+2. Start Jupyter:
+   ```bash
+   jupyter notebook
+   ```
+   This will open Jupyter in your web browser.
+
+3. In the Jupyter interface, navigate to:
+   ```
+   examples/DIIID-like_ideal_example/run_and_analyze.ipynb
+   ```
+   Click on the notebook to open it.
+
+4. Select the Julia kernel:
+   - If prompted to select a kernel, choose &quot;Julia 1.11&quot; (or whatever version you installed)
+   - If the kernel is already selected, you&#39;re ready to go!
+
+5. Run the notebook:
+   - Click &quot;Cell&quot; → &quot;Run All&quot; from the menu, or
+   - Press `Shift + Enter` to run each cell one at a time
+
+   The first time you run the notebook, it will take a few minutes to compile. Subsequent runs will be faster.
+
+### 10. Troubleshooting
+
+**If you get an error about missing libraries:**
+
+Make sure the Fortran libraries are built. Run from the JPEC directory:</code></pre><p>bash ls deps/</p><pre><code class="nohighlight hljs">You should see `libspline.dylib` and `libvac.dylib`. If not, repeat step 7.
+
+**If Julia can&#39;t find packages:**
+
+Make sure you&#39;re running Julia with the project environment:</code></pre><p>bash cd ~/Code/JPEC julia –project=.</p><pre><code class="nohighlight hljs">
+**If the Jupyter kernel isn&#39;t found:**
+
+Rebuild IJulia:</code></pre><p>bash julia –project=. -e &#39;using Pkg; Pkg.build(&quot;IJulia&quot;)&#39;</p><pre><code class="nohighlight hljs">Then restart Jupyter.
+
+**If you get permission errors:**
+
+Make sure you have write permissions in the JPEC directory. You may need to use `sudo` for some Homebrew commands, but avoid using `sudo` with Julia commands.
+
+### Alternative: Using VS Code (Optional)
+
+If you prefer using VS Code instead of Jupyter in the browser:
+
+1. Install VS Code from [https://code.visualstudio.com/](https://code.visualstudio.com/)
+
+2. Install the Julia extension:
+   - Open VS Code
+   - Click the Extensions icon (or press `Cmd + Shift + X`)
+   - Search for &quot;Julia&quot; and install the official Julia extension
+   - Search for &quot;Jupyter&quot; and install the Jupyter extension
+
+3. Open the JPEC folder in VS Code:
+   - Click File → Open Folder
+   - Navigate to and select your JPEC directory
+
+4. Open the notebook `examples/DIIID-like_ideal_example/run_and_analyze.ipynb`
+
+5. Click &quot;Select Kernel&quot; in the top right and choose &quot;Julia 1.11&quot;
+
+6. Run the cells using `Shift + Enter`
+
+## Pre-commit Hooks (Optional Developer Tools)
+
+The repository uses pre-commit hooks to maintain code quality and prevent noisy commits from Jupyter notebook metadata and outputs.
+
+### Why Use Pre-commit Hooks?
+
+Pre-commit hooks automatically:
+- Strip Jupyter notebook outputs, execution counts, and metadata (prevents merge conflicts and noisy diffs)
+- Format Julia code according to `.JuliaFormatter.toml` settings
+- Remove trailing whitespace and fix line endings
+- Validate YAML/TOML syntax
+- Prevent accidentally committing large files (&gt;5MB)
+
+### Installation
+</code></pre><p>bash</p><h1 id="Install-pre-commit-(requires-Python/pip)"><a class="docs-heading-anchor" href="#Install-pre-commit-(requires-Python/pip)">Install pre-commit (requires Python/pip)</a><a id="Install-pre-commit-(requires-Python/pip)-1"></a><a class="docs-heading-anchor-permalink" href="#Install-pre-commit-(requires-Python/pip)" title="Permalink"></a></h1><p>pip install pre-commit</p><h1 id="Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)"><a class="docs-heading-anchor" href="#Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)">Install JuliaFormatter globally (required for Julia code formatting hook)</a><a id="Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)-1"></a><a class="docs-heading-anchor-permalink" href="#Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)" title="Permalink"></a></h1><p>julia -e &#39;using Pkg; Pkg.add(&quot;JuliaFormatter&quot;)&#39;</p><h1 id="Install-the-git-hooks-in-your-local-repository"><a class="docs-heading-anchor" href="#Install-the-git-hooks-in-your-local-repository">Install the git hooks in your local repository</a><a id="Install-the-git-hooks-in-your-local-repository-1"></a><a class="docs-heading-anchor-permalink" href="#Install-the-git-hooks-in-your-local-repository" title="Permalink"></a></h1><p>cd /path/to/JPEC pre-commit install</p><pre><code class="nohighlight hljs">
+### Usage
+
+Once installed, the hooks run automatically on `git commit`. You can also run them manually:
+</code></pre><p>bash</p><h1 id="Run-on-all-files-in-the-repository"><a class="docs-heading-anchor" href="#Run-on-all-files-in-the-repository">Run on all files in the repository</a><a id="Run-on-all-files-in-the-repository-1"></a><a class="docs-heading-anchor-permalink" href="#Run-on-all-files-in-the-repository" title="Permalink"></a></h1><p>pre-commit run –all-files</p><h1 id="Run-only-on-currently-staged-files"><a class="docs-heading-anchor" href="#Run-only-on-currently-staged-files">Run only on currently staged files</a><a id="Run-only-on-currently-staged-files-1"></a><a class="docs-heading-anchor-permalink" href="#Run-only-on-currently-staged-files" title="Permalink"></a></h1><p>pre-commit run</p><pre><code class="nohighlight hljs">
+### Bypassing Hooks (Not Recommended)
+
+In rare cases where you need to bypass the hooks:
+</code></pre><p>bash git commit –no-verify</p><pre><code class="nohighlight hljs">
+However, this is discouraged as it may introduce notebook clutter or formatting inconsistencies.
+
+### Optional: Standalone nbstripout Filter
+
+For additional protection beyond pre-commit, you can install nbstripout as a git filter:
+</code></pre><p>bash</p><h1 id="Install-nbstripout-globally"><a class="docs-heading-anchor" href="#Install-nbstripout-globally">Install nbstripout globally</a><a id="Install-nbstripout-globally-1"></a><a class="docs-heading-anchor-permalink" href="#Install-nbstripout-globally" title="Permalink"></a></h1><p>pip install nbstripout</p><h1 id="Install-filter-for-this-repository"><a class="docs-heading-anchor" href="#Install-filter-for-this-repository">Install filter for this repository</a><a id="Install-filter-for-this-repository-1"></a><a class="docs-heading-anchor-permalink" href="#Install-filter-for-this-repository" title="Permalink"></a></h1><p>cd /path/to/JPEC nbstripout –install ```</p><p>This ensures notebooks are cleaned even if pre-commit is bypassed with <code>--no-verify</code>. However, this is <strong>optional</strong> and not required for normal development - the pre-commit hook is sufficient for most workflows.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../splines/">Splines »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Thursday 5 February 2026 20:40">Thursday 5 February 2026</span>. Using Julia version 1.11.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
