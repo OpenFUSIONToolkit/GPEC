@@ -65,6 +65,30 @@ using Interpolations
             @test wall_geo.nowall == false
             @test length(wall_geo.x) == 16
             @test !any(isnan, wall_geo.x)
+
+            # Test that wall with R <= 0 throws an error
+            # Create a plasma surface very close to R=0
+            plasma_surf_near_zero = JPEC.Vacuum.initialize_plasma_surface(
+                VacuumInput(
+                    r=0.05 .+ 0.03 .* cos.(range(0, 2pi, length=16)),
+                    z=0.03 .* sin.(range(0, 2pi, length=16)),
+                    ν=zeros(16),
+                    mtheta=16
+                )
+            )
+            # Use a "dee" wall shape with parameters that will produce R < 0
+            # Setting cw (offset) to a large negative value will shift the wall left past R=0
+            wall_settings_negative = WallShapeSettings(shape="dee", cw=-1.5, a=0.1)
+            @test_throws ErrorException JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_negative)
+
+            # Test that conformal wall R-coordinates are clamped by centerstack_min
+            # With a very large 'a' parameter, a conformal wall would naturally go to R < 0,
+            # but it should be clamped to centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
+            wall_settings_large_a = WallShapeSettings(shape="conformal", a=10.0, equal_arc_wall=false)
+            wall_geo_clamped = JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_large_a)
+            expected_min = min(0.1, 0.1 * minimum(plasma_surf_near_zero.x))
+            @test all(wall_geo_clamped.x .>= expected_min)
+            @test any(wall_geo_clamped.x .<= expected_min + 1e-10)  # At least one point should be at the minimum
         end
 
         @testset "distribute_to_equal_arc_grid" begin

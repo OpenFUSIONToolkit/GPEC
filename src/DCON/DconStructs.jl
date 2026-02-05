@@ -1,7 +1,7 @@
 """
     SingType
 
-A mutable struct containing data for singular surfaces in the plasma stability analysis.
+A mutable struct holding data related to the singular surfaces in the equilibrium.
 
 ## Fields
 
@@ -11,7 +11,24 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `di::Float64` - Mercier criterion
+"""
+@kwdef mutable struct SingType
+    psifac::Float64 = 0.0
+    rho::Float64 = 0.0
+    m::Vector{Int} = Int[]
+    n::Vector{Int} = Int[]
+    q::Float64 = 0.0
+    q1::Float64 = 0.0
+end
+
+"""
+    SingAsymptotics
+
+A struct containing asymptotic expansion data for ideal DCON calculations at a singular surface.
+This data is computed on-demand during singular surface crossings in `cross_ideal_singular_surf!`.
+
+## Fields
+
   - `alpha::Vector{ComplexF64}` - Resonant matrix eigenvalues
   - `r1::Vector{Int}` - Resonant indices along first index
   - `r2::Vector{Int}` - Resonant indices along second index
@@ -22,23 +39,36 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
-@kwdef mutable struct SingType
-    psifac::Float64 = 0.0
-    rho::Float64 = 0.0
-    m::Vector{Int} = Int[]
-    n::Vector{Int} = Int[]
-    q::Float64 = 0.0
-    q1::Float64 = 0.0
-    di::Float64 = 0.0
-    alpha::Vector{ComplexF64} = ComplexF64[]
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
-    n1::Vector{Int} = Int[]
-    n2::Vector{Int} = Int[]
-    power::Vector{ComplexF64} = ComplexF64[]
-    vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
+struct SingAsymptotics
+    sing_order::Int
+    alpha::Vector{ComplexF64}
+    r1::Vector{Int}
+    r2::Vector{Int}
+    n1::Vector{Int}
+    n2::Vector{Int}
+    power::Vector{ComplexF64}
+    vmat::Array{ComplexF64,4}
+    mmat::Array{ComplexF64,4}
+    m0mat::Matrix{ComplexF64}
+end
+
+"""
+    IntegrationChunk
+
+A struct representing a region of integration in the Euler-Lagrange solver.
+
+## Fields
+
+  - `psi_start::Float64` - Starting ψ coordinate for this integration region
+  - `psi_end::Float64` - Ending ψ coordinate for this integration region
+  - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
+  - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
+"""
+@kwdef struct IntegrationChunk
+    psi_start::Float64
+    psi_end::Float64
+    needs_crossing::Bool
+    ising::Int = 0
 end
 
 """
@@ -83,6 +113,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
   - `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct DconInternal
     dir_path::String = ""
@@ -108,6 +139,7 @@ A mutable struct holding internal state variables for stability calculations.
     q1lim::Float64 = 0.0
     locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
     debug_settings::DebugSettings = DebugSettings()
+    wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
 
 """
@@ -161,8 +193,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
-  - `nperq_edge::Int` - Number of points per q value at edge (not yet implemented)
-  - `wv_farwall_flag::Bool` - Force nowall gpec calculations while calculating mutual inductance with the wall, when set true.
   - `dcon_kin_threads::Int` - Number of threads for kinetic calculations (not yet implemented)
   - `parallel_threads::Int` - Number of parallel threads (not yet implemented)
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
@@ -217,8 +247,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
-    nperq_edge::Int = 20
-    wv_farwall_flag::Bool = true
     dcon_kin_threads::Int = 1
     parallel_threads::Int = 1
     diagnose::Bool = false
@@ -285,8 +313,8 @@ Populated in `Free.jl`.
 
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays
     # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)
-    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac + 5, 4)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
+    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
 end
 
 VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)
@@ -323,9 +351,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
   - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
-  - `ising::Int` - Index of the next singular surface to be crossed during integration.
+  - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-  - `next::String` - Next integration action to take (e.g. `"cross"` to cross a rational surface or `"finish"`).
+  - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
@@ -376,9 +404,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
     ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ising::Int = 0
+    ising_start::Int = 0
     psimax::Float64 = 0.0
-    next::String = ""
+    needs_crossing::Bool = false
     nzero::Int = 0
 
     # Used for Gaussian reduction
