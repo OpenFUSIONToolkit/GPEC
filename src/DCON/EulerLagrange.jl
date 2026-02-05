@@ -73,7 +73,7 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
         intr.qlim = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
-        odet.step -= 1 # step was incremented one extra time in ode_step!
+        odet.step -= 1 # step was incremented one extra time in integrate_el_region!
         trim_storage!(odet)
     end
 
@@ -128,9 +128,10 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, equil::Equili
         end
     end
 
-    # TODO: this might be able to be combined into chunk_el_integration_bounds? Unsure as of right now
-    # since it relies on unimplemented sing_start != 0 and kin_flag = true logic
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
+    # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
+    # because it depends on the starting psifac which is set here. The logic for sing_start != 0
+    # and kin_flag = true would also live here when implemented.
     if false #(TODO: kin_flag)
     # for ising = 1:kmsing
     #     if kinsing[ising].psifac > psifac
@@ -206,6 +207,11 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::Dc
             # Set integration limit to just before the next singular surface
             psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
                                                         abs(minimum(intr.sing[ising_current].n) * intr.sing[ising_current].q1)
+
+            # Validate chunk bounds
+            @assert psi_current < psi_end "Invalid chunk bounds: psi_start=$psi_current >= psi_end=$psi_end"
+            @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
+
             push!(chunks, IntegrationChunk(;
                 psi_start=psi_current,
                 psi_end=psi_end,
@@ -222,6 +228,9 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::DconControl, intr::Dc
         end
 
         # No more singular surfaces to cross, set integration limit to edge
+        @assert psi_current < intr.psilim * (1 - eps) "Final chunk has invalid bounds"
+        @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Final chunk overlaps with previous chunk"
+
         push!(chunks, IntegrationChunk(;
             psi_start=psi_current,
             psi_end=(intr.psilim * (1 - eps)),

@@ -623,7 +623,7 @@ function sing_get_ua(sing_asymp::SingAsymptotics, z::Float64)
 end
 
 """
-    sing_get_ca(ctrl::DconControl, intr::DconInternal, odet::OdeState, sing_asymp::SingAsymptotics, singp::SingType)
+    sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::DconInternal)
 
 Compute the asymptotic expansion coefficients according to equation
 50 in Glasser 2016 DCON paper. Performs the same function as
@@ -633,6 +633,7 @@ Compute the asymptotic expansion coefficients according to equation
 
   - `u::Array{ComplexF64,3}`: Current solution matrix, shape (numpert_total, numpert_total, 2)
   - `ua::Array{ComplexF64,3}`: Asymptotic solution matrix, shape (numpert_total, numpert_total, 2)
+  - `intr::DconInternal`: Internal DCON data containing perturbation dimensions
 """
 function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::DconInternal)
 
