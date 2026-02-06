@@ -1,7 +1,7 @@
 """
     SingType
 
-A mutable struct containing data for singular surfaces in the plasma stability analysis.
+A mutable struct holding data related to the singular surfaces in the equilibrium.
 
 ## Fields
 
@@ -11,7 +11,24 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `di::Float64` - Mercier criterion
+"""
+@kwdef mutable struct SingType
+    psifac::Float64 = 0.0
+    rho::Float64 = 0.0
+    m::Vector{Int} = Int[]
+    n::Vector{Int} = Int[]
+    q::Float64 = 0.0
+    q1::Float64 = 0.0
+end
+
+"""
+    SingAsymptotics
+
+A struct containing asymptotic expansion data for ideal DCON calculations at a singular surface.
+This data is computed on-demand during singular surface crossings in `cross_ideal_singular_surf!`.
+
+## Fields
+
   - `alpha::Vector{ComplexF64}` - Resonant matrix eigenvalues
   - `r1::Vector{Int}` - Resonant indices along first index
   - `r2::Vector{Int}` - Resonant indices along second index
@@ -22,23 +39,36 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
   - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
 """
-@kwdef mutable struct SingType
-    psifac::Float64 = 0.0
-    rho::Float64 = 0.0
-    m::Vector{Int} = Int[]
-    n::Vector{Int} = Int[]
-    q::Float64 = 0.0
-    q1::Float64 = 0.0
-    di::Float64 = 0.0
-    alpha::Vector{ComplexF64} = ComplexF64[]
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
-    n1::Vector{Int} = Int[]
-    n2::Vector{Int} = Int[]
-    power::Vector{ComplexF64} = ComplexF64[]
-    vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
+struct SingAsymptotics
+    sing_order::Int
+    alpha::Vector{ComplexF64}
+    r1::Vector{Int}
+    r2::Vector{Int}
+    n1::Vector{Int}
+    n2::Vector{Int}
+    power::Vector{ComplexF64}
+    vmat::Array{ComplexF64,4}
+    mmat::Array{ComplexF64,4}
+    m0mat::Matrix{ComplexF64}
+end
+
+"""
+    IntegrationChunk
+
+A struct representing a region of integration in the Euler-Lagrange solver.
+
+## Fields
+
+  - `psi_start::Float64` - Starting ψ coordinate for this integration region
+  - `psi_end::Float64` - Ending ψ coordinate for this integration region
+  - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
+  - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
+"""
+@kwdef struct IntegrationChunk
+    psi_start::Float64
+    psi_end::Float64
+    needs_crossing::Bool
+    ising::Int = 0
 end
 
 """
@@ -170,6 +200,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
 """
 @kwdef mutable struct DconControl
     verbose::Bool = true
@@ -223,6 +254,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
+    save_interval::Int = 10
 end
 
 @kwdef mutable struct FourFitVars
@@ -319,9 +351,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
   - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
-  - `ising::Int` - Index of the next singular surface to be crossed during integration.
+  - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-  - `next::String` - Next integration action to take (e.g. `"cross"` to cross a rational surface or `"finish"`).
+  - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
@@ -372,9 +404,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
     ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ising::Int = 0
+    ising_start::Int = 0
     psimax::Float64 = 0.0
-    next::String = ""
+    needs_crossing::Bool = false
     nzero::Int = 0
 
     # Used for Gaussian reduction
@@ -400,9 +432,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 end
 
-# Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
-
 
 # Below here are debug output structs used for benchmarking and unit testing
 

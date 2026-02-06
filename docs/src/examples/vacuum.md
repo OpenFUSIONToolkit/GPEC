@@ -25,7 +25,7 @@ zin = rand(Float64, n_modes)      # Vertical coordinates
 deltain = rand(Float64, n_modes)  # Displacement data
 
 # Initialize DCON interface
-JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+JPEC.Vacuum.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 ```
 
 ### Vacuum Matrix Calculation
@@ -50,7 +50,7 @@ grrio = rand(Float64, 2*(mthvac+5), mpert*2)  # Geometry data
 xzptso = rand(Float64, mthvac+5, 4)           # Source points
 
 # Perform vacuum matrix calculation
-JPEC.VacuumMod.mscvac(
+JPEC.Vacuum.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
     wall_flag, farwall_flag,
@@ -93,7 +93,7 @@ farwall_flag = false  # Do not use far wall approximation
 # Additional wall parameters might be needed
 # (specific implementation depends on geometry)
 
-JPEC.VacuumMod.mscvac(
+JPEC.Vacuum.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
     wall_flag, farwall_flag,
@@ -137,7 +137,7 @@ println("Most unstable eigenvalue: ", eigenvals[max_growth_idx])
 # xin, zin, deltain = process_boundary_data(boundary_data)
 
 # 4. Perform vacuum calculation
-# JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+# JPEC.Vacuum.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 # ... vacuum calculation ...
 
 # 5. Analyze stability
@@ -166,7 +166,7 @@ using Pkg
 Pkg.add("BenchmarkTools")
 using BenchmarkTools
 
-@time JPEC.VacuumMod.mscvac(wv, mpert, mtheta, mthvac,
+@time JPEC.Vacuum.mscvac(wv, mpert, mtheta, mthvac,
                            complex_flag, kernelsignin,
                            wall_flag, farwall_flag,
                            grrio, xzptso)
