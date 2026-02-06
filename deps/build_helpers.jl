@@ -6,7 +6,7 @@
 
 const parent_dir = joinpath(@__DIR__, "..", "src")
 
-export build_spline_fortran, build_vacuum_fortran, build_biest
+export build_spline_fortran, build_vacuum_fortran
 
 function build_fortran()
     ENV["FC"] = get(ENV, "FC", "gfortran")
@@ -34,8 +34,7 @@ function build_fortran()
     results = [
         # build_jpec_fortran() add here
         build_spline_fortran(),
-        build_vacuum_fortran(),
-        build_biest()
+        build_vacuum_fortran()
     ]
 
     if all(results)
@@ -66,40 +65,6 @@ function build_vacuum_fortran()
         return true
     catch e
         @error "Failed to build Vacuum-fortran: $e"
-        return false
-    end
-
-end
-
-function build_biest()
-    dir = joinpath(parent_dir, "BIEST")
-    try
-        # Build BIEST library
-        run(pipeline(`make -C $dir`))
-        @info "BIEST compiled successfully"
-
-        # Copy the compiled library to the lib directory
-        lib_dir = joinpath(parent_dir, "BIEST", "lib")
-        if !isdir(lib_dir)
-            mkdir(lib_dir)
-        end
-
-        # Look for the compiled shared library and copy it
-        lib_file = joinpath(dir, "libbiest.so")
-        if Sys.isapple()
-            lib_file = joinpath(dir, "libbiest.dylib")
-        end
-
-        if isfile(lib_file)
-            cp(lib_file, joinpath(lib_dir, basename(lib_file)); force=true)
-            @info "BIEST library copied to $lib_dir"
-        end
-
-        return true
-    catch e
-        @warn "BIEST build may have issues (this is not critical): $e"
-        @warn "BIEST functionality from Julia will not be available unless the library is compiled separately"
-        @warn "To manually compile BIEST, run: cd src/BIEST && make"
         return false
     end
 

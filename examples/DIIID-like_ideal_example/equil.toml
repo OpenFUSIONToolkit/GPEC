@@ -2,7 +2,7 @@
 eq_type = "efit"             # Type of the input 2D equilibrium file
 eq_filename = "TKMKR_D3Dlike_default_Hmode.geqdsk"  # path to equilibrium file
 
-jac_type = "pest"          # Coordinate system (hamada, pest, boozer, equal_arc)
+jac_type = "hamada"          # Coordinate system (hamada, pest, boozer, equal_arc)
 power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
 power_b = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
 power_r = 0                  # del.B ~ B_p^power_bp * B^power_b / R^power_r
