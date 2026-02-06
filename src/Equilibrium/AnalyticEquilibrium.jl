@@ -149,7 +149,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, fs_r; bc=Spl.extrap_bc_matrix(xs_r, fs_r), search=LinearBinary(), extrap=:extension)
+    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
     spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
@@ -190,7 +190,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    sq_in = cubic_interp(sq_xs, sq_fs; bc=Spl.extrap_bc_matrix(sq_xs, sq_fs), search=LinearBinary(), extrap=:extension)
+    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
     rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes,
         :extrap, Spl.PeriodicBC())
 
@@ -256,7 +256,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
-    sq_in = cubic_interp(psis, sqfs; bc=Spl.extrap_bc_matrix(psis, sqfs), extrap=:extension)
+    sq_in = cubic_interp(psis, sqfs; bc=CubicFit(), extrap=:extension)
 
     # Compute 2D data and spline
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]

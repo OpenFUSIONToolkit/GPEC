@@ -96,7 +96,7 @@ function read_efit(config::EquilibriumConfig)
         sqrt.(psi_norm_grid)
     )
     sq_xs = collect(psi_norm_grid)
-    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=Spl.extrap_bc_matrix(sq_xs, sq_fs_nodes), extrap=:extension)
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=:extension)
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -234,12 +234,12 @@ function read_chease2(config::EquilibriumConfig)
     fs[:, 3] .= zq
     # Fit spline with extrapolation boundary condition (bctype = 3)
     # Compute cumulative integral of pressure column for normalization
-    fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=Spl.extrap_bc(xs, fs[:, 2]))
+    fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=CubicFit())
     # Make a writable copy and normalize pressure integral column (2nd column)
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
     # Create final spline with modified data
-    sq_in = cubic_interp(xs, fs_copy; bc=Spl.extrap_bc_matrix(xs, fs_copy), extrap=:extension)
+    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=:extension)
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -348,12 +348,12 @@ function read_chease(config::EquilibriumConfig)
         fs[:, 3] .= zq
 
         # Compute cumulative integral of pressure column for normalization
-        fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=Spl.extrap_bc(xs, fs[:, 2]))
+        fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=CubicFit())
         # Make a writable copy and normalize pressure integral column (2nd column)
         fs_copy = copy(fs)
         fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
         # Create final spline with modified data
-        sq_in = cubic_interp(xs, fs_copy; bc=Spl.extrap_bc_matrix(xs, fs_copy), extrap=:extension)
+        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=:extension)
 
         # --- Setup parameters ---
         # PeriodicBC requires a closed grid where fs[:, end, :] == fs[:, 1, :]

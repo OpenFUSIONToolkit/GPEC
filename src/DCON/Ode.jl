@@ -507,7 +507,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     fill!(odet.dW_edge, -Inf * (1 + im))
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
-    odet.wvmat_real, odet.wvmat_imag = free_compute_wv_spline(ctrl, equil, intr)
+    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop through integration, compute dW at steps where psifac >= psiedge
     for istep in 1:odet.step

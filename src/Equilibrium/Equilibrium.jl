@@ -6,7 +6,7 @@ import ..Spl
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
 import StaticArrays: @MMatrix
 
 # --- Internal Module Structure ---

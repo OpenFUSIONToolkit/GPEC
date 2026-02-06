@@ -311,37 +311,22 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     # --- Fit splines using native FastInterpolations CubicSeriesInterpolant ---
     ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband, numpert_total=intr.numpert_total)
 
-    # Pre-allocate shared buffers for real/imag extraction (reused for all 9 matrices)
-    npsi, n_series = size(amats_flat)
-    re_buf = Matrix{Float64}(undef, npsi, n_series)
-    im_buf = Matrix{Float64}(undef, npsi, n_series)
-
-    # Helper to extract real/imag into pre-allocated buffers (avoids broadcast allocation)
-    @inline function extract_real_imag!(re::Matrix{Float64}, im::Matrix{Float64}, z::Matrix{ComplexF64})
-        @inbounds for i in eachindex(z)
-            re[i] = real(z[i])
-            im[i] = imag(z[i])
-        end
+    # FastInterpolations now natively supports complex values - no need to split real/imag
+    # Helper to create complex interpolant directly using CubicFit() for native endpoint handling
+    @inline function make_complex_interp(xs, z_flat)
+        return cubic_interp(xs, z_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
     end
 
-    # Helper to create interpolant pair from complex matrix
-    @inline function make_interp_pair(xs, z_flat, re_buf, im_buf)
-        extract_real_imag!(re_buf, im_buf, z_flat)
-        re_interp = cubic_interp(xs, re_buf; bc=Spl.extrap_bc_matrix(xs, re_buf), extrap=:extension, search=LinearBinary())
-        im_interp = cubic_interp(xs, im_buf; bc=Spl.extrap_bc_matrix(xs, im_buf), extrap=:extension, search=LinearBinary())
-        return (re_interp, im_interp)
-    end
-
-    # Create series interpolants with per-column extrap BC
-    ffit.amats_real, ffit.amats_imag = make_interp_pair(metric.xs, amats_flat, re_buf, im_buf)
-    ffit.bmats_real, ffit.bmats_imag = make_interp_pair(metric.xs, bmats_flat, re_buf, im_buf)
-    ffit.cmats_real, ffit.cmats_imag = make_interp_pair(metric.xs, cmats_flat, re_buf, im_buf)
-    ffit.dmats_real, ffit.dmats_imag = make_interp_pair(metric.xs, dmats_flat, re_buf, im_buf)
-    ffit.emats_real, ffit.emats_imag = make_interp_pair(metric.xs, emats_flat, re_buf, im_buf)
-    ffit.hmats_real, ffit.hmats_imag = make_interp_pair(metric.xs, hmats_flat, re_buf, im_buf)
-    ffit.fmats_lower_real, ffit.fmats_lower_imag = make_interp_pair(metric.xs, fmats_lower_flat, re_buf, im_buf)
-    ffit.gmats_real, ffit.gmats_imag = make_interp_pair(metric.xs, gmats_flat, re_buf, im_buf)
-    ffit.kmats_real, ffit.kmats_imag = make_interp_pair(metric.xs, kmats_flat, re_buf, im_buf)
+    # Create complex series interpolants with per-column extrap BC
+    ffit.amats = make_complex_interp(metric.xs, amats_flat)
+    ffit.bmats = make_complex_interp(metric.xs, bmats_flat)
+    ffit.cmats = make_complex_interp(metric.xs, cmats_flat)
+    ffit.dmats = make_complex_interp(metric.xs, dmats_flat)
+    ffit.emats = make_complex_interp(metric.xs, emats_flat)
+    ffit.hmats = make_complex_interp(metric.xs, hmats_flat)
+    ffit.fmats_lower = make_complex_interp(metric.xs, fmats_lower_flat)
+    ffit.gmats = make_complex_interp(metric.xs, gmats_flat)
+    ffit.kmats = make_complex_interp(metric.xs, kmats_flat)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

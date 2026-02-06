@@ -279,15 +279,12 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
 
     # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
     wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
-    wv_real = real.(wv_flat)
-    wv_imag = imag.(wv_flat)
 
-    wvmat_real = cubic_interp(psi_array, wv_real;
-        bc=Spl.extrap_bc_matrix(psi_array, wv_real), extrap=:extension, search=LinearBinary())
-    wvmat_imag = cubic_interp(psi_array, wv_imag;
-        bc=Spl.extrap_bc_matrix(psi_array, wv_imag), extrap=:extension, search=LinearBinary())
+    # FastInterpolations now natively supports complex values - create complex series interpolant directly
+    # Use CubicFit() for native endpoint handling
+    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
 
-    return (wvmat_real, wvmat_imag)
+    return wvmat
 end
 
 """
@@ -297,7 +294,7 @@ Compute total complex energy eigenvalue (total1). This is a trimmed down version
 that only computes the total energy eigenvalue for the mode unstable mode, used in `ode_record_edge_dW`
 which calls this function at each step in the psiedge -> psilim region of integration. This performs
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
-wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat_real` and `odet.wvmat_imag`.
+wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat` (a complex-valued spline).
 """
 function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, odet::OdeState)
 
@@ -312,12 +309,9 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from series interpolants (use separate hint for wv grid)
-    odet.wvmat_real(odet._wv_real_buf, odet.psifac; hint=odet.wv_hint)
-    odet.wvmat_imag(odet._wv_imag_buf, odet.psifac; hint=odet.wv_hint)
-    @inbounds for i in eachindex(odet._wv_real_buf)
-        odet._wv_out[i] = odet._wv_real_buf[i] + im * odet._wv_imag_buf[i]
-    end
+    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
+    # FastInterpolations now natively supports complex values
+    odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
     wv = odet._wv_out
 
     # Compute total energy matrix and eigen-decomposition

@@ -15,6 +15,6 @@ export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based ev
 export BicubicSpline, empty_BicubicSpline, BicubicBC
 
 # Export boundary condition types and helpers
-export extrap_bc, extrap_bc_matrix, NaturalBC, PeriodicBC, BCPair, Deriv1, Deriv2
+export extrap_bc, extrap_bc_matrix, NaturalBC, PeriodicBC, CubicFit, BCPair, Deriv1, Deriv2
 
 end

@@ -25,6 +25,7 @@ using LinearAlgebra
 # Re-export FastInterpolations BC types for convenience
 const NaturalBC = FastInterpolations.NaturalBC
 const PeriodicBC = FastInterpolations.PeriodicBC
+const CubicFit = FastInterpolations.CubicFit
 const BCPair = FastInterpolations.BCPair
 const Deriv1 = FastInterpolations.Deriv1
 const Deriv2 = FastInterpolations.Deriv2
@@ -124,6 +125,17 @@ function extrap_bc_matrix(xs::AbstractVector{Float64}, Y::Matrix{Float64})
     bcs = Vector{BCPair}(undef, n_series)
     @inbounds for k in 1:n_series
         bcs[k] = extrap_bc(xs, @view(Y[:, k]))
+    end
+    return bcs
+end
+
+# Complex version - computes BCs from real parts (phases handled separately in spline)
+function extrap_bc_matrix(xs::AbstractVector{Float64}, Y::Matrix{ComplexF64})
+    n_series = size(Y, 2)
+    bcs = Vector{BCPair}(undef, n_series)
+    @inbounds for k in 1:n_series
+        # Compute BCs from real parts (derivative structure is determined by magnitude)
+        bcs[k] = extrap_bc(xs, real.(@view(Y[:, k])))
     end
     return bcs
 end

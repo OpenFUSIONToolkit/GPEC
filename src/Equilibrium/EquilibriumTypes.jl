@@ -491,11 +491,11 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(dVdpsi_vals) == npts
     @assert length(q_vals) == npts
 
-    # Create value interpolants with extrap BC and LinearBinary search for sequential psi access
-    F_spline = cubic_interp(xs, F_vals; bc=Spl.extrap_bc(xs, F_vals), extrap=extrap, search=LinearBinary())
-    P_spline = cubic_interp(xs, P_vals; bc=Spl.extrap_bc(xs, P_vals), extrap=extrap, search=LinearBinary())
-    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=Spl.extrap_bc(xs, dVdpsi_vals), extrap=extrap, search=LinearBinary())
-    q_spline = cubic_interp(xs, q_vals; bc=Spl.extrap_bc(xs, q_vals), extrap=extrap, search=LinearBinary())
+    # Create value interpolants with CubicFit BC and LinearBinary search for sequential psi access
+    F_spline = cubic_interp(xs, F_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    P_spline = cubic_interp(xs, P_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    q_spline = cubic_interp(xs, q_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
 
     # Create derivative views (these share data with value interpolants, no extra storage)
     F_deriv = deriv1(F_spline)
