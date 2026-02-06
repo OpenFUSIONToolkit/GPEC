@@ -1,5 +1,3 @@
-const INV_4PI = 1.0 / (4π)
-
 """
     periodic_wrap(x, n) -> Int
 
@@ -196,7 +194,7 @@ Evaluate the Laplace single-layer (FxU) kernel between two 3D points. Returns
 The single-layer kernel φ is the fundamental solution to Laplace's equation:
 
 ```
-φ(x_obs, x_src) = 1 / (4π |x_obs - x_src|)
+φ(x_obs, x_src) = 1 / |x_obs - x_src|
 ```
 
 # Arguments
@@ -216,7 +214,7 @@ function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     end
     r2 = dx*dx + dy*dy + dz*dz
     r2 < 1e-30 && return 0.0
-    return INV_4PI * inv(sqrt(r2))
+    return inv(sqrt(r2))
 end
 """
     laplace_double_layer(x_obs, x_src, n_src) -> Float64
@@ -228,7 +226,7 @@ scalar arithmetic is used for maximum performance.
 The double-layer kernel K is the normal derivative of the fundamental solution:
 
 ```
-K(x_obs, x_src, n_src) = ∇_{x_src} φ · n_src = 1/(4π) * (x_obs - x_src) · n_src / |x_obs - x_src|³
+K(x_obs, x_src, n_src) = ∇_{x_src} φ · n_src = (x_obs - x_src) · n_src / |x_obs - x_src|³
 ```
 
 # Arguments
@@ -254,7 +252,7 @@ function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     r2 < 1e-30 && return 0.0
     rinv = inv(sqrt(r2))
     r3inv = rinv * rinv * rinv
-    return (dx*nx + dy*ny + dz*nz) * (INV_4PI * r3inv)
+    return (dx*nx + dy*ny + dz*nz) * r3inv
 end
 
 """

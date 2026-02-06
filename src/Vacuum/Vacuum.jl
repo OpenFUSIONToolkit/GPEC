@@ -378,14 +378,8 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
         fourier_transform!(green_fourier, green_temp, plasma_surf.sin_mn_basis3D, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
-    grad_green += 0.5I
-
-    # Only needed for mutual inductance with the wall calculations
-    if kernelsign < 0
-        grad_green .*= kernelsign
-        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        grad_green .+= 2I
-    end
+    # Add the term that comes from the volume integral of Green's identity
+    grad_green += 2π * I
 
     # Invert the vacuum response system of equations, eqs. 112 of Chance 1997 (gelimb in Fortran)
     green_fourier .= grad_green \ green_fourier
