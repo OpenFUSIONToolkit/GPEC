@@ -2,13 +2,14 @@ module Vacuum
 
 using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 
-include("VacuumStructs.jl")
-include("VacuumInternals.jl")
-
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
+
+include("DataTypes.jl")
+include("Kernel2D.jl")
+include("MathUtils.jl")
 
 # ======================================================================
 # Legacy fortran vacuum module interface
