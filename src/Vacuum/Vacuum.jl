@@ -341,8 +341,6 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     # TODO: Currently only supports axisymmetric surfaces
     plasma_surf = PlasmaGeometry3D(inputs)
     wall = WallGeometry3D(inputs, plasma_surf, wall_settings)
-    patch_rad_pol = PATCH_RAD;
-    patch_rad_tor = PATCH_RAD #round(Int, PATCH_RAD * plasma_surf.aspect_ratio)
 
     # Allocate based on wall presence
     grad_green_size = wall.nowall ? num_points : 2 * num_points
@@ -359,7 +357,7 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     SIN_COL_OFFSET = num_modes
 
     # Plasma–Plasma block
-    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, plasma_surf, patch_rad_pol, patch_rad_tor, RAD_DIM, INTERP_ORDER)
+    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
 
     # Fourier transform obs=plasma, src=plasma block into green_fourier
     fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET)

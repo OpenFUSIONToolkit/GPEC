@@ -61,7 +61,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
     # Total size of square patch extracted around singular point (odd number: 2*PATCH_DIM0+1)
     PATCH_DIM = 2 * PATCH_RAD + 1
-    @assert INTERP_ORDER <= PATCH_DIM "Must have INTERP_ORDER <= PATCH_DIM"
+    @assert INTERP_ORDER <= PATCH_DIM "Must have INTERP_ORDER <= PATCH_DIM, got INTERP_ORDER=$INTERP_ORDER, PATCH_DIM=$PATCH_DIM"
     # Number of angular quadrature nodes in polar coordinates (uniformly distributed around circle)
     ANG_DIM = 2 * RAD_DIM
 
@@ -76,9 +76,9 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
 
     # Partition of Unity on Cartesian grid
     Gpou = zeros(PATCH_DIM, PATCH_DIM)
-    for i in 1:PATCH_DIM, j in 1:PATCH_DIM
-        r = sqrt((i - 1 - PATCH_RAD)^2 + (j - 1 - PATCH_RAD)^2) / PATCH_RAD
-        Gpou[i, j] = -pou(r)
+    coords = LinRange(-1.0, 1.0, PATCH_DIM)
+    for (i, x) in enumerate(coords), (j, y) in enumerate(coords)
+        Gpou[i, j] = -pou(sqrt(x^2 + y^2))
     end
 
     # Partition of Unity on polar grid including transformation Jacobian - Ppou = χ(ρ) M²/4 r dr dt, eq. 38 in Malhotra 2019
@@ -406,8 +406,7 @@ function compute_3D_kernel_matrix!(
     greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
-    PATCH_RAD_POL::Int,
-    PATCH_RAD_TOR::Int,
+    PATCH_RAD::Int,
     RAD_DIM::Int,
     INTERP_ORDER::Int
 )
@@ -429,10 +428,10 @@ function compute_3D_kernel_matrix!(
     populate_greenfunction = source isa PlasmaGeometry3D
 
     # Initialize quadrature data
-    quad_data = get_singular_quadrature(PATCH_RAD_POL, RAD_DIM, INTERP_ORDER)
+    quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
-    @assert observer.mtheta ≥ PATCH_DIM
-    @assert observer.nzeta ≥ PATCH_DIM
+    @assert observer.mtheta ≥ PATCH_DIM "Must have observer.mtheta ≥ PATCH_DIM, got observer.mtheta=$(observer.mtheta), PATCH_DIM=$PATCH_DIM"
+    @assert observer.nzeta ≥ PATCH_DIM "Must have observer.nzeta ≥ PATCH_DIM, got observer.nzeta=$(observer.nzeta), PATCH_DIM=$PATCH_DIM"
 
     # Allocate thread-local workspaces (one per thread)
     nthreads = Threads.nthreads()
