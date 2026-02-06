@@ -3,8 +3,8 @@ using JPEC
 
 # --- Helper constructors ---
 # Minimal valid inputs
-function make_inputs(; mr=4, mz=4, ma=4, e=1.7, a=0.3, r0=1.7, q0=1.0, 
-                      p0fac=1.2, b0fac=1.0, f0fac=1.0)
+function make_inputs(; mr=4, mz=4, ma=4, e=1.7, a=0.3, r0=1.7, q0=1.0,
+    p0fac=1.2, b0fac=1.0, f0fac=1.0)
     equil_inputs = JPEC.Equilibrium.EquilibriumConfig()  # or mock/minimal constructor
     sol_inputs = JPEC.Equilibrium.SolovevConfig(mr, mz, ma, e, a, r0, q0, p0fac, b0fac, f0fac)
     return equil_inputs, sol_inputs
@@ -83,10 +83,13 @@ end
 @testset "sol_run parameter sensitivity" begin
     equil_inputs, sol_inputs = make_inputs()
     dri1 = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
-    dri2 = JPEC.Equilibrium.sol_run(equil_inputs, JPEC.Equilibrium.SolovevConfig(sol_inputs.mr, sol_inputs.mz, sol_inputs.ma,
-                                               sol_inputs.e * 1.1, sol_inputs.a, sol_inputs.r0,
-                                               sol_inputs.q0, sol_inputs.p0fac, sol_inputs.b0fac,
-                                               sol_inputs.f0fac))
+    dri2 = JPEC.Equilibrium.sol_run(
+        equil_inputs,
+        JPEC.Equilibrium.SolovevConfig(sol_inputs.mr, sol_inputs.mz, sol_inputs.ma,
+            sol_inputs.e * 1.1, sol_inputs.a, sol_inputs.r0,
+            sol_inputs.q0, sol_inputs.p0fac, sol_inputs.b0fac,
+            sol_inputs.f0fac)
+    )
     @test dri1.psio != dri2.psio  # psio should depend on elongation e
 end
 
