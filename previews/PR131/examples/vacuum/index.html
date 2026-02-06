@@ -15,7 +15,7 @@ zin = rand(Float64, n_modes)      # Vertical coordinates
 deltain = rand(Float64, n_modes)  # Displacement data
 
 # Initialize DCON interface
-JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)</code></pre><h3 id="Vacuum-Matrix-Calculation"><a class="docs-heading-anchor" href="#Vacuum-Matrix-Calculation">Vacuum Matrix Calculation</a><a id="Vacuum-Matrix-Calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Vacuum-Matrix-Calculation" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Set up vacuum calculation parameters
+JPEC.Vacuum.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)</code></pre><h3 id="Vacuum-Matrix-Calculation"><a class="docs-heading-anchor" href="#Vacuum-Matrix-Calculation">Vacuum Matrix Calculation</a><a id="Vacuum-Matrix-Calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Vacuum-Matrix-Calculation" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Set up vacuum calculation parameters
 mpert = 5              # Number of perturbation modes
 mtheta = 256           # Number of theta points for plasma
 mthvac = 256           # Number of theta points for vacuum
@@ -34,7 +34,7 @@ grrio = rand(Float64, 2*(mthvac+5), mpert*2)  # Geometry data
 xzptso = rand(Float64, mthvac+5, 4)           # Source points
 
 # Perform vacuum matrix calculation
-JPEC.VacuumMod.mscvac(
+JPEC.Vacuum.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
     wall_flag, farwall_flag,
@@ -63,7 +63,7 @@ farwall_flag = false  # Do not use far wall approximation
 # Additional wall parameters might be needed
 # (specific implementation depends on geometry)
 
-JPEC.VacuumMod.mscvac(
+JPEC.Vacuum.mscvac(
     wv, mpert, mtheta, mthvac,
     complex_flag, kernelsignin,
     wall_flag, farwall_flag,
@@ -95,7 +95,7 @@ println(&quot;Most unstable eigenvalue: &quot;, eigenvals[max_growth_idx])</code
 # xin, zin, deltain = process_boundary_data(boundary_data)
 
 # 4. Perform vacuum calculation
-# JPEC.VacuumMod.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+# JPEC.Vacuum.set_dcon_params(mthin, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 # ... vacuum calculation ...
 
 # 5. Analyze stability
@@ -109,7 +109,7 @@ using Pkg
 Pkg.add(&quot;BenchmarkTools&quot;)
 using BenchmarkTools
 
-@time JPEC.VacuumMod.mscvac(wv, mpert, mtheta, mthvac,
+@time JPEC.Vacuum.mscvac(wv, mpert, mtheta, mthvac,
                            complex_flag, kernelsignin,
                            wall_flag, farwall_flag,
-                           grrio, xzptso)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../splines/">« Spline Examples</a><a class="docs-footer-nextpage" href="../equilibrium/">Equilibrium Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Thursday 15 January 2026 18:01">Thursday 15 January 2026</span>. Using Julia version 1.11.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+                           grrio, xzptso)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../splines/">« Spline Examples</a><a class="docs-footer-nextpage" href="../equilibrium/">Equilibrium Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 6 February 2026 16:40">Friday 6 February 2026</span>. Using Julia version 1.11.8.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
