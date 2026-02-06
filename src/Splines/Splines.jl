@@ -14,7 +14,7 @@ export evaluate!, deriv1!, integrate!, cumulative_integral, integrate_spline, to
 export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation
 export BicubicSpline, empty_BicubicSpline, BicubicBC
 
-# Export boundary condition types and helpers
-export extrap_bc, extrap_bc_matrix, NaturalBC, PeriodicBC, CubicFit, BCPair, Deriv1, Deriv2
+# Export boundary condition types
+export NaturalBC, PeriodicBC, CubicFit, BCPair, Deriv1, Deriv2
 
 end

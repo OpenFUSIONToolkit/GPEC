@@ -2,16 +2,16 @@
 FastInterpolationsAdaptor - Helpers and types for FastInterpolations.jl in JPEC
 
 This module provides:
-- extrap_bc: Helper to create BCPair for 4-point endpoint derivative extrapolation
-- extrap_bc_matrix: Per-column BCPairs for matrix of y-series
 - cumulative_integral: Exact spline integration (uses cubic spline coefficients)
+- total_integral: Optimized final-value-only integration
+- Internal helpers for BicubicSpline boundary condition handling
 
 ## Boundary Conditions
 
-Use FastInterpolations' native BC types directly:
+Use FastInterpolations' native BC types:
 - `NaturalBC()`: f''(x) = 0 at endpoints
 - `PeriodicBC()`: Periodic (requires fs[end] == fs[1])
-- `extrap_bc(xs, fs)`: GPEC-style 4-point polynomial extrapolation at endpoints
+- `CubicFit()`: Automatic endpoint derivative estimation (4-point fit)
 
 ## Performance Notes
 
@@ -31,61 +31,14 @@ const Deriv1 = FastInterpolations.Deriv1
 const Deriv2 = FastInterpolations.Deriv2
 
 # =============================================================================
-# Boundary Condition Helpers
+# Boundary Condition Helpers (Internal)
 # =============================================================================
-
-"""
-    extrap_bc(xs, fs) -> BCPair
-
-Create a BCPair for GPEC-style "extrap" boundary conditions.
-
-Estimates endpoint derivatives using 4-point Lagrange polynomial extrapolation,
-matching the Fortran GPEC behavior. This provides better accuracy than natural
-(f''=0) boundary conditions for smooth profiles.
-
-# Arguments
-
-  - `xs`: Grid coordinates (at least 4 points)
-  - `fs`: Function values at grid points
-
-# Returns
-
-A `BCPair(Deriv1(yp_left), Deriv1(yp_right))` specifying first derivatives at endpoints.
-
-# Example
-
-```julia
-xs = collect(range(0, 1; length=100))
-fs = sin.(xs)
-spline = cubic_interp(xs, fs; bc=extrap_bc(xs, fs))
-```
-"""
-@inline function extrap_bc(xs::AbstractVector{Float64}, fs::AbstractVector{Float64})
-    n = length(xs)
-    @assert n >= 4 "Need at least 4 points for extrap BC"
-    yp_left = _estimate_endpoint_derivative(@view(xs[1:4]), @view(fs[1:4]), xs[1])
-    yp_right = _estimate_endpoint_derivative(@view(xs[(n-3):n]), @view(fs[(n-3):n]), xs[n])
-    return BCPair(Deriv1(yp_left), Deriv1(yp_right))
-end
-
-# Complex version: returns tuple of (BCPair for real, BCPair for imag)
-@inline function extrap_bc(xs::AbstractVector{Float64}, fs::AbstractVector{ComplexF64})
-    n = length(xs)
-    @assert n >= 4 "Need at least 4 points for extrap BC"
-    fs_real = real.(fs)
-    fs_imag = imag.(fs)
-    yp_left_r = _estimate_endpoint_derivative(@view(xs[1:4]), @view(fs_real[1:4]), xs[1])
-    yp_right_r = _estimate_endpoint_derivative(@view(xs[(n-3):n]), @view(fs_real[(n-3):n]), xs[n])
-    yp_left_i = _estimate_endpoint_derivative(@view(xs[1:4]), @view(fs_imag[1:4]), xs[1])
-    yp_right_i = _estimate_endpoint_derivative(@view(xs[(n-3):n]), @view(fs_imag[(n-3):n]), xs[n])
-    return (BCPair(Deriv1(yp_left_r), Deriv1(yp_right_r)),
-        BCPair(Deriv1(yp_left_i), Deriv1(yp_right_i)))
-end
 
 """
     _estimate_endpoint_derivative(xs, fs, x0)
 
 Estimate f'(x0) using cubic Lagrange interpolation through 4 points.
+Used internally by BicubicSpline for extrap boundary conditions.
 """
 @inline function _estimate_endpoint_derivative(xs::AbstractVector{Float64},
     fs::AbstractVector{T}, x0::Float64) where {T}
@@ -112,32 +65,6 @@ Estimate f'(x0) using cubic Lagrange interpolation through 4 points.
     L4_deriv = ((x0 - x1) * (x0 - x2) + (x0 - x1) * (x0 - x3) + (x0 - x2) * (x0 - x3)) / L4_denom
 
     return f1 * L1_deriv + f2 * L2_deriv + f3 * L3_deriv + f4 * L4_deriv
-end
-
-"""
-    extrap_bc_matrix(xs, Y::Matrix{Float64}) -> Vector{BCPair}
-
-Create per-column BCPairs for a matrix of y-series using extrap boundary conditions.
-Returns a vector of BCPairs, one per column of Y.
-"""
-function extrap_bc_matrix(xs::AbstractVector{Float64}, Y::Matrix{Float64})
-    n_series = size(Y, 2)
-    bcs = Vector{BCPair}(undef, n_series)
-    @inbounds for k in 1:n_series
-        bcs[k] = extrap_bc(xs, @view(Y[:, k]))
-    end
-    return bcs
-end
-
-# Complex version - computes BCs from real parts (phases handled separately in spline)
-function extrap_bc_matrix(xs::AbstractVector{Float64}, Y::Matrix{ComplexF64})
-    n_series = size(Y, 2)
-    bcs = Vector{BCPair}(undef, n_series)
-    @inbounds for k in 1:n_series
-        # Compute BCs from real parts (derivative structure is determined by magnitude)
-        bcs[k] = extrap_bc(xs, real.(@view(Y[:, k])))
-    end
-    return bcs
 end
 
 # =============================================================================
