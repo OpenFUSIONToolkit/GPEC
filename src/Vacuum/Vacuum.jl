@@ -301,18 +301,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     fourier_inverse_transform!(air, grri, plasma_surf.cos_ln_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    vacmat = arr .+ aii
-    vacmti = air .- ari
+    wv = complex.(arr .+ aii, air .- ari)
+
     # Force symmetry of response matrix if desired
-    force_wv_symmetry && begin
-        for l1 in 1:mpert
-            for l2 in l1:mpert
-                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
-                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-            end
-        end
-    end
-    wv = complex.(vacmat, vacmti)
+    force_wv_symmetry && hermitianpart!(wv)
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
