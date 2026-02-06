@@ -222,8 +222,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
-    kin_source::String = "pentrc"
-    kin_dummy_sigma::Float64 = 1e-2
+    kin_source::String = "dummy"
+    kin_dummy_sigma::Float64 = 1e-6
     con_flag::Bool = false
     kinfac1::Float64 = 1.0
     kinfac2::Float64 = 1.0
