@@ -372,6 +372,9 @@ at each step. This handles the solution normalization logic that was previously
 in a DO loop within eulerlagrange_integration and called every step by running LSODE in one step mode
 in the Fortran code. However, we now perform the equivalent of `ode_output_step`
 and `ode_record_edge` post-integration using the saved data.
+
+With save_interval > 1, this only saves every Nth step to reduce array copying overhead,
+but always saves steps near rational surfaces (beginning and end of each integration segment).
 """
 function integrator_callback!(integrator)
 
@@ -384,17 +387,38 @@ function integrator_callback!(integrator)
     # Check if the solution norms are above a threshold, if so apply Gaussian reduction
     compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
-    # Grow arrays if out of storage space
-    if odet.step >= size(odet.u_store, 4)
-        resize_storage!(odet)
+    # Determine if we should save this step
+    # Always save if:
+    # 1. First few steps of integration (ensures we capture point right after rational/axis)
+    # 2. Every Nth step (save_interval)
+    # 3. Near the end of integration segment (ensures we capture point right before next rational)
+
+    # Check if we're near the end of this integration segment
+    psi_range = abs(integrator.sol.prob.tspan[2] - integrator.sol.prob.tspan[1])
+    psi_remaining = abs(integrator.sol.prob.tspan[2] - integrator.t)
+    near_end = psi_remaining < 0.05 * psi_range || psi_remaining < 1e-4
+
+    # Check if we're at the beginning (first 2 steps capture the point right after rational)
+    # Count steps within this segment (not global step count)
+    steps_in_segment = length(integrator.sol.t)
+    near_start = steps_in_segment <= 2
+
+    # Save if interval condition met, or near start/end
+    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
+
+    if should_save
+        # Grow arrays if out of storage space
+        if odet.step >= size(odet.u_store, 4)
+            resize_storage!(odet)
+        end
+        odet.psi_store[odet.step] = integrator.t
+        @views odet.u_store[:, :, :, odet.step] .= integrator.u
+        odet.q_store[odet.step] = odet.q # these two were set in sing_der!
+        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+
+        # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
+        odet.step += 1
     end
-    # Save values
-    odet.psi_store[odet.step] = integrator.t
-    odet.u_store[:, :, :, odet.step] .= integrator.u
-    odet.q_store[odet.step] = odet.q # these two were set in sing_der!
-    odet.ud_store[:, :, :, odet.step] .= odet.ud
-    # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
-    odet.step += 1
 end
 
 """
@@ -602,24 +626,27 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     gauss = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix)
     # Transformation matrices for each region between fixups (ifix + 1 regions)
     transforms = Array{ComplexF64,3}(undef, intr.numpert_total, intr.numpert_total, odet.ifix + 1)
+    # Temporary workspace matrices
+    gauss_buffer = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
+    temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    mask = trues(intr.numpert_total)
 
     # Construct gaussian reduction matrices for each fixup
-    identity = Matrix{ComplexF64}(I, intr.numpert_total, intr.numpert_total)
-    mask = trues(intr.numpert_total)
     for ifix in 1:odet.ifix
-        gauss[:, :, ifix] = copy(identity)
+        gauss[:, :, ifix] .= identity
         mask .= true
         for isol in 1:intr.numpert_total
             ksol = odet.index[isol, ifix]
             mask[ksol] = false
-            temp = copy(identity)
+            temp .= identity
             for jsol in 1:intr.numpert_total
                 if mask[jsol]
                     temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
                 end
             end
-            # Matrix multiplication gauss = gauss * temp
-            gauss[:, :, ifix] .= gauss[:, :, ifix] * temp
+            mul!(gauss_buffer, view(gauss,:,:,ifix), temp)
+            gauss[:, :, ifix] .= gauss_buffer
         end
         # Account for zeroed indices at singular surfaces in `ode_ideal_cross`
         if odet.sing_flag[ifix]
@@ -633,9 +660,9 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     # Here, the i'th region is between the (i-1)'th and i'th fixup e.g. transforms[:, :, 1]
     # is the transform matrix for the region between init and first fixup
     # and mfix + 1 is the for the region after the last fixup and before the edge
-    transforms[:, :, end] = copy(identity)
+    transforms[:, :, end] .= identity
     for ifix in odet.ifix:-1:1
-        transforms[:, :, ifix] = gauss[:, :, ifix] * transforms[:, :, ifix+1]
+        mul!(view(transforms,:,:,ifix), view(gauss,:,:,ifix), view(transforms,:,:,(ifix+1)))
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
@@ -644,12 +671,16 @@ function transform_u!(odet::OdeState, intr::DconInternal)
     for ifix in 1:(odet.ifix+1)
         # If after the last fixup, go to the end of integration
         kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
-        for istep in jfix:kfix
+        @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
-            odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * transforms[:, :, ifix]
-            odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * transforms[:, :, ifix]
-            odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * transforms[:, :, ifix]
-            odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * transforms[:, :, ifix]
+            mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
+            odet.u_store[:, :, 1, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.u_store[:, :, 2, istep], transforms[:, :, ifix])
+            odet.u_store[:, :, 2, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.ud_store[:, :, 1, istep], transforms[:, :, ifix])
+            odet.ud_store[:, :, 1, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.ud_store[:, :, 2, istep], transforms[:, :, ifix])
+            odet.ud_store[:, :, 2, istep] .= gauss_buffer
         end
         jfix = kfix + 1
     end

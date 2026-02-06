@@ -200,6 +200,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
 """
 @kwdef mutable struct DconControl
     verbose::Bool = true
@@ -253,6 +254,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
+    save_interval::Int = 10
 end
 
 @kwdef mutable struct FourFitVars
@@ -430,9 +432,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 end
 
-# Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
-
 
 # Below here are debug output structs used for benchmarking and unit testing
 

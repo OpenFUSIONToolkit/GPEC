@@ -197,6 +197,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     g12 = zeros(ComplexF64, 2 * intr.mband + 1)
     jmat = zeros(ComplexF64, 2 * intr.mband + 1)
     jmat1 = zeros(ComplexF64, 2 * intr.mband + 1)
+    a_inv_dmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    a_inv_cmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
     # Instead of using Offset Arrays like in Fortran (-mband:mband), we store everything in
     # a single 1:(2*mband+1) array and map the zero index to the middle
@@ -300,11 +302,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
-        temp1 = amat_fact \ dmat
-        temp2 = amat_fact \ cmat
-        fmat .-= adjoint(dmat) * temp1
-        kmat .= emat .- (adjoint(kmat) * temp2)
-        gmat .= hmat .- (adjoint(cmat) * temp2)
+        ldiv!(a_inv_dmat_temp, amat_fact, dmat)
+        ldiv!(a_inv_cmat_temp, amat_fact, cmat)
+        fmat .-= adjoint(dmat) * a_inv_dmat_temp
+        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)
+        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
