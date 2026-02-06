@@ -129,11 +129,15 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac.wt .* (2π * equil.psio * 1e-3))
-    for istep in 1:odet.step
-        odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * coeffs
-        odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * coeffs
-        odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * coeffs
-        odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * coeffs
+    @views for istep in 1:odet.step
+        mul!(odet.tmp, odet.u_store[:, :, 1, istep], coeffs)
+        odet.u_store[:, :, 1, istep] .= odet.tmp
+        mul!(odet.tmp, odet.u_store[:, :, 2, istep], coeffs)
+        odet.u_store[:, :, 2, istep] .= odet.tmp
+        mul!(odet.tmp, odet.ud_store[:, :, 1, istep], coeffs)
+        odet.ud_store[:, :, 1, istep] .= odet.tmp
+        mul!(odet.tmp, odet.ud_store[:, :, 2, istep], coeffs)
+        odet.ud_store[:, :, 2, istep] .= odet.tmp
     end
 
     # Write energies to screen

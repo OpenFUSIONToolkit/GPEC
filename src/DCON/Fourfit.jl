@@ -197,6 +197,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     g12 = zeros(ComplexF64, 2 * intr.mband + 1)
     jmat = zeros(ComplexF64, 2 * intr.mband + 1)
     jmat1 = zeros(ComplexF64, 2 * intr.mband + 1)
+    a_inv_dmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    a_inv_cmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
     # Instead of using Offset Arrays like in Fortran (-mband:mband), we store everything in
     # a single 1:(2*mband+1) array and map the zero index to the middle
@@ -223,14 +225,14 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         chi1 = 2π * equil.psio
 
         # Fill lower half (0, -1, …, -mband)
-        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:intr.mband+1]
-        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, intr.mband+2:2*intr.mband+2]
-        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 2*intr.mband+3:3*intr.mband+3]
-        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 3*intr.mband+4:4*intr.mband+4]
-        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 4*intr.mband+5:5*intr.mband+5]
-        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 5*intr.mband+6:6*intr.mband+6]
-        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 6*intr.mband+7:7*intr.mband+7]
-        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 7*intr.mband+8:8*intr.mband+8]
+        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:(intr.mband+1)]
+        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (intr.mband+2):(2*intr.mband+2)]
+        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (2*intr.mband+3):(3*intr.mband+3)]
+        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (3*intr.mband+4):(4*intr.mband+4)]
+        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (4*intr.mband+5):(5*intr.mband+5)]
+        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (5*intr.mband+6):(6*intr.mband+6)]
+        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (6*intr.mband+7):(7*intr.mband+7)]
+        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, (7*intr.mband+8):(8*intr.mband+8)]
 
         # Fill upper half (+1:mband) with conjugate symmetry
         for k in 1:intr.mband
@@ -252,7 +254,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
             for m1 in intr.mlow:intr.mhigh
                 ipert_m = m1 - intr.mlow + 1
                 singfac1 = m1 - nq
-                for dm in max(1 - ipert_m, -intr.mband):min(intr.mpert - ipert_m, intr.mband)
+                for dm in max(1-ipert_m, -intr.mband):min(intr.mpert-ipert_m, intr.mband)
                     m2 = m1 + dm
                     singfac2 = m2 - nq
                     jpert_m = ipert_m + dm
@@ -270,7 +272,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
                     bmats_flatview[ipert_flat] = -2π * im * chi1 * (n * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
                     cmats_flatview[ipert_flat] =
                         2π * im * ((2π * im * chi1 * singfac2 * (n * g12[dmidx] + m1 * g31[dmidx])) -
-                                (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
+                                   (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
                         2π * im * (jtheta * singfac1 * imat[dmidx] + n * p1 / chi1 * jmat[dmidx])
                     dmats_flatview[ipert_flat] = 2π * chi1 * (g23[dmidx] + g33[dmidx] * m1 / n)
                     emats_flatview[ipert_flat] = -chi1 / n * (q1 * chi1 * g33[dmidx] - 2π * im * chi1 * g31[dmidx] * singfac2 + jtheta * imat[dmidx])
@@ -300,11 +302,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
-        temp1 = amat_fact \ dmat
-        temp2 = amat_fact \ cmat
-        fmat .-= adjoint(dmat) * temp1
-        kmat .= emat .- (adjoint(kmat) * temp2)
-        gmat .= hmat .- (adjoint(cmat) * temp2)
+        ldiv!(a_inv_dmat_temp, amat_fact, dmat)
+        ldiv!(a_inv_cmat_temp, amat_fact, cmat)
+        fmat .-= adjoint(dmat) * a_inv_dmat_temp
+        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)
+        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution

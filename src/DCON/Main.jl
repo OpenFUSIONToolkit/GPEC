@@ -131,7 +131,12 @@ function Main(path::String="./")
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
         end
-        sing_scan!(intr, ctrl, equil, ffit)
+
+        # NOTE: Asymptotic calculations for ideal DCON are now computed on-demand during
+        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that
+        # asymptotics are only needed for ideal DCON and are not inherent properties of
+        # the singular surface.
+
         if ctrl.kin_flag
             # ksing_find()
         end
@@ -142,7 +147,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Integrating Euler-Lagrange equation")
         end
-        odet = ode_run(ctrl, equil, ffit, intr)
+        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             println("Fixed-boundary mode unstable for n = $nstring.")
         end
@@ -299,7 +304,6 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]
         out_h5["singular/q"] = [sing.q for sing in intr.sing]
         out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
-        out_h5["singular/di"] = [sing.di for sing in intr.sing]
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
