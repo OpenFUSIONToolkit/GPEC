@@ -4,15 +4,15 @@ using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
 using StaticArrays
 using FastGaussQuadrature
 using SparseArrays
-using ..BIEST
-
-include("VacuumStructs.jl")
-include("VacuumInternals.jl")
-include("Vacuum3D.jl")
 
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response, compute_vacuum_response_3D
 export compute_vacuum_field
 export WallShapeSettings
+
+include("DataTypes.jl")
+include("Kernel2D.jl")
+include("Kernel3D.jl")
+include("MathUtils.jl")
 
 # ======================================================================
 # Legacy fortran vacuum module interface
