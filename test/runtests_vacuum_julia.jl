@@ -13,35 +13,32 @@ using Interpolations
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
             @test vac_in.n == 0
+            @test vac_in.kernelsign == 1.0
+            @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
             # Test default constructor for WallShapeSettings
             wall_set = WallShapeSettings()
             @test wall_set.shape == "nowall"
             @test wall_set.a == 0.3
-
-            # Test default constructor for WallGeometry
-            wall_geo = JPEC.Vacuum.WallGeometry()
-            @test wall_geo.nowall == true
-            @test isempty(wall_geo.x)
         end
 
         @testset "initialize_plasma_surface" begin
             inputs = VacuumInput(
                 r=[1.0, 1.1, 1.2, 1.1],
                 z=[0.0, 0.1, 0.0, -0.1],
-                delta=zeros(4),
+                ν=zeros(4),
                 mtheta=4,
                 mpert=1,
                 mlow=1,
-                n=1,
-                qa=1.0
+                n=1
             )
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
             @test length(plasma_surf.x) == 4
             @test length(plasma_surf.z) == 4
             @test length(plasma_surf.dx_dtheta) == 4
-            @test size(plasma_surf.coslt) == (4, 1)
+            @test size(plasma_surf.cos_ln_basis) == (4, 1)
+            @test size(plasma_surf.sin_ln_basis) == (4, 1)
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end
@@ -52,7 +49,7 @@ using Interpolations
                 VacuumInput(
                     r=1.7 .+ 0.3 .* cos.(range(0, 2pi, length=16)),
                     z=0.3 .* sin.(range(0, 2pi, length=16)),
-                    delta=zeros(16),
+                    ν=zeros(16),
                     mtheta=16
                 )
             )
@@ -68,18 +65,35 @@ using Interpolations
             @test wall_geo.nowall == false
             @test length(wall_geo.x) == 16
             @test !any(isnan, wall_geo.x)
+
+            # Test that wall with R <= 0 throws an error
+            # Create a plasma surface very close to R=0
+            plasma_surf_near_zero = JPEC.Vacuum.initialize_plasma_surface(
+                VacuumInput(
+                    r=0.05 .+ 0.03 .* cos.(range(0, 2pi, length=16)),
+                    z=0.03 .* sin.(range(0, 2pi, length=16)),
+                    ν=zeros(16),
+                    mtheta=16
+                )
+            )
+            # Use a "dee" wall shape with parameters that will produce R < 0
+            # Setting cw (offset) to a large negative value will shift the wall left past R=0
+            wall_settings_negative = WallShapeSettings(shape="dee", cw=-1.5, a=0.1)
+            @test_throws ErrorException JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_negative)
+
+            # Test that conformal wall R-coordinates are clamped by centerstack_min
+            # With a very large 'a' parameter, a conformal wall would naturally go to R < 0,
+            # but it should be clamped to centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
+            wall_settings_large_a = WallShapeSettings(shape="conformal", a=10.0, equal_arc_wall=false)
+            wall_geo_clamped = JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_large_a)
+            expected_min = min(0.1, 0.1 * minimum(plasma_surf_near_zero.x))
+            @test all(wall_geo_clamped.x .>= expected_min)
+            @test any(wall_geo_clamped.x .<= expected_min + 1e-10)  # At least one point should be at the minimum
         end
 
         @testset "distribute_to_equal_arc_grid" begin
-            xin = [1.0, 2.0, 3.0, 4.0]
-            zin = [0.0, 0.0, 0.0, 0.0]
-            mw1 = 4
-            xout, zout, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin, zin, mw1)
-            @test isapprox(xout, [1.0, 2.0, 3.0, 4.0], atol=1e-9)
-            @test isapprox(zout, [0.0, 0.0, 0.0, 0.0], atol=1e-9)
-
-            # A simple circle
-            theta = range(0, 2pi, length=10)
+            # A simple circle (note the function assumes periodic shapes with open loop endpoints)
+            theta = range(0, step=2pi/10, length=10)
             xin_circ = cos.(theta)
             zin_circ = sin.(theta)
             xout_circ, zout_circ, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin_circ, zin_circ, 10)
@@ -105,13 +119,33 @@ using Interpolations
         @testset "Legendre Functions (Pn_minus_half)" begin
             s = 1.5
             n = 3
-            P = JPEC.Vacuum.Pn_minus_half_1997(s, n)
-            @test length(P) == n + 2
-            @test !any(isnan, P)
+            P_1997 = JPEC.Vacuum.Pn_minus_half_1997(s, n)
+            @test length(P_1997) == n + 2
+            @test !any(isnan, P_1997)
 
-            # Test Pn_minus_half_2007 error
-            # @test JPEC.Vacuum.Pn_minus_half_2007(s, n)
-            @test_logs (:warn, "2007 paper implementation of Pn_minus_half is not yet complete. Use old version.") JPEC.Vacuum.Pn_minus_half_2007(s, n)
+            # Test Pn_minus_half_2007 implementation
+            P_2007 = JPEC.Vacuum.Pn_minus_half_2007(s, n)
+            @test length(P_2007) == n + 2
+            @test !any(isnan, P_2007)
+
+            # For small n and reasonable s, 1997 and 2007 should agree closely
+            @test isapprox(P_1997[1], P_2007[1], rtol=1e-7)  # P^0
+            @test isapprox(P_1997[2], P_2007[2], rtol=1e-7)  # P^1
+        end
+
+        @testset "Bulirsch Elliptic Integrals" begin
+            # Test the new Bulirsch algorithm
+            m1 = 0.5
+            K, E, conv, iters = JPEC.Vacuum.elliptic_integrals_bulirsch(m1)
+            @test K isa Float64
+            @test E isa Float64
+            @test !isnan(K)
+            @test !isnan(E)
+            @test conv < 1e-10  # Should converge well
+
+            # Test domain error
+            @test_throws DomainError JPEC.Vacuum.elliptic_integrals_bulirsch(-0.1)
+            @test_throws DomainError JPEC.Vacuum.elliptic_integrals_bulirsch(1.5)
         end
 
         @testset "green function" begin
@@ -223,13 +257,10 @@ using Interpolations
             inputs = VacuumInput(
                 r=collect(r_eq),
                 z=collect(z_eq),
-                delta=zeros(mtheta_eq),
+                ν=zeros(mtheta_eq),
                 mlow=1,
-                mhigh=2,
                 mpert=2,
                 n=1,
-                qa=2.0,
-                mtheta_eq=mtheta_eq,
                 mtheta=mtheta
             )
             wall_settings = WallShapeSettings(shape="nowall")
@@ -254,13 +285,10 @@ using Interpolations
             inputs = VacuumInput(
                 r=collect(r_eq),
                 z=collect(z_eq),
-                delta=zeros(mtheta_eq),
+                ν=zeros(mtheta_eq),
                 mlow=1,
-                mhigh=2,
                 mpert=2,
                 n=1,
-                qa=2.0,
-                mtheta_eq=mtheta_eq,
                 mtheta=mtheta
             )
             # Use a conformal wall

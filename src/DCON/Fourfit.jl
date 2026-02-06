@@ -124,10 +124,8 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
 
     # --- Fit the grid data to a Fourier-cubic spline ---
     fit_method = fft_flag ? 2 : 1
-    # In Fortran, `bctype` was set for the periodic `y` dimension. Here, the `FourierSpline`
-    # `bctype` argument applies to the non-periodic `x` dimension. The Fortran
-    # code used "extrap" for this.
-    bctype_x = "not-a-knot"
+    # The `bctype` argument applies to the non-periodic radial (x) dimension.
+    bctype_x = "extrap"
 
     # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
     metric.fspline = Spl.FourierSpline(

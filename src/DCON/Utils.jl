@@ -10,8 +10,8 @@ function resize_storage!(odet::OdeState)
     newlen = 2 * oldlen
 
     # Allocate new arrays
-    u_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
-    ud_new = Array{ComplexF64,4}(undef, odet.mpert, odet.mpert, 2, newlen)
+    u_new = Array{ComplexF64,4}(undef, odet.numpert_total, odet.numpert_total, 2, newlen)
+    ud_new = Array{ComplexF64,4}(undef, odet.numpert_total, odet.numpert_total, 2, newlen)
     psi_new = Vector{Float64}(undef, newlen)
     q_new = Vector{Float64}(undef, newlen)
 
