@@ -60,14 +60,10 @@ function equilibrium_solver(input::InverseRunInput)
     newq0 = config.control.newq0
 
     me = 3
-    interp = false
-    diagnose_rz_in = false
-    diagnose_rzphi = false
 
     # c-----------------------------------------------------------------------
     # c     allocate and define local arrays.
     # c-----------------------------------------------------------------------
-    # sq_in._fs[:, 3] .= sqrt.(sq_in._xs)
     rz_in._xs = sq_in._xs
     rz_in._ys = collect(0:rz_in.my) ./ rz_in.my
 
@@ -78,9 +74,9 @@ function equilibrium_solver(input::InverseRunInput)
     y = rz_in.fs[:, :, 2] .- zo
     r2 = x .^ 2 .+ y .^ 2
 
-    twopi = 2 * pi
+    twopi = 2 * π
 
-    deta = zeros(Float64, mx + 1, my + 1)
+    deta = zeros(Float64, mx+1, my+1)
     for ipsi in 0:mx, itheta in 0:my
         if r2[ipsi+1, itheta+1] == 0.0
             deta[ipsi+1, itheta+1] = 0.0
@@ -109,8 +105,9 @@ function equilibrium_solver(input::InverseRunInput)
     end
 
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
+    deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
-    rz_in_fs = zeros(Float64, mx + 1, my + 1, 3)
+    rz_in_fs = zeros(Float64, mx+1, my+1, 3)
     rz_in_fs[:, :, 1] = r2
     rz_in_fs[:, :, 2] = deta
 
@@ -128,8 +125,8 @@ function equilibrium_solver(input::InverseRunInput)
     # c     set up radial grid (only "ldp" implemented)
     # c-----------------------------------------------------------------------
     if grid_type == "ldp"
-        xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi + 1) .* (π / 2))) .^ 2
-        fs = zeros(Float64, mpsi + 1, 4)
+        xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
+        fs = zeros(Float64, mpsi+1, 4)
         sq = cubic_interp(xs, fs; bc=CubicFit(), extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
@@ -146,12 +143,12 @@ function equilibrium_solver(input::InverseRunInput)
     end
 
     # (/"  r2  "," deta "," dphi ","  jac "/)
-    rzphi_fs = zeros(Float64, mpsi + 1, mtheta + 1, 4)
+    rzphi_fs = zeros(Float64, mpsi+1, mtheta+1, 4)
     rzphi_xs = copy(sq_xs)
     rzphi_ys = collect(0:mtheta) ./ mtheta
 
     # (/"  b0  ","      ","      " /)
-    eqfun_fs = zeros(Float64, mpsi + 1, mtheta + 1, 3)
+    eqfun_fs = zeros(Float64, mpsi+1, mtheta+1, 3)
     eqfun_xs = copy(sq_xs)
     eqfun_ys = collect(0:mtheta) ./ mtheta
 
@@ -160,10 +157,6 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs,
         :extrap, Spl.PeriodicBC())
 
-
-    # spl_xs = zeros(Float64,mtheta+1)
-    # spl_fs = zeros(Float64,mtheta+1, 5)
-    # spl = Spl.spline_setup(spl_xs, spl_fs; bctype="extrap", extrap=:extension)
 
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
@@ -181,25 +174,30 @@ function equilibrium_solver(input::InverseRunInput)
             rfac = sqrt(f_rz_in[1])
             r = ro + rfac * cos(twopi * (theta + f_rz_in[2]))
             jacfac = fx_rz_in[1] * (1 + fy_rz_in[2]) - fy_rz_in[1] * fx_rz_in[2]
-            w11 = (1 + fy_rz_in[2]) * twopi^2 * rfac / jacfac
+            w11 = (1 + fy_rz_in[2]) * twopi ^ 2 * rfac / jacfac
             w12 = -fy_rz_in[1] * pi / (rfac * jacfac)
-            bp = psio * sqrt(w11 * w11 + w12 * w12) / r
+            bp = psio * sqrt(w11*w11 + w12*w12) / r
             bt = f_sq_in[1] / r
-            b = sqrt(bp * bp + bt * bt)
+            b = sqrt(bp*bp + bt*bt)
 
-            #         spl.fs[itheta+1, 1] = f_rz_[1]
-            #         spl.fs[itheta+1, 2] = f_rz_[2]
-            #         spl.fs[itheta+1, 3] = r*jacfac
-            #         spl.fs[itheta+1, 4] = spl.fs[itheta+1, 3]/(r*r)
-            #         spl.fs[itheta+1, 5] = spl.fs[itheta+1, 3]*bp^(config.power_bp)*b^(config.power_b)/r^(config.power_r)
+            spl_fs[itheta+1, 1] = f_rz_in[1]
+            spl_fs[itheta+1, 2] = f_rz_in[2]
+            spl_fs[itheta+1, 3] = r * jacfac
+            spl_fs[itheta+1, 4] = spl_fs[itheta+1, 3] / (r * r)
+            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.control.power_bp * b^config.control.power_b / r^config.control.power_r
+
         end
+        # c-----------------------------------------------------------------------
+        # c     fit to cubic splines and integrate.
+        # c-----------------------------------------------------------------------
 
-        #     spl.xs = spl.integral!()
-        #     spl.xs = spl.fsi[:, 5] ./ spl.fs[end, 5]
-        #     spl.fs[:, 2] .= spl.fs[:, 2] .+ rzphi.ys .- spl.xs
-        #     spl.fs[:, 4] .= (spl.fs[:, 3] ./ spl.fsi[end, 3]) ./ (spl.fs[:, 5] ./ spl.fsi[end, 5]) .* spl.fsi[end, 3] * twopi * pi
-        #     spl.fs[:, 3] .= f_sq[1] * pi / psio .* (spl.fsi[:, 4] .- spl.fsi[end, 4] .* spl.xs)
-        #     # spl.xs = Spl.spline_setup(spl.xs, spl.fs; bctype="periodic").integral!()
+        spl = Spl.CubicSpline(spl_xs, spl_fs; bctype="periodic")
+        Spl.spline_integrate!(spl)
+
+        spl_xs = spl.fsi[:, 5] ./ spl.fsi[mtheta+1, 5]
+        spl_fs[:, 2] .+= rzphi_ys .- spl_xs
+        spl_fs[:, 4] = (spl_fs[:, 3] ./ spl.fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl.fsi[mtheta+1, 5]) * spl.fsi[mtheta+1, 3] * twopi * pi
+        spl_fs[:, 3] = f_sq_in[1] * pi / psio * (spl.fsi[:, 4] - spl.fsi[mtheta+1, 4] .* spl_xs)
 
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
@@ -213,13 +211,67 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[ipsi+1, 4] = spl.fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
     end
 
-    # # sq = Spl.spline_setup(sq.xs, sq.fs; bctype="extrap", extrap=:extension)
-    # f = Spl.evaluate!(sq, sq.xs[1])
-    # f1 = Spl.deriv1!(sq, sq.xs[1])
-    # q0 = f[4] - f1[4] * sq.xs[1]
+    sq = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
 
-    # if newq0 == -1
-    #     newq0 = -q0
-    # end
+    f_sq, f1_sq = Spl.spline_eval(sq, sq_xs, 1)
+    q0 = f_sq[1, 4] - f1_sq[1, 4] * sq.xs[1]
+    if newq0 == -1
+        newq0 = -q0
+    end
 
+    if newq0 != 0
+        f0 = f_sq[1, 2] - f1_sq[1, 2] * sq_xs[1]
+        f0fac = f0^2 * ((newq0 / q0)^2 - 1)
+        q0 = newq0
+        for ipsi in 0:mpsi
+            ffac = sqrt(1 + f0fac / f_sq[ipsi+1, 1]^2) * sign(newq0)
+            sq_fs[ipsi+1, 1] *= ffac
+            sq_fs[ipsi+1, 4] *= ffac
+            rzphi_fs[ipsi+1, :, 3] *= ffac
+        end
+        sq = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
+    end
+    qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
+    rzphi = Spl.BicubicSpline(rzphi_xs, rzphi_ys, rzphi_fs; bctypex="extrap", bctypey="periodic")
+
+    for ipsi in 0:mpsi
+        f_sq = Spl.spline_eval!(sq, sq_xs[ipsi+1])
+        q = f_sq[4]
+        for itheta in 0:mtheta
+            f_rzphi, fx_rzphi, fy_rzphi = Spl.bicube_deriv1!(rzphi, sq_xs[ipsi+1], rzphi_ys[itheta+1])
+            rfac = sqrt(f_rzphi[1])
+            eta = twopi * (itheta / mtheta + f_rzphi[2])
+            r = ro + rfac * cos(eta)
+            jacfac = fx_rzphi[4]
+
+            v = zeros(Float64, 3, 3)
+            v[1, 1] = fx_rzphi[1] / (2 * rfac)
+            v[1, 2] = fx_rzphi[2] * twopi * rfac
+            v[1, 3] = fx_rzphi[3] * r
+            v[2, 1] = fy_rzphi[1] / (2 * rfac)
+            v[2, 2] = (1 + fy_rzphi[2]) * twopi * rfac
+            v[2, 3] = fy_rzphi[3] * r
+            v[3, 3] = twopi * r
+
+            w11 = (1 + fy_rzphi[2]) * twopi^2 * rfac * r / jacfac
+            w12 = -fy_rzphi[1] * pi * r / (rfac * jacfac)
+
+            delpsi = sqrt(w11^2 + w12^2)
+            eqfun_fs[ipsi+1, itheta+1, 1] = sqrt(((twopi * psio * delpsi)^2 + f_sq[1]^2) / (twopi * r)^2)
+            eqfun_fs[ipsi+1, itheta+1, 2] = (sum(v[1, :] .* v[2, :]) + f_sq[4] * v[3, 3] * v[1, 3]) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
+            eqfun_fs[ipsi+1, itheta+1, 3] = (v[2, 3] * v[3, 3] + f_sq[4] * v[3, 3]^2) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
+        end
+    end
+    eqfun = Spl.BicubicSpline(eqfun_xs, eqfun_ys, eqfun_fs; bctypex="extrap", bctypey="periodic")
+
+    return PlasmaEquilibrium(
+        input.config,
+        EquilibriumParameters(),
+        sq,
+        rzphi,
+        eqfun,
+        ro,
+        zo,
+        psio
+    )
 end

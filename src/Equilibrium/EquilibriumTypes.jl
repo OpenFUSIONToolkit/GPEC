@@ -15,6 +15,8 @@ A mutable struct containing control parameters for equilibrium reconstruction.
   - `power_bp::Int` - Poloidal field power exponent for Jacobian
   - `power_b::Int` - Toroidal field power exponent for Jacobian
   - `power_r::Int` - Major radius power exponent for Jacobian
+  - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
+  - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
@@ -29,6 +31,8 @@ A mutable struct containing control parameters for equilibrium reconstruction.
 @kwdef mutable struct EquilibriumControl
     eq_type::String = "efit"
     eq_filename::String = "mypath"
+    r0exp::Float64 = 1.0
+    b0exp::Float64 = 1.0
 
     jac_type::String = "hamada"
     power_bp::Int = 0
@@ -51,7 +55,7 @@ A mutable struct containing control parameters for equilibrium reconstruction.
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumControl(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
+    function EquilibriumControl(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
         grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
         input_only, use_galgrid)
         if jac_type == "hamada"
@@ -84,7 +88,7 @@ A mutable struct containing control parameters for equilibrium reconstruction.
         elseif jac_type != "other"
             error("Cannot recognize jac_type = $(jac_type)")
         end
-        return new(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
+        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
             grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
             input_only, use_galgrid)
     end

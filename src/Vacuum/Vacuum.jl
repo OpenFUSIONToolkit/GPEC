@@ -3,13 +3,14 @@ module Vacuum
 using TOML, SpecialFunctions, LinearAlgebra, Printf
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 
-include("VacuumStructs.jl")
-include("VacuumInternals.jl")
-
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
+
+include("DataTypes.jl")
+include("Kernel2D.jl")
+include("MathUtils.jl")
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -240,8 +241,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -257,8 +258,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cslth, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.snlth, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -295,24 +296,16 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cslth, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.snlth, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.snlth, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cslth, 0, mpert)
+    fourier_inverse_transform!(arr, grri, plasma_surf.cos_ln_basis, 0, 0)
+    fourier_inverse_transform!(aii, grri, plasma_surf.sin_ln_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grri, plasma_surf.sin_ln_basis, 0, 0)
+    fourier_inverse_transform!(air, grri, plasma_surf.cos_ln_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    vacmat = arr .+ aii
-    vacmti = air .- ari
+    wv = complex.(arr .+ aii, air .- ari)
+
     # Force symmetry of response matrix if desired
-    force_wv_symmetry && begin
-        for l1 in 1:mpert
-            for l2 in l1:mpert
-                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
-                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-            end
-        end
-    end
-    wv = complex.(vacmat, vacmti)
+    force_wv_symmetry && hermitianpart!(wv)
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)

@@ -11,16 +11,15 @@ function Main(path::String="./")
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
-        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
     else
-        wall_settings = Vacuum.WallShapeSettings()
+        intr.wall_settings = Vacuum.WallShapeSettings()
     end
     if "DEBUG" in keys(inputs)
-        debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
-        debug_settings = DebugSettings()
+        intr.debug_settings = DebugSettings()
     end
-    intr.debug_settings = debug_settings
     # Set up variables
     # TODO: dcon_kin_threads logic?
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
@@ -133,7 +132,12 @@ function Main(path::String="./")
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
         end
-        sing_scan!(intr, ctrl, equil, ffit)
+
+        # NOTE: Asymptotic calculations for ideal DCON are now computed on-demand during
+        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that
+        # asymptotics are only needed for ideal DCON and are not inherent properties of
+        # the singular surface.
+
         if ctrl.kin_flag
             # ksing_find()
         end
@@ -144,7 +148,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Integrating Euler-Lagrange equation")
         end
-        odet = ode_run(ctrl, equil, ffit, intr)
+        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             println("Fixed-boundary mode unstable for n = $nstring.")
         end
@@ -155,7 +159,7 @@ function Main(path::String="./")
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr, wall_settings)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
                 println("Free-boundary mode unstable for n = $nstring.")
@@ -286,7 +290,6 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]
         out_h5["singular/q"] = [sing.q for sing in intr.sing]
         out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
-        out_h5["singular/di"] = [sing.di for sing in intr.sing]
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 

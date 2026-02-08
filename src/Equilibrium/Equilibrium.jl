@@ -23,7 +23,7 @@ export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutp
 const mu0 = 4π * 1e-7
 
 """
-    setup_equilibrium(equil_input::EquilInput)
+    setup_equilibrium(eq_config::EquilibriumConfig)
 
 The main public API for the `Equilibrium` module. It orchestrates the entire
 process of reading an equilibrium file, running the appropriate solver, and
@@ -31,7 +31,7 @@ returning the final processed `PlasmaEquilibrium` object.
 
 ## Arguments:
 
-  - `equil_input`: An `EquilInput` object containing all necessary setup parameters.
+  - `eq_config`: An `EquilibriumConfig` object containing all necessary setup parameters.
 
 ## Returns:
 
@@ -48,10 +48,10 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
         eq_input = read_efit(eq_config)
-    elseif eq_type == "chease2"
-        eq_input = read_chease2(eq_config)
-    elseif eq_type == "chease"
-        eq_input = read_chease(eq_config)
+    elseif eq_type in ["chease2", "chease_ascii"]
+        eq_input = read_chease_ascii(eq_config)
+    elseif eq_type in ["chease", "chease_binary"]
+        eq_input = read_chease_binary(eq_config)
     elseif eq_type == "lar"
 
         if additional_input === nothing

@@ -12,35 +12,32 @@ using LinearAlgebra
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
             @test vac_in.n == 0
+            @test vac_in.kernelsign == 1.0
+            @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
             # Test default constructor for WallShapeSettings
             wall_set = WallShapeSettings()
             @test wall_set.shape == "nowall"
             @test wall_set.a == 0.3
-
-            # Test default constructor for WallGeometry
-            wall_geo = JPEC.Vacuum.WallGeometry()
-            @test wall_geo.nowall == true
-            @test isempty(wall_geo.x)
         end
 
         @testset "initialize_plasma_surface" begin
             inputs = VacuumInput(
                 r=[1.0, 1.1, 1.2, 1.1],
                 z=[0.0, 0.1, 0.0, -0.1],
-                delta=zeros(4),
+                ν=zeros(4),
                 mtheta=4,
                 mpert=1,
                 mlow=1,
-                n=1,
-                qa=1.0
+                n=1
             )
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
             @test length(plasma_surf.x) == 4
             @test length(plasma_surf.z) == 4
             @test length(plasma_surf.dx_dtheta) == 4
-            @test size(plasma_surf.coslt) == (4, 1)
+            @test size(plasma_surf.cos_ln_basis) == (4, 1)
+            @test size(plasma_surf.sin_ln_basis) == (4, 1)
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end
@@ -51,7 +48,7 @@ using LinearAlgebra
                 VacuumInput(
                     r=1.7 .+ 0.3 .* cos.(range(0, 2pi, length=16)),
                     z=0.3 .* sin.(range(0, 2pi, length=16)),
-                    delta=zeros(16),
+                    ν=zeros(16),
                     mtheta=16
                 )
             )
@@ -67,6 +64,30 @@ using LinearAlgebra
             @test wall_geo.nowall == false
             @test length(wall_geo.x) == 16
             @test !any(isnan, wall_geo.x)
+
+            # Test that wall with R <= 0 throws an error
+            # Create a plasma surface very close to R=0
+            plasma_surf_near_zero = JPEC.Vacuum.initialize_plasma_surface(
+                VacuumInput(
+                    r=0.05 .+ 0.03 .* cos.(range(0, 2pi, length=16)),
+                    z=0.03 .* sin.(range(0, 2pi, length=16)),
+                    ν=zeros(16),
+                    mtheta=16
+                )
+            )
+            # Use a "dee" wall shape with parameters that will produce R < 0
+            # Setting cw (offset) to a large negative value will shift the wall left past R=0
+            wall_settings_negative = WallShapeSettings(shape="dee", cw=-1.5, a=0.1)
+            @test_throws ErrorException JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_negative)
+
+            # Test that conformal wall R-coordinates are clamped by centerstack_min
+            # With a very large 'a' parameter, a conformal wall would naturally go to R < 0,
+            # but it should be clamped to centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
+            wall_settings_large_a = WallShapeSettings(shape="conformal", a=10.0, equal_arc_wall=false)
+            wall_geo_clamped = JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_large_a)
+            expected_min = min(0.1, 0.1 * minimum(plasma_surf_near_zero.x))
+            @test all(wall_geo_clamped.x .>= expected_min)
+            @test any(wall_geo_clamped.x .<= expected_min + 1e-10)  # At least one point should be at the minimum
         end
 
         @testset "distribute_to_equal_arc_grid" begin
@@ -235,13 +256,10 @@ using LinearAlgebra
             inputs = VacuumInput(
                 r=collect(r_eq),
                 z=collect(z_eq),
-                delta=zeros(mtheta_eq),
+                ν=zeros(mtheta_eq),
                 mlow=1,
-                mhigh=2,
                 mpert=2,
                 n=1,
-                qa=2.0,
-                mtheta_eq=mtheta_eq,
                 mtheta=mtheta
             )
             wall_settings = WallShapeSettings(shape="nowall")
@@ -266,13 +284,10 @@ using LinearAlgebra
             inputs = VacuumInput(
                 r=collect(r_eq),
                 z=collect(z_eq),
-                delta=zeros(mtheta_eq),
+                ν=zeros(mtheta_eq),
                 mlow=1,
-                mhigh=2,
                 mpert=2,
                 n=1,
-                qa=2.0,
-                mtheta_eq=mtheta_eq,
                 mtheta=mtheta
             )
             # Use a conformal wall
