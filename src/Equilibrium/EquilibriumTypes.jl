@@ -293,7 +293,7 @@ raw equilibrium data and preparing the initial splines.
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D}
+mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     sq_in::S       # 1D profile spline for F, P, q
     psi_in::I2D    # 2D flux interpolant (CubicInterpolantND)
@@ -323,7 +323,7 @@ A container struct for inputs to the `inverse_run` function.
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D}
+mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     sq_in::S   # 1D profile spline for F, P, q
     rz_in_xs::Vector{Float64}   # ψ coordinates
@@ -567,7 +567,7 @@ This object provides a complete representation of the processed plasma equilibri
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D}
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
