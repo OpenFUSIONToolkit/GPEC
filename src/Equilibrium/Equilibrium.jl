@@ -7,7 +7,7 @@ using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
 using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
-import StaticArrays: @MMatrix
+import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
@@ -92,37 +92,41 @@ Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext
 Performs the same function as equil_out_sep_find in the Fortran code.
 """
 function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
-    rzphi = pe.rzphi
-    mpsi = size(rzphi.fs, 1) - 1
-    mtheta = size(rzphi.fs, 2) - 1
+    mpsi = length(pe.rzphi_xs) - 1
+    mtheta = length(pe.rzphi_ys) - 1
 
     # Allocate vector to store eta offset from rzphi (direct array access at grid points)
-    vector = rzphi.ys .+ @view rzphi.fs[end, :, 2]
+    vector = pe.rzphi_ys .+ @view pe.rzphi_offset.nodal_derivs.partials[1, end, :]
 
     edge_idx = mpsi + 1  # Edge flux surface index
+    psi_edge = pe.rzphi_xs[edge_idx]
     eta0 = 0.0
     idx = findmin(abs.(vector .- eta0))[2]
-    theta = rzphi.ys[idx]
+    theta = pe.rzphi_ys[idx]
     rsep = zeros(2)
 
     for iside in 1:2
         it = 0
         while true
             it += 1
-            f, _, fy = Spl.deriv1!(rzphi, rzphi.xs[edge_idx], theta)
-            eta = theta + f[2] - eta0
-            eta_theta = 1 + fy[2]
+            # Evaluate offset and its derivative
+            offset = pe.rzphi_offset((psi_edge, theta))
+            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
+
+            eta = theta + offset - eta0
+            eta_theta = 1 + offset_y
             dtheta = -eta / eta_theta
             theta += dtheta
             if abs(eta) <= 1e-10 || it > 100
                 break
             end
         end
-        f = Spl.evaluate!(rzphi, rzphi.xs[edge_idx], theta)
-        rsep[iside] = pe.ro + sqrt(f[1]) * cos(2π * (theta + f[2]))
+        r2 = pe.rzphi_rcoord((psi_edge, theta))
+        offset = pe.rzphi_offset((psi_edge, theta))
+        rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
         eta0 = 0.5
         idx = findmin(abs.(vector .- eta0))[2]
-        theta = rzphi.ys[idx]
+        theta = pe.rzphi_ys[idx]
     end
 
     # Top and bottom separatrix locations using Newton iteration
@@ -133,7 +137,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     for iside in 1:2
         eta0 = (iside == 1) ? 0.0 : 0.5
         idx = findmin(abs.(vector .- eta0))[2]
-        theta = rzphi.ys[idx]
+        theta = pe.rzphi_ys[idx]
         rfac = 0.0
         cosfac = 0.0
         z = 0.0
@@ -141,9 +145,13 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         iter = 0
         while iter < max_iter
             iter += 1
-            f, fx, fy, fxx, fxy, fyy = Spl.deriv2!(rzphi, rzphi.xs[edge_idx], theta)
-            r2, r2y, r2yy = f[1], fy[1], fyy[1]
-            eta, eta1, eta2 = f[2], fy[2], fyy[2]
+            # Evaluate rcoord and offset with derivatives
+            r2 = pe.rzphi_rcoord((psi_edge, theta))
+            r2y = pe.rzphi_rcoord((psi_edge, theta); deriv=(0,1))
+            r2yy = pe.rzphi_rcoord((psi_edge, theta); deriv=(0,2))
+            eta = pe.rzphi_offset((psi_edge, theta))
+            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
+            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0,2))
 
             rfac = sqrt(r2)
             rfac1 = r2y / (2 * rfac)
@@ -159,8 +167,8 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             dtheta = -z1 / z2
             theta += dtheta
             # Wrap theta back into valid periodic range [0, 2π)
-            y_period = rzphi.ys[end] - rzphi.ys[1] + (rzphi.ys[2] - rzphi.ys[1])
-            theta = mod(theta - rzphi.ys[1], y_period) + rzphi.ys[1]
+            y_period = pe.rzphi_ys[end] - pe.rzphi_ys[1] + (pe.rzphi_ys[2] - pe.rzphi_ys[1])
+            theta = mod(theta - pe.rzphi_ys[1], y_period) + pe.rzphi_ys[1]
             if abs(dtheta) < 1e-12 * y_period
                 break
             end
@@ -188,10 +196,9 @@ struct, such as rmean, amean, kappa, bt0, crnt, betat, betan, li1, etc. Performs
 the same function as equil_out_global in the Fortran code.
 """
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
-    rzphi = pe.rzphi
     profiles = pe.profiles
-    mpsi = size(rzphi.fs, 1) - 1
-    mtheta = size(rzphi.fs, 2) - 1
+    mpsi = length(pe.rzphi_xs) - 1
+    mtheta = length(pe.rzphi_ys) - 1
 
     # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
@@ -202,7 +209,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
-    dpsi = 1.0 - rzphi.xs[mpsi+1]
+    dpsi = 1.0 - pe.rzphi_xs[mpsi+1]
     psi_edge = profiles.xs[end]
     bt0 = (profiles.F_spline.y[end] + profiles.F_deriv(psi_edge; hint=Ref(profiles.npts_minus_1)) * dpsi) / (2π * rmean)
 
@@ -218,18 +225,23 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     gs1 = zeros(Float64, mtheta + 1)
     gs2 = zeros(Float64, mtheta + 1)
 
-    # Direct array access at edge flux surface grid points
-    edge_fs = @view rzphi.fs[end, :, :]
-    edge_fy = @view rzphi.fsy[end, :, :]
+    # Direct array access at edge flux surface grid points using nodal_derivs
     for itheta in 0:mtheta
-        jac = edge_fs[itheta+1, 4]
+        # Function values (partials[1,:,:])
+        r2 = pe.rzphi_rcoord.nodal_derivs.partials[1, end, itheta+1]
+        offset = pe.rzphi_offset.nodal_derivs.partials[1, end, itheta+1]
+        jac = pe.rzphi_jac.nodal_derivs.partials[1, end, itheta+1]
+        # Theta derivatives (partials[3,:,:] = ∂f/∂y)
+        r2_y = pe.rzphi_rcoord.nodal_derivs.partials[3, end, itheta+1]
+        offset_y = pe.rzphi_offset.nodal_derivs.partials[3, end, itheta+1]
+
         chi1 = 2π * psio / jac
         jacfac = π / jac
-        rfac = sqrt(edge_fs[itheta+1, 1])
-        eta = 2π * (rzphi.ys[itheta+1] + edge_fs[itheta+1, 2])
+        rfac = sqrt(r2)
+        eta = 2π * (pe.rzphi_ys[itheta+1] + offset)
         r = pe.ro + rfac * cos(eta)
-        v21 = jacfac * edge_fy[itheta+1, 1] / (2π * rfac)
-        v22 = jacfac * (1 + edge_fy[itheta+1, 2]) * (2 * rfac)
+        v21 = jacfac * r2_y / (2π * rfac)
+        v22 = jacfac * (1 + offset_y) * (2 * rfac)
         v33 = jacfac * 2π * (r / π)
         dvsq = (v21^2 + v22^2) * (v33 * jac^2)^2
         gs1[itheta+1] = sqrt(dvsq) / (2π * r)
@@ -481,7 +493,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 2] = source[ipsi, :]
 
         # Compute total integral using exact spline integration (only final value needed)
-        term[ipsi, :] .= Spl.total_integral(flux.ys, fs_matrix; bc=Spl.PeriodicBC())
+        term[ipsi, :] .= Spl.total_integral(equil.rzphi_ys, fs_matrix; bc=Spl.PeriodicBC())
     end
 
     totali = sum(term; dims=2)

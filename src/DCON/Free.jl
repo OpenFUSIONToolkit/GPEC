@@ -158,10 +158,14 @@ function compute_vacuum_inputs(psifac::Float64, n::Int, ctrl::DconControl, equil
     # Compute r, z, and ν at the plasma boundary
     qa = equil.profiles.q_spline(psifac)
     for itheta in 1:mtheta
-        f = Spl.evaluate!(equil.rzphi, psifac, theta_norm[itheta])
-        rfac[itheta] = sqrt(f[1])
-        angle[itheta] = 2π * (theta_norm[itheta] + f[2])
-        ν[itheta] = f[3]
+        # Evaluate each quantity separately using native FastInterpolations API
+        r2 = equil.rzphi_rcoord((psifac, theta_norm[itheta]))
+        offset = equil.rzphi_offset((psifac, theta_norm[itheta]))
+        nu_val = equil.rzphi_nu((psifac, theta_norm[itheta]))
+
+        rfac[itheta] = sqrt(r2)
+        angle[itheta] = 2π * (theta_norm[itheta] + offset)
+        ν[itheta] = nu_val
     end
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)
