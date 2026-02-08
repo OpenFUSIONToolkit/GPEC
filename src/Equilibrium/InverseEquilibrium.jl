@@ -130,9 +130,9 @@ function equilibrium_solver(input::InverseRunInput)
     # c     set up radial grid (only "ldp" implemented)
     # c-----------------------------------------------------------------------
     if grid_type == "ldp"
-        xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
-        fs = zeros(Float64, mpsi+1, 4)
-        sq = cubic_interp(xs, fs; bc=CubicFit(), extrap=:extension)
+        sq_xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
+        sq_fs = zeros(Float64, mpsi+1, 4)
+        sq = cubic_interp(sq_xs, sq_fs; bc=Spl.CubicFit(), extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end
@@ -154,7 +154,9 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun_xs = copy(sq_xs)
     eqfun_ys = collect(0:mtheta) ./ mtheta
 
-
+    # Preallocate arrays for periodic spline fitting in the loop
+    spl_xs = zeros(Float64, mtheta+1)
+    spl_fs = zeros(Float64, mtheta+1, 5)
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
         f_sq_in = sq_in(psifac)
@@ -195,30 +197,37 @@ function equilibrium_solver(input::InverseRunInput)
         # c     fit to cubic splines and integrate.
         # c-----------------------------------------------------------------------
 
-        spl = Spl.CubicSpline(spl_xs, spl_fs; bctype="periodic")
-        Spl.spline_integrate!(spl)
+        spl = cubic_interp(spl_xs, spl_fs; bc=Spl.PeriodicBC())
+        spl_fsi = Spl.cumulative_integral(spl_xs, spl_fs; bc=Spl.PeriodicBC())
 
-        spl_xs = spl.fsi[:, 5] ./ spl.fsi[mtheta+1, 5]
+        spl_xs = spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
         spl_fs[:, 2] .+= rzphi_ys .- spl_xs
-        spl_fs[:, 4] = (spl_fs[:, 3] ./ spl.fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl.fsi[mtheta+1, 5]) * spl.fsi[mtheta+1, 3] * twopi * pi
-        spl_fs[:, 3] = f_sq_in[1] * pi / psio * (spl.fsi[:, 4] - spl.fsi[mtheta+1, 4] .* spl_xs)
+        spl_fs[:, 4] = (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) * spl_fsi[mtheta+1, 3] * twopi * pi
+        spl_fs[:, 3] = f_sq_in[1] * pi / psio * (spl_fsi[:, 4] - spl_fsi[mtheta+1, 4] .* spl_xs)
 
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
-            fs = Spl.evaluate!(spl, theta)
+            fs = spl(theta)
             rzphi_fs[ipsi+1, itheta+1, :] = fs[1:4]
         end
 
         sq_fs[ipsi+1, 1] = f_sq_in[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in[2]
-        sq_fs[ipsi+1, 3] = spl.fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
-        sq_fs[ipsi+1, 4] = spl.fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
+        sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
+        sq_fs[ipsi+1, 4] = spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
     end
 
-    sq = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
+    sq = cubic_interp(sq_xs, sq_fs; bc=Spl.CubicFit(), extrap=:extension)
 
-    f_sq, f1_sq = Spl.spline_eval(sq, sq_xs, 1)
-    q0 = f_sq[1, 4] - f1_sq[1, 4] * sq.xs[1]
+    # Evaluate sq and its derivative at all grid points
+    f_sq = zeros(Float64, mpsi+1, 4)
+    f1_sq = zeros(Float64, mpsi+1, 4)
+    sq_deriv = deriv1(sq)
+    for i in 1:(mpsi+1)
+        f_sq[i, :] = sq(sq_xs[i])
+        f1_sq[i, :] = sq_deriv(sq_xs[i])
+    end
+    q0 = f_sq[1, 4] - f1_sq[1, 4] * sq_xs[1]
     if newq0 == -1
         newq0 = -q0
     end
@@ -233,7 +242,7 @@ function equilibrium_solver(input::InverseRunInput)
             sq_fs[ipsi+1, 4] *= ffac
             rzphi_fs[ipsi+1, :, 3] *= ffac
         end
-        sq = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
+        sq = cubic_interp(sq_xs, sq_fs; bc=Spl.CubicFit(), extrap=:extension)
     end
     qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
     # Create native FastInterpolations interpolants for rzphi
@@ -247,7 +256,7 @@ function equilibrium_solver(input::InverseRunInput)
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
     for ipsi in 0:mpsi
-        f_sq = Spl.spline_eval!(sq, sq_xs[ipsi+1])
+        f_sq = sq(sq_xs[ipsi+1])
         q = f_sq[4]
         for itheta in 0:mtheta
             # Evaluate rzphi interpolants at grid points using nodal_derivs
