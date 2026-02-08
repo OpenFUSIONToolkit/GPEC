@@ -449,7 +449,7 @@ end
 """
     ProfileSplines
 
-Named 1D splines for equilibrium profiles using native FastInterpolations types.
+Named 1D cubic spline interpolants for equilibrium profiles.
 Each profile is stored as a separate spline for code clarity.
 
 # Fields
@@ -489,8 +489,8 @@ end
 """
     ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=:extension)
 
-Create ProfileSplines from arrays of profile values using extrap BC.
-Uses native FastInterpolations CubicInterpolant types with DerivativeView for derivatives.
+Create ProfileSplines from arrays of profile values.
+Uses CubicFit boundary conditions with extension extrapolation.
 """
 function ProfileSplines(xs::Vector{Float64},
     F_vals::Vector{Float64},

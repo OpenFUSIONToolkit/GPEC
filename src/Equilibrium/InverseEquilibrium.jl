@@ -112,7 +112,7 @@ function equilibrium_solver(input::InverseRunInput)
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
-    # Create interpolants for r² and dη using native FastInterpolations API
+    # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2;
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta;
@@ -245,7 +245,7 @@ function equilibrium_solver(input::InverseRunInput)
         sq = cubic_interp(sq_xs, sq_fs; bc=Spl.CubicFit(), extrap=:extension)
     end
     qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
-    # Create native FastInterpolations interpolants for rzphi
+    # Create 2D interpolants for geometric quantities (rzphi)
     rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 1];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 2];
@@ -301,7 +301,7 @@ function equilibrium_solver(input::InverseRunInput)
             eqfun_fs[ipsi+1, itheta+1, 3] = (v[2, 3] * v[3, 3] + f_sq[4] * v[3, 3]^2) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
         end
     end
-    # Create native FastInterpolations interpolants for eqfun
+    # Create 2D interpolants for physics quantities (eqfun)
     eqfun_B = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 1];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     eqfun_metric1 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 2];

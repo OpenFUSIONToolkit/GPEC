@@ -74,12 +74,12 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
-    # Use nodal_derivs.partials access at grid points for performance
+    # Access grid point values and derivatives directly from interpolant storage
     for ipsi in 1:mpsi
         for jtheta in 1:mtheta
             theta_norm = equil.rzphi_ys[jtheta] # θ is from 0 to 1
 
-            # Access nodal derivatives from interpolants (partials indexing: [1,:,:]=f, [2,:,:]=∂f/∂x, [3,:,:]=∂f/∂y, [4,:,:]=∂²f/∂x∂y)
+            # Grid point values: nodal_derivs.partials[1,:,:] = f, [2,:,:] = ∂f/∂ψ, [3,:,:] = ∂f/∂θ
             r_coord_sq = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, jtheta]
             eta_offset = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, jtheta]
             jac = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, jtheta]
@@ -309,7 +309,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
         # TODO: add kinetic matrices here
     end
 
-    # --- Fit splines using native FastInterpolations CubicSeriesInterpolant ---
+    # --- Create Fourier coefficient splines (multi-quantity cubic interpolants) ---
     ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband, numpert_total=intr.numpert_total)
 
     # FastInterpolations now natively supports complex values - no need to split real/imag

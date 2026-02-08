@@ -520,7 +520,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         )
     end
 
-    # Fit the geometric spline `rzphi` using native FastInterpolations API with extrap/periodic BCs.
+    # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
     rzphi_xs = psi_nodes
     rzphi_ys = collect(theta_nodes)
@@ -595,7 +595,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    # Create eqfun interpolants using native FastInterpolations API
+    # Create 2D interpolants for physics quantities (eqfun)
     eqfun_B = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 1];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     eqfun_metric1 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 2];

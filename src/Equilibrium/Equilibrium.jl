@@ -440,7 +440,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
-    # Create flux interpolants using native FastInterpolations
+    # Create flux interpolants for Grad-Shafranov diagnostics
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2];
