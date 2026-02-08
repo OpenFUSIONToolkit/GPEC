@@ -232,14 +232,14 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     # loop over poloidal angle using nodal_derivs access at grid points
     for itheta in 1:(mtheta+1)
         # Access nodal derivatives from interpolants
-        f1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta]
+        f1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
         f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
         f4 = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-        fx1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[2, ipsi, itheta]
+        fx1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta]
         fx2 = plasma_eq.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
         fx3 = plasma_eq.rzphi_nu.nodal_derivs.partials[2, ipsi, itheta]
         fx4 = plasma_eq.rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
-        fy1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta]
+        fy1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
         fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
         fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
 

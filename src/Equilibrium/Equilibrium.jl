@@ -121,7 +121,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
                 break
             end
         end
-        r2 = pe.rzphi_rcoord((psi_edge, theta))
+        r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
         eta0 = 0.5
@@ -146,9 +146,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         while iter < max_iter
             iter += 1
             # Evaluate rcoord and offset with derivatives
-            r2 = pe.rzphi_rcoord((psi_edge, theta))
-            r2y = pe.rzphi_rcoord((psi_edge, theta); deriv=(0,1))
-            r2yy = pe.rzphi_rcoord((psi_edge, theta); deriv=(0,2))
+            r2 = pe.rzphi_rsquared((psi_edge, theta))
+            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=(0,1))
+            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=(0,2))
             eta = pe.rzphi_offset((psi_edge, theta))
             eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
             eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0,2))
@@ -228,11 +228,11 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     # Direct array access at edge flux surface grid points using nodal_derivs
     for itheta in 0:mtheta
         # Function values (partials[1,:,:])
-        r2 = pe.rzphi_rcoord.nodal_derivs.partials[1, end, itheta+1]
+        r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, end, itheta+1]
         offset = pe.rzphi_offset.nodal_derivs.partials[1, end, itheta+1]
         jac = pe.rzphi_jac.nodal_derivs.partials[1, end, itheta+1]
         # Theta derivatives (partials[3,:,:] = ∂f/∂y)
-        r2_y = pe.rzphi_rcoord.nodal_derivs.partials[3, end, itheta+1]
+        r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, end, itheta+1]
         offset_y = pe.rzphi_offset.nodal_derivs.partials[3, end, itheta+1]
 
         chi1 = 2π * psio / jac
@@ -413,7 +413,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
     for ipsi in 1:(mpsi+1)
-        rfac = @. sqrt(equil.rzphi_rcoord.nodal_derivs.partials[1, ipsi, :])
+        rfac = @. sqrt(equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, :])
         angle = @. 2π * (equil.rzphi_ys + equil.rzphi_offset.nodal_derivs.partials[1, ipsi, :])
         r[ipsi, :] .= ro .+ rfac .* cos.(angle)
         z[ipsi, :] .= zo .+ rfac .* sin.(angle)
@@ -425,12 +425,12 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # y-derivatives
     for ipsi in 1:(mpsi+1)
         for itheta in 1:(mtheta+1)
-            f1 = equil.rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta]
+            f1 = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
             f2 = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
             f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-            fy1 = equil.rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta]
+            fy1 = equil.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
             fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
-            fx1 = equil.rzphi_rcoord.nodal_derivs.partials[2, ipsi, itheta]
+            fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta]
             fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
 
             flux_fs[ipsi, itheta, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1

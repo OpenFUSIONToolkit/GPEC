@@ -30,10 +30,10 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             theta = plasma_eq.rzphi_ys[itheta]
 
             # Access nodal derivatives at grid points
-            f1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta]
+            f1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
             f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
             jac = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-            fy1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta]
+            fy1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
             fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
             fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
 

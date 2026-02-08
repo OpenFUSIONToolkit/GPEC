@@ -524,7 +524,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     # theta_nodes includes both 0 and 1 (closed periodic grid).
     rzphi_xs = psi_nodes
     rzphi_ys = collect(theta_nodes)
-    rzphi_rcoord = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 1];
+    rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 1];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 2];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
@@ -545,19 +545,19 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             # Access nodal derivatives from the interpolants (grid points)
             # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
             f = SVector{4}(
-                rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_nu.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
             )
             fx = SVector{4}(
-                rzphi_rcoord.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[2, ipsi, itheta],
                 rzphi_nu.nodal_derivs.partials[2, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
             )
             fy = SVector{4}(
-                rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
@@ -605,7 +605,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
-        rzphi_rcoord, rzphi_offset, rzphi_nu, rzphi_jac,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
         ro, zo, psio)
 end

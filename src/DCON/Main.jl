@@ -258,7 +258,7 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/rzphi/xs"] = equil.rzphi_xs
         out_h5["splines/rzphi/ys"] = equil.rzphi_ys
         # Extract nodal values from native FastInterpolations interpolants
-        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi_rcoord.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/fs/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/fs/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/fs/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]

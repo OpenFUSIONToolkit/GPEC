@@ -80,7 +80,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             theta_norm = equil.rzphi_ys[jtheta] # θ is from 0 to 1
 
             # Access nodal derivatives from interpolants (partials indexing: [1,:,:]=f, [2,:,:]=∂f/∂x, [3,:,:]=∂f/∂y, [4,:,:]=∂²f/∂x∂y)
-            r_coord_sq = equil.rzphi_rcoord.nodal_derivs.partials[1, ipsi, jtheta]
+            r_coord_sq = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, jtheta]
             eta_offset = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, jtheta]
             jac = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, jtheta]
             jac1 = equil.rzphi_jac.nodal_derivs.partials[2, ipsi, jtheta] # ∂J/∂ψ
@@ -90,10 +90,10 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
             # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
-            fx1 = equil.rzphi_rcoord.nodal_derivs.partials[2, ipsi, jtheta]
+            fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, jtheta]
             fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, jtheta]
             fx3 = equil.rzphi_nu.nodal_derivs.partials[2, ipsi, jtheta]
-            fy1 = equil.rzphi_rcoord.nodal_derivs.partials[3, ipsi, jtheta]
+            fy1 = equil.rzphi_rsquared.nodal_derivs.partials[3, ipsi, jtheta]
             fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, jtheta]
             fy3 = equil.rzphi_nu.nodal_derivs.partials[3, ipsi, jtheta]
 

@@ -246,7 +246,7 @@ function equilibrium_solver(input::InverseRunInput)
     end
     qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
     # Create native FastInterpolations interpolants for rzphi
-    rzphi_rcoord = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 1];
+    rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 1];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 2];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
@@ -261,19 +261,19 @@ function equilibrium_solver(input::InverseRunInput)
         for itheta in 0:mtheta
             # Evaluate rzphi interpolants at grid points using nodal_derivs
             f_rzphi = SVector{4}(
-                rzphi_rcoord.nodal_derivs.partials[1, ipsi+1, itheta+1],
+                rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1],
                 rzphi_offset.nodal_derivs.partials[1, ipsi+1, itheta+1],
                 rzphi_nu.nodal_derivs.partials[1, ipsi+1, itheta+1],
                 rzphi_jac.nodal_derivs.partials[1, ipsi+1, itheta+1]
             )
             fx_rzphi = SVector{4}(
-                rzphi_rcoord.nodal_derivs.partials[2, ipsi+1, itheta+1],
+                rzphi_rsquared.nodal_derivs.partials[2, ipsi+1, itheta+1],
                 rzphi_offset.nodal_derivs.partials[2, ipsi+1, itheta+1],
                 rzphi_nu.nodal_derivs.partials[2, ipsi+1, itheta+1],
                 rzphi_jac.nodal_derivs.partials[2, ipsi+1, itheta+1]
             )
             fy_rzphi = SVector{4}(
-                rzphi_rcoord.nodal_derivs.partials[3, ipsi+1, itheta+1],
+                rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1],
                 rzphi_offset.nodal_derivs.partials[3, ipsi+1, itheta+1],
                 rzphi_nu.nodal_derivs.partials[3, ipsi+1, itheta+1],
                 rzphi_jac.nodal_derivs.partials[3, ipsi+1, itheta+1]
@@ -314,7 +314,7 @@ function equilibrium_solver(input::InverseRunInput)
         EquilibriumParameters(),
         sq,
         rzphi_xs, rzphi_ys,
-        rzphi_rcoord, rzphi_offset, rzphi_nu, rzphi_jac,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
         ro,
         zo,

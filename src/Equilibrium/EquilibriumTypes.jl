@@ -550,7 +550,7 @@ This object provides a complete representation of the processed plasma equilibri
     2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
-      + `rzphi_rcoord::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
+      + `rzphi_rsquared::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
       + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
       + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
       + `rzphi_jac::CubicInterpolantND`: Jacobian
@@ -577,7 +577,7 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.Cubic
     rzphi_ys::Vector{Float64}
 
     # Geometric quantities (4 interpolants)
-    rzphi_rcoord::I2D
+    rzphi_rsquared::I2D
     rzphi_offset::I2D
     rzphi_nu::I2D
     rzphi_jac::I2D
