@@ -7,8 +7,11 @@ Performs the same function as `sing_find` in the Fortran code.
 """
 function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
+    profiles = equil.profiles
+
     # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
+        hint = Ref(1)
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
             dq = equil.params.qextrema_q[iex] - equil.params.qextrema_q[iex-1]
@@ -20,7 +23,6 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
 
             # Loop over possible m's in interval
             while (m - n * equil.params.qextrema_q[iex-1]) * (m - n * equil.params.qextrema_q[iex]) <= 0
-                it = 0
                 psi0 = equil.params.qextrema_psi[iex-1]
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
@@ -29,7 +31,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
+                    singfac = (m - n * profiles.q_spline(psifac; hint=hint)) * dm
                     abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
@@ -48,7 +50,7 @@ function sing_find!(intr::DconInternal, equil::Equilibrium.PlasmaEquilibrium)
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=Spl.spline_deriv1!(equil.sq, psifac)[2][4]
+                        q1=profiles.q_deriv(psifac; hint=hint)
                     ))
                     intr.msing += 1
                 end
@@ -81,9 +83,11 @@ or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are 
 """
 function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium)
 
+    profiles = equil.profiles
+
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = equil.sq.fs1[end, 4]
+    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.control.psihigh
 
     # Optionally override qlim based on dmlim
@@ -105,21 +109,18 @@ function sing_lim!(intr::DconInternal, ctrl::DconControl, equil::Equilibrium.Pla
     # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(equil.sq.fs[:, 4] .- intr.qlim))
+        _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
         jpsi = min(jpsi, equil.config.control.mpsi - 1)
 
-        # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
-
-        intr.psilim = equil.sq.xs[jpsi]
+        intr.psilim = profiles.xs[jpsi]
         converged = false
+        hint = Ref(jpsi)
         for _ in 1:itmax
-            dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
+            dpsi = (intr.qlim - profiles.q_spline(intr.psilim; hint=hint)) / profiles.q_deriv(intr.psilim; hint=hint)
             intr.psilim += dpsi
             if abs(dpsi) < eps * abs(intr.psilim)
                 converged = true
-                intr.q1lim = q1val(intr.psilim)
+                intr.q1lim = profiles.q_deriv(intr.psilim)
                 break
             end
         end
@@ -166,7 +167,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
     n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
 
     # Compute Mercier criterion and singular power
-    compute_sing_mmat!(mmat, singp, ctrl, equil, ffit, intr)
+    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, ffit, intr)
 
     # TODO: My approach for the following logic is to mimic the existing code but go block by block
     # in m0mat (i.e. looping through each resonance). I think it works for 2D, probably not 3D
@@ -216,7 +217,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::DconControl, equil::Equ
 end
 
 """
-    compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+    compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::DconInternal)
 
 Calculate asymptotic mmat matrix for a singular surface. Formerly `sing_mmat!`.
 Performs the same function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
@@ -246,7 +247,12 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal)
+function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::DconInternal)
+
+    q_spline = profiles.q_spline
+    q_d1 = profiles.q_deriv
+    q_d2 = deriv2(q_spline)
+    q_d3 = deriv3(q_spline)
 
     # Initial allocations
     q = @MVector zeros(Float64, 4)
@@ -262,11 +268,29 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Dc
     v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
-    # Evaluate cubic splines
-    q .= getindex.(Spl.spline_deriv3!(equil.sq, singp.psifac), 4)
-    f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
-    g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
-    k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
+    # Evaluate q spline and its derivatives
+    q .= (q_spline(singp.psifac),
+        q_d1(singp.psifac),
+        q_d2(singp.psifac),
+        q_d3(singp.psifac))
+
+    # Evaluate fmats_lower and derivatives using series interpolants
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=3)
+
+    # Evaluate gmats and derivatives
+    ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=3)
+
+    # Evaluate kmats and derivatives
+    ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
@@ -711,29 +735,33 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
+    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
+    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # kinetic stuff - skip for now
     if false #(TODO: kin_flag)
         error("kin_flag not implemented yet")
     else
-        # Evaluate matrix splines at the current psi value
-        Spl.spline_eval!(odet.amat, ffit.amats, psieval)
-        Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
-        Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
-        Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
-        Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
-        Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
+        # Evaluate matrix splines at the current psi value using shared hint
+        ffit.amats(vec(ffit._mat_out), psieval; hint=ffit._hint)
+        amat = ffit._mat_out
 
-        # Form full matrices from flat representations
-        # TODO: make these block diagonal for multi-n?
-        amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
+        # Use odet temporary buffers for subsequent matrices to avoid overwriting amat
         bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
+
         cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
+        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+
         fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
+
         kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
+        ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
+
         gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
+        ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
 
         odet.Afact = cholesky!(Hermitian(amat))
         # bmat = A⁻¹ * bmat

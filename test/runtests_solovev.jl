@@ -1,5 +1,6 @@
 using Test
 using JPEC
+using FastInterpolations
 
 # --- Helper constructors ---
 # Minimal valid inputs
@@ -24,7 +25,7 @@ end
 @testset "sol_run clamps p0fac to ≥ 1" begin
     equil_inputs, sol_inputs = make_inputs(p0fac=0.5)
     dri = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
-    @test all(dri.sq_in.fs[:, 2] .>= 0)  # no negative pressures
+    @test all(dri.sq_in.y[:, 2] .>= 0)  # no negative pressures
 end
 
 @testset "sol_run scalar relationships" begin
@@ -55,12 +56,12 @@ end
     sq = dri.sq_in
     psi = dri.psi_in
 
-    # Spline types
-    @test isa(sq, JPEC.Spl.CubicSpline)
-    @test isa(psi, JPEC.Spl.BicubicSpline)
+    # Spline types (using native FastInterpolations)
+    @test isa(sq, FastInterpolations.CubicSeriesInterpolant)
+    @test isa(psi, FastInterpolations.CubicInterpolantND)
 
     # Domain monotonicity
-    @test issorted(sq.xs)
+    @test issorted(sq.cache.x)
     @test issorted(psi.xs)
     @test issorted(psi.ys)
 
@@ -94,11 +95,12 @@ end
 end
 
 @testset "sol_run extreme inputs" begin
-    # minimal grid
-    equil_inputs, sol_inputs = make_inputs(mr=1, mz=1, ma=1)
+    # minimal grid (CubicInterpolant requires at least 4 points for extrap BC)
+    # mr=3, mz=3 creates 4-point grids (mr+1 points)
+    equil_inputs, sol_inputs = make_inputs(mr=3, mz=3, ma=3)
     dri = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
-    @test length(dri.psi_in.xs) == 2
-    @test length(dri.psi_in.ys) == 2
+    @test length(dri.psi_in.xs) == 4
+    @test length(dri.psi_in.ys) == 4
 
     # very high aspect ratio
     equil_inputs, sol_inputs = make_inputs(e=0.8, a=0.1, r0=10.0)

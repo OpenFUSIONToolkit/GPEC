@@ -43,7 +43,8 @@ function Main(path::String="./")
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
-    locstab_fs = zeros(Float64, length(equil.sq.xs), 5)
+    profiles_xs = equil.profiles.xs
+    locstab_fs = zeros(Float64, length(profiles_xs), 5)
     if ctrl.mer_flag
         if ctrl.verbose
             println("Evaluating Mercier criterion")
@@ -55,7 +56,7 @@ function Main(path::String="./")
     end
 
     # Fit data to splines
-    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -242,50 +243,35 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["equil/ro"] = equil.ro
         out_h5["equil/zo"] = equil.zo
 
-        # Write spline arrays
-        out_h5["splines/sq/xs"] = Vector(equil.sq.xs)
-        # TODO: getting errors when trying to dump just fs, so splitting for now, which adds so many lines
-        # This should be fixed if we separate these like Nik mentioned
-        out_h5["splines/sq/fs/2piF"] = equil.sq.fs[:, 1]
-        out_h5["splines/sq/fs/mu0p"] = equil.sq.fs[:, 2]
-        out_h5["splines/sq/fs/dVdpsi"] = equil.sq.fs[:, 3]
-        out_h5["splines/sq/fs/q"] = equil.sq.fs[:, 4]
-        out_h5["splines/sq/fs1/2piF"] = equil.sq.fs1[:, 1]
-        out_h5["splines/sq/fs1/mu0p"] = equil.sq.fs1[:, 2]
-        out_h5["splines/sq/fs1/dVdpsi"] = equil.sq.fs1[:, 3]
-        out_h5["splines/sq/fs1/q"] = equil.sq.fs1[:, 4]
-        out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
-        out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
-        out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
-        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, 1]
-        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, 2]
-        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, 3]
-        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, 4]
-        out_h5["splines/rzphi/fsx/rcoords"] = equil.rzphi.fsx[:, 1]
-        out_h5["splines/rzphi/fsx/offset"] = equil.rzphi.fsx[:, 2]
-        out_h5["splines/rzphi/fsx/nu"] = equil.rzphi.fsx[:, 3]
-        out_h5["splines/rzphi/fsx/jac"] = equil.rzphi.fsx[:, 4]
-        out_h5["splines/rzphi/fsy/rcoords"] = equil.rzphi.fsy[:, 1]
-        out_h5["splines/rzphi/fsy/offset"] = equil.rzphi.fsy[:, 2]
-        out_h5["splines/rzphi/fsy/nu"] = equil.rzphi.fsy[:, 3]
-        out_h5["splines/rzphi/fsy/jac"] = equil.rzphi.fsy[:, 4]
-        out_h5["splines/rzphi/fsxy/rcoords"] = equil.rzphi.fsxy[:, 1]
-        out_h5["splines/rzphi/fsxy/offset"] = equil.rzphi.fsxy[:, 2]
-        out_h5["splines/rzphi/fsxy/nu"] = equil.rzphi.fsxy[:, 3]
-        out_h5["splines/rzphi/fsxy/jac"] = equil.rzphi.fsxy[:, 4]
-        out_h5["splines/rzphi/x0"] = 0 # TODO: equil.rzphi.x0
-        out_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
-        out_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
-        out_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
+        # Write spline arrays (using profiles with named splines)
+        profiles = equil.profiles
+        out_h5["splines/sq/xs"] = profiles.xs
+        out_h5["splines/sq/fs/2piF"] = profiles.F_spline.y
+        out_h5["splines/sq/fs/mu0p"] = profiles.P_spline.y
+        out_h5["splines/sq/fs/dVdpsi"] = profiles.dVdpsi_spline.y
+        out_h5["splines/sq/fs/q"] = profiles.q_spline.y
+        out_h5["splines/sq/fs1/2piF"] = profiles.F_deriv.(profiles.xs)
+        out_h5["splines/sq/fs1/mu0p"] = profiles.P_deriv.(profiles.xs)
+        out_h5["splines/sq/fs1/dVdpsi"] = profiles.dVdpsi_deriv.(profiles.xs)
+        out_h5["splines/sq/fs1/q"] = profiles.q_deriv.(profiles.xs)
+        out_h5["splines/sq/xpower"] = 0
+        out_h5["splines/rzphi/xs"] = equil.rzphi_xs
+        out_h5["splines/rzphi/ys"] = equil.rzphi_ys
+        # Extract grid point values from interpolants for HDF5 output
+        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data
         if ctrl.mer_flag
-            out_h5["locstab/di"] = Vector(intr.locstab.fs[:, 1] ./ equil.sq.xs)
-            out_h5["locstab/dr"] = Vector(intr.locstab.fs[:, 2] ./ equil.sq.xs)
-            out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
+            locstab_xs = intr.locstab.cache.x
+            out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
+            out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
+            out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag
-            out_h5["locstab/ca1"] = Vector(intr.locstab.fs[:, 4])
+            out_h5["locstab/ca1"] = intr.locstab.y[:, 4]
         end
 
         # Write integration data

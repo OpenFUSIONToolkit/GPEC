@@ -25,7 +25,7 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, equil, intr)
+        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
         # initialize_el_at_singular_surf!(ctrl, equil, intr, odet)
@@ -38,7 +38,7 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
 
     # Print initial integration condition
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" Spl.spline_eval!(equil.sq, odet.psifac)[4]))")
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
     end
 
     # Iterate through each integration chunk
@@ -81,7 +81,7 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
     if ctrl.verbose
         println("Evaluating fixed-boundary stability criterion")
     end
-    odet.nzero = evaluate_stability_criterion!(odet, equil)
+    odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
     # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
     transform_u!(odet, intr)
@@ -90,7 +90,7 @@ function eulerlagrange_integration(ctrl::DconControl, equil::Equilibrium.PlasmaE
 end
 
 """
-    initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
+    initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, intr::DconInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
 Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
@@ -100,26 +100,22 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 Support for `kin_flag`
 Move ising_start logic to chunk_el_integration_bounds?
 """
-function initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
-
-    # Shorthand to evaluate q/q1 inside newton iteration
-    qval = psi -> Spl.spline_eval!(equil.sq, psi)[4]
-    q1val = psi -> Spl.spline_deriv1!(equil.sq, psi)[2][4]
+function initialize_el_at_axis!(odet::OdeState, ctrl::DconControl, profiles::Equilibrium.ProfileSplines, intr::DconInternal)
 
     # Default psifac to minimum equilibrium psi value
-    odet.psifac = equil.sq.xs[1]
+    odet.psifac = profiles.xs[1]
 
     # Use Newton iteration to find starting psi if qlow is above q0
-    if ctrl.qlow > equil.sq.fs[1, 4]
+    if ctrl.qlow > profiles.q_spline.y[1]
         # Find last index where q < qlow
-        idx = findlast(jpsi -> equil.sq.fs[jpsi-1, 4] < ctrl.qlow, 2:equil.sq.mx)
+        idx = findlast(jpsi -> profiles.q_spline.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
         if idx !== nothing
-            odet.psifac = equil.sq.xs[idx]
+            odet.psifac = profiles.xs[idx]
         end
         # Refine psifac using Newton iteration
         converged = false
         for _ in 1:itmax
-            dpsi = (ctrl.qlow - qval(odet.psifac)) / q1val(odet.psifac)
+            dpsi = (ctrl.qlow - profiles.q_spline(odet.psifac)) / profiles.q_deriv(odet.psifac)
             odet.psifac += dpsi
             abs(dpsi) < eps * abs(odet.psifac) && (converged=true; break)
         end
@@ -595,7 +591,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.
     fill!(odet.dW_edge, -Inf * (1 + im))
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
-    odet.wvmat_spline = free_compute_wv_spline(ctrl, equil, intr)
+    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop through integration, compute dW at steps where psifac >= psiedge
     for istep in 1:odet.step

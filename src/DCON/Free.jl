@@ -17,7 +17,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
-    dV_dpsi = Spl.spline_eval!(equil.sq, intr.psilim)[3]
+    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
@@ -147,7 +147,7 @@ the r, z, and ν values at the plasma boundary, as well as mode numbers and numb
 function compute_vacuum_inputs(psifac::Float64, n::Int, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Allocations
-    theta_norm = Vector(equil.rzphi.ys)
+    theta_norm = equil.rzphi_ys
     mtheta = equil.config.control.mtheta + 1
     angle = zeros(Float64, mtheta)
     r = zeros(Float64, mtheta)
@@ -156,11 +156,16 @@ function compute_vacuum_inputs(psifac::Float64, n::Int, ctrl::DconControl, equil
     rfac = zeros(Float64, mtheta)
 
     # Compute r, z, and ν at the plasma boundary
+    qa = equil.profiles.q_spline(psifac)
     for itheta in 1:mtheta
-        f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
-        rfac[itheta] = sqrt(f[1])
-        angle[itheta] = 2π * (theta_norm[itheta] + f[2])
-        ν[itheta] = f[3]
+        # Evaluate geometric quantities at (ψ, θ)
+        r2 = equil.rzphi_rsquared((psifac, theta_norm[itheta]))
+        offset = equil.rzphi_offset((psifac, theta_norm[itheta]))
+        nu_val = equil.rzphi_nu((psifac, theta_norm[itheta]))
+
+        rfac[itheta] = sqrt(r2)
+        angle[itheta] = 2π * (theta_norm[itheta] + offset)
+        ν[itheta] = nu_val
     end
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)
@@ -193,9 +198,11 @@ q-window minimum.
 """
 function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
+    profiles = equil.profiles
+
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = Spl.spline_eval!(equil.sq, ctrl.psiedge)[4]
+    qedge = profiles.q_spline(ctrl.psiedge)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
     psi_array = zeros(Float64, npsi + 1)
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
@@ -204,15 +211,11 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         # Space points evenly in q
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
-        # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
-
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         converged = false
         for _ in 1:itmax
-            dpsi = (qi - qval(psii)) / q1val(psii)
+            dpsi = (qi - profiles.q_spline(psii)) / profiles.q_deriv(psii)
             psii += dpsi
             if abs(dpsi) < eps * abs(psii)
                 converged = true
@@ -242,7 +245,14 @@ function free_compute_wv_spline(ctrl::DconControl, equil::Equilibrium.PlasmaEqui
         end
     end
 
-    return Spl.CubicSpline(psi_array, reshape(wv_array, npsi+1, :); bctype="extrap")
+    # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
+    wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
+
+    # FastInterpolations now natively supports complex values - create complex series interpolant directly
+    # Use CubicFit() for native endpoint handling
+    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
+
+    return wvmat
 end
 
 """
@@ -252,7 +262,7 @@ Compute total complex energy eigenvalue (total1). This is a trimmed down version
 that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
 which calls this function at each step in the psiedge -> psilim region of integration. This performs
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
-wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat_spline`.
+wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat` (a complex-valued spline).
 """
 function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::DconInternal, odet::OdeState)
 
@@ -261,13 +271,15 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     tot_eigvals = zeros(ComplexF64, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
-    dV_dpsi = Spl.spline_eval!(equil.sq, intr.psilim)[3]
+    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from spline
-    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.numpert_total, intr.numpert_total)
+    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
+    # FastInterpolations now natively supports complex values
+    odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
+    wv = odet._wv_out
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv

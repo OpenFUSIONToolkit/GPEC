@@ -2,7 +2,6 @@ using Test
 using JPEC
 using JPEC.Vacuum
 using LinearAlgebra
-using Interpolations
 
 @testset "Vacuum.jl Unit Tests" begin
 

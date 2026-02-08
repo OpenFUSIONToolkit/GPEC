@@ -163,7 +163,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = Spl.CubicSpline(xs_r, fs_r; bctype="extrap")
+    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
+    spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
     r = 0.0
@@ -172,39 +173,28 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sq_xs = zeros(ma + 1)
     sq_fs = zeros(ma + 1, 3)
     r_nodes = zeros(ma + 1)
-
-    for ia in 1:(ma+1)
-        r += dr
-        r_nodes[ia] = r
-        f, f1 = Spl.spline_deriv1!(spl, r)
-        ψ = f[3]
-        Bphi = f[2]
-        pval = f[6]
-        qval = f[8]
-        dψdr = f1[3]
-        r2 = -(f[4] * r / f[8]) / dψdr
-        sq_xs[ia] = ψ / psio
-        sq_fs[ia, 1] = lar_r0 * Bphi
-        sq_fs[ia, 2] = pval
-        sq_fs[ia, 3] = qval
-    end
-
-    sq_in = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
-
     rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
 
+    hint = Ref(1)
     for ia in 1:(ma+1)
-        r = r_nodes[ia]
-        f, f1 = Spl.spline_deriv1!(spl, r)
-        y4 = f[4]
-        q = f[8]
+        r += dr
+        r_nodes[ia] = r
+        f = spl(r; hint=hint)
+        f1 = spl_deriv(r; hint=hint)
         dψdr = f1[3]
-        r2 = -(y4 * r / q) / dψdr
+
+        # Fill spline data for sq_in
+        sq_xs[ia] = f[3] / psio  # ψ / psio
+        sq_fs[ia, 1] = lar_r0 * f[2]  # F = R0 * Bphi
+        sq_fs[ia, 2] = f[6]  # P
+        sq_fs[ia, 3] = f[8]  # q
+
+        # Compute Shafranov shift and fill rzphi grid
+        r2 = -(f[4] * r / f[8]) / dψdr
         if lar_input.zeroth
             r2 = 0.0
         end
-
         for itau in 1:(mtau+1)
             θ = 2π * (itau - 1) / mtau
             cosθ, sinθ = cos(θ), sin(θ)
@@ -214,10 +204,17 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    rz_in = Spl.BicubicSpline(r_nodes, collect(rzphi_y_nodes), rzphi_fs_nodes; bctypex="extrap", bctypey="periodic")
+    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
+    # Create separate interpolants for R and Z coordinates
+    rz_in_xs = r_nodes
+    rz_in_ys = collect(rzphi_y_nodes)
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0
-    return InverseRunInput(equil_input, sq_in, rz_in, lar_r0, 0.0, psio)
+    return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio)
 end
 
 """
@@ -278,18 +275,21 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
-    sq_in = Spl.CubicSpline(psis, sqfs; bctype="extrap")
+    sq_in = cubic_interp(psis, sqfs; bc=CubicFit(), extrap=:extension)
 
     # Compute 2D data and spline
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]
     z = [zmin + j * (zmax - zmin) / mz for j in 0:mz]
-    psifs = Array{Float64}(undef, mr + 1, mz + 1, 1)
+    psifs = Array{Float64}(undef, mr + 1, mz + 1)
     for iz in 1:(mz+1)
         for ir in 1:(mr+1)
-            psifs[ir, iz, 1] = psio - psifac * (efac * (r[ir] * z[iz])^2 + (r[ir]^2 - r0^2)^2 / 4)
+            psifs[ir, iz] = psio - psifac * (efac * (r[ir] * z[iz])^2 + (r[ir]^2 - r0^2)^2 / 4)
         end
     end
-    psi_in = Spl.BicubicSpline(r, z, psifs; bctypex="extrap", bctypey="extrap")
+    psi_in_xs = r
+    psi_in_ys = z
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs;
+        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # Print out equilibrium info
     println("Generating Solovev equilibrium inputs with:")
@@ -297,5 +297,5 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     println("   e=$e, a=$a, r0=$r0")
     println("   q0=$q0, p0fac=$p0fac, b0fac=$b0fac, f0fac=$f0fac")
 
-    return DirectRunInput(equil_inputs, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end

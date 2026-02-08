@@ -315,10 +315,17 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
         x_wall, z_wall, _, theta_grid, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
         theta_grid .= theta_grid .* (2π)  # Scale to [0, 2π) - irregular spacing
-        fx_of_theta = interpolate((theta_grid,), x_wall, Gridded(Linear()))
-        dx_dtheta = only.(Interpolations.gradient.(Ref(fx_of_theta), theta_grid))
-        fz_of_theta = interpolate((theta_grid,), z_wall, Gridded(Linear()))
-        dz_dtheta = only.(Interpolations.gradient.(Ref(fz_of_theta), theta_grid))
+        # Close the loop for periodic BC by appending first point at the end
+        theta_closed = vcat(collect(theta_grid), 2π)
+        x_closed = vcat(x_wall, x_wall[1])
+        z_closed = vcat(z_wall, z_wall[1])
+        spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
+        spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
+        d1_spline_x = deriv1(spline_x)
+        d1_spline_z = deriv1(spline_z)
+        theta_vec = collect(theta_grid)
+        dx_dtheta = d1_spline_x.(theta_vec)
+        dz_dtheta = d1_spline_z.(theta_vec)
     else
         # used regular theta grid spacing to build wall
         theta_grid = range(0; stop=2π, length=mtheta + 1)[1:(end-1)] # length mtheta without endpoint

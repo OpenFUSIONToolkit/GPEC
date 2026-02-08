@@ -112,7 +112,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
+  - `locstab::CubicSeriesInterpolant` - Spline for local stability analysis
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct DconInternal
@@ -137,7 +137,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
@@ -260,24 +260,47 @@ end
 @kwdef mutable struct FourFitVars
     mpert::Int
     mband::Int
+    numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
 
-    # Spline matrices
-    amats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    bmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    cmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    dmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    emats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    hmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    fmats_lower::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    kmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    gmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    # Complex-valued CubicSeriesInterpolant for stability matrices
+    # Each matrix is flattened to (npsi × numpert_total^2) series
+    # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
+    amats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    bmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    cmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    dmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    emats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    hmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    fmats_lower::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    kmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    gmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+
+    # Pre-allocated evaluation buffer for matrix output
+    _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+
+    # Shared hint for sequential evaluation (all splines evaluated at same psi)
+    _hint::Base.RefValue{Int} = Ref(1)
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
-# TODO: I think this initialization is funky - just need mband, not mpert. Fix later
-FourFitVars(mpert::Int) = FourFitVars(; mpert)
+# Helper to create empty series interpolant for default initialization (real-valued)
+function _empty_series_interp(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(Float64, 5, n_series)
+    return cubic_interp(xs, Y)
+end
+
+# Helper to create empty complex series interpolant for default initialization
+function _empty_series_interp_complex(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Y)
+end
+
+# Convenience constructor
+FourFitVars(mpert::Int, mband::Int, numpert_total::Int) = FourFitVars(; mpert, mband, numpert_total)
 
 """
     VacuumData
@@ -346,7 +369,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
-  - `wvmat_spline::Spl.CubicSpline{ComplexF64}` - Spline representation of precomputed wv matrices used by `free_test`/vacuum routines.
+  - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
@@ -397,7 +420,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat_spline::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 
     # Data for integrator
     psifac::Float64 = 0.0
@@ -428,10 +452,17 @@ and a small set of temporary matrices and factors used to compute singular-layer
     kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
+    Afact::Cholesky{ComplexF64,Matrix{ComplexF64}} = cholesky(Matrix{ComplexF64}(I, numpert_total, numpert_total))
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+
+    # Shared hint for CubicInterpolant interval search optimization during ODE integration
+    # All splines evaluated at the same psi can share this hint for O(1) interval lookups
+    spline_hint::Base.RefValue{Int} = Ref(1)
+    # Separate hint for wvmat splines (different grid size than equilibrium profiles)
+    wv_hint::Base.RefValue{Int} = Ref(1)
 end
 
+# Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
 
 # Below here are debug output structs used for benchmarking and unit testing

@@ -8,9 +8,11 @@ using FFTW
 using OrdinaryDiffEq
 using HDF5
 using JLD2
+using FastInterpolations
 
 import ..Equilibrium
 import ..Spl
+import ..Util
 import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
