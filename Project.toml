@@ -24,7 +24,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 [compat]
 DiffEqCallbacks = "4.9.0"
 Documenter = "1.14.1"
-FastInterpolations = "0.2.4"
+FastInterpolations = ">=0.2.8"
 FFTW = "1.9.0"
 HDF5 = "0.17.2"
 JLD2 = "0.6.3"
