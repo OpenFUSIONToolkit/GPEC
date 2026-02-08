@@ -49,34 +49,50 @@ using JPEC
 
 ### Benchmarking
 
-When asked to run benchmarks, use the following defaults unless specific instructions override them.
+Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits.
+
+**Tool usage:**
+
+```bash
+# Compare feature branch against develop
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --branch1 develop \
+  --branch2 feature-branch
+
+# Compare specific commits
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --commit1 abc123 \
+  --commit2 def456
+
+# Compare current develop vs develop from 1 month ago
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --branch1 develop \
+  --commit1 HEAD~10 \
+  --branch2 develop
+```
 
 **Default benchmark case:** `examples/DIIID-like_ideal_example`
 
-**Required metrics:**
+**Reported metrics:**
 1. **Eigenmode energy (`et[1]`)** - First eigenvalue; verifies calculation correctness
 2. **Integration steps** - Total ODE solver steps
-3. **Runtime (warmed)** - Wall-clock time after JIT warmup (run example 2+ times first)
-4. **Commit hash** - Git commit of code tested; note if uncommitted changes exist
+3. **Runtime (warmed)** - Wall-clock time averaged over multiple warm runs (JIT warmup handled automatically)
+4. **Commit hash** - Git commit of code tested
 
-**Reference baseline:** The `origin/develop` branch. Known results are recorded below to avoid re-running.
+**The tool automatically:**
+- Handles JIT warmup (runs example 3 times, averages last 2)
+- Switches between branches/commits
+- Stashes uncommitted changes if necessary
+- Restores original branch when done
+- Reports comparison with percentage differences
 
-**Benchmark procedure:**
-
-1. **Feature branch**: Run the benchmark example with current code (including uncommitted edits) and record metrics
-2. **Check develop baseline**: Run `git fetch origin develop` and check latest commit hash
-3. **Compare to baseline**:
-   - If develop commit matches "Known Results" below → use recorded values
-   - If develop has new commits → checkout develop, run benchmark, update "Known Results" table
-4. **Report**: Compare feature vs develop, flagging eigenmode differences (possible bugs) and performance changes
-
-**JIT warmup requirement:** Julia's JIT compiler makes the first run slow. Always run the example 2+ times before recording runtime. Only the warmed (subsequent) runs are valid for comparison.
-
-**Known Benchmark Results** (`examples/DIIID-like_ideal_example`):
-
-| Branch  | Commit    | et[1]  | Steps | Runtime |
-|---------|-----------|--------|-------|---------|
-| develop | `bb65a5b` | 1.7005 | 911   | 2.73s   |
+**Important notes:**
+- Working directory should be clean or changes will be stashed during branch switching
+- Tool requires HDF5.jl for reading euler.h5 output
+- Each benchmark run takes several minutes per branch (includes compilation + warm runs)
 
 
 ## Architecture
