@@ -56,9 +56,9 @@ end
     sq = dri.sq_in
     psi = dri.psi_in
 
-    # Spline types (using new Julia implementations)
+    # Spline types (using native FastInterpolations)
     @test isa(sq, FastInterpolations.CubicSeriesInterpolant)
-    @test isa(psi, JPEC.Spl.BicubicSpline)
+    @test isa(psi, FastInterpolations.CubicInterpolantND)
 
     # Domain monotonicity
     @test issorted(sq.cache.x)

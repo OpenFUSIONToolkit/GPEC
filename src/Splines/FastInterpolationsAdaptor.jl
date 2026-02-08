@@ -4,7 +4,7 @@ FastInterpolationsAdaptor - Helpers and types for FastInterpolations.jl in JPEC
 This module provides:
 - cumulative_integral: Exact spline integration (uses cubic spline coefficients)
 - total_integral: Optimized final-value-only integration
-- Internal helpers for BicubicSpline boundary condition handling
+- Re-exports of FastInterpolations boundary condition types
 
 ## Boundary Conditions
 
@@ -29,43 +29,6 @@ const CubicFit = FastInterpolations.CubicFit
 const BCPair = FastInterpolations.BCPair
 const Deriv1 = FastInterpolations.Deriv1
 const Deriv2 = FastInterpolations.Deriv2
-
-# =============================================================================
-# Boundary Condition Helpers (Internal)
-# =============================================================================
-
-"""
-    _estimate_endpoint_derivative(xs, fs, x0)
-
-Estimate f'(x0) using cubic Lagrange interpolation through 4 points.
-Used internally by BicubicSpline for extrap boundary conditions.
-"""
-@inline function _estimate_endpoint_derivative(xs::AbstractVector{Float64},
-    fs::AbstractVector{T}, x0::Float64) where {T}
-    x1, x2, x3, x4 = xs[1], xs[2], xs[3], xs[4]
-    f1, f2, f3, f4 = fs[1], fs[2], fs[3], fs[4]
-
-    d12 = x1 - x2
-    d13 = x1 - x3
-    d14 = x1 - x4
-    d23 = x2 - x3
-    d24 = x2 - x4
-    d34 = x3 - x4
-
-    L1_denom = d12 * d13 * d14
-    L1_deriv = ((x0 - x2) * (x0 - x3) + (x0 - x2) * (x0 - x4) + (x0 - x3) * (x0 - x4)) / L1_denom
-
-    L2_denom = (-d12) * d23 * d24
-    L2_deriv = ((x0 - x1) * (x0 - x3) + (x0 - x1) * (x0 - x4) + (x0 - x3) * (x0 - x4)) / L2_denom
-
-    L3_denom = (-d13) * (-d23) * d34
-    L3_deriv = ((x0 - x1) * (x0 - x2) + (x0 - x1) * (x0 - x4) + (x0 - x2) * (x0 - x4)) / L3_denom
-
-    L4_denom = (-d14) * (-d24) * (-d34)
-    L4_deriv = ((x0 - x1) * (x0 - x2) + (x0 - x1) * (x0 - x3) + (x0 - x2) * (x0 - x3)) / L4_denom
-
-    return f1 * L1_deriv + f2 * L2_deriv + f3 * L3_deriv + f4 * L4_deriv
-end
 
 # =============================================================================
 # Exact Spline Integration

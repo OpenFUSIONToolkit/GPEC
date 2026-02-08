@@ -29,10 +29,10 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams{B<:Spl.BicubicSpline,S<:FastInterpolations.CubicSeriesInterpolant,D}
+struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastInterpolations.CubicSeriesInterpolant,D}
     ro::Float64
     zo::Float64
-    psi_in::B
+    psi_in::I2D
     sq_in::S
     sq_in_deriv::D
     psio::Float64
@@ -55,7 +55,7 @@ the Julia spline implementation.
   - `bf_out`: A mutable `DirectBField` struct to store the results
   - `r`: R-coordinate to evaluate at
   - `z`: Z-coordinate to evaluate at
-  - `psi_in`: 2D bicubic spline for poloidal flux `ψ(R,Z)`
+  - `psi_in`: 2D cubic interpolant for poloidal flux `ψ(R,Z)`
   - `sq_in`: 1D cubic spline for profiles `F(ψ_norm)` and `P(ψ_norm)`
   - `sq_in_deriv`: Pre-computed derivative view of sq_in
   - `psio`: total toroidal flux
@@ -65,29 +65,26 @@ function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
-    psi_in::Spl.BicubicSpline,
+    psi_in::FastInterpolations.CubicInterpolantND,
     sq_in::FastInterpolations.CubicSeriesInterpolant,
     sq_in_deriv,
     psio::Float64;
     derivs::Int=0
 )
-    # Evaluate 2D spline for psi(r,z) and its derivatives
+    # Evaluate 2D interpolant for psi(r,z) and its derivatives
     if derivs == 0
-        f_psi = Spl.evaluate!(psi_in, r, z)
-        bf_out.psi = f_psi[1]
+        bf_out.psi = psi_in((r, z))
     elseif derivs == 1
-        f_psi, fx_psi, fy_psi = Spl.deriv1!(psi_in, r, z)
-        bf_out.psi = f_psi[1]
-        bf_out.psir = fx_psi[1]
-        bf_out.psiz = fy_psi[1]
+        bf_out.psi = psi_in((r, z))
+        bf_out.psir = psi_in((r, z); deriv=(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
     else # derivs >= 2
-        f_psi, fx_psi, fy_psi, fxx_psi, fxy_psi, fyy_psi = Spl.deriv2!(psi_in, r, z)
-        bf_out.psi = f_psi[1]
-        bf_out.psir = fx_psi[1]
-        bf_out.psiz = fy_psi[1]
-        bf_out.psirr = fxx_psi[1]
-        bf_out.psirz = fxy_psi[1]
-        bf_out.psizz = fyy_psi[1]
+        bf_out.psi = psi_in((r, z))
+        bf_out.psir = psi_in((r, z); deriv=(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
+        bf_out.psirr = psi_in((r, z); deriv=(2, 0))
+        bf_out.psirz = psi_in((r, z); deriv=(1, 1))
+        bf_out.psizz = psi_in((r, z); deriv=(0, 2))
     end
 
     # Evaluate magnetic fields from equilibrium profiles
@@ -189,11 +186,13 @@ function direct_position!(raw_profile::DirectRunInput)
 
     # Renormalize psi based on the value at the magnetic axis
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
-    x_coords = raw_profile.psi_in.xs
-    y_coords = raw_profile.psi_in.ys
-    new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
+    x_coords = raw_profile.psi_in_xs
+    y_coords = raw_profile.psi_in_ys
+    # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
+    new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs, :extrap, :extrap)
+    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs;
+        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # Helper function for robust Newton-Raphson search with restarts
     function find_separatrix_crossing(start_r, end_r, label)
@@ -521,10 +520,18 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         )
     end
 
-    # Fit the geometric spline `rzphi` using bicubic spline with extrap/periodic BCs.
+    # Fit the geometric spline `rzphi` using native FastInterpolations API with extrap/periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
-    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes,
-        :extrap, Spl.PeriodicBC())
+    rzphi_xs = psi_nodes
+    rzphi_ys = collect(theta_nodes)
+    rzphi_rcoord = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_nu = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 3];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_jac = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 4];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
@@ -535,8 +542,26 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            # Evaluate at grid point coordinates
-            f, fx, fy = Spl.deriv1!(rzphi, psi_nodes[ipsi], theta_norm)
+            # Access nodal derivatives from the interpolants (grid points)
+            # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
+            f = SVector{4}(
+                rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_nu.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+            )
+            fx = SVector{4}(
+                rzphi_rcoord.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_offset.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_nu.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
+            )
+            fy = SVector{4}(
+                rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_offset.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
+            )
             rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
@@ -570,9 +595,17 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    # Create eqfun BicubicSpline - derivatives are computed internally
-    eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes,
-        :extrap, Spl.PeriodicBC())
+    # Create eqfun interpolants using native FastInterpolations API
+    eqfun_B = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_metric1 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_metric2 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 3];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles, rzphi, eqfun, ro, zo, psio)
+    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
+        rzphi_xs, rzphi_ys,
+        rzphi_rcoord, rzphi_offset, rzphi_nu, rzphi_jac,
+        eqfun_B, eqfun_metric1, eqfun_metric2,
+        ro, zo, psio)
 end

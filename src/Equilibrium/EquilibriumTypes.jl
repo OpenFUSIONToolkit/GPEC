@@ -275,8 +275,8 @@ raw equilibrium data and preparing the initial splines.
      3. `q` — safety factor profile
      4. `√ψ_norm` — square root of normalized flux
   - `psi_in`
-    2D spline data on the (R, Z) grid [m].
-    The z-values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
+    2D cubic interpolant on the (R, Z) grid [m].
+    The values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
     Definitions:
 
      1. `ψ(R, Z) = ψ_boundary - ψ(R, Z)`
@@ -284,17 +284,21 @@ raw equilibrium data and preparing the initial splines.
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
           * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
-          * 2D flux surfaces by `BicubicSpline`
+          * 2D flux surfaces by `CubicInterpolantND`
+  - `psi_in_xs::Vector{Float64}` — R coordinate grid for psi_in [m]
+  - `psi_in_ys::Vector{Float64}` — Z coordinate grid for psi_in [m]
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,B<:Spl.BicubicSpline}
+mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D}
     config::EquilibriumConfig
     sq_in::S       # 1D profile spline for F, P, q
-    psi_in::B      # 2D flux spline (BicubicSpline)
+    psi_in::I2D    # 2D flux interpolant (CubicInterpolantND)
+    psi_in_xs::Vector{Float64}  # R coordinates
+    psi_in_ys::Vector{Float64}  # Z coordinates
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
@@ -311,18 +315,24 @@ A container struct for inputs to the `inverse_run` function.
 
   - `config::EquilibriumConfig` - The equilibrium configuration object
   - `sq_in::CubicSeriesInterpolant` - 1D profile spline for F, P, q
-  - `rz_in::BicubicSpline` - 2D bicubic spline for (R,Z) geometry
+  - `rz_in_xs::Vector{Float64}` - ψ coordinate grid for rz_in
+  - `rz_in_ys::Vector{Float64}` - θ coordinate grid for rz_in
+  - `rz_in_R::CubicInterpolantND` - R coordinate interpolant [m]
+  - `rz_in_Z::CubicInterpolantND` - Z coordinate interpolant [m]
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,B<:Spl.BicubicSpline}
+mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D}
     config::EquilibriumConfig
     sq_in::S   # 1D profile spline for F, P, q
-    rz_in::B   # 2D bicubic spline input for (R,Z) geometry
-    ro::Float64          # R axis location
-    zo::Float64          # Z axis location
-    psio::Float64        # Total flux difference |psi_axis - psi_boundary|
+    rz_in_xs::Vector{Float64}   # ψ coordinates
+    rz_in_ys::Vector{Float64}   # θ coordinates
+    rz_in_R::I2D                # R coordinate interpolant
+    rz_in_Z::I2D                # Z coordinate interpolant
+    ro::Float64                 # R axis location
+    zo::Float64                 # Z axis location
+    psio::Float64               # Total flux difference |psi_axis - psi_boundary|
 end
 
 """
@@ -531,33 +541,52 @@ This object provides a complete representation of the processed plasma equilibri
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
-  - `rzphi::BicubicSpline`:
-    2D bicubic spline for flux-coordinate mapping with periodic boundary conditions in theta.
 
-      + **x value:** normalized ψ (grid points only)
+  - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
+      + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
+      + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
+
+  - **Geometric quantities (rzphi, 4 interpolants):**
+    2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
+      + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
-      + **Quantity 1:** r_coord² = (R - ro)² + (Z - zo)²
-      + **Quantity 2:** Offset between the geometric poloidal angle (η) and the new angle (θₙₑw), η / (2π) - θₙₑw
-      + **Quantity 3:** ν in ϕ = 2πζ + ν(ψ, θ)
-      + **Quantity 4:** Jacobian
-  - `eqfun::BicubicSpline`:
-    2D bicubic spline storing local physics and geometric quantities.
+      + `rzphi_rcoord::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
+      + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
+      + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
+      + `rzphi_jac::CubicInterpolantND`: Jacobian
 
+  - **Physics quantities (eqfun, 3 interpolants):**
+    2D cubic interpolants storing local physics and geometric quantities.
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle θₙₑw
-      + **Quantity 1:** Total magnetic field strength, B [T]
-      + **Quantity 2:** (e₁⋅e₂ + q⋅e₃⋅e₁) / (J⋅B²)
-      + **Quantity 3:** (e₂⋅e₃ + q⋅e₃⋅e₃) / (J⋅B²)
+      + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
+      + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
+      + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
+
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{P<:ProfileSplines,B1,B2}
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
-    rzphi::B1
-    eqfun::B2
+
+    # Grid coordinates (shared by all 2D interpolants)
+    rzphi_xs::Vector{Float64}
+    rzphi_ys::Vector{Float64}
+
+    # Geometric quantities (4 interpolants)
+    rzphi_rcoord::I2D
+    rzphi_offset::I2D
+    rzphi_nu::I2D
+    rzphi_jac::I2D
+
+    # Physics quantities (3 interpolants)
+    eqfun_B::I2D
+    eqfun_metric1::I2D
+    eqfun_metric2::I2D
+
     ro::Float64
     zo::Float64
     psio::Float64

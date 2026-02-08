@@ -1,85 +1,12 @@
 @testset "FastInterpolations-based Splines" begin
+    # NOTE: BicubicSpline wrapper has been removed in favor of native FastInterpolations API.
+    # The codebase now uses FastInterpolations.cubic_interp((xs, ys), fs) directly.
+    # These tests are commented out as BicubicSpline no longer exists.
+    # See PlasmaEquilibrium struct for examples of native FastInterpolations usage.
 
-    @testset "BicubicSpline - Basic Evaluation" begin
-        @info "Testing BicubicSpline basic evaluation"
-
-        # Create 2D function: f(x,y) = sin(x) * cos(y)
-        xs = collect(range(0.0; stop=2π, length=50))
-        ys = collect(range(0.0; stop=2π, length=50))
-
-        fs = zeros(Float64, length(xs), length(ys), 1)
-        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
-            fs[ix, iy, 1] = sin(x) * cos(y)
-        end
-
-        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, :extrap)
-
-        # Evaluate at interior point
-        x_test, y_test = π/3, π/4
-        f = JPEC.Spl.evaluate!(bcs, x_test, y_test)
-
-        expected = sin(x_test) * cos(y_test)
-        @test abs(f[1] - expected) < 1e-5
-    end
-
-    @testset "BicubicSpline - First Derivatives" begin
-        @info "Testing BicubicSpline first derivatives"
-
-        xs = collect(range(0.0; stop=2π, length=60))
-        ys = collect(range(0.0; stop=2π, length=60))
-
-        fs = zeros(Float64, length(xs), length(ys), 1)
-        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
-            fs[ix, iy, 1] = sin(x) * cos(y)
-        end
-
-        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, :extrap)
-
-        x_test, y_test = π/3, π/4
-        f, fx, fy = JPEC.Spl.deriv1!(bcs, x_test, y_test)
-
-        # Analytical derivatives
-        expected_fx = cos(x_test) * cos(y_test)
-        expected_fy = -sin(x_test) * sin(y_test)
-
-        @test abs(fx[1] - expected_fx) < 1e-3
-        @test abs(fy[1] - expected_fy) < 1e-3
-    end
-
-    @testset "BicubicSpline - Second Derivatives and Cross-Derivative" begin
-        @info "Testing BicubicSpline second derivatives including fxy"
-
-        xs = collect(range(0.0; stop=2π, length=80))
-        ys = collect(range(0.0; stop=2π, length=80))
-
-        fs = zeros(Float64, length(xs), length(ys), 1)
-        for (ix, x) in enumerate(xs), (iy, y) in enumerate(ys)
-            fs[ix, iy, 1] = sin(x) * cos(y)
-        end
-
-        bcs = JPEC.Spl.BicubicSpline(xs, ys, fs, :extrap, :extrap)
-
-        x_test, y_test = π/3, π/4
-        f, fx, fy, fxx, fxy, fyy = JPEC.Spl.deriv2!(bcs, x_test, y_test)
-
-        # Analytical second derivatives
-        expected_fxx = -sin(x_test) * cos(y_test)
-        expected_fyy = -sin(x_test) * cos(y_test)
-        expected_fxy = -cos(x_test) * sin(y_test)
-
-        @test abs(fxx[1] - expected_fxx) < 1e-2
-        @test abs(fyy[1] - expected_fyy) < 1e-2
-        @test abs(fxy[1] - expected_fxy) < 1e-2
-    end
-
-    @testset "BicubicSpline - Empty Constructor" begin
-        @info "Testing BicubicSpline empty constructor"
-
-        empty_bcs = JPEC.Spl.empty_BicubicSpline()
-        @test length(empty_bcs.xs) == 4  # Needs 4 points for extrap BC
-        @test length(empty_bcs.ys) == 4
-        @test empty_bcs.nqty == 1
-    end
+    # @testset "BicubicSpline - Basic Evaluation" begin
+    #     ... (tests removed - use native cubic_interp instead)
+    # end
 
 end
 

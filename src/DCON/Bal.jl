@@ -203,9 +203,8 @@ on a single magnetic flux surface.
 function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.PlasmaEquilibrium, hint::Ref{Int})
     # shorter aliases for equilibrium structs
     profiles = plasma_eq.profiles
-    rzphi = plasma_eq.rzphi
-    mtheta = length(rzphi.ys) - 1
-    theta_grid = rzphi.ys
+    mtheta = length(plasma_eq.rzphi_ys) - 1
+    theta_grid = plasma_eq.rzphi_ys
 
     # surface quantities
     psi = profiles.xs[ipsi]
@@ -230,23 +229,23 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     v = zeros(3, 3)  # contravariant basis vectors
     w = zeros(3, 3)  # covariant basis vectors
 
-    # loop over poloidal angle using direct array access at grid points
+    # loop over poloidal angle using nodal_derivs access at grid points
     for itheta in 1:(mtheta+1)
-        # Direct array access for values and derivatives
-        f1 = rzphi.fs[ipsi, itheta, 1]
-        f2 = rzphi.fs[ipsi, itheta, 2]
-        f4 = rzphi.fs[ipsi, itheta, 4]
-        fx1 = rzphi.fsx[ipsi, itheta, 1]
-        fx2 = rzphi.fsx[ipsi, itheta, 2]
-        fx3 = rzphi.fsx[ipsi, itheta, 3]
-        fx4 = rzphi.fsx[ipsi, itheta, 4]
-        fy1 = rzphi.fsy[ipsi, itheta, 1]
-        fy2 = rzphi.fsy[ipsi, itheta, 2]
-        fy3 = rzphi.fsy[ipsi, itheta, 3]
+        # Access nodal derivatives from interpolants
+        f1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta]
+        f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+        f4 = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+        fx1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[2, ipsi, itheta]
+        fx2 = plasma_eq.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
+        fx3 = plasma_eq.rzphi_nu.nodal_derivs.partials[2, ipsi, itheta]
+        fx4 = plasma_eq.rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
+        fy1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta]
+        fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
+        fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
 
         fx_psi[:, itheta] .= (fx1, fx2, fx3, fx4)  # Store fx for later use
 
-        theta = rzphi.ys[itheta]
+        theta = theta_grid[itheta]
         rfac = sqrt(f1)
         eta = 2pi * (theta + f2)
         r = plasma_eq.ro + rfac * cos(eta)

@@ -383,10 +383,9 @@ Performs the same function as equil_out_gse in the Fortran code.
 """
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
-    rzphi = equil.rzphi
     profiles = equil.profiles
-    mpsi = length(rzphi.xs) - 1
-    mtheta = length(rzphi.ys) - 1
+    mpsi = length(equil.rzphi_xs) - 1
+    mtheta = length(equil.rzphi_ys) - 1
     ro, zo = equil.ro, equil.zo
     psio = equil.psio
     verbose = equil.params.verbose
@@ -397,13 +396,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         println("Diagnosing Grad-Shafranov solution...")
     end
 
-    # Compute R, Z coordinates using direct array access
+    # Compute R, Z coordinates using nodal_derivs access
     r = zeros(Float64, mpsi + 1, mtheta + 1)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
     for ipsi in 1:(mpsi+1)
-        rfac = @. sqrt(rzphi.fs[ipsi, :, 1])
-        angle = @. 2π * (rzphi.ys + rzphi.fs[ipsi, :, 2])
+        rfac = @. sqrt(equil.rzphi_rcoord.nodal_derivs.partials[1, ipsi, :])
+        angle = @. 2π * (equil.rzphi_ys + equil.rzphi_offset.nodal_derivs.partials[1, ipsi, :])
         r[ipsi, :] .= ro .+ rfac .* cos.(angle)
         z[ipsi, :] .= zo .+ rfac .* sin.(angle)
     end
@@ -414,13 +413,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # y-derivatives
     for ipsi in 1:(mpsi+1)
         for itheta in 1:(mtheta+1)
-            f1 = rzphi.fs[ipsi, itheta, 1]
-            f2 = rzphi.fs[ipsi, itheta, 2]
-            f4 = rzphi.fs[ipsi, itheta, 4]
-            fy1 = rzphi.fsy[ipsi, itheta, 1]
-            fy2 = rzphi.fsy[ipsi, itheta, 2]
-            fx1 = rzphi.fsx[ipsi, itheta, 1]
-            fx2 = rzphi.fsx[ipsi, itheta, 2]
+            f1 = equil.rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta]
+            f2 = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+            f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+            fy1 = equil.rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta]
+            fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
+            fx1 = equil.rzphi_rcoord.nodal_derivs.partials[2, ipsi, itheta]
+            fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
 
             flux_fs[ipsi, itheta, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
             flux_fs[ipsi, itheta, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
@@ -429,14 +428,18 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
-    flux = Spl.BicubicSpline(collect(rzphi.xs), collect(rzphi.ys), flux_fs,
-        :extrap, Spl.PeriodicBC())
+    # Create flux interpolants using native FastInterpolations
+    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     # Compute flux derivatives at all grid points for diagnostics
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            _, flux_fx, flux_fy = Spl.deriv1!(flux, rzphi.xs[ipsi+1], rzphi.ys[itheta+1])
-            flux_fsx[ipsi+1, itheta+1, :] .= flux_fx
-            flux_fsy[ipsi+1, itheta+1, :] .= flux_fy
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1,0))
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1,0))
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0,1))
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0,1))
         end
     end
 
@@ -449,7 +452,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         s1p = profiles.F_deriv(psi; hint=hint)
         s2p = profiles.P_deriv(psi; hint=hint)
         for itheta in 1:(mtheta+1)
-            f4 = rzphi.fs[ipsi, itheta, 4]
+            f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
             denom = (2π * r[ipsi, itheta])^2
             source[ipsi, itheta] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
         end

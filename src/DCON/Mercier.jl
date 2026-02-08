@@ -9,10 +9,9 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
 
     # Shorthand
     profiles = plasma_eq.profiles
-    rzphi = plasma_eq.rzphi
 
     # Allocate splines
-    ff_fs = zeros(length(rzphi.ys), 5)
+    ff_fs = zeros(length(plasma_eq.rzphi_ys), 5)
 
     # Compute surface quantities
     hint = Ref(1)  # Linear search hint for sequential psi access
@@ -27,16 +26,16 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian
-        for itheta in 1:length(rzphi.ys)
-            theta = rzphi.ys[itheta]
+        for itheta in 1:length(plasma_eq.rzphi_ys)
+            theta = plasma_eq.rzphi_ys[itheta]
 
-            # Direct array access at grid points
-            f1 = rzphi.fs[ipsi, itheta, 1]
-            f2 = rzphi.fs[ipsi, itheta, 2]
-            jac = rzphi.fs[ipsi, itheta, 4]
-            fy1 = rzphi.fsy[ipsi, itheta, 1]
-            fy2 = rzphi.fsy[ipsi, itheta, 2]
-            fy3 = rzphi.fsy[ipsi, itheta, 3]
+            # Access nodal derivatives at grid points
+            f1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[1, ipsi, itheta]
+            f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+            jac = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+            fy1 = plasma_eq.rzphi_rcoord.nodal_derivs.partials[3, ipsi, itheta]
+            fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
+            fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
 
             rfac = sqrt(f1)
             eta = 2π * (theta + f2)
@@ -62,7 +61,7 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         end
 
         # Integrate quantities with respect to theta using exact spline integral
-        avg = Spl.total_integral(rzphi.ys, ff_fs; bc=Spl.PeriodicBC())
+        avg = Spl.total_integral(plasma_eq.rzphi_ys, ff_fs; bc=Spl.PeriodicBC())
 
         # Evaluate Mercier criterion and related quantities
         term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]

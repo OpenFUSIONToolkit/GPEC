@@ -61,42 +61,41 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    rzphi = equil.rzphi
-    mpsi = length(rzphi.xs)
-    mtheta = length(rzphi.ys)
+    mpsi = length(equil.rzphi_xs)
+    mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
-    # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
+    # The equil.rzphi_ys is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= rzphi.xs
-    metric.ys .= rzphi.ys .* 2π
+    metric.xs .= equil.rzphi_xs
+    metric.ys .= equil.rzphi_ys .* 2π
 
     # Temporary array for contravariant basis vectors
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
-    # Use direct array access at grid points for performance
+    # Use nodal_derivs.partials access at grid points for performance
     for ipsi in 1:mpsi
         for jtheta in 1:mtheta
-            theta_norm = rzphi.ys[jtheta] # θ is from 0 to 1
+            theta_norm = equil.rzphi_ys[jtheta] # θ is from 0 to 1
 
-            # Direct array access for geometric quantities (see EquilibriumAPI.txt)
-            r_coord_sq = rzphi.fs[ipsi, jtheta, 1]
-            eta_offset = rzphi.fs[ipsi, jtheta, 2]
-            jac = rzphi.fs[ipsi, jtheta, 4]
-            jac1 = rzphi.fsx[ipsi, jtheta, 4] # ∂J/∂ψ
+            # Access nodal derivatives from interpolants (partials indexing: [1,:,:]=f, [2,:,:]=∂f/∂x, [3,:,:]=∂f/∂y, [4,:,:]=∂²f/∂x∂y)
+            r_coord_sq = equil.rzphi_rcoord.nodal_derivs.partials[1, ipsi, jtheta]
+            eta_offset = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, jtheta]
+            jac = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, jtheta]
+            jac1 = equil.rzphi_jac.nodal_derivs.partials[2, ipsi, jtheta] # ∂J/∂ψ
 
             rfac = sqrt(r_coord_sq)
             eta = 2π * (theta_norm + eta_offset)
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
             # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
-            fx1 = rzphi.fsx[ipsi, jtheta, 1]
-            fx2 = rzphi.fsx[ipsi, jtheta, 2]
-            fx3 = rzphi.fsx[ipsi, jtheta, 3]
-            fy1 = rzphi.fsy[ipsi, jtheta, 1]
-            fy2 = rzphi.fsy[ipsi, jtheta, 2]
-            fy3 = rzphi.fsy[ipsi, jtheta, 3]
+            fx1 = equil.rzphi_rcoord.nodal_derivs.partials[2, ipsi, jtheta]
+            fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, jtheta]
+            fx3 = equil.rzphi_nu.nodal_derivs.partials[2, ipsi, jtheta]
+            fy1 = equil.rzphi_rcoord.nodal_derivs.partials[3, ipsi, jtheta]
+            fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, jtheta]
+            fy3 = equil.rzphi_nu.nodal_derivs.partials[3, ipsi, jtheta]
 
             v[1, 1] = fx1 / (2.0 * rfac * jac)
             v[1, 2] = fx2 * 2π * rfac / jac

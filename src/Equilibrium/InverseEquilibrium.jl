@@ -46,7 +46,10 @@ function equilibrium_solver(input::InverseRunInput)
     # Extract input parameters
 
     config = input.config
-    rz_in = input.rz_in
+    rz_in_xs = input.rz_in_xs
+    rz_in_ys = input.rz_in_ys
+    rz_in_R = input.rz_in_R
+    rz_in_Z = input.rz_in_Z
     sq_in = input.sq_in
     ro = input.ro
     zo = input.zo
@@ -64,14 +67,16 @@ function equilibrium_solver(input::InverseRunInput)
     # c-----------------------------------------------------------------------
     # c     allocate and define local arrays.
     # c-----------------------------------------------------------------------
-    rz_in._xs = sq_in._xs
-    rz_in._ys = collect(0:rz_in.my) ./ rz_in.my
+    # Access grid dimensions from the interpolants
+    mx = length(rz_in_xs) - 1
+    my = length(rz_in_ys) - 1
 
-    mx = rz_in.mx
-    my = rz_in.my
+    # Extract R and Z nodal values from interpolants
+    R_data = rz_in_R.nodal_derivs.partials[1, :, :]
+    Z_data = rz_in_Z.nodal_derivs.partials[1, :, :]
 
-    x = rz_in.fs[:, :, 1] .- ro
-    y = rz_in.fs[:, :, 2] .- zo
+    x = R_data .- ro
+    y = Z_data .- zo
     r2 = x .^ 2 .+ y .^ 2
 
     twopi = 2 * π
@@ -99,7 +104,7 @@ function equilibrium_solver(input::InverseRunInput)
         end
         for itheta in 0:my
             if r2[ipsi+1, itheta+1] > 0
-                deta[ipsi+1, itheta+1] -= rz_in.ys[itheta+1]
+                deta[ipsi+1, itheta+1] -= rz_in_ys[itheta+1]
             end
         end
     end
@@ -107,11 +112,11 @@ function equilibrium_solver(input::InverseRunInput)
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
-    rz_in_fs = zeros(Float64, mx+1, my+1, 3)
-    rz_in_fs[:, :, 1] = r2
-    rz_in_fs[:, :, 2] = deta
-
-    rz_spline = Spl.BicubicSpline(rz_in.xs, rz_in.ys, rz_in_fs, :extrap, Spl.PeriodicBC())
+    # Create interpolants for r² and dη using native FastInterpolations API
+    rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2;
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta;
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
     # c-----------------------------------------------------------------------
     # c     prepare new spline type for surface quantities.
@@ -132,14 +137,11 @@ function equilibrium_solver(input::InverseRunInput)
         error("Only 'ldp' grid_type is implemented for now.")
     end
 
-    local rzphi::Spl.BicubicSpline
-    local eqfun::Spl.BicubicSpline
-
     # c-----------------------------------------------------------------------
     # c     prepare new bicube type for coordinates.
     # c-----------------------------------------------------------------------
     if mtheta == 0
-        mtheta = rz_in.my
+        mtheta = my
     end
 
     # (/"  r2  "," deta "," dphi ","  jac "/)
@@ -152,11 +154,6 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun_xs = copy(sq_xs)
     eqfun_ys = collect(0:mtheta) ./ mtheta
 
-    rzphi = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, rzphi_fs,
-        :extrap, Spl.PeriodicBC())
-    eqfun = Spl.BicubicSpline(copy(sq.xs), collect(0:mtheta) ./ mtheta, eqfun_fs,
-        :extrap, Spl.PeriodicBC())
-
 
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
@@ -164,24 +161,31 @@ function equilibrium_solver(input::InverseRunInput)
         spl_xs .= rzphi_ys
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
-            f_rz_in, fx_rz_in, fy_rz_in = Spl.deriv1!(new_rz_in, psifac, theta)
+            # Evaluate r² and dη interpolants separately
+            f_rsq = rz_rsq((psifac, theta))
+            f_deta = rz_deta((psifac, theta))
+            fx_rsq = rz_rsq((psifac, theta); deriv=(1, 0))
+            fx_deta = rz_deta((psifac, theta); deriv=(1, 0))
+            fy_rsq = rz_rsq((psifac, theta); deriv=(0, 1))
+            fy_deta = rz_deta((psifac, theta); deriv=(0, 1))
+
             f_sq_in = sq_in(psifac)
 
-            if f_rz_in[1] < 0
+            if f_rsq < 0
                 error("Invalid extrapolation near axis, rerun with larger value of psilow")
             end
 
-            rfac = sqrt(f_rz_in[1])
-            r = ro + rfac * cos(twopi * (theta + f_rz_in[2]))
-            jacfac = fx_rz_in[1] * (1 + fy_rz_in[2]) - fy_rz_in[1] * fx_rz_in[2]
-            w11 = (1 + fy_rz_in[2]) * twopi ^ 2 * rfac / jacfac
-            w12 = -fy_rz_in[1] * pi / (rfac * jacfac)
+            rfac = sqrt(f_rsq)
+            r = ro + rfac * cos(twopi * (theta + f_deta))
+            jacfac = fx_rsq * (1 + fy_deta) - fy_rsq * fx_deta
+            w11 = (1 + fy_deta) * twopi ^ 2 * rfac / jacfac
+            w12 = -fy_rsq * pi / (rfac * jacfac)
             bp = psio * sqrt(w11*w11 + w12*w12) / r
             bt = f_sq_in[1] / r
             b = sqrt(bp*bp + bt*bt)
 
-            spl_fs[itheta+1, 1] = f_rz_in[1]
-            spl_fs[itheta+1, 2] = f_rz_in[2]
+            spl_fs[itheta+1, 1] = f_rsq
+            spl_fs[itheta+1, 2] = f_deta
             spl_fs[itheta+1, 3] = r * jacfac
             spl_fs[itheta+1, 4] = spl_fs[itheta+1, 3] / (r * r)
             spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.control.power_bp * b^config.control.power_b / r^config.control.power_r
@@ -232,13 +236,39 @@ function equilibrium_solver(input::InverseRunInput)
         sq = Spl.CubicSpline(sq_xs, sq_fs; bctype="extrap")
     end
     qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
-    rzphi = Spl.BicubicSpline(rzphi_xs, rzphi_ys, rzphi_fs; bctypex="extrap", bctypey="periodic")
+    # Create native FastInterpolations interpolants for rzphi
+    rzphi_rcoord = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_nu = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 3];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_jac = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 4];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
     for ipsi in 0:mpsi
         f_sq = Spl.spline_eval!(sq, sq_xs[ipsi+1])
         q = f_sq[4]
         for itheta in 0:mtheta
-            f_rzphi, fx_rzphi, fy_rzphi = Spl.bicube_deriv1!(rzphi, sq_xs[ipsi+1], rzphi_ys[itheta+1])
+            # Evaluate rzphi interpolants at grid points using nodal_derivs
+            f_rzphi = SVector{4}(
+                rzphi_rcoord.nodal_derivs.partials[1, ipsi+1, itheta+1],
+                rzphi_offset.nodal_derivs.partials[1, ipsi+1, itheta+1],
+                rzphi_nu.nodal_derivs.partials[1, ipsi+1, itheta+1],
+                rzphi_jac.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            )
+            fx_rzphi = SVector{4}(
+                rzphi_rcoord.nodal_derivs.partials[2, ipsi+1, itheta+1],
+                rzphi_offset.nodal_derivs.partials[2, ipsi+1, itheta+1],
+                rzphi_nu.nodal_derivs.partials[2, ipsi+1, itheta+1],
+                rzphi_jac.nodal_derivs.partials[2, ipsi+1, itheta+1]
+            )
+            fy_rzphi = SVector{4}(
+                rzphi_rcoord.nodal_derivs.partials[3, ipsi+1, itheta+1],
+                rzphi_offset.nodal_derivs.partials[3, ipsi+1, itheta+1],
+                rzphi_nu.nodal_derivs.partials[3, ipsi+1, itheta+1],
+                rzphi_jac.nodal_derivs.partials[3, ipsi+1, itheta+1]
+            )
             rfac = sqrt(f_rzphi[1])
             eta = twopi * (itheta / mtheta + f_rzphi[2])
             r = ro + rfac * cos(eta)
@@ -262,14 +292,21 @@ function equilibrium_solver(input::InverseRunInput)
             eqfun_fs[ipsi+1, itheta+1, 3] = (v[2, 3] * v[3, 3] + f_sq[4] * v[3, 3]^2) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
         end
     end
-    eqfun = Spl.BicubicSpline(eqfun_xs, eqfun_ys, eqfun_fs; bctypex="extrap", bctypey="periodic")
+    # Create native FastInterpolations interpolants for eqfun
+    eqfun_B = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_metric1 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_metric2 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 3];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
     return PlasmaEquilibrium(
         input.config,
         EquilibriumParameters(),
         sq,
-        rzphi,
-        eqfun,
+        rzphi_xs, rzphi_ys,
+        rzphi_rcoord, rzphi_offset, rzphi_nu, rzphi_jac,
+        eqfun_B, eqfun_metric1, eqfun_metric2,
         ro,
         zo,
         psio

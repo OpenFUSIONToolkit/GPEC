@@ -255,13 +255,13 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/sq/fs1/dVdpsi"] = profiles.dVdpsi_deriv.(profiles.xs)
         out_h5["splines/sq/fs1/q"] = profiles.q_deriv.(profiles.xs)
         out_h5["splines/sq/xpower"] = 0
-        out_h5["splines/rzphi/xs"] = equil.rzphi.xs
-        out_h5["splines/rzphi/ys"] = equil.rzphi.ys
-        # BicubicSpline stores fs as 3D array (nx × ny × nqty)
-        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, :, 1]
-        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, :, 2]
-        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, :, 3]
-        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, :, 4]
+        out_h5["splines/rzphi/xs"] = equil.rzphi_xs
+        out_h5["splines/rzphi/ys"] = equil.rzphi_ys
+        # Extract nodal values from native FastInterpolations interpolants
+        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi_rcoord.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/fs/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data
         if ctrl.mer_flag

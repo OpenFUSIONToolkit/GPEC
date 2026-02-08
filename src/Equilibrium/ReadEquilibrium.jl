@@ -107,17 +107,19 @@ function read_efit(config::EquilibriumConfig)
         psi_proc .*= -1.0
     end
 
-    # --- Create 2D Psi Spline (psi_in) ---
+    # --- Create 2D Psi interpolant (psi_in) ---
     r_grid = range(rleft, rleft + rdim; length=nw)
     z_grid = range(zmid - zdim / 2, zmid + zdim / 2; length=nh)
     rmin, rmax = extrema(r_grid)
     zmin, zmax = extrema(z_grid)
 
-    psi_proc_3d = reshape(psi_proc, (nw, nh, 1))
-    psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d, :extrap, :extrap)
+    psi_in_xs = collect(r_grid)
+    psi_in_ys = collect(z_grid)
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc;
+        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # --- Bundle everything for the solver ---
-    return DirectRunInput(config, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end
 
 
@@ -203,12 +205,16 @@ function read_chease_binary(config::EquilibriumConfig)
         zo = buffer[poloidal_start, 1]
         fs_2d[:, :, 2] .= transpose(buffer[poloidal_start:poloidal_stop, :])
 
-        # Grid setting
-        ys = range(0, 2π; length=mtau) |> collect
-        rz_in = Spl.BicubicSpline(xs, ys, fs_2d; bctypex="extrap", bctypey="periodic")
+        # Create separate interpolants for R and Z coordinates
+        rz_in_xs = xs
+        rz_in_ys = range(0, 2π; length=mtau) |> collect
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1];
+            bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2];
+            bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
         println("--> Finished reading CHEASE equilibrium (Binary).")
-        return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
+        return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
     end
 end
 
@@ -358,16 +364,18 @@ function read_chease_ascii(config::EquilibriumConfig)
     poloidal_stop = ntnova + 3
     ro = zrcp[poloidal_start, 1] # Already scaled
     zo = zzcp[poloidal_start, 1] # Already scaled
-    ys = range(0, 2π; length=mtau) |> collect
-    # Allocate and fill fs array (radial × poloidal × 2 quantities)
-    fs = zeros(length(xs), length(ys), 2)
+    rz_in_ys = range(0, 2π; length=mtau) |> collect
     # CHEASE includes 2 ghost points at the start (wrap-around); drop them.
-    fs[:, :, 1] .= transpose(zrcp[poloidal_start:poloidal_stop, :])
-    fs[:, :, 2] .= transpose(zzcp[poloidal_start:poloidal_stop, :])
+    R_data = transpose(zrcp[poloidal_start:poloidal_stop, :])
+    Z_data = transpose(zzcp[poloidal_start:poloidal_stop, :])
 
-    # Setup bicubic spline with periodic boundary conditions
-    rz_in = Spl.BicubicSpline(xs, ys, fs, :extrap, Spl.PeriodicBC())
+    # Create separate interpolants for R and Z coordinates
+    rz_in_xs = xs
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data;
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data;
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
-    return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
+    return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
 end

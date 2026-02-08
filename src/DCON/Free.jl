@@ -147,7 +147,7 @@ the r, z, and ν values at the plasma boundary, as well as mode numbers and numb
 function compute_vacuum_inputs(psifac::Float64, n::Int, ctrl::DconControl, equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal)
 
     # Allocations
-    theta_norm = equil.rzphi.ys
+    theta_norm = equil.rzphi_ys
     mtheta = equil.config.control.mtheta + 1
     angle = zeros(Float64, mtheta)
     r = zeros(Float64, mtheta)
