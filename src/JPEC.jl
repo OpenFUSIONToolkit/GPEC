@@ -1,6 +1,10 @@
 # JPEC.jl
 module JPEC
 
+include("Utilities/Utilities.jl")
+import .UtilitiesMod as Util
+export UtilitiesMod, Util
+
 include("Splines/Splines.jl")
 import .SplinesMod as Spl
 export SplinesMod, Spl

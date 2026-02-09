@@ -1,16 +1,18 @@
 module SplinesMod
 
-const libdir = joinpath(@__DIR__, "..", "..", "deps")
-const libspline = joinpath(libdir, "libspline")
+# Pure Julia spline implementations
+# FastInterpolationsAdaptor.jl provides helpers for FastInterpolations CubicInterpolant/CubicSeriesInterpolant
+# The codebase uses native interpolants from FastInterpolations directly
+include("FastInterpolationsAdaptor.jl")
 
-include("Helper.jl")
+# Re-export FastInterpolations search strategies for use with CubicInterpolant hint/search kwargs
+using FastInterpolations: LinearBinary, Binary, HintedBinary
 
-include("CubicSpline.jl")
-include("BicubicSpline.jl")
-include("FourierSpline.jl")
+# Exports
+export evaluate!, deriv1!, integrate!, cumulative_integral, integrate_spline, total_integral, total_integral!
+export LinearBinary, Binary, HintedBinary  # Search strategies for hint-based evaluation
 
-export spline_eval!, spline_deriv1!, spline_deriv2!, spline_deriv3!, spline_eval, spline_integrate!, CubicSpline, empty_CubicSpline
-export bicube_eval!, bicube_deriv1!, bicube_deriv2!, bicube_eval, BicubicSpline, empty_BicubicSpline
-export fspline_eval, FourierSpline, empty_FourierSpline
+# Export boundary condition types
+export NaturalBC, PeriodicBC, CubicFit, BCPair, Deriv1, Deriv2
 
 end

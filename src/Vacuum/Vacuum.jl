@@ -1,6 +1,7 @@
 module Vacuum
 
-using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
+using TOML, SpecialFunctions, LinearAlgebra, Printf
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 using StaticArrays
 using FastGaussQuadrature
 using SparseArrays

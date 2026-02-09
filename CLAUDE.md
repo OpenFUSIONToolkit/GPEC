@@ -49,28 +49,51 @@ using JPEC
 
 ### Benchmarking
 
-When asked to run benchmarks, use the following defaults unless specific instructions override them:
+Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits.
+
+**Tool usage:**
+
+```bash
+# Compare feature branch against develop
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --branch1 develop \
+  --branch2 feature-branch
+
+# Compare specific commits
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --commit1 abc123 \
+  --commit2 def456
+
+# Compare current develop vs develop from 1 month ago
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --branch1 develop \
+  --commit1 HEAD~10 \
+  --branch2 develop
+```
 
 **Default benchmark case:** `examples/DIIID-like_ideal_example`
 
-**Reference case:** The `origin/develop` branch. Always pull the latest developments before running the reference case:
-```bash
-git fetch origin develop
-```
+**Reported metrics:**
+1. **Eigenmode energy (`et[1]`)** - First eigenvalue; verifies calculation correctness
+2. **Integration steps** - Total ODE solver steps
+3. **Runtime (warmed)** - Wall-clock time averaged over multiple warm runs (JIT warmup handled automatically)
+4. **Commit hash** - Git commit of code tested
 
-**Required metrics to report:**
-1. **Least stable eigenmode energy** - The first value of `et` (eigenvalue array). This verifies consistency of stability calculation results.
-2. **Number of steps** - Total integration steps taken by the ODE solver
-3. **Runtime** - Wall-clock execution time
+**The tool automatically:**
+- Handles JIT warmup (runs example 3 times, averages last 2)
+- Switches between branches/commits
+- Stashes uncommitted changes if necessary
+- Restores original branch when done
+- Reports comparison with percentage differences
 
-**Benchmark procedure:**
-1. Fetch and checkout `origin/develop` for the reference run
-2. Run the benchmark example and record metrics
-3. Switch to the test branch/version
-4. Run the same benchmark example and record metrics
-5. Compare results, highlighting any differences in eigenmode energy (indicates potential bugs) and performance changes
+**Important notes:**
+- Working directory should be clean or changes will be stashed during branch switching
+- Tool requires HDF5.jl for reading euler.h5 output
+- Each benchmark run takes several minutes per branch (includes compilation + warm runs)
 
-Assume these defaults apply unless told otherwise.
 
 ## Architecture
 
@@ -170,3 +193,13 @@ This format is used for compiling release notes, so tags should be human-readabl
 - When modifying equilibrium code, remember to update diagnostic outputs (gsec.h5, gse.h5, gsei.h5)
 - The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
+
+## Git Merge conflict resolution policy
+
+- When resolving git conflicts, do not simply accept one side.
+- Analyze what each side changed and WHY before producing a resolution.
+- Produce a merged version incorporating both sets of changes.
+- If both sides renamed the same symbol differently, prefer the current (ours) branch convention.
+- When a rename on one side conflicts with a logic change on the other, apply the logic change using the renamed symbol.
+- If a conflict involves changes to numerical parameters (tolerances, boundary conditions, grid sizes), flag for human review rather than guessing.
+- Flag any conflicts where the combination is ambiguous for human review.

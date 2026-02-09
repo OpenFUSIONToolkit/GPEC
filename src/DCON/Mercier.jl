@@ -8,38 +8,43 @@ in the Fortran code.
 function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
     # Shorthand
-    sq = plasma_eq.sq
-    rzphi = plasma_eq.rzphi
+    profiles = plasma_eq.profiles
 
     # Allocate splines
-    ff_fs = zeros(length(rzphi.ys), 5)
+    ff_fs = zeros(length(plasma_eq.rzphi_ys), 5)
 
     # Compute surface quantities
-    for ipsi in 1:length(sq.xs)
-        twopif = sq.fs[ipsi, 1]
-        p1 = sq.fs1[ipsi, 2]
-        v1 = sq.fs[ipsi, 3]
-        v2 = sq.fs1[ipsi, 3]
-        q = sq.fs[ipsi, 4]
-        q1 = sq.fs1[ipsi, 4]
+    hint = Ref(1)  # Linear search hint for sequential psi access
+    for ipsi in 1:profiles.npts
+        psi = profiles.xs[ipsi]
+        twopif = profiles.F_spline.y[ipsi]
+        p1 = profiles.P_deriv(psi; hint=hint)
+        v1 = profiles.dVdpsi_spline.y[ipsi]
+        v2 = profiles.dVdpsi_deriv(psi; hint=hint)
+        q = profiles.q_spline.y[ipsi]
+        q1 = profiles.q_deriv(psi; hint=hint)
         chi1 = 2π * plasma_eq.psio
 
         # Evaluate coordinates and jacobian
-        for itheta in 1:length(rzphi.ys)
-            theta = rzphi.ys[itheta]
+        for itheta in 1:length(plasma_eq.rzphi_ys)
+            theta = plasma_eq.rzphi_ys[itheta]
 
-            # Evaluate bicubic spline at grid point
-            f, _, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[ipsi], theta)
+            # Access nodal derivatives at grid points
+            f1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
+            f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+            jac = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+            fy1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
+            fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
+            fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
 
-            rfac = sqrt(f[1])
-            eta = 2π * (theta + f[2])
+            rfac = sqrt(f1)
+            eta = 2π * (theta + f2)
             r = plasma_eq.ro + rfac * cos(eta)
-            jac = f[4]  # Jacobian
 
             # Evaluate other local quantities
-            v21 = fy[1] / (2.0 * rfac * jac)
-            v22 = (1.0 + fy[2]) * 2π * rfac / jac
-            v23 = fy[3] * r / jac
+            v21 = fy1 / (2.0 * rfac * jac)
+            v22 = (1.0 + fy2) * 2π * rfac / jac
+            v23 = fy3 * r / jac
             v33 = 2π * r / jac
             bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
             dpsisq = (2π * r)^2 * (v21^2 + v22^2)
@@ -55,11 +60,8 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        ff = Spl.CubicSpline(Vector(rzphi.ys), ff_fs; bctype="periodic")
-
-        # Integrate quantities with respect to theta
-        Spl.spline_integrate!(ff)
-        avg = ff.fsi[end, :]
+        # Integrate quantities with respect to theta using exact spline integral
+        avg = Spl.total_integral(plasma_eq.rzphi_ys, ff_fs; bc=Spl.PeriodicBC())
 
         # Evaluate Mercier criterion and related quantities
         term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]
@@ -69,8 +71,8 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
 
         # Store results in output spline structure
-        locstab_fs[ipsi, 1] = di * sq.xs[ipsi]
-        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * sq.xs[ipsi]
+        locstab_fs[ipsi, 1] = di * profiles.xs[ipsi]
+        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * profiles.xs[ipsi]
         locstab_fs[ipsi, 3] = h
     end
 end

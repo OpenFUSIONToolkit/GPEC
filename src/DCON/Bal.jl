@@ -1,5 +1,5 @@
 """
-    compute_asymptotic_solutions(poloidal_angle, growth_parameter, asymptotic_spline, eigenfunctions, reference_angle) -> Matrix{Float64}
+    compute_asymptotic_solutions(poloidal_angle, growth_parameter, asymptotic_interp, asymp_buffer, eigenfunctions, reference_angle) -> Matrix{Float64}
 
 Computes the asymptotic pseudo-solutions (alpha series) for the ballooning equation
 at a given extended poloidal angle. These solutions are used as boundary conditions for
@@ -9,7 +9,8 @@ the numerical ODE integration.
 
   - `poloidal_angle::Float64`: Extended poloidal angle θ.
   - `growth_parameter::Float64`: Growth parameter α (from Mercier criterion).
-  - `asymptotic_spline::Splines.CubicSpline`: Spline containing asymptotic expansion coefficients.
+  - `asymptotic_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 asymptotic coefficients.
+  - `asymp_buffer::Vector{Float64}`: Pre-allocated buffer for in-place interpolation.
   - `eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2 matrix).
   - `reference_angle::Float64`: Reference poloidal angle (usually 0).
 
@@ -18,27 +19,27 @@ the numerical ODE integration.
   - `asymptotic_matrix::Matrix{Float64}`: 2×2 matrix where each column is an asymptotic solution.
 """
 function compute_asymptotic_solutions(poloidal_angle::Float64, growth_parameter::Float64,
-    asymptotic_spline::Spl.CubicSpline,
+    asymptotic_interp::CubicSeriesInterpolant, asymp_buffer::Vector{Float64},
     eigenfunctions::Matrix{Float64}, reference_angle::Float64)
     asymptotic_matrix = zeros(Float64, 2, 2)
     first_order_correction = zeros(Float64, 2, 2)
 
-    # Evaluate alpha series expansion at poloidal_angle
-    asymptotic_eval = Spl.spline_eval(asymptotic_spline, [poloidal_angle])
-    asymptotic_coeffs = asymptotic_eval[1, :]
+    # Evaluate all asymptotic coefficients in-place (zero allocation)
+    asymptotic_interp(asymp_buffer, poloidal_angle)
+    a1, a2, a3, a4, a5 = asymp_buffer[1], asymp_buffer[2], asymp_buffer[3], asymp_buffer[4], asymp_buffer[5]
     angle_offset = poloidal_angle - reference_angle
 
     # First-order terms from the asymptotic expansion
-    first_order_correction[1, 1] = eigenfunctions[1, 1] + asymptotic_coeffs[1] / angle_offset
-    first_order_correction[2, 1] = eigenfunctions[2, 1] + asymptotic_coeffs[2] / angle_offset
-    first_order_correction[1, 2] = eigenfunctions[1, 2] + asymptotic_coeffs[3] / angle_offset
-    first_order_correction[2, 2] = eigenfunctions[2, 2] + asymptotic_coeffs[4] / angle_offset
+    first_order_correction[1, 1] = eigenfunctions[1, 1] + a1 / angle_offset
+    first_order_correction[2, 1] = eigenfunctions[2, 1] + a2 / angle_offset
+    first_order_correction[1, 2] = eigenfunctions[1, 2] + a3 / angle_offset
+    first_order_correction[2, 2] = eigenfunctions[2, 2] + a4 / angle_offset
 
     # Transformed solutions
     asymptotic_matrix[1, 1] = first_order_correction[1, 1]
     asymptotic_matrix[1, 2] = first_order_correction[1, 2]
-    asymptotic_matrix[2, 1] = asymptotic_coeffs[5] * first_order_correction[1, 1] + first_order_correction[2, 1]
-    asymptotic_matrix[2, 2] = asymptotic_coeffs[5] * first_order_correction[1, 2] + first_order_correction[2, 2]
+    asymptotic_matrix[2, 1] = a5 * first_order_correction[1, 1] + first_order_correction[2, 1]
+    asymptotic_matrix[2, 2] = a5 * first_order_correction[1, 2] + first_order_correction[2, 2]
 
     # CORRECTED: Match Fortran's thfac = ABS(dtheta)^(alpha+0.5) / dtheta
     # This equals: sign(dtheta) * |dtheta|^(alpha - 0.5)
@@ -73,22 +74,22 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 
   - `derivatives::Vector{Float64}`: Output vector [dy₁/dθ, dy₂/dθ].
   - `solution::Vector{Float64}`: Current state vector [y₁, y₂].
-  - `parameters::Tuple`: (ode_coefficient_spline, reference_angle).
+  - `parameters::Tuple`: (ode_coeff_interp, reference_angle, coeff_buffer, hint).
   - `poloidal_angle::Float64`: Current poloidal angle θ (independent variable).
 """
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
-    ode_coefficient_spline, reference_angle = parameters
+    ode_coeff_interp, reference_angle, coeff_buffer, hint = parameters
 
-    # Evaluate spline coefficients at current poloidal angle
-    coeff_matrix = Spl.spline_eval(ode_coefficient_spline, [poloidal_angle])
-    coefficients = coeff_matrix[1, :]  # Extract as vector
+    # Evaluate all ODE coefficients in-place (zero allocation)
+    ode_coeff_interp(coeff_buffer, poloidal_angle; hint=hint)
+    c1, c2, c3, c4, c5 = coeff_buffer[1], coeff_buffer[2], coeff_buffer[3], coeff_buffer[4], coeff_buffer[5]
     angle_offset = poloidal_angle - reference_angle
 
     # ODE coefficient f: magnetic shear-related curvature term
-    f_coefficient = coefficients[1] * (angle_offset + coefficients[2])^2 + coefficients[3]
+    f_coefficient = c1 * (angle_offset + c2)^2 + c3
 
     # ODE coefficient g: pressure-driven instability growth term
-    g_coefficient = coefficients[4] + angle_offset * coefficients[5]
+    g_coefficient = c4 + angle_offset * c5
 
     # RHS system
     derivatives[1] = solution[2] / f_coefficient
@@ -100,8 +101,8 @@ end
 #   Integrates the ideal marginal ballooning equations
 # ======================================================================
 """
-    integrate_ballooning_ode(flux_surface_index, growth_parameter, ode_coefficient_spline,
-                             asymptotic_spline, eigenfunctions, reference_angle, control) -> (Float64, Float64)
+    integrate_ballooning_ode(ipsi, growth_parameter, ode_coeff_interp,
+                             asymptotic_interp, eigenfunctions, reference_angle, control) -> (Float64, Float64)
 
 Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK integration.
 
@@ -109,33 +110,35 @@ Integrates the ballooning ODE from `-θ_max` to `+θ_max` using adaptive RK inte
 
   - `(coefficient_1, coefficient_2)`: Asymptotic coefficients determining stability.
 """
-function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Float64,
-    ode_coefficient_spline::Spl.CubicSpline,
-    asymptotic_spline::Spl.CubicSpline,
+function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
+    ode_coeff_interp::CubicSeriesInterpolant,
+    asymptotic_interp::CubicSeriesInterpolant,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
     control::DconControl)
 
-    
     TOLERANCE = 1e-5
-    MINIMUM_THETA = 1.0
     MINIMUM_STEP = 1e-10
 
-    # Determine integration limits
-    curvature_ratio = ode_coefficient_spline.fs[:, 3] ./ ode_coefficient_spline.fs[:, 1]
+    # Determine integration limits (access grid values from SeriesInterpolant)
+    curvature_ratio = ode_coeff_interp.y[:, 3] ./ ode_coeff_interp.y[:, 1]
     theta_max_absolute = sqrt(maximum(abs.(curvature_ratio))) * 10.0 * control.thmax0
     theta_max = min(theta_max_absolute, 100.0)
-    # Isn't it too low theta_max for high ipsi compared to fortran? we have to check this.
+
+    # Pre-allocate buffers for in-place interpolation (zero allocation)
+    coeff_buffer = Vector{Float64}(undef, 5)
+    asymp_buffer = Vector{Float64}(undef, 5)
+    hint = Ref(1)
 
     # Initial conditions from asymptotic solution
     theta_start = -theta_max
-    asymptotic_start = compute_asymptotic_solutions(theta_start, growth_parameter, asymptotic_spline,
-        eigenfunctions, reference_angle)
+    asymptotic_start = compute_asymptotic_solutions(theta_start, growth_parameter, asymptotic_interp,
+        asymp_buffer, eigenfunctions, reference_angle)
     initial_condition = Vector{Float64}(asymptotic_start[:, 2]) * sinh(1.0)
 
     # Set up and solve ODE problem
     ode_problem = ODEProblem(compute_ballooning_ode!, initial_condition,
         (theta_start, theta_max),
-        (ode_coefficient_spline, reference_angle))
+        (ode_coeff_interp, reference_angle, coeff_buffer, hint))
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
@@ -149,8 +152,8 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
             end
 
             # Asymptotic matching
-            asymptotic_final = compute_asymptotic_solutions(theta_final, growth_parameter, asymptotic_spline,
-                eigenfunctions, reference_angle)
+            asymptotic_final = compute_asymptotic_solutions(theta_final, growth_parameter, asymptotic_interp,
+                asymp_buffer, eigenfunctions, reference_angle)
 
             det_asymptotic = asymptotic_final[1, 1] * asymptotic_final[2, 2] -
                              asymptotic_final[1, 2] * asymptotic_final[2, 1]
@@ -162,14 +165,11 @@ function integrate_ballooning_ode(flux_surface_index::Int, growth_parameter::Flo
 
             return coefficient_1, coefficient_2
         else
-            # retcode=Success with early termination is normal (ODE reached stopping condition)
-            if ode_solution.retcode != ReturnCode.Success
-                @warn "ODE integration failed for surface ipsi = $flux_surface_index (retcode: $(ode_solution.retcode))"
-            end
+            @warn "ODE integration failed for surface ipsi = $ipsi (retcode: $(ode_solution.retcode))"
             return NaN, NaN
         end
     catch e
-        @warn "ODE integration failed for surface ipsi = $flux_surface_index: $(e)"
+        @warn "ODE integration failed for surface ipsi = $ipsi: $(e)"
         return NaN, NaN
     end
 end
@@ -180,74 +180,93 @@ end
 #   computes coefficients for the ideal marginal ballooning equations.
 # ----------------------------------------------------------------------
 """
-    bal_prep(...) -> (di, alpha, bf, bg, v0, theta0)
+    prepare_ballooning_coefficients(ipsi, plasma_eq, hint) -> (di, alpha, ode_coeff_interp, asymptotic_interp, v0, theta0)
 
 Prepares all coefficients and splines required for the ballooning stability analysis
 on a single magnetic flux surface.
+
+## Arguments
+
+  - `ipsi::Int`: Flux surface index.
+  - `plasma_eq::PlasmaEquilibrium`: Plasma equilibrium data.
+  - `hint::Ref{Int}`: Spline search hint for sequential ipsi access.
 
 ## Returns
 
   - `mercier_criterion::Float64`: Mercier criterion di. If > 0, surface is stable.
   - `growth_parameter::Float64`: Growth rate exponent α.
-  - `ode_coefficient_spline::CubicSpline`: Spline for ODE system.
-  - `asymptotic_spline::CubicSpline`: Spline for asymptotic matching.
+  - `ode_coeff_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 ODE coefficients.
+  - `asymptotic_interp::CubicSeriesInterpolant`: SeriesInterpolant for 5 asymptotic coefficients.
   - `zeroth_order_eigenfunctions::Matrix{Float64}`: Zeroth-order eigenfunctions (2×2).
   - `reference_angle::Float64`: Reference poloidal angle.
 """
-function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.PlasmaEquilibrium, hint::Ref{Int})
     # shorter aliases for equilibrium structs
-    sq = plasma_eq.sq
-    rzphi = plasma_eq.rzphi
-    mtheta = length(rzphi.ys) - 1
-    theta_grid = Vector(rzphi.ys)
+    profiles = plasma_eq.profiles
+    mtheta = length(plasma_eq.rzphi_ys) - 1
+    theta_grid = plasma_eq.rzphi_ys
 
     # surface quantities
-    two_pi_f = sq.fs[flux_surface_index, 1]
-    pressure_gradient = sq.fs1[flux_surface_index, 2] # p'
-    q = sq.fs[flux_surface_index, 4]
-    q_derivative = sq.fs1[flux_surface_index, 4] # q'
+    psi = profiles.xs[ipsi]
+    two_pi_f = profiles.F_spline.y[ipsi]
+    pressure_gradient = profiles.P_deriv(psi; hint=hint)
+    q = profiles.q_spline.y[ipsi]
+    q_derivative = profiles.q_deriv(psi; hint=hint)
     chi_prime = 2pi * plasma_eq.psio
 
-    # arrays to be filled
-    jac = zeros(mtheta + 1)
-    b1 = zeros(mtheta + 1)
-    bsq = zeros(mtheta + 1)
-    dbdb0 = zeros(mtheta + 1)
-    dbdb1 = zeros(mtheta + 1)
-    dbdb2 = zeros(mtheta + 1)
-    kappan = zeros(mtheta + 1)
-    kappas = zeros(mtheta + 1)
-    fx_psi = zeros(4, mtheta + 1)  # Store fx values (4 components) for each theta point
+    # arrays to be filled (use undef since all elements are written in the loop)
+    jac = Vector{Float64}(undef, mtheta + 1)
+    b1 = Vector{Float64}(undef, mtheta + 1)
+    bsq = Vector{Float64}(undef, mtheta + 1)
+    dbdb0 = Vector{Float64}(undef, mtheta + 1)
+    dbdb1 = Vector{Float64}(undef, mtheta + 1)
+    dbdb2 = Vector{Float64}(undef, mtheta + 1)
+    kappan = Vector{Float64}(undef, mtheta + 1)
+    kappas = Vector{Float64}(undef, mtheta + 1)
+    fx_psi = Matrix{Float64}(undef, 4, mtheta + 1)  # Store fx values (4 components) for each theta point
 
-    # loop over poloidal angle
-    for itheta in 0:mtheta
-        f, fx, fy = Spl.bicube_deriv1!(rzphi, rzphi.xs[flux_surface_index], rzphi.ys[itheta+1])
-        fx_psi[:, itheta+1] = fx  # Store fx for later use
+    # Pre-allocate basis vector matrices (reused each iteration)
+    v = zeros(3, 3)  # contravariant basis vectors
+    w = zeros(3, 3)  # covariant basis vectors
 
-        theta = rzphi.ys[itheta+1]
-        rfac = sqrt(f[1])
-        eta = 2pi * (theta + f[2])
+    # loop over poloidal angle using nodal_derivs access at grid points
+    for itheta in 1:(mtheta+1)
+        # Access nodal derivatives from interpolants
+        f1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
+        f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+        f4 = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+        fx1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta]
+        fx2 = plasma_eq.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
+        fx3 = plasma_eq.rzphi_nu.nodal_derivs.partials[2, ipsi, itheta]
+        fx4 = plasma_eq.rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
+        fy1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
+        fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
+        fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
+
+        fx_psi[:, itheta] .= (fx1, fx2, fx3, fx4)  # Store fx for later use
+
+        theta = theta_grid[itheta]
+        rfac = sqrt(f1)
+        eta = 2pi * (theta + f2)
         r = plasma_eq.ro + rfac * cos(eta)
-        jac[itheta+1] = f[4]
+        jac[itheta] = f4
 
         # contravariant basis vectors v^i
-        v = zeros(3, 3)
-        v[1, 1] = fx[1] / (2 * rfac * jac[itheta+1])
-        v[1, 2] = fx[2] * 2pi * rfac / jac[itheta+1]
-        v[1, 3] = fx[3] * r / jac[itheta+1]
-        v[2, 1] = fy[1] / (2 * rfac * jac[itheta+1])
-        v[2, 2] = (1 + fy[2]) * 2pi * rfac / jac[itheta+1]
-        v[2, 3] = fy[3] * r / jac[itheta+1]
-        v[3, 3] = 2pi * r / jac[itheta+1]
+        v[1, 1] = fx1 / (2 * rfac * jac[itheta])
+        v[1, 2] = fx2 * 2pi * rfac / jac[itheta]
+        v[1, 3] = fx3 * r / jac[itheta]
+        v[2, 1] = fy1 / (2 * rfac * jac[itheta])
+        v[2, 2] = (1 + fy2) * 2pi * rfac / jac[itheta]
+        v[2, 3] = fy3 * r / jac[itheta]
+        v[3, 3] = 2pi * r / jac[itheta]
 
         # covariant basis vectors w_i (direct method)
-        w = zeros(3, 3)
-        w[1, 1] = (1 + fy[2]) * (2pi)^2 * rfac * r / jac[itheta+1]
-        w[1, 2] = -fy[1] * pi * r / (rfac * jac[itheta+1])
-        w[2, 1] = -fx[2] * (2pi)^2 * r * rfac / jac[itheta+1]
-        w[2, 2] = fx[1] * pi * r / (rfac * jac[itheta+1])
-        w[3, 1] = (fx[2] * fy[3] - fx[3] * (1 + fy[2])) * 2pi * r * rfac / jac[itheta+1]
-        w[3, 2] = (fx[3] * fy[1] - fx[1] * fy[3]) * r / (2 * rfac * jac[itheta+1])
+        w[1, 1] = (1 + fy2) * (2pi)^2 * rfac * r / jac[itheta]
+        w[1, 2] = -fy1 * pi * r / (rfac * jac[itheta])
+        w[2, 1] = -fx2 * (2pi)^2 * r * rfac / jac[itheta]
+        w[2, 2] = fx1 * pi * r / (rfac * jac[itheta])
+        w[3, 1] = (fx2 * fy3 - fx3 * (1 + fy2)) * 2pi * r * rfac / jac[itheta]
+        w[3, 2] = (fx3 * fy1 - fx1 * fy3) * r / (2 * rfac * jac[itheta])
         w[3, 3] = 1 / (2pi * r)
 
         # store physical quantities
@@ -256,27 +275,30 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
         e_phi = @view v[3, :]
 
         B_vec = (e_theta + q * e_phi) * chi_prime
-        b1[itheta+1] = dot(B_vec, grad_psi)
-        bsq[itheta+1] = dot(B_vec, B_vec)
+        b1[itheta] = dot(B_vec, grad_psi)
+        bsq[itheta] = dot(B_vec, B_vec)
 
         grad_alpha = @view w[1, :]
         grad_theta = @view w[2, :]
         grad_phi = @view w[3, :]
         gtheta = grad_phi - q * grad_theta
 
-        dbdb0[itheta+1] = dot(grad_alpha, grad_alpha) * q_derivative^2
-        dbdb1[itheta+1] = -2 * dot(gtheta, grad_alpha) * q_derivative
-        dbdb2[itheta+1] = dot(gtheta, gtheta)
+        dbdb0[itheta] = dot(grad_alpha, grad_alpha) * q_derivative^2
+        dbdb1[itheta] = -2 * dot(gtheta, grad_alpha) * q_derivative
+        dbdb2[itheta] = dot(gtheta, gtheta)
     end
 
-    # compute curvature terms
-    spl0 = Spl.CubicSpline(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); bctype="periodic")
+    # compute curvature terms using native cubic_interp with PeriodicBC
+    spl0_interp = cubic_interp(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); search=LinearBinary(), bc=PeriodicBC())
+    spl0_d1 = deriv1(spl0_interp)
+    # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
+    spl0_fs1 = stack(spl0_d1.(theta_grid))
 
-    kappas .= -spl0.fs1[:, 1] .* two_pi_f ./ (2 .* jac)
+    kappas .= -spl0_fs1[:, 1] .* two_pi_f ./ (2 .* jac)
     kappan .= ((pressure_gradient ./ bsq .- fx_psi[4, :] ./ jac) ./ chi_prime .+
-               two_pi_f .* q_derivative ./ (bsq .* jac) .+ spl0.fs1[:, 2] ./ jac) ./ 2.0
+               two_pi_f .* q_derivative ./ (bsq .* jac) .+ spl0_fs1[:, 2] ./ jac) ./ 2.0
 
-    # compute coefficients for ballooning equation and store in spline 'bf'
+    # compute coefficients for ballooning equation and store
     bf_fs = zeros(mtheta + 1, 5)
     jacfac = jac ./ chi_prime
     bf_fs[:, 1] = dbdb0 ./ (bsq .* jacfac)
@@ -284,38 +306,38 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
     bf_fs[:, 3] = (dbdb2 - dbdb1 .^ 2 ./ (4 .* dbdb0)) ./ (bsq .* jacfac)
     bf_fs[:, 4] = 2 .* kappan .* pressure_gradient ./ chi_prime .* jacfac
     bf_fs[:, 5] = -2 .* kappas .* pressure_gradient ./ chi_prime .* q_derivative .* jacfac
-    ode_coefficient_spline = Spl.CubicSpline(theta_grid, bf_fs; bctype="periodic")
+    ode_coeff_interp = cubic_interp(theta_grid, bf_fs; bc=PeriodicBC())
 
-    # initialize spline 'bg'
-    spl0_bg = Spl.CubicSpline(theta_grid, -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2); bctype="periodic")
-    Spl.spline_integrate!(spl0_bg)
+    # initialize bg values
+    spl0_bg_fs = -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2)
+    spl0_bg_fsi = Spl.cumulative_integral(theta_grid, spl0_bg_fs; bc=PeriodicBC())
     bg_fs = zeros(mtheta + 1, 5)
-    bg_fs[:, 5] = spl0_bg.fs[:, 1] .- spl0_bg.fsi[end, 1]
+    bg_fs[:, 5] = spl0_bg_fsi .- spl0_bg_fsi[end]
 
     # Mercier criterion calculation
     spl1_fs = zeros(mtheta + 1, 4)
-    for itheta in 0:mtheta
+    for itheta in 1:(mtheta+1)
         c0 = zeros(2, 2)
         c0[1, 1] = 0.5
-        c0[1, 2] = 1 / ode_coefficient_spline.fs[itheta+1, 1]
-        c0[2, 1] = -ode_coefficient_spline.fs[itheta+1, 4]
+        c0[1, 2] = 1 / bf_fs[itheta, 1]
+        c0[2, 1] = -bf_fs[itheta, 4]
         c0[2, 2] = -0.5
-        spl1_fs[itheta+1, 1] = c0[1, 1] + c0[1, 2]*bg_fs[itheta+1, 5]
-        spl1_fs[itheta+1, 2] = c0[1, 2]
-        spl1_fs[itheta+1, 3] = c0[2, 1] + (c0[2, 2]-c0[1, 1]-c0[1, 2]*bg_fs[itheta+1, 5])*bg_fs[itheta+1, 5]
-        spl1_fs[itheta+1, 4] = -spl1_fs[itheta+1, 1]
+        spl1_fs[itheta, 1] = c0[1, 1] + c0[1, 2]*bg_fs[itheta, 5]
+        spl1_fs[itheta, 2] = c0[1, 2]
+        spl1_fs[itheta, 3] = c0[2, 1] + (c0[2, 2]-c0[1, 1]-c0[1, 2]*bg_fs[itheta, 5])*bg_fs[itheta, 5]
+        spl1_fs[itheta, 4] = -spl1_fs[itheta, 1]
     end
 
-    spl1 = Spl.CubicSpline(theta_grid, spl1_fs; bctype="periodic")
-    Spl.spline_integrate!(spl1)
+    spl1_totals = Spl.total_integral(theta_grid, spl1_fs; bc=PeriodicBC())
 
-    d0bar = [spl1.fsi[end, 1] spl1.fsi[end, 2]; spl1.fsi[end, 3] spl1.fsi[end, 4]]
+    d0bar = [spl1_totals[1] spl1_totals[2]; spl1_totals[3] spl1_totals[4]]
 
     di = det(d0bar)
 
-    # if stable by Mercier, no more work to do
+    # if stable by Mercier, no more work to do - return empty asymptotic data
     if di > 0
-        return di, NaN, ode_coefficient_spline, Spl.CubicSpline(theta_grid, bg_fs; bctype="periodic"), zeros(2, 2), 0.0
+        asymptotic_interp = cubic_interp(theta_grid, bg_fs; bc=PeriodicBC())
+        return di, NaN, ode_coeff_interp, asymptotic_interp, zeros(2, 2), 0.0
     end
 
     alpha = sqrt(-di)
@@ -329,56 +351,56 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     # ===== Higher-order corrections for the asymptotic solution =====
     # Compute derivatives for first-order terms (v1)
-    # This follows the structure from bal_prep.f lines 300-340
     spl2_fs = zeros(mtheta + 1, 4)
 
-    for itheta in 0:mtheta
+    for itheta in 1:(mtheta+1)
         # Matrix product: (spl1 - alpha*I) * v0
-        spl2_fs[itheta+1, 1] = (spl1.fs[itheta+1, 1] - alpha) * v0[1, 1] + spl1.fs[itheta+1, 2] * v0[2, 1]
-        spl2_fs[itheta+1, 2] = spl1.fs[itheta+1, 3] * v0[1, 1] + (spl1.fs[itheta+1, 4] - alpha) * v0[2, 1]
-        spl2_fs[itheta+1, 3] = (spl1.fs[itheta+1, 1] + alpha) * v0[1, 2] + spl1.fs[itheta+1, 2] * v0[2, 2]
-        spl2_fs[itheta+1, 4] = spl1.fs[itheta+1, 3] * v0[1, 2] + (spl1.fs[itheta+1, 4] + alpha) * v0[2, 2]
+        spl2_fs[itheta, 1] = (spl1_fs[itheta, 1] - alpha) * v0[1, 1] + spl1_fs[itheta, 2] * v0[2, 1]
+        spl2_fs[itheta, 2] = spl1_fs[itheta, 3] * v0[1, 1] + (spl1_fs[itheta, 4] - alpha) * v0[2, 1]
+        spl2_fs[itheta, 3] = (spl1_fs[itheta, 1] + alpha) * v0[1, 2] + spl1_fs[itheta, 2] * v0[2, 2]
+        spl2_fs[itheta, 4] = spl1_fs[itheta, 3] * v0[1, 2] + (spl1_fs[itheta, 4] + alpha) * v0[2, 2]
     end
 
-    spl2 = Spl.CubicSpline(theta_grid, spl2_fs; bctype="periodic")
-    Spl.spline_integrate!(spl2)
-    # CRITICAL: Replace fs with integrated values (matching Fortran's spl2%fs=spl2%fsi)
-    spl2_fs_integrated = copy(spl2.fsi)  # Save integrated values
-    spl2 = Spl.CubicSpline(theta_grid, spl2_fs_integrated; bctype="periodic")
+    spl2_fsi = Spl.cumulative_integral(theta_grid, spl2_fs; bc=PeriodicBC())
+    # CRITICAL: Use integrated values as the new fs (matching Fortran's spl2%fs=spl2%fsi)
+    spl2_fs_new = copy(spl2_fsi)
 
+    # Compute derivatives of spl1 for second-order terms
+    spl1_interp = cubic_interp(theta_grid, spl1_fs; search=LinearBinary(), bc=PeriodicBC())
+    spl1_d1 = deriv1(spl1_interp)
+    # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
+    spl1_fs1 = stack(spl1_d1.(theta_grid))
 
     # Compute derivatives for second-order terms
     spl3_fs = zeros(mtheta + 1, 4)
 
-    for itheta in 0:mtheta
+    for itheta in 1:(mtheta+1)
         # d1 matrix elements (first-order corrections to d matrix)
-        fexp = -spl1.fs[itheta+1, 2] * ode_coefficient_spline.fs[itheta+1, 2] * 2
-        d1_11 = fexp * bg_fs[itheta+1, 5]
+        fexp = -spl1_fs[itheta, 2] * bf_fs[itheta, 2] * 2
+        d1_11 = fexp * bg_fs[itheta, 5]
         d1_12 = fexp
-        d1_21 = -fexp * bg_fs[itheta+1, 5]^2
+        d1_21 = -fexp * bg_fs[itheta, 5]^2
         d1_22 = -d1_11
 
         # Now use in spl3_fs calculation
-        spl3_fs[itheta+1, 1] = (spl1.fs1[itheta+1, 1] + 1 - alpha) * spl2.fs[itheta+1, 1] +
-                               spl1.fs[itheta+1, 2] * spl2.fs[itheta+1, 2] +
-                               d1_11 * v0[1, 1] + d1_12 * v0[2, 1]
+        spl3_fs[itheta, 1] = (spl1_fs1[itheta, 1] + 1 - alpha) * spl2_fs_new[itheta, 1] +
+                             spl1_fs[itheta, 2] * spl2_fs_new[itheta, 2] +
+                             d1_11 * v0[1, 1] + d1_12 * v0[2, 1]
 
+        spl3_fs[itheta, 2] = spl1_fs[itheta, 3] * spl2_fs_new[itheta, 1] +
+                             (spl1_fs[itheta, 4] + 1 - alpha) * spl2_fs_new[itheta, 2] +
+                             d1_21 * v0[1, 1] + d1_22 * v0[2, 1]
 
-        spl3_fs[itheta+1, 2] = spl1.fs[itheta+1, 3] * spl2.fs[itheta+1, 1] +
-                               (spl1.fs[itheta+1, 4] + 1 - alpha) * spl2.fs[itheta+1, 2] +
-                               d1_21 * v0[1, 1] + d1_22 * v0[2, 1]
+        spl3_fs[itheta, 3] = (spl1_fs[itheta, 1] + 1 + alpha) * spl2_fs_new[itheta, 3] +
+                             spl1_fs[itheta, 2] * spl2_fs_new[itheta, 4] +
+                             d1_11 * v0[1, 2] + d1_12 * v0[2, 2]
 
-        spl3_fs[itheta+1, 3] = (spl1.fs[itheta+1, 1] + 1 + alpha) * spl2.fs[itheta+1, 3] +
-                               spl1.fs[itheta+1, 2] * spl2.fs[itheta+1, 4] +
-                               d1_11 * v0[1, 2] + d1_12 * v0[2, 2]
-
-        spl3_fs[itheta+1, 4] = spl1.fs[itheta+1, 3] * spl2.fs[itheta+1, 3] +
-                               (spl1.fs[itheta+1, 4] + 1 + alpha) * spl2.fs[itheta+1, 4] +
-                               d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
+        spl3_fs[itheta, 4] = spl1_fs[itheta, 3] * spl2_fs_new[itheta, 3] +
+                             (spl1_fs[itheta, 4] + 1 + alpha) * spl2_fs_new[itheta, 4] +
+                             d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
     end
 
-    spl3 = Spl.CubicSpline(theta_grid, spl3_fs; bctype="periodic")
-    Spl.spline_integrate!(spl3)
+    spl3_totals = Spl.total_integral(theta_grid, spl3_fs; bc=PeriodicBC())
 
     # Compute first-order constants for both eigenfunctions
     # First eigenfunction (with -alpha correction)
@@ -390,26 +412,26 @@ function prepare_ballooning_coefficients(flux_surface_index::Int, plasma_eq::Equ
 
     det_d = d[1, 1] * d[2, 2] - d[1, 2] * d[2, 1]
     v10 = zeros(2, 2)
-    v10[1, 1] = (d[1, 2] * spl3.fsi[end, 2] - d[2, 2] * spl3.fsi[end, 1]) / det_d
-    v10[2, 1] = (d[2, 1] * spl3.fsi[end, 1] - d[1, 1] * spl3.fsi[end, 2]) / det_d
+    v10[1, 1] = (d[1, 2] * spl3_totals[2] - d[2, 2] * spl3_totals[1]) / det_d
+    v10[2, 1] = (d[2, 1] * spl3_totals[1] - d[1, 1] * spl3_totals[2]) / det_d
 
     # Second eigenfunction (with +alpha correction)
     d[1, 1] = d0bar[1, 1] + 1 + alpha
     d[2, 2] = d0bar[2, 2] + 1 + alpha
     det_d = d[1, 1] * d[2, 2] - d[1, 2] * d[2, 1]
-    v10[1, 2] = (d[1, 2] * spl3.fsi[end, 4] - d[2, 2] * spl3.fsi[end, 3]) / det_d
-    v10[2, 2] = (d[2, 1] * spl3.fsi[end, 3] - d[1, 1] * spl3.fsi[end, 4]) / det_d
+    v10[1, 2] = (d[1, 2] * spl3_totals[4] - d[2, 2] * spl3_totals[3]) / det_d
+    v10[2, 2] = (d[2, 1] * spl3_totals[3] - d[1, 1] * spl3_totals[4]) / det_d
 
-    # Assemble final bg spline with higher-order corrections
-    bg_fs[:, 1] = spl2.fs[:, 1] .+ v10[1, 1]
-    bg_fs[:, 2] = spl2.fs[:, 2] .+ v10[2, 1]
-    bg_fs[:, 3] = spl2.fs[:, 3] .+ v10[1, 2]
-    bg_fs[:, 4] = spl2.fs[:, 4] .+ v10[2, 2]
+    # Assemble final bg with higher-order corrections
+    bg_fs[:, 1] = spl2_fs_new[:, 1] .+ v10[1, 1]
+    bg_fs[:, 2] = spl2_fs_new[:, 2] .+ v10[2, 1]
+    bg_fs[:, 3] = spl2_fs_new[:, 3] .+ v10[1, 2]
+    bg_fs[:, 4] = spl2_fs_new[:, 4] .+ v10[2, 2]
 
-    bg = Spl.CubicSpline(theta_grid, bg_fs; bctype="periodic")
+    asymptotic_interp = cubic_interp(theta_grid, bg_fs; bc=PeriodicBC())
 
     reference_angle = 0.0 # Central poloidal angle (typically 0)
-    return di, alpha, ode_coefficient_spline, bg, v0, reference_angle
+    return di, alpha, ode_coeff_interp, asymptotic_interp, v0, reference_angle
 end
 
 
@@ -441,27 +463,27 @@ function compute_ballooning_stability!(ctrl::DconControl, locstab_fs::Matrix{Flo
         println("Evaluating high-n ballooning criterion...")
     end
 
-    num_psi = length(plasma_eq.sq.xs)
+    profiles = plasma_eq.profiles
+    num_psi = profiles.npts
 
     # Loop over flux surfaces
-    for flux_surface_index in 1:num_psi
+    hint = Ref(1)  # Shared hint for sequential psi access
+    for ipsi in 1:num_psi
 
         # Prepare coefficients and check Mercier criterion
-        mercier_criterion, growth_param, ode_coeff_spline, asymp_spline, zeroth_eigs, ref_angle = prepare_ballooning_coefficients(flux_surface_index, plasma_eq)
+        mercier_criterion, growth_param, ode_coeff_interp, asymptotic_interp, zeroth_eigs, ref_angle = prepare_ballooning_coefficients(ipsi, plasma_eq, hint)
 
         # Store Mercier criterion in locstab matrix (matches Fortran output)
-        # Assuming locstab columns are [di*psi, (di+(h-0.5)^2)*psi, h, ca1, ca2]
-        locstab_fs[flux_surface_index, 1] = mercier_criterion * plasma_eq.sq.xs[flux_surface_index]
-        # Note: h and the second term are not calculated here as in mercier_scan, focusing on ballooning.
+        locstab_fs[ipsi, 1] = mercier_criterion * profiles.xs[ipsi]
 
         # If Mercier unstable, proceed with ballooning integration
-        if mercier_criterion <= 0 && mercier_criterion >= -1e4 && plasma_eq.sq.xs[flux_surface_index] <= 1.0
-            ca1, ca2 = integrate_ballooning_ode(flux_surface_index, growth_param, ode_coeff_spline, asymp_spline, zeroth_eigs, ref_angle, ctrl)
+        if mercier_criterion <= 0 && mercier_criterion >= -1e4 && profiles.xs[ipsi] <= 1.0
+            ca1, ca2 = integrate_ballooning_ode(ipsi, growth_param, ode_coeff_interp, asymptotic_interp, zeroth_eigs, ref_angle, ctrl)
 
             # Store final asymptotic coefficients if integration reached theta_max
             if isfinite(ca1) && isfinite(ca2)
-                locstab_fs[flux_surface_index, 4] = ca1
-                locstab_fs[flux_surface_index, 5] = ca2
+                locstab_fs[ipsi, 4] = ca1
+                locstab_fs[ipsi, 5] = ca2
             end
         end
     end

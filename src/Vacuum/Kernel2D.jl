@@ -159,16 +159,14 @@ function kernel!(
     xgauss_right = dtheta .+ GAUSSIANPOINTS .* dtheta # [0, 2Δθ]
     lagrange_left, lagrange_right = get_lagrange_stencils(GAUSSIANPOINTS)
 
-    # TODO: this isn't the same as the periodic_cubic_deriv interpolation?
-    # We need to interpolate off-grid during Gaussian quadrature
-    # THIS IS A BUG: extrapolations BC assumes both endpoints are included in the data, so this wraps at mtheta-1 to 0 instead of mtheta to 0
-    # The correct form is:
-    # theta_grid_periodic = range(; start=0, length=mtheta+1, step=dtheta)
-    # R_periodic = vcat(source.x, source.x[1])
-    # spline_x = cubic_spline_interpolation(theta_grid_periodic, R_periodic, bc = Periodic(OnGrid()); extrapolation_bc=Interpolations.Periodic())
-    # We can drop the extrapolation condition since we do mod(theta_gauss[ig], 2π) in the Gaussian quadrature loop below, or leave it here and drop that. They are redundant
-    spline_x = cubic_spline_interpolation(theta_grid, source.x; extrapolation_bc=Interpolations.Periodic())
-    spline_z = cubic_spline_interpolation(theta_grid, source.z; extrapolation_bc=Interpolations.Periodic())
+    # Set up periodic splines used for off-grid Gaussian quadrature points
+    theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
+    x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
+    z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
+    spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
+    spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
+    d1_spline_x = deriv1(spline_x)
+    d1_spline_z = deriv1(spline_z)
 
     # Loop through observer points
     for j in 1:mtheta
@@ -203,9 +201,9 @@ function kernel!(
                 # Compute green function for this Gaussian point
                 theta_gauss0 = mod(theta_gauss[ig], 2π)
                 x_gauss = spline_x(theta_gauss0)
-                dx_dtheta_gauss = Interpolations.gradient(spline_x, theta_gauss0)[1]
+                dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
-                dz_dtheta_gauss = Interpolations.gradient(spline_z, theta_gauss0)[1]
+                dz_dtheta_gauss = d1_spline_z(theta_gauss0)
                 G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # First type of singularity: 𝒢ⁿ (Eq. 75: 2π𝒢ⁿ + log(θ-θ')²/X')

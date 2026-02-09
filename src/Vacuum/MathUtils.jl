@@ -51,8 +51,12 @@ end
 # Returns the array of derivatives at all x points, I think this acts like difspl
 # in the Fortran but need to check/consolidate spline routines later
 function periodic_cubic_deriv(theta, vals)
-    itp = scale(interpolate(vals, BSpline(Cubic(Periodic(OnGrid())))), theta)
-    return first.(Interpolations.gradient.(Ref(itp), theta))
+    # Close the loop for periodic BC by appending first point at the end
+    theta_closed = vcat(collect(theta), theta[end] + (theta[2] - theta[1]))
+    vals_closed = vcat(vals, vals[1])
+    spline = cubic_interp(theta_closed, vals_closed; bc=PeriodicBC())
+    d1 = deriv1(spline)
+    return d1.(collect(theta))
 end
 
 """
@@ -182,15 +186,15 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
     end
 
     # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
-    θin = range(0.0, 1.0; length=mtheta_in)
-    itp = cubic_spline_interpolation(θin, vecin)
+    θin = collect(range(0.0, 1.0; length=mtheta_in))
+    spline = cubic_interp(θin, vecin)
 
     # Interpolate to new grid with optional offsets
     vecout = zeros(mtheta)
     for i in 1:mtheta
         x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
         x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
-        vecout[i] = itp(x)
+        vecout[i] = spline(x)
     end
     return vecout
 end
