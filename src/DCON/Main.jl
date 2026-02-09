@@ -9,6 +9,8 @@ function Main(path::String="./")
     # TODO: leaving DCON_CONTROL as a part of the toml file, eventually can combine equil, gpec, etc. into one input file?
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
+    # Normalize to avoid whitespace/case issues from TOML input.
+    ctrl.kin_source = strip(lowercase(String(ctrl.kin_source)))
     equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     if "WALL" in keys(inputs)
         wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
@@ -295,6 +297,11 @@ function write_outputs_to_HDF5(ctrl::DconControl, equil::Equilibrium.PlasmaEquil
         out_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
         out_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
         out_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
+
+        out_h5["kinetic/kin_source"] = ctrl.kin_source # to ensure the right type of kin_source is being used
+        if ctrl.kin_source == "dummy"
+            out_h5["kinetic/kin_sigma"] = ctrl.kin_dummy_sigma
+        end
 
         # Write local stability data
         if ctrl.mer_flag

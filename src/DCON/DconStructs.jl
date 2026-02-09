@@ -223,7 +223,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
     kin_source::String = "dummy"
-    kin_dummy_sigma::Float64 = 1e-6
+    kin_dummy_sigma::Float64 = 1e-10
     con_flag::Bool = false
     kinfac1::Float64 = 1.0
     kinfac2::Float64 = 1.0
