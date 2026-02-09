@@ -48,15 +48,52 @@ function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matr
     mul!(view(gil, (m00+1):(m00+num_points), (l00+1):(l00+num_pert)), gij, cs)
 end
 
-# Returns the array of derivatives at all x points, I think this acts like difspl
-# in the Fortran but need to check/consolidate spline routines later
-function periodic_cubic_deriv(theta, vals)
+"""
+    interp_to_new_grid(θ_out, vec_in)
+
+Resample the input array `vec_in` using a periodic cubic spline to an output array `vec_out` evaluated
+at new grid points `θ_out`. This function performs the same function as `trans` in Fortran.
+
+# Arguments
+
+  - `θ_out::Vector{Float64}`: Output grid points on [0, 2π] where the resampled values will be evaluated
+  - `vec_in::Vector{Float64}`: Input array to be resampled
+
+# Returns
+
+  - `Vector{Float64}`: The resampled output array on the θ_out grid
+"""
+function interp_to_new_grid(θ_out::AbstractRange{Float64}, vec_in::Vector{Float64})
+
+    # Input grids from DCON are from [0, 1]
+    θ_in = collect(range(0.0, 2π; length=length(vec_in)))
+    spline = cubic_interp(θ_in, vec_in; bc=PeriodicBC())
+    return spline.(θ_out)
+end
+
+"""
+    periodic_deriv(theta, vals)
+
+Compute the first derivative of a periodic function defined by `vals` at points `theta` using cubic spline interpolation.
+The input `theta` should be uniformly spaced and cover a full period (e.g., 0 to 2π). The output array will have the
+same length as `theta` and will represent the derivative of the periodic function at each point.
+
+# Arguments
+
+  - `theta::Vector{Float64}`: Array of theta values (should be uniformly spaced and represent a periodic domain)
+  - `vals::Vector{Float64}`: Array of function values corresponding to each theta (end point not included)
+
+# Returns
+
+  - `Vector{Float64}`: Array of the first derivative of the function at each theta point    # Close the loop for periodic BC by appending first point at the end
+"""
+function periodic_deriv(θ_grid, vals)
     # Close the loop for periodic BC by appending first point at the end
-    theta_closed = vcat(collect(theta), theta[end] + (theta[2] - theta[1]))
+    θ_closed = vcat(collect(θ_grid), θ_grid[end] + (θ_grid[2] - θ_grid[1]))
     vals_closed = vcat(vals, vals[1])
-    spline = cubic_interp(theta_closed, vals_closed; bc=PeriodicBC())
+    spline = cubic_interp(θ_closed, vals_closed; bc=PeriodicBC())
     d1 = deriv1(spline)
-    return d1.(collect(theta))
+    return d1.(collect(θ_grid))
 end
 
 """
@@ -148,55 +185,6 @@ function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x
     end
 
     return f, df # Return value and derivative
-end
-
-"""
-    interp_to_new_grid(vecin, mtheta; dx0=0.0, dx1=0.0)
-
-Resample the input array `vecin` using a periodic cubic spline to an output array of length `mtheta`.
-
-This function unifies the Fortran functions `trans`, `transdx`, and `transdxx` into a single
-function with optional offset parameters.
-
-# Arguments
-
-  - `vecin::Vector{Float64}`: Input array to be resampled
-  - `mtheta::Int`: Desired length of the output array
-  - `dx0::Float64`: Global offset added to all x-coordinates (default 0, applied as `x += dx0 / mtheta_in`)
-  - `dx1::Float64`: Fine offset added to each index (default 0, applied as `ai = (i-1) + dx1`)
-
-# Returns
-
-  - `vecout::Vector{Float64}`: The resampled output array (length `mtheta`)
-
-# Notes
-
-  - If `mtheta == length(vecin)`, returns the input vector unchanged
-  - Uses periodic cubic spline interpolation for resampling
-  - Input grid is normalized to [0, 1] for interpolation
-"""
-function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.0)
-
-    # Initialize
-    mtheta_in = length(vecin)
-
-    # If mtheta == mtheta_in, just return the input vector
-    if mtheta == mtheta_in
-        return vecin
-    end
-
-    # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
-    θin = collect(range(0.0, 1.0; length=mtheta_in))
-    spline = cubic_interp(θin, vecin)
-
-    # Interpolate to new grid with optional offsets
-    vecout = zeros(mtheta)
-    for i in 1:mtheta
-        x = (i - 1 + dx1) / mtheta + dx0 / mtheta_in
-        x = x % 1.0  # This is for periodicity in the case of dx1/dx0 ≠ 0
-        vecout[i] = spline(x)
-    end
-    return vecout
 end
 
 """

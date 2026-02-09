@@ -180,31 +180,29 @@ the necessary plasma surface data for vacuum calculations.
 function PlasmaGeometry(inputs::VacuumInput)
 
     (; mtheta, mpert, mlow, ν, r, z, n) = inputs
-    # Interpolate arrays from input onto mtheta grid
-    R = interp_to_new_grid(r, mtheta)
-    Z = interp_to_new_grid(z, mtheta)
-    ν = interp_to_new_grid(ν, mtheta)
 
-    # Plasma boundary theta derivative: for splines, need to add periodic point
+    # Interpolate arrays from input onto mtheta grid
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    θ_grid_periodic = range(; start=0, length=mtheta+1, step=2π/mtheta)
-    R_periodic = vcat(R, R[1])
-    Z_periodic = vcat(Z, Z[1])
-    dx_dtheta = periodic_cubic_deriv(θ_grid_periodic, R_periodic)
-    dz_dtheta = periodic_cubic_deriv(θ_grid_periodic, Z_periodic)
+    x = interp_to_new_grid(θ_grid, r)
+    z = interp_to_new_grid(θ_grid, z)
+    ν = interp_to_new_grid(θ_grid, ν)
+
+    # Plasma boundary theta derivative evaluated on the mtheta grid
+    dx_dtheta = periodic_deriv(θ_grid, x)
+    dz_dtheta = periodic_deriv(θ_grid, z)
 
     # Precompute Fourier transform terms, sin(mθ - nν) and cos(mθ - nν)
     sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
     cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
 
-    return PlasmaGeometry(
-        R,
-        Z,
-        ν,
-        dx_dtheta,
-        dz_dtheta,
-        sin_mn_basis,
-        cos_mn_basis
+    return PlasmaGeometry(;
+        x=x,
+        z=z,
+        ν=ν,
+        dx_dtheta=dx_dtheta,
+        dz_dtheta=dz_dtheta,
+        sin_mn_basis=sin_mn_basis,
+        cos_mn_basis=cos_mn_basis
     )
 end
 
@@ -269,7 +267,7 @@ Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
 function PlasmaGeometry3D(inputs::VacuumInput3D)
 
     # Extract 2D poloidal data
-    (; mtheta, nzeta, npert, nlow, mlow, mpert) = inputs
+    (; mtheta, nzeta, npert, nlow, mlow, mpert, x, z, ν) = inputs
     num_points = mtheta * nzeta
     dθ = 2π / mtheta
     dζ = 2π / nzeta
@@ -283,28 +281,37 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     dr_dζ = zeros(num_points, 3)
 
     # Interpolate arrays from input onto mtheta grid (same as 2D)
-    x = interp_to_new_grid(inputs.x, mtheta)
-    z = interp_to_new_grid(inputs.z, mtheta)
-    ν = interp_to_new_grid(inputs.ν, mtheta)
+    x = interp_to_new_grid(θ_grid, x)
+    z = interp_to_new_grid(θ_grid, z)
+    ν = interp_to_new_grid(θ_grid, ν)
 
     # Build 3D surface point-by-point from 2D contour
-    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
+    for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
         idx = i + (j - 1) * mtheta
         r[idx, :] .= [x[i] * cos(ϕ), x[i] * sin(ϕ), z[i]]
     end
 
     # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions
     r_grid = reshape(r, mtheta, nzeta, 3)
-    itps = [cubic_spline_interpolation((θ_grid, ϕ_grid), r_grid[:, :, k]; bc=Periodic(OnGrid())) for k in 1:3]
+    # Close the loop for periodic BC by appending first point at the end
+    θ_closed = vcat(collect(θ_grid), θ_grid[1] + 2π)
+    ϕ_closed = vcat(collect(ϕ_grid), ϕ_grid[1] + 2π)
+    r_closed = zeros(mtheta + 1, nzeta + 1, 3)
+    r_closed[1:mtheta, 1:nzeta, :] .= r_grid
+    r_closed[mtheta+1, 1:nzeta, :] .= r_grid[1, 1:nzeta, :]
+    r_closed[1:mtheta, nzeta+1, :] .= r_grid[1:mtheta, 1, :]
+    r_closed[mtheta+1, nzeta+1, :] .= r_grid[1, 1, :]
+    itps = [cubic_interp((θ_closed, ϕ_closed), r_closed[:, :, k]; bc=(PeriodicBC(), PeriodicBC())) for k in 1:3]
 
     # Compute tangent vectors, unit normals, and differential area elements via spline interpolation
-    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
+    grad = zeros(4)
+    for i in 1:mtheta, j in 1:nzeta
         idx = i + (j - 1) * mtheta
-        # Compute gradients directly to avoid list comprehension allocation
         for k in 1:3
-            g = Interpolations.gradient(itps[k], θ, ϕ)
-            dr_dθ[idx, k] = g[1]
-            dr_dζ[idx, k] = g[2]
+            # Grad stores f, fx, fy, fxy
+            grad .= itps[k].nodal_derivs.partials[:, i, j]
+            dr_dθ[idx, k] = grad[2]
+            dr_dζ[idx, k] = grad[3]
         end
         normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
     end
@@ -511,8 +518,8 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
         dz_dtheta = d1_spline_z.(theta_vec)
     else
         # used regular theta grid spacing to build wall
-        dx_dtheta = periodic_cubic_deriv(θ_grid, x_wall)
-        dz_dtheta = periodic_cubic_deriv(θ_grid, z_wall)
+        dx_dtheta = periodic_deriv(θ_grid, x_wall)
+        dz_dtheta = periodic_deriv(θ_grid, z_wall)
     end
 
     # to add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
@@ -685,15 +692,25 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
 
     # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions
     r_grid = reshape(r, mtheta, nzeta, 3)
-    itps = [cubic_spline_interpolation((θ_grid, ϕ_grid), r_grid[:, :, k]; bc=Periodic(OnGrid())) for k in 1:3]
+    # Close the loop for periodic BC by appending first point at the end
+    θ_closed = vcat(collect(θ_grid), θ_grid[1] + 2π)
+    ϕ_closed = vcat(collect(ϕ_grid), ϕ_grid[1] + 2π)
+    r_closed = zeros(mtheta + 1, nzeta + 1, 3)
+    r_closed[1:mtheta, 1:nzeta, :] .= r_grid
+    r_closed[mtheta+1, 1:nzeta, :] .= r_grid[1, 1:nzeta, :]
+    r_closed[1:mtheta, nzeta+1, :] .= r_grid[1:mtheta, 1, :]
+    r_closed[mtheta+1, nzeta+1, :] .= r_grid[1, 1, :]
+    itps = [cubic_interp((θ_closed, ϕ_closed), r_closed[:, :, k]; bc=(PeriodicBC(), PeriodicBC())) for k in 1:3]
 
     # Compute tangent vectors, normals, and differential area elements
-    for (i, θ) in enumerate(θ_grid), (j, ϕ) in enumerate(ϕ_grid)
+    grad = zeros(4)
+    for i in 1:mtheta, j in 1:nzeta
         idx = i + (j - 1) * mtheta
         for k in 1:3
-            g = Interpolations.gradient(itps[k], θ, ϕ)
-            dr_dθ[idx, k] = g[1]
-            dr_dζ[idx, k] = g[2]
+            # Grad stores f, fx, fy, fxy
+            grad .= itps[k].nodal_derivs.partials[:, i, j]
+            dr_dθ[idx, k] = grad[2]
+            dr_dζ[idx, k] = grad[3]
         end
         normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
     end

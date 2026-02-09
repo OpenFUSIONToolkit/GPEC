@@ -161,8 +161,8 @@ function kernel!(
 
     # Set up periodic splines used for off-grid Gaussian quadrature points
     theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
-    x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
-    z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
+    x_closed = vcat(source.x, source.x[1])
+    z_closed = vcat(source.z, source.z[1])
     spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
     spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
     d1_spline_x = deriv1(spline_x)
