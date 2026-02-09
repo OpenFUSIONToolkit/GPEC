@@ -334,8 +334,8 @@ It returns the relevant arrays: `wv`, `green_fourier`, `plasma_coords`, and `wal
 function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallShapeSettings; PATCH_RAD::Int=11, RAD_DIM::Int=20, INTERP_ORDER::Int=5)
 
     # Initialization and allocations
-    (; mtheta, mpert, force_wv_symmetry, kernelsign, nzeta, npert) = inputs
-    num_points = nzeta * mtheta
+    (; mtheta, mpert, force_wv_symmetry, nzeta, npert) = inputs
+    num_points_per_surf = nzeta * mtheta
     num_modes = npert * mpert
 
     # TODO: Currently only supports axisymmetric surfaces
@@ -343,16 +343,15 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     wall = WallGeometry3D(inputs, plasma_surf, wall_settings)
 
     # Allocate based on wall presence
-    grad_green_size = wall.nowall ? num_points : 2 * num_points
-    grad_green = zeros(grad_green_size, grad_green_size)
-    green_temp = zeros(num_points, num_points)
+    num_points = wall.nowall ? num_points_per_surf : 2 * num_points_per_surf
+    grad_green = zeros(num_points, num_points)
+    green_temp = zeros(num_points_per_surf, num_points_per_surf)
 
-    # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first num_points rows are plasma as observer, second are wall
+    # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first num_points_per_surf rows are plasma as observer, second are wall
     # First num_modes columns are real (cosine), second num_modes are imaginary (sine)
-    green_fourier_rows = wall.nowall ? num_points : 2 * num_points
-    green_fourier = zeros(green_fourier_rows, 2 * num_modes)
+    green_fourier = zeros(num_points, 2 * num_modes)
     PLASMA_ROW_OFFSET = 0
-    WALL_ROW_OFFSET = num_points
+    WALL_ROW_OFFSET = num_points_per_surf
     COS_COL_OFFSET = 0
     SIN_COL_OFFSET = num_modes
 
@@ -365,25 +364,30 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
 
     if !wall.nowall
         # Plasma–Wall block
-        compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, wall, patch_rad_pol, patch_rad_tor, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         # Wall–Wall block
-        compute_3D_kernel_matrix!(grad_green, green_temp, wall, wall, patch_rad_pol, patch_rad_tor, RAD_DIM, INTERP_ORDER)
+        compute_3D_kernel_matrix!(grad_green, green_temp, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         # Wall–Plasma block
-        compute_3D_kernel_matrix!(grad_green, green_temp, wall, plasma_surf, patch_rad_pol, patch_rad_tor, RAD_DIM, INTERP_ORDER)
-
+        compute_3D_kernel_matrix!(grad_green, green_temp, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         # Fourier transform obs=wall, src=plasma block into green_fourier
         fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis3D, WALL_ROW_OFFSET, COS_COL_OFFSET)
         fourier_transform!(green_fourier, green_temp, plasma_surf.sin_mn_basis3D, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
+    # After last fourier_transform! call: # TODO: does this actually help?
+    green_temp = nothing
+    GC.gc(false)  # hint to free before the big solve
+
     # Add the term that comes from the volume integral of Green's identity
     grad_green += 2π * I
 
     # Invert the vacuum response system of equations, eqs. 112 of Chance 1997 (gelimb in Fortran)
-    green_fourier .= grad_green \ green_fourier
+    F = lu!(grad_green)           # overwrites grad_green with LU factors
+    ldiv!(F, green_fourier)       # solves in-place, overwrites green_fourier
+    grad_green = nothing           # free immediately (now contains LU junk)
 
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    dθdζ = 4π^2 / (num_points)
+    dθdζ = 4π^2 / (num_points_per_surf)
     arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
     fourier_inverse_transform!(arr, green_fourier, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, dθdζ)
     fourier_inverse_transform!(aii, green_fourier, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, dθdζ)
