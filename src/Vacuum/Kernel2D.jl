@@ -45,29 +45,25 @@ const GAUSSIANPOINTS32 = [
 ]
 
 """
-    kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iops, inputs; xwall=nothing, zwall=nothing)
+    kernel!(grad_greenfunction, greenfunction, observer, source, n)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
-
 **WARNING: This kernel only supports closed toroidal walls currently.
 The residue calculation needs to be updated for open walls.**
 
 # Arguments
 
-  - `grad_greenfunction_mat`: Gradient Green's function matrix (output)
-  - `greenfunction_mat`: Green's function matrix (output)
-  - `x_obspoints`: Observer x coordinates (R coordinates)
-  - `z_obspoints`: Observer z coordinates (Z coordinates)
-  - `x_sourcepoints`: Source x coordinates (R coordinates)
-  - `z_sourcepoints`: Source z coordinates (Z coordinates)
-  - `j1/j2`: Block index for observer/source (1=plasma, 2=wall)
+  - `grad_greenfunction`: Gradient Green's function matrix (output)
+  - `greenfunction`: Green's function matrix (output)
+  - `observer`: Observer geometry struct (PlasmaGeometry or WallGeometry)
+  - `source`: Source geometry struct (PlasmaGeometry or WallGeometry)
   - `n`: Toroidal mode number
 
 # Returns
 
-Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
-Note that greenfunction_mat is zeroed each time this function is called,
-but grad_greenfunction_mat is not since it fills a different block of the
+Modifies `grad_greenfunction` and `greenfunction` in place.
+Note that greenfunction is zeroed each time this function is called,
+but grad_greenfunction is not since it fills a different block of the
 (2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
@@ -77,87 +73,74 @@ but grad_greenfunction_mat is not since it fills a different block of the
   - Implements analytical singularity removal following Chance 1997
 """
 function kernel!(
-    grad_greenfunction_mat::Matrix{Float64},
-    greenfunction_mat::Matrix{Float64},
-    x_obspoints::Vector{Float64},
-    z_obspoints::Vector{Float64},
-    x_sourcepoints::Vector{Float64},
-    z_sourcepoints::Vector{Float64},
-    j1::Int,
-    j2::Int,
+    grad_greenfunction::Matrix{Float64},
+    greenfunction::Matrix{Float64},
+    observer::Union{PlasmaGeometry,WallGeometry},
+    source::Union{PlasmaGeometry,WallGeometry},
     n::Int
 )
 
-    # These used to be function arguments, but can just set inside here based on j1/j2
-    plasma_plasma_block = j1 == 1 && j2 == 1 # previously iops
-    plasma_is_source = j2 == 1 # previously iopw
-    isgn = plasma_is_source ? -1 : 1
-
-    mtheta = length(x_obspoints)
+    mtheta = length(observer.x)
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
-    # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
-    fill!(greenfunction_mat, 0.0)
+    # Take a view of the corresponding block of the grad_greenfunction
+    col_index = (source isa PlasmaGeometry ? 1 : 2)
+    row_index = (observer isa PlasmaGeometry ? 1 : 2)
+    grad_greenfunction_block = view(
+        grad_greenfunction,
+        ((row_index-1)*mtheta+1):(row_index*mtheta),
+        ((col_index-1)*mtheta+1):(col_index*mtheta)
+    )
 
-    if mtheta != length(z_obspoints) || mtheta != length(x_sourcepoints) || mtheta != length(z_sourcepoints)
-        error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
-    end
+    # Zero out greenfunction at start of each kernel call
+    fill!(greenfunction, 0.0)
+    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    populate_greenfunction = source isa PlasmaGeometry
 
     # S₁ᵢ in Chance 1997, eq.(78)
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
 
-    # Used for Z'_θ and X'_θ in eq.(51)
-    # Close the loop for periodic BC by appending first point at the end
+    # Precompute composite Simpson's 1/3 rule weights, excluding singular points
+    # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+    nsrc = mtheta - 3
+    simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
+
+    # Set up periodic splines used for off-grid Gaussian quadrature points
     theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
-    x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
-    z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
+    x_closed = vcat(source.x, source.x[1])
+    z_closed = vcat(source.z, source.z[1])
     spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
     spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
-    # Create derivative views once, reuse for all evaluations (avoids allocation per call)
     d1_spline_x = deriv1(spline_x)
     d1_spline_z = deriv1(spline_z)
-    theta_vec = collect(theta_grid)
-    dx_dtheta = d1_spline_x.(theta_vec)
-    dz_dtheta = d1_spline_z.(theta_vec)
 
     # Loop through observer points
     for j in 1:mtheta
-        # Initialize variables
-        x_obs=x_obspoints[j]
-        z_obs=z_obspoints[j]
-        theta_obs=theta_grid[j]
-        grad_green_0 = 0.0 # simpson integral for coupling_0 (𝒥 ∇'𝒢⁰∇'ℒ)
-        # Workspace = view of appropriate row of grad_greenfunction_mat for this observer point
-        grad_green_work = @view(grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)])
+        # Get observer coordinates
+        x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
         # Obtain nonsingular region (endpoints at j+2 and j-2, so exclude j-1, j, and j+1)
-        nonsing_src_indices = mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
-
-        # Compute composite Simpson's 1/3 rule weights (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
-        # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-        nsrc = length(nonsing_src_indices)
-        simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
+        nonsing_idx = mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
 
         # Perform Simpson integration for nonsingular source points
-        for (isrc, wsimpson) in zip(nonsing_src_indices, simpson_weights)
-            x_source=x_sourcepoints[isrc]
-            z_source=z_sourcepoints[isrc]
-
-            # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[isrc], dz_dtheta[isrc], n)
+        for (isrc, wsimpson) in zip(nonsing_idx, simpson_weights)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], source.dx_dtheta[isrc], source.dz_dtheta[isrc], n)
 
             # Sum contributions to Green's function matrices using Simpson weight
-            grad_green_work[isrc] += isgn * coupling_n * wsimpson
-            greenfunction_mat[j, isrc] += G_n * wsimpson
-            grad_green_0 += coupling_0 * wsimpson
+            if populate_greenfunction
+                greenfunction[j, isrc] += G_n * wsimpson
+            end
+            grad_greenfunction_block[j, isrc] += gradG_n * wsimpson
+            # Subtract regular integral component of δⱼᵢK⁰ in eq. 83
+            grad_greenfunction_block[j, j] -= gradG_0 * wsimpson
         end
 
         # Perform Gaussian quadrature for singular points (source = obs point)
         # Get indices of the singularity region, [j-2, j-1, j, j+1, j+2]
-        js = mod.(j .+ ((mtheta-3):(mtheta+1)), mtheta) .+ 1
+        sing_idx = mod1.(j .+ ((mtheta-2):(mtheta+2)), mtheta)
         # Integrate region of length 2 * dtheta on left/right of singularity
         for region in ["left", "right"]
             gauss_xleft = theta_obs - (region == "left" ? 2 * dtheta : 0)
@@ -171,10 +154,7 @@ function kernel!(
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
-
-                # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
-                G_n_nonsingular = plasma_plasma_block ? G_n + log((theta_obs-theta_gauss[ig])^2)/x_obs : G_n
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
                 wgauss = GAUSSIANWEIGHTS[ig] * dtheta
@@ -188,49 +168,61 @@ function kernel!(
                 A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
 
                 # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
-                if plasma_is_source
-                    greenfunction_mat[j, js[1]] += G_n_nonsingular * A2_minus
-                    greenfunction_mat[j, js[2]] += G_n_nonsingular * A1_minus
-                    greenfunction_mat[j, js[3]] += G_n_nonsingular * A0
-                    greenfunction_mat[j, js[4]] += G_n_nonsingular * A1_plus
-                    greenfunction_mat[j, js[5]] += G_n_nonsingular * A2_plus
+                if populate_greenfunction
+                    if observer isa PlasmaGeometry
+                        # Remove singular behavior by adding on leading-order term, Chance eq.(75)
+                        G_n += log((theta_obs - theta_gauss[ig])^2) / x_obs
+                    end
+                    greenfunction[j, sing_idx[1]] += G_n * A2_minus
+                    greenfunction[j, sing_idx[2]] += G_n * A1_minus
+                    greenfunction[j, sing_idx[3]] += G_n * A0
+                    greenfunction[j, sing_idx[4]] += G_n * A1_plus
+                    greenfunction[j, sing_idx[5]] += G_n * A2_plus
                 end
 
-                # Second type of singularity: 𝒦ⁿ
-                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰
-                grad_green_work[js[1]] += isgn * coupling_n * A2_minus
-                grad_green_work[js[2]] += isgn * coupling_n * A1_minus
-                grad_green_work[js[3]] += isgn * coupling_n * A0
-                grad_green_work[js[4]] += isgn * coupling_n * A1_plus
-                grad_green_work[js[5]] += isgn * coupling_n * A2_plus
+                # Second type of singularity: 𝒦ⁿ (Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰)
+                grad_greenfunction_block[j, sing_idx[1]] += gradG_n * A2_minus
+                grad_greenfunction_block[j, sing_idx[2]] += gradG_n * A1_minus
+                grad_greenfunction_block[j, sing_idx[3]] += gradG_n * A0
+                grad_greenfunction_block[j, sing_idx[4]] += gradG_n * A1_plus
+                grad_greenfunction_block[j, sing_idx[5]] += gradG_n * A2_plus
                 # Subtract off the diverging singular n=0 component
-                grad_green_work[j] -= isgn * coupling_0 * wgauss
+                grad_greenfunction_block[j, j] -= gradG_0 * wgauss
             end
         end
 
-        # Set residue based on logic similar to Table I of Chance 1997 + existing δⱼᵢ in eq. 69
-        # Would need to pass in wall geometry to generalize this to open walls
-        is_closed_toroidal = true
-        if is_closed_toroidal
-            residue = (j1 == 2.0) ? 0.0 : (j2 == 1 ? 2.0 : -2.0) # Chance eq. 89
-        else
-            # TODO: this line can be gotten rid of if we are never doing open walls
-            residue = (j1 == j2) ? 2.0 : 0.0 # Chance eq. 90
-        end
-        # Subtract regular integral component of δⱼᵢK⁰ in eq. 83 and add residue value in eq. 89/90
-        grad_green_work[j] = grad_green_work[j] - isgn * grad_green_0 + residue
-
         # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
-        if plasma_plasma_block
-            greenfunction_mat[j, js[1]] -= log_correction_2 / x_obs
-            greenfunction_mat[j, js[2]] -= log_correction_1 / x_obs
-            greenfunction_mat[j, js[3]] -= log_correction_0 / x_obs
-            greenfunction_mat[j, js[4]] -= log_correction_1 / x_obs
-            greenfunction_mat[j, js[5]] -= log_correction_2 / x_obs
+        if populate_greenfunction && observer isa PlasmaGeometry
+            greenfunction[j, sing_idx[1]] -= log_correction_2 / x_obs
+            greenfunction[j, sing_idx[2]] -= log_correction_1 / x_obs
+            greenfunction[j, sing_idx[3]] -= log_correction_0 / x_obs
+            greenfunction[j, sing_idx[4]] -= log_correction_1 / x_obs
+            greenfunction[j, sing_idx[5]] -= log_correction_2 / x_obs
         end
     end
+
+    # Normals need to point outward from vacuum region. In VACUUM clockwise θ convention, normal points
+    # out of vacuum for wall but inward for plasma, so we multiply by -1 for wall sources
+    if source isa PlasmaGeometry
+        grad_greenfunction_block .*= -1
+    end
+
+    # Add analytic singular integral (second type) from Table I of Chance 1997 + existing δⱼᵢ in eq. 69
+    # Would need to pass in wall geometry to generalize this to open walls
+    is_closed_toroidal = true
+    if is_closed_toroidal # Chance eq. 89
+        residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
+    else # Chance eq. 90
+        # TODO: this line can be gotten rid of if we are never doing open walls
+        residue = (typeof(observer) == typeof(source)) ? 2.0 : 0.0
+    end
+    # Add residue value from eq. 89/90 to block diagonal
+    @inbounds for i in 1:mtheta
+        grad_greenfunction_block[i, i] += residue
+    end
+
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
-    greenfunction_mat ./= 2π
+    greenfunction ./= 2π
 end
 
 #############################################################

@@ -41,16 +41,16 @@ of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
   - `z::Vector{Float64}`: Plasma surface Z-coordinate on VACUUM theta grid
   - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
   - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
-  - `sin_ln_basis::Matrix{Float64}`: sin(lθ - nν) basis functions for poloidal modes at plasma surface
-  - `cos_ln_basis::Matrix{Float64}`: cos(lθ - nν) basis functions for poloidal modes at plasma surface
+  - `sin_mn_basis::Matrix{Float64}`: sin(mθ - nν) basis functions for poloidal modes at plasma surface
+  - `cos_mn_basis::Matrix{Float64}`: cos(mθ - nν) basis functions for poloidal modes at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
     z::Vector{Float64}
     dx_dtheta::Vector{Float64}
     dz_dtheta::Vector{Float64}
-    sin_ln_basis::Matrix{Float64}
-    cos_ln_basis::Matrix{Float64}
+    sin_mn_basis::Matrix{Float64}
+    cos_mn_basis::Matrix{Float64}
 end
 
 """
@@ -146,34 +146,28 @@ the necessary plasma surface data for vacuum calculations.
 function initialize_plasma_surface(inputs::VacuumInput)
 
     (; mtheta, mpert, mlow, ν, r, z, n) = inputs
+
     # Interpolate arrays from input onto mtheta grid
-    x_plasma = interp_to_new_grid(r, mtheta)
-    z_plasma = interp_to_new_grid(z, mtheta)
-    ν = interp_to_new_grid(ν, mtheta)
-
-    # Plasma boundary theta derivative: length mth with θ = [0, 1)
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    dx_dtheta = periodic_cubic_deriv(θ_grid, x_plasma)
-    dz_dtheta = periodic_cubic_deriv(θ_grid, z_plasma)
+    x = interp_to_new_grid(θ_grid, r)
+    z = interp_to_new_grid(θ_grid, z)
+    ν = interp_to_new_grid(θ_grid, ν)
 
-    # Precompute Fourier transform terms, sin(lθ - nν) and cos(lθ - nν)
-    sin_ln_basis = zeros(Float64, mtheta, mpert)
-    cos_ln_basis = zeros(Float64, mtheta, mpert)
-    for j in 1:mpert
-        for i in 1:mtheta
-            l = mlow + j - 1
-            cos_ln_basis[i, j] = cos(l * θ_grid[i] - n * ν[i])
-            sin_ln_basis[i, j] = sin(l * θ_grid[i] - n * ν[i])
-        end
-    end
+    # Plasma boundary theta derivative evaluated on the mtheta grid
+    dx_dtheta = periodic_deriv(θ_grid, x)
+    dz_dtheta = periodic_deriv(θ_grid, z)
+
+    # Precompute Fourier transform terms, sin(mθ - nν) and cos(mθ - nν)
+    sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
+    cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
 
     return PlasmaGeometry(
-        x_plasma,
-        z_plasma,
+        x,
+        z,
         dx_dtheta,
         dz_dtheta,
-        sin_ln_basis,
-        cos_ln_basis
+        sin_mn_basis,
+        cos_mn_basis
     )
 end
 
@@ -207,11 +201,27 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     nowall = wall_settings.shape == "nowall"
     is_closed_toroidal = true
 
-    # All of these arrays are of length mtheta with θ = [0, 1)
+    # Output wall coordinate arrays
     mtheta = inputs.mtheta
+    x_wall = zeros(mtheta)
+    z_wall = zeros(mtheta)
+    dx_dtheta = zeros(mtheta)
+    dz_dtheta = zeros(mtheta)
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
 
-    # Get wall shape from form_wall
-    # Plasma surface coordinates
+    if nowall
+        @info "Using no wall"
+        return WallGeometry(;
+            nowall=nowall,
+            is_closed_toroidal=is_closed_toroidal,
+            x=x_wall,
+            z=z_wall,
+            dx_dtheta=dx_dtheta,
+            dz_dtheta=dz_dtheta
+        )
+    end
+
+    # Compute plasma surface quantities
     x_plasma = plasma_surf.x
     z_plasma = plasma_surf.z
 
@@ -232,9 +242,7 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
     (; aw, bw, cw, dw, tw, a) = wall_settings
     wcentr = 0.0 # Initialize
 
-    if wall_settings.shape == "nowall"
-        @info "Using no wall"
-    elseif wall_settings.shape == "conformal"
+    if wall_settings.shape == "conformal"
         dx = a * r_minor
         @info "Calculating conformal wall shape $((@sprintf "%.2e" dx)) m from plasma surface."
         wcentr = r_major
@@ -307,31 +315,17 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         end
     end
 
-    # Optional: Re-parameterization
+    # Optional: Re-parameterization for equal arc length spacing of wall points
+    # Note: we still use θ_grid for the derivatives below because we are effectively defining
+    # a new θ angle to parametrize the wall over, but maintain the equal spacing
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         @info "Re-distributing wall points to equal arc length spacing"
-        if !is_closed_toroidal
-            @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
-        end
-        x_wall, z_wall, _, theta_grid, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
-        theta_grid .= theta_grid .* (2π)  # Scale to [0, 2π) - irregular spacing
-        # Close the loop for periodic BC by appending first point at the end
-        theta_closed = vcat(collect(theta_grid), 2π)
-        x_closed = vcat(x_wall, x_wall[1])
-        z_closed = vcat(z_wall, z_wall[1])
-        spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
-        spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
-        d1_spline_x = deriv1(spline_x)
-        d1_spline_z = deriv1(spline_z)
-        theta_vec = collect(theta_grid)
-        dx_dtheta = d1_spline_x.(theta_vec)
-        dz_dtheta = d1_spline_z.(theta_vec)
-    else
-        # used regular theta grid spacing to build wall
-        theta_grid = range(0; stop=2π, length=mtheta + 1)[1:(end-1)] # length mtheta without endpoint
-        dx_dtheta = periodic_cubic_deriv(theta_grid, x_wall)
-        dz_dtheta = periodic_cubic_deriv(theta_grid, z_wall)
+        !is_closed_toroidal && @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
+        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
+
+    dx_dtheta = periodic_deriv(θ_grid, x_wall)
+    dz_dtheta = periodic_deriv(θ_grid, z_wall)
 
     if any(x_wall .<= 0.0) && !nowall
         # to add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
