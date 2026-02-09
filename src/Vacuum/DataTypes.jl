@@ -211,13 +211,13 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
 
     if nowall
         @info "Using no wall"
-        return WallGeometry(;
-            nowall=nowall,
-            is_closed_toroidal=is_closed_toroidal,
-            x=x_wall,
-            z=z_wall,
-            dx_dtheta=dx_dtheta,
-            dz_dtheta=dz_dtheta
+        return WallGeometry(
+            nowall,
+            is_closed_toroidal,
+            x_wall,
+            z_wall,
+            dx_dtheta,
+            dz_dtheta
         )
     end
 
