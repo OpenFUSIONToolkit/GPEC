@@ -211,7 +211,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     mer_flag::Bool = false
     fft_flag::Bool = false
     mthvac::Int = 480
-    nzvac::Int = 64
+    nzvac::Int = 1
     sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0

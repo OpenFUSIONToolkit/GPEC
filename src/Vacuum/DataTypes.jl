@@ -291,29 +291,10 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
         r[idx, :] .= [x[i] * cos(ϕ), x[i] * sin(ϕ), z[i]]
     end
 
-    # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions
-    r_grid = reshape(r, mtheta, nzeta, 3)
-    # Close the loop for periodic BC by appending first point at the end
-    θ_closed = vcat(collect(θ_grid), θ_grid[1] + 2π)
-    ϕ_closed = vcat(collect(ϕ_grid), ϕ_grid[1] + 2π)
-    r_closed = zeros(mtheta + 1, nzeta + 1, 3)
-    r_closed[1:mtheta, 1:nzeta, :] .= r_grid
-    r_closed[mtheta+1, 1:nzeta, :] .= r_grid[1, 1:nzeta, :]
-    r_closed[1:mtheta, nzeta+1, :] .= r_grid[1:mtheta, 1, :]
-    r_closed[mtheta+1, nzeta+1, :] .= r_grid[1, 1, :]
-    itps = [cubic_interp((θ_closed, ϕ_closed), r_closed[:, :, k]; bc=(PeriodicBC(), PeriodicBC())) for k in 1:3]
-
-    # Compute tangent vectors, unit normals, and differential area elements via spline interpolation
-    grad = zeros(4)
-    for i in 1:mtheta, j in 1:nzeta
-        idx = i + (j - 1) * mtheta
-        for k in 1:3
-            # Grad stores f, fx, fy, fxy
-            grad .= itps[k].nodal_derivs.partials[:, i, j]
-            dr_dθ[idx, k] = grad[2]
-            dr_dζ[idx, k] = grad[3]
-        end
-        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
+    # Compute tangent vectors and normal vectors via periodic bicubic splines
+    dr_dθ, dr_dζ = periodic_deriv_2D(θ_grid, ϕ_grid, reshape(r, mtheta, nzeta, 3))
+    for i in 1:num_points
+        normal[i, :] = cross(dr_dθ[i, :], dr_dζ[i, :])
     end
 
     # Determine normal orientation (inward for plasma) and enforce it
@@ -634,9 +615,8 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
             # Then, extend in normal direction, n = (-dz, dx)
             alph = -atan(x_plasma[next] - x_plasma[prev], z_plasma[next] - z_plasma[prev])
             R_wall = max(centerstack_min, x_plasma[i] + a * r_minor * cos(alph))
-            Z_wall = z_plasma[i] + a * r_minor * sin(alph)
             # Map to Cartesian (X, Y, Z)
-            r[idx, :] .= [R_wall * cos(ϕ), R_wall * sin(ϕ), Z_wall]
+            r[idx, :] .= [R_wall * cos(ϕ), R_wall * sin(ϕ), z_plasma[i] + a * r_minor * sin(alph)]
         end
 
         if any(sqrt.(r[:, 1] .^ 2 .+ r[:, 2] .^ 2) .<= centerstack_min + eps(Float64))
@@ -674,34 +654,23 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
         end
     end
 
-    # Optional: Re-parameterization
+    # Optional: Re-parameterization for equal arc length spacing of wall points
+    # Note: we still use θ_grid for the derivatives below because we are effectively defining
+    # a new θ angle to parametrize the wall over, but maintain the equal spacing
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
-        error("Re-distributing wall points to equal arc length spacing not implemented for 3D walls yet.")
+        @info "Re-distributing wall points to equal arc length spacing"
+        !is_closed_toroidal && @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
+        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(r[:, 1], r[:, 3], mtheta)
+        for (j, ϕ) in enumerate(ϕ_grid), i in 1:mtheta
+            idx = i + (j - 1) * mtheta
+            r[idx, :] .= [x_wall[i] * cos(ϕ), x_wall[i] * sin(ϕ), z_wall[i]]
+        end
     end
 
-    # Create splines for each Cartesian component (X, Y, Z) with periodic boundary conditions
-    r_grid = reshape(r, mtheta, nzeta, 3)
-    # Close the loop for periodic BC by appending first point at the end
-    θ_closed = vcat(collect(θ_grid), θ_grid[1] + 2π)
-    ϕ_closed = vcat(collect(ϕ_grid), ϕ_grid[1] + 2π)
-    r_closed = zeros(mtheta + 1, nzeta + 1, 3)
-    r_closed[1:mtheta, 1:nzeta, :] .= r_grid
-    r_closed[mtheta+1, 1:nzeta, :] .= r_grid[1, 1:nzeta, :]
-    r_closed[1:mtheta, nzeta+1, :] .= r_grid[1:mtheta, 1, :]
-    r_closed[mtheta+1, nzeta+1, :] .= r_grid[1, 1, :]
-    itps = [cubic_interp((θ_closed, ϕ_closed), r_closed[:, :, k]; bc=(PeriodicBC(), PeriodicBC())) for k in 1:3]
-
-    # Compute tangent vectors, normals, and differential area elements
-    grad = zeros(4)
-    for i in 1:mtheta, j in 1:nzeta
-        idx = i + (j - 1) * mtheta
-        for k in 1:3
-            # Grad stores f, fx, fy, fxy
-            grad .= itps[k].nodal_derivs.partials[:, i, j]
-            dr_dθ[idx, k] = grad[2]
-            dr_dζ[idx, k] = grad[3]
-        end
-        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
+    # Compute tangent vectors and normal vectors via periodic bicubic splines
+    dr_dθ, dr_dζ = periodic_deriv_2D(θ_grid, ϕ_grid, reshape(r, mtheta, nzeta, 3))
+    for i in 1:num_points
+        normal[i, :] = cross(dr_dθ[i, :], dr_dζ[i, :])
     end
 
     # Determine normal orientation (outward for wall) and enforce it

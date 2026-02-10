@@ -232,14 +232,13 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     wall = WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Allocate matrices upfront with correct size based on wall presence
-    grad_green_size = wall.nowall ? mtheta : 2 * mtheta
-    grad_green = zeros(grad_green_size, grad_green_size)
+    num_points = wall.nowall ? mtheta : 2 * mtheta
+    grad_green = zeros(num_points, num_points)
     green_temp = zeros(mtheta, mtheta)
 
     # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first mtheta rows are plasma as observer, second are wall
     # First mpert columns are real (cosine), second mpert are imaginary (sine)
-    green_fourier_rows = wall.nowall ? mtheta : 2 * mtheta
-    green_fourier = zeros(green_fourier_rows, 2 * mpert)
+    green_fourier = zeros(num_points, 2 * mpert)
     PLASMA_ROW_OFFSET = 0
     WALL_ROW_OFFSET = mtheta
     COS_COL_OFFSET = 0
@@ -269,8 +268,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     cn0 = 1.0 # expose to user if anyone ever actually tries to use this
     (n == 0 && !wall.nowall && wall.is_closed_toroidal) && begin
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
-        mth12 = wall.nowall ? mtheta : 2 * mtheta
-        for i in 1:mth12, j in 1:mth12
+        for i in 1:num_points, j in 1:num_points
             grad_green[i, j] += cn0
         end
     end
@@ -334,20 +332,20 @@ It returns the relevant arrays: `wv`, `green_fourier`, `plasma_coords`, and `wal
 """
 function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallShapeSettings; PATCH_RAD::Int=11, RAD_DIM::Int=20, INTERP_ORDER::Int=5)
 
-    # Initialization and allocations
-    (; mtheta, mpert, force_wv_symmetry, nzeta, npert) = inputs
-    num_points_per_surf = nzeta * mtheta
-    num_modes = npert * mpert
-
+    # Initialize surfaces
     # TODO: Currently only supports axisymmetric surfaces
     plasma_surf = PlasmaGeometry3D(inputs)
     wall = WallGeometry3D(inputs, plasma_surf, wall_settings)
 
-    # Allocate based on wall presence
+    (; mtheta, mpert, force_wv_symmetry, nzeta, npert) = inputs
+    num_modes = npert * mpert
+    num_points_per_surf = nzeta * mtheta
+    # If no wall, only plasma points; if wall, plasma + wall points
     num_points = wall.nowall ? num_points_per_surf : 2 * num_points_per_surf
+
+    # Allocate matrices, accounting for whether wall is present or not
     grad_green = zeros(num_points, num_points)
     green_temp = zeros(num_points_per_surf, num_points_per_surf)
-
     # 𝒢ₗ(θⱼ) from Chance eq. 106-108. first num_points_per_surf rows are plasma as observer, second are wall
     # First num_modes columns are real (cosine), second num_modes are imaginary (sine)
     green_fourier = zeros(num_points, 2 * num_modes)
@@ -370,6 +368,7 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
         compute_3D_kernel_matrix!(grad_green, green_temp, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
         # Wall–Plasma block
         compute_3D_kernel_matrix!(grad_green, green_temp, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+
         # Fourier transform obs=wall, src=plasma block into green_fourier
         fourier_transform!(green_fourier, green_temp, plasma_surf.cos_mn_basis3D, WALL_ROW_OFFSET, COS_COL_OFFSET)
         fourier_transform!(green_fourier, green_temp, plasma_surf.sin_mn_basis3D, WALL_ROW_OFFSET, SIN_COL_OFFSET)

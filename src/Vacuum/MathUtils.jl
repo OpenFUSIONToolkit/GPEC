@@ -91,9 +91,60 @@ function periodic_deriv(θ_grid, vals)
     # Close the loop for periodic BC by appending first point at the end
     θ_closed = vcat(collect(θ_grid), θ_grid[end] + (θ_grid[2] - θ_grid[1]))
     vals_closed = vcat(vals, vals[1])
+
+    # Assemble and evaluate the periodic cubic spline to get the derivative at each point in θ_grid
     spline = cubic_interp(θ_closed, vals_closed; bc=PeriodicBC())
-    d1 = deriv1(spline)
-    return d1.(collect(θ_grid))
+    return spline.(θ_grid; deriv=1)
+end
+
+"""
+    periodic_deriv_2D(θ_grid, ϕ_grid, r_grid)
+
+Compute periodic derivatives on a 2D toroidal grid for vector-valued data.
+This closes the periodic loops in both θ and ϕ, fits periodic bicubic splines,
+and returns the derivatives evaluated on the original grid.
+
+# Arguments
+
+  - `θ_grid`: Poloidal grid (length mtheta)
+  - `ϕ_grid`: Toroidal grid (length nzeta)
+  - `r_grid`: Surface points in Cartesian coordinates, shape (mtheta, nzeta, 3)
+
+# Returns
+
+  - `dr_dθ::Matrix{Float64}`: ∂r/∂θ evaluated on the grid, shape (mtheta*nzeta, 3)
+  - `dr_dζ::Matrix{Float64}`: ∂r/∂ζ evaluated on the grid, shape (mtheta*nzeta, 3)
+"""
+function periodic_deriv_2D(θ_grid, ϕ_grid, r_grid::AbstractArray{<:Real,3})
+
+    mtheta = length(θ_grid)
+    nzeta = length(ϕ_grid)
+
+    # Close the loop for periodic BC by appending first point at the end
+    θ_closed = vcat(collect(θ_grid), θ_grid[1] + 2π)
+    ϕ_closed = vcat(collect(ϕ_grid), ϕ_grid[1] + 2π)
+    r_closed = zeros(mtheta + 1, nzeta + 1, 3)
+    r_closed[1:mtheta, 1:nzeta, :] .= r_grid
+    r_closed[mtheta+1, 1:nzeta, :] .= r_grid[1, 1:nzeta, :]
+    r_closed[1:mtheta, nzeta+1, :] .= r_grid[1:mtheta, 1, :]
+    r_closed[mtheta+1, nzeta+1, :] .= r_grid[1, 1, :]
+
+    itps = [cubic_interp((θ_closed, ϕ_closed), r_closed[:, :, k]; bc=(PeriodicBC(), PeriodicBC())) for k in 1:3]
+
+    dr_dθ = zeros(eltype(r_grid), mtheta * nzeta, 3)
+    dr_dζ = zeros(eltype(r_grid), mtheta * nzeta, 3)
+    grad = zeros(eltype(r_grid), 4)
+    for i in 1:mtheta, j in 1:nzeta
+        idx = i + (j - 1) * mtheta
+        for k in 1:3
+            # Grad stores f, fx, fy, fxy
+            grad .= itps[k].nodal_derivs.partials[:, i, j]
+            dr_dθ[idx, k] = grad[2]
+            dr_dζ[idx, k] = grad[3]
+        end
+    end
+
+    return dr_dθ, dr_dζ
 end
 
 """
