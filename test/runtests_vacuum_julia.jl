@@ -24,20 +24,20 @@ using LinearAlgebra
 
         @testset "initialize_plasma_surface" begin
             inputs = VacuumInput(
-                r=[1.0, 1.1, 1.2, 1.1],
-                z=[0.0, 0.1, 0.0, -0.1],
-                ν=zeros(4),
-                mtheta=4,
+                r=[1.0, 1.1, 1.2, 1.1, 1.0],
+                z=[0.0, 0.1, 0.0, -0.1, 0.0],
+                ν=zeros(5),
+                mtheta=5,
                 mpert=1,
                 mlow=1,
                 n=1
             )
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
-            @test length(plasma_surf.x) == 4
-            @test length(plasma_surf.z) == 4
-            @test length(plasma_surf.dx_dtheta) == 4
-            @test size(plasma_surf.cos_ln_basis) == (4, 1)
-            @test size(plasma_surf.sin_ln_basis) == (4, 1)
+            @test length(plasma_surf.x) == 5
+            @test length(plasma_surf.z) == 5
+            @test length(plasma_surf.dx_dtheta) == 5
+            @test size(plasma_surf.cos_mn_basis) == (5, 1)
+            @test size(plasma_surf.sin_mn_basis) == (5, 1)
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end
@@ -179,26 +179,27 @@ using LinearAlgebra
         @testset "interp_to_new_grid" begin
             # Test upsampling a sine wave
             mtheta_in = 17
-            theta_in = collect(range(0, 1, length=mtheta_in))
-            vecin = sin.(2π .* theta_in)
+            theta_in = collect(range(0, 2π, length=mtheta_in))
+            vecin = sin.(theta_in)
 
             mtheta_out = 33
-            vecout = JPEC.Vacuum.interp_to_new_grid(vecin, mtheta_out)
+            theta_out = range(0, 2π, length=mtheta_out)
+            vecout = JPEC.Vacuum.interp_to_new_grid(theta_out, vecin)
 
-            theta_out = (0:(mtheta_out-1)) ./ mtheta_out
-            expected_out = sin.(2π .* theta_out)
+            expected_out = sin.(collect(theta_out))
 
             @test isapprox(vecout, expected_out, atol=1e-2)
 
             # Test no-op
-            vecout_noop = JPEC.Vacuum.interp_to_new_grid(vecin, mtheta_in)
-            @test vecout_noop == vecin
+            theta_noop = range(0, 2π, length=mtheta_in)
+            vecout_noop = JPEC.Vacuum.interp_to_new_grid(theta_noop, vecin)
+            @test isapprox(vecout_noop, vecin, atol=1e-12)
         end
 
-        @testset "periodic_cubic_deriv" begin
+        @testset "periodic_deriv" begin
             theta = range(0, 2pi, length=101)[1:(end-1)]
             vals = sin.(theta)
-            derivs = JPEC.Vacuum.periodic_cubic_deriv(theta, vals)
+            derivs = JPEC.Vacuum.periodic_deriv(theta, vals)
             @test isapprox(derivs, cos.(theta), atol=1e-3)
         end
 
