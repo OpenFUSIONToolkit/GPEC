@@ -322,16 +322,16 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     end
 
     return PlasmaGeometry3D(;
-        mtheta,
-        nzeta,
-        r,
-        dr_dθ,
-        dr_dζ,
-        normal,
-        sin_mn_basis3D,
-        cos_mn_basis3D,
-        aspect_ratio,
-        normal_orient
+        mtheta=mtheta,
+        nzeta=nzeta,
+        r=r,
+        dr_dθ=dr_dθ,
+        dr_dζ=dr_dζ,
+        normal=normal,
+        sin_mn_basis3D=sin_mn_basis3D,
+        cos_mn_basis3D=cos_mn_basis3D,
+        aspect_ratio=aspect_ratio,
+        normal_orient=normal_orient
     )
 end
 
@@ -486,7 +486,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         @info "Re-distributing wall points to equal arc length spacing"
         !is_closed_toroidal && @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
-        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
+        x_wall, z_wall = distribute_to_equal_arc_grid(x_wall, z_wall)
     end
 
     dx_dtheta = periodic_deriv(θ_grid, x_wall)
@@ -660,7 +660,7 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         @info "Re-distributing wall points to equal arc length spacing"
         !is_closed_toroidal && @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
-        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(r[:, 1], r[:, 3], mtheta)
+        x_wall, z_wall = distribute_to_equal_arc_grid(r[1:mtheta, 1], r[1:mtheta, 3])
         for (j, ϕ) in enumerate(ϕ_grid), i in 1:mtheta
             idx = i + (j - 1) * mtheta
             r[idx, :] .= [x_wall[i] * cos(ϕ), x_wall[i] * sin(ϕ), z_wall[i]]
@@ -678,15 +678,15 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
     normal_orient = normal[idx, 1] > 0 ? 1 : -1
     @views normal .*= normal_orient
 
-    return WallGeometry3D(
-        nowall,
-        is_closed_toroidal,
-        mtheta,
-        nzeta,
-        r,
-        dr_dθ,
-        dr_dζ,
-        normal,
-        normal_orient
+    return WallGeometry3D(;
+        nowall=nowall,
+        is_closed_toroidal=is_closed_toroidal,
+        mtheta=mtheta,
+        nzeta=nzeta,
+        r=r,
+        dr_dθ=dr_dθ,
+        dr_dζ=dr_dζ,
+        normal=normal,
+        normal_orient=normal_orient
     )
 end
