@@ -108,176 +108,59 @@ function periodic_deriv(θ_grid, vals)
 end
 
 """
-    lagrange1d(ax, af, m, nl, x, iop)
+    distribute_to_equal_arc_grid(xin, zin)
 
-Perform Lagrange interpolation and optionally compute its derivative.
-Replaces `lagp`, `lagpe4`, and `lag` from Fortran code.
-
-# Arguments
-
-  - `ax::Vector{Float64}`: Array of x-coordinates for the interpolation points
-  - `af::Vector{Float64}`: Array of y-coordinates (function values) for the interpolation points
-  - `m::Int`: Number of interpolation points
-  - `nl::Int`: Number of points to use for the local interpolation (polynomial degree + 1)
-  - `x::Float64`: The x-value at which to evaluate the interpolated function and/or its derivative
-  - `iop::Int`: Flag controlling output (0 = value only, 1 = value and derivative)
-
-# Returns
-
-  - `f::Float64`: The interpolated function value at `x`
-  - `df::Float64`: The interpolated function derivative at `x` (0.0 if iop=0)
-
-# Notes
-
-  - Uses local Lagrange interpolation with `nl` points centered around `x`
-  - Automatically adjusts interpolation window to stay within array bounds
-"""
-function lagrange1d(ax::Vector{Float64}, af::Vector{Float64}, m::Int, nl::Int, x::Float64, iop::Int)
-
-    # --- Error fix: Initialize f and df internally to 0.0 ---
-    f::Float64 = 0.0
-    df::Float64 = 0.0
-
-    jn = findfirst(i -> ax[i] >= x, 1:m)
-    jn = (jn === nothing) ? m : jn
-    jn = max(jn - 1, 1)
-    if jn < m && abs(ax[jn+1] - x) < abs(x - ax[jn])
-        jn += 1
-    end
-
-    # Determine the range of indices for interpolation
-    jnmm = floor(Int, (nl - 0.1) / 2)
-    jnpp = floor(Int, (nl + 0.1) / 2)
-
-    nll = jn - jnmm
-    nlr = jn + jnpp
-
-    # Adjust for even nl when ax[jn] > x (Window shift)
-    if (nl % 2 == 0) && (ax[jn] > x)
-        nll -= 1
-        nlr -= 1 # <--- Shifting the window (was nlr += 1)
-    end
-
-    # Clamp indices to valid array bounds
-    if nlr > m
-        nlr = m
-        nll = nlr - nl + 1
-    elseif nll < 1
-        nll = 1
-        nlr = nl
-    end
-
-    # Compute function value f
-    for i in nll:nlr
-        alag = 1.0
-        for j in nll:nlr
-            (i == j) && continue
-            alag *= (x - ax[j]) / (ax[i] - ax[j])
-        end
-        f += alag * af[i]
-    end
-
-    # --- Error fix: Use the 'iop' argument ---
-    (iop == 0) && return f, df # df is returned as 0.0
-
-    # Compute derivative df
-    for i in nll:nlr
-        slag = 0.0
-        for id in nll:nlr
-            (id == i) && continue
-            alag = 1.0
-            for j in nll:nlr
-                (j == i) && continue
-                alag *= (j != id) ? ((x - ax[j]) / (ax[i] - ax[j])) : (1.0 / (ax[i] - ax[id]))
-            end
-            slag += alag
-        end
-        df += slag * af[i]
-    end
-
-    return f, df # Return value and derivative
-end
-
-"""
-    distribute_to_equal_arc_grid(xin, zin, mw1)
-
-Perform arc length re-parameterization of a 2D curve.
-
-Takes an input curve defined by `(xin, zin)` coordinates and re-samples it such that
-the new points `(xout, zout)` are equally spaced in arc length along the curve.
+Given a set of points (xin, zin) that define a closed curve in 2D, redistribute these points to be equally spaced
+in terms of arc length along the curve. This is useful for ensuring that points on a wall or plasma surface are
+uniformly distributed in space rather than in the parameter θ. This performs the same function as eqarcw in the
+Fortran code. We now use FastInterpolations instead of a manual Lagrange interpolation.
 
 # Arguments
 
-  - `xin::Vector{Float64}`: Array of x-coordinates of the input curve
-  - `zin::Vector{Float64}`: Array of z-coordinates of the input curve
-  - `mw1::Int`: Number of points in the input and output curves
+  - `xin::Vector{Float64}`: x-coordinates of the original points defining the curve (endpoint not included)
+  - `zin::Vector{Float64}`: z-coordinates of the original points defining the curve (endpoint not included)
 
 # Returns
 
-  - `xout::Vector{Float64}`: Array of x-coordinates of the arc-length re-parameterized curve
-  - `zout::Vector{Float64}`: Array of z-coordinates of the arc-length re-parameterized curve
-  - `ell::Vector{Float64}`: Array of cumulative arc lengths for the input curve
-  - `thgr::Vector{Float64}`: Array of re-parameterized 'theta' values corresponding to equal arc lengths
-  - `thlag::Vector{Float64}`: Array of normalized 'theta' values for the input curve (0 to 1)
-
-# Notes
-
-  - Uses Lagrange interpolation for calculating arc length and resampling
-  - Ensures uniform spacing in arc length for improved numerical stability
+  - `xout::Vector{Float64}`: x-coordinates of the redistributed points, equally spaced in arc length
+  - `zout::Vector{Float64}`: z-coordinates of the redistributed points, equally spaced in arc length
 """
-function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}, mtheta::Int)
+function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64})
 
-    # Temporary arrays for interpolation and arc-length calculation
-    theta_in = zeros(Float64, mtheta) # Normalized input parameter [0, 1)
-    theta_out = zeros(Float64, mtheta) # New parameter distribution for equal spacing
-    xout = zeros(Float64, mtheta) # Uniformly spaced R-coordinates
-    zout = zeros(Float64, mtheta) # Uniformly spaced Z-coordinates
+    mtheta = length(xin)
+    dθ = 2π / mtheta
+    θ_grid = range(; start=0, length=mtheta, step=dθ)
+    # Close the loop for periodic BC by appending first point at the end
+    θ_closed = vcat(collect(θ_grid), θ_grid[end] + dθ)
+    xin_closed = vcat(xin, xin[1])
+    zin_closed = vcat(zin, zin[1])
 
-    # Define initial normalized parameter theta_in
-    dt = 1.0 / mtheta
-    theta_in .= range(; start=0, length=mtheta, step=dt) # θ ∈ [0, 1)
-    # we need a closed loop for arc length calculation
-    mtheta1 = mtheta + 1
-    xin1 = vcat(xin, xin[1])
-    zin1 = vcat(zin, zin[1])
-    theta_in1 = vcat(theta_in, [1.0])
-    ell = zeros(Float64, mtheta1) # Cumulative arc length of closed loop
+    # Build periodic splines for derivatives on the closed loop
+    spline_x = cubic_interp(θ_closed, xin_closed; bc=PeriodicBC())
+    spline_z = cubic_interp(θ_closed, zin_closed; bc=PeriodicBC())
 
     # Calculate cumulative arc length using numerical integration
-    # We use a mid-point derivative approximation to find the path length
-    for iw in 2:mtheta1
-        # Evaluate derivative at the midpoint of the interval
-        theta = (theta_in1[iw] + theta_in1[iw-1]) / 2.0
-
-        # Calculate dx/dt and dz/dt using Lagrange interpolation (order 3)
-        _, d_xin = lagrange1d(theta_in1, xin1, mtheta1, 3, theta, 1)
-        _, d_zin = lagrange1d(theta_in1, zin1, mtheta1, 3, theta, 1)
-
-        # Instantaneous speed (ds/dt)
-        ds_dt = sqrt(d_xin^2 + d_zin^2)
+    arc_length = zeros(length(θ_closed)) # Cumulative arc length of closed loop
+    for i in 2:(mtheta+1)
+        # Use a mid-point derivative approximation
+        theta_mid = (θ_closed[i] + θ_closed[i-1]) / 2.0
+        d_xin = spline_x(theta_mid; deriv=1)
+        d_zin = spline_z(theta_mid; deriv=1)
 
         # Accumulate length: ds = (ds/dt) * dt
-        ell[iw] = ell[iw-1] + ds_dt * dt
+        ds_dθ = sqrt(d_xin^2 + d_zin^2)
+        arc_length[i] = arc_length[i-1] + ds_dθ * dθ
     end
 
     # Re-parameterize based on equal arc-length segments
-    ell_targets = collect(range(0; step=ell[end]/mtheta, length=mtheta)) # [0, Length) for open loop result
-    for i in 2:mtheta
-        # Find the value of 'theta_in' that corresponds to the target arc length 's'
-        f_th, _ = lagrange1d(ell, theta_in1, mtheta1, 3, ell_targets[i], 0)
-        theta_out[i] = f_th
-    end
+    arc_length_targets = range(; start=0, length=mtheta, step=arc_length[end]/mtheta)
+    # Interpolate the original (x,z) data at the equal arc length points to get (xout, zout)
+    x_from_ell = cubic_interp(arc_length, xin_closed)
+    z_from_ell = cubic_interp(arc_length, zin_closed)
+    xout = x_from_ell.(arc_length_targets)
+    zout = z_from_ell.(arc_length_targets)
 
-    # Interpolate the original (x,z) data at the new parameter points to get (xout, zout)
-    # Chance interpolates in theta_out to get xin, zin but this introduces small errors in arc lengths
-    for i in 1:mtheta
-        f_x, _ = lagrange1d(ell, xin1, mtheta1, 3, ell_targets[i], 0)
-        f_z, _ = lagrange1d(ell, zin1, mtheta1, 3, ell_targets[i], 0)
-        xout[i] = f_x
-        zout[i] = f_z
-    end
-
-    return xout, zout, ell, theta_out, theta_in
+    return xout, zout
 end
 
 # Helper functions for compute_vacuum_field
