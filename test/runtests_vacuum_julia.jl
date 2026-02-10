@@ -95,7 +95,7 @@ using LinearAlgebra
             theta = range(0, step=2pi/10, length=10)
             xin_circ = cos.(theta)
             zin_circ = sin.(theta)
-            xout_circ, zout_circ, _, _, _ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin_circ, zin_circ, 10)
+            xout_circ, zout_circ = JPEC.Vacuum.distribute_to_equal_arc_grid(xin_circ, zin_circ)
             # The points should still be on the unit circle
             @test all(r -> isapprox(r, 1.0, atol=1e-9), sqrt.(xout_circ .^ 2 + zout_circ .^ 2))
         end
@@ -160,21 +160,6 @@ using LinearAlgebra
 
     # ----------------------------------------------------------------------
     @testset "VacuumInternals.jl - Interpolation/Grid" begin
-        @testset "lagrange1d" begin
-            ax = [1.0, 2.0, 3.0, 4.0]
-            af = [2.0, 4.0, 6.0, 8.0] # f(x) = 2x
-            m = 4
-            nl = 3
-
-            # Test value
-            f, df = JPEC.Vacuum.lagrange1d(ax, af, m, nl, 2.5, 0)
-            @test isapprox(f, 5.0, atol=1e-12)
-
-            # Test value and derivative
-            f, df = JPEC.Vacuum.lagrange1d(ax, af, m, nl, 2.5, 1)
-            @test isapprox(f, 5.0, atol=1e-12)
-            @test isapprox(df, 2.0, atol=1e-12)
-        end
 
         @testset "interp_to_new_grid" begin
             # Test upsampling a sine wave
