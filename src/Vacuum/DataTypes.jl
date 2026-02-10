@@ -499,28 +499,17 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
         end
     end
 
-    # Optional: Re-parameterization
+    # Optional: Re-parameterization for equal arc length spacing of wall points
+    # Note: we still use θ_grid for the derivatives below because we are effectively defining
+    # a new θ angle to parametrize the wall over, but maintain the equal spacing
     if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
         @info "Re-distributing wall points to equal arc length spacing"
-        !is_closed_toroidal && error("Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used.")
-        x_wall, z_wall, _, theta_grid, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
-        theta_grid .= theta_grid .* (2π)  # Scale to [0, 2π) - irregular spacing
-        # Close the loop for periodic BC by appending first point at the end
-        theta_closed = vcat(collect(theta_grid), 2π)
-        x_closed = vcat(x_wall, x_wall[1])
-        z_closed = vcat(z_wall, z_wall[1])
-        spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
-        spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
-        d1_spline_x = deriv1(spline_x)
-        d1_spline_z = deriv1(spline_z)
-        theta_vec = collect(theta_grid)
-        dx_dtheta = d1_spline_x.(theta_vec)
-        dz_dtheta = d1_spline_z.(theta_vec)
-    else
-        # used regular theta grid spacing to build wall
-        dx_dtheta = periodic_deriv(θ_grid, x_wall)
-        dz_dtheta = periodic_deriv(θ_grid, z_wall)
+        !is_closed_toroidal && @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
+        x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
+
+    dx_dtheta = periodic_deriv(θ_grid, x_wall)
+    dz_dtheta = periodic_deriv(θ_grid, z_wall)
 
     # to add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
     any(x_wall .<= 0.0) && error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")

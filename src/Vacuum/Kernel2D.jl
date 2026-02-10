@@ -89,7 +89,6 @@ end
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
-
 **WARNING: This kernel only supports closed toroidal walls currently.
 The residue calculation needs to be updated for open walls.**
 
