@@ -71,19 +71,11 @@
     #         @test isapprox(plasma_eq_ascii.zo, plasma_eq_binary.zo, atol=tol)
     #     end
 
-    #     # NOTE: bicube_eval removed with BicubicSpline - use native FastInterpolations API instead
+    #     # TODO: Rewrite using native FastInterpolations evaluation of rzphi interpolants
     #     # @testset "Spline Evaluation Consistency" begin
     #     #     ... (test removed - rzphi is now multiple CubicInterpolantND instances)
     #     # end
     # end
-
-    # # NOTE: bicube_eval removed with BicubicSpline - use native FastInterpolations API instead
-    # # @testset "Geometry Reconstruction" begin
-    # #     ... (test removed - rzphi is now multiple CubicInterpolantND instances)
-    # # end
-
-    # # NOTE: Geometry Reconstruction test removed (used bicube_eval which no longer exists)
-    # # TODO: Rewrite using native FastInterpolations evaluation of rzphi interpolants
 
     # @testset "Data Source Comparison (EFIT vs CHEASE)" begin
     #     # Verify consistency between different code outputs (EFIT vs CHEASE)

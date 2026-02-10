@@ -84,23 +84,23 @@ fs_integral = JPEC.SplinesMod.cumulative_integral(xs, fs; bc=JPEC.SplinesMod.Nat
 using FastInterpolations: cubic_interp
 
 # Create 2D grid
-xs = collect(range(0.0, 2π, length=20))
+xs = collect(range(0.0, 0.99, length=20))
 ys = collect(range(0.0, 2π, length=20))
 
 # Create 2D function data
 fs = zeros(20, 20)
 for i in 1:20, j in 1:20
-    fs[i, j] = sin(xs[i]) * cos(ys[j])
+    fs[i, j] = sqrt(xs[i]) * cos(ys[j])
 end
 
 # Set up 2D cubic interpolant
 # Use PeriodicBC on second dimension (θ direction)
 spline_2d = cubic_interp((xs, ys), fs; 
-    bc=(JPEC.SplinesMod.NaturalBC(), JPEC.SplinesMod.PeriodicBC()),
+    bc=(JPEC.SplinesMod.CubicFit(), JPEC.SplinesMod.PeriodicBC()),
     extrap=(:extension, :wrap))
 
 # Evaluate spline at a point
-x_eval, y_eval = π/2, π/4
+x_eval, y_eval = 0.5, π/4
 f = spline_2d((x_eval, y_eval))
 
 # Evaluate with derivative (specify which dimension)
