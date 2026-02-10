@@ -35,7 +35,7 @@ makedocs(;
             "Equilibrium Examples" => "examples/equilibrium.md"
         ]
     ],
-    checkdocs=:none  # Changed from :exports to avoid errors for undocumented internal functions
+    checkdocs=:exports
 )
 
 deploydocs(;
