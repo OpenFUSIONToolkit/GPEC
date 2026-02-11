@@ -2,7 +2,7 @@
     MetricData
 
 A structure to hold the computed metric tensor components and their
-Fourier-spline representation. This is the Julia equivalent of the `fspline_type`
+Fourier representation. This is the Julia equivalent of the `fspline_type`
 named `metric` in the Fortran `fourfit_make_metric` subroutine.
 
 ### Fields
@@ -13,7 +13,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
   - `ys::Vector{Float64}`: Poloidal angle coordinates `θ` in radians (0 to 2π).
   - `fs::Array{Float64, 3}`: The raw metric data on the grid, size `(mpsi, mtheta, 8)`.
     The 8 quantities are: `g¹¹`, `g²²`, `g³³`, `g²³`, `g³¹`, `g¹²`, `J`, `∂J/∂ψ`.
-  - `fspline::Spl.FourierSpline`: The fitted Fourier-cubic spline object.
+  - `fourier_coeffs::Util.FourierCoefficients`: The FFT coefficients (no spline interpolation needed).
 """
 @kwdef mutable struct MetricData
     mpsi::Int
@@ -21,7 +21,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
     xs::Vector{Float64} = zeros(mpsi)
     ys::Vector{Float64} = zeros(mtheta)
     fs::Array{Float64,3} = zeros(mpsi, mtheta, 8)
-    fspline::Union{Spl.FourierSpline,Nothing} = nothing
+    fourier_coeffs::Util.FourierCoefficients = Util.empty_FourierCoefficients()
 end
 
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
@@ -61,42 +61,41 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    rzphi = equil.rzphi
-    mpsi = length(rzphi.xs)
-    mtheta = length(rzphi.ys)
+    mpsi = length(equil.rzphi_xs)
+    mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
-    # The `rzphi.ys` from EquilibriumAPI is normalized (0 to 1), so scale to radians.
+    # The equil.rzphi_ys is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= Vector(rzphi.xs)
-    metric.ys .= Vector(rzphi.ys .* 2π)
+    metric.xs .= equil.rzphi_xs
+    metric.ys .= equil.rzphi_ys .* 2π
 
     # Temporary array for contravariant basis vectors
     v = @MMatrix zeros(Float64, 3, 3)
 
     # --- Main computation loop over the (ψ, θ) grid ---
+    # Access grid point values and derivatives directly from interpolant storage
     for ipsi in 1:mpsi
-        psi_norm = rzphi.xs[ipsi]
         for jtheta in 1:mtheta
-            theta_norm = rzphi.ys[jtheta] # θ is from 0 to 1
+            theta_norm = equil.rzphi_ys[jtheta] # θ is from 0 to 1
 
-            # Evaluate the geometry spline to get (R,Z) and their derivatives
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
-
-            # Extract geometric quantities from the spline data
-            # See EquilibriumAPI.txt for `rzphi` quantities
-            r_coord_sq = f[1]
-            eta_offset = f[2]
-            jac = f[4]
-            jac1 = fx[4] # ∂J/∂ψ
+            # Grid point values: nodal_derivs.partials[1,:,:] = f, [2,:,:] = ∂f/∂ψ, [3,:,:] = ∂f/∂θ
+            r_coord_sq = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, jtheta]
+            eta_offset = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, jtheta]
+            jac = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, jtheta]
+            jac1 = equil.rzphi_jac.nodal_derivs.partials[2, ipsi, jtheta] # ∂J/∂ψ
 
             rfac = sqrt(r_coord_sq)
             eta = 2π * (theta_norm + eta_offset)
             r_major = equil.ro + rfac * cos(eta) # This is the R coordinate
 
             # --- Compute contravariant basis vectors ∇ψ, ∇θ, ∇ζ ---
-            fx1, fx2, fx3 = fx[1], fx[2], fx[3]
-            fy1, fy2, fy3 = fy[1], fy[2], fy[3]
+            fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, jtheta]
+            fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, jtheta]
+            fx3 = equil.rzphi_nu.nodal_derivs.partials[2, ipsi, jtheta]
+            fy1 = equil.rzphi_rsquared.nodal_derivs.partials[3, ipsi, jtheta]
+            fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, jtheta]
+            fy3 = equil.rzphi_nu.nodal_derivs.partials[3, ipsi, jtheta]
 
             v[1, 1] = fx1 / (2.0 * rfac * jac)
             v[1, 2] = fx2 * 2π * rfac / jac
@@ -122,22 +121,8 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
         end
     end
 
-    # --- Fit the grid data to a Fourier-cubic spline ---
-    fit_method = fft_flag ? 2 : 1
-    # In Fortran, `bctype` was set for the periodic `y` dimension. Here, the `FourierSpline`
-    # `bctype` argument applies to the non-periodic `x` dimension. The Fortran
-    # code used "extrap" for this.
-    bctype_x = "not-a-knot"
-
-    # The poloidal (y) dimension is handled implicitly as periodic by the Fourier transform.
-    metric.fspline = Spl.FourierSpline(
-        metric.xs,
-        metric.ys,
-        metric.fs,
-        mband;
-        bctype=bctype_x,
-        fit_method=fit_method
-    )
+    # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
+    metric.fourier_coeffs = Util.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
     return metric
 end
 
@@ -177,28 +162,30 @@ Set powers if necessary
 function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
 
     # --- Extract inputs ---
-    sq = equil.sq
+    profiles = equil.profiles
     mpsi = metric.mpsi
 
     # Allocations (use flat storage for all matrices to fill splines)
     # TODO: This can be made more efficient for 2D equilibria by using block diagonals
-    amats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    bmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    cmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    dmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    emats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    hmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
-    g11 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g22 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g33 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g23 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g31 = zeros(ComplexF64, 2 * intr.mband + 1)
-    g12 = zeros(ComplexF64, 2 * intr.mband + 1)
-    jmat = zeros(ComplexF64, 2 * intr.mband + 1)
-    jmat1 = zeros(ComplexF64, 2 * intr.mband + 1)
+    amats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    bmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    cmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    dmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    emats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    hmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    fmats_lower_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    gmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    kmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    g11 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    g22 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    g33 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    g23 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    g31 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    g12 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    jmat = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    jmat1 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    a_inv_dmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
+    a_inv_cmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
     # Instead of using Offset Arrays like in Fortran (-mband:mband), we store everything in
     # a single 1:(2*mband+1) array and map the zero index to the middle
@@ -206,6 +193,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     imat = zeros(ComplexF64, 2 * intr.mband + 1)
     imat[mid] = 1 + 0im
 
+    hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
         amats_flatview = @view amats_flat[ipsi, :, :]
@@ -218,21 +206,26 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         gmats_flatview = @view gmats_flat[ipsi, :, :]
         kmats_flatview = @view kmats_flat[ipsi, :, :]
         # --- Profiles ---
-        p1 = sq.fs1[ipsi, 2]
-        q = sq.fs[ipsi, 4]
-        q1 = sq.fs1[ipsi, 4]
-        jtheta = -sq.fs1[ipsi, 1]
+        psi = profiles.xs[ipsi]
+        p1 = profiles.P_deriv(psi; hint=hint)
+        q = profiles.q_spline.y[ipsi]
+        q1 = profiles.q_deriv(psi; hint=hint)
+        jtheta = -profiles.F_deriv(psi; hint=hint)
         chi1 = 2π * equil.psio
 
-        # Fill lower half (0, -1, …, -mband)
-        g11[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 1:intr.mband+1]
-        g22[mid:-1:1] .= metric.fspline.cs.fs[ipsi, intr.mband+2:2*intr.mband+2]
-        g33[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 2*intr.mband+3:3*intr.mband+3]
-        g23[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 3*intr.mband+4:4*intr.mband+4]
-        g31[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 4*intr.mband+5:5*intr.mband+5]
-        g12[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 5*intr.mband+6:6*intr.mband+6]
-        jmat[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 6*intr.mband+7:7*intr.mband+7]
-        jmat1[mid:-1:1] .= metric.fspline.cs.fs[ipsi, 7*intr.mband+8:8*intr.mband+8]
+        # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)
+        # The 8 quantities are: g11, g22, g33, g23, g31, g12, jmat, jmat1
+        fc = metric.fourier_coeffs
+        for m in 0:intr.mband
+            g11[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 1)
+            g22[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 2)
+            g33[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 3)
+            g23[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 4)
+            g31[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 5)
+            g12[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 6)
+            jmat[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 7)
+            jmat1[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 8)
+        end
 
         # Fill upper half (+1:mband) with conjugate symmetry
         for k in 1:intr.mband
@@ -254,7 +247,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             for m1 in intr.mlow:intr.mhigh
                 ipert_m = m1 - intr.mlow + 1
                 singfac1 = m1 - nq
-                for dm in max(1 - ipert_m, -intr.mband):min(intr.mpert - ipert_m, intr.mband)
+                for dm in max(1-ipert_m, -intr.mband):min(intr.mpert-ipert_m, intr.mband)
                     m2 = m1 + dm
                     singfac2 = m2 - nq
                     jpert_m = ipert_m + dm
@@ -272,7 +265,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
                     bmats_flatview[ipert_flat] = -2π * im * chi1 * (n * g22[dmidx] + (m1 + nq) * g23[dmidx] + m1 * q * g33[dmidx])
                     cmats_flatview[ipert_flat] =
                         2π * im * ((2π * im * chi1 * singfac2 * (n * g12[dmidx] + m1 * g31[dmidx])) -
-                                (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
+                                   (q1 * chi1 * (n * g23[dmidx] + m1 * g33[dmidx]))) -
                         2π * im * (jtheta * singfac1 * imat[dmidx] + n * p1 / chi1 * jmat[dmidx])
                     dmats_flatview[ipert_flat] = 2π * chi1 * (g23[dmidx] + g33[dmidx] * m1 / n)
                     emats_flatview[ipert_flat] = -chi1 / n * (q1 * chi1 * g33[dmidx] - 2π * im * chi1 * g31[dmidx] * singfac2 + jtheta * imat[dmidx])
@@ -302,11 +295,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
         amat_fact = cholesky(Hermitian(amat, :L))
-        temp1 = amat_fact \ dmat
-        temp2 = amat_fact \ cmat
-        fmat .-= adjoint(dmat) * temp1
-        kmat .= emat .- (adjoint(kmat) * temp2)
-        gmat .= hmat .- (adjoint(cmat) * temp2)
+        ldiv!(a_inv_dmat_temp, amat_fact, dmat)
+        ldiv!(a_inv_cmat_temp, amat_fact, cmat)
+        fmat .-= adjoint(dmat) * a_inv_dmat_temp
+        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)
+        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
@@ -316,17 +309,25 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         # TODO: add kinetic matrices here
     end
 
-    # --- Fit splines ---
-    ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband)
-    ffit.amats = Spl.CubicSpline(metric.xs, amats_flat; bctype="extrap")
-    ffit.bmats = Spl.CubicSpline(metric.xs, bmats_flat; bctype="extrap")
-    ffit.cmats = Spl.CubicSpline(metric.xs, cmats_flat; bctype="extrap")
-    ffit.dmats = Spl.CubicSpline(metric.xs, dmats_flat; bctype="extrap")
-    ffit.emats = Spl.CubicSpline(metric.xs, emats_flat; bctype="extrap")
-    ffit.hmats = Spl.CubicSpline(metric.xs, hmats_flat; bctype="extrap")
-    ffit.fmats_lower = Spl.CubicSpline(metric.xs, fmats_lower_flat; bctype="extrap")
-    ffit.gmats = Spl.CubicSpline(metric.xs, gmats_flat; bctype="extrap")
-    ffit.kmats = Spl.CubicSpline(metric.xs, kmats_flat; bctype="extrap")
+    # --- Create Fourier coefficient splines (multi-quantity cubic interpolants) ---
+    ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband, numpert_total=intr.numpert_total)
+
+    # FastInterpolations now natively supports complex values - no need to split real/imag
+    # Helper to create complex interpolant directly using CubicFit() for native endpoint handling
+    @inline function make_complex_interp(xs, z_flat)
+        return cubic_interp(xs, z_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
+    end
+
+    # Create complex series interpolants with per-column extrap BC
+    ffit.amats = make_complex_interp(metric.xs, amats_flat)
+    ffit.bmats = make_complex_interp(metric.xs, bmats_flat)
+    ffit.cmats = make_complex_interp(metric.xs, cmats_flat)
+    ffit.dmats = make_complex_interp(metric.xs, dmats_flat)
+    ffit.emats = make_complex_interp(metric.xs, emats_flat)
+    ffit.hmats = make_complex_interp(metric.xs, hmats_flat)
+    ffit.fmats_lower = make_complex_interp(metric.xs, fmats_lower_flat)
+    ffit.gmats = make_complex_interp(metric.xs, gmats_flat)
+    ffit.kmats = make_complex_interp(metric.xs, kmats_flat)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

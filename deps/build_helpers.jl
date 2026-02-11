@@ -6,7 +6,7 @@
 
 const parent_dir = joinpath(@__DIR__, "..", "src")
 
-export build_spline_fortran, build_vacuum_fortran
+export build_vacuum_fortran
 
 function build_fortran()
     ENV["FC"] = get(ENV, "FC", "gfortran")
@@ -32,8 +32,6 @@ function build_fortran()
     ENV["LDFLAGS"] = "-shared"
 
     results = [
-        # build_jpec_fortran() add here
-        build_spline_fortran(),
         build_vacuum_fortran()
     ]
 
@@ -43,18 +41,6 @@ function build_fortran()
         @error "Some Fortran builds failed."
     end
 
-end
-
-function build_spline_fortran()
-    dir = joinpath(parent_dir, "Splines", "fortran")
-    try
-        run(pipeline(`make -C $dir`))
-        @info "Splines-fortran compiled well"
-        return true
-    catch e
-        @error "Failed to build Splines-fortran: $e"
-        return false
-    end
 end
 
 function build_vacuum_fortran()
@@ -83,4 +69,3 @@ end
 #         return false
 #     end
 # end
-

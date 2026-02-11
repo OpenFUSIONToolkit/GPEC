@@ -16,6 +16,8 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `power_bp::Int` - Poloidal field power exponent for Jacobian
   - `power_b::Int` - Toroidal field power exponent for Jacobian
   - `power_r::Int` - Major radius power exponent for Jacobian
+  - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
+  - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
@@ -29,6 +31,8 @@ Bundles all necessary settings originally specified in the equil fortran namelis
 @kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
     eq_filename::String = "mypath"
+    r0exp::Float64 = 1.0
+    b0exp::Float64 = 1.0
 
     jac_type::String = "hamada"
     power_bp::Int = 0
@@ -50,7 +54,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumConfig(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
+    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
         grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
         force_termination, use_galgrid)
         if jac_type == "hamada"
@@ -83,7 +87,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         elseif jac_type != "other"
             error("Cannot recognize jac_type = $(jac_type)")
         end
-        return new(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
+        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
             grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
             force_termination, use_galgrid)
     end
@@ -254,26 +258,30 @@ raw equilibrium data and preparing the initial splines.
      3. `q` — safety factor profile
      4. `√ψ_norm` — square root of normalized flux
   - `psi_in`
-    2D spline data on the (R, Z) grid [m].
-    The z-values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
+    2D cubic interpolant on the (R, Z) grid [m].
+    The values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
     Definitions:
 
      1. `ψ(R, Z) = ψ_boundary - ψ(R, Z)`
 
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
-          * 1D profiles are represented by `CubicSpline`
-          * 2D flux surfaces by `BicubicSpline`
+          * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
+          * 2D flux surfaces by `CubicInterpolantND`
+  - `psi_in_xs::Vector{Float64}` — R coordinate grid for psi_in [m]
+  - `psi_in_ys::Vector{Float64}` — Z coordinate grid for psi_in [m]
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput
+mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
-    sq_in::Spl.CubicSpline{Float64}       # 1D profile spline (CubicSpline)
-    psi_in::Spl.BicubicSpline      # 2D flux spline (BicubicSpline)
+    sq_in::S       # 1D profile spline for F, P, q
+    psi_in::I2D    # 2D flux interpolant (CubicInterpolantND)
+    psi_in_xs::Vector{Float64}  # R coordinates
+    psi_in_ys::Vector{Float64}  # Z coordinates
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
@@ -289,19 +297,25 @@ A container struct for inputs to the `inverse_run` function.
 ## Fields
 
   - `config::EquilibriumConfig` - The equilibrium configuration object
-  - `sq_in::Spl.CubicSpline{Float64}` - 1D spline input profile (F*Bt, Pressure, q)
-  - `rz_in::Spl.BicubicSpline` - 2D bicubic spline for (R,Z) geometry
+  - `sq_in::CubicSeriesInterpolant` - 1D profile spline for F, P, q
+  - `rz_in_xs::Vector{Float64}` - ψ coordinate grid for rz_in
+  - `rz_in_ys::Vector{Float64}` - θ coordinate grid for rz_in
+  - `rz_in_R::CubicInterpolantND` - R coordinate interpolant [m]
+  - `rz_in_Z::CubicInterpolantND` - Z coordinate interpolant [m]
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput
+mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
-    sq_in::Spl.CubicSpline{Float64}   # 1D spline input profile (e.g. F*Bt, Pressure, q)
-    rz_in::Spl.BicubicSpline # 2D bicubic spline input for (R,Z) geometry
-    ro::Float64          # R axis location
-    zo::Float64          # Z axis location
-    psio::Float64        # Total flux difference |psi_axis - psi_boundary|
+    sq_in::S   # 1D profile spline for F, P, q
+    rz_in_xs::Vector{Float64}   # ψ coordinates
+    rz_in_ys::Vector{Float64}   # θ coordinates
+    rz_in_R::I2D                # R coordinate interpolant
+    rz_in_Z::I2D                # Z coordinate interpolant
+    ro::Float64                 # R axis location
+    zo::Float64                 # Z axis location
+    psio::Float64               # Total flux difference |psi_axis - psi_boundary|
 end
 
 """
@@ -416,6 +430,84 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
 end
 
 """
+    ProfileSplines
+
+Named 1D cubic spline interpolants for equilibrium profiles.
+Each profile is stored as a separate spline for code clarity.
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared x-axis (normalized psi)
+  - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
+  - `P_spline`: μ₀*P (plasma pressure × μ₀)
+  - `dVdpsi_spline`: dV/dψ (volume derivative)
+  - `q_spline`: q (safety factor)
+
+# Derivative Interpolants (for continuous derivative evaluation)
+
+  - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
+
+# Notes
+
+  - Node values at grid points: Access via `spline.y[i]`
+  - Derivative at any point: Call `deriv(x)` (derivative views are callable)
+  - Grid: Access via `xs` field or `spline.cache.x`
+"""
+struct ProfileSplines{S,D}
+    xs::Vector{Float64}
+    npts::Int          # length(xs), avoids redundant length() calls
+    npts_minus_1::Int  # npts - 1, for hint at last interval
+    # Value interpolants
+    F_spline::S
+    P_spline::S
+    dVdpsi_spline::S
+    q_spline::S
+    # Derivative views (callable, share data with value interpolants)
+    F_deriv::D
+    P_deriv::D
+    dVdpsi_deriv::D
+    q_deriv::D
+end
+
+"""
+    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=:extension)
+
+Create ProfileSplines from arrays of profile values.
+Uses CubicFit boundary conditions with extension extrapolation.
+"""
+function ProfileSplines(xs::Vector{Float64},
+    F_vals::Vector{Float64},
+    P_vals::Vector{Float64},
+    dVdpsi_vals::Vector{Float64},
+    q_vals::Vector{Float64};
+    extrap::Symbol=:extension)
+    npts = length(xs)
+    npts_minus_1 = npts - 1
+    @assert length(F_vals) == npts
+    @assert length(P_vals) == npts
+    @assert length(dVdpsi_vals) == npts
+    @assert length(q_vals) == npts
+
+    # Create value interpolants with CubicFit BC and LinearBinary search for sequential psi access
+    F_spline = cubic_interp(xs, F_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    P_spline = cubic_interp(xs, P_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    q_spline = cubic_interp(xs, q_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+
+    # Create derivative views (these share data with value interpolants, no extra storage)
+    F_deriv = deriv1(F_spline)
+    P_deriv = deriv1(P_spline)
+    dVdpsi_deriv = deriv1(dVdpsi_spline)
+    q_deriv = deriv1(q_spline)
+
+    ProfileSplines{typeof(F_spline),typeof(F_deriv)}(
+        xs, npts, npts_minus_1,
+        F_spline, P_spline, dVdpsi_spline, q_spline,
+        F_deriv, P_deriv, dVdpsi_deriv, q_deriv
+    )
+end
+
+"""
     PlasmaEquilibrium(...)
 
 The final, self-contained result of the equilibrium reconstruction.
@@ -428,42 +520,56 @@ This object provides a complete representation of the processed plasma equilibri
 
   - `params::EquilibriumParameters`:
     Computed equilibrium parameters and diagnostics.
-  - `sq::CubicSpline{Float64}`:
-    Final 1D profile spline.
+  - `profiles::ProfileSplines`:
+    Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
+    Access values at grid points via `profiles.F_spline.y[i]`, etc.
+    Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
 
-      + **x value:** normalized ψ
-      + **Quantity 1:** Toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
-      + **Quantity 2:** Pressure × μ₀, `P * μ₀`
-      + **Quantity 3:** dV/dψ
-      + **Quantity 4:** q
-  - `rzphi::BicubicSpline`:
-    Final 2D flux-coordinate mapping spline.
+  - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
+      + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
+      + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
 
+  - **Geometric quantities (rzphi, 4 interpolants):**
+    2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
-      + **Quantity 1:** r_coord² = (R - ro)² + (Z - zo)²
-      + **Quantity 2:** Offset between the geometric poloidal angle (η) and the new angle (θₙₑw), η / (2π) - θₙₑw
-      + **Quantity 3:** ν in ϕ = 2πζ + ν(ψ, θ)
-      + **Quantity 4:** Jacobian
-  - `eqfun::BicubicSpline`:
-    2D spline storing local physics and geometric quantities that vary across flux surfaces.
-    These are precomputed for efficient use in subsequent stability and transport codes.
+      + `rzphi_rsquared::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
+      + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
+      + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
+      + `rzphi_jac::CubicInterpolantND`: Jacobian
 
-      + **x value:** normalized ψ ∈ [0, 1]
-      + **y value:** SFL poloidal angle θₙₑw ∈ [0, 1]
-      + **Quantity 1:** Total magnetic field strength, B [T]
-      + **Quantity 2:** (e₁⋅e₂ + q⋅e₃⋅e₁) / (J⋅B²)
-      + **Quantity 3:** (e₂⋅e₃ + q⋅e₃⋅e₃) / (J⋅B²)
+  - **Physics quantities (eqfun, 3 interpolants):**
+    2D cubic interpolants storing local physics and geometric quantities.
+      + **x value:** normalized ψ
+      + **y value:** SFL poloidal angle θₙₑw
+      + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
+      + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
+      + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
+
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     params::EquilibriumParameters
-    sq::Spl.CubicSpline{Float64}
-    rzphi::Spl.BicubicSpline
-    eqfun::Spl.BicubicSpline
+    profiles::P
+
+    # Grid coordinates (shared by all 2D interpolants)
+    rzphi_xs::Vector{Float64}
+    rzphi_ys::Vector{Float64}
+
+    # Geometric quantities (4 interpolants)
+    rzphi_rsquared::I2D
+    rzphi_offset::I2D
+    rzphi_nu::I2D
+    rzphi_jac::I2D
+
+    # Physics quantities (3 interpolants)
+    eqfun_B::I2D
+    eqfun_metric1::I2D
+    eqfun_metric2::I2D
+
     ro::Float64
     zo::Float64
     psio::Float64

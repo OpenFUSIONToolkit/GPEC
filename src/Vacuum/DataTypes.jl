@@ -11,26 +11,20 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
 
 - `r::Vector{Float64}`: Plasma boundary R-coordinate as a function of poloidal angle
 - `z::Vector{Float64}`: Plasma boundary Z-coordinate as a function of poloidal angle
-- `delta::Vector{Float64}`: Toroidal angle offset: -dφ/qa; 0 for coordinate systems using machine angle (e.g., PEST basis)
+- `ν::Vector{Float64}`: Free parameter in specifying toroidal angle, ϕ = 2πζ + ν(ψ, θ), on theta grid
 - `mlow::Int`: Lower poloidal mode number for spectral representation
-- `mhigh::Int`: Upper poloidal mode number for spectral representation
-- `mpert::Int`: Number of perturbation modes (mhigh - mlow + 1)
-- `n::Int`: The toroidal mode number
-- `qa::Float64`: Safety factor at the plasma boundary
-- `mtheta_eq::Int`: Number of poloidal angles in the input equilibrium boundary arrays
+- `mpert::Int`: Number of poloidal modes (mhigh - mlow + 1)
+- `n::Int`: Toroidal mode number
 - `mtheta::Int`: Number of poloidal grid points for vacuum calculations
 - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
 """
-@kwdef mutable struct VacuumInput
+@kwdef struct VacuumInput
     r::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
-    delta::Vector{Float64} = Float64[]
+    ν::Vector{Float64} = Float64[]
     mlow::Int = 0
-    mhigh::Int = 0
     mpert::Int = 0
     n::Int = 0
-    qa::Float64 = 0.0
-    mtheta_eq::Int = 1
     mtheta::Int = 1
     force_wv_symmetry::Bool = true
     # NOTE: kernelsign parameter deprecated - compute_vacuum_response now computes both grri and grre
@@ -39,22 +33,21 @@ end
 """
     PlasmaGeometry
 
-Struct holding plasma geometry data on the mtheta grid for vacuum calculations.
-
-Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
+Struct holding plasma geometry data on the mtheta grid for vacuum calculations. Arrays are
+of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
+It also precomputes trigonometric basis functions needed for Fourier calculations into matrices
+of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
 
 # Fields
 
-- `x::Vector{Float64}`: Plasma surface R-coordinate
-- `z::Vector{Float64}`: Plasma surface Z-coordinate
-- `delta::Vector{Float64}`: Toroidal angle offset divided by qa (i.e., -ν/qa where ϕ = 2πζ + ν(ψ, θ)) at plasma surface
-- `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
-- `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
+  - `x::Vector{Float64}`: Plasma surface R-coordinate on VACUUM theta grid
+  - `z::Vector{Float64}`: Plasma surface Z-coordinate on VACUUM theta grid
+  - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
+  - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
     z::Vector{Float64}
-    delta::Vector{Float64}
     dx_dtheta::Vector{Float64}
     dz_dtheta::Vector{Float64}
 end
@@ -62,15 +55,14 @@ end
 """
     WallGeometry
 
-Struct holding wall geometry data for vacuum calculations.
-
-Arrays are of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
+Struct holding wall geometry data for vacuum calculations. Arrays are of length
+`mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
 
 # Fields
 
-- `nowall::Bool`: Boolean flag indicating if there is no wall
-- `x::Vector{Float64}`: Wall R-coordinates
-- `z::Vector{Float64}`: Wall Z-coordinates
+ - `nowall::Bool`: Boolean flag indicating if there is no wall
+ - `x::Vector{Float64}`: Wall R-coordinates
+ - `z::Vector{Float64}`: Wall Z-coordinates
 """
 @kwdef struct WallGeometry
     nowall::Bool = true
@@ -86,12 +78,14 @@ Struct containing input settings for vacuum wall geometry.
 # Fields
 
 - `shape::String`: String selecting wall shape. Options are:
-  - `"nowall"`: No wall
-  - `"conformal"`: Wall conformal to plasma surface at distance `a`
-  - `"elliptical"`: Elliptical wall
-  - `"dee"`: Dee-shaped wall
-  - `"mod_dee"`: Modified Dee-shaped wall
-  - `"filepath"`: Custom wall shape from the file you specify
+
+      + `"nowall"`: No wall
+      + `"conformal"`: Wall conformal to plasma surface at distance `a`
+      + `"elliptical"`: Elliptical wall
+      + `"dee"`: Dee-shaped wall
+      + `"mod_dee"`: Modified Dee-shaped wall
+      + `"filepath"`: Custom wall shape from the file you specify
+
 - `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
 - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
 - `bw::Float64`: Elongation parameter for wall shapes
@@ -144,30 +138,26 @@ the necessary plasma surface data for vacuum calculations.
 """
 function initialize_plasma_surface(inputs::VacuumInput)
 
-    # Interpolate arrays from input onto mtheta grid (from readahg in the Fortran)
+    # Interpolate arrays from input onto mtheta grid
     mtheta = inputs.mtheta
     x_plasma = interp_to_new_grid(inputs.r, mtheta)
     z_plasma = interp_to_new_grid(inputs.z, mtheta)
-    delta = interp_to_new_grid(inputs.delta, mtheta)
+    ν  = interp_to_new_grid(inputs.ν , mtheta)
 
-    # Compute derivatives of plasma boundary with respect to poloidal angle θ
-    # All of these arrays are of length mtheta with θ = [0, 1)
-    theta_grid = range(start=0, length=mtheta, step=2π/mtheta)
-    dx_plasma_dtheta = periodic_cubic_deriv(theta_grid, x_plasma)
-    dz_plasma_dtheta = periodic_cubic_deriv(theta_grid, z_plasma)
+    # Plasma boundary theta derivative: length mth with θ = [0, 1)
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+    dx_dtheta = periodic_cubic_deriv(θ_grid, x_plasma)
+    dz_dtheta = periodic_cubic_deriv(θ_grid, z_plasma)
 
     return PlasmaGeometry(
         x_plasma,
         z_plasma,
-        delta,
-        dx_plasma_dtheta,
-        dz_plasma_dtheta
+        ν,
+        dx_dtheta,
+        dz_dtheta
     )
 end
 
-#-----------------------------------------#
-# Functions to initialize data structures #
-#-----------------------------------------#
 """
     initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings) -> WallGeometry
 
@@ -228,14 +218,18 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         dx = a * r_minor
         @info "Calculating conformal wall shape $((@sprintf "%.2e" dx)) m from plasma surface." 
         wcentr = r_major
-        centerstack_min  = min(0.1, 0.1 * minimum(x_plasma))  # Avoid wall crossing R=0 axis
+        centerstack_min = min(0.1, 0.1 * minimum(x_plasma))  # Avoid wall crossing R=0 axis
         for i in 1:mtheta
             j = mod1(i - 1, mtheta)
             k = mod1(i + 1, mtheta)
             # Normal vector calculation
             alph = atan(x_plasma[k] - x_plasma[j], z_plasma[j] - z_plasma[k])
-            x_wall[i] = max(centerstack_min , x_plasma[i] + a * r_minor * cos(alph))
+            x_wall[i] = max(centerstack_min, x_plasma[i] + a * r_minor * cos(alph))
             z_wall[i] = z_plasma[i] + a * r_minor * sin(alph)
+        end
+
+        if any(x_wall .<= centerstack_min + eps(Float64))
+            @warn "Conformal wall with a=$a would cross R=0 axis; forcing minimum wall R to $(@sprintf "%.2e" centerstack_min) m to avoid unphysical geometry."
         end
 
     elseif wall_settings.shape == "elliptical"
@@ -299,91 +293,14 @@ function initialize_wall(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_
         x_wall, z_wall, _, _, _ = distribute_to_equal_arc_grid(x_wall, z_wall, mtheta)
     end
 
+    if any(x_wall .<= 0.0) && !nowall
+        # to add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
+        error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
+    end
+
     return WallGeometry(
         nowall=nowall,
         x=x_wall,
         z=z_wall
     )
-end
-
-"""
-    distribute_to_equal_arc_grid(xin, zin, mw1)
-
-Perform arc length re-parameterization of a 2D curve. 
-
-Takes an input curve defined by `(xin, zin)` coordinates and re-samples it such that
-the new points `(xout, zout)` are equally spaced in arc length along the curve.
-
-# Arguments
-
-- `xin::Vector{Float64}`: Array of x-coordinates of the input curve
-- `zin::Vector{Float64}`: Array of z-coordinates of the input curve
-- `mw1::Int`: Number of points in the input and output curves
-
-# Returns
-
-- `xout::Vector{Float64}`: Array of x-coordinates of the arc-length re-parameterized curve
-- `zout::Vector{Float64}`: Array of z-coordinates of the arc-length re-parameterized curve
-- `ell::Vector{Float64}`: Array of cumulative arc lengths for the input curve
-- `thgr::Vector{Float64}`: Array of re-parameterized 'theta' values corresponding to equal arc lengths
-- `thlag::Vector{Float64}`: Array of normalized 'theta' values for the input curve (0 to 1)
-
-# Notes
-
-- Uses Lagrange interpolation for calculating arc length and resampling
-- Ensures uniform spacing in arc length for improved numerical stability
-"""
-function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}, mtheta::Int)
-
-    # Temporary arrays for interpolation and arc-length calculation
-    theta_in = zeros(Float64, mtheta) # Normalized input parameter [0, 1)
-    theta_out  = zeros(Float64, mtheta) # New parameter distribution for equal spacing
-    xout  = zeros(Float64, mtheta) # Uniformly spaced R-coordinates
-    zout  = zeros(Float64, mtheta) # Uniformly spaced Z-coordinates
-
-    # Define initial normalized parameter theta_in
-    dt = 1.0 / mtheta
-    theta_in .= range(start=0, length=mtheta, step=dt) # θ ∈ [0, 1)
-    # we need a closed loop for arc length calculation
-    mtheta1 = mtheta + 1
-    xin1 = vcat(xin, xin[1])
-    zin1 = vcat(zin, zin[1])
-    theta_in1 = vcat(theta_in, [1.0])
-    ell   = zeros(Float64, mtheta1) # Cumulative arc length of closed loop
-
-    # Calculate cumulative arc length using numerical integration
-    # We use a mid-point derivative approximation to find the path length
-    for iw in 2:mtheta1
-        # Evaluate derivative at the midpoint of the interval
-        theta = (theta_in1[iw] + theta_in1[iw - 1]) / 2.0
-        
-        # Calculate dx/dt and dz/dt using Lagrange interpolation (order 3)
-        _, d_xin = lagrange1d(theta_in1, xin1, mtheta1, 3, theta, 1)
-        _, d_zin = lagrange1d(theta_in1, zin1, mtheta1, 3, theta, 1)
-
-        # Instantaneous speed (ds/dt)
-        ds_dt = sqrt(d_xin^2 + d_zin^2)
-        
-        # Accumulate length: ds = (ds/dt) * dt
-        ell[iw] = ell[iw - 1] + ds_dt * dt
-    end
-
-    # Re-parameterize based on equal arc-length segments
-    ell_targets = collect(range(0, step=ell[end]/mtheta, length=mtheta)) # [0, Length) for open loop result
-    for i in 2:mtheta
-        # Find the value of 'theta_in' that corresponds to the target arc length 's'
-        f_th, _ = lagrange1d(ell, theta_in1, mtheta1, 3, ell_targets[i], 0)
-        theta_out[i] = f_th
-    end
-
-    # Interpolate the original (x,z) data at the new parameter points to get (xout, zout)
-    # Chance interpolates in theta_out to get xin, zin but this introduces small errors in arc lengths
-    for i in 1:mtheta
-        f_x, _ = lagrange1d(ell, xin1, mtheta1, 3, ell_targets[i], 0)
-        f_z, _ = lagrange1d(ell, zin1, mtheta1, 3, ell_targets[i], 0)
-        xout[i] = f_x
-        zout[i] = f_z
-    end
-        
-    return xout, zout, ell, theta_out, theta_in
 end

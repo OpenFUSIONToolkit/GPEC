@@ -1,16 +1,4 @@
 """
-    sing_scan!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
-
-Scan all singular surfaces and calculate asymptotic vmat and mmat matrices
-and Mericer criterion. Performs the same function as `sing_scan` in the Fortran code.
-"""
-function sing_scan!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars)
-    for ising in 1:intr.msing
-        sing_vmat!(intr, ctrl, equil, ffit, ising)
-    end
-end
-
-"""
     sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
 Locate singular rational q-surfaces (q = m/nn) using a bisection method
@@ -19,8 +7,11 @@ Performs the same function as `sing_find` in the Fortran code.
 """
 function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
 
+    profiles = equil.profiles
+
     # Loop over all toroidal mode numbers
     for n in intr.nlow:intr.nhigh
+        hint = Ref(1)
         # Loop over extrema of q, find all rational values in between
         for iex in 2:equil.params.mextrema
             dq = equil.params.qextrema_q[iex] - equil.params.qextrema_q[iex-1]
@@ -32,7 +23,6 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
 
             # Loop over possible m's in interval
             while (m - n * equil.params.qextrema_q[iex-1]) * (m - n * equil.params.qextrema_q[iex]) <= 0
-                it = 0
                 psi0 = equil.params.qextrema_psi[iex-1]
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
@@ -41,8 +31,8 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
                 converged = false
                 for _ in 1:itmax
                     psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * Spl.spline_eval!(equil.sq, psifac)[4]) * dm
-                    abs(singfac) < 1e-8 && (converged = true; break)
+                    singfac = (m - n * profiles.q_spline(psifac; hint=hint)) * dm
+                    abs(singfac) < 1e-8 && (converged=true; break)
                     singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
                 end
 
@@ -60,7 +50,7 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
                         psifac=psifac,
                         rho=sqrt(psifac),
                         q=m / n,
-                        q1=Spl.spline_deriv1!(equil.sq, psifac)[2][4]
+                        q1=profiles.q_deriv(psifac; hint=hint)
                     ))
                     intr.msing += 1
                 end
@@ -69,7 +59,7 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
         end
     end
     # Sort singular surfaces by increasing ψ
-    intr.sing = sort(intr.sing, by = s -> s.psifac)
+    intr.sing = sort(intr.sing; by=s -> s.psifac)
 end
 
 """
@@ -93,9 +83,11 @@ or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are 
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
+    profiles = equil.profiles
+
     # Initial guesses based on equilibrium
     intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = equil.sq.fs1[end, 4]
+    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.psihigh
 
     # Optionally override qlim based on dmlim
@@ -117,21 +109,18 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(equil.sq.fs[:, 4] .- intr.qlim))
+        _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
         jpsi = min(jpsi, equil.config.mpsi - 1)
 
-        # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
-
-        intr.psilim = equil.sq.xs[jpsi]
+        intr.psilim = profiles.xs[jpsi]
         converged = false
+        hint = Ref(jpsi)
         for _ in 1:itmax
-            dpsi = (intr.qlim - qval(intr.psilim)) / q1val(intr.psilim)
+            dpsi = (intr.qlim - profiles.q_spline(intr.psilim; hint=hint)) / profiles.q_deriv(intr.psilim; hint=hint)
             intr.psilim += dpsi
             if abs(dpsi) < eps * abs(intr.psilim)
                 converged = true
-                intr.q1lim = q1val(intr.psilim)
+                intr.q1lim = profiles.q_deriv(intr.psilim)
                 break
             end
         end
@@ -142,101 +131,96 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
-    sing_vmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+    compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-Calculate asymptotic vmat and mmat matrices and Mercier criterion for
-singular surface `ising`. Performs the same function as `sing_vmat` in the Fortran code.
-Main differences are 1-indexing for the expansion orders. See equations 41-48 in
-the 2016 Glasser DCON paper for the mathematical details.
+Calculate asymptotic vmat and mmat matrices for a singular surface.
+Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data instead of
+mutating the `SingType` struct. This makes it clear that asymptotics are computed on-demand
+for ideal DCON and are not inherent properties of the singular surface.
+
+See equations 41-48 in the 2016 Glasser DCON paper for the mathematical details.
 
 ### Arguments
 
-  - `ising::Int`: Index of the singular surface to process (1 to `intr.msing`)
+  - `singp::SingType`: Singular surface parameters
+  - Other standard DCON parameters
 
-### TODOs
+### Returns
 
-Check logic on typing of di
+  - `SingAsymptotics`: Struct containing all asymptotic expansion data
 """
-function sing_vmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Allocations
-    singp = intr.sing[ising]
-    singp.vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 1)
-    singp.mmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 3)
-    singp.power = zeros(ComplexF64, 2 * intr.numpert_total)
+    vmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 1)
+    mmat = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, 2 * ctrl.sing_order + 3)
+    power = zeros(ComplexF64, 2 * intr.numpert_total)
 
     # Compute the resonant (r) and nonresonant (n) indices of the shearing transformation matrix R
     # 1 indexes along the N*M dimension, and 2 along the 2*N*M dimension
     # In 2D, see eq. 41 of 2016 Glasser DCON paper
     # TODO: if we remove the 3rd dimension, no need for both r1 and r2
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    singp.r1 = ipert_res
-    singp.r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
-    singp.n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
-    singp.n2 = vec([i + j * intr.numpert_total for j in 0:1, i in singp.n1])
-
-    psifac = singp.psifac
-    q = singp.q
-    di0 = Spl.spline_eval!(intr.locstab, singp.psifac)[1] / singp.psifac
-    q1 = singp.q1
-    rho = singp.rho
+    r1 = ipert_res
+    r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
+    n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
+    n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
 
     # Compute Mercier criterion and singular power
-    sing_mmat!(intr, ctrl, equil, ffit, ising)
+    compute_sing_mmat!(mmat, singp, ctrl, equil.profiles, ffit, intr)
+
     # TODO: My approach for the following logic is to mimic the existing code but go block by block
     # in m0mat (i.e. looping through each resonance). I think it works for 2D, probably not 3D
     # Note: We only need the transpose here because the third dimension corresponds to the bottom half of the 2N X 2N matrix
     # If we get rid of the 3rd dimension, this becomes simpler
-    if length(singp.r1) == 1
-        singp.m0mat = transpose(singp.mmat[singp.r1[1], singp.r2, :, 1])
+    m0mat = if length(r1) == 1
+        Matrix(transpose(mmat[r1[1], r2, :, 1]))
     else
-        singp.m0mat = vcat([transpose(singp.mmat[singp.r1[i], singp.r2, :, 1]) for i in eachindex(singp.r1)]...)
+        Matrix(vcat([transpose(mmat[r1[i], r2, :, 1]) for i in eachindex(r1)]...))
     end
 
-    singp.alpha = eigen(singp.m0mat).values[length(singp.r1)+1:end] # take the M largest eigenvalues
-    # In 3D, need to do a surface average to obtain the di computed in Mercier.jl
-    # In 2D, I think alphas are the same for all resonances so can just take the first index
-    singp.di = -real(singp.alpha[1]^2)
+    alpha = eigen(m0mat).values[(length(r1)+1):end] # take the M largest eigenvalues
 
     # This is the parameter α but for all modes - α = 0 for non-resonant modes
-    singp.power[ipert_res] .= -singp.alpha
-    singp.power[ipert_res .+ intr.numpert_total] .= singp.alpha
+    power[ipert_res] .= -alpha
+    power[ipert_res .+ intr.numpert_total] .= alpha
 
     # Zeroth-order non-resonant solutions
     # TODO: without the third dimension, this is just setting to the identity
-    singp.vmat .= 0
     for ipert in 1:intr.numpert_total
-        singp.vmat[ipert, ipert, 1, 1] = 1
-        singp.vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
+        vmat[ipert, ipert, 1, 1] = 1
+        vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
     end
-    
+
     # Zeroth-order resonant solutions - solve (M₀ - αI)v₀ = 0
     # TODO: this will probably need a better generalization in 3D
-    for i in eachindex(singp.r1) # go block by block in M₀
-        m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
-        r1 = singp.r1[i]
-        r2 = r1 + intr.numpert_total
-        alpha = singp.alpha[i]
-        singp.vmat[r1, r1, 1, 1] = 1
-        singp.vmat[r1, r2, 1, 1] = 1
-        singp.vmat[r1, r1, 2, 1] = -(m0mat[1, 1] + alpha) / m0mat[1, 2]
-        singp.vmat[r1, r2, 2, 1] = -(m0mat[1, 1] - alpha) / m0mat[1, 2]
-        det = conj(singp.vmat[r1, r1, 1, 1]) * singp.vmat[r1, r2, 2, 1] -
-            conj(singp.vmat[r1, r2, 1, 1]) * singp.vmat[r1, r1, 2, 1]
-        singp.vmat[r1, :, :, 1] ./= sqrt(det)
+    for i in eachindex(r1) # go block by block in M₀
+        m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+        r1_i = r1[i]
+        r2_i = r1_i + intr.numpert_total
+        alpha_i = alpha[i]
+        vmat[r1_i, r1_i, 1, 1] = 1
+        vmat[r1_i, r2_i, 1, 1] = 1
+        vmat[r1_i, r1_i, 2, 1] = -(m0mat_block[1, 1] + alpha_i) / m0mat_block[1, 2]
+        vmat[r1_i, r2_i, 2, 1] = -(m0mat_block[1, 1] - alpha_i) / m0mat_block[1, 2]
+        det = conj(vmat[r1_i, r1_i, 1, 1]) * vmat[r1_i, r2_i, 2, 1] -
+              conj(vmat[r1_i, r2_i, 1, 1]) * vmat[r1_i, r1_i, 2, 1]
+        vmat[r1_i, :, :, 1] ./= sqrt(det)
     end
 
     # Higher order solutions - need to solve iteratively
-    for k in 1:2*ctrl.sing_order
-        sing_solve!(singp, intr, k)
+    for k in 1:(2*ctrl.sing_order)
+        solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k)
     end
+
+    return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
 end
 
 """
-    sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+    compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-Calculate asymptotic mmat matrix for singular surface `ising`. Performs the same
-function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
+Calculate asymptotic mmat matrix for a singular surface. Formerly `sing_mmat!`.
+Performs the same function as `sing_mmat` in the Fortran code. Main differences are 1-indexing for
 the expansion orders and using dense matrices instead of banded. We keep the Fortran
 convention of only filling in the lower half of the Hermitian matrices, and wrap the
 subsequent multiplications in `Hermitian()` calls to take advantage of the symmetry.
@@ -253,7 +237,8 @@ and then reconstructing mmat from x.
 
 ### Arguments
 
-  - `ising::Int`: Index of the singular surface to process (1 to `intr.msing`)
+  - `mmat::Array{ComplexF64,4}`: Output array to store the computed mmat values
+  - `singp::SingType`: Singular surface parameters
 
 ### TODOs
 
@@ -262,10 +247,14 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, ising::Int)
+function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+
+    q_spline = profiles.q_spline
+    q_d1 = profiles.q_deriv
+    q_d2 = deriv2(q_spline)
+    q_d3 = deriv3(q_spline)
 
     # Initial allocations
-    singp = intr.sing[ising]
     q = @MVector zeros(Float64, 4)
     singfac = zeros(Float64, intr.numpert_total, 4)
     f_lower_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
@@ -279,16 +268,34 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
     v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
-    # Evaluate cubic splines
-    q .= getindex.(Spl.spline_deriv3!(equil.sq, singp.psifac), 4)
-    f_lower_interp[:, :, 1], f_lower_interp[:, :, 2], f_lower_interp[:, :, 3], f_lower_interp[:, :, 4] = Spl.spline_deriv3!(ffit.fmats_lower, singp.psifac)
-    g_interp[:, :, 1], g_interp[:, :, 2], g_interp[:, :, 3], g_interp[:, :, 4] = Spl.spline_deriv3!(ffit.gmats, singp.psifac)
-    k_interp[:, :, 1], k_interp[:, :, 2], k_interp[:, :, 3], k_interp[:, :, 4] = Spl.spline_deriv3!(ffit.kmats, singp.psifac)
+    # Evaluate q spline and its derivatives
+    q .= (q_spline(singp.psifac),
+        q_d1(singp.psifac),
+        q_d2(singp.psifac),
+        q_d3(singp.psifac))
+
+    # Evaluate fmats_lower and derivatives using series interpolants
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=3)
+
+    # Evaluate gmats and derivatives
+    ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=3)
+
+    # Evaluate kmats and derivatives
+    ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
+    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
     for i in 2:4
-        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i], inner=intr.mpert)
+        singfac[:, i] .= repeat(-(intr.nlow:intr.nhigh) .* q[i]; inner=intr.mpert)
     end
     # For resonant modes mᵢ - nᵢq(ψ) = [-nᵢq', -nᵢq'', -nᵢq'''] - shift up terms by 1 index
     # Add scaling to account for hardcoding coefficients in computations below
@@ -306,13 +313,13 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
     # f_lower = QL̄ = [QL̄, QL̄' + Q' L̄, 1/2 (QL̄'' + 2Q' L̄' + QQ'' L̄), 1/6 (QL̄''' + 3Q' L̄'' + 3Q'' L̄' + Q'''L̄), ...] (but without 1/2, 1/6, etc)
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 f_lower[ipert, jpert, 1] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 1]
                 if ctrl.sing_order ≥ 1
                     f_lower[ipert, jpert, 2] = singfac[ipert, 1] * f_lower_interp[ipert, jpert, 2] +
-                                            singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
+                                               singfac[ipert, 2] * f_lower_interp[ipert, jpert, 1]
                 end
                 if ctrl.sing_order ≥ 2
                     f_lower[ipert, jpert, 3] =
@@ -335,7 +342,7 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 end
                 if ctrl.sing_order ≥ 5
                     f_lower[ipert, jpert, 6] = 10 * singfac[ipert, 3] * f_lower_interp[ipert, jpert, 4] +
-                                            10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
+                                               10 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 3]
                 end
                 if ctrl.sing_order ≥ 6
                     f_lower[ipert, jpert, 7] = 20 * singfac[ipert, 4] * f_lower_interp[ipert, jpert, 4]
@@ -357,8 +364,8 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
         for j in 0:n
             for ipert_n in 1:intr.npert
                 for jpert_m in 1:intr.mpert
-                    for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
-                        for kpert_m in max(1, ipert_m - intr.mband):jpert_m
+                    for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
+                        for kpert_m in max(1, ipert_m-intr.mband):jpert_m
                             ipert = ipert_m + (ipert_n - 1) * intr.mpert
                             jpert = jpert_m + (ipert_n - 1) * intr.mpert
                             kpert = kpert_m + (ipert_n - 1) * intr.mpert
@@ -377,13 +384,13 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
     # K = [QK̄, QK̄' + Q'K̄, QK̄''/2 + Q'K̄' + Q̄''K̄/2, ...]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in max(1, jpert_m - intr.mband):min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in max(1, jpert_m-intr.mband):min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 k[ipert, jpert, 1] = singfac[ipert, 1] * k_interp[ipert, jpert, 1]
                 if ctrl.sing_order ≥ 1
                     k[ipert, jpert, 2] = singfac[ipert, 1] * k_interp[ipert, jpert, 2] +
-                                        singfac[ipert, 2] * k_interp[ipert, jpert, 1]
+                                         singfac[ipert, 2] * k_interp[ipert, jpert, 1]
                 end
                 if ctrl.sing_order ≥ 2
                     k[ipert, jpert, 3] =
@@ -406,7 +413,7 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 end
                 if ctrl.sing_order ≥ 5
                     k[ipert, jpert, 6] = singfac[ipert, 3] * k_interp[ipert, jpert, 4] / 12 +
-                                        singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
+                                         singfac[ipert, 4] * k_interp[ipert, jpert, 3] / 12
                 end
                 if ctrl.sing_order ≥ 6
                     k[ipert, jpert, 7] = singfac[ipert, 4] * k_interp[ipert, jpert, 4] / 36
@@ -419,7 +426,7 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
     # G = [G, G', G''/2, G'''/6]
     for ipert_n in 1:intr.npert
         for jpert_m in 1:intr.mpert
-            for ipert_m in jpert_m:min(intr.mpert, jpert_m + intr.mband)
+            for ipert_m in jpert_m:min(intr.mpert, jpert_m+intr.mband)
                 ipert = ipert_m + (ipert_n - 1) * intr.mpert
                 jpert = jpert_m + (ipert_n - 1) * intr.mpert
                 g_lower[ipert, jpert, 1] = g_interp[ipert, jpert, 1]
@@ -445,14 +452,14 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
 
     # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
     # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
-    for isol in 1:2*intr.numpert_total
+    for isol in 1:(2*intr.numpert_total)
         @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
     # Higher-order: ∑Fⱼx¹ₙ₋ⱼ = -Kₙv¹ → x¹ₙ = F₀⁻¹(-∑Fⱼxₙ₋ⱼ - Kₙv¹)
     for i in 1:ctrl.sing_order
-        for isol in 1:2*intr.numpert_total
+        for isol in 1:(2*intr.numpert_total)
             for j in 1:i
                 @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
             end
@@ -463,7 +470,7 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
 
     # Solve x²ₙ = (G - K^†F⁻¹K)v¹ + K^†F⁻¹v² = Gₙv¹ + ∑Kⱼ^† x¹ₙ₋ⱼ at each order
     for i in 0:ctrl.sing_order
-        for isol in 1:2*intr.numpert_total
+        for isol in 1:(2*intr.numpert_total)
             for j in 0:i
                 x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
             end
@@ -473,64 +480,83 @@ function sing_mmat!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
 
     # Assemble power series coefficients of M = zS⁻¹(LS - S') at each order in √z
     # eq. 28 in Glasser 2023 PoP paper
-    singp.mmat .= 0
-    r1 = singp.r1
-    r2 = singp.r2
-    n1 = singp.n1
-    n2 = singp.n2
+    # Compute resonant and nonresonant indices
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+    r1 = ipert_res
+    r2 = vec([ipert_res[i] + j * intr.numpert_total for j in 0:1, i in eachindex(ipert_res)])
+    n1 = [i for i in 1:intr.numpert_total if !(i in ipert_res)]
+    n2 = vec([i + j * intr.numpert_total for j in 0:1, i in n1])
+
     j = 0
     # Start with the S⁻¹LS components
     # Glasser PoP 2023 eq. 39: at each other of L, we get contributions to z^k from RLR,
     # z^k+0.5 from RLA and ALR, and z^k+1 from ALA (where A is the nonresonant part)
     for i in 0:ctrl.sing_order
-        singp.mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
-        singp.mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
-        singp.mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
-        singp.mmat[n1, n2, :, j+3] .= x[n1, n2, :, i+1]
+        mmat[r1, r2, :, j+1] .= x[r1, r2, :, i+1]
+        mmat[r1, n2, :, j+2] .= x[r1, n2, :, i+1]
+        mmat[n1, r2, :, j+2] .= x[n1, r2, :, i+1]
+        mmat[n1, n2, :, j+3] .= x[n1, n2, :, i+1]
         # Expansion of M is in half powers of z due to shearing transformation, so we jump by 2
         j += 2
     end
     # Apply the effect of the shearing transformation to the resonant indices R
     # Glasser PoP 2023 eq. 25 + 28: M = zS⁻¹LS - zS⁻¹S' = zS⁻¹LS + 0.5 [R, 0; 0, -R], 0ᵗʰ order only
     for i in eachindex(r1)
-        singp.mmat[r1[i], r2[2 * i - 1], 1, 1] += 0.5
-        singp.mmat[r1[i], r2[2 * i], 2, 1] -= 0.5
+        mmat[r1[i], r2[2*i-1], 1, 1] += 0.5
+        mmat[r1[i], r2[2*i], 2, 1] -= 0.5
     end
 end
 
 """
-    sing_solve!(singp::SingType, k::Int)
+    solve_higher_order_vmat!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::DconInternal, k::Int)
 
-Solves iteratively for the next order in the power series `singp.vmat`.
-See equation 47 in the Glass 2016 DCON paper. Identical to the Fortran
-`sing_solve` subroutine.
+Solves iteratively for the next order in the power series `vmat`.
+See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
+`sing_solve` subroutine. Now takes individual arrays instead of singp struct.
 
-## Arguments
+### Arguments
 
-  - `singp::SingType`: The singular surface data structure containing all relevant matrices and parameters.
-  - `k::Int`: The current order in the power series expansion.
+  - `vmat::Array{ComplexF64,4}`: V matrix power series (modified in-place)
+  - `mmat::Array{ComplexF64,4}`: M matrix power series
+  - `m0mat::Matrix{ComplexF64}`: Zeroth order M matrix
+  - `alpha::Vector{ComplexF64}`: Eigenvalues of M₀ for resonant modes
+  - `r1, r2, n1, n2::Vector{Int}`: Resonant and nonresonant indices
+  - `power::Vector{ComplexF64}`: α values for all modes (0 for nonresonant)
+  - `k::Int`: The current order in the power series expansion
 """
-function sing_solve!(singp::SingType, intr::ForceFreeStatesInternal, k::Int)
-    # TODO: rename this solver_higher_order_vmat?
+function solve_higher_order_vmat!(
+    vmat::Array{ComplexF64,4},
+    mmat::Array{ComplexF64,4},
+    m0mat::Matrix{ComplexF64},
+    alpha::Vector{ComplexF64},
+    r1::Vector{Int},
+    r2::Vector{Int},
+    n1::Vector{Int},
+    n2::Vector{Int},
+    power::Vector{ComplexF64},
+    intr::ForceFreeStatesInternal,
+    k::Int
+)
+
     # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
-        singp.vmat[:, :, :, k+1] .+= sing_matmul(singp.mmat[:, :, :, l+1], singp.vmat[:, :, :, k-l+1])
+        vmat[:, :, :, k+1] .+= sing_matmul(mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
     end
-    for isol in 1:2*intr.numpert_total
-        for i in eachindex(singp.r1) # go block by block?
+    for isol in 1:(2*intr.numpert_total)
+        for i in eachindex(r1) # go block by block?
             # a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ (for multi-n 2D, we make a the ith block fo M₀)
-            m0mat = singp.m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
-            a = copy(m0mat)
-            a[1, 1] -= k / 2.0 + singp.power[isol]
-            a[2, 2] -= k / 2.0 + singp.power[isol]
+            m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+            a = copy(m0mat_block)
+            a[1, 1] -= k / 2.0 + power[isol]
+            a[2, 2] -= k / 2.0 + power[isol]
             det = a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]
             # Solve the resonant indices
-            x = -singp.vmat[singp.r1[i], isol, :, k+1]
-            singp.vmat[singp.r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
-            singp.vmat[singp.r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
+            x = -vmat[r1[i], isol, :, k+1]
+            vmat[r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
+            vmat[r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
         end
         # Solve the non-resonant indices (the eigenvalue α = 0, so M₀v = 0 (null space))
-        singp.vmat[singp.n1, isol, :, k+1] ./= (singp.power[isol] + k / 2.0)
+        vmat[n1, isol, :, k+1] ./= (power[isol] + k / 2.0)
     end
 end
 
@@ -540,7 +566,7 @@ end
 Matrix multiplication specific to singular matrices.
 Identical to the Fortran `sing_matmul` subroutine.
 
-## Arguments
+### Arguments
 
   - `a::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
   - `b::Array{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
@@ -566,7 +592,7 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
             @views c[:, i, j] .+= tmp
-            @views mul!(tmp, a[:, m+1:2*m, j], b[:, i, 2])
+            @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
             @views c[:, i, j] .+= tmp
         end
     end
@@ -575,45 +601,45 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
 end
 
 """
-    sing_get_ua(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
+    sing_get_ua(sing_asymp::SingAsymptotics, z::Float64) -> ua
 
 Compute the asymptotic series solution for a given singular surface.
-Fills and returns `ua` with the asymptotic solution vmat computed in
-`sing_vmat`. We obtain the solution using equations 45 and 41 in the
-2016 DCON paper. Performs the same function as `sing_get_ua` in the
-Fortran code.
+Fills and returns `ua` with the asymptotic solution vmat from the provided asymptotics.
+We obtain the solution using equations 45 and 41 in the 2016 DCON paper.
+Performs the same function as `sing_get_ua` in the Fortran code.
+
+### Arguments
+
+  - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data
+  - `z::Float64`: Distance from singular surface = ψ - ψ_res (Note this is -dpsi from cross_ideal_singular_surf)
 """
-function sing_get_ua(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
+function sing_get_ua(sing_asymp::SingAsymptotics, z::Float64)
 
-    singp = intr.sing[odet.ising]
-    r1 = singp.r1
-    r2 = singp.r2
-
-    # Compute distance from singular surface (z)
-    dpsi = odet.psifac - singp.psifac
-    sqrtfac = sqrt(complex(dpsi))
+    r1 = sing_asymp.r1
+    r2 = sing_asymp.r2
+    sqrt_z = sqrt(complex(z)) # √z
 
     # Compute power series via Horner's method (eq. 45 in Glasser 2016)
-    ua = copy(singp.vmat[:, :, :, 2*ctrl.sing_order+1])
-    for iorder in (2*ctrl.sing_order-1):-1:0
-        ua .= ua .* sqrtfac .+ singp.vmat[:, :, :, iorder+1] # sqrtfac becomes √zᵏ here
+    ua = copy(sing_asymp.vmat[:, :, :, 2*sing_asymp.sing_order+1])
+    for iorder in (2*sing_asymp.sing_order-1):-1:0
+        ua .= ua .* sqrt_z .+ sing_asymp.vmat[:, :, :, iorder+1] # sqrt_z becomes √zᵏ here
     end
 
     # Loop through resonances - this might change in 3D
     for i in eachindex(r1)
         # Form full power series solution for v by multiplying by zᵅ (eq. 45 in Glasser 2016)
-        pfac = abs(dpsi).^singp.alpha[i] # zᵅ
-        ua[:, r2[2 * i - 1], :] ./= pfac # /zᵅ = z⁻ᵅ
-        ua[:, r2[2 * i], :] .*= pfac
+        pfac = abs(z) .^ sing_asymp.alpha[i] # zᵅ
+        ua[:, r2[2*i-1], :] ./= pfac # /zᵅ = z⁻ᵅ
+        ua[:, r2[2*i], :] .*= pfac
 
         # Apply shearing transformation u = Rv (eq. 41 in Glasser 2016)
-        ua[r1[i], :, 1] ./= sqrtfac # z^-0.5
-        ua[r1[i], :, 2] .*= sqrtfac # z^0.5
+        ua[r1[i], :, 1] ./= sqrt_z # z^-0.5
+        ua[r1[i], :, 2] .*= sqrt_z # z^0.5
 
         # Renormalize
-        if odet.psifac < singp.psifac
-            ua[:, r2[2 * i - 1], :] .*= abs(ua[r1[i], r2[2 * i - 1], 1]) / ua[r1[i], r2[2 * i - 1], 1]
-            ua[:, r2[2 * i], :] .*= abs(ua[r1[i], r2[2 * i], 1]) / ua[r1[i], r2[2 * i], 1]
+        if z < 0
+            ua[:, r2[2*i-1], :] .*= abs(ua[r1[i], r2[2*i-1], 1]) / ua[r1[i], r2[2*i-1], 1]
+            ua[:, r2[2*i], :] .*= abs(ua[r1[i], r2[2*i], 1]) / ua[r1[i], r2[2*i], 1]
         end
     end
 
@@ -621,25 +647,29 @@ function sing_get_ua(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal
 end
 
 """
-    sing_get_ca(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
+    sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
 
 Compute the asymptotic expansion coefficients according to equation
 50 in Glasser 2016 DCON paper. Performs the same function as
 `sing_get_ca` in the Fortran code.
-"""
-function sing_get_ca(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
 
-    ua = sing_get_ua(ctrl, intr, odet)
+### Arguments
+
+  - `u::Array{ComplexF64,3}`: Current solution matrix, shape (numpert_total, numpert_total, 2)
+  - `ua::Array{ComplexF64,3}`: Asymptotic solution matrix, shape (numpert_total, numpert_total, 2)
+  - `intr::ForceFreeStatesInternal`: Internal ForceFreeStates data containing perturbation dimensions
+"""
+function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::ForceFreeStatesInternal)
 
     # Build temp1
     temp1 = zeros(ComplexF64, 2 * intr.numpert_total, 2 * intr.numpert_total)
     temp1[1:intr.numpert_total, :] .= ua[:, :, 1]
-    temp1[intr.numpert_total+1:2*intr.numpert_total, :] .= ua[:, :, 2]
+    temp1[(intr.numpert_total+1):(2*intr.numpert_total), :] .= ua[:, :, 2]
 
     # Built temp2
     temp2 = zeros(ComplexF64, 2 * intr.numpert_total, intr.numpert_total)
-    temp2[1:intr.numpert_total, :] .= odet.u[:, :, 1]
-    temp2[intr.numpert_total+1:2*intr.numpert_total, :] .= odet.u[:, :, 2]
+    temp2[1:intr.numpert_total, :] .= u[:, :, 1]
+    temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
 
     # LU factorization and solve
     temp2 .= lu(temp1) \ temp2
@@ -647,7 +677,7 @@ function sing_get_ca(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal
     # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
-    ca[:, :, 2] .= temp2[intr.numpert_total+1:2*intr.numpert_total, :]
+    ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
 
     return ca
 end
@@ -692,11 +722,12 @@ Implement kin_flag functionality
 """
 function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
-        FourFitVars,ForceFreeStatesInternal,OdeState},
+        FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
 
     # Unpack structs and initialize
-    ctrl, equil, ffit, intr, odet = params
+    # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
+    _, equil, ffit, intr, odet, _ = params
     fill!(odet.tmp, 0)
     u1 = @view(u[:, :, 1])
     u2 = @view(u[:, :, 2])
@@ -704,31 +735,35 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    odet.q = Spl.spline_eval!(equil.sq, psieval)[4]
+    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
+    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
 
     # kinetic stuff - skip for now
     if false #(TODO: kin_flag)
         error("kin_flag not implemented yet")
     else
-        # Evaluate matrix splines at the current psi value
-        Spl.spline_eval!(odet.amat, ffit.amats, psieval)
-        Spl.spline_eval!(odet.bmat, ffit.bmats, psieval)
-        Spl.spline_eval!(odet.cmat, ffit.cmats, psieval)
-        Spl.spline_eval!(odet.fmat_lower, ffit.fmats_lower, psieval)
-        Spl.spline_eval!(odet.kmat, ffit.kmats, psieval)
-        Spl.spline_eval!(odet.gmat, ffit.gmats, psieval)
-        
-        # Form full matrices from flat representations
-        # TODO: make these block diagonal for multi-n?
-        amat = reshape(odet.amat, intr.numpert_total, intr.numpert_total)
-        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
-        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
-        fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
-        kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
-        gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
+        # Evaluate matrix splines at the current psi value using shared hint
+        ffit.amats(vec(ffit._mat_out), psieval; hint=ffit._hint)
+        amat = ffit._mat_out
 
-        odet.Afact = cholesky(Hermitian(amat))
+        # Use odet temporary buffers for subsequent matrices to avoid overwriting amat
+        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
+
+        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
+        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+
+        fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
+
+        kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
+        ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
+
+        gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
+        ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
+
+        odet.Afact = cholesky!(Hermitian(amat))
         # bmat = A⁻¹ * bmat
         ldiv!(odet.Afact, bmat)
         # cmat = A⁻¹ * cmat

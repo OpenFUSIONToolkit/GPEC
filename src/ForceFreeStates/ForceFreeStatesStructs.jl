@@ -1,7 +1,7 @@
 """
     SingType
 
-A mutable struct containing data for singular surfaces in the plasma stability analysis.
+A mutable struct holding data related to the singular surfaces in the equilibrium.
 
 ## Fields
 
@@ -11,16 +11,6 @@ A mutable struct containing data for singular surfaces in the plasma stability a
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `di::Float64` - Mercier criterion
-  - `alpha::Vector{ComplexF64}` - Resonant matrix eigenvalues
-  - `r1::Vector{Int}` - Resonant indices along first index
-  - `r2::Vector{Int}` - Resonant indices along second index
-  - `n1::Vector{Int}` - Nonresonant indices along first index
-  - `n2::Vector{Int}` - Nonresonant indices along second index
-  - `power::Vector{ComplexF64}` - Power series coefficients
-  - `vmat::Array{ComplexF64,4}` - Power series of V matrix for asymptotic analysis
-  - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
-  - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
   - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
   - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
 """
@@ -31,18 +21,58 @@ A mutable struct containing data for singular surfaces in the plasma stability a
     n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
-    di::Float64 = 0.0
-    alpha::Vector{ComplexF64} = ComplexF64[]
-    r1::Vector{Int} = Int[]
-    r2::Vector{Int} = Int[]
-    n1::Vector{Int} = Int[]
-    n2::Vector{Int} = Int[]
-    power::Vector{ComplexF64} = ComplexF64[]
-    vmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    mmat::Array{ComplexF64,4} = Array{ComplexF64}(undef, 0, 0, 0, 0)
-    m0mat::Matrix{ComplexF64} = zeros(ComplexF64, 2, 2)
     grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
     grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
+end
+
+"""
+    SingAsymptotics
+
+A struct containing asymptotic expansion data for ideal ForceFreeStates calculations at a singular surface.
+This data is computed on-demand during singular surface crossings in `cross_ideal_singular_surf!`.
+
+## Fields
+
+  - `alpha::Vector{ComplexF64}` - Resonant matrix eigenvalues
+  - `r1::Vector{Int}` - Resonant indices along first index
+  - `r2::Vector{Int}` - Resonant indices along second index
+  - `n1::Vector{Int}` - Nonresonant indices along first index
+  - `n2::Vector{Int}` - Nonresonant indices along second index
+  - `power::Vector{ComplexF64}` - Power series coefficients
+  - `vmat::Array{ComplexF64,4}` - Power series of V matrix for asymptotic analysis
+  - `mmat::Array{ComplexF64,4}` - Power series of M matrix for asymptotic analysis
+  - `m0mat::Matrix{ComplexF64}` - Zeroth order M matrix projected onto resonant subspace
+"""
+struct SingAsymptotics
+    sing_order::Int
+    alpha::Vector{ComplexF64}
+    r1::Vector{Int}
+    r2::Vector{Int}
+    n1::Vector{Int}
+    n2::Vector{Int}
+    power::Vector{ComplexF64}
+    vmat::Array{ComplexF64,4}
+    mmat::Array{ComplexF64,4}
+    m0mat::Matrix{ComplexF64}
+end
+
+"""
+    IntegrationChunk
+
+A struct representing a region of integration in the Euler-Lagrange solver.
+
+## Fields
+
+  - `psi_start::Float64` - Starting ψ coordinate for this integration region
+  - `psi_end::Float64` - Ending ψ coordinate for this integration region
+  - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
+  - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
+"""
+@kwdef struct IntegrationChunk
+    psi_start::Float64
+    psi_end::Float64
+    needs_crossing::Bool
+    ising::Int = 0
 end
 
 """
@@ -86,7 +116,8 @@ A mutable struct holding internal state variables for stability calculations.
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
-  - `locstab::Spl.CubicSpline{Float64}` - Spline for local stability analysis
+  - `locstab::CubicSeriesInterpolant` - Spline for local stability analysis
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
 @kwdef mutable struct ForceFreeStatesInternal
     dir_path::String = ""
@@ -110,14 +141,15 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::Spl.CubicSpline{Float64} = Spl.empty_CubicSpline(Float64)
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
     debug_settings::DebugSettings = DebugSettings()
+    wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
 
 """
     ForceFreeStatesControl
 
-A mutable struct containing control parameters for stability analysis, set by the user in dcon.toml.
+A mutable struct containing control parameters for stability analysis, set by the user in jpec.toml.
 
 ## Fields
 
@@ -165,15 +197,13 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
-  - `nperq_edge::Int` - Number of points per q value at edge (not yet implemented)
-  - `wv_farwall_flag::Bool` - Force nowall gpec calculations while calculating mutual inductance with the wall, when set true.
-  - `dcon_kin_threads::Int` - Number of threads for kinetic calculations (not yet implemented)
   - `parallel_threads::Int` - Number of parallel threads (not yet implemented)
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
+  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
 """
 @kwdef mutable struct ForceFreeStatesControl
@@ -221,39 +251,60 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
-    nperq_edge::Int = 20
-    wv_farwall_flag::Bool = true
-    dcon_kin_threads::Int = 1
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "jpec.h5"
     force_wv_symmetry::Bool = true
+    save_interval::Int = 10
     force_termination::Bool = false
 end
 
 @kwdef mutable struct FourFitVars
     mpert::Int
     mband::Int
+    numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
 
-    # Spline matrices
-    amats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    bmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    cmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    dmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    emats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    hmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    fmats_lower::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    kmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
-    gmats::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    # Complex-valued CubicSeriesInterpolant for stability matrices
+    # Each matrix is flattened to (npsi × numpert_total^2) series
+    # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
+    amats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    bmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    cmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    dmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    emats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    hmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    fmats_lower::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    kmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    gmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+
+    # Pre-allocated evaluation buffer for matrix output
+    _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+
+    # Shared hint for sequential evaluation (all splines evaluated at same psi)
+    _hint::Base.RefValue{Int} = Ref(1)
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
-# TODO: I think this initialization is funky - just need mband, not mpert. Fix later
-FourFitVars(mpert::Int) = FourFitVars(; mpert)
+# Helper to create empty series interpolant for default initialization (real-valued)
+function _empty_series_interp(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(Float64, 5, n_series)
+    return cubic_interp(xs, Y)
+end
+
+# Helper to create empty complex series interpolant for default initialization
+function _empty_series_interp_complex(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Y)
+end
+
+# Convenience constructor
+FourFitVars(mpert::Int, mband::Int, numpert_total::Int) = FourFitVars(; mpert, mband, numpert_total)
 
 """
     VacuumData
@@ -263,18 +314,18 @@ Populated in `Free.jl`.
 
 ## Fields
 
-- `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
-- `mpert::Int` - Number of poloidal modes
-- `numpert_total::Int` - Total number of modes (mpert × npert)
-- `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
-- `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
-- `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
-- `ep::Vector{ComplexF64}` - Plasma eigenvalues
-- `ev::Vector{ComplexF64}` - Vacuum eigenvalues
-- `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-- `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-- `grre::Array{Float64, 2}` - Exterior Green's function (2×mthvac × 2×mpert)
-- `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
+  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `mpert::Int` - Number of poloidal modes
+  - `numpert_total::Int` - Total number of modes (mpert × npert)
+  - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
+  - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
+  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+  - `ep::Vector{ComplexF64}` - Plasma eigenvalues
+  - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
+  - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+  - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
+  - `grre::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
+  - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
     mthvac::Int
@@ -290,9 +341,9 @@ Populated in `Free.jl`.
 
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays
     # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)  # Interior Green's function (kernelsign=-1)
-    grre::Array{Float64,2} = Array{Float64}(undef, 2 * (mthvac + 5), 2 * mpert)  # Exterior Green's function (kernelsign=+1)
-    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac + 5, 4)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
+    grre::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
+    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
 end
 
 VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)
@@ -300,7 +351,7 @@ VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, m
 """
 OdeState
 
-A mutable struct to hold the state of the ODE solver used by the DCON integration routines.
+A mutable struct to hold the state of the ODE solver used by the ForceFreeStates integration routines.
 This struct stores configuration parameters used to allocate arrays, the evolving stored
 solution during integration, diagnostic arrays used for normalization / Gaussian reduction,
 and a small set of temporary matrices and factors used to compute singular-layer corrections.
@@ -324,14 +375,14 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
-  - `wvmat_spline::Spl.CubicSpline{ComplexF64}` - Spline representation of precomputed wv matrices used by `free_test`/vacuum routines.
+  - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
   - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
-  - `ising::Int` - Index of the next singular surface to be crossed during integration.
+  - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
-  - `next::String` - Next integration action to take (e.g. `"cross"` to cross a rational surface or `"finish"`).
+  - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
@@ -375,16 +426,17 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat_spline::Spl.CubicSpline{ComplexF64} = Spl.empty_CubicSpline(ComplexF64)
+    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 
     # Data for integrator
     psifac::Float64 = 0.0
     q::Float64 = 0.0
     u::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
     ud::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 2)
-    ising::Int = 0
+    ising_start::Int = 0
     psimax::Float64 = 0.0
-    next::String = ""
+    needs_crossing::Bool = false
     nzero::Int = 0
 
     # Used for Gaussian reduction
@@ -406,13 +458,18 @@ and a small set of temporary matrices and factors used to compute singular-layer
     kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
     tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Union{Cholesky{ComplexF64,Matrix{ComplexF64}},Nothing} = nothing
+    Afact::Cholesky{ComplexF64,Matrix{ComplexF64}} = cholesky(Matrix{ComplexF64}(I, numpert_total, numpert_total))
     singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+
+    # Shared hint for CubicInterpolant interval search optimization during ODE integration
+    # All splines evaluated at the same psi can share this hint for O(1) interval lookups
+    spline_hint::Base.RefValue{Int} = Ref(1)
+    # Separate hint for wvmat splines (different grid size than equilibrium profiles)
+    wv_hint::Base.RefValue{Int} = Ref(1)
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
-
 
 # Below here are debug output structs used for benchmarking and unit testing
 
@@ -426,23 +483,23 @@ A struct to hold all inputs required for vacuum benchmarking between Fortran and
 
 ## Fields
 
-- `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
-- `mpert::Int` - Number of poloidal modes
-- `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
-- `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
-- `complex_flag::Bool` - Flag indicating if complex arithmetic is used
-- `kernelsign::Float64` - Sign of the kernel for vacuum calculation
-- `wall_flag::Bool` - Flag indicating presence of wall
-- `farwall_flag::Bool` - Flag indicating presence of far wall
-- `grri::Matrix{Float64}` - Green's function response matrix
-- `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
-- `ahg_file::String` - Filename for AHG data
-- `dir_path::String` - Directory path for input/output files
-- `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
-- `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
-- `n::Int` - Toroidal mode number
-- `ipert_n::Int` - Index of perturbed toroidal mode
-- `psifac::Float64` - Normalized flux coordinate
+  - `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
+  - `mpert::Int` - Number of poloidal modes
+  - `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
+  - `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
+  - `complex_flag::Bool` - Flag indicating if complex arithmetic is used
+  - `kernelsign::Float64` - Sign of the kernel for vacuum calculation
+  - `wall_flag::Bool` - Flag indicating presence of wall
+  - `farwall_flag::Bool` - Flag indicating presence of far wall
+  - `grri::Matrix{Float64}` - Green's function response matrix
+  - `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
+  - `ahg_file::String` - Filename for AHG data
+  - `dir_path::String` - Directory path for input/output files
+  - `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
+  - `n::Int` - Toroidal mode number
+  - `ipert_n::Int` - Index of perturbed toroidal mode
+  - `psifac::Float64` - Normalized flux coordinate
 """
 @kwdef struct VacuumBenchmarkInputs
     # Vacuum computation parameters
@@ -458,13 +515,13 @@ A struct to hold all inputs required for vacuum benchmarking between Fortran and
     xzpts::Matrix{Float64}
     ahg_file::String
     dir_path::String
-    
+
     # VacuumInput struct for Julia code
     vac_inputs::Vacuum.VacuumInput
-    
+
     # Wall settings
     wall_settings::Vacuum.WallShapeSettings
-    
+
     # Additional context
     n::Int
     ipert_n::Int

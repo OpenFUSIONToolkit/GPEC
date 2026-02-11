@@ -1,13 +1,14 @@
-# Setting up JPEC 
+# Setting up JPEC
 
 - [Setting up JPEC](#setting-up-jpec)
   - [On Windows via WSL (Ubuntu)](#on-windows-via-wsl-ubuntu)
   - [On macOS](#on-macos)
+  - [Pre-commit Hooks (Optional Developer Tools)](#pre-commit-hooks-optional-developer-tools)
 
 ## On Windows via WSL (Ubuntu)
 1. Install WSL and Ubuntu
    If you don't already have WSL and Ubuntu installed, set this up. [This page](https://learn.microsoft.com/en-us/windows/wsl/install) gives detailed instructions on how to complete the installation. In the Windows Powershell,
-   
+
    1. Make sure WSL is installed:
         ```PowerShell
         wsl --install
@@ -32,9 +33,9 @@
     `cmake` → sometimes needed by dependencies
 
 3. Install Julia in WSL
-   
+
     1. Download the latest Linux tarball from the official site [Julia downloads](https://julialang.org/downloads/). It will look like
-        ```shell 
+        ```shell
         wget https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.3-linux-x86_64.tar.gz
         ```
 
@@ -46,12 +47,12 @@
         tar -xvzf julia-1.11.3-linux-x86_64.tar.gz
         sudo mv julia-1.11.3 /opt/
         ```
-        
+
         ☆ Ensure these commands match the tarball you installed. These commands match the above tarball and might need to be modified for you installation.
-    
+
     3. Add Julia to PATH:
 
-        ```shell 
+        ```shell
         echo 'export PATH=/opt/julia-1.11.3/bin:$PATH' >> ~/.bashrc
         source ~/.bashrc
         ```
@@ -59,12 +60,12 @@
     4. Test it is properly installed
 
         ```shell
-        julia --version 
+        julia --version
         ```
 
-4. Install Python/Jupyter in WSL 
-   
-   This step is only really required if you want to run the `.ipynb` test notebooks. You do not necessarily need Python3 installed, but Jupyter runs on a Python server. 
+4. Install Python/Jupyter in WSL
+
+   This step is only really required if you want to run the `.ipynb` test notebooks. You do not necessarily need Python3 installed, but Jupyter runs on a Python server.
    If you do not want to install Python3 and Jupyter, you can install the "IJulia" package to your Julia environment instead and run the command 'notebook()' in the terminal.
    1. To install Python3 and Jupyter notebooks, use these commands
         ```shell
@@ -130,7 +131,7 @@ Clone it from GitHub directly to your virtual machine.
         Pkg.instantiate()       # install recorded dependencies
         Pkg.add("Preferences")  # install missing dependency if needed
         Pkg.build("IJulia")     # rebuild kernel
-        Pkg.precompile()        # precompile all packages - probably unnecessary 
+        Pkg.precompile()        # precompile all packages - probably unnecessary
         ```
 
 8. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
@@ -147,9 +148,9 @@ Clone it from GitHub directly to your virtual machine.
         1. Install **Remote - WSL** extension in VS Code.
         2. Open VS Code → Connect To → Connect to WSL.
         3. Click Open Folder and then navigate to the JPEC folder on your VM. Open your JPEC folder from WSL: ~/JPEC.
-   
+
         If this is not working, you can launch vscode from the WSL shell you have using the command `code .`
-        
+
         4. Open a terminal inside VS Code — it will automatically use WSL/Ubuntu.
         5. You can now run:
             ```shell
@@ -235,3 +236,69 @@ JPEC uses TOML configuration files (`jpec.toml`) with the following main section
 - **`[PerturbedEquilibrium]`**: Plasma response settings (forcing data, output options)
 
 See the example directories for complete configuration file templates.
+
+(Setup instructions to be added)
+
+## Pre-commit Hooks (Optional Developer Tools)
+
+The repository uses pre-commit hooks to maintain code quality and prevent noisy commits from Jupyter notebook metadata and outputs.
+
+### Why Use Pre-commit Hooks?
+
+Pre-commit hooks automatically:
+- Strip Jupyter notebook outputs, execution counts, and metadata (prevents merge conflicts and noisy diffs)
+- Format Julia code according to `.JuliaFormatter.toml` settings
+- Remove trailing whitespace and fix line endings
+- Validate YAML/TOML syntax
+- Prevent accidentally committing large files (>5MB)
+
+### Installation
+
+```bash
+# Install pre-commit (requires Python/pip)
+pip install pre-commit
+
+# Install JuliaFormatter globally (required for Julia code formatting hook)
+julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
+
+# Install the git hooks in your local repository
+cd /path/to/JPEC
+pre-commit install
+```
+
+### Usage
+
+Once installed, the hooks run automatically on `git commit`. You can also run them manually:
+
+```bash
+# Run on all files in the repository
+pre-commit run --all-files
+
+# Run only on currently staged files
+pre-commit run
+```
+
+### Bypassing Hooks (Not Recommended)
+
+In rare cases where you need to bypass the hooks:
+
+```bash
+git commit --no-verify
+```
+
+However, this is discouraged as it may introduce notebook clutter or formatting inconsistencies.
+
+### Optional: Standalone nbstripout Filter
+
+For additional protection beyond pre-commit, you can install nbstripout as a git filter:
+
+```bash
+# Install nbstripout globally
+pip install nbstripout
+
+# Install filter for this repository
+cd /path/to/JPEC
+nbstripout --install
+```
+
+This ensures notebooks are cleaned even if pre-commit is bypassed with `--no-verify`. However, this is **optional** and not required for normal development - the pre-commit hook is sufficient for most workflows.

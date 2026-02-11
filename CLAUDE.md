@@ -158,6 +158,54 @@ using Revise
 using JPEC
 ```
 
+### Benchmarking
+
+Use the generic benchmarking tool at `benchmarks/benchmark_git_branches.jl` to compare performance between branches or commits.
+
+**Tool usage:**
+
+```bash
+# Compare feature branch against develop
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --branch1 develop \
+  --branch2 feature-branch
+
+# Compare specific commits
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --commit1 abc123 \
+  --commit2 def456
+
+# Compare current develop vs develop from 1 month ago
+julia benchmarks/benchmark_git_branches.jl \
+  --example examples/DIIID-like_ideal_example \
+  --branch1 develop \
+  --commit1 HEAD~10 \
+  --branch2 develop
+```
+
+**Default benchmark case:** `examples/DIIID-like_ideal_example`
+
+**Reported metrics:**
+1. **Eigenmode energy (`et[1]`)** - First eigenvalue; verifies calculation correctness
+2. **Integration steps** - Total ODE solver steps
+3. **Runtime (warmed)** - Wall-clock time averaged over multiple warm runs (JIT warmup handled automatically)
+4. **Commit hash** - Git commit of code tested
+
+**The tool automatically:**
+- Handles JIT warmup (runs example 3 times, averages last 2)
+- Switches between branches/commits
+- Stashes uncommitted changes if necessary
+- Restores original branch when done
+- Reports comparison with percentage differences
+
+**Important notes:**
+- Working directory should be clean or changes will be stashed during branch switching
+- Tool requires HDF5.jl for reading euler.h5 output
+- Each benchmark run takes several minutes per branch (includes compilation + warm runs)
+
+
 ## Architecture
 
 ### Computational Workflow
@@ -417,7 +465,7 @@ This format is used for compiling release notes, so tags should be human-readabl
 ### General
 - **Julia version**: 1.11 is the target version
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
-- **Testing**: Tests include both Fortran and Julia implementations to ensure parity during conversion
+- **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
 
 ### Output Files
 - **Default output**: `jpec.h5` (previously `euler.h5` in older versions)
@@ -426,8 +474,18 @@ This format is used for compiling release notes, so tags should be human-readabl
 ### Current Development Priorities
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `jpec.toml` file
-- **Documentation**: Updated with PerturbedEquilibrium API reference at https://openfusiontoolkit.github.io/JPEC/dev/
 
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
+- Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
+
+## Git Merge conflict resolution policy
+
+- When resolving git conflicts, do not simply accept one side.
+- Analyze what each side changed and WHY before producing a resolution.
+- Produce a merged version incorporating both sets of changes.
+- If both sides renamed the same symbol differently, prefer the current (ours) branch convention.
+- When a rename on one side conflicts with a logic change on the other, apply the logic change using the renamed symbol.
+- If a conflict involves changes to numerical parameters (tolerances, boundary conditions, grid sizes), flag for human review rather than guessing.
+- Flag any conflicts where the combination is ambiguous for human review.

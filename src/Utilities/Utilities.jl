@@ -14,11 +14,13 @@ mathematical utilities.
 module Utilities
 
 include("FourierTransforms.jl")
+include("FourierCoefficients.jl")
 
-# Re-export key functionality
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
 export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
+
+export FourierCoefficients, empty_FourierCoefficients, get_complex_coeff, get_complex_coeffs!
 
 end # module Utilities

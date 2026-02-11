@@ -1,6 +1,7 @@
 module Vacuum
 
-using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
+using TOML, SpecialFunctions, LinearAlgebra, Printf
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 
 # Import parent modules
 import ..Spl
@@ -9,8 +10,6 @@ import ..Equilibrium
 # Import FourierTransforms utility for coefficient calculation and transforms
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
-include("VacuumStructs.jl")
-include("VacuumInternals.jl")
 include("VacuumFromEquilibrium.jl")
 
 export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
@@ -18,6 +17,10 @@ export compute_vacuum_field
 export kernel!
 export WallShapeSettings
 export extract_plasma_surface_at_psi, create_vacuum_input_at_psi, compute_greens_functions_only
+
+include("DataTypes.jl")
+include("Kernel2D.jl")
+include("MathUtils.jl")
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -33,14 +36,14 @@ Initialize DCON parameters for vacuum field calculations.
 
 # Arguments
 
-- `mtheta`: Number of theta grid points (Integer)
-- `lmin`: Minimum poloidal mode number (Integer)
-- `lmax`: Maximum poloidal mode number (Integer)
-- `nnin`: Toroidal mode number (Integer)
-- `qa1in`: Safety factor parameter (Float64)
-- `xin`: Vector of radial coordinates at plasma boundary (Vector{Float64})
-- `zin`: Vector of vertical coordinates at plasma boundary (Vector{Float64})
-- `deltain`: Vector of displacement values (Vector{Float64})
+  - `mtheta`: Number of theta grid points (Integer)
+  - `lmin`: Minimum poloidal mode number (Integer)
+  - `lmax`: Maximum poloidal mode number (Integer)
+  - `nnin`: Toroidal mode number (Integer)
+  - `qa1in`: Safety factor parameter (Float64)
+  - `xin`: Vector of radial coordinates at plasma boundary (Vector{Float64})
+  - `zin`: Vector of vertical coordinates at plasma boundary (Vector{Float64})
+  - `deltain`: Vector of displacement values (Vector{Float64})
 
 # Note
 
@@ -84,8 +87,8 @@ and resets the internal DCON state for future vacuum calculations.
 
 # Notes
 
-- Must be called after `set_surface_params` if you want to reset the surface data memory.
-- No arguments are required.
+  - Must be called after `set_surface_params` if you want to reset the surface data memory.
+  - No arguments are required.
 
 # Example
 
@@ -108,22 +111,22 @@ Compute the vacuum response matrix for magnetostatic perturbations.
 
 # Arguments
 
-- `wv`: Pre-allocated complex matrix (mpert × mpert) to store vacuum response (Array{ComplexF64,2})
-- `mpert`: Number of perturbation modes (Integer)
-- `mtheta`: Number of theta grid points for plasma (Integer)
-- `mtheta_vacuum`: Number of theta grid points for vacuum region (Integer)
-- `complex_flag`: Whether to use complex arithmetic (Bool)
-- `kernelsignin`: Sign convention for vacuum kernels (Float64, typically -1.0)
-- `wall_flag`: Whether to include an externally defined wall shape (Bool)
-- `farwall_flag`: Whether to use far-wall approximation (Bool)
-- `grrio`: Green's function data (Array{Float64,2})
-- `xzptso`: Source point coordinates (Array{Float64,2})
-- `op_ahgfile`: Optional communication file for when set_surface_params is not called (String or Nothing)
+  - `wv`: Pre-allocated complex matrix (mpert × mpert) to store vacuum response (Array{ComplexF64,2})
+  - `mpert`: Number of perturbation modes (Integer)
+  - `mtheta`: Number of theta grid points for plasma (Integer)
+  - `mtheta_vacuum`: Number of theta grid points for vacuum region (Integer)
+  - `complex_flag`: Whether to use complex arithmetic (Bool)
+  - `kernelsignin`: Sign convention for vacuum kernels (Float64, typically -1.0)
+  - `wall_flag`: Whether to include an externally defined wall shape (Bool)
+  - `farwall_flag`: Whether to use far-wall approximation (Bool)
+  - `grrio`: Green's function data (Array{Float64,2})
+  - `xzptso`: Source point coordinates (Array{Float64,2})
+  - `op_ahgfile`: Optional communication file for when set_surface_params is not called (String or Nothing)
 
 # Returns
 
-- Modifies `wv` in-place with the computed vacuum response matrix
-- Returns the modified `wv` matrix
+  - Modifies `wv` in-place with the computed vacuum response matrix
+  - Returns the modified `wv` matrix
 
 # Note
 
@@ -217,7 +220,7 @@ function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::
     if kernelsign < 0
         grad_greenfunction_mat .*= kernelsign
         # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:2 * mtheta
+        for i in 1:(2*mtheta)
             grad_greenfunction_mat[i, i] += 2.0
         end
     end
@@ -234,23 +237,23 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
 # Arguments
 
-- `inputs::VacuumInput`: Struct containing vacuum calculation parameters including mode numbers,
-  grid resolution, toroidal mode number, and plasma boundary information.
-- `wall_settings::WallShapeSettings`: Struct specifying the wall geometry configuration.
+  - `inputs::VacuumInput`: Struct containing vacuum calculation parameters including mode numbers,
+    grid resolution, toroidal mode number, and plasma boundary information.
+  - `wall_settings::WallShapeSettings`: Struct specifying the wall geometry configuration.
 
 # Returns
 
-- `wv`: Complex vacuum response matrix (mpert × mpert) relating plasma perturbations to vacuum response
-- `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
-- `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
-- `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
+  - `wv`: Complex vacuum response matrix (mpert × mpert) relating plasma perturbations to vacuum response
+  - `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
+  - `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
+  - `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
 
 # Notes
 
-- This function computes both Green's functions to enable proper surface inductance calculations
-- Uses FourierTransforms utility internally for consistent coefficient calculation
-- The vacuum response includes plasma-plasma and plasma-wall coupling effects
-- For n=0 modes with closed walls, a regularization factor is added to prevent singularities
+  - This function computes both Green's functions to enable proper surface inductance calculations
+  - Uses FourierTransforms utility internally for consistent coefficient calculation
+  - The vacuum response includes plasma-plasma and plasma-wall coupling effects
+  - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
@@ -271,7 +274,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Plasma–Plasma block
     j1, j2 = 1, 1
-    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
+    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
     # Populate both grri and grre with the same right-hand side
@@ -283,15 +286,15 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     !wall.nowall && begin
         # Plasma–Wall block
         j1, j2 = 1, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, 0, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, n)
 
         # Wall–Wall block
         j1, j2 = 2, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, 0, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, n)
 
         # Wall–Plasma block
         j1, j2 = 2, 1
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks into both grri and grre
         fourier_transform!(grri, greenfunction_temp, cslth, mtheta, 0)
@@ -339,24 +342,16 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, cslth, 0, 0)
-    fourier_inverse_transform!(aii, grri, snlth, 0, mpert)
-    fourier_inverse_transform!(ari, grri, snlth, 0, 0)
-    fourier_inverse_transform!(air, grri, cslth, 0, mpert)
+    fourier_inverse_transform!(arr, grri, cos_ln_basis, 0, 0)
+    fourier_inverse_transform!(aii, grri, sin_ln_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grri, sin_ln_basis, 0, 0)
+    fourier_inverse_transform!(air, grri, cos_ln_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    vacmat = arr .+ aii
-    vacmti = air .- ari
+    wv = complex.(arr .+ aii, air .- ari)
+
     # Force symmetry of response matrix if desired
-    force_wv_symmetry && begin
-        for l1 in 1:mpert
-            for l2 in l1:mpert
-                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
-                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-            end
-        end
-    end
-    wv = complex.(vacmat, vacmti)
+    force_wv_symmetry && hermitianpart!(wv)
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
@@ -369,40 +364,41 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 end
 
 """
-    compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, 
+    compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry,
            Bn::Vector{<:Number}, R_grid::AbstractVector, Z_grid::AbstractVector)
 
 Calculate the perturbed magnetic field in the vacuum region resulting from a normal
 magnetic field perturbation (`Bn`) at the plasma surface. Replaces `mscfld` from Fortran.
 
 This function orchestrates the vacuum field calculation by:
-1. Calling `vaccal!` to compute the vacuum response kernel (`grri`)
-2. Defining a grid of points (`R_grid`, `Z_grid`) where the field is to be calculated
-3. Calling `_pickup_field` to compute the magnetic field components on that grid using the kernel
-   and the source perturbation `Bn`
+
+ 1. Calling `vaccal!` to compute the vacuum response kernel (`grri`)
+ 2. Defining a grid of points (`R_grid`, `Z_grid`) where the field is to be calculated
+ 3. Calling `_pickup_field` to compute the magnetic field components on that grid using the kernel
+    and the source perturbation `Bn`
 
 # Arguments
 
-- `inputs::VacuumInput`: Struct containing vacuum calculation parameters (n, mpert, mtheta, etc.)
-- `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry and basis functions
-- `wall::WallGeometry`: Struct with wall geometry
-- `Bn::Vector{<:Number}`: Complex vector of Fourier harmonics of the normal magnetic field
-  perturbation at the plasma surface, `B_n = B_n_real + i*B_n_imag`. Length must be `mpert`.
-- `R_grid::AbstractVector`: Vector of R coordinates for the output field grid
-- `Z_grid::AbstractVector`: Vector of Z coordinates for the output field grid
+  - `inputs::VacuumInput`: Struct containing vacuum calculation parameters (n, mpert, mtheta, etc.)
+  - `plasma_surf::PlasmaGeometry`: Struct with plasma surface geometry and basis functions
+  - `wall::WallGeometry`: Struct with wall geometry
+  - `Bn::Vector{<:Number}`: Complex vector of Fourier harmonics of the normal magnetic field
+    perturbation at the plasma surface, `B_n = B_n_real + i*B_n_imag`. Length must be `mpert`.
+  - `R_grid::AbstractVector`: Vector of R coordinates for the output field grid
+  - `Z_grid::AbstractVector`: Vector of Z coordinates for the output field grid
 
 # Returns
 
-- `B_R::Matrix{ComplexF64}`: The R-component of the magnetic field on the grid
-- `B_Z::Matrix{ComplexF64}`: The Z-component of the magnetic field on the grid
-- `B_phi::Matrix{ComplexF64}`: The toroidal component of the magnetic field on the grid
-- `grid_info::Matrix{Int}`: Information about the grid points (1=inside plasma, 0=outside)
+  - `B_R::Matrix{ComplexF64}`: The R-component of the magnetic field on the grid
+  - `B_Z::Matrix{ComplexF64}`: The Z-component of the magnetic field on the grid
+  - `B_phi::Matrix{ComplexF64}`: The toroidal component of the magnetic field on the grid
+  - `grid_info::Matrix{Int}`: Information about the grid points (1=inside plasma, 0=outside)
 """
-function compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry, 
-                Bn::Vector{<:Number}, R_grid::AbstractVector, Z_grid::AbstractVector)
+function compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall::WallGeometry,
+    Bn::Vector{<:Number}, R_grid::AbstractVector, Z_grid::AbstractVector)
 
     # 1. Call vaccal! to get the inverted Green's function matrix
-    # The Fortran version calls the whole chain (ent33 -> vaccal), 
+    # The Fortran version calls the whole chain (ent33 -> vaccal),
     # here we assume vaccal! provides what we need.
     wv, grri = vaccal!(inputs, plasma_surf, wall)
 
@@ -413,7 +409,7 @@ function compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, 
     # 2. Define grid and parameters for pickup routine
     nx = length(R_grid)
     nz = length(Z_grid)
-    
+
     # 3. Call the field pickup routine
     B_R, B_Z, B_phi, grid_info = _pickup_field(
         inputs, plasma_surf, grri, Bn_real, Bn_imag, R_grid, Z_grid

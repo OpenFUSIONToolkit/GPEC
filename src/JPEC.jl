@@ -80,17 +80,16 @@ function main(args::Vector{String}=String[])
 
 
     if "Wall" in keys(inputs)
-        wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     else
-        wall_settings = Vacuum.WallShapeSettings()
+        intr.wall_settings = Vacuum.WallShapeSettings()
     end
 
     if "DEBUG" in keys(inputs)
-        debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+        intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
-        debug_settings = DebugSettings()
+        intr.debug_settings = DebugSettings()
     end
-    intr.debug_settings = debug_settings
     
     # Set up variables
     # TODO: dcon_kin_threads logic?
@@ -115,20 +114,21 @@ function main(args::Vector{String}=String[])
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
-    locstab_fs = zeros(Float64, length(equil.sq.xs), 5)
+    # Compute Mercier and Ballooning stability (if desired)
+    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
+    profiles_xs = equil.profiles.xs
+    locstab_fs = zeros(Float64, length(profiles_xs), 5)
     if ctrl.mer_flag
         if ctrl.verbose
             println("Evaluating Mercier criterion")
         end
         mercier_scan!(locstab_fs, equil)
     end
-    # TODO: ballooning stability
-    #IF(bal_flag)THEN
-    #   IF(ctrl.verbose) WRITE(*,*)"Evaluating ballooning criterion"
-    #   CALL bal_scan
-    #ENDIF
+    if ctrl.bal_flag
+        compute_ballooning_stability!(ctrl, locstab_fs, equil)
+    end
     # Fit data to splines
-    intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -200,10 +200,12 @@ function main(args::Vector{String}=String[])
         if ctrl.kin_flag
             error("kin_flag not implemented yet")
         end
-        sing_scan!(intr, ctrl, equil, ffit)
-        if ctrl.kin_flag
-            # ksing_find()
-        end
+
+        # NOTE: Asymptotic calculations for ideal DCON are now computed on-demand during
+        # singular surface crossings in cross_ideal_singular_surf!. This makes it clear that
+        # asymptotics are only needed for ideal DCON and are not inherent properties of
+        # the singular surface.
+
     end
 
     # Integrate Euler-Lagrange Equation
@@ -211,7 +213,7 @@ function main(args::Vector{String}=String[])
         if ctrl.verbose
             println("Integrating Euler-Lagrange equation")
         end
-        odet = ode_run(ctrl, equil, ffit, intr)
+        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             println("Fixed-boundary mode unstable for n = $nstring.")
         end
@@ -222,7 +224,7 @@ function main(args::Vector{String}=String[])
         if ctrl.verbose
             println("Computing free boundary energies")
         end
-        vac_data = free_run!(odet, ctrl, equil, ffit, intr, wall_settings)
+        vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
                 println("Free-boundary mode unstable for n = $nstring.")
@@ -290,6 +292,9 @@ function main(args::Vector{String}=String[])
     println("="^60)
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
+
+    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
+
 end
 
 """
@@ -348,50 +353,30 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["equil/ro"] = equil.ro
         out_h5["equil/zo"] = equil.zo
 
-        # Write spline arrays
-        out_h5["splines/sq/xs"] = Vector(equil.sq.xs)
-        # TODO: getting errors when trying to dump just fs, so splitting for now, which adds so many lines
-        # This should be fixed if we separate these like Nik mentioned
-        out_h5["splines/sq/fs/2piF"] = equil.sq.fs[:, 1]
-        out_h5["splines/sq/fs/mu0p"] = equil.sq.fs[:, 2]
-        out_h5["splines/sq/fs/dVdpsi"] = equil.sq.fs[:, 3]
-        out_h5["splines/sq/fs/q"] = equil.sq.fs[:, 4]
-        out_h5["splines/sq/fs1/2piF"] = equil.sq.fs1[:, 1]
-        out_h5["splines/sq/fs1/mu0p"] = equil.sq.fs1[:, 2]
-        out_h5["splines/sq/fs1/dVdpsi"] = equil.sq.fs1[:, 3]
-        out_h5["splines/sq/fs1/q"] = equil.sq.fs1[:, 4]
-        out_h5["splines/sq/xpower"] = 0 # TODO: equil.sq.xpower
-        out_h5["splines/rzphi/xs"] = Vector(equil.rzphi.xs)
-        out_h5["splines/rzphi/ys"] = Vector(equil.rzphi.ys)
-        out_h5["splines/rzphi/fs/rcoords"] = equil.rzphi.fs[:, 1]
-        out_h5["splines/rzphi/fs/offset"] = equil.rzphi.fs[:, 2]
-        out_h5["splines/rzphi/fs/nu"] = equil.rzphi.fs[:, 3]
-        out_h5["splines/rzphi/fs/jac"] = equil.rzphi.fs[:, 4]
-        out_h5["splines/rzphi/fsx/rcoords"] = equil.rzphi.fsx[:, 1]
-        out_h5["splines/rzphi/fsx/offset"] = equil.rzphi.fsx[:, 2]
-        out_h5["splines/rzphi/fsx/nu"] = equil.rzphi.fsx[:, 3]
-        out_h5["splines/rzphi/fsx/jac"] = equil.rzphi.fsx[:, 4]
-        out_h5["splines/rzphi/fsy/rcoords"] = equil.rzphi.fsy[:, 1]
-        out_h5["splines/rzphi/fsy/offset"] = equil.rzphi.fsy[:, 2]
-        out_h5["splines/rzphi/fsy/nu"] = equil.rzphi.fsy[:, 3]
-        out_h5["splines/rzphi/fsy/jac"] = equil.rzphi.fsy[:, 4]
-        out_h5["splines/rzphi/fsxy/rcoords"] = equil.rzphi.fsxy[:, 1]
-        out_h5["splines/rzphi/fsxy/offset"] = equil.rzphi.fsxy[:, 2]
-        out_h5["splines/rzphi/fsxy/nu"] = equil.rzphi.fsxy[:, 3]
-        out_h5["splines/rzphi/fsxy/jac"] = equil.rzphi.fsxy[:, 4]
-        out_h5["splines/rzphi/x0"] = 0 # TODO: equil.rzphi.x0
-        out_h5["splines/rzphi/y0"] = 0 # TODO: equil.rzphi.y0
-        out_h5["splines/rzphi/xpower"] = 0 # TODO: equil.rzphi.xpower
-        out_h5["splines/rzphi/fpower"] = 0 # TODO: equil.rzphi.fpower
+        # Write spline arrays (using profiles with named splines)
+        profiles = equil.profiles
+        out_h5["splines/profiles/xs"] = profiles.xs
+        out_h5["splines/profiles/2piF"] = profiles.F_spline.y
+        out_h5["splines/profiles/mu0p"] = profiles.P_spline.y
+        out_h5["splines/profiles/dVdpsi"] = profiles.dVdpsi_spline.y
+        out_h5["splines/profiles/q"] = profiles.q_spline.y
+        out_h5["splines/rzphi/xs"] = equil.rzphi_xs
+        out_h5["splines/rzphi/ys"] = equil.rzphi_ys
+        # Extract grid point values from interpolants for HDF5 output
+        out_h5["splines/rzphi/rcoords"] = equil.rzphi_rsquared.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/offset"] = equil.rzphi_offset.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
+        out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data
         if ctrl.mer_flag
-            out_h5["locstab/di"] = Vector(intr.locstab.fs[:, 1] ./ equil.sq.xs)
-            out_h5["locstab/dr"] = Vector(intr.locstab.fs[:, 2] ./ equil.sq.xs)
-            out_h5["singular/di0"] = [Spl.spline_eval!(intr.locstab, sing.psifac)[1] / sing.psifac for sing in intr.sing]
+            locstab_xs = intr.locstab.cache.x
+            out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
+            out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
+            out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
         end
         if ctrl.bal_flag
-            out_h5["locstab/ca1"] = Vector(locstab_fs[:, 4])
+            out_h5["locstab/ca1"] = intr.locstab.y[:, 4]
         end
 
         # Write integration data
@@ -410,7 +395,6 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]
         out_h5["singular/q"] = [sing.q for sing in intr.sing]
         out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
-        out_h5["singular/di"] = [sing.di for sing in intr.sing]
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 

@@ -1,23 +1,13 @@
 """
-    free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> VacuumData
 
-Compute the free boundary energies using VACUUM. Performs the same function as `free_run`
+Compute the free boundary energies using the Julia port of the VACUUM code. Performs the same function as `free_run`
 in the Fortran code, except now all data is passed in memory instead of via files. This
 modifies `odet` in place to normalize the eigenfunctions stored in `u_store` and `ud_store`,
 and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
 and data dumping.
-
-### TODOs
-Check if normalize is ever false, currently always true, and if not, remove related logic
 """
-function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, wall_settings::Vacuum.WallShapeSettings)
-
-    # TODO: this is always true in fortran - just get rid of it?
-    normalize = true
-    # Flags used within VACUUM
-    complex_flag = true
-    wall_flag = false
-    ahg_file = "ahg2msc_dcon.out" # Deprecated, but needed for VACUUM function call
+function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
     vac = VacuumData(ctrl.mthvac, intr.mpert, intr.numpert_total)
@@ -27,7 +17,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
-    v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
+    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
@@ -35,35 +25,32 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     end
 
     # Compute vacuum response matrix
-    wv_block = zeros(ComplexF64, intr.mpert, intr.mpert)
     for ipert_n in 1:intr.npert
-        n = ipert_n - 1 + intr.nlow
-        
         # Set VACUUM run parameters and boundary shape
-        vac_inputs = set_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
+        n = ipert_n - 1 + intr.nlow
+        vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
         fill!(vac.grri, 0.0)
         fill!(vac.grre, 0.0)
         fill!(vac.xzpts, 0.0)
 
-        farwall_flag = wall_settings.shape == "nowall" ? true : false
+        # Compute vacuum energy matrix and both Green's functions
+        wv_block, vac.grri, vac.grre, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
         # Output data for unit testing and benchmarking
         if intr.debug_settings.output_benchmark_data
             @info "Outputting top level vacuum debug data for n = $n"
+            farwall_flag = intr.wall_settings.shape == "nowall" ? true : false
             benchmark_inputs = VacuumBenchmarkInputs(
-                    wv_block, intr.mpert, equil.config.mtheta, ctrl.mthvac,
-                    complex_flag, vac_inputs.kernelsign, wall_flag,
-                    farwall_flag, vac.grri, vac.xzpts, ahg_file, intr.dir_path,
-                    vac_inputs, wall_settings,
-                    n, ipert_n, intr.psilim
+                wv_block, intr.mpert, equil.control.mtheta, ctrl.mthvac,
+                true, vac_inputs.kernelsign, false,
+                farwall_flag, vac.grri, vac.xzpts, "ahg2msc_dcon.out", intr.dir_path,
+                vac_inputs, intr.wall_settings,
+                n, ipert_n, intr.psilim
             )
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
 
-        # Compute vacuum energy matrix and both Green's functions
-        wv_block, vac.grri, vac.grre, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
-
-        # Scale vacuum matrix by singfac = (m - n*qlim)
+        # Equation 126 in Chance 1997 - scale by (m - n*q)(m' - n*q)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
         @inbounds for ipert in 1:intr.mpert
             @views wv_block[ipert, :] .*= singfac[ipert]
@@ -71,9 +58,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
         end
 
         # Store block in full wv matrix
-        @views vac.wv[(ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
-
-        Vacuum.unset_surface_params()
+        @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
     end
 
     # Compute complex energy eigenvalues and vectors
@@ -91,18 +76,16 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     end
 
     # Normalize eigenfunction and energy.
-    if normalize
-        for isol in 1:intr.numpert_total
-            norm = 0.0 + 0.0im
-            for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
-                ipert = (ipert_n - 1) * intr.mpert + ipert_m
-                jpert = (ipert_n - 1) * intr.mpert + jpert_m
-                norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
-            end
-            norm /= v1
-            vac.wt[:, isol] ./= sqrt(norm)
-            vac.et[isol] /= norm
+    for isol in 1:intr.numpert_total
+        norm = 0.0 + 0.0im
+        for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+            ipert = (ipert_n - 1) * intr.mpert + ipert_m
+            jpert = (ipert_n - 1) * intr.mpert + jpert_m
+            norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
         end
+        norm /= dV_dpsi
+        vac.wt[:, isol] ./= sqrt(norm)
+        vac.et[isol] /= norm
     end
 
     # Normalize phase
@@ -123,12 +106,16 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     end
 
     # Normalize eigenvectors based on scaled wt
-    coeffs = odet.u[:,:,1,end] \ (vac.wt .* (2π * equil.psio * 1e-3))
-    for istep in 1:odet.step
-        odet.u_store[:, :, 1, istep] .= odet.u_store[:, :, 1, istep] * coeffs
-        odet.u_store[:, :, 2, istep] .= odet.u_store[:, :, 2, istep] * coeffs
-        odet.ud_store[:, :, 1, istep] .= odet.ud_store[:, :, 1, istep] * coeffs
-        odet.ud_store[:, :, 2, istep] .= odet.ud_store[:, :, 2, istep] * coeffs
+    coeffs = odet.u[:, :, 1, end] \ (vac.wt .* (2π * equil.psio * 1e-3))
+    @views for istep in 1:odet.step
+        mul!(odet.tmp, odet.u_store[:, :, 1, istep], coeffs)
+        odet.u_store[:, :, 1, istep] .= odet.tmp
+        mul!(odet.tmp, odet.u_store[:, :, 2, istep], coeffs)
+        odet.u_store[:, :, 2, istep] .= odet.tmp
+        mul!(odet.tmp, odet.ud_store[:, :, 1, istep], coeffs)
+        odet.ud_store[:, :, 1, istep] .= odet.tmp
+        mul!(odet.tmp, odet.ud_store[:, :, 2, istep], coeffs)
+        odet.ud_store[:, :, 2, istep] .= odet.tmp
     end
 
     # Write energies to screen
@@ -143,65 +130,62 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    set_vacuum_inputs(psifac::Float64, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+    compute_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
 
-Prepare and write the necessary parameters and boundary shape to VACUUM for computing the vacuum response matrix.
-Performs the same function as `free_write_msc` in the Fortran code, except we will always use in-memory communication.
+Compute the necessary input paramters to the VACUUM code for computing the vacuum response matrix.
+Performs the same function as `free_write_msc` in the Fortran code, except we create a data struct
+to pass in memory to the Julia VACUUM code instead of writing to a file. Computed quantities include
+the r, z, and ν values at the plasma boundary, as well as mode numbers and number of poloidal points.
 
 ### Arguments
 
   - `psifac`: Flux surface value at the plasma boundary (Float64)
   - `n`: Toroidal mode number (Int)
   - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
-  - `intr`: Internal DCON parameters (ForceFreeStatesInternal)
-
+  - `intr`: Internal ForceFreeStates parameters
+  - `ctrl`: ForceFreeStates control parameters
 """
-function set_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
+function compute_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
 
     # Allocations
-    theta_norm = Vector(equil.rzphi.ys)
-    mtheta = equil.config.mtheta
-    angle = zeros(Float64, mtheta + 1)
-    r = zeros(Float64, mtheta + 1)
-    z = zeros(Float64, mtheta + 1)
-    delta = zeros(Float64, mtheta + 1)
-    rfac = zeros(Float64, mtheta + 1)
+    theta_norm = equil.rzphi_ys
+    mtheta = equil.config.mtheta + 1
+    angle = zeros(Float64, mtheta)
+    r = zeros(Float64, mtheta)
+    z = zeros(Float64, mtheta)
+    ν = zeros(Float64, mtheta)
+    rfac = zeros(Float64, mtheta)
 
-    # Compute output
-    qa = Spl.spline_eval!(equil.sq, psifac)[4]
-    for itheta in 1:equil.config.mtheta+1
-        f = Spl.bicube_eval!(equil.rzphi, psifac, theta_norm[itheta])
-        rfac[itheta] = sqrt(f[1])
-        angle[itheta] = 2π * (theta_norm[itheta] + f[2])
-        delta[itheta] = -f[3] / qa
+    # Compute r, z, and ν at the plasma boundary
+    qa = equil.profiles.q_spline(psifac)
+    for itheta in 1:mtheta
+        # Evaluate geometric quantities at (ψ, θ)
+        r2 = equil.rzphi_rsquared((psifac, theta_norm[itheta]))
+        offset = equil.rzphi_offset((psifac, theta_norm[itheta]))
+        nu_val = equil.rzphi_nu((psifac, theta_norm[itheta]))
+
+        rfac[itheta] = sqrt(r2)
+        angle[itheta] = 2π * (theta_norm[itheta] + offset)
+        ν[itheta] = nu_val
     end
     r .= equil.ro .+ rfac .* cos.(angle)
     z .= equil.zo .+ rfac .* sin.(angle)
 
     # Invert values for n < 0
     if n < 0
-        qa = -qa
-        delta .= -delta
+        ν .= -ν
         n = -n
     end
 
-    # Pass all required values to VACUUM
-    Vacuum.set_surface_params(equil.config.mtheta, intr.mlow, intr.mhigh, n, qa,
-        reverse(r), reverse(z), reverse(delta))
-
-    # For input to the Julia vacuum code
     return Vacuum.VacuumInput(;
-        r = reverse(r),
-        z = reverse(z),
-        delta = reverse(delta),
-        mhigh = intr.mhigh,
-        mlow = intr.mlow,
-        mpert = intr.mpert,
-        n = n,
-        qa = qa,
-        mtheta_eq = equil.config.mtheta,
-        mtheta = ctrl.mthvac,
-        force_wv_symmetry = ctrl.force_wv_symmetry
+        r=reverse(r),
+        z=reverse(z),
+        ν=reverse(ν),
+        mlow=intr.mlow,
+        mpert=intr.mpert,
+        n=n,
+        mtheta=ctrl.mthvac,
+        force_wv_symmetry=ctrl.force_wv_symmetry
     )
 end
 
@@ -210,31 +194,29 @@ end
 
 Compute a spline of vacuum response matrices over the range of psi from 'ctrl.psi_edge' to
 `intr.qlim`. This is used for fast evaluation of wt during `ode_record_edge`. Performs the
-same function as `free_wvmats` in the Fortran code.
+same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
+q-window minimum.
 """
 function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
+    profiles = equil.profiles
+
     # Number of psi grid points for the spline: 4 per q-window minimum
     # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = Spl.spline_eval!(equil.sq, ctrl.psiedge)[4]
+    qedge = profiles.q_spline(ctrl.psiedge)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
-    psii = ctrl.psiedge
     psi_array = zeros(Float64, npsi + 1)
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
-    for i in 1:npsi+1
+    for i in 1:(npsi+1)
         # Space points evenly in q
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
-
-        # Shorthand to evaluate q/q1 inside newton iteration
-        qval(ψ) = Spl.spline_eval!(equil.sq, ψ)[4]
-        q1val(ψ) = Spl.spline_deriv1!(equil.sq, ψ)[2][4]
 
         # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         converged = false
         for _ in 1:itmax
-            dpsi = (qi - qval(psii)) / q1val(psii)
+            dpsi = (qi - profiles.q_spline(psii)) / profiles.q_deriv(psii)
             psii += dpsi
             if abs(dpsi) < eps * abs(psii)
                 converged = true
@@ -246,67 +228,59 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
             error("Newton iteration for psilim did not converge after $itmax iterations.")
         end
 
-        wv_block = zeros(ComplexF64, intr.mpert, intr.mpert)
         for ipert_n in 1:intr.npert
-            n = ipert_n - 1 + intr.mlow
-
-            # Prepare vacuum matrices
-            set_vacuum_inputs(psii, n, equil, intr)
-            grri = Array{Float64}(undef, 2 * (ctrl.mthvac + 5), intr.mpert * 2)
-            xzpts = Array{Float64}(undef, ctrl.mthvac + 5, 4)
-
-            complex_flag = true
-            kernelsignin = 1.0
-            wall_flag = false
-            farwall_flag = false
-            ahg_file = "ahg2msc_dcon.out" # Deprecated
-
             # Compute vacuum matrix
-            Vacuum.mscvac(wv_block, intr.mpert, equil.config.mtheta, ctrl.mthvac, complex_flag, kernelsignin,
-                wall_flag, farwall_flag, grri, xzpts, ahg_file, intr.dir_path)
+            n = ipert_n - 1 + intr.nlow
+            vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
+            wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling
             singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
-            for ipert in 1:intr.mpert
-                wv_block[ipert, :] .*= singfac[ipert]
-                wv_block[:, ipert] .*= singfac[ipert]
+            @inbounds for ipert in 1:intr.mpert
+                @views wv_block[ipert, :] .*= singfac[ipert]
+                @views wv_block[:, ipert] .*= singfac[ipert]
             end
 
             # Store block in full wv matrix
-            @views wv_array[i, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert, (ipert_n-1)*intr.mpert+1 : ipert_n*intr.mpert] .= wv_block
-
-            # Free VACUUM memory
-            Vacuum.unset_surface_params()
+            @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
         end
     end
 
-    return Spl.CubicSpline(psi_array, reshape(wv_array, npsi+1, :); bctype="extrap")
+    # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
+    wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
+
+    # FastInterpolations now natively supports complex values - create complex series interpolant directly
+    # Use CubicFit() for native endpoint handling
+    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
+
+    return wvmat
 end
 
 """
     free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState) -> ComplexF64
 
 Compute total complex energy eigenvalue (total1). This is a trimmed down version of `free_run`
-that only computes the total energy eigenvalue for the mode unstable mode, used in `ode_record_edge_dW`
+that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
 which calls this function at each step in the psiedge -> psilim region of integration. This performs
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
-wv matrix spline to `free_compute_wv_spline` and pass it in `odet`.wvmat_spline.
+wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat` (a complex-valued spline).
 """
 function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
-    normalize = true
-
+    # Allocations
     wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     tot_eigvals = zeros(ComplexF64, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
-    v1 = Spl.spline_eval!(equil.sq, intr.psilim)[3]
+    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from spline
-    wv = reshape(Spl.spline_eval!(odet.wvmat_spline, odet.psifac), intr.numpert_total, intr.numpert_total)
+    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
+    # FastInterpolations now natively supports complex values
+    odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
+    wv = odet._wv_out
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
@@ -320,17 +294,15 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     end
 
     # Normalize eigenfunction and energy (only need the first eigenmode)
-    if normalize
-        isol = 1
-        norm = 0.0 + 0.0im
-        for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
-            ipert = (ipert_n - 1) * intr.mpert + ipert_m
-            jpert = (ipert_n - 1) * intr.mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
-        end
-        norm /= v1
-        tot_eigvals[isol] /= norm
+    isol = 1
+    norm = 0.0 + 0.0im
+    for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+        ipert = (ipert_n - 1) * intr.mpert + ipert_m
+        jpert = (ipert_n - 1) * intr.mpert + jpert_m
+        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
     end
+    norm /= dV_dpsi
+    tot_eigvals[isol] /= norm
 
     return tot_eigvals[1]
 end

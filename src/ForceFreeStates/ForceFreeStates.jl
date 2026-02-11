@@ -8,9 +8,11 @@ using FFTW
 using OrdinaryDiffEq
 using HDF5
 using JLD2
+using FastInterpolations
 
 import ..Equilibrium
 import ..Spl
+import ..Util
 import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
@@ -18,7 +20,8 @@ import StaticArrays: @MVector, @MMatrix
 # Include all necessary files
 include("ForceFreeStatesStructs.jl")
 include("Mercier.jl")
-include("Ode.jl")
+include("Bal.jl")
+include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")
 include("FixedBoundaryStability.jl")
