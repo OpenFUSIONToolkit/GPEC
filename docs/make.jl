@@ -26,13 +26,9 @@ makedocs(;
         "API Reference" => [
             "Splines" => "splines.md",
             "Vacuum" => "vacuum.md",
-            "Equilibrium" => "equilibrium.md"
+            "Equilibrium" => "equilibrium.md",
+            "Utilities" => "utilities.md"
         ],
-        "Examples" => [
-            "Spline Examples" => "examples/splines.md",
-            "Vacuum Examples" => "examples/vacuum.md",
-            "Equilibrium Examples" => "examples/equilibrium.md"
-        ]
     ],
     checkdocs=:exports
 )

@@ -171,12 +171,13 @@ function read_chease_binary(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
-        Spl.spline_integrate!(sq_in)
-
-        fs_copy = copy(sq_in.fs)
-        fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
+        # Compute cumulative integral of pressure column for normalization
+        fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=CubicFit())
+        # Make a writable copy and normalize pressure integral
+        fs_copy = copy(fs)
+        fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
+        # Create final spline with modified data
+        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=:extension)
 
         # --- 2D Geometry ---
         mtau = ntnova + 1  # Same with ASCII

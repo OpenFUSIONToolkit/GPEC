@@ -1,15 +1,13 @@
 # Splines Module
 
-The Splines module provides cubic, bicubic, and fourier spline interpolation functionality, used for smooth representation of MHD equilibria.
+The Splines module provides helpers and utilities for working with FastInterpolations.jl cubic splines, used for smooth representation of MHD equilibria.
 
 ## Overview
 
-The module includes:
-- Cubic spline interpolation for 1D data
-- Bicubic spline interpolation for 2D data
-- Fourier spline interpolation for decomposed data
-- Derivative evaluation capabilities
-- Support for both real and complex-valued data
+JPEC uses [FastInterpolations.jl](https://github.com/ThummeTo/FastInterpolations.jl) for high-performance cubic spline interpolation. The SplinesMod provides:
+- Helper functions for exact spline integration (`cumulative_integral`, `total_integral`)
+- Re-exports of FastInterpolations boundary condition types
+- Re-exports of FastInterpolations search strategies for optimized evaluation
 
 ## API Reference
 
@@ -17,54 +15,38 @@ The module includes:
 Modules = [JPEC.SplinesMod]
 ```
 
-## Types
+## Boundary Condition Types
 
-### CubicSplineType
-Represents a cubic spline interpolation object.
+The module re-exports FastInterpolations boundary condition types:
+- `NaturalBC()`: Natural boundary condition (f''(x) = 0 at endpoints)
+- `PeriodicBC()`: Periodic boundary condition (requires data[end] == data[1])
+- `CubicFit()`: Automatic endpoint derivative estimation using 4-point fit
+- `BCPair(bc_left, bc_right)`: Different BCs at left and right boundaries
+- `Deriv1(value)`: First derivative boundary condition
+- `Deriv2(value)`: Second derivative boundary condition
 
-### BicubicSplineType
-Represents a bicubic spline interpolation object for 2D data.
+## Search Strategies
 
-### FourierSplineType
-Represents a Fourier spline interpolation object for decomposed data.
+For optimized evaluation (especially with monotonic access patterns):
+- `LinearBinary()`: Linear search + binary fallback (~4 ns/point for monotonic access)
+- `Binary()`: Binary search
+- `HintedBinary()`: Binary search with hint
 
-## Functions
+## Integration Functions
 
-### CubicSpline
+### cumulative_integral
 ```@docs
-JPEC.SplinesMod.CubicSpline
+JPEC.SplinesMod.cumulative_integral
 ```
 
-### spline_eval
+### total_integral
 ```@docs
-JPEC.SplinesMod.spline_eval!
-JPEC.SplinesMod.spline_deriv1!
-JPEC.SplinesMod.spline_deriv2!
-JPEC.SplinesMod.spline_deriv3!
-JPEC.SplinesMod.spline_eval
+JPEC.SplinesMod.total_integral
 ```
 
-### BicubicSpline
+### integrate_spline
 ```@docs
-JPEC.SplinesMod.BicubicSpline
-```
-
-### bicube_eval
-```@docs
-JPEC.SplinesMod.bicube_eval!
-JPEC.SplinesMod.bicube_deriv1!
-JPEC.SplinesMod.bicube_deriv2!
-JPEC.SplinesMod.bicube_eval
-```
-
-### FourierSpline
-```@docs
-JPEC.SplinesMod.FourierSpline
-```
-
-### fspline_eval
-```@docs
-JPEC.SplinesMod.fspline_eval
+JPEC.SplinesMod.integrate_spline
 ```
 
 ## Example Usage
@@ -72,41 +54,75 @@ JPEC.SplinesMod.fspline_eval
 ### 1D Cubic Spline
 ```julia
 using JPEC
+using FastInterpolations: cubic_interp, deriv1
 
 # Create data points
-xs = collect(range(0.0, stop=2π, length=21))
+xs = collect(range(0.0, 2π, length=21))
 fs = sin.(xs)
 
-# Set up spline (1 quantity)
-spline = JPEC.SplinesMod.CubicSpline(xs, hcat(fs), 1)
+# Create spline with natural boundary conditions
+spline = cubic_interp(xs, fs; bc=JPEC.SplinesMod.NaturalBC())
 
-# Evaluate at value (and derivatives) at single point
+# Evaluate at a single point
 x = 1.0
-f = JPEC.SplinesMod.spline_eval!(spline, x)
-f, f1, f2, f3 = JPEC.SplinesMod.spline_deriv3!(spline, x)
+f = spline(x)
+
+# Evaluate derivative at a point
+d1_spline = deriv1(spline)
+f_deriv = d1_spline(x)
 
 # Evaluate at vector of new points
-xs_fine = collect(range(0.0, stop=2π, length=100))
-fs_fine = JPEC.SplinesMod.spline_eval(spline, xs_fine)
+xs_fine = collect(range(0.0, 2π, length=100))
+fs_fine = spline.(xs_fine)
+
+# Compute cumulative integral
+fs_integral = JPEC.SplinesMod.cumulative_integral(xs, fs; bc=JPEC.SplinesMod.NaturalBC())
 ```
 
-### 2D Bicubic Spline
+### 2D Cubic Spline (CubicInterpolantND)
 ```julia
+using FastInterpolations: cubic_interp
+
 # Create 2D grid
-xs = collect(range(0.0, stop=2π, length=20))
-ys = collect(range(0.0, stop=2π, length=20))
+xs = collect(range(0.0, 0.99, length=20))
+ys = collect(range(0.0, 2π, length=20))
 
 # Create 2D function data
-fs = zeros(20, 20, 1)
+fs = zeros(20, 20)
 for i in 1:20, j in 1:20
-    fs[i, j, 1] = sin(xs[i]) * cos(ys[j])
+    fs[i, j] = sqrt(xs[i]) * cos(ys[j])
 end
 
-# Set up bicubic spline
-bcspline = JPEC.SplinesMod.BicubicSpline(xs, ys, fs, 1, 1)
+# Set up 2D cubic interpolant
+# Use PeriodicBC on second dimension (θ direction)
+spline_2d = cubic_interp((xs, ys), fs; 
+    bc=(JPEC.SplinesMod.CubicFit(), JPEC.SplinesMod.PeriodicBC()),
+    extrap=(:extension, :wrap))
 
-# Evaluate spline
-x_eval, y_eval = π/2, π/4
-f = JPEC.SplinesMod.bicube_eval!(bcspline, x_eval, y_eval) # just the value
-f, fx, fy = JPEC.SplinesMod.bicube_deriv1!(bcspline, x_eval, y_eval, 1) #include first derivative
+# Evaluate spline at a point
+x_eval, y_eval = 0.5, π/4
+f = spline_2d((x_eval, y_eval))
+
+# Evaluate with derivative (specify which dimension)
+fx = spline_2d((x_eval, y_eval); deriv=(1, 0))  # ∂f/∂x
+fy = spline_2d((x_eval, y_eval); deriv=(0, 1))  # ∂f/∂y
+```
+
+### Multi-series 1D Spline (CubicSeriesInterpolant)
+```julia
+using FastInterpolations: cubic_interp
+
+# Create multiple data series
+xs = collect(range(0.0, 1.0, length=50))
+fs = hcat(sin.(2π*xs), cos.(2π*xs), xs.^2)  # 3 series
+
+# Create series interpolant (more efficient than separate splines)
+spline_series = cubic_interp(xs, fs; bc=JPEC.SplinesMod.CubicFit())
+
+# Evaluate all series at once
+x = 0.5
+f_all = spline_series(x)  # Returns vector of length 3
+
+# Compute total integral for all series
+integrals = JPEC.SplinesMod.total_integral(xs, fs; bc=JPEC.SplinesMod.CubicFit())
 ```
