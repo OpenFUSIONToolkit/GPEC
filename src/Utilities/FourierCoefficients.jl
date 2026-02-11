@@ -112,13 +112,13 @@ Get normalized complex FFT coefficient at grid point.
 
 The FourierCoefficients internally stores:
 
-  - cos_coeffs = 2 * real(FFT) / ntheta  (for m > 0)
-  - sin_coeffs = -2 * imag(FFT) / ntheta (for m > 0)
+  - `cos_coeffs = 2 * real(FFT) / ntheta` (for m > 0)
+  - `sin_coeffs = -2 * imag(FFT) / ntheta` (for m > 0)
 
 This function returns the normalized FFT coefficient (FFT/ntheta):
 
-  - c_0 = cos_coeffs[0]  (DC component)
-  - c_m = cos_coeffs[m]/2 - i*sin_coeffs[m]/2  (for m > 0)
+  - `c[0] = cos_coeffs[0]` (DC component)
+  - `c[m] = cos_coeffs[m]/2 - i*sin_coeffs[m]/2` (for m > 0)
 """
 function get_complex_coeff(fc::FourierCoefficients, ipsi::Int, mode::Int, qty::Int)
     @boundscheck begin
