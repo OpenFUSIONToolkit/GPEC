@@ -114,7 +114,7 @@ function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
     ode_coeff_interp::CubicSeriesInterpolant,
     asymptotic_interp::CubicSeriesInterpolant,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
-    control::DconControl)
+    control::ForceFreeStatesControl)
 
     TOLERANCE = 1e-5
     MINIMUM_STEP = 1e-10
@@ -448,7 +448,7 @@ equation if the surface is Mercier unstable.
 
 ## Arguments
 
-  - `ctrl::DconControl`: Control parameters for the analysis.
+  - `ctrl::ForceFreeStatesControl`: Control parameters for the analysis.
   - `locstab_fs::Matrix{Float64}`: Local stability matrix to store results (modified in place).
   - `plasma_eq::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data.
 
@@ -457,7 +457,7 @@ This function modifies `locstab_fs` in place with:
   - Column 1: Mercier criterion × ψ
   - Columns 4-5: Asymptotic coefficients ca₁ and ca₂
 """
-function compute_ballooning_stability!(ctrl::DconControl, locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function compute_ballooning_stability!(ctrl::ForceFreeStatesControl, locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
     if ctrl.verbose
         println("Evaluating high-n ballooning criterion...")

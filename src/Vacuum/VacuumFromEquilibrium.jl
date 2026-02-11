@@ -6,6 +6,8 @@ by extracting the plasma geometry from the equilibrium bicubic spline.
 """
 
 # Note: Equilibrium module is imported in parent scope via ..Equilibrium
+# Import FourierTransforms for coefficient calculation
+using ..Utilities.FourierTransforms: compute_fourier_coefficients
 
 """
     extract_plasma_surface_at_psi(
@@ -146,13 +148,17 @@ function create_vacuum_input_at_psi(
     # Extract plasma surface geometry at this psi
     r, z, delta, qa = extract_plasma_surface_at_psi(equil, psi, mtheta_eq)
 
+    # Convert delta to ν for VacuumInput
+    # Relationship: delta = -ν/qa, so ν = -delta*qa
+    ν = -delta .* qa
+
     # Create VacuumInput structure
     mhigh = mlow + mpert - 1
 
-    return Vacuum.VacuumInput(
+    return VacuumInput(
         r = r,
         z = z,
-        delta = delta,
+        ν = ν,
         mlow = mlow,
         mhigh = mhigh,
         mpert = mpert,
@@ -201,11 +207,11 @@ function compute_greens_functions_only(
 )
     # Reuse initialization from compute_vacuum_response
     (; mtheta, mpert, mlow, n, qa) = inputs
-    plasma_surf = Vacuum.initialize_plasma_surface(inputs)
-    wall = Vacuum.initialize_wall(inputs, plasma_surf, wall_settings)
+    plasma_surf = initialize_plasma_surface(inputs)
+    wall = initialize_wall(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
-    cslth, snlth = Vacuum.compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
+    cslth, snlth = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
 
     # Allocate arrays for both Green's functions
     grri = zeros(2 * mtheta, 2 * mpert)
@@ -215,32 +221,32 @@ function compute_greens_functions_only(
 
     # Plasma–Plasma block
     j1, j2 = 1, 1
-    Vacuum.kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
+    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
-    Vacuum.fourier_transform!(grri, greenfunction_temp, cslth, 0, 0)
-    Vacuum.fourier_transform!(grri, greenfunction_temp, snlth, 0, mpert)
-    Vacuum.fourier_transform!(grre, greenfunction_temp, cslth, 0, 0)
-    Vacuum.fourier_transform!(grre, greenfunction_temp, snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, cslth, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, snlth, 0, mpert)
+    fourier_transform!(grre, greenfunction_temp, cslth, 0, 0)
+    fourier_transform!(grre, greenfunction_temp, snlth, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
         j1, j2 = 1, 2
-        Vacuum.kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, 0, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, n)
 
         # Wall–Wall block
         j1, j2 = 2, 2
-        Vacuum.kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, 0, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, n)
 
         # Wall–Plasma block
         j1, j2 = 2, 1
-        Vacuum.kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, 1, n)
+        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks
-        Vacuum.fourier_transform!(grri, greenfunction_temp, cslth, mtheta, 0)
-        Vacuum.fourier_transform!(grri, greenfunction_temp, snlth, mtheta, mpert)
-        Vacuum.fourier_transform!(grre, greenfunction_temp, cslth, mtheta, 0)
-        Vacuum.fourier_transform!(grre, greenfunction_temp, snlth, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, cslth, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, snlth, mtheta, mpert)
+        fourier_transform!(grre, greenfunction_temp, cslth, mtheta, 0)
+        fourier_transform!(grre, greenfunction_temp, snlth, mtheta, mpert)
     end
 
     # Add cn0 for n=0 modes if needed

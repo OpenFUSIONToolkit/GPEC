@@ -10,6 +10,12 @@ import ..Equilibrium
 # Import FourierTransforms utility for coefficient calculation and transforms
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
+# Include core data structures and functions first
+include("DataTypes.jl")
+include("Kernel2D.jl")
+include("MathUtils.jl")
+
+# Include VacuumFromEquilibrium after DataTypes so VacuumInput is defined
 include("VacuumFromEquilibrium.jl")
 
 export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
@@ -17,10 +23,6 @@ export compute_vacuum_field
 export kernel!
 export WallShapeSettings
 export extract_plasma_surface_at_psi, create_vacuum_input_at_psi, compute_greens_functions_only
-
-include("DataTypes.jl")
-include("Kernel2D.jl")
-include("MathUtils.jl")
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -264,7 +266,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Compute Fourier basis coefficients using FourierTransforms utility
     # We only need the coefficient arrays for the existing fourier_transform! functions
-    cslth, snlth = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
+    cos_ln_basis, sin_ln_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
 
     # Allocate arrays for both Green's functions
     grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
@@ -278,10 +280,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Fourier transform plasma-plasma block
     # Populate both grri and grre with the same right-hand side
-    fourier_transform!(grri, greenfunction_temp, cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, snlth, 0, mpert)
-    fourier_transform!(grre, greenfunction_temp, cslth, 0, 0)
-    fourier_transform!(grre, greenfunction_temp, snlth, 0, mpert)
+    fourier_transform!(grri, greenfunction_temp, cos_ln_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, sin_ln_basis, 0, mpert)
+    fourier_transform!(grre, greenfunction_temp, cos_ln_basis, 0, 0)
+    fourier_transform!(grre, greenfunction_temp, sin_ln_basis, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -297,10 +299,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
         # Fourier transform wall blocks into both grri and grre
-        fourier_transform!(grri, greenfunction_temp, cslth, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, snlth, mtheta, mpert)
-        fourier_transform!(grre, greenfunction_temp, cslth, mtheta, 0)
-        fourier_transform!(grre, greenfunction_temp, snlth, mtheta, mpert)
+        fourier_transform!(grri, greenfunction_temp, cos_ln_basis, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, sin_ln_basis, mtheta, mpert)
+        fourier_transform!(grre, greenfunction_temp, cos_ln_basis, mtheta, 0)
+        fourier_transform!(grre, greenfunction_temp, sin_ln_basis, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes

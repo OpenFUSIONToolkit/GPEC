@@ -13,9 +13,12 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
 - `z::Vector{Float64}`: Plasma boundary Z-coordinate as a function of poloidal angle
 - `ν::Vector{Float64}`: Free parameter in specifying toroidal angle, ϕ = 2πζ + ν(ψ, θ), on theta grid
 - `mlow::Int`: Lower poloidal mode number for spectral representation
+- `mhigh::Int`: Upper poloidal mode number (mhigh = mlow + mpert - 1)
 - `mpert::Int`: Number of poloidal modes (mhigh - mlow + 1)
 - `n::Int`: Toroidal mode number
-- `mtheta::Int`: Number of poloidal grid points for vacuum calculations
+- `qa::Float64`: Safety factor at plasma boundary
+- `mtheta_eq::Int`: Number of equilibrium poloidal grid points (input grid resolution)
+- `mtheta::Int`: Number of vacuum calculation poloidal grid points
 - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
 """
 @kwdef struct VacuumInput
@@ -23,8 +26,11 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
     z::Vector{Float64} = Float64[]
     ν::Vector{Float64} = Float64[]
     mlow::Int = 0
+    mhigh::Int = 0
     mpert::Int = 0
     n::Int = 0
+    qa::Float64 = 1.0
+    mtheta_eq::Int = 1
     mtheta::Int = 1
     force_wv_symmetry::Bool = true
     # NOTE: kernelsign parameter deprecated - compute_vacuum_response now computes both grri and grre
@@ -35,19 +41,19 @@ end
 
 Struct holding plasma geometry data on the mtheta grid for vacuum calculations. Arrays are
 of length `mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
-It also precomputes trigonometric basis functions needed for Fourier calculations into matrices
-of size (mtheta, mpert), where `mpert` is the number of poloidal modes.
 
 # Fields
 
   - `x::Vector{Float64}`: Plasma surface R-coordinate on VACUUM theta grid
   - `z::Vector{Float64}`: Plasma surface Z-coordinate on VACUUM theta grid
+  - `delta::Vector{Float64}`: Toroidal angle offset δ = -ν/(n*qa) for vacuum phase factor
   - `dx_dtheta::Vector{Float64}`: Derivative dR/dθ at plasma surface
   - `dz_dtheta::Vector{Float64}`: Derivative dZ/dθ at plasma surface
 """
 struct PlasmaGeometry
     x::Vector{Float64}
     z::Vector{Float64}
+    delta::Vector{Float64}
     dx_dtheta::Vector{Float64}
     dz_dtheta::Vector{Float64}
 end
@@ -142,7 +148,11 @@ function initialize_plasma_surface(inputs::VacuumInput)
     mtheta = inputs.mtheta
     x_plasma = interp_to_new_grid(inputs.r, mtheta)
     z_plasma = interp_to_new_grid(inputs.z, mtheta)
-    ν  = interp_to_new_grid(inputs.ν , mtheta)
+    ν = interp_to_new_grid(inputs.ν, mtheta)
+
+    # Compute delta from ν for vacuum phase factor
+    # delta = -ν/qa for use in phase: cos(m*θ + n*qa*δ) = cos(m*θ - n*ν)
+    delta = -ν ./ inputs.qa
 
     # Plasma boundary theta derivative: length mth with θ = [0, 1)
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
@@ -152,7 +162,7 @@ function initialize_plasma_surface(inputs::VacuumInput)
     return PlasmaGeometry(
         x_plasma,
         z_plasma,
-        ν,
+        delta,
         dx_dtheta,
         dz_dtheta
     )

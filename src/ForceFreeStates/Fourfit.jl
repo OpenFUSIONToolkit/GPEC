@@ -13,7 +13,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
   - `ys::Vector{Float64}`: Poloidal angle coordinates `θ` in radians (0 to 2π).
   - `fs::Array{Float64, 3}`: The raw metric data on the grid, size `(mpsi, mtheta, 8)`.
     The 8 quantities are: `g¹¹`, `g²²`, `g³³`, `g²³`, `g³¹`, `g¹²`, `J`, `∂J/∂ψ`.
-  - `fourier_coeffs::Util.FourierCoefficients`: The FFT coefficients (no spline interpolation needed).
+  - `fourier_coeffs::Utilities.FourierCoefficients`: The FFT coefficients (no spline interpolation needed).
 """
 @kwdef mutable struct MetricData
     mpsi::Int
@@ -21,7 +21,7 @@ named `metric` in the Fortran `fourfit_make_metric` subroutine.
     xs::Vector{Float64} = zeros(mpsi)
     ys::Vector{Float64} = zeros(mtheta)
     fs::Array{Float64,3} = zeros(mpsi, mtheta, 8)
-    fourier_coeffs::Util.FourierCoefficients = Util.empty_FourierCoefficients()
+    fourier_coeffs::Utilities.FourierCoefficients = Utilities.empty_FourierCoefficients()
 end
 
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
@@ -122,7 +122,7 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     end
 
     # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
-    metric.fourier_coeffs = Util.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
+    metric.fourier_coeffs = Utilities.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
     return metric
 end
 
@@ -217,14 +217,14 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         # The 8 quantities are: g11, g22, g33, g23, g31, g12, jmat, jmat1
         fc = metric.fourier_coeffs
         for m in 0:intr.mband
-            g11[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 1)
-            g22[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 2)
-            g33[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 3)
-            g23[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 4)
-            g31[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 5)
-            g12[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 6)
-            jmat[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 7)
-            jmat1[mid-m] = Util.get_complex_coeff(fc, ipsi, m, 8)
+            g11[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 1)
+            g22[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 2)
+            g33[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 3)
+            g23[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 4)
+            g31[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 5)
+            g12[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 6)
+            jmat[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 7)
+            jmat1[mid-m] = Utilities.get_complex_coeff(fc, ipsi, m, 8)
         end
 
         # Fill upper half (+1:mband) with conjugate symmetry

@@ -138,9 +138,9 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
         return vecin
     end
 
-    # Input grids are from [0, 1] inclusive, since no interpolants will fall outside of this, we don't need periodic extrapolation
+    # Input grids are from [0, 1] inclusive, while no interpolants will fall outside of this, the bc still impacts the end behavior
     θin = collect(range(0.0, 1.0; length=mtheta_in))
-    spline = cubic_interp(θin, vecin)
+    spline = cubic_interp(θin, vecin; bc=PeriodicBC())
 
     # Interpolate to new grid with optional offsets
     vecout = zeros(mtheta)

@@ -12,7 +12,7 @@ using LinearAlgebra
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
             @test vac_in.n == 0
-            @test vac_in.kernelsign == 1.0
+            # NOTE: kernelsign field deprecated - compute_vacuum_response now computes both grri and grre
             @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
