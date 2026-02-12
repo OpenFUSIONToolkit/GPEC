@@ -7,7 +7,7 @@ by extracting the plasma geometry from the equilibrium bicubic spline.
 
 # Note: Equilibrium module is imported in parent scope via ..Equilibrium
 # Import FourierTransforms for coefficient calculation
-using ..Utilities.FourierTransforms: compute_fourier_coefficients
+using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!
 
 """
     extract_plasma_surface_at_psi(
