@@ -42,9 +42,10 @@ import FastInterpolations: cubic_interp, CubicFit
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
-using .ForceFreeStates: sing_lim!, sing_find!, mercier_scan!, sing_scan!, ode_run, free_run!
+using .ForceFreeStates: sing_lim!, sing_find!
+using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix
-using .ForceFreeStates: eulerlagrange_integration, compute_ballooning_stability!
+using .ForceFreeStates: eulerlagrange_integration, free_run!
 
 function main(args::Vector{String}=String[])
     # Parse command line arguments
