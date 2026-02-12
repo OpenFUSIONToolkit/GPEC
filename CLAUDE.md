@@ -29,7 +29,7 @@ The Vacuum module implements the methods described in:
   - Describes: Fundamental vacuum response calculation method for tokamak geometry
 
 - **Chance et al. (2007)**: "Calculation of the vacuum Green's function valid even for high toroidal mode numbers in tokamaks"
-  - Location: `docs/resources/2007-Chance-Calculation of the vacuum Green's function valid even for high toroidal mode numbers in tokamaks.pdf`
+  - Location: `docs/resources/2007-Chance-Calculation of the vacuum Greens function valid even for high toroidal mode numbers in tokamaks.pdf`
   - Published: Physics of Plasmas **14**, 052506 (2007)
   - Describes: Improved Green's function calculation for high-n modes
 
@@ -86,7 +86,7 @@ JPEC will eventually implement resistive MHD stability analysis based on:
   - Describes: Resistive stability analysis and Δ' calculation via matched asymptotic expansions
 
 - **Glasser (2018)**: "A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time"
-  - Location: `docs/resources/2018-Glasser-A robust solution for the resistive MHD toroidal Δ′ matrix in near real-time.pdf`
+  - Location: `docs/resources/2018-Glasser-A robust solution for the resistive MHD toroidal Delta-prime matrix in near real-time.pdf`
   - Published: Physics of Plasmas **25**, 032501 (2018)
   - Describes: Fast computation of Δ' matrix for resistive stability
 
