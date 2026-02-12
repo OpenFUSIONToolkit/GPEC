@@ -1,16 +1,15 @@
 # Vacuum Module
 
 The Vacuum module provides magnetostatic vacuum field calculations with plasma-wall interactions.
-Refactored from VACUUM by M.S. Chance into a pure Julia implementation.
+The 2D vacuum calculations follow the approach outlined in [Chance Phys. Plasmas 1997, Chance J. Comp. Phys. 2007] and implemented in Chance's VACUUM fortran code, but does so in a new Julia implementation.
 
 ## Overview
 
 The module provides:
 
-- Pure Julia implementation of vacuum response calculations (`compute_vacuum_response`, `compute_vacuum_field`)
+- Vacuum response calculations (`compute_vacuum_response`, `compute_vacuum_field`)
 - Support for various wall geometries (conformal, elliptical, dee-shaped, or custom)
 - Pre-computed Legendre functions using Bulirsch elliptic integrals for improved accuracy
-- ~~Deprecated: Fortran interface (`mscvac`, `set_dcon_params`) - use Julia API instead~~
 
 ## Key Structures
 
@@ -96,14 +95,4 @@ chi = JPEC.Vacuum.compute_vacuum_field(R_obs, Z_obs, inputs, xi, eta, plasma_sur
 - For large mode numbers (nρ̂ ≥ 0.1), 32-point Gaussian quadrature is used for Legendre function evaluation
 - For n=0 modes with closed walls, automatic regularization is applied
 - Wall shapes support: nowall, conformal, elliptical, dee, mod_dee, or custom from file
-- The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per Chance 1997
-
-## Migration from Fortran API
-
-The legacy Fortran interface functions (`mscvac`, `set_dcon_params`, `unset_dcon_params`) have been deprecated in favor of the Julia API. Key changes:
-
-- `delta` parameter renamed to `ν` (nu) for mathematical clarity
-- `qa` (safety factor) no longer passed separately - it's not needed in the vacuum calculation
-- `mhigh` removed - use `mpert` (number of modes) instead
-- `mtheta_eq` removed - DCON theta grid size inferred from input array length
-- Wall settings moved to `WallShapeSettings` struct for better encapsulation
+- The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per [Chance Phys. Plasmas 1997]

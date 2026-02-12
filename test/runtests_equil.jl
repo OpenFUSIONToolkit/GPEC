@@ -3,7 +3,7 @@
 
     # --- Directory Configuration ---
     # Define the data directory for easy maintenance
-    data_dir = "test_data/regression_equilibrium_example"
+    data_dir = joinpath(@__DIR__, "test_data", "regression_equilibrium_example")
 
     # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
@@ -70,20 +70,7 @@
             @test isapprox(plasma_eq_ascii.ro, plasma_eq_binary.ro, atol=tol)
             @test isapprox(plasma_eq_ascii.zo, plasma_eq_binary.zo, atol=tol)
         end
-
-        # NOTE: bicube_eval removed with BicubicSpline - use native FastInterpolations API instead
-        # @testset "Spline Evaluation Consistency" begin
-        #     ... (test removed - rzphi is now multiple CubicInterpolantND instances)
-        # end
     end
-
-    # NOTE: bicube_eval removed with BicubicSpline - use native FastInterpolations API instead
-    # @testset "Geometry Reconstruction" begin
-    #     ... (test removed - rzphi is now multiple CubicInterpolantND instances)
-    # end
-
-    # NOTE: Geometry Reconstruction test removed (used bicube_eval which no longer exists)
-    # TODO: Rewrite using native FastInterpolations evaluation of rzphi interpolants
 
     @testset "Data Source Comparison (EFIT vs CHEASE)" begin
         # Verify consistency between different code outputs (EFIT vs CHEASE)

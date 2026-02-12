@@ -46,8 +46,9 @@ end
     @test isapprox(dri.zmax, -dri.zmin)
     @test dri.rmax > dri.rmin
 
-    # Proper grid size consistency
-    @test length(dri.psi_in.xs) == mr + 1
+    # Proper grid size consistency (coordinates stored in DirectRunInput, not in interpolant)
+    @test length(dri.psi_in_xs) == mr + 1
+    @test length(dri.psi_in_ys) == mz + 1
 end
 
 @testset "sol_run spline integrity" begin
@@ -60,13 +61,16 @@ end
     @test isa(sq, FastInterpolations.CubicSeriesInterpolant)
     @test isa(psi, FastInterpolations.CubicInterpolantND)
 
-    # Domain monotonicity
+    # Domain monotonicity (coordinates are accessed via different paths)
     @test issorted(sq.cache.x)
-    @test issorted(psi.xs)
-    @test issorted(psi.ys)
+    @test issorted(dri.psi_in_xs)  # R coordinates
+    @test issorted(dri.psi_in_ys)  # Z coordinates
+    # Alternatively via the grids tuple: psi.grids[1] and psi.grids[2]
+    @test psi.grids[1] == dri.psi_in_xs
+    @test psi.grids[2] == dri.psi_in_ys
 
-    # Check that psi values are finite
-    @test all(isfinite, psi.fs)
+    # Check that psi values are finite (stored in nodal_derivs.partials)
+    @test all(isfinite, psi.nodal_derivs.partials)
 end
 
 @testset "sol_run 2D psi field properties" begin
@@ -74,10 +78,12 @@ end
     dri = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
     psi = dri.psi_in
 
-    # Check psi symmetry in z
-    z_half = Int(length(psi.ys) ÷ 2)
-    vals_top = psi.fs[:, end, 1]
-    vals_bottom = psi.fs[:, 1, 1]
+    # Check psi symmetry in z (Solovev equilibrium should be up-down symmetric)
+    # nodal_derivs.partials[1, :, :] contains function values on the (R,Z) grid
+    # partials[deriv_idx, r_idx, z_idx] where deriv_idx=1 is the function value
+    partials = psi.nodal_derivs.partials
+    vals_top = partials[1, :, end]      # z = zmax
+    vals_bottom = partials[1, :, 1]     # z = zmin
     @test all(abs.(vals_top .- vals_bottom) .< 1e-12)  # nearly symmetric about z=0
 end
 
@@ -99,8 +105,8 @@ end
     # mr=3, mz=3 creates 4-point grids (mr+1 points)
     equil_inputs, sol_inputs = make_inputs(mr=3, mz=3, ma=3)
     dri = JPEC.Equilibrium.sol_run(equil_inputs, sol_inputs)
-    @test length(dri.psi_in.xs) == 4
-    @test length(dri.psi_in.ys) == 4
+    @test length(dri.psi_in_xs) == 4
+    @test length(dri.psi_in_ys) == 4
 
     # very high aspect ratio
     equil_inputs, sol_inputs = make_inputs(e=0.8, a=0.1, r0=10.0)

@@ -112,6 +112,11 @@ function equilibrium_solver(input::InverseRunInput)
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
+    # Ensure periodicity: copy first theta column to last
+    # (The computation above may have broken periodicity due to subtracting rz_in_ys values)
+    r2[:, end] .= r2[:, 1]
+    deta[:, end] .= deta[:, 1]
+
     # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2;
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
@@ -196,6 +201,10 @@ function equilibrium_solver(input::InverseRunInput)
         # c-----------------------------------------------------------------------
         # c     fit to cubic splines and integrate.
         # c-----------------------------------------------------------------------
+
+        # Ensure periodicity: copy first theta row to last
+        # (Numerical operations may have broken exact periodicity)
+        spl_fs[end, :] .= spl_fs[1, :]
 
         spl = cubic_interp(spl_xs, spl_fs; bc=Spl.PeriodicBC())
         spl_fsi = Spl.cumulative_integral(spl_xs, spl_fs; bc=Spl.PeriodicBC())
@@ -309,10 +318,20 @@ function equilibrium_solver(input::InverseRunInput)
     eqfun_metric2 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 3];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
+    # Create ProfileSplines from sq interpolant
+    # sq_fs columns: [F*2π, P, dV/dψ, q]
+    profiles = ProfileSplines(
+        sq_xs,
+        sq_fs[:, 1],  # F values (already includes 2π factor)
+        sq_fs[:, 2],  # P values
+        sq_fs[:, 3],  # dV/dψ values
+        sq_fs[:, 4]   # q values
+    )
+
     return PlasmaEquilibrium(
         input.config,
         EquilibriumParameters(),
-        sq,
+        profiles,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
