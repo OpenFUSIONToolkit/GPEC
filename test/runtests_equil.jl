@@ -7,7 +7,7 @@
 
     # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
-        efit_control = JPEC.Equilibrium.EquilibriumControl(;
+        efit_config = JPEC.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
@@ -15,7 +15,6 @@
             psilow=0.01,
             psihigh=0.994
         )
-        efit_config = JPEC.Equilibrium.EquilibriumConfig(efit_control, JPEC.Equilibrium.EquilibriumOutput())
         global plasma_eq_efit = JPEC.Equilibrium.setup_equilibrium(efit_config)
 
         @test plasma_eq_efit isa JPEC.Equilibrium.PlasmaEquilibrium
@@ -24,7 +23,7 @@
 
     # --- 2. Load CHEASE Binary Data ---
     @testset "Load CHEASE Binary" begin
-        binary_control = JPEC.Equilibrium.EquilibriumControl(;
+        binary_config = JPEC.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_binary"),
             eq_type="chease_binary",
             jac_type="boozer",
@@ -34,15 +33,14 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        chease_config_chease_binary = JPEC.Equilibrium.EquilibriumConfig(binary_control, JPEC.Equilibrium.EquilibriumOutput())
-        global plasma_eq_binary = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_binary)
+        global plasma_eq_binary = JPEC.Equilibrium.setup_equilibrium(binary_config)
 
         @test plasma_eq_binary isa JPEC.Equilibrium.PlasmaEquilibrium
     end
 
     # --- 3. Load CHEASE ASCII Data ---
     @testset "Load CHEASE ASCII" begin
-        ascii_control = JPEC.Equilibrium.EquilibriumControl(;
+        ascii_config = JPEC.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_ascii"),
             eq_type="chease_ascii",
             jac_type="boozer",
@@ -52,8 +50,7 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        chease_config_chease_ascii = JPEC.Equilibrium.EquilibriumConfig(ascii_control, JPEC.Equilibrium.EquilibriumOutput())
-        global plasma_eq_ascii = JPEC.Equilibrium.setup_equilibrium(chease_config_chease_ascii)
+        global plasma_eq_ascii = JPEC.Equilibrium.setup_equilibrium(ascii_config)
 
         @test plasma_eq_ascii isa JPEC.Equilibrium.PlasmaEquilibrium
     end

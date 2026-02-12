@@ -28,7 +28,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     for ipert_n in 1:intr.npert
         # Set VACUUM run parameters and boundary shape
         n = ipert_n - 1 + intr.nlow
-        vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
+        vac_inputs = compute_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
         fill!(vac.grri, 0.0)
         fill!(vac.grre, 0.0)
         fill!(vac.xzpts, 0.0)

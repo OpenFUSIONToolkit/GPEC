@@ -138,9 +138,14 @@ function interp_to_new_grid(vecin::Vector{Float64}, mtheta::Int; dx0=0.0, dx1=0.
         return vecin
     end
 
+    # Enforce periodicity: FastInterpolations requires y[1] ≈ y[end] for PeriodicBC
+    # For truly periodic data (poloidal angle), force endpoints to match exactly
+    vecin_periodic = copy(vecin)
+    vecin_periodic[end] = vecin_periodic[1]
+
     # Input grids are from [0, 1] inclusive, while no interpolants will fall outside of this, the bc still impacts the end behavior
     θin = collect(range(0.0, 1.0; length=mtheta_in))
-    spline = cubic_interp(θin, vecin; bc=PeriodicBC())
+    spline = cubic_interp(θin, vecin_periodic; bc=PeriodicBC())
 
     # Interpolate to new grid with optional offsets
     vecout = zeros(mtheta)

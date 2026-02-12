@@ -286,9 +286,9 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     u0[2] = sqrt((r - ro)^2 + (z - zo)^2)
 
     bfield = DirectBField()
-    equil_input = raw_profile.config.control
+    equil_config = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_input.power_bp, equil_input.power_b, equil_input.power_r, bfield)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)

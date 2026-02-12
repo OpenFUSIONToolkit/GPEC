@@ -61,8 +61,7 @@ function extract_plasma_surface_at_psi(
     zo = equil.zo
 
     # Get safety factor at this surface
-    sq_vals = Spl.spline_eval!(equil.sq, psi)
-    qa = sq_vals[4]
+    qa = equil.profiles.q_spline(psi)
 
     # Allocate output arrays
     r = zeros(Float64, mtheta_eq)
@@ -75,19 +74,13 @@ function extract_plasma_surface_at_psi(
         # Theta coordinate normalized to [0, 1)
         theta = itheta / mtheta_eq
 
-        # Evaluate bicubic spline at (psi, theta)
-        rzphi_vals = Spl.bicube_eval!(equil.rzphi, psi, theta)
+        # Evaluate bicubic splines at (psi, theta)
+        # New API uses separate interpolants for each component
+        r2 = equil.rzphi_rsquared((psi, theta))      # r² or rfac²
+        deta = equil.rzphi_offset((psi, theta))      # angle offset
+        dphi = equil.rzphi_nu((psi, theta))          # toroidal angle offset (nu)
 
-        # Extract values
-        # rzphi_vals is the _f array which gets filled by bicube_eval!
-        # Component 1: r² or rfac²
-        # Component 2: deta (angle offset)
-        # Component 3: dphi (toroidal angle offset)
-        # Component 4: jac (Jacobian)
-
-        rfac = sqrt(abs(rzphi_vals[1]))
-        deta = rzphi_vals[2]
-        dphi = rzphi_vals[3]
+        rfac = sqrt(abs(r2))
 
         # Compute R, Z coordinates
         eta = twopi * (theta + deta)

@@ -114,7 +114,7 @@ function compute_singular_coupling_metrics!(
     end
 
     # Get vacuum calculation parameters
-    mtheta_eq = length(equil.rzphi.ys)  # Equilibrium poloidal grid size
+    mtheta_eq = length(equil.rzphi_ys)  # Equilibrium poloidal grid size
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
 
@@ -383,8 +383,7 @@ function interpolate_field_at_surface(
     end
 
     # Get safety factor at this surface
-    sq_vals = Spl.spline_eval!(equil.sq, psi)
-    q = sq_vals[4]
+    q = equil.profiles.q_spline(psi)
 
     # Convert displacement to field using ideal MHD relation
     # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ (from FieldReconstruction.jl line 304)
@@ -446,9 +445,8 @@ function compute_current_density(
     twopi = 2π
 
     # Get equilibrium quantities at this surface
-    sq_vals = Spl.spline_eval!(equil.sq, psi)
-    F_tor = sq_vals[1]  # Toroidal field function F = R*B_tor times 2π
-    q = sq_vals[4]      # Safety factor
+    F_tor = equil.profiles.F_spline(psi)  # Toroidal field function F = R*B_tor times 2π
+    q = equil.profiles.q_spline(psi)      # Safety factor
 
     # Magnetic axis location
     ro = equil.ro
@@ -456,7 +454,7 @@ function compute_current_density(
 
     # Number of theta points for integration
     # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
-    mthsurf = length(equil.rzphi.x1) - 1
+    mthsurf = length(equil.rzphi_xs) - 1
 
     # Integrate around flux surface using trapezoidal rule
     integral = 0.0
@@ -470,22 +468,17 @@ function compute_current_density(
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
-        # Evaluate bicubic spline with derivatives at (psi, theta)
-        rzphi_f, rzphi_fx, rzphi_fy = Spl.bicube_deriv1!(equil.rzphi, psi, theta)
+        # Evaluate bicubic splines with derivatives at (psi, theta)
+        # New API uses separate interpolants for each component
+        r2 = equil.rzphi_rsquared((psi, theta))           # rfac²
+        deta = equil.rzphi_offset((psi, theta))           # angle offset
+        jac = equil.rzphi_jac((psi, theta))               # Jacobian
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0,1))  # ∂(rfac²)/∂theta
+        deta_y = equil.rzphi_offset((psi, theta); deriv=(0,1))  # ∂(deta)/∂theta
 
-        # Extract quantities from rzphi
-        # f[1] = rfac² = (R-ro)² + (Z-zo)²
-        # f[2] = deta (angle offset)
-        # f[3] = dphi (toroidal angle offset) - not needed for j_c
-        # f[4] = jac (Jacobian)
-        # fy[1] = ∂(rfac²)/∂theta
-        # fy[2] = ∂(deta)/∂theta
-
-        rfac = sqrt(abs(rzphi_f[1]))
-        jac = rzphi_f[4]
-        deta = rzphi_f[2]
-        fy_rfac2 = rzphi_fy[1]
-        fy_deta = rzphi_fy[2]
+        rfac = sqrt(abs(r2))
+        fy_rfac2 = r2_y
+        fy_deta = deta_y
 
         # Compute R coordinate (Z not needed for this calculation)
         eta = twopi * (theta + deta)
@@ -784,7 +777,7 @@ function compute_surface_area(
     zo = equil.zo
 
     # Number of theta points for integration
-    mthsurf = length(equil.rzphi.x1) - 1
+    mthsurf = length(equil.rzphi_xs) - 1
 
     # Integrate around flux surface using trapezoidal rule
     area = 0.0
@@ -797,15 +790,17 @@ function compute_surface_area(
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
-        # Evaluate bicubic spline with derivatives at (psi, theta)
-        rzphi_f, _, rzphi_fy = Spl.bicube_deriv1!(equil.rzphi, psi, theta)
+        # Evaluate bicubic splines with derivatives at (psi, theta)
+        r2 = equil.rzphi_rsquared((psi, theta))
+        jac = equil.rzphi_jac((psi, theta))
+        deta = equil.rzphi_offset((psi, theta))
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0,1))
+        deta_y = equil.rzphi_offset((psi, theta); deriv=(0,1))
 
-        # Extract quantities (fx not needed for area calculation)
-        rfac = sqrt(abs(rzphi_f[1]))
-        jac = rzphi_f[4]
-        deta = rzphi_f[2]
-        fy_rfac2 = rzphi_fy[1]
-        fy_deta = rzphi_fy[2]
+        # Compute rfac
+        rfac = sqrt(abs(r2))
+        fy_rfac2 = r2_y
+        fy_deta = deta_y
 
         # Compute R coordinate
         eta = twopi * (theta + deta)

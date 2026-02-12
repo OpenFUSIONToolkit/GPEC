@@ -37,10 +37,14 @@ using TOML
 using Printf
 using HDF5
 
+# Import FastInterpolations functions and types needed in main
+import FastInterpolations: cubic_interp, CubicFit
+
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
 using .ForceFreeStates: sing_lim!, sing_find!, mercier_scan!, sing_scan!, ode_run, free_run!
 using .ForceFreeStates: make_metric, make_matrix
+using .ForceFreeStates: eulerlagrange_integration, compute_ballooning_stability!
 
 function main(args::Vector{String}=String[])
     # Parse command line arguments
