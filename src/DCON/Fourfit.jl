@@ -166,16 +166,16 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     mpsi = metric.mpsi
 
     # Allocations (use flat storage for all matrices to fill splines)
-    # TODO: This can be made more efficient for 2D equilibria by using block diagonals
-    amats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    bmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    cmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    dmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    emats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    hmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    fmats_lower_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    gmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
-    kmats_flat = Matrix{ComplexF64}(undef, mpsi, intr.numpert_total^2)
+    # NOTE: Using zeros() instead of undef to ensure off-diagonal blocks (n≠n') are zero for block-diagonal multi-n
+    amats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    bmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    cmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    dmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    emats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    hmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     g11 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
     g22 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
     g33 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
@@ -196,15 +196,15 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::DconInternal, m
     hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
-        amats_flatview = @view amats_flat[ipsi, :, :]
-        bmats_flatview = @view bmats_flat[ipsi, :, :]
-        cmats_flatview = @view cmats_flat[ipsi, :, :]
-        dmats_flatview = @view dmats_flat[ipsi, :, :]
-        emats_flatview = @view emats_flat[ipsi, :, :]
-        hmats_flatview = @view hmats_flat[ipsi, :, :]
-        fmats_lower_flatview = @view fmats_lower_flat[ipsi, :, :]
-        gmats_flatview = @view gmats_flat[ipsi, :, :]
-        kmats_flatview = @view kmats_flat[ipsi, :, :]
+        amats_flatview = @view amats_flat[ipsi, :]
+        bmats_flatview = @view bmats_flat[ipsi, :]
+        cmats_flatview = @view cmats_flat[ipsi, :]
+        dmats_flatview = @view dmats_flat[ipsi, :]
+        emats_flatview = @view emats_flat[ipsi, :]
+        hmats_flatview = @view hmats_flat[ipsi, :]
+        fmats_lower_flatview = @view fmats_lower_flat[ipsi, :]
+        gmats_flatview = @view gmats_flat[ipsi, :]
+        kmats_flatview = @view kmats_flat[ipsi, :]
         # --- Profiles ---
         psi = profiles.xs[ipsi]
         p1 = profiles.P_deriv(psi; hint=hint)
