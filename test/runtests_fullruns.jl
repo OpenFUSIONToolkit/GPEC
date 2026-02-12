@@ -7,10 +7,10 @@
         true
     end
 
-    # ex2 = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example_multi_n")
-    # @info "Running Solovev ideal multi-n example"
-    # @test begin
-    #     DCON.Main(ex2)
-    #     true
-    # end
+    ex2 = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example_multi_n")
+    @info "Running Solovev ideal multi-n example"
+    @test begin
+        DCON.Main(ex2)
+        true
+    end
 end
