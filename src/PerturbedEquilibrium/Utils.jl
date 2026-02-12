@@ -49,7 +49,7 @@ end
         filename::String
     )
 
-Write perturbed equilibrium results to HDF5 file (appends to existing DCON output).
+Write perturbed equilibrium results to HDF5 file (appends to existing ForceFreeStates output).
 
 ## Output Structure
 

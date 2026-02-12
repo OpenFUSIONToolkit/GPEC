@@ -15,7 +15,7 @@ Reference: ~/Code/gpec/gpec/gpout.f
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
         equil::Equilibrium.PlasmaEquilibrium,
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         vac_data::VacuumData,
         ffs_intr::ForceFreeStatesInternal,
         intr::PerturbedEquilibriumInternal,
@@ -35,7 +35,7 @@ Implements GPEC algorithm from gpout.f:
 ## Arguments
 - `state`: Output state structure to store results
 - `equil`: Equilibrium solution with q-profile and flux surfaces
-- `dcon_results`: DCON stability calculation results
+- `ForceFreeStates_results`: ForceFreeStates stability calculation results
 - `vac_data`: Vacuum response data including Green's functions
 - `ffs_intr`: ForceFreeStates internal state with singular surface data
 - `intr`: PerturbedEquilibrium internal state with permeability matrix
@@ -56,7 +56,7 @@ Note: numpert_total = mpert × npert handles all (m,n) mode combinations
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
     equil::Equilibrium.PlasmaEquilibrium,
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     vac_data::VacuumData,
     ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal,
@@ -207,13 +207,13 @@ function compute_singular_coupling_metrics!(
             respsi = sing_surf.psifac  # Flux coordinate of singular surface
 
             # Step 4b: Evaluate field derivative jump across surface
-            # Use asymptotic coefficients from DCON if available
-            if size(dcon_results.ca_l, 4) >= s && size(dcon_results.ca_r, 4) >= s
+            # Use asymptotic coefficients from ForceFreeStates if available
+            if size(ForceFreeStates_results.ca_l, 4) >= s && size(ForceFreeStates_results.ca_r, 4) >= s
                 # Get field derivatives from asymptotic coefficients
                 # ca_l and ca_r contain the solution just left and right of singular surface
                 # Component 2 is the derivative (∂ξ_ψ/∂ψ)
-                lbwp1 = dcon_results.ca_l[resnum, i, 2, s]
-                rbwp1 = dcon_results.ca_r[resnum, i, 2, s]
+                lbwp1 = ForceFreeStates_results.ca_l[resnum, i, 2, s]
+                rbwp1 = ForceFreeStates_results.ca_r[resnum, i, 2, s]
             else
                 # Fallback: use finite difference across singular surface
                 spot = 1e-6  # Small step
@@ -221,8 +221,8 @@ function compute_singular_coupling_metrics!(
                 rpsi = respsi + spot / (abs(n_mode) * abs(sing_surf.q1))
 
                 # Interpolate field derivative at left and right
-                lbwp1 = interpolate_field_derivative(dcon_results, lpsi, resnum, i)
-                rbwp1 = interpolate_field_derivative(dcon_results, rpsi, resnum, i)
+                lbwp1 = interpolate_field_derivative(ForceFreeStates_results, lpsi, resnum, i)
+                rbwp1 = interpolate_field_derivative(ForceFreeStates_results, rpsi, resnum, i)
             end
 
             # Step 4c: Compute Delta' (tearing stability parameter)
@@ -259,7 +259,7 @@ function compute_singular_coupling_metrics!(
             end
 
             # Step 4g: Get interpolated field at resonant surface
-            interpbwn = interpolate_field_at_surface(dcon_results, respsi, resnum, i, equil, m_res, n_mode)
+            interpbwn = interpolate_field_at_surface(ForceFreeStates_results, respsi, resnum, i, equil, m_res, n_mode)
 
             # Normalize by surface area
             area = compute_surface_area(equil, sing_surf.psifac)
@@ -290,7 +290,7 @@ end
 
 """
     interpolate_field_derivative(
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         psi::Float64,
         mode_idx::Int,
         forcing_idx::Int
@@ -298,26 +298,26 @@ end
 
 Interpolate field derivative ∂b/∂ψ at arbitrary flux coordinate.
 
-Uses linear interpolation of stored DCON solution.
+Uses linear interpolation of stored ForceFreeStates solution.
 """
 function interpolate_field_derivative(
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     psi::Float64,
     mode_idx::Int,
     forcing_idx::Int
 )::ComplexF64
     # Find bracketing points in psi_store
-    psi_store = dcon_results.psi_store[1:dcon_results.step]
+    psi_store = ForceFreeStates_results.psi_store[1:ForceFreeStates_results.step]
 
     # Find indices that bracket psi
     idx_right = findfirst(p -> p >= psi, psi_store)
 
     if idx_right === nothing
         # psi is beyond stored range, use last value
-        return dcon_results.ud_store[mode_idx, forcing_idx, 1, dcon_results.step]
+        return ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, ForceFreeStates_results.step]
     elseif idx_right == 1
         # psi is before stored range, use first value
-        return dcon_results.ud_store[mode_idx, forcing_idx, 1, 1]
+        return ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, 1]
     else
         # Interpolate between idx_left and idx_right
         idx_left = idx_right - 1
@@ -326,8 +326,8 @@ function interpolate_field_derivative(
         psi_right = psi_store[idx_right]
         weight = (psi - psi_left) / (psi_right - psi_left)
 
-        val_left = dcon_results.ud_store[mode_idx, forcing_idx, 1, idx_left]
-        val_right = dcon_results.ud_store[mode_idx, forcing_idx, 1, idx_right]
+        val_left = ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_left]
+        val_right = ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_right]
 
         return val_left * (1.0 - weight) + val_right * weight
     end
@@ -335,7 +335,7 @@ end
 
 """
     interpolate_field_at_surface(
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         psi::Float64,
         mode_idx::Int,
         forcing_idx::Int,
@@ -346,14 +346,14 @@ end
 
 Interpolate magnetic field at arbitrary flux surface.
 
-Interpolates displacement from DCON solution and converts to field using
+Interpolates displacement from ForceFreeStates solution and converts to field using
 ideal MHD relation from flux coordinates:
     b^ψ = i * χ₁ * (m - n*q) * ξ_ψ
 
 This matches the field reconstruction in FieldReconstruction.jl.
 """
 function interpolate_field_at_surface(
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     psi::Float64,
     mode_idx::Int,
     forcing_idx::Int,
@@ -362,22 +362,22 @@ function interpolate_field_at_surface(
     n_mode::Int
 )::ComplexF64
     # Get displacement at this surface via interpolation
-    psi_store = dcon_results.psi_store[1:dcon_results.step]
+    psi_store = ForceFreeStates_results.psi_store[1:ForceFreeStates_results.step]
 
     idx_right = findfirst(p -> p >= psi, psi_store)
 
     if idx_right === nothing
-        xi_psi = dcon_results.u_store[mode_idx, forcing_idx, 1, dcon_results.step]
+        xi_psi = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, ForceFreeStates_results.step]
     elseif idx_right == 1
-        xi_psi = dcon_results.u_store[mode_idx, forcing_idx, 1, 1]
+        xi_psi = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, 1]
     else
         idx_left = idx_right - 1
         psi_left = psi_store[idx_left]
         psi_right = psi_store[idx_right]
         weight = (psi - psi_left) / (psi_right - psi_left)
 
-        val_left = dcon_results.u_store[mode_idx, forcing_idx, 1, idx_left]
-        val_right = dcon_results.u_store[mode_idx, forcing_idx, 1, idx_right]
+        val_left = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, idx_left]
+        val_right = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, idx_right]
 
         xi_psi = val_left * (1.0 - weight) + val_right * weight
     end

@@ -15,7 +15,7 @@ High Priority (MWE):
   - `verbose::Bool` - Enable verbose logging (default: true)
 
 Output Settings:
-  - `output_filename::String` - Combined output file with DCON results (default: uses DCON HDF5_filename)
+  - `output_filename::String` - Combined output file with ForceFreeStates results (default: uses ForceFreeStates HDF5_filename)
   - `write_outputs_to_HDF5::Bool` - Write perturbed equilibrium outputs to HDF5 (default: true)
 
 Medium Priority (defer for MWE):
@@ -31,7 +31,7 @@ Medium Priority (defer for MWE):
     verbose::Bool = true
 
     # Output settings
-    output_filename::String = ""  # Empty means use DCON filename
+    output_filename::String = ""  # Empty means use ForceFreeStates filename
     write_outputs_to_HDF5::Bool = true
 
     # Medium Priority (include but simple for MWE)

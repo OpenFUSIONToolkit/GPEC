@@ -5,7 +5,7 @@ Vacuum structures and initialization functions.
 """
     VacuumInput
 
-Struct holding plasma boundary and mode data as provided from DCON namelist and computed quantities.
+Struct holding plasma boundary and mode data as provided from ForceFreeStates namelist and computed quantities.
 
 # Fields
 
@@ -19,7 +19,7 @@ Struct holding plasma boundary and mode data as provided from DCON namelist and 
 - `qa::Float64`: Safety factor at plasma boundary
 - `mtheta_eq::Int`: Number of equilibrium poloidal grid points (input grid resolution)
 - `mtheta::Int`: Number of vacuum calculation poloidal grid points
-- `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix (set in dcon.toml)
+- `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
 """
 @kwdef struct VacuumInput
     r::Vector{Float64} = Float64[]

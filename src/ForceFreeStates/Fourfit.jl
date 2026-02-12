@@ -129,7 +129,7 @@ end
 """
     make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
 
-Constructs main DCON matrices for a given toroidal mode number and returns
+Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
 them as a new `FourFitVars` object. See the appendix of the 2016 Glasser
 DCON paper for details on the matrix definitions. Performs the same function
 as `fourfit_make_matrix` in the Fortran code, except F, G, and K are now
@@ -255,7 +255,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
                     # Some complex indexing here... we flatten the 2D (mpert x npert) x (mpert x npert) matrix,
                     # so we need a "ipert" for m, m', n, and n' (in full 3D). In 2D, just m, m', and n
                     ipert = ipert_m + (ipert_n - 1) * intr.mpert
-                    jpert = jpert_m + (ipert_n - 1) * intr.mpert # TODO: this will be jpert_n in 3D-DCON
+                    jpert = jpert_m + (ipert_n - 1) * intr.mpert # TODO: this will be jpert_n in 3D-ForceFreeStates
                     ipert_flat = ipert + (jpert - 1) * intr.numpert_total
 
                     # Compute matrix values at the current m, m', n (and eventually n')

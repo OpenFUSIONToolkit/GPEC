@@ -34,7 +34,7 @@ julia benchmarks/benchmark_git_branches.jl --example examples/DIIID-like_ideal_e
 
 # Requirements
 
-- Example directory must contain DCON.jl file that can be run via: `using JPEC; JPEC.DCON.Main("path")`
+- Example directory must contain jpec.jl file that can be run via: `using JPEC; JPEC.main("path")`
 - Working directory must be clean or changes will be stashed during branch switching
 
 # Output Metrics
@@ -166,7 +166,7 @@ function run_example_benchmark(example_path, num_runs)
     cd(example_path) do
         Pkg.activate("../..")
         using JPEC
-        @time JPEC.DCON.Main("./")
+        @time JPEC.main("./")
     end
 
     # Warm runs for timing
@@ -174,7 +174,7 @@ function run_example_benchmark(example_path, num_runs)
     for i in 1:num_runs
         println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
         runtime = cd(example_path) do
-            @elapsed JPEC.DCON.Main("./")
+            @elapsed JPEC.main("./")
         end
         push!(runtimes, runtime)
         println("  Runtime: $(round(runtime, digits=2)) s")

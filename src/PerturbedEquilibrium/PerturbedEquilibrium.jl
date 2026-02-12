@@ -39,7 +39,7 @@ export write_outputs_to_HDF5
 """
     compute_perturbed_equilibrium(
         equil::Equilibrium.PlasmaEquilibrium,
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         vac_data::Union{VacuumData, Nothing},
         ffs_intr::ForceFreeStatesInternal,
         ft_ctrl::ForcingTerms.ForcingTermsControl,
@@ -54,7 +54,7 @@ coupling metrics.
 
 ## Arguments
   - `equil`: Equilibrium solution from Equilibrium module
-  - `dcon_results`: Stability calculation results from ForceFreeStates module
+  - `ForceFreeStates_results`: Stability calculation results from ForceFreeStates module
   - `vac_data`: Vacuum response data from ForceFreeStates free boundary calculation
   - `ffs_intr`: ForceFreeStates internal state with mode information
   - `ft_ctrl`: Forcing terms control parameters from [ForcingTerms] section
@@ -72,7 +72,7 @@ coupling metrics.
 """
 function compute_perturbed_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     vac_data::Union{VacuumData, Nothing},
     ffs_intr::ForceFreeStates.ForceFreeStatesInternal,
     ft_ctrl::ForcingTerms.ForcingTermsControl,
@@ -99,7 +99,7 @@ function compute_perturbed_equilibrium(
         if vac_data === nothing
             @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_plasma_response!(state, equil, dcon_results, vac_data, ffs_intr, intr, ctrl)
+            compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
         end
     end
 
@@ -108,7 +108,7 @@ function compute_perturbed_equilibrium(
         if vac_data === nothing
             @warn "Vacuum data not available. Skipping singular coupling calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_singular_coupling_metrics!(state, equil, dcon_results, vac_data, ffs_intr, intr, ctrl)
+            compute_singular_coupling_metrics!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
         end
     end
 

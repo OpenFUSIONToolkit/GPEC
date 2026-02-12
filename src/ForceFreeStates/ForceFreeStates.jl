@@ -1,6 +1,6 @@
 module ForceFreeStates
 
-# All imports and includes for the DCON module
+# All imports and includes for the ForceFreeStates module
 using LinearAlgebra
 using LinearAlgebra.LAPACK
 using TOML
@@ -28,7 +28,7 @@ include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 
-# These are used for various small tolerances and root finders throughout DCON
+# These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
 global itmax = 50
 

@@ -24,7 +24,7 @@ Reference: GPEC gpeq.f lines 100-102
 """
     reconstruct_physical_fields(
         response_vector::Vector{ComplexF64},
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         equil::Equilibrium.PlasmaEquilibrium,
         ffs_intr::ForceFreeStatesInternal,
         intr::PerturbedEquilibriumInternal
@@ -45,7 +45,7 @@ algebraic relations in flux coordinates. All fields are returned in mode space
 # Arguments
 
 - `response_vector::Vector{ComplexF64}`: Response coefficients [numpert_total]
-- `dcon_results::OdeState`: DCON results with u_store eigenmodes
+- `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store eigenmodes
 - `equil::Equilibrium.PlasmaEquilibrium`: Equilibrium data
 - `ffs_intr::ForceFreeStatesInternal`: Mode information (m, n ranges)
 - `intr::PerturbedEquilibriumInternal`: Internal state
@@ -62,26 +62,26 @@ All in mode space, matching GPEC output format.
 
 # Notes
 
-- Uses DCON radial grid (not equilibrium grid)
+- Uses ForceFreeStates radial grid (not equilibrium grid)
 - Works entirely in mode space - no Fourier transforms
 - Follows GPEC gpeq_sol, gpeq_contra formulation
 - Field from ideal MHD: b^ψ = i*χ₁*(m-n*q)*ξ_ψ
 """
 function reconstruct_physical_fields(
     response_vector::Vector{ComplexF64},
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal
 )
     # Get dimensions
-    npsi = size(dcon_results.u_store, 4)
+    npsi = size(ForceFreeStates_results.u_store, 4)
     mpert = ffs_intr.mpert
 
     # Step 1: Sum weighted eigenmode contributions to get covariant ξ_ψ in mode space
     xi_psi_modes = sum_eigenmode_contributions(
         response_vector,
-        dcon_results,
+        ForceFreeStates_results,
         ffs_intr
     )
 
@@ -89,7 +89,7 @@ function reconstruct_physical_fields(
     # This mimics GPEC's gpeq_sol and gpeq_contra
     b_psi_modes, b_theta_modes, b_zeta_modes = compute_perturbed_field_modes(
         xi_psi_modes,
-        dcon_results,
+        ForceFreeStates_results,
         equil,
         ffs_intr
     )
@@ -97,8 +97,8 @@ function reconstruct_physical_fields(
     # Package outputs in NamedTuples for clarity
     xi_modes = (
         psi = xi_psi_modes,      # [npsi, mpert] - covariant radial displacement
-        theta = zeros(ComplexF64, npsi, mpert),  # Placeholder - not computed from DCON
-        zeta = zeros(ComplexF64, npsi, mpert)    # Placeholder - not computed from DCON
+        theta = zeros(ComplexF64, npsi, mpert),  # Placeholder - not computed from ForceFreeStates
+        zeta = zeros(ComplexF64, npsi, mpert)    # Placeholder - not computed from ForceFreeStates
     )
 
     b_modes = (
@@ -113,7 +113,7 @@ end
 """
     sum_eigenmode_contributions(
         response_vector::Vector{ComplexF64},
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         ffs_intr::ForceFreeStatesInternal
     ) -> xi_psi_modes
 
@@ -129,7 +129,7 @@ plasma response to external forcing.
 # Arguments
 
 - `response_vector::Vector{ComplexF64}`: Response coefficient for each eigenmode [numpert_total]
-- `dcon_results::OdeState`: DCON results with u_store containing eigenmodes
+- `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store containing eigenmodes
 - `ffs_intr::ForceFreeStatesInternal`: Mode information (mpert, etc.)
 
 # Returns
@@ -138,19 +138,19 @@ plasma response to external forcing.
 
 # Notes
 
-- In DCON formulation, u_store[:, :, 1, :] contains ξ_ψ (covariant radial displacement)
+- In ForceFreeStates formulation, u_store[:, :, 1, :] contains ξ_ψ (covariant radial displacement)
 - The response vector is ordered as [mode1_mode1, mode1_mode2, ..., mode2_mode1, ...]
 - We sum over all (i,j) eigenmode pairs to get the total response for each mode i
 - This corresponds to xsp_mn in GPEC notation
 """
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     ffs_intr::ForceFreeStatesInternal
 )
     # Extract dimensions
     numpert_total = length(response_vector)
-    npsi = size(dcon_results.u_store, 4)
+    npsi = size(ForceFreeStates_results.u_store, 4)
     mpert = ffs_intr.mpert
 
     # Initialize output array (npsi × mpert)
@@ -174,7 +174,7 @@ function sum_eigenmode_contributions(
             for ipsi in 1:npsi
                 # u_store[i, j, component, radial_index]
                 # Component 1 = ξ_ψ (covariant radial displacement)
-                xi_psi_modes[ipsi, i] += coeff * dcon_results.u_store[i, j, 1, ipsi]
+                xi_psi_modes[ipsi, i] += coeff * ForceFreeStates_results.u_store[i, j, 1, ipsi]
             end
 
             idx += 1
@@ -187,7 +187,7 @@ end
 """
     compute_perturbed_field_modes(
         xi_psi_modes::Matrix{ComplexF64},
-        dcon_results::OdeState,
+        ForceFreeStates_results::OdeState,
         equil::Equilibrium.PlasmaEquilibrium,
         ffs_intr::ForceFreeStatesInternal
     ) -> (b_psi_modes, b_theta_modes, b_zeta_modes)
@@ -217,7 +217,7 @@ where:
 # Arguments
 
 - `xi_psi_modes::Matrix{ComplexF64}`: Covariant radial displacement ξ_ψ(ψ,m) [npsi, mpert]
-- `dcon_results::OdeState`: DCON results with psi_store for radial grid
+- `ForceFreeStates_results::OdeState`: ForceFreeStates results with psi_store for radial grid
 - `equil::Equilibrium.PlasmaEquilibrium`: Equilibrium with q(ψ), q'(ψ), Ψ₀
 - `ffs_intr::ForceFreeStatesInternal`: Mode numbers (mlow, mhigh, n)
 
@@ -237,7 +237,7 @@ Tuple of three matrices, all [npsi, mpert]:
 """
 function compute_perturbed_field_modes(
     xi_psi_modes::Matrix{ComplexF64},
-    dcon_results::OdeState,
+    ForceFreeStates_results::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal
 )
@@ -263,24 +263,24 @@ function compute_perturbed_field_modes(
     for ipert in 1:mpert
         for ipsi in 2:npsi-1
             # Centered difference
-            dpsi = dcon_results.psi_store[ipsi+1] - dcon_results.psi_store[ipsi-1]
+            dpsi = ForceFreeStates_results.psi_store[ipsi+1] - ForceFreeStates_results.psi_store[ipsi-1]
             xi_psi1_modes[ipsi, ipert] = (xi_psi_modes[ipsi+1, ipert] - xi_psi_modes[ipsi-1, ipert]) / dpsi
         end
         # Forward difference at axis
         if npsi > 1
-            dpsi = dcon_results.psi_store[2] - dcon_results.psi_store[1]
+            dpsi = ForceFreeStates_results.psi_store[2] - ForceFreeStates_results.psi_store[1]
             xi_psi1_modes[1, ipert] = (xi_psi_modes[2, ipert] - xi_psi_modes[1, ipert]) / dpsi
         end
         # Backward difference at edge
         if npsi > 1
-            dpsi = dcon_results.psi_store[npsi] - dcon_results.psi_store[npsi-1]
+            dpsi = ForceFreeStates_results.psi_store[npsi] - ForceFreeStates_results.psi_store[npsi-1]
             xi_psi1_modes[npsi, ipert] = (xi_psi_modes[npsi, ipert] - xi_psi_modes[npsi-1, ipert]) / dpsi
         end
     end
 
     # Compute field for each radial point and mode
     for ipsi in 1:npsi
-        psi_norm = dcon_results.psi_store[ipsi]
+        psi_norm = ForceFreeStates_results.psi_store[ipsi]
 
         # Get equilibrium quantities at this surface
         sq_vals, sq_derivs = Spl.spline_deriv1!(equil.sq, psi_norm)
@@ -297,7 +297,7 @@ function compute_perturbed_field_modes(
             # Get displacement and derivative at this point
             xsp = xi_psi_modes[ipsi, ipert]     # ξ_ψ
             xsp1 = xi_psi1_modes[ipsi, ipert]   # ∂ξ_ψ/∂ψ
-            xss = 0.0 + 0.0im                    # ξ_ζ = 0 (not computed from DCON)
+            xss = 0.0 + 0.0im                    # ξ_ζ = 0 (not computed from ForceFreeStates)
 
             # GPEC gpeq.f line 100-102: Compute contravariant field
             # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ

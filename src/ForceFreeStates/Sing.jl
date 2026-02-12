@@ -136,14 +136,13 @@ end
 Calculate asymptotic vmat and mmat matrices for a singular surface.
 Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data instead of
 mutating the `SingType` struct. This makes it clear that asymptotics are computed on-demand
-for ideal DCON and are not inherent properties of the singular surface.
+for ideal ForceFreeStates and are not inherent properties of the singular surface.
 
 See equations 41-48 in the 2016 Glasser DCON paper for the mathematical details.
 
 ### Arguments
 
   - `singp::SingType`: Singular surface parameters
-  - Other standard DCON parameters
 
 ### Returns
 
@@ -508,7 +507,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
 end
 
 """
-    solve_higher_order_vmat!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::DconInternal, k::Int)
+    solve_higher_order_vmat!(vmat::Array{ComplexF64,4}, mmat::Array{ComplexF64,4}, m0mat::Matrix{ComplexF64}, alpha::Vector{ComplexF64}, r1::Vector{Int}, r2::Vector{Int}, n1::Vector{Int}, n2::Vector{Int}, power::Vector{ComplexF64}, intr::ForceFreeStatesInternal, k::Int)
 
 Solves iteratively for the next order in the power series `vmat`.
 See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran

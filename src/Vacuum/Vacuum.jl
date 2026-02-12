@@ -34,7 +34,7 @@ const libvac = joinpath(libdir, "libvac")
 """
     set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
-Initialize DCON parameters for vacuum field calculations.
+Initialize ForceFreeStates parameters for vacuum field calculations.
 
 # Arguments
 
@@ -82,10 +82,10 @@ end
 """
     unset_surface_params()
 
-Unset DCON parameters previously set by `set_surface_params`.
+Unset ForceFreeStates parameters previously set by `set_surface_params`.
 
-This subroutine deallocates in-memory arrays (`x_dcon`, `z_dcon`, and `delta_dcon`)
-and resets the internal DCON state for future vacuum calculations.
+This subroutine deallocates in-memory arrays (`x`, `z`, and `delta`)
+and resets the internal ForceFreeStates state for future vacuum calculations.
 
 # Notes
 
