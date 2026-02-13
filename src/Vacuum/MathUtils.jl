@@ -4,12 +4,13 @@
 # Returns the array of derivatives at all x points, I think this acts like difspl
 # in the Fortran but need to check/consolidate spline routines later
 function periodic_cubic_deriv(theta, vals)
-    # Close the loop for periodic BC by appending first point at the end
-    theta_closed = vcat(collect(theta), theta[end] + (theta[2] - theta[1]))
-    vals_closed = vcat(vals, vals[1])
-    spline = cubic_interp(theta_closed, vals_closed; bc=PeriodicBC())
+    # Use exclusive endpoint PeriodicBC (FastInterpolations v0.2.9+)
+    # Infer period from theta grid
+    theta_vec = collect(theta)
+    period = theta_vec[end] - theta_vec[1] + (theta_vec[2] - theta_vec[1])
+    spline = cubic_interp(theta_vec, vals; bc=PeriodicBC(; endpoint=:exclusive, period=period))
     d1 = deriv1(spline)
-    return d1.(collect(theta))
+    return d1.(theta_vec)
 end
 
 """

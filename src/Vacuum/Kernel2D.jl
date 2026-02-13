@@ -110,12 +110,10 @@ function kernel!(
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
 
     # Used for Z'_θ and X'_θ in eq.(51)
-    # Close the loop for periodic BC by appending first point at the end
-    theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
-    x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
-    z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
-    spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
-    spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
+    # Use exclusive endpoint PeriodicBC (FastInterpolations v0.2.9+)
+    theta_vec = collect(theta_grid)
+    spline_x = cubic_interp(theta_vec, x_sourcepoints; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    spline_z = cubic_interp(theta_vec, z_sourcepoints; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
     # Create derivative views once, reuse for all evaluations (avoids allocation per call)
     d1_spline_x = deriv1(spline_x)
     d1_spline_z = deriv1(spline_z)
