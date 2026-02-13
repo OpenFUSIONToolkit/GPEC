@@ -5,7 +5,7 @@ module Equilibrium
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC
 import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
