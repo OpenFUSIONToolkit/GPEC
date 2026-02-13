@@ -317,8 +317,13 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
 
     else
         filepath = wall_settings.shape
-        !isfile(filepath) && @error "ERROR: Wall geometry file $filepath does not exist.
-            Please set the wall shape parameter to a valid file path or a built-in shape (nowall, conformal, elliptical, dee, mod_dee)."
+        if !isfile(filepath)
+            error(
+                "Wall geometry file $filepath does not exist. " *
+                "Please set the wall shape parameter to a valid file path or a built-in shape " *
+                "(nowall, conformal, elliptical, dee, mod_dee)."
+            )
+        end
 
         wcentr = 0.0
         open(wall_settings.shape, "r") do io
@@ -326,7 +331,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
             wcentr = parse(Float64, readline(io))
             readline(io) # Skip header/comment line
 
-            (npots0 < mtheta) && @error "ERROR: $filename contains fewer points ($npots0) than mtheta ($mtheta)."
+            npots0 < mtheta && error("Wall geometry file $filepath contains fewer points ($npots0) than mtheta ($mtheta).")
 
             for i in 1:mtheta
                 line = split(readline(io))
@@ -344,7 +349,7 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     end
 
     # To add support for x<0 walls, be sure to carefully replicate Chance's fortran code x<0 handling in the kernel function to account for the additional singularities associated with this
-    any(x_wall .<= 0.0) && @error "Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry."
+    any(x_wall .<= 0.0) && error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
 
     return WallGeometry(false, x_wall, z_wall)
 end
