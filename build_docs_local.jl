@@ -8,13 +8,13 @@ Pkg.instantiate()
 # Build the package
 Pkg.build()
 
-# Activate the docs environment (don't instantiate yet - JPEC is not registered)
+# Activate the docs environment
 Pkg.activate("docs")
 
-# Add the local package to docs environment BEFORE instantiating
-Pkg.develop(PackageSpec(; path="."))
+# Add the local package to docs environment first
+Pkg.develop(PackageSpec(path="."))
 
-# Now instantiate to get Documenter and other deps
+# Now instantiate to get other dependencies
 Pkg.instantiate()
 
 # Build the documentation

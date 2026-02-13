@@ -3,9 +3,10 @@ function symbolize_keys(dict::Dict{String,Any})
 end
 
 """
-    EquilibriumControl
+    EquilibriumConfig(...)
 
-A mutable struct containing control parameters for equilibrium reconstruction.
+A mutable struct containing configuration parameters for equilibrium reconstruction.
+Bundles all necessary settings originally specified in the equil fortran namelists.
 
 ## Fields
 
@@ -24,11 +25,10 @@ A mutable struct containing control parameters for equilibrium reconstruction.
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
-  - `use_classic_splines::Bool` - Use classic spline interpolation method
-  - `input_only::Bool` - Only process input without full reconstruction
+  - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
-@kwdef mutable struct EquilibriumControl
+@kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
     eq_filename::String = "mypath"
     r0exp::Float64 = 1.0
@@ -47,17 +47,16 @@ A mutable struct containing control parameters for equilibrium reconstruction.
 
     newq0::Int = 0
     etol::Float64 = 1e-7
-    use_classic_splines::Bool = false
 
-    input_only::Bool = false
+    force_termination::Bool = false
     use_galgrid::Bool = true
 
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumControl(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
-        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
-        input_only, use_galgrid)
+    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
+        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+        force_termination, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -89,87 +88,71 @@ A mutable struct containing control parameters for equilibrium reconstruction.
             error("Cannot recognize jac_type = $(jac_type)")
         end
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
-            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
-            input_only, use_galgrid)
+            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+            force_termination, use_galgrid)
     end
 end
 
 """
-    EquilibriumOutput
-
-A mutable struct containing flags for equilibrium output options.
-
-## Fields
-
-  - `gse_flag::Bool` - Output GSE (Grad-Shafranov Equation) data
-  - `out_eq_1d::Bool` - Output 1D equilibrium profiles in text format
-  - `bin_eq_1d::Bool` - Output 1D equilibrium profiles in binary format
-  - `out_eq_2d::Bool` - Output 2D equilibrium data in text format
-  - `bin_eq_2d::Bool` - Output 2D equilibrium data in binary format
-  - `out_2d::Bool` - Output 2D flux surface data in text format
-  - `bin_2d::Bool` - Output 2D flux surface data in binary format
-  - `dump_flag::Bool` - Output diagnostic dump files
+Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 """
-@kwdef mutable struct EquilibriumOutput
-    gse_flag::Bool = false
-    out_eq_1d::Bool = false
-    bin_eq_1d::Bool = false
-    out_eq_2d::Bool = false
-    bin_eq_2d::Bool = true
-    out_2d::Bool = false
-    bin_2d::Bool = false
-    dump_flag::Bool = false
-end
+function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
+    # Check for required fields
+    required_keys = ("eq_filename", "eq_type")
+    missingkeys = filter(k -> !haskey(equil_dict, k), required_keys)
 
-"""
-    EquilibriumConfig(...)
+    if !isempty(missingkeys)
+        error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
+    end
 
-A container struct that bundles all necessary configuration settings originally specified in the equil
-fortran namelists.
-"""
-@kwdef mutable struct EquilibriumConfig
-    control::EquilibriumControl = EquilibriumControl()
-    output::EquilibriumOutput = EquilibriumOutput()
-end
+    # Filter to only known parameters
+    config_fields = Set(String.(fieldnames(EquilibriumConfig)))
+    config_data = Dict{String,Any}()
 
-"""
-Constructor that allows users to form a EquilibriumConfig struct from dictionaries
-for convenience when most of the defaults are fine.
-"""
-function EquilibriumConfig(control::Dict, output::Dict)
-    construct = EquilibriumControl(; control...)
-    outstruct = EquilibriumOutput(; output...)
-    return EquilibriumConfig(; control=construct, output=outstruct)
+    for (k, v) in equil_dict
+        if k in config_fields
+            config_data[k] = v
+        else
+            @warn "Unknown equilibrium parameter: $k"
+        end
+    end
+
+    # Construct validated struct
+    config = EquilibriumConfig(; symbolize_keys(config_data)...)
+    if !isabspath(config.eq_filename)
+        config.eq_filename = normpath(joinpath(base_path, config.eq_filename))
+    end
+
+    return config
 end
 
 """
 Outer constructor for EquilibriumConfig that enables a toml file
     interface for specifying the configuration settings
+
+DEPRECATED: Use [Equilibrium] section in jpec.toml instead
 """
-# if this also have default, then conflicts with @kwdef mutable struct EquilibriumConfig.
 function EquilibriumConfig(path::String)
     raw = TOML.parsefile(path)
 
     # Extract EQUIL_CONTROL with default fallback
-    control_data = get(raw, "EQUIL_CONTROL", Dict())
-    output_data = get(raw, "EQUIL_OUTPUT", Dict())
+    config_data = get(raw, "EQUIL_CONTROL", Dict())
 
-    # Check for required fields in control_data
+    # Check for required fields
     required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(control_data, k), required_keys)
+    missingkeys = filter(k -> !haskey(config_data, k), required_keys)
 
     if !isempty(missingkeys)
-        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missing, ", "))")
+        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missingkeys, ", "))")
     end
 
-    # Construct validated structs
-    control = EquilibriumControl(; symbolize_keys(control_data)...)
-    if !isabspath(control.eq_filename)
-        control.eq_filename = normpath(joinpath(dirname(path), control.eq_filename))
+    # Construct validated struct
+    config = EquilibriumConfig(; symbolize_keys(config_data)...)
+    if !isabspath(config.eq_filename)
+        config.eq_filename = normpath(joinpath(dirname(path), config.eq_filename))
     end
-    output = EquilibriumOutput(; symbolize_keys(output_data)...)
 
-    return EquilibriumConfig(; control=control, output=output)
+    return config
 end
 
 """

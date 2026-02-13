@@ -19,7 +19,7 @@ Key responsibilities of the module:
 	(global parameters, q-profile finding, separatrix finding, GSE checks).
 
 The module exposes a small public API that covers setup, configuration,
-and common analyses used by other JPEC components (e.g. `DCON`, vacuum
+and common analyses used by other JPEC components (e.g. `ForceFreeStates`, vacuum
 interfaces).
 
 ## API Reference
@@ -35,7 +35,6 @@ Modules = [JPEC.Equilibrium]
 	provided).
 - `EquilibriumControl` — low-level control parameters (grid, jacobian
 	type, tolerances, etc.).
-- `EquilibriumOutput` — options controlling what output is written.
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).
@@ -65,7 +64,7 @@ Basic example: read a TOML config and build an equilibrium
 using JPEC
 
 # Build from a TOML file (searches relative paths if needed)
-pe = JPEC.Equilibrium.setup_equilibrium("docs/examples/dcon.toml")
+pe = JPEC.Equilibrium.setup_equilibrium("docs/examples/ForceFreeStates.toml")
 
 println("Magnetic axis: ", pe.params.r0, ", ", pe.params.z0)
 println("q(0) = ", pe.params.q0)

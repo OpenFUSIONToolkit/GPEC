@@ -27,7 +27,8 @@ makedocs(;
             "Splines" => "splines.md",
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
-            "Utilities" => "utilities.md"
+            "Utilities" => "utilities.md",
+            "Perturbed Equilibrium" => "perturbed_equilibrium.md"
         ],
     ],
     checkdocs=:exports
