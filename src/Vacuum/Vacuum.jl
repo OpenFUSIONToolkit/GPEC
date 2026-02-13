@@ -221,7 +221,7 @@ For kernelsign < 0 (interior potential), multiply by -1 and add 2 to diagonal.
 function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::Float64, mtheta::Int)
     if kernelsign < 0
         grad_greenfunction_mat .*= kernelsign
-        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
+        # Account for factor of 2 in diagonal terms [Chance Phys. Plasmas 1997 2161 eq. 90]
         for i in 1:(2*mtheta)
             grad_greenfunction_mat[i, i] += 2.0
         end
@@ -307,7 +307,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
     cn0 = 1.0 # expose to user if anyone ever actually tries to use this
-    (n == 0 && !wall.nowall && wall.is_closed_toroidal) && begin
+    (n == 0 && !wall.nowall) && begin
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = wall.nowall ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
@@ -339,18 +339,18 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    wv = zeros(mpert, mpert)
-    xzpts = zeros(Float64, inputs.mtheta, 4)
+    wv = zeros(ComplexF64, mpert, mpert)
+    xzpts = zeros(inputs.mtheta, 4)
     if !green_only
-        # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
+        # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
         arr, aii, ari, air = ntuple(_ -> zeros(mpert, mpert), 4)
         fourier_inverse_transform!(arr, grre, cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
         fourier_inverse_transform!(aii, grre, sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
         fourier_inverse_transform!(ari, grre, sin_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
         fourier_inverse_transform!(air, grre, cos_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
-        # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-        wv = complex.(arr .+ aii, air .- ari)
+        # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
+        wv .= complex.(arr .+ aii, air .- ari)
 
         # Force symmetry of response matrix if desired
         force_wv_symmetry && hermitianpart!(wv)

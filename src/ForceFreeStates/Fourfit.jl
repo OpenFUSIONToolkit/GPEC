@@ -130,7 +130,7 @@ end
     make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
 
 Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
-them as a new `FourFitVars` object. See the appendix of the 2016 Glasser
+them as a new `FourFitVars` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
 DCON paper for details on the matrix definitions. Performs the same function
 as `fourfit_make_matrix` in the Fortran code, except F, G, and K are now
 stored as dense matrices. The matrix F is stored in factorized form with
@@ -281,9 +281,9 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             end
         end
 
-        # Factorize and build composites
-        # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser 2016)
-        # We multiply by Q (singfac) later when performing computations later
+        # Factorize and build composite matrices [Glasser Phys. Plasmas 2016 112506 Appendix A]
+        # Nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ [Glasser Phys. Plasmas 2016 112506 eq. 29]
+        # We multiply by Q (singfac = m - n*q) later when performing computations
         amat = reshape(amats_flatview, intr.numpert_total, intr.numpert_total)
         cmat = reshape(cmats_flatview, intr.numpert_total, intr.numpert_total)
         dmat = reshape(dmats_flatview, intr.numpert_total, intr.numpert_total)
@@ -294,12 +294,14 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         gmat = reshape(gmats_flatview, intr.numpert_total, intr.numpert_total)
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
+
+        # Schur complement reduction [Glasser Phys. Plasmas 2016 112506 eq. A5-A7]
         amat_fact = cholesky(Hermitian(amat, :L))
-        ldiv!(a_inv_dmat_temp, amat_fact, dmat)
-        ldiv!(a_inv_cmat_temp, amat_fact, cmat)
-        fmat .-= adjoint(dmat) * a_inv_dmat_temp
-        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)
-        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)
+        ldiv!(a_inv_dmat_temp, amat_fact, dmat)         # A⁻¹D
+        ldiv!(a_inv_cmat_temp, amat_fact, cmat)         # A⁻¹C
+        fmat .-= adjoint(dmat) * a_inv_dmat_temp        # F̃ = F - D†A⁻¹D
+        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)  # K̃ = E - K†A⁻¹C
+        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)  # G̃ = H - C†A⁻¹C
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution

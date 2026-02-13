@@ -70,7 +70,7 @@ but grad_greenfunction is not since it fills a different block of the
 
   - Uses Simpson's rule for integration away from singular points
   - Uses Gaussian quadrature near singular points for improved accuracy
-  - Implements analytical singularity removal following Chance 1997
+  - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
 function kernel!(
     grad_greenfunction::Matrix{Float64},
@@ -98,7 +98,7 @@ function kernel!(
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
 
-    # S₁ᵢ in Chance 1997, eq.(78)
+    # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
@@ -132,7 +132,7 @@ function kernel!(
                 greenfunction[j, isrc] += G_n * wsimpson
             end
             grad_greenfunction_block[j, isrc] += gradG_n * wsimpson
-            # Subtract regular integral component of δⱼᵢK⁰ in eq. 83
+            # Subtract regular integral component of δⱼᵢK⁰ [Chance Phys. Plasmas 1997 2161 eq. 83]
             grad_greenfunction_block[j, j] -= gradG_0 * wsimpson
         end
 
@@ -156,19 +156,20 @@ function kernel!(
 
                 # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
                 wgauss = GAUSSIANWEIGHTS[ig] * dtheta
-                # Calculate p = θ/Δ = (θⱼ - θ')/Δ
+                # Normalized coordinate p = (θⱼ - θ')/Δθ
                 pgauss=(theta_gauss[ig]-theta_obs)/dtheta
-                # Compute 5-point Lagrange basis polynomials at the Gauss point and multiply by quadrature weight
-                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss
-                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss
-                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss
-                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss
-                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
+                # 5-point Lagrange interpolation polynomials [Chance Phys. Plasmas 1997 2161 eq. 76]
+                # Weighted by Gaussian quadrature for accurate singular integral evaluation
+                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss                    # L₀(p) centered at j
+                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss        # L₁(p) at j+1
+                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss       # L₋₁(p) at j-1
+                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss        # L₂(p) at j+2
+                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss       # L₋₂(p) at j-2
 
                 # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
                 if populate_greenfunction
                     if observer isa PlasmaGeometry
-                        # Remove singular behavior by adding on leading-order term, Chance eq.(75)
+                        # Remove singular behavior by adding on leading-order term [Chance Phys. Plasmas 1997 2161 eq. 75]
                         G_n += log((theta_obs - theta_gauss[ig])^2) / x_obs
                     end
                     greenfunction[j, sing_idx[1]] += G_n * A2_minus
@@ -178,7 +179,7 @@ function kernel!(
                     greenfunction[j, sing_idx[5]] += G_n * A2_plus
                 end
 
-                # Second type of singularity: 𝒦ⁿ (Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰)
+                # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
                 grad_greenfunction_block[j, sing_idx[1]] += gradG_n * A2_minus
                 grad_greenfunction_block[j, sing_idx[2]] += gradG_n * A1_minus
                 grad_greenfunction_block[j, sing_idx[3]] += gradG_n * A0
@@ -189,7 +190,7 @@ function kernel!(
             end
         end
 
-        # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
+        # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] if plasma-plasma block
         if populate_greenfunction && observer isa PlasmaGeometry
             greenfunction[j, sing_idx[1]] -= log_correction_2 / x_obs
             greenfunction[j, sing_idx[2]] -= log_correction_1 / x_obs
@@ -205,16 +206,8 @@ function kernel!(
         grad_greenfunction_block .*= -1
     end
 
-    # Add analytic singular integral (second type) from Table I of Chance 1997 + existing δⱼᵢ in eq. 69
-    # Would need to pass in wall geometry to generalize this to open walls
-    is_closed_toroidal = true
-    if is_closed_toroidal # Chance eq. 89
-        residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
-    else # Chance eq. 90
-        # TODO: this line can be gotten rid of if we are never doing open walls
-        residue = (typeof(observer) == typeof(source)) ? 2.0 : 0.0
-    end
-    # Add residue value from eq. 89/90 to block diagonal
+    # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
+    residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
     @inbounds for i in 1:mtheta
         grad_greenfunction_block[i, i] += residue
     end
@@ -639,13 +632,13 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     ρ2 = x_minus2 + ζ2
 
-    # Chance 1997 eq.(41) ℛ = R
+    # Distance parameter ℛ [Chance Phys. Plasmas 1997 2161 eq. 41]
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4)
     R = sqrt(R2)
     R5 = R4 * R
 
-    # Chance 1997 eq.(42) 𝘴 = s
+    # Argument of Legendre function 𝘴 [Chance Phys. Plasmas 1997 2161 eq. 42]
     s = (x_obs2 + x_source2 + ζ2) / R2
 
     # Legendre functions for
@@ -661,29 +654,30 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     pnp1 = legendre[end]
     pn = legendre[end-1]
 
-    # Chance 1997 eq.(40) 2π𝒢ⁿ = G_n
+    # Green's function 2π𝒢ⁿ = G_n [Chance Phys. Plasmas 1997 2161 eq. 40]
     gg = 2 * sqrt(π) * gamma(0.5 - n) / R
     G_n = gg * pn
 
-    # Chance 1997 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
+    # Gradient factor [Chance Phys. Plasmas 1997 2161 eq. 44]
+    # NOTE: Paper has erroneous extra factor of 2π
     grad_gg = gg / R4 / 2π
 
-    # ∂Gⁿ/∂X' = dG_dX
+    # Derivatives of Green's function [Chance Phys. Plasmas 1997 2161 eq. 36-38]
+    # ∂Gⁿ/∂X' using chain rule: ∂Gⁿ/∂X' = (∂Gⁿ/∂R)(∂R/∂X') + (∂Gⁿ/∂s)(∂s/∂X')
     xterm1 = (n * (x_obs2 + x_source2 + ζ2) * (x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
     xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1
     dG_dX = grad_gg * (xterm1 + xterm2) / x_source
 
-    # ∂Gⁿ/∂Z' = dG_dZ
+    # ∂Gⁿ/∂Z' using chain rule
     zterm1 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
     zterm2 = 4.0 * x_multiple * pnp1
     dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
 
-    # Chance 1997 eq.(51)
-    # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
-    # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
+    # Coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ [Chance Phys. Plasmas 1997 2161 eq. 51]
+    # Jacobian factor from coordinate transformation
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
-    # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
+    # Special case for n=0: coupling_0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
     dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source * (x_source2-x_obs2+ζ2) * p0)
     dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1)
     coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5

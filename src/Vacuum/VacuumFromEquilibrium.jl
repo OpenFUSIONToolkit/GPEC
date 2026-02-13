@@ -35,8 +35,9 @@ From these we compute:
   - R = R₀ + r_minor * cos(θ_cyl)
   - Z = Z₀ + r_minor * sin(θ_cyl)
 
-## Reference    # Allocate output arrays
+## Reference
 
+[Chance Phys. Plasmas 1997 2161]
 Matches GPEC's ahg_write and gpvacuum_flxsurf approach (gpvacuum.f line 291-296)
 """
 function extract_plasma_surface_at_psi(equil::Equilibrium.PlasmaEquilibrium, ψ::Float64)
