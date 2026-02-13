@@ -198,74 +198,80 @@ function compute_greens_functions_only(
     inputs::VacuumInput,
     wall_settings::WallShapeSettings
 )
-    # Reuse initialization from compute_vacuum_response
-    (; mtheta, mpert, mlow, n, qa) = inputs
+
+    # Initialization and allocations
+    (; mtheta, mpert, mlow, n, qa, force_wv_symmetry) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
 
-    # Compute Fourier basis coefficients
-    cslth, snlth = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
+    # Compute Fourier basis coefficients using FourierTransforms utility
+    # We only need the coefficient arrays for the existing fourier_transform! functions
+    cos_ln_basis, sin_ln_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
 
     # Allocate arrays for both Green's functions
-    grri = zeros(2 * mtheta, 2 * mpert)
-    grre = zeros(2 * mtheta, 2 * mpert)
-    grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
-    greenfunction_temp = zeros(mtheta, mtheta)
+    grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
+    grre = zeros(2 * mtheta, 2 * mpert)  # Exterior (kernelsign=+1)
+    grad_green = zeros(2 * mtheta, 2 * mtheta)
+    green_temp = zeros(mtheta, mtheta)
+
+    PLASMA_ROW_OFFSET = 0
+    WALL_ROW_OFFSET = mtheta
+    COS_COL_OFFSET = 0
+    SIN_COL_OFFSET = mpert
 
     # Plasma–Plasma block
-    j1, j2 = 1, 1
-    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
+    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
-    # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, cslth, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, snlth, 0, mpert)
-    fourier_transform!(grre, greenfunction_temp, cslth, 0, 0)
-    fourier_transform!(grre, greenfunction_temp, snlth, 0, mpert)
+    # Fourier transform obs=plasma, src=plasma block
+    fourier_transform!(grri, green_temp, cos_ln_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(grri, green_temp, sin_ln_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+    fourier_transform!(grre, green_temp, cos_ln_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(grre, green_temp, sin_ln_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
-    !wall.nowall && begin
+    if !wall.nowall
         # Plasma–Wall block
-        j1, j2 = 1, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, n)
-
+        kernel!(grad_green, green_temp, plasma_surf, wall, n)
         # Wall–Wall block
-        j1, j2 = 2, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, n)
-
+        kernel!(grad_green, green_temp, wall, wall, n)
         # Wall–Plasma block
-        j1, j2 = 2, 1
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
+        kernel!(grad_green, green_temp, wall, plasma_surf, n)
 
-        # Fourier transform wall blocks
-        fourier_transform!(grri, greenfunction_temp, cslth, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, snlth, mtheta, mpert)
-        fourier_transform!(grre, greenfunction_temp, cslth, mtheta, 0)
-        fourier_transform!(grre, greenfunction_temp, snlth, mtheta, mpert)
+        # Fourier transform obs=wall, src=plasma block
+        fourier_transform!(grri, green_temp, cos_ln_basis, WALL_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_transform!(grri, green_temp, sin_ln_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
+        fourier_transform!(grre, green_temp, cos_ln_basis, WALL_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_transform!(grre, green_temp, sin_ln_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
-    # Add cn0 for n=0 modes if needed
-    cn0 = 1.0
-    (abs(n) <= 1e-5 && !wall.nowall && wall.is_closed_toroidal) && begin
+    # Add cn0 to make grdgre nonsingular for n=0 modes
+    cn0 = 1.0 # expose to user if anyone ever actually tries to use this
+    (n == 0 && !wall.nowall && wall.is_closed_toroidal) && begin
+        @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = wall.nowall ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
-            grad_greenfunction_mat[i, j] += cn0
+            grad_green[i, j] += cn0
         end
     end
 
-    # Apply kernelsign transformations and invert to get Green's functions
-    # grri: interior (kernelsign=-1), grre: exterior (kernelsign=+1)
-    grad_greenfunction_mat_interior = copy(grad_greenfunction_mat)
-    grad_greenfunction_mat_exterior = copy(grad_greenfunction_mat)
+    # Compute both Green's functions with different kernel signs
+    # grri: interior potential (kernelsign=-1)
+    # grre: exterior potential (kernelsign=+1)
 
-    apply_kernelsign!(grad_greenfunction_mat_interior, -1.0, mtheta)  # Interior
-    apply_kernelsign!(grad_greenfunction_mat_exterior, +1.0, mtheta)  # Exterior
+    # Make copies for each kernelsign
+    grad_green_interior = copy(grad_green)
+    grad_green_exterior = copy(grad_green)
 
-    # Invert the system for both cases
+    # Apply kernelsign transformations
+    apply_kernelsign!(grad_green_interior, -1.0, mtheta)  # Interior
+    apply_kernelsign!(grad_green_exterior, +1.0, mtheta)  # Exterior (no-op)
+
+    # Invert the vacuum response system for both cases
     if wall.nowall
-        @views grri[1:mtheta, :] .= grad_greenfunction_mat_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
-        @views grre[1:mtheta, :] .= grad_greenfunction_mat_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
+        @views grri[1:mtheta, :] .= grad_green_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grre[1:mtheta, :] .= grad_green_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
     else
-        grri .= grad_greenfunction_mat_interior \ grri
-        grre .= grad_greenfunction_mat_exterior \ grre
+        grri .= grad_green_interior \ grri
+        grre .= grad_green_exterior \ grre
     end
 
     return grri, grre

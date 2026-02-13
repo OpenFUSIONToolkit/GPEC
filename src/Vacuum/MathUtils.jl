@@ -1,6 +1,3 @@
-# NOTE: fourier_transform! and fourier_inverse_transform! have been moved to
-# src/Utilities/FourierTransforms.jl and are imported at the module level in Vacuum.jl
-
 """
     interp_to_new_grid(θ_out, vec_in)
 
@@ -18,9 +15,15 @@ at new grid points `θ_out`. This function performs the same function as `trans`
 """
 function interp_to_new_grid(θ_out::AbstractRange{Float64}, vec_in::Vector{Float64})
 
+    # TODO: is this the best way to handle this?
+    if vec_in[1] != vec_in[end]
+        vec_in_closed = vcat(vec_in, vec_in[1])
+    else
+        vec_in_closed = vec_in
+    end
     # Input grids from DCON are from [0, 1]
-    θ_in = collect(range(0.0, 2π; length=length(vec_in)))
-    spline = cubic_interp(θ_in, vec_in; bc=PeriodicBC())
+    θ_in = collect(range(0.0, 2π; length=length(vec_in_closed)))
+    spline = cubic_interp(θ_in, vec_in_closed; bc=PeriodicBC())
     return spline.(θ_out)
 end
 
