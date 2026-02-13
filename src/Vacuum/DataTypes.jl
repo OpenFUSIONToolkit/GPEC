@@ -33,7 +33,6 @@ Struct holding plasma boundary and mode data as provided from ForceFreeStates na
     mtheta_eq::Int = 1
     mtheta::Int = 1
     force_wv_symmetry::Bool = true
-    # NOTE: kernelsign parameter deprecated - compute_vacuum_response now computes both grri and grre
 end
 
 """

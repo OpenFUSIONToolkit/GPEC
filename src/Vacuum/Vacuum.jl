@@ -22,7 +22,7 @@ export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
-export extract_plasma_surface_at_psi, create_vacuum_input_at_psi, compute_greens_functions_only
+export extract_plasma_surface_at_psi, create_vacuum_input_at_psi
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -257,7 +257,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
   - The vacuum response includes plasma-plasma and plasma-wall coupling effects
   - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only=false)
 
     # Initialization and allocations
     (; mtheta, mpert, mlow, n, qa, force_wv_symmetry) = inputs
@@ -337,25 +337,28 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    arr, aii, ari, air = ntuple(_ -> zeros(mpert, mpert), 4)
-    fourier_inverse_transform!(arr, grre, cos_ln_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
-    fourier_inverse_transform!(aii, grre, sin_ln_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
-    fourier_inverse_transform!(ari, grre, sin_ln_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
-    fourier_inverse_transform!(air, grre, cos_ln_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
-
-    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    wv = complex.(arr .+ aii, air .- ari)
-
-    # Force symmetry of response matrix if desired
-    force_wv_symmetry && hermitianpart!(wv)
-
-    # Create xzpts array
+    wv = zeros(mpert, mpert)
     xzpts = zeros(Float64, inputs.mtheta, 4)
-    @views xzpts[:, 1] .= plasma_surf.x
-    @views xzpts[:, 2] .= plasma_surf.z
-    @views xzpts[:, 3] .= wall.x
-    @views xzpts[:, 4] .= wall.z
+    if !green_only
+        # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
+        arr, aii, ari, air = ntuple(_ -> zeros(mpert, mpert), 4)
+        fourier_inverse_transform!(arr, grre, cos_ln_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_inverse_transform!(aii, grre, sin_ln_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+        fourier_inverse_transform!(ari, grre, sin_ln_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_inverse_transform!(air, grre, cos_ln_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+
+        # Final form of vacuum response matrix (eq. 114 of Chance 2007)
+        wv = complex.(arr .+ aii, air .- ari)
+
+        # Force symmetry of response matrix if desired
+        force_wv_symmetry && hermitianpart!(wv)
+
+        # Create xzpts array
+        @views xzpts[:, 1] .= plasma_surf.x
+        @views xzpts[:, 2] .= plasma_surf.z
+        @views xzpts[:, 3] .= wall.x
+        @views xzpts[:, 4] .= wall.z
+    end
 
     return wv, grri, grre, xzpts
 end

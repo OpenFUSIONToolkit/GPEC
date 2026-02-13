@@ -183,6 +183,9 @@ function compute_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.Plasm
         ν=reverse(ν),
         mlow=intr.mlow,
         mpert=intr.mpert,
+        mhigh=intr.mhigh,
+        qa=qa,
+        mtheta_eq=equil.config.mtheta,
         n=n,
         mtheta=ctrl.mthvac,
         force_wv_symmetry=ctrl.force_wv_symmetry
