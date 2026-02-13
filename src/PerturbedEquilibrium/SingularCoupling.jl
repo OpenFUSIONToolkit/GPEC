@@ -117,7 +117,6 @@ function compute_singular_coupling_metrics!(
     end
 
     # Get vacuum calculation parameters
-    mtheta_eq = length(equil.rzphi_ys)  # Equilibrium poloidal grid size
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
     nlow = ffs_intr.nlow
@@ -160,16 +159,8 @@ function compute_singular_coupling_metrics!(
             end
 
             # Compute Green's functions at this surface for this n
-            vac_input = Vacuum.create_vacuum_input_at_psi(
-                equil,
-                sing_surf.psifac,
-                mtheta_eq,
-                mtheta,
-                mpert,
-                mlow,
-                nn
-            )
-            grri, grre = Vacuum.compute_greens_functions_only(vac_input, wall_settings)
+            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, mpert, mlow, nn)
+            _, grri, grre, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
 
             # Store in singular surface struct (overwrites for each n)
             ffs_intr.sing[s].grri = grri

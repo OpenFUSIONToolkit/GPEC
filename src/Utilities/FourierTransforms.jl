@@ -43,7 +43,7 @@ export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
 
 """
-    compute_fourier_coefficients(mtheta, mpert, mlow; n=0, qa=0.0, delta=zeros(mtheta))
+    compute_fourier_coefficients(mtheta, mpert, mlow; n=0, ν=zeros(mtheta))
 
 Compute Fourier basis function coefficients for transforms between theta-space and mode-space.
 
@@ -56,68 +56,46 @@ Compute Fourier basis function coefficients for transforms between theta-space a
 # Keyword Arguments
 
 - `n::Int=0`: Toroidal mode number (default: 0, no toroidal coupling)
-- `qa::Float64=0.0`: Safety factor at boundary (default: 0.0)
-- `delta::Vector{Float64}=zeros(mtheta)`: Toroidal phase shift array (default: no shift)
+- `ν::Vector{Float64}=zeros(mtheta)`: Toroidal angle offset array (default: no offset, n*ν = 0)
 
 # Returns
 
-- `cslth::Matrix{Float64}`: Cosine coefficients [mtheta, mpert] where `cslth[i,l] = cos(m*θᵢ + n*qa*δᵢ)`
-- `snlth::Matrix{Float64}`: Sine coefficients [mtheta, mpert] where `snlth[i,l] = sin(m*θᵢ + n*qa*δᵢ)`
+- `cos_mn_basis::Matrix{Float64}`: Cosine coefficients [mtheta, mpert] where `cos_mn_basis[i,l] = cos(m*θᵢ - n*νᵢ)`
+- `sin_mn_basis::Matrix{Float64}`: Sine coefficients [mtheta, mpert] where `sin_mn_basis[i,l] = sin(m*θᵢ - n*νᵢ)`
 
 # Notes
 
-The theta grid is uniform: `θᵢ = 2π*(i-1)/mtheta` for `i = 1:mtheta`
+The theta grid is uniform: `θᵢ = 2π*i/mtheta` for `i = 0:mtheta-1`
 
 Mode numbers are: `m = mlow, mlow+1, ..., mlow+mpert-1`
 
-When `n=0, qa=0, delta=0` (default), this reduces to simple harmonic basis:
-- `cslth[i,l] = cos(m*θᵢ)`
-- `snlth[i,l] = sin(m*θᵢ)`
-
-For vacuum calculations with toroidal coupling, the phase includes `n*qa*delta`:
-- `cslth[i,l] = cos(m*θᵢ + n*qa*δᵢ)`
-- `snlth[i,l] = sin(m*θᵢ + n*qa*δᵢ)`
+When `n=0, ν=0` (default), this reduces to simple harmonic basis:
+- `cos_mn_basis[i,l] = cos(m*θᵢ)`
+- `sin_mn_basis[i,l] = sin(m*θᵢ)`
 """
 function compute_fourier_coefficients(
     mtheta::Int,
     mpert::Int,
     mlow::Int;
     n::Int=0,
-    qa::Float64=0.0,
-    delta::Vector{Float64}=zeros(Float64, mtheta)
+    ν::Vector{Float64}=zeros(Float64, mtheta)
 )
     # Validate inputs
     @assert mtheta > 0 "mtheta must be positive"
     @assert mpert >= 0 "mpert must be non-negative"
-    @assert length(delta) == mtheta "delta must have length mtheta"
+    @assert length(ν) == mtheta "ν must have length mtheta"
 
     # Handle edge case: mpert = 0 returns empty arrays
-    if mpert == 0
-        return zeros(Float64, mtheta, 0), zeros(Float64, mtheta, 0)
-    end
+    mpert == 0 && return zeros(Float64, mtheta, 0), zeros(Float64, mtheta, 0)
 
     # Uniform theta grid: [0, 2π)
-    theta_grid = range(0, 2π, length=mtheta+1)[1:end-1]
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
 
-    # Compute toroidal phase shift (zero if n=0 or qa=0)
-    nqdelta = n * qa .* delta
+    # Compute sin(mθ - nν) and cos(mθ - nν) for all modes and theta points
+    sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
+    cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
 
-    # Allocate coefficient matrices
-    cslth = zeros(Float64, mtheta, mpert)
-    snlth = zeros(Float64, mtheta, mpert)
-
-    # Compute basis functions for each mode and theta point
-    for l in 1:mpert
-        m = mlow + l - 1  # Mode number
-        for i in 1:mtheta
-            # Total argument: m*θ + n*qa*δ
-            arg = theta_grid[i] * m + nqdelta[i]
-            cslth[i, l] = cos(arg)
-            snlth[i, l] = sin(arg)
-        end
-    end
-
-    return cslth, snlth
+    return cos_mn_basis, sin_mn_basis
 end
 
 """
@@ -186,7 +164,7 @@ Construct a FourierTransform object with pre-computed basis functions.
 ft = FourierTransform(480, 40, -20)
 
 # With toroidal phase (for Vacuum calculations)
-ft_vac = FourierTransform(480, 40, -20; n=1, qa=2.5, delta=delta_array)
+ft_vac = FourierTransform(480, 40, -20; n=1, ν=ν_array)
 ```
 """
 function FourierTransform(
@@ -194,11 +172,10 @@ function FourierTransform(
     mpert::Int,
     mlow::Int;
     n::Int=0,
-    qa::Float64=0.0,
-    delta::Vector{Float64}=zeros(Float64, mtheta)
+    ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cslth, snlth = compute_fourier_coefficients(mtheta, mpert, mlow; n, qa, delta)
-    return FourierTransform(mtheta, mpert, mlow, cslth, snlth)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n, ν)
+    return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
 end
 
 """
