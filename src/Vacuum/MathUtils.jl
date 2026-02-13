@@ -1,50 +1,4 @@
 """
-    interp_to_new_grid(θ_out, vec_in)
-
-Resample the input array `vec_in` using a periodic cubic spline to an output array `vec_out` evaluated
-at new grid points `θ_out`. This function performs the same function as `trans` in Fortran.
-
-# Arguments
-
-  - `θ_out::Vector{Float64}`: Output grid points on [0, 2π] where the resampled values will be evaluated
-  - `vec_in::Vector{Float64}`: Input array to be resampled
-
-# Returns
-
-  - `Vector{Float64}`: The resampled output array on the θ_out grid
-"""
-function interp_to_new_grid(θ_out::AbstractRange{Float64}, vec_in::Vector{Float64})
-    # Input grids from DCON are from [0, 1]
-    θ_in = collect(range(0.0, 2π; length=length(vec_in)))
-    return cubic_interp(θ_in, vec_in; bc=PeriodicBC()).(θ_out)
-end
-
-"""
-    periodic_deriv(θ_grid, vals)
-
-Compute the first derivative of a periodic function defined by `vals` at points `theta` using cubic spline interpolation.
-The input `theta` should be uniformly spaced and cover a full period (e.g., 0 to 2π). The output array will have the
-same length as `theta` and will represent the derivative of the periodic function at each point.
-
-# Arguments
-
-  - `θ_grid::Vector{Float64}`: Array of theta values (should be uniformly spaced and represent a periodic domain)
-  - `vals::Vector{Float64}`: Array of function values corresponding to each theta (end point not included)
-
-# Returns
-
-  - `Vector{Float64}`: Array of the first derivative of the function at each theta point    # Close the loop for periodic BC by appending first point at the end
-"""
-function periodic_deriv(θ_grid, vals)
-    # Close the loop for periodic BC by appending first point at the end
-    θ_closed = vcat(collect(θ_grid), θ_grid[end] + (θ_grid[2] - θ_grid[1]))
-    vals_closed = vcat(vals, vals[1])
-    spline = cubic_interp(θ_closed, vals_closed; bc=PeriodicBC())
-    d1 = deriv1(spline)
-    return d1.(collect(θ_grid))
-end
-
-"""
     distribute_to_equal_arc_grid(xin, zin)
 
 Given a set of points (xin, zin) that define a closed curve in 2D, redistribute these points to be equally spaced
@@ -67,36 +21,28 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     mtheta = length(xin)
     dθ = 2π / mtheta
     θ_grid = range(; start=0, length=mtheta, step=dθ)
-    # Close the loop for periodic BC by appending first point at the end
-    θ_closed = vcat(collect(θ_grid), θ_grid[end] + dθ)
-    xin_closed = vcat(xin, xin[1])
-    zin_closed = vcat(zin, zin[1])
 
     # Build periodic splines for derivatives on the closed loop
-    spline_x = cubic_interp(θ_closed, xin_closed; bc=PeriodicBC())
-    spline_z = cubic_interp(θ_closed, zin_closed; bc=PeriodicBC())
+    spline_x = cubic_interp(θ_grid, xin; bc=PeriodicBC(; endpoint=:exclusive))
+    spline_z = cubic_interp(θ_grid, zin; bc=PeriodicBC(; endpoint=:exclusive))
 
     # Calculate cumulative arc length using numerical integration
-    arc_length = zeros(length(θ_closed)) # Cumulative arc length of closed loop
-    for i in 2:(mtheta+1)
+    arc_length = zeros(mtheta + 1)
+    for i in 1:mtheta
         # Use a mid-point derivative approximation
-        theta_mid = (θ_closed[i] + θ_closed[i-1]) / 2.0
+        theta_mid = θ_grid[i] + dθ / 2.0
         d_xin = spline_x(theta_mid; deriv=1)
         d_zin = spline_z(theta_mid; deriv=1)
-
         # Accumulate length: ds = (ds/dt) * dt
         ds_dθ = sqrt(d_xin^2 + d_zin^2)
-        arc_length[i] = arc_length[i-1] + ds_dθ * dθ
+        arc_length[i+1] = arc_length[i] + ds_dθ * dθ
     end
 
-    # Re-parameterize based on equal arc-length segments
+    # Re-parameterize based on equal arc-length segments by interpolate the original (x,z) data at the equal arc length points
     arc_length_targets = range(; start=0, length=mtheta, step=arc_length[end]/mtheta)
-    # Interpolate the original (x,z) data at the equal arc length points to get (xout, zout)
-    x_from_ell = cubic_interp(arc_length, xin_closed)
-    z_from_ell = cubic_interp(arc_length, zin_closed)
-    xout = x_from_ell.(arc_length_targets)
-    zout = z_from_ell.(arc_length_targets)
-
+    # arc_length is an uneven grid so we have to specify the period explicitly
+    xout = cubic_interp(arc_length[1:(end-1)], xin; bc=PeriodicBC(; endpoint=:exclusive, period=arc_length[end])).(arc_length_targets)
+    zout = cubic_interp(arc_length[1:(end-1)], zin; bc=PeriodicBC(; endpoint=:exclusive, period=arc_length[end])).(arc_length_targets)
     return xout, zout
 end
 

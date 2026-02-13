@@ -32,19 +32,15 @@ using LinearAlgebra
                 mlow=1,
                 n=1
             )
-            plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
+            plasma_surf = JPEC.Vacuum.PlasmaGeometry(inputs)
             @test length(plasma_surf.x) == 5
             @test length(plasma_surf.z) == 5
-            @test length(plasma_surf.delta) == 5
-            @test length(plasma_surf.dx_dtheta) == 5
-            @test length(plasma_surf.dz_dtheta) == 5
-            @test !any(isnan, plasma_surf.dx_dtheta)
-            @test !any(isnan, plasma_surf.dz_dtheta)
+            @test length(plasma_surf.ν) == 5
         end
 
         @testset "initialize_wall" begin
             inputs = VacuumInput(mtheta=16)
-            plasma_surf = JPEC.Vacuum.initialize_plasma_surface(
+            plasma_surf = JPEC.Vacuum.PlasmaGeometry(
                 VacuumInput(
                     r=1.7 .+ 0.3 .* cos.(range(0, 2pi, length=16)),
                     z=0.3 .* sin.(range(0, 2pi, length=16)),
@@ -55,19 +51,19 @@ using LinearAlgebra
 
             # Test "nowall"
             wall_settings = WallShapeSettings(shape="nowall")
-            wall_geo = JPEC.Vacuum.initialize_wall(inputs, plasma_surf, wall_settings)
+            wall_geo = JPEC.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
             @test wall_geo.nowall == true
 
             # Test "conformal" wall
             wall_settings = WallShapeSettings(shape="conformal", a=0.2)
-            wall_geo = JPEC.Vacuum.initialize_wall(inputs, plasma_surf, wall_settings)
+            wall_geo = JPEC.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
             @test wall_geo.nowall == false
             @test length(wall_geo.x) == 16
             @test !any(isnan, wall_geo.x)
 
             # Test that wall with R <= 0 throws an error
             # Create a plasma surface very close to R=0
-            plasma_surf_near_zero = JPEC.Vacuum.initialize_plasma_surface(
+            plasma_surf_near_zero = JPEC.Vacuum.PlasmaGeometry(
                 VacuumInput(
                     r=0.05 .+ 0.03 .* cos.(range(0, 2pi, length=16)),
                     z=0.03 .* sin.(range(0, 2pi, length=16)),
@@ -78,13 +74,13 @@ using LinearAlgebra
             # Use a "dee" wall shape with parameters that will produce R < 0
             # Setting cw (offset) to a large negative value will shift the wall left past R=0
             wall_settings_negative = WallShapeSettings(shape="dee", cw=-1.5, a=0.1)
-            @test_throws ErrorException JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_negative)
+            @test_throws ErrorException JPEC.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings_negative)
 
             # Test that conformal wall R-coordinates are clamped by centerstack_min
             # With a very large 'a' parameter, a conformal wall would naturally go to R < 0,
             # but it should be clamped to centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
             wall_settings_large_a = WallShapeSettings(shape="conformal", a=10.0, equal_arc_wall=false)
-            wall_geo_clamped = JPEC.Vacuum.initialize_wall(inputs, plasma_surf_near_zero, wall_settings_large_a)
+            wall_geo_clamped = JPEC.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings_large_a)
             expected_min = min(0.1, 0.1 * minimum(plasma_surf_near_zero.x))
             @test all(wall_geo_clamped.x .>= expected_min)
             @test any(wall_geo_clamped.x .<= expected_min + 1e-10)  # At least one point should be at the minimum
@@ -160,33 +156,6 @@ using LinearAlgebra
 
     # ----------------------------------------------------------------------
     @testset "VacuumInternals.jl - Interpolation/Grid" begin
-
-        @testset "interp_to_new_grid" begin
-            # Test upsampling a sine wave
-            mtheta_in = 17
-            theta_in = collect(range(0, 2π, length=mtheta_in))
-            vecin = sin.(theta_in)
-
-            mtheta_out = 33
-            theta_out = range(0, 2π, length=mtheta_out)
-            vecout = JPEC.Vacuum.interp_to_new_grid(theta_out, vecin)
-
-            expected_out = sin.(collect(theta_out))
-
-            @test isapprox(vecout, expected_out, atol=1e-2)
-
-            # Test no-op
-            theta_noop = range(0, 2π, length=mtheta_in)
-            vecout_noop = JPEC.Vacuum.interp_to_new_grid(theta_noop, vecin)
-            @test isapprox(vecout_noop, vecin, atol=1e-12)
-        end
-
-        @testset "periodic_deriv" begin
-            theta = range(0, 2pi, length=101)[1:(end-1)]
-            vals = sin.(theta)
-            derivs = JPEC.Vacuum.periodic_deriv(theta, vals)
-            @test isapprox(derivs, cos.(theta), atol=1e-3)
-        end
 
         @testset "_create_pickup_grid" begin
             R_grid = [1, 2]

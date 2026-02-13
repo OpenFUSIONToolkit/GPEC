@@ -28,7 +28,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     for ipert_n in 1:intr.npert
         # Set VACUUM run parameters and boundary shape
         n = ipert_n - 1 + intr.nlow
-        vac_inputs = Vacuum.create_vacuum_input_at_psi(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+        vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
         fill!(vac.grri, 0.0)
         fill!(vac.grre, 0.0)
         fill!(vac.xzpts, 0.0)
@@ -157,7 +157,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         for ipert_n in 1:intr.npert
             # Compute vacuum matrix
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.create_vacuum_input_at_psi(equil, intr.psilim, intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+            vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling
