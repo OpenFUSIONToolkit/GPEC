@@ -15,7 +15,7 @@ The module provides:
 
 ### VacuumInput
 Contains plasma boundary data and calculation parameters including:
-- Plasma boundary coordinates (r, z) on DCON theta grid
+- Plasma boundary coordinates (r, z) on JPEC theta grid
 - Free toroidal angle parameter (ν) where ϕ = 2πζ + ν(ψ, θ)
 - Poloidal mode numbers (mlow, mpert)
 - Toroidal mode number (n)
@@ -56,8 +56,8 @@ using JPEC
 # Create VacuumInput struct with plasma boundary data
 # Note: ν is the free toroidal angle parameter where ϕ = 2πζ + ν(ψ, θ)
 inputs = JPEC.Vacuum.VacuumInput(
-    r = plasma_r_coords,      # Plasma R coordinates on DCON theta grid
-    z = plasma_z_coords,      # Plasma Z coordinates on DCON theta grid
+    r = plasma_r_coords,      # Plasma R coordinates on JPEC theta grid
+    z = plasma_z_coords,      # Plasma Z coordinates on JPEC theta grid
     ν = nu_array,             # Toroidal angle parameter (formerly delta/qa)
     mlow = 1,                 # Lowest poloidal mode number
     mpert = 10,               # Number of poloidal modes

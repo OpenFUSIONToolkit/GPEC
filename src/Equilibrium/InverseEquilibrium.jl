@@ -55,12 +55,12 @@ function equilibrium_solver(input::InverseRunInput)
     zo = input.zo
     psio = input.psio
 
-    grid_type = config.control.grid_type
-    mpsi = config.control.mpsi
-    mtheta = config.control.mtheta
-    psilow = config.control.psilow
-    psihigh = config.control.psihigh
-    newq0 = config.control.newq0
+    grid_type = config.grid_type
+    mpsi = config.mpsi
+    mtheta = config.mtheta
+    psilow = config.psilow
+    psihigh = config.psihigh
+    newq0 = config.newq0
 
     me = 3
 
@@ -195,7 +195,7 @@ function equilibrium_solver(input::InverseRunInput)
             spl_fs[itheta+1, 2] = f_deta
             spl_fs[itheta+1, 3] = r * jacfac
             spl_fs[itheta+1, 4] = spl_fs[itheta+1, 3] / (r * r)
-            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.control.power_bp * b^config.control.power_b / r^config.control.power_r
+            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.power_bp * b^config.power_b / r^config.power_r
 
         end
         # c-----------------------------------------------------------------------

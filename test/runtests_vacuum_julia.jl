@@ -12,7 +12,7 @@ using LinearAlgebra
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
             @test vac_in.n == 0
-            @test vac_in.kernelsign == 1.0
+            # NOTE: kernelsign field deprecated - compute_vacuum_response now computes both grri and grre
             @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
@@ -35,9 +35,9 @@ using LinearAlgebra
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
             @test length(plasma_surf.x) == 5
             @test length(plasma_surf.z) == 5
+            @test length(plasma_surf.delta) == 5
             @test length(plasma_surf.dx_dtheta) == 5
-            @test size(plasma_surf.cos_mn_basis) == (5, 1)
-            @test size(plasma_surf.sin_mn_basis) == (5, 1)
+            @test length(plasma_surf.dz_dtheta) == 5
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end
@@ -250,12 +250,14 @@ using LinearAlgebra
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
-            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
 
             @test size(wv) == (2, 2);
             @test !any(isnan, wv);
             @test size(grri) == (2 * 128, 2 * 2);
             @test !any(isnan, grri);
+            @test size(grre) == (2 * 128, 2 * 2);
+            @test !any(isnan, grre);
             @test size(xzpts) == (128, 4);
             @test !any(isnan, xzpts[:, 1:2]);
         end
@@ -279,7 +281,7 @@ using LinearAlgebra
             # Use a conformal wall
             wall_settings = WallShapeSettings(shape="conformal", a=0.5)
 
-            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
 
             @test size(wv) == (2, 2)
             @test !any(isnan, wv)
