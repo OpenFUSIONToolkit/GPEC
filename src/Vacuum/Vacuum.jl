@@ -22,7 +22,7 @@ export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
-export extract_plasma_surface_at_psi, create_vacuum_input_at_psi, compute_greens_functions_only
+export extract_plasma_surface_at_psi, create_vacuum_input_at_psi
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -257,61 +257,61 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
   - The vacuum response includes plasma-plasma and plasma-wall coupling effects
   - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only=false)
 
     # Initialization and allocations
-    (; mtheta, mpert, mlow, n, qa, force_wv_symmetry) = inputs
-    plasma_surf = initialize_plasma_surface(inputs)
-    wall = initialize_wall(inputs, plasma_surf, wall_settings)
+    (; mtheta, mpert, mlow, n, force_wv_symmetry) = inputs
+    plasma_surf = PlasmaGeometry(inputs)
+    wall = WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients using FourierTransforms utility
     # We only need the coefficient arrays for the existing fourier_transform! functions
-    cos_ln_basis, sin_ln_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, ν=plasma_surf.ν)
 
     # Allocate arrays for both Green's functions
     grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
     grre = zeros(2 * mtheta, 2 * mpert)  # Exterior (kernelsign=+1)
-    grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
-    greenfunction_temp = zeros(mtheta, mtheta)
+    grad_green = zeros(2 * mtheta, 2 * mtheta)
+    green_temp = zeros(mtheta, mtheta)
+
+    # Fourier transforms offsets into grri/grre: first mtheta rows are plasma as observer, second are wall
+    # First mpert columns are real (cosine), second mpert are imaginary (sine)
+    PLASMA_ROW_OFFSET = 0
+    WALL_ROW_OFFSET = mtheta
+    COS_COL_OFFSET = 0
+    SIN_COL_OFFSET = mpert
 
     # Plasma–Plasma block
-    j1, j2 = 1, 1
-    kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
+    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, n)
 
-    # Fourier transform plasma-plasma block
-    # Populate both grri and grre with the same right-hand side
-    fourier_transform!(grri, greenfunction_temp, cos_ln_basis, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, sin_ln_basis, 0, mpert)
-    fourier_transform!(grre, greenfunction_temp, cos_ln_basis, 0, 0)
-    fourier_transform!(grre, greenfunction_temp, sin_ln_basis, 0, mpert)
+    # Fourier transform obs=plasma, src=plasma block
+    fourier_transform!(grri, green_temp, cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(grri, green_temp, sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+    fourier_transform!(grre, green_temp, cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(grre, green_temp, sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
-    !wall.nowall && begin
+    if !wall.nowall
         # Plasma–Wall block
-        j1, j2 = 1, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, wall.x, wall.z, j1, j2, n)
-
+        kernel!(grad_green, green_temp, plasma_surf, wall, n)
         # Wall–Wall block
-        j1, j2 = 2, 2
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, wall.x, wall.z, j1, j2, n)
-
+        kernel!(grad_green, green_temp, wall, wall, n)
         # Wall–Plasma block
-        j1, j2 = 2, 1
-        kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
+        kernel!(grad_green, green_temp, wall, plasma_surf, n)
 
-        # Fourier transform wall blocks into both grri and grre
-        fourier_transform!(grri, greenfunction_temp, cos_ln_basis, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, sin_ln_basis, mtheta, mpert)
-        fourier_transform!(grre, greenfunction_temp, cos_ln_basis, mtheta, 0)
-        fourier_transform!(grre, greenfunction_temp, sin_ln_basis, mtheta, mpert)
+        # Fourier transform obs=wall, src=plasma block
+        fourier_transform!(grri, green_temp, cos_mn_basis, WALL_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_transform!(grri, green_temp, sin_mn_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
+        fourier_transform!(grre, green_temp, cos_mn_basis, WALL_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_transform!(grre, green_temp, sin_mn_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
     cn0 = 1.0 # expose to user if anyone ever actually tries to use this
-    (abs(n) <= 1e-5 && !wall.nowall && wall.is_closed_toroidal) && begin
+    (n == 0 && !wall.nowall) && begin
         @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
         mth12 = wall.nowall ? mtheta : 2 * mtheta
         for i in 1:mth12, j in 1:mth12
-            grad_greenfunction_mat[i, j] += cn0
+            grad_green[i, j] += cn0
         end
     end
 
@@ -320,47 +320,47 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     # grre: exterior potential (kernelsign=+1)
 
     # Make copies for each kernelsign
-    grad_greenfunction_mat_interior = copy(grad_greenfunction_mat)
-    grad_greenfunction_mat_exterior = copy(grad_greenfunction_mat)
+    grad_green_interior = copy(grad_green)
+    grad_green_exterior = copy(grad_green)
 
     # Apply kernelsign transformations
-    apply_kernelsign!(grad_greenfunction_mat_interior, -1.0, mtheta)  # Interior
-    apply_kernelsign!(grad_greenfunction_mat_exterior, +1.0, mtheta)  # Exterior (no-op)
+    apply_kernelsign!(grad_green_interior, -1.0, mtheta)  # Interior
+    apply_kernelsign!(grad_green_exterior, +1.0, mtheta)  # Exterior (no-op)
 
     # Invert the vacuum response system for both cases
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        @views grri[1:mtheta, :] .= grad_greenfunction_mat_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
-        @views grre[1:mtheta, :] .= grad_greenfunction_mat_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
+        @views grri[1:mtheta, :] .= grad_green_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grre[1:mtheta, :] .= grad_green_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
     else
-        grri .= grad_greenfunction_mat_interior \ grri
-        grre .= grad_greenfunction_mat_exterior \ grre
+        grri .= grad_green_interior \ grri
+        grre .= grad_green_exterior \ grre
     end
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-    arr = zeros(mpert, mpert)
-    aii = zeros(mpert, mpert)
-    ari = zeros(mpert, mpert)
-    air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grre, cos_ln_basis, 0, 0)
-    fourier_inverse_transform!(aii, grre, sin_ln_basis, 0, mpert)
-    fourier_inverse_transform!(ari, grre, sin_ln_basis, 0, 0)
-    fourier_inverse_transform!(air, grre, cos_ln_basis, 0, mpert)
+    wv = zeros(mpert, mpert)
+    xzpts = zeros(inputs.mtheta, 4)
+    if !green_only
+        # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+        arr, aii, ari, air = ntuple(_ -> zeros(mpert, mpert), 4)
+        fourier_inverse_transform!(arr, grre, cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_inverse_transform!(aii, grre, sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+        fourier_inverse_transform!(ari, grre, sin_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_inverse_transform!(air, grre, cos_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
-    # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
-    wv = complex.(arr .+ aii, air .- ari)
+        # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
+        wv .= complex.(arr .+ aii, air .- ari)
 
-    # Force symmetry of response matrix if desired
-    force_wv_symmetry && hermitianpart!(wv)
+        # Force symmetry of response matrix if desired
+        force_wv_symmetry && hermitianpart!(wv)
 
-    # Create xzpts array
-    xzpts = zeros(Float64, inputs.mtheta, 4)
-    @views xzpts[:, 1] .= plasma_surf.x
-    @views xzpts[:, 2] .= plasma_surf.z
-    @views xzpts[:, 3] .= wall.x
-    @views xzpts[:, 4] .= wall.z
+        # Create xzpts array
+        @views xzpts[:, 1] .= plasma_surf.x
+        @views xzpts[:, 2] .= plasma_surf.z
+        @views xzpts[:, 3] .= wall.x
+        @views xzpts[:, 4] .= wall.z
+    end
 
     return wv, grri, grre, xzpts
 end
