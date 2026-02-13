@@ -245,8 +245,27 @@ function compute_greens_functions_only(
     # Add cn0 for n=0 modes if needed
     cn0 = 1.0
     (abs(n) <= 1e-5 && !wall.nowall && wall.is_closed_toroidal) && begin
-        grri[1:mtheta, 1:mpert] .+= cn0
-        grre[1:mtheta, 1:mpert] .+= cn0
+        mth12 = wall.nowall ? mtheta : 2 * mtheta
+        for i in 1:mth12, j in 1:mth12
+            grad_greenfunction_mat[i, j] += cn0
+        end
+    end
+
+    # Apply kernelsign transformations and invert to get Green's functions
+    # grri: interior (kernelsign=-1), grre: exterior (kernelsign=+1)
+    grad_greenfunction_mat_interior = copy(grad_greenfunction_mat)
+    grad_greenfunction_mat_exterior = copy(grad_greenfunction_mat)
+
+    apply_kernelsign!(grad_greenfunction_mat_interior, -1.0, mtheta)  # Interior
+    apply_kernelsign!(grad_greenfunction_mat_exterior, +1.0, mtheta)  # Exterior
+
+    # Invert the system for both cases
+    if wall.nowall
+        @views grri[1:mtheta, :] .= grad_greenfunction_mat_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grre[1:mtheta, :] .= grad_greenfunction_mat_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
+    else
+        grri .= grad_greenfunction_mat_interior \ grri
+        grre .= grad_greenfunction_mat_exterior \ grre
     end
 
     return grri, grre
