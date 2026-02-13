@@ -437,6 +437,66 @@ function dummy_kinetic_matrices(numpert::Int, mpsi::Int, sigma::Float64)
 end
 
 """
+    load_gpec_dw_matrix(path::String, numpert::Int) -> (psi_vals, kwmats_flat, ktmats_flat)
+
+Parse a GPEC dw matrix file and return per-psi flattened matrices. The file is
+expected to have columns: psi, i, j, real/imag pairs for T_x, T_f, T_ef, T_fp, T_efp.
+The returned kwmats map to components 1..5 in that order; component 6 is zeros.
+ktmats are returned as zeros.
+"""
+function load_gpec_dw_matrix(path::String, numpert::Int)
+    psi_vals = Float64[]
+    rows = [Vector{Vector{ComplexF64}}() for _ in 1:5]
+    current_psi = NaN
+    row_idx = 0
+
+    open(path, "r") do io
+        for line in eachline(io)
+            s = strip(line)
+            isempty(s) && continue
+            startswith(s, "GPEC") && continue
+            startswith(s, "psi") && continue
+
+            fields = split(s)
+            length(fields) < 13 && continue
+
+            vals = map(x -> tryparse(Float64, x), fields[1:13])
+            any(v -> v === nothing, vals) && continue
+
+            psi = vals[1]
+            i = Int(vals[2])
+            j = Int(vals[3])
+
+            if row_idx == 0 || !isapprox(psi, current_psi; rtol=0.0, atol=1e-12)
+                push!(psi_vals, psi)
+                row_idx += 1
+                current_psi = psi
+                for c in 1:5
+                    push!(rows[c], zeros(ComplexF64, numpert^2))
+                end
+            end
+
+            flat = i + (j - 1) * numpert
+            rows[1][row_idx][flat] = complex(vals[4], vals[5])
+            rows[2][row_idx][flat] = complex(vals[6], vals[7])
+            rows[3][row_idx][flat] = complex(vals[8], vals[9])
+            rows[4][row_idx][flat] = complex(vals[10], vals[11])
+            rows[5][row_idx][flat] = complex(vals[12], vals[13])
+        end
+    end
+
+    mpsi = length(psi_vals)
+    kwmats_flat = [zeros(ComplexF64, mpsi, numpert^2) for _ in 1:6]
+    for c in 1:5
+        for r in 1:mpsi
+            kwmats_flat[c][r, :] = rows[c][r]
+        end
+    end
+    ktmats_flat = [zeros(ComplexF64, mpsi, numpert^2) for _ in 1:6]
+    return psi_vals, kwmats_flat, ktmats_flat
+end
+
+"""
     make_kinetic_matrix(equil, intr, ctrl, metric, ffit) -> FourFitVars
 
 Computes kinetic damping matrices and extends FourFitVars with kinetic terms.
@@ -545,7 +605,48 @@ function make_kinetic_matrix(
         println("Using dummy kinetic matrices with sigma = $(ctrl.kin_dummy_sigma)")
         dummy_kwmats, dummy_ktmats = dummy_kinetic_matrices(intr.numpert_total, mpsi, ctrl.kin_dummy_sigma)
     elseif use_files
-        error("kin_source = :file not implemented yet")
+        #TODO: these files don't contain ktmats and kwmats. These are T_x, T_f, T_ef, T_fp, T_efp instead which are response matrices or something
+        #   Make something that dumps ktmats and kwmats instead
+        file_path = isempty(ctrl.kin_file_path) ?
+                    joinpath("TODELETE-WandTorqueFilesFromFortran", "gpec_dw_matrix_n1.out") :
+                    ctrl.kin_file_path
+
+        psi_vals, dummy_kwmats, dummy_ktmats = load_gpec_dw_matrix(file_path, intr.numpert_total)
+
+        function resample_kin_mats(
+            mats::Vector{Matrix{ComplexF64}},
+            src_psi::Vector{Float64},
+            dst_psi::Vector{Float64}
+        )
+            any(diff(src_psi) .<= 0.0) &&
+                error("GPEC dw matrix psi grid must be strictly increasing for interpolation.")
+            resampled = [zeros(ComplexF64, length(dst_psi), size(mats[1], 2)) for _ in 1:6]
+            for i in 1:6
+                spline = Spl.CubicSpline(src_psi, mats[i]; bctype="extrap")
+                for j in 1:length(dst_psi)
+                    resampled[i][j, :] = Spl.spline_eval!(spline, dst_psi[j])
+                end
+            end
+            return resampled
+        end
+
+        needs_resample = length(psi_vals) != mpsi
+        if !needs_resample
+            for i in 1:mpsi
+                if !isapprox(psi_vals[i], metric.xs[i]; rtol=0.0, atol=1e-10)
+                    needs_resample = true
+                    break
+                end
+            end
+        end
+
+        if needs_resample
+            if ctrl.verbose
+                println("Interpolating GPEC dw matrix from $(length(psi_vals)) psi points to $mpsi metric points.")
+            end
+            dummy_kwmats = resample_kin_mats(dummy_kwmats, psi_vals, metric.xs)
+            dummy_ktmats = resample_kin_mats(dummy_ktmats, psi_vals, metric.xs)
+        end
     end
 
     # Parallel loop over radial surfaces (matches Fortran OMP PARALLEL DO)
@@ -604,6 +705,13 @@ function make_kinetic_matrix(
             ktmat_sum .*= ctrl.kinfac2
         end
 
+        if use_dummy
+            for i in 1:6
+                kwmat_sum[:, :, i] .= reshape(dummy_kwmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
+                ktmat_sum[:, :, i] .= reshape(dummy_ktmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
+            end
+        end
+
         # Store raw kinetic matrices (for diagnostics)
         for i in 1:6
             kwmats_flat[i][ipsi, :] = vec(kwmat_sum[:, :, i])
@@ -621,13 +729,28 @@ function make_kinetic_matrix(
         ebat = copy(emat_ideal)
         fmat = reshape(Spl.spline_eval!(ffit.fmats_lower, psifac), intr.numpert_total, intr.numpert_total)
 
+        println("Det(amat_ideal): ", det(amat_ideal), " at psi = ", psifac)
         # Add kinetic contributions to ideal matrices
         amat = amat_ideal .+ kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1]
+        println("Det(amat): ", det(amat), " at psi = ", psifac, " det(kwmat_sum[:,:,1]): ", det(kwmat_sum[:, :, 1]))
+        println(
+            " det(ktmat_sum[:,:,1]): ",
+            det(ktmat_sum[:, :, 1]),
+            " max abs(kwmat_sum[:,:,1]): ",
+            maximum(abs.(kwmat_sum[:, :, 1])),
+            " max abs(ktmat_sum[:,:,1]): ",
+            maximum(abs.(ktmat_sum[:, :, 1])),
+            "max abs(amat_ideal): ",
+            maximum(abs.(amat_ideal))
+        )
+        println("min abs(amat_ideal): ", minimum(abs.(amat_ideal)))
+        #print statements for amats, kwmats, ktmats, etc and maybe min/max
         bmat = bmat_ideal .+ kwmat_sum[:, :, 2] .+ ktmat_sum[:, :, 2]
         cmat = cmat_ideal .+ kwmat_sum[:, :, 3] .+ ktmat_sum[:, :, 3]
         dmat = dmat_ideal .+ kwmat_sum[:, :, 4] .+ ktmat_sum[:, :, 4]
         emat = emat_ideal .+ kwmat_sum[:, :, 5] .+ ktmat_sum[:, :, 5]
         hmat = hmat_ideal .+ kwmat_sum[:, :, 6] .+ ktmat_sum[:, :, 6]
+        println("min abs(mats): ", minimum((minimum(abs.(amat)), minimum(abs.(bmat)), minimum(abs.(cmat)), minimum(abs.(dmat)), minimum(abs.(emat)), minimum(abs.(hmat)))))
 
         # Compute auxiliary matrices
         caat = cmat .- 2.0 .* ktmat_sum[:, :, 3]

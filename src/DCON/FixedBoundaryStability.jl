@@ -107,9 +107,16 @@ construction but may accumulate numerical noise during integration.
   - `nonherm::Bool`: true if W⁻¹ was non-Hermitian beyond tolerance (> 1e-3)
 """
 function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
+    u1 = u[:, :, 1]
+    u2 = u[:, :, 2]
+    if any(!isfinite, u1) || any(!isfinite, u2)
+        max_u1 = maximum(abs.(u1))
+        max_u2 = maximum(abs.(u2))
+        error("Non-finite entries in U matrices: any(!isfinite, U1)=$(any(!isfinite, u1)), any(!isfinite, U2)=$(any(!isfinite, u2)), max|U1|=$max_u1, max|U2|=$max_u2")
+    end
 
     # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
-    wp_inverse = u[:, :, 1] / u[:, :, 2]
+    wp_inverse = u1 / u2
 
     # TODO: This section not be necessary since W should be Hermitian by construction.
     # This likely just removes any numerical noise during integration
