@@ -339,7 +339,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    wv = zeros(mpert, mpert)
+    wv = zeros(ComplexF64, mpert, mpert)
     xzpts = zeros(inputs.mtheta, 4)
     if !green_only
         # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
