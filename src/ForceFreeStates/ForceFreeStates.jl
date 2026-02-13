@@ -11,7 +11,6 @@ using JLD2
 using FastInterpolations
 
 import ..Equilibrium
-import ..Spl
 import ..Utilities
 import ..Vacuum
 using Printf

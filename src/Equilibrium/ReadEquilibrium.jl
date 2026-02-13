@@ -211,9 +211,9 @@ function read_chease_binary(config::EquilibriumConfig)
         rz_in_xs = xs
         rz_in_ys = range(0, 2π; length=mtau) |> collect
         rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1];
-            bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+            bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
         rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2];
-            bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+            bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
         println("--> Finished reading CHEASE equilibrium (Binary).")
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
@@ -352,8 +352,9 @@ function read_chease_ascii(config::EquilibriumConfig)
     fs[:, 2] .= zcppr # normalized Pressure
     fs[:, 3] .= zq # q profile
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    # Compute cumulative integral of pressure column for normalization
-    fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=CubicFit())
+    # Compute cumulative integral of pressure column for normalization using FastInterpolations
+    itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
+    fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
     # Make a writable copy and normalize pressure integral
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
@@ -374,9 +375,9 @@ function read_chease_ascii(config::EquilibriumConfig)
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data;
-        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data;
-        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)

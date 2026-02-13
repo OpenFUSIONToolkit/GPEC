@@ -1,10 +1,6 @@
 # JPEC.jl
 module JPEC
 
-include("Splines/Splines.jl")
-import .SplinesMod as Spl
-export SplinesMod, Spl
-
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
 export Utilities
@@ -95,7 +91,7 @@ function main(args::Vector{String}=String[])
     else
         intr.debug_settings = DebugSettings()
     end
-    
+
     # Set up variables
     # TODO: parallel threads logic
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
@@ -185,10 +181,14 @@ function main(args::Vector{String}=String[])
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             println("Run parameters:")
-            println("   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))")
+            println(
+                "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))"
+            )
             println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
             println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println("   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))")
+            println(
+                "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))"
+            )
             println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
         end
 
@@ -314,9 +314,8 @@ vacuum data if `vac_flag` is true.
 ### TODOs
 
 Combine spline unpacking if possible, too many extra lines
-
 """
-function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData, Nothing})
+function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 

@@ -1,7 +1,6 @@
 module Equilibrium
 
 # --- Module-level Dependencies ---
-import ..Spl
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
@@ -444,9 +443,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1];
-        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2];
-        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
     # Compute flux derivatives at all grid points for diagnostics
     hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for ipsi in 0:mpsi
@@ -496,7 +495,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 2] = source[ipsi, :]
 
         # Compute total integral using FastInterpolations native integration
-        itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=Spl.PeriodicBC())
+        itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=PeriodicBC())
         term[ipsi, :] .= FastInterpolations.integrate(itp)
     end
 
