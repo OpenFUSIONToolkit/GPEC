@@ -138,7 +138,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    # Initialize solutions with the identity matrix for U_22 as described in [Glasser PoP 2016] Section VI
+    # Initialize solutions with the identity matrix for U_22 [Glasser Phys. Plasmas 2016 112506 Section VI]
     for ipert in 1:intr.numpert_total
         odet.u[ipert, ipert, 2] = 1
     end

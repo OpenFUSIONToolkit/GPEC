@@ -74,7 +74,7 @@ but grad_greenfunction_mat is not since it fills a different block of the
 
   - Uses Simpson's rule for integration away from singular points
   - Uses Gaussian quadrature near singular points for improved accuracy
-  - Implements analytical singularity removal following Chance 1997
+  - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
 function kernel!(
     grad_greenfunction_mat::Matrix{Float64},
@@ -104,12 +104,12 @@ function kernel!(
         error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
     end
 
-    # S₁ᵢ in Chance 1997, eq.(78)
+    # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
 
-    # Used for Z'_θ and X'_θ in eq.(51)
+    # Used for Z'_θ and X'_θ [Chance Phys. Plasmas 1997 2161 eq. 51]
     # Close the loop for periodic BC by appending first point at the end
     theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
     x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
@@ -146,7 +146,7 @@ function kernel!(
             x_source=x_sourcepoints[isrc]
             z_source=z_sourcepoints[isrc]
 
-            # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
+            # G_n is 2π𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ [Chance Phys. Plasmas 1997 2161 eq. 36-42, 51]
             G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[isrc], dz_dtheta[isrc], n)
 
             # Sum contributions to Green's function matrices using Simpson weight
@@ -173,7 +173,7 @@ function kernel!(
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
                 G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
-                # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
+                # Add logarithm to G_n to analytically isolate singularity [Chance Phys. Plasmas 1997 2161 eq. 75]
                 G_n_nonsingular = plasma_plasma_block ? G_n + log((theta_obs-theta_gauss[ig])^2)/x_obs : G_n
 
                 # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
@@ -187,7 +187,7 @@ function kernel!(
                 A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss
                 A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
 
-                # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
+                # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 26-27]
                 if plasma_is_source
                     greenfunction_mat[j, js[1]] += G_n_nonsingular * A2_minus
                     greenfunction_mat[j, js[2]] += G_n_nonsingular * A1_minus
@@ -196,8 +196,7 @@ function kernel!(
                     greenfunction_mat[j, js[5]] += G_n_nonsingular * A2_plus
                 end
 
-                # Second type of singularity: 𝒦ⁿ
-                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰
+                # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
                 grad_green_work[js[1]] += isgn * coupling_n * A2_minus
                 grad_green_work[js[2]] += isgn * coupling_n * A1_minus
                 grad_green_work[js[3]] += isgn * coupling_n * A0
@@ -208,19 +207,19 @@ function kernel!(
             end
         end
 
-        # Set residue based on logic similar to Table I of Chance 1997 + existing δⱼᵢ in eq. 69
+        # Set residue [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89-90]
         # Would need to pass in wall geometry to generalize this to open walls
         is_closed_toroidal = true
         if is_closed_toroidal
-            residue = (j1 == 2.0) ? 0.0 : (j2 == 1 ? 2.0 : -2.0) # Chance eq. 89
+            residue = (j1 == 2.0) ? 0.0 : (j2 == 1 ? 2.0 : -2.0) # eq. 89
         else
             # TODO: this line can be gotten rid of if we are never doing open walls
-            residue = (j1 == j2) ? 2.0 : 0.0 # Chance eq. 90
+            residue = (j1 == j2) ? 2.0 : 0.0 # eq. 90
         end
-        # Subtract regular integral component of δⱼᵢK⁰ in eq. 83 and add residue value in eq. 89/90
+        # Subtract regular integral component of δⱼᵢK⁰ [Chance Phys. Plasmas 1997 2161 eq. 83]
         grad_green_work[j] = grad_green_work[j] - isgn * grad_green_0 + residue
 
-        # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
+        # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75]
         if plasma_plasma_block
             greenfunction_mat[j, js[1]] -= log_correction_2 / x_obs
             greenfunction_mat[j, js[2]] -= log_correction_1 / x_obs

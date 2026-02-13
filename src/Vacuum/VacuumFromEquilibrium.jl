@@ -49,6 +49,7 @@ From these we compute:
 - delta = rzphi.f[3] / qa
 
 ## Reference
+[Chance Phys. Plasmas 1997 2161]
 Matches GPEC's ahg_write and gpvacuum_flxsurf approach (gpvacuum.f line 291-296)
 """
 function extract_plasma_surface_at_psi(
@@ -191,6 +192,7 @@ Much faster than full compute_vacuum_response() since it skips:
 - Mode coupling matrices
 
 ## Reference
+[Chance Phys. Plasmas 1997 2161]
 Mimics GPEC's gpvacuum_flxsurf which only computes Green's functions
 for surface inductance (gpvacuum.f line 279-283)
 """

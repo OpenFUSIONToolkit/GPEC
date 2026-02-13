@@ -3,6 +3,7 @@ Field reconstruction from eigenmode response.
 
 Converts eigenmode response coefficients to physical displacement and magnetic
 field perturbations in mode space, following the GPEC gpeq module approach.
+[Park Phys. Plasmas 2007 052110]
 
 This module mimics the GPEC Fortran subroutines:
 - gpeq_sol: Get equilibrium solution at each radial point
@@ -18,7 +19,9 @@ Fields are computed using ideal MHD relations in flux coordinates:
 
 where χ₁ = 2π * Ψ₀ (total poloidal flux normalization).
 
-Reference: GPEC gpeq.f lines 100-102
+References:
+- [Park Phys. Plasmas 2007 052110] - 3D equilibrium perturbations
+- GPEC gpeq.f lines 100-102
 """
 
 """
@@ -33,8 +36,8 @@ Reference: GPEC gpeq.f lines 100-102
 Reconstruct displacement and magnetic field from eigenmode response in mode space.
 
 This function mimics GPEC's gpeq module, computing fields using ideal MHD
-algebraic relations in flux coordinates. All fields are returned in mode space
-[npsi, mpert] rather than real space.
+algebraic relations in flux coordinates [Park Phys. Plasmas 2007 052110].
+All fields are returned in mode space [npsi, mpert] rather than real space.
 
 # Process (following GPEC)
 

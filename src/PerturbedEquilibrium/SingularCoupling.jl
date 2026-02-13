@@ -8,7 +8,10 @@ Implements GPEC's singular surface analysis (gpout.f lines 585-665, 1700-1810):
 - Chirikov parameters (island overlap)
 - Coupling matrices
 
-Reference: ~/Code/gpec/gpec/gpout.f
+References:
+- [Park Phys. Plasmas 2009 056115] - Plasma response calculation
+- [Park Phys. Rev. Lett. 2007 195003] - RMP control
+- [Glasser Phys. Plasmas 2016 072505] - Resistive Δ' calculation
 """
 
 """
@@ -26,6 +29,7 @@ Compute singular layer coupling metrics and island diagnostics.
 
 Calculates the coupling between forcing modes and resonant surfaces, which determines
 the effectiveness of external perturbations at rational surfaces where q = m/n.
+[Park Phys. Plasmas 2009 056115]
 
 Implements GPEC algorithm from gpout.f:
 1. For each forcing mode, apply unit field and compute plasma response

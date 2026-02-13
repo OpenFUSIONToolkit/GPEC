@@ -130,7 +130,7 @@ end
     make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
 
 Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
-them as a new `FourFitVars` object. See the appendix of the 2016 Glasser
+them as a new `FourFitVars` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
 DCON paper for details on the matrix definitions. Performs the same function
 as `fourfit_make_matrix` in the Fortran code, except F, G, and K are now
 stored as dense matrices. The matrix F is stored in factorized form with
@@ -282,7 +282,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         end
 
         # Factorize and build composites
-        # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser 2016)
+        # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser Phys. Plasmas 2016 112506)
         # We multiply by Q (singfac) later when performing computations later
         amat = reshape(amats_flatview, intr.numpert_total, intr.numpert_total)
         cmat = reshape(cmats_flatview, intr.numpert_total, intr.numpert_total)

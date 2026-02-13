@@ -3,6 +3,8 @@ Response matrix construction for perturbed equilibrium calculations.
 
 Based on gpresp.f from GPEC, implementing resp_index=0 (energy-based inductance).
 Uses ForceFreeStates eigenmode solutions and vacuum response data.
+
+Reference: [Park Phys. Plasmas 2009 056115]
 """
 
 # Use FourierTransform utility instead of FFTW for theta ↔ mode transforms
@@ -91,7 +93,7 @@ end
 Compute normal magnetic field at plasma boundary from eigenmode displacements.
 
 This is the key step that converts eigenmode displacements to magnetic field perturbations
-at the plasma surface. Formula from GPEC:
+at the plasma surface [Park Phys. Plasmas 2009 056115]. Formula from GPEC:
 
     bwp_mn[i,j] = i * (dΨ/dρ) * (m[i] - n*q_boundary) * ξ_ψ[i,j]
 

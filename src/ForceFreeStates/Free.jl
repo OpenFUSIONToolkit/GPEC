@@ -50,7 +50,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
             @save "vacuum_response_inputs.jld2" benchmark_inputs
         end
 
-        # Equation 126 in Chance 1997 - scale by (m - n*q)(m' - n*q)
+        # Scale by (m - n*q)(m' - n*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
         @inbounds for ipert in 1:intr.mpert
             @views wv_block[ipert, :] .*= singfac[ipert]

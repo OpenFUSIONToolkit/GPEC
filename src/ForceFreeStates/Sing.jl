@@ -138,7 +138,7 @@ Formerly `sing_vmat!`. Returns a `SingAsymptotics` struct with the computed data
 mutating the `SingType` struct. This makes it clear that asymptotics are computed on-demand
 for ideal ForceFreeStates and are not inherent properties of the singular surface.
 
-See equations 41-48 in the 2016 Glasser DCON paper for the mathematical details.
+See equations 41-48 in the Glasser Phys. Plasmas 2016 112506 for the mathematical details.
 
 ### Arguments
 
@@ -157,7 +157,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
 
     # Compute the resonant (r) and nonresonant (n) indices of the shearing transformation matrix R
     # 1 indexes along the N*M dimension, and 2 along the 2*N*M dimension
-    # In 2D, see eq. 41 of 2016 Glasser DCON paper
+    # In 2D, see eq. 41 of Glasser Phys. Plasmas 2016 112506
     # TODO: if we remove the 3rd dimension, no need for both r1 and r2
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
     r1 = ipert_res

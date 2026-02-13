@@ -221,7 +221,7 @@ For kernelsign < 0 (interior potential), multiply by -1 and add 2 to diagonal.
 function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::Float64, mtheta::Int)
     if kernelsign < 0
         grad_greenfunction_mat .*= kernelsign
-        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
+        # Account for factor of 2 in diagonal terms [Chance Phys. Plasmas 1997 2161 eq. 90]
         for i in 1:(2*mtheta)
             grad_greenfunction_mat[i, i] += 2.0
         end
@@ -339,7 +339,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
 
-    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
+    # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
     arr = zeros(mpert, mpert)
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
@@ -349,7 +349,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     fourier_inverse_transform!(ari, grre, sin_ln_basis, 0, 0)
     fourier_inverse_transform!(air, grre, cos_ln_basis, 0, mpert)
 
-    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
+    # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
     wv = complex.(arr .+ aii, air .- ari)
 
     # Force symmetry of response matrix if desired
