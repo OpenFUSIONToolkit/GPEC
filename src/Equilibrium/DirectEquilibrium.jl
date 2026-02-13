@@ -29,11 +29,12 @@ end
 A struct to hold constant parameters for the ODE integration, making them
 easily accessible within the derivative function `direct_fieldline_der!`.
 """
-struct FieldLineDerivParams
+struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastInterpolations.CubicSeriesInterpolant,D}
     ro::Float64
     zo::Float64
-    psi_in::Spl.BicubicSpline
-    sq_in::Spl.CubicSpline
+    psi_in::I2D
+    sq_in::S
+    sq_in_deriv::D
     psio::Float64
     power_bp::Int
     power_b::Int
@@ -42,7 +43,7 @@ struct FieldLineDerivParams
 end
 
 """
-    direct_get_bfield!(bf_out, r, z, psi_in, sq_in, psio; derivs=0)
+    direct_get_bfield!(bf_out, r, z, psi_in, sq_in, sq_in_deriv, psio; derivs=0)
 
 Calculates the magnetic field and its derivatives at a given (R,Z) point.
 The results are stored in-place in the `bf_out` object. This is equivalent
@@ -54,8 +55,9 @@ the Julia spline implementation.
   - `bf_out`: A mutable `DirectBField` struct to store the results
   - `r`: R-coordinate to evaluate at
   - `z`: Z-coordinate to evaluate at
-  - `psi_in`: 2D bicubic spline for poloidal flux `ψ(R,Z)`
+  - `psi_in`: 2D cubic interpolant for poloidal flux `ψ(R,Z)`
   - `sq_in`: 1D cubic spline for profiles `F(ψ_norm)` and `P(ψ_norm)`
+  - `sq_in_deriv`: Pre-computed derivative view of sq_in
   - `psio`: total toroidal flux
   - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
 """
@@ -63,35 +65,34 @@ function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
-    psi_in::Spl.BicubicSpline,
-    sq_in::Spl.CubicSpline{Float64},
+    psi_in::FastInterpolations.CubicInterpolantND,
+    sq_in::FastInterpolations.CubicSeriesInterpolant,
+    sq_in_deriv,
     psio::Float64;
     derivs::Int=0
 )
-    # Evaluate 2D spline for psi(r,z) and its derivatives
+    # Evaluate 2D interpolant for psi(r,z) and its derivatives
     if derivs == 0
-        f_psi = Spl.bicube_eval!(psi_in, r, z)
-        bf_out.psi = f_psi[1]
+        bf_out.psi = psi_in((r, z))
     elseif derivs == 1
-        f_psi, fx_psi, fy_psi = Spl.bicube_deriv1!(psi_in, r, z)
-        bf_out.psi = f_psi[1]
-        bf_out.psir = fx_psi[1]
-        bf_out.psiz = fy_psi[1]
+        bf_out.psi = psi_in((r, z))
+        bf_out.psir = psi_in((r, z); deriv=(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
     else # derivs >= 2
-        f_psi, fx_psi, fy_psi, fxx_psi, fxy_psi, fyy_psi = Spl.bicube_deriv2!(psi_in, r, z)
-        bf_out.psi = f_psi[1]
-        bf_out.psir = fx_psi[1]
-        bf_out.psiz = fy_psi[1]
-        bf_out.psirr = fxx_psi[1]
-        bf_out.psirz = fxy_psi[1]
-        bf_out.psizz = fyy_psi[1]
+        bf_out.psi = psi_in((r, z))
+        bf_out.psir = psi_in((r, z); deriv=(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
+        bf_out.psirr = psi_in((r, z); deriv=(2, 0))
+        bf_out.psirz = psi_in((r, z); deriv=(1, 1))
+        bf_out.psizz = psi_in((r, z); deriv=(0, 2))
     end
 
     # Evaluate magnetic fields from equilibrium profiles
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    f_sq, f1_sq = Spl.spline_deriv1!(sq_in, psi_norm)
+    f_sq = sq_in(psi_norm)
+    f1_sq = sq_in_deriv(psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
     bf_out.f1 = f1_sq[1] # dF/dψ
     bf_out.p = f_sq[2]  # μ0*Pressure
@@ -138,6 +139,7 @@ function direct_position!(raw_profile::DirectRunInput)
 
     bfield = DirectBField()
     max_iterations = 200
+    sq_in_deriv = deriv1(raw_profile.sq_in)
 
     # For an axis initial guess, we find zero crossing of Bz on the midplane
     # Note the Fortran had this wrapped in a if ro == 0 block, which we omit here
@@ -147,7 +149,7 @@ function direct_position!(raw_profile::DirectRunInput)
     dr = (raw_profile.rmax - raw_profile.rmin) / 20.0
 
     for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=1)
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
         if bfield.bz >= 0.0
             break
         end
@@ -160,7 +162,7 @@ function direct_position!(raw_profile::DirectRunInput)
     # Now, use Newton iteration to find the O-point (magnetic axis) where Br=0 and Bz=0
     dr, dz = 0.0, 0.0
     for _ in 1:max_iterations
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=2)
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
         det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
         if abs(det) < 1e-20
             error("Jacobian matrix is singular near ($r, $z).")
@@ -183,12 +185,14 @@ function direct_position!(raw_profile::DirectRunInput)
     end
 
     # Renormalize psi based on the value at the magnetic axis
-    direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=0)
-    x_coords = Vector(raw_profile.psi_in.xs)
-    y_coords = Vector(raw_profile.psi_in.ys)
-    new_psi_fs = raw_profile.psi_in.fs .* raw_profile.psio / bfield.psi
+    direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
+    x_coords = raw_profile.psi_in_xs
+    y_coords = raw_profile.psi_in_ys
+    # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
+    new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = Spl.BicubicSpline(x_coords, y_coords, new_psi_fs; bctypex=3, bctypey=3)
+    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinary(),
+        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # Helper function for robust Newton-Raphson search with restarts
     function find_separatrix_crossing(start_r, end_r, label)
@@ -198,7 +202,7 @@ function direct_position!(raw_profile::DirectRunInput)
             r_sep = (start_r * (3.0 - 0.5 * ird) + end_r) / (4.0 - 0.5 * ird)
             for _ in 1:max_iterations
 
-                direct_get_bfield!(bfield, r_sep, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=1)
+                direct_get_bfield!(bfield, r_sep, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
                 if abs(bfield.psir) < 1e-14
                     @warn "d(psi)/dr is near zero."
                     break
@@ -259,11 +263,12 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     r = ro + sqrt(psifac) * (rs2 - ro)
     z = zo
     bfield = DirectBField()
+    sq_in_deriv = deriv1(raw_profile.sq_in)
 
     # Refine starting R using Newton's method
     dr = 0.0
     for _ in 1:10
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=1)
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
         dr = (psi0 - bfield.psi) / bfield.psir
         r += dr
         if abs(dr) <= 1e-12 * r
@@ -272,7 +277,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     end
     !(abs(dr) <= 1e-12 * r) && error("Failed to refine starting R on flux surface.")
 
-    direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio; derivs=2)
+    direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
     psi0 = bfield.psi
 
     # Set up and solve the ODE for fieldline following
@@ -281,9 +286,9 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     u0[2] = sqrt((r - ro)^2 + (z - zo)^2)
 
     bfield = DirectBField()
-    equil_input = raw_profile.config.control
-    params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, raw_profile.psio,
-        equil_input.power_bp, equil_input.power_b, equil_input.power_r, bfield)
+    equil_config = raw_profile.config
+    params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -295,10 +300,6 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true)
-
-    if sol.retcode != :Success && sol.retcode != :Terminated
-        error("ODE integration failed for psi = $psifac with code: $(sol.retcode)")
-    end
 
     return hcat(sol.t, hcat(sol.u...)'), bfield
 end
@@ -322,7 +323,7 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     cos_eta, sin_eta = cos(eta), sin(eta)
     r = params.ro + y[2] * cos_eta
     z = params.zo + y[2] * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.psio; derivs=1)
+    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
 
     bp = sqrt(params.bfield.br^2 + params.bfield.bz^2)
     bt = params.bfield.f / r
@@ -372,7 +373,7 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
     cos_eta, sin_eta = cos(eta), sin(eta)
     r = params.ro + rfac * cos_eta
     z = params.zo + rfac * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.psio; derivs=1)
+    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
     dpsi = params.bfield.psi - psi0
 
     for _ in 1:max_iter
@@ -386,7 +387,7 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
         rfac += drfac
         r = params.ro + rfac * cos_eta
         z = params.zo + rfac * sin_eta
-        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.psio; derivs=1)
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
         dpsi = params.bfield.psi - psi0
 
         if abs(dpsi) <= 1e-12 * psi0 || abs(drfac) <= 1e-12 * abs(rfac)
@@ -420,7 +421,7 @@ robustness.
 function equilibrium_solver(raw_profile::DirectRunInput)
 
     # Shorthand
-    equil_params = raw_profile.config.control
+    equil_params = raw_profile.config
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
     mpsi = equil_params.mpsi
@@ -462,14 +463,21 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             bfield.f * (y_out[:, 4] .- ff_x_nodes .* y_out[end, 4]),
             y_out[:, 2] ./ y_out[end, 2] .- ff_x_nodes
         )
-        ff = Spl.CubicSpline(ff_x_nodes, ff_fs_nodes; bctype="periodic")
+        # Enforce exact endpoint matching for periodic data (removes floating-point noise)
+        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+
+        # Create series interpolant for all columns
+        ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
+        ff_deriv = deriv1(ff_interp)
 
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
-            f, f1 = Spl.spline_deriv1!(ff, theta_nodes[itheta])
-            @views rzphi_nodes[ipsi, itheta, 1:3] = f[1:3]
-            jac_term = (1.0 + f1[4]) * y_out[end, 2] * 2π * psio
-            rzphi_nodes[ipsi, itheta, 4] = jac_term
+            theta = theta_nodes[itheta]
+            ff_val = ff_interp(theta)
+            rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+            rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+            rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv(theta)[4]) * y_out[end, 2] * 2π * psio
         end
 
         # Store surface-averaged quantities for the `sq` spline
@@ -479,41 +487,81 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
     end
 
-    # Fit 1D profile spline `sq` and perform q-profile revision if needed
-    sq = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
-    q0 = sq.fs[1, 4] - sq.fs1[1, 4] * sq.xs[1]
+    # Create temporary ProfileSplines for q-profile revision calculation
+    profiles = ProfileSplines(
+        psi_nodes,
+        sq_nodes[:, 1],  # F * 2π
+        sq_nodes[:, 2],  # P * μ₀
+        sq_nodes[:, 3],  # dV/dψ
+        sq_nodes[:, 4]   # q
+    )
+    # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
+    q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
     if equil_params.newq0 != 0.0
         println("Revising q-profile for newq0 = $(equil_params.newq0)...")
-        f0 = sq.fs[1, 1] - sq.fs1[1, 1] * sq.xs[1]
+        f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
         f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)
-            ffac = sqrt(1.0 + f0fac / sq.fs[i, 1]^2) * sign(equil_params.newq0)
+            ffac = sqrt(1.0 + f0fac / profiles.F_spline.y[i]^2) * sign(equil_params.newq0)
             sq_nodes[i, 1] *= ffac
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
         end
-        # Re-create the spline with the revised data
-        sq = Spl.CubicSpline(psi_nodes, sq_nodes; bctype="extrap")
+        # Re-create profiles with the revised data
+        profiles = ProfileSplines(
+            psi_nodes,
+            sq_nodes[:, 1],  # F * 2π
+            sq_nodes[:, 2],  # P * μ₀
+            sq_nodes[:, 3],  # dV/dψ
+            sq_nodes[:, 4]   # q
+        )
     end
 
-    # Fit the 2D geometric spline `rzphi`. Periodic in theta (y-dimension)
-    rzphi = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), rzphi_nodes; bctypex="extrap", bctypey="periodic")
+    # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
+    # theta_nodes includes both 0 and 1 (closed periodic grid).
+    rzphi_xs = psi_nodes
+    rzphi_ys = collect(theta_nodes)
+    rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 1]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 2]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_nu = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 3]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    rzphi_jac = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 4]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
-        psi_norm = psi_nodes[ipsi]
-        fsq = Spl.spline_eval!(sq, psi_norm)
-        q = fsq[4]
-        f_val = fsq[1]
+        q = profiles.q_spline.y[ipsi]
+        f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            f, fx, fy = Spl.bicube_deriv1!(rzphi, psi_norm, theta_norm)
+            # Access nodal derivatives from the interpolants (grid points)
+            # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
+            f = SVector{4}(
+                rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_nu.nodal_derivs.partials[1, ipsi, itheta],
+                rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+            )
+            fx = SVector{4}(
+                rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_offset.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_nu.nodal_derivs.partials[2, ipsi, itheta],
+                rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
+            )
+            fy = SVector{4}(
+                rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_offset.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
+                rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
+            )
             rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
@@ -547,6 +595,17 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             end
         end
     end
-    eqfun = Spl.BicubicSpline(psi_nodes, collect(theta_nodes), eqfun_fs_nodes; bctypex="extrap", bctypey="periodic")
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), sq, rzphi, eqfun, ro, zo, psio)
+    # Create 2D interpolants for physics quantities (eqfun)
+    eqfun_B = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 1]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_metric1 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 2]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_metric2 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 3]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+
+    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
+        rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
+        eqfun_B, eqfun_metric1, eqfun_metric2,
+        ro, zo, psio)
 end

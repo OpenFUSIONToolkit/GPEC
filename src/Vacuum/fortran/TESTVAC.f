@@ -28,7 +28,7 @@ c-----------------------------------------------------------------------
       COMPLEX(r8), DIMENSION(mpert, mpert) :: wv
       REAL(r8), DIMENSION(2*(mthvac+5),mpert*2) :: grriio
       REAL(r8), DIMENSION(mthvac+5,4) :: xzptso
-      
+
       ! REAL(r8) :: xs, zs, xt, zt, xtp, ztp
       ! INTEGER :: n
       CALL defglo(mthvac)
@@ -47,15 +47,15 @@ c-----------------------------------------------------------------------
 
 c-----------------------------------------------------------------------
 c     Write a bunch of outputs:
-c     bval  
+c     bval
 c     aval
-c     aval0 
+c     aval0
 c-----------------------------------------------------------------------
 
       WRITE(*,*) "bval = ", bval
       WRITE(*,*) "aval = ", aval
       WRITE(*,*) "aval0 = ", aval0
-      
+
       END SUBROUTINE test_green
 c-----------------------------------------------------------------------
 
@@ -90,7 +90,7 @@ c-----------------------------------------------------------------------
       ALLOCATE(gij(nths,nths), gil(nths2,nfm2), cs(nths,nfm))
       ALLOCATE(gll(nfm,nfm))
       ALLOCATE(x(nths))
-      
+
       gij = 0.0_r8
       gil = 0.0_r8
       cs = 0.0_r8
@@ -151,7 +151,7 @@ c-----------------------------------------------------------------------
       COMPLEX(r8), DIMENSION(mpert, mpert) :: wv
       REAL(r8), DIMENSION(2*(mthvac+5),mpert*2) :: grriio
       REAL(r8), DIMENSION(mthvac+5,4) :: xzptso
-      
+
       CALL mscvac(wv,mpert,mtheta,mthvac,complex_flag,kernelsignin,
      $                   walflag, farwalflag, grriio, xzptso)
 
@@ -290,13 +290,13 @@ c-----------------------------------------------------------------------
       ! WRITE(*,*) "mth1 = ", mth1
       ! WRITE(*,*) "nths2 = ", nths2
 
-      
+
       ALLOCATE(gren(1:mth1,1:mth1))
       ALLOCATE(grdgre(nths2,nths2))
       ! Write out the size of the allocated arrays
       WRITE(*,*) "gren size: ", SIZE(gren,1), SIZE(gren,2)
       WRITE(*,*) "grdgre size: ", SIZE(grdgre,1), SIZE(grdgre,2)
-      
+
       CALL kernel(xobs, zobs, xsce, zsce, grdgre, gren,
      $            j1, j2, isgn, iopw, iops, ischk)
 
@@ -319,7 +319,7 @@ c-----------------------------------------------------------------------
       END DO
 
       ! Write grdgre to a file
-      OPEN(unit=debug_out_unit, file='test_kernel_grdgre_output.txt', 
+      OPEN(unit=debug_out_unit, file='test_kernel_grdgre_output.txt',
      $     status='replace', action='write', form='formatted')
       ! WRITE(debug_out_unit,*) 'grdgre matrix:'
       DO i = 1, SIZE(grdgre,1)
@@ -329,7 +329,7 @@ c-----------------------------------------------------------------------
       CLOSE(debug_out_unit)
 
       ! Write gren to a file
-      OPEN(unit=debug_out_unit_2, file='test_kernel_gren_output.txt', 
+      OPEN(unit=debug_out_unit_2, file='test_kernel_gren_output.txt',
      $     status='replace', action='write', form='formatted')
       ! WRITE(debug_out_unit_2,*) 'gren matrix:'
       DO i = 1, SIZE(gren,1)
@@ -347,7 +347,7 @@ c-----------------------------------------------------------------------
 c-----------------------------------------------------------------------
 c     Main program to run the tests
 c-----------------------------------------------------------------------
-      
+
       PROGRAM TESTVAC
 
       USE TESTVAC_MOD

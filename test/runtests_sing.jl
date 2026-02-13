@@ -1,4 +1,6 @@
 using Test
+using TOML
+using FastInterpolations: cubic_interp, CubicFit, LinearBinary
 
 #TODO: these take forever to run- can we optimize them up?
 @testset "Sing Tests" begin
@@ -117,10 +119,18 @@ using Test
         end
     end
 
+    function load_equilibrium_from_jpec(jpec_path::String)
+        inputs = TOML.parsefile(jpec_path)
+        eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dirname(jpec_path))
+        return JPEC.Equilibrium.setup_equilibrium(eq_config)
+    end
+
     @testset "sing_der" begin
-        equil = JPEC.Equilibrium.setup_equilibrium(joinpath(@__DIR__, "../examples/Solovev_ideal_example/equil.toml"))
-        ctrl = JPEC.DCON.DconControl();
-        intr = JPEC.DCON.DconInternal()
+
+        equil = load_equilibrium_from_jpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "jpec.toml"))
+        #equil = JPEC.Equilibrium.setup_equilibrium(joinpath(@__DIR__, "../examples/Solovev_ideal_example/equil.toml"))
+        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal()
         intr.numpert_total = 32 # replacing mpert (we set equal to 32). This is the same as msol
         # set mode ranges so sing_der can form singfac_vec consistently
         intr.mpert = intr.numpert_total
@@ -131,7 +141,8 @@ using Test
         intr.nhigh = 1
         intr.npert = intr.nhigh - intr.nlow + 1
         ctrl.nn_low = intr.nlow
-        odet = JPEC.DCON.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = JPEC.ForceFreeStates.OdeState(; numpert_total=intr.numpert_total,
+            numsteps_init=ctrl.numsteps_init, numunorms_init=ctrl.numunorms_init, msing=intr.msing)
 
         psifac_dummy = collect(range(0, 1, 10));
         points = length(psifac_dummy)
@@ -156,17 +167,18 @@ using Test
         odet.u[:, :, 1] .= umat_p1;
         odet.u[:, :, 2] .= umat_p2
 
-        ffit = JPEC.DCON.FourFitVars(; mpert=intr.numpert_total, mband=intr.mband)
-        ffit.amats = SplinesMod.CubicSpline(psifac_dummy, reshape(amats, points, :); bctype="extrap")
-        ffit.bmats = SplinesMod.CubicSpline(psifac_dummy, reshape(bmats, points, :); bctype="extrap")
-        ffit.cmats = SplinesMod.CubicSpline(psifac_dummy, reshape(cmats, points, :); bctype="extrap")
-        ffit.fmats_lower = SplinesMod.CubicSpline(psifac_dummy, reshape(fmats, points, :); bctype="extrap")
-        ffit.kmats = SplinesMod.CubicSpline(psifac_dummy, reshape(kmats, points, :); bctype="extrap")
-        ffit.gmats = SplinesMod.CubicSpline(psifac_dummy, reshape(gmats, points, :); bctype="extrap")
+        ffit = JPEC.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, mband=intr.mband, numpert_total=intr.numpert_total)
+        ffit.amats = cubic_interp(psifac_dummy, reshape(amats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
+        ffit.bmats = cubic_interp(psifac_dummy, reshape(bmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
+        ffit.cmats = cubic_interp(psifac_dummy, reshape(cmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
+        ffit.fmats_lower = cubic_interp(psifac_dummy, reshape(fmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
+        ffit.kmats = cubic_interp(psifac_dummy, reshape(kmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
+        ffit.gmats = cubic_interp(psifac_dummy, reshape(gmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
 
         du = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-        params = (ctrl, equil, ffit, intr, odet)
-        JPEC.DCON.sing_der!(du, odet.u, params, odet.psifac)
+        chunk = JPEC.ForceFreeStates.IntegrationChunk(; psi_start=odet.psifac, psi_end=odet.psifac, needs_crossing=false)
+        params = (ctrl, equil, ffit, intr, odet, chunk)
+        JPEC.ForceFreeStates.sing_der!(du, odet.u, params, odet.psifac)
 
         du_fortran = read_solutions_3d(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_du.dat"))
         write_sing_output(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_julia.dat"), odet.psifac, odet.q, intr.mlow, ctrl.nn_low, du) #TODO: should it be ctrl.nn_high or ctrl.nn_low?
@@ -186,14 +198,14 @@ using Test
     end
 
     @testset "sing_find" begin
-        equil = JPEC.Equilibrium.setup_equilibrium(joinpath(@__DIR__, "../examples/Solovev_ideal_example/equil.toml"))
-        intr = JPEC.DCON.DconInternal()
+        equil = load_equilibrium_from_jpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "jpec.toml"))
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal()
         intr.nlow = 1
         intr.nhigh = 1
         intr.npert = 1
         intr.msing = 0
-        intr.sing = JPEC.DCON.SingType[]
-        JPEC.DCON.sing_find!(intr, equil)
+        intr.sing = JPEC.ForceFreeStates.SingType[]
+        JPEC.ForceFreeStates.sing_find!(intr, equil)
         @test intr.msing > 0
         @test length(intr.sing) == intr.msing
         for s in intr.sing
@@ -206,20 +218,20 @@ using Test
     # sing_lim
     # ---------------------------------
     @testset "sing_lim" begin
-        equil = JPEC.Equilibrium.setup_equilibrium(joinpath(@__DIR__, "../examples/Solovev_ideal_example/equil.toml"))
-        ctrl = JPEC.DCON.DconControl();
-        intr = JPEC.DCON.DconInternal()
+        equil = load_equilibrium_from_jpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "jpec.toml"))
+        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal()
         ctrl.qhigh = equil.params.qmax
         ctrl.set_psilim_via_dmlim = false
-        JPEC.DCON.sing_lim!(intr, ctrl, equil)
+        JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         @test isapprox(intr.qlim, equil.params.qmax; atol=1e-12)
-        @test isapprox(intr.psilim, equil.config.control.psihigh; atol=1e-12)
+        @test isapprox(intr.psilim, equil.config.psihigh; atol=1e-12)
 
         ctrl.qhigh = max(equil.params.qmin + 0.1, equil.params.qmax - 0.5)
         ctrl.set_psilim_via_dmlim = false
-        JPEC.DCON.sing_lim!(intr, ctrl, equil)
+        JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         @test intr.qlim < equil.params.qmax + 1e-12
-        q_at_psilim = Spl.spline_eval!(equil.sq, intr.psilim)[4]
+        q_at_psilim = equil.profiles.q_spline(intr.psilim)
         @test isapprox(q_at_psilim, intr.qlim; atol=1e-6)
     end
 

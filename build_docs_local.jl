@@ -8,12 +8,14 @@ Pkg.instantiate()
 # Build the package
 Pkg.build()
 
-# Activate and instantiate the docs environment
+# Activate the docs environment
 Pkg.activate("docs")
-Pkg.instantiate()
 
-# Add the local package to docs environment
-Pkg.develop(PackageSpec(path="."))
+# Add the local package to docs environment first
+Pkg.develop(PackageSpec(; path="."))
+
+# Now instantiate to get other dependencies
+Pkg.instantiate()
 
 # Build the documentation
 include("docs/make.jl")
