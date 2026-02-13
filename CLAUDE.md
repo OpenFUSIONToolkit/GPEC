@@ -76,7 +76,7 @@ The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calc
   - Published: Physics of Plasmas **24**, 032505 (2017)
   - Describes: Self-consistent coupling with neoclassical effects
 
-### Resistive DCON Module (Future Work)
+### Resistive MHD Stability Analysis (Future Work)
 
 JPEC will eventually implement resistive MHD stability analysis based on:
 
