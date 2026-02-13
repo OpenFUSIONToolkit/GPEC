@@ -495,8 +495,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
 
-        # Compute total integral using exact spline integration (only final value needed)
-        term[ipsi, :] .= Spl.total_integral(equil.rzphi_ys, fs_matrix; bc=Spl.PeriodicBC())
+        # Compute total integral using FastInterpolations native integration
+        itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=Spl.PeriodicBC())
+        term[ipsi, :] .= FastInterpolations.integrate(itp)
     end
 
     totali = sum(term; dims=2)

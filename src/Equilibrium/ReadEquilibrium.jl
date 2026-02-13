@@ -171,8 +171,9 @@ function read_chease_binary(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        # Compute cumulative integral of pressure column for normalization
-        fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=CubicFit())
+        # Compute cumulative integral of pressure column for normalization using FastInterpolations
+        itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
+        fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
         # Make a writable copy and normalize pressure integral
         fs_copy = copy(fs)
         fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio

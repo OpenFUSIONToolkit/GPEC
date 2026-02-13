@@ -207,7 +207,7 @@ function equilibrium_solver(input::InverseRunInput)
         spl_fs[end, :] .= spl_fs[1, :]
 
         spl = cubic_interp(spl_xs, spl_fs; bc=Spl.PeriodicBC())
-        spl_fsi = Spl.cumulative_integral(spl_xs, spl_fs; bc=Spl.PeriodicBC())
+        spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
         spl_xs = spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
         spl_fs[:, 2] .+= rzphi_ys .- spl_xs
