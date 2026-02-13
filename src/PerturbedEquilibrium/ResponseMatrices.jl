@@ -93,15 +93,17 @@ end
 Compute normal magnetic field at plasma boundary from eigenmode displacements.
 
 This is the key step that converts eigenmode displacements to magnetic field perturbations
-at the plasma surface [Park Phys. Plasmas 2009 056115]. Formula from GPEC:
+at the plasma surface. From the ideal MHD constraint [Park Phys. Plasmas 2009 056115 eq. 4]:
 
-    bwp_mn[i,j] = i * (dΨ/dρ) * (m[i] - n*q_boundary) * ξ_ψ[i,j]
+    B_n = i * (dΨ/dρ) * (m - n*q) * ξ_ψ
 
-## Physical Interpretation:
+where ξ_ψ is the radial displacement eigenfunction.
+
+## Physical Interpretation [Park Phys. Plasmas 2007 052110 Section II]:
 - ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
-- singfac[i] = m[i] - n*q: Measures distance from rational surface
-- dΨ/dρ: Converts displacement to flux perturbation
-- Factor of i: Phase relationship for oscillating fields
+- singfac[i] = m[i] - n*q: Singular factor measuring distance from rational surface
+- dΨ/dρ: Converts displacement to flux perturbation (poloidal flux gradient)
+- Factor of i: Phase relationship for oscillating fields in complex representation
 
 ## Arguments
 - `boundary_data`: Output from extract_boundary_displacements()
@@ -128,7 +130,8 @@ function compute_normal_magnetic_field(
     dPsi_drho = boundary_data.dPsi_drho
     q_boundary = boundary_data.q_boundary
 
-    # Compute singular factor for each Fourier mode: singfac[i] = m[i] - n*q_boundary
+    # Compute singular factor for each Fourier mode [Park Phys. Plasmas 2009 056115 eq. 4]
+    # singfac[i] = m[i] - n*q_boundary measures distance from rational surface
     # Mode indexing: modes are ordered as (m, n) pairs
     # Linear index i corresponds to: m = (i-1) % mpert + mlow, n = (i-1) ÷ mpert + nlow
     singfac = zeros(Float64, numpert_total)
@@ -138,7 +141,8 @@ function compute_normal_magnetic_field(
         singfac[i] = m_mode - n_mode * q_boundary
     end
 
-    # Compute normal magnetic field: bwp_mn[i,j] = i * (dΨ/dρ) * singfac[i] * ξ_ψ[i,j]
+    # Compute normal magnetic field [Park Phys. Plasmas 2009 056115 eq. 4]
+    # bwp_mn[i,j] = i * (dΨ/dρ) * singfac[i] * ξ_ψ[i,j]
     for i in 1:numpert_total
         for j in 1:numpert_total
             bwp_mn[i, j] = 1im * dPsi_drho * singfac[i] * ξ_psi[i, j]

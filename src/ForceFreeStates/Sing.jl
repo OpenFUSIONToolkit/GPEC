@@ -689,7 +689,9 @@ end
         psieval::Float64
     )
 
-Evaluate the derivative of the Euler-Lagrange equations, i.e. u' in equation 24 of Glasser 2016.
+Evaluate the derivative of the Euler-Lagrange equations [Glasser Phys. Plasmas 2016 112506 eq. 24].
+This implements du/dψ for the ideal MHD eigenvalue problem.
+
 This function performs the same role as `sing_der` in the Fortran code, with main differences
 coming from hiding LAPACK operations under the hood via Julia's LinearAlgebra package,
 so the code is much more straightforward.

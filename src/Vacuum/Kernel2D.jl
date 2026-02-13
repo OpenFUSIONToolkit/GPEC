@@ -178,14 +178,15 @@ function kernel!(
 
                 # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
                 wgauss = GAUSSIANWEIGHTS[ig] * dtheta
-                # Calculate p = θ/Δ = (θⱼ - θ')/Δ
+                # Normalized coordinate p = (θⱼ - θ')/Δθ
                 pgauss=(theta_gauss[ig]-theta_obs)/dtheta
-                # Compute 5-point Lagrange basis polynomials at the Gauss point and multiply by quadrature weight
-                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss
-                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss
-                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss
-                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss
-                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
+                # 5-point Lagrange interpolation polynomials [Chance Phys. Plasmas 1997 2161 eq. 76]
+                # Weighted by Gaussian quadrature for accurate singular integral evaluation
+                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss                    # L₀(p) centered at j
+                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss        # L₁(p) at j+1
+                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss       # L₋₁(p) at j-1
+                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss        # L₂(p) at j+2
+                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss       # L₋₂(p) at j-2
 
                 # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 26-27]
                 if plasma_is_source
@@ -648,13 +649,13 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     ρ2 = x_minus2 + ζ2
 
-    # Chance 1997 eq.(41) ℛ = R
+    # Distance parameter ℛ [Chance Phys. Plasmas 1997 2161 eq. 41]
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4)
     R = sqrt(R2)
     R5 = R4 * R
 
-    # Chance 1997 eq.(42) 𝘴 = s
+    # Argument of Legendre function 𝘴 [Chance Phys. Plasmas 1997 2161 eq. 42]
     s = (x_obs2 + x_source2 + ζ2) / R2
 
     # Legendre functions for
@@ -670,29 +671,30 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     pnp1 = legendre[end]
     pn = legendre[end-1]
 
-    # Chance 1997 eq.(40) 2π𝒢ⁿ = G_n
+    # Green's function 2π𝒢ⁿ = G_n [Chance Phys. Plasmas 1997 2161 eq. 40]
     gg = 2 * sqrt(π) * gamma(0.5 - n) / R
     G_n = gg * pn
 
-    # Chance 1997 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
+    # Gradient factor [Chance Phys. Plasmas 1997 2161 eq. 44]
+    # NOTE: Paper has erroneous extra factor of 2π
     grad_gg = gg / R4 / 2π
 
-    # ∂Gⁿ/∂X' = dG_dX
+    # Derivatives of Green's function [Chance Phys. Plasmas 1997 2161 eq. 36-38]
+    # ∂Gⁿ/∂X' using chain rule: ∂Gⁿ/∂X' = (∂Gⁿ/∂R)(∂R/∂X') + (∂Gⁿ/∂s)(∂s/∂X')
     xterm1 = (n * (x_obs2 + x_source2 + ζ2) * (x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
     xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1
     dG_dX = grad_gg * (xterm1 + xterm2) / x_source
 
-    # ∂Gⁿ/∂Z' = dG_dZ
+    # ∂Gⁿ/∂Z' using chain rule
     zterm1 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
     zterm2 = 4.0 * x_multiple * pnp1
     dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
 
-    # Chance 1997 eq.(51)
-    # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
-    # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
+    # Coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ [Chance Phys. Plasmas 1997 2161 eq. 51]
+    # Jacobian factor from coordinate transformation
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
-    # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
+    # Special case for n=0: coupling_0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
     dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source * (x_source2-x_obs2+ζ2) * p0)
     dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1)
     coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5
