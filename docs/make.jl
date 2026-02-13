@@ -24,12 +24,11 @@ makedocs(;
         "Home" => "index.md",
         "Setup" => "set_up.md",
         "API Reference" => [
-            "Splines" => "splines.md",
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
             "Utilities" => "utilities.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md"
-        ],
+        ]
     ],
     checkdocs=:exports
 )

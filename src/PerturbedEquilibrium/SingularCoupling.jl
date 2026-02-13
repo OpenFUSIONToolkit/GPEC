@@ -427,17 +427,18 @@ function compute_current_density(
     last_delpsi = 0.0
     last_jcfun = 0.0
 
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 0:mthsurf
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
         # Evaluate bicubic splines with derivatives at (psi, theta)
         # New API uses separate interpolants for each component
-        r2 = equil.rzphi_rsquared((psi, theta))           # rfac²
-        deta = equil.rzphi_offset((psi, theta))           # angle offset
-        jac = equil.rzphi_jac((psi, theta))               # Jacobian
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1))  # ∂(rfac²)/∂theta
-        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1))  # ∂(deta)/∂theta
+        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)           # rfac²
+        deta = equil.rzphi_offset((psi, theta); hint=hint2d)           # angle offset
+        jac = equil.rzphi_jac((psi, theta); hint=hint2d)               # Jacobian
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1), hint=hint2d)  # ∂(rfac²)/∂theta
+        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1), hint=hint2d)  # ∂(deta)/∂theta
 
         rfac = sqrt(abs(r2))
         fy_rfac2 = r2_y
@@ -771,16 +772,17 @@ function compute_surface_area(
     last_jac = 0.0
     last_delpsi = 0.0
 
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 0:mthsurf
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
         # Evaluate bicubic splines with derivatives at (psi, theta)
-        r2 = equil.rzphi_rsquared((psi, theta))
-        jac = equil.rzphi_jac((psi, theta))
-        deta = equil.rzphi_offset((psi, theta))
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1))
-        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1))
+        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
+        jac = equil.rzphi_jac((psi, theta); hint=hint2d)
+        deta = equil.rzphi_offset((psi, theta); hint=hint2d)
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1), hint=hint2d)
+        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1), hint=hint2d)
 
         # Compute rfac
         rfac = sqrt(abs(r2))

@@ -49,11 +49,12 @@ function extract_plasma_surface_at_psi(equil::Equilibrium.PlasmaEquilibrium, ψ:
     ν = zeros(mtheta)
 
     # Evaluate equilibrium around the flux surface
+    hint2d = (Ref(1), Ref(1))
     for (i, θ_sfl) in enumerate(equil.rzphi_ys)
         # Get minor radius, geometric poloidal angle, and toroidal angle offset
-        r_minor[i] = sqrt(equil.rzphi_rsquared((ψ, θ_sfl)))
-        θ_cyl[i] = 2π * (θ_sfl + equil.rzphi_offset((ψ, θ_sfl)))
-        ν[i] = equil.rzphi_nu((ψ, θ_sfl))
+        r_minor[i] = sqrt(equil.rzphi_rsquared((ψ, θ_sfl); hint=hint2d))
+        θ_cyl[i] = 2π * (θ_sfl + equil.rzphi_offset((ψ, θ_sfl); hint=hint2d))
+        ν[i] = equil.rzphi_nu((ψ, θ_sfl); hint=hint2d)
     end
 
     # Compute R and Z using the computed cylindrical coordinates

@@ -109,8 +109,8 @@ function kernel!(
     simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
 
     # Set up periodic splines used for off-grid Gaussian quadrature points
-    spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive))
-    spline_z = cubic_interp(theta_grid, source.z; bc=PeriodicBC(; endpoint=:exclusive))
+    spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    spline_z = cubic_interp(theta_grid, source.z; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
     d1_spline_x = deriv1(spline_x)
     d1_spline_z = deriv1(spline_z)
 

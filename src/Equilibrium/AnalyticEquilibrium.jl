@@ -208,10 +208,10 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = r_nodes
     rz_in_ys = collect(rzphi_y_nodes)
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1];
-        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2];
-        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio)
@@ -288,7 +288,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     end
     psi_in_xs = r
     psi_in_ys = z
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs;
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; search=LinearBinary(),
         bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # Print out equilibrium info

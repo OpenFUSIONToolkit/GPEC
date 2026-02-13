@@ -4,7 +4,6 @@ using TOML, SpecialFunctions, LinearAlgebra, Printf
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 
 # Import parent modules
-import ..Spl
 import ..Equilibrium
 
 # Import FourierTransforms utility for coefficient calculation and transforms

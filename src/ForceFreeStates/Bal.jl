@@ -310,7 +310,8 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
 
     # initialize bg values
     spl0_bg_fs = -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2)
-    spl0_bg_fsi = Spl.cumulative_integral(theta_grid, spl0_bg_fs; bc=PeriodicBC())
+    itp_bg = cubic_interp(theta_grid, spl0_bg_fs; bc=PeriodicBC())
+    spl0_bg_fsi = FastInterpolations.cumulative_integrate(itp_bg)
     bg_fs = zeros(mtheta + 1, 5)
     bg_fs[:, 5] = spl0_bg_fsi .- spl0_bg_fsi[end]
 
@@ -328,7 +329,8 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
         spl1_fs[itheta, 4] = -spl1_fs[itheta, 1]
     end
 
-    spl1_totals = Spl.total_integral(theta_grid, spl1_fs; bc=PeriodicBC())
+    itp_spl1 = cubic_interp(theta_grid, spl1_fs; bc=PeriodicBC())
+    spl1_totals = FastInterpolations.integrate(itp_spl1)
 
     d0bar = [spl1_totals[1] spl1_totals[2]; spl1_totals[3] spl1_totals[4]]
 
@@ -361,7 +363,8 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
         spl2_fs[itheta, 4] = spl1_fs[itheta, 3] * v0[1, 2] + (spl1_fs[itheta, 4] + alpha) * v0[2, 2]
     end
 
-    spl2_fsi = Spl.cumulative_integral(theta_grid, spl2_fs; bc=PeriodicBC())
+    itp_spl2 = cubic_interp(theta_grid, spl2_fs; bc=PeriodicBC())
+    spl2_fsi = FastInterpolations.cumulative_integrate(itp_spl2)
     # CRITICAL: Use integrated values as the new fs (matching Fortran's spl2%fs=spl2%fsi)
     spl2_fs_new = copy(spl2_fsi)
 
@@ -400,7 +403,8 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
                              d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
     end
 
-    spl3_totals = Spl.total_integral(theta_grid, spl3_fs; bc=PeriodicBC())
+    itp_spl3 = cubic_interp(theta_grid, spl3_fs; bc=PeriodicBC())
+    spl3_totals = FastInterpolations.integrate(itp_spl3)
 
     # Compute first-order constants for both eigenfunctions
     # First eigenfunction (with -alpha correction)
