@@ -70,15 +70,16 @@ function extract_plasma_surface_at_psi(
 
     # Evaluate equilibrium around the flux surface
     twopi = 2π
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 0:mtheta_eq-1
         # Theta coordinate normalized to [0, 1)
         theta = itheta / mtheta_eq
 
         # Evaluate bicubic splines at (psi, theta)
         # New API uses separate interpolants for each component
-        r2 = equil.rzphi_rsquared((psi, theta))      # r² or rfac²
-        deta = equil.rzphi_offset((psi, theta))      # angle offset
-        dphi = equil.rzphi_nu((psi, theta))          # toroidal angle offset (nu)
+        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)      # r² or rfac²
+        deta = equil.rzphi_offset((psi, theta); hint=hint2d)      # angle offset
+        dphi = equil.rzphi_nu((psi, theta); hint=hint2d)          # toroidal angle offset (nu)
 
         rfac = sqrt(abs(r2))
 

@@ -466,6 +466,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     spline_hint::Base.RefValue{Int} = Ref(1)
     # Separate hint for wvmat splines (different grid size than equilibrium profiles)
     wv_hint::Base.RefValue{Int} = Ref(1)
+    # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
+    # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
+    rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization

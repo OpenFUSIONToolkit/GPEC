@@ -107,11 +107,12 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
     for iside in 1:2
         it = 0
+        hint2d = (Ref(1), Ref(1))  # Shared 2D hint for Newton iteration
         while true
             it += 1
             # Evaluate offset and its derivative
-            offset = pe.rzphi_offset((psi_edge, theta))
-            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
+            offset = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
+            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=(0, 1), hint=hint2d)
 
             eta = theta + offset - eta0
             eta_theta = 1 + offset_y
@@ -143,15 +144,16 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         z = 0.0
         max_iter = 1000
         iter = 0
+        hint2d = (Ref(1), Ref(1))  # Shared 2D hint for Newton iteration
         while iter < max_iter
             iter += 1
             # Evaluate rcoord and offset with derivatives
-            r2 = pe.rzphi_rsquared((psi_edge, theta))
-            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=(0,1))
-            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=(0,2))
-            eta = pe.rzphi_offset((psi_edge, theta))
-            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
-            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0,2))
+            r2 = pe.rzphi_rsquared((psi_edge, theta); hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=(0, 1), hint=hint2d)
+            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=(0, 2), hint=hint2d)
+            eta = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
+            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0, 1), hint=hint2d)
+            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0, 2), hint=hint2d)
 
             rfac = sqrt(r2)
             rfac1 = r2y / (2 * rfac)
@@ -446,12 +448,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2];
         bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     # Compute flux derivatives at all grid points for diagnostics
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1,0))
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1,0))
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0,1))
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0,1))
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1, 0), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1, 0), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0, 1), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0, 1), hint=hint2d)
         end
     end
 

@@ -158,11 +158,12 @@ function compute_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.Plasm
 
     # Compute r, z, and ν at the plasma boundary
     qa = equil.profiles.q_spline(psifac)
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 1:mtheta
         # Evaluate geometric quantities at (ψ, θ)
-        r2 = equil.rzphi_rsquared((psifac, theta_norm[itheta]))
-        offset = equil.rzphi_offset((psifac, theta_norm[itheta]))
-        nu_val = equil.rzphi_nu((psifac, theta_norm[itheta]))
+        r2 = equil.rzphi_rsquared((psifac, theta_norm[itheta]); hint=hint2d)
+        offset = equil.rzphi_offset((psifac, theta_norm[itheta]); hint=hint2d)
+        nu_val = equil.rzphi_nu((psifac, theta_norm[itheta]); hint=hint2d)
 
         rfac[itheta] = sqrt(r2)
         angle[itheta] = 2π * (theta_norm[itheta] + offset)
