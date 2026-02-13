@@ -115,7 +115,7 @@ function read_efit(config::EquilibriumConfig)
 
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc;
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinary(),
         bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # --- Bundle everything for the solver ---
@@ -210,9 +210,9 @@ function read_chease_binary(config::EquilibriumConfig)
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
         rz_in_ys = range(0, 2π; length=mtau) |> collect
-        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1];
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
             bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2];
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
             bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
         println("--> Finished reading CHEASE equilibrium (Binary).")
@@ -374,9 +374,9 @@ function read_chease_ascii(config::EquilibriumConfig)
 
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data;
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data;
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")

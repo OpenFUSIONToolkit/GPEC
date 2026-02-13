@@ -118,9 +118,9 @@ function equilibrium_solver(input::InverseRunInput)
     deta[:, end] .= deta[:, 1]
 
     # Create 2D interpolants for r² and dη
-    rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2;
+    rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta;
+    rz_deta = cubic_interp((rz_in_xs, rz_in_ys), deta; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     # c-----------------------------------------------------------------------
@@ -255,13 +255,13 @@ function equilibrium_solver(input::InverseRunInput)
     end
     qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
     # Create 2D interpolants for geometric quantities (rzphi)
-    rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 1];
+    rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 1]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 2];
+    rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 2]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rzphi_nu = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 3];
+    rzphi_nu = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 3]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rzphi_jac = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 4];
+    rzphi_jac = cubic_interp((rzphi_xs, rzphi_ys), rzphi_fs[:, :, 4]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     for ipsi in 0:mpsi
@@ -311,11 +311,11 @@ function equilibrium_solver(input::InverseRunInput)
         end
     end
     # Create 2D interpolants for physics quantities (eqfun)
-    eqfun_B = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 1];
+    eqfun_B = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 1]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    eqfun_metric1 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 2];
+    eqfun_metric1 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 2]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    eqfun_metric2 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 3];
+    eqfun_metric2 = cubic_interp((eqfun_xs, eqfun_ys), eqfun_fs[:, :, 3]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     # Create ProfileSplines from sq interpolant

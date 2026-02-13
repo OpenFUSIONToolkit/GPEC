@@ -442,9 +442,9 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1];
+    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2];
+    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
     # Compute flux derivatives at all grid points for diagnostics
     hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
