@@ -143,7 +143,7 @@ the necessary plasma surface data for vacuum calculations.
 """
 function initialize_plasma_surface(inputs::VacuumInput)
 
-    (; mtheta, mpert, mlow, ν, r, z, n) = inputs
+    (; mtheta, ν, r, z) = inputs
 
     # Interpolate arrays from input onto mtheta grid
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)

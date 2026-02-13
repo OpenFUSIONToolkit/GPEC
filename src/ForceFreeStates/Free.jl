@@ -28,27 +28,13 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     for ipert_n in 1:intr.npert
         # Set VACUUM run parameters and boundary shape
         n = ipert_n - 1 + intr.nlow
-        vac_inputs = compute_vacuum_inputs(intr.psilim, n, equil, intr, ctrl)
+        vac_inputs = Vacuum.create_vacuum_input_at_psi(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
         fill!(vac.grri, 0.0)
         fill!(vac.grre, 0.0)
         fill!(vac.xzpts, 0.0)
 
         # Compute vacuum energy matrix and both Green's functions
         wv_block, vac.grri, vac.grre, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-
-        # Output data for unit testing and benchmarking
-        if intr.debug_settings.output_benchmark_data
-            @info "Outputting top level vacuum debug data for n = $n"
-            farwall_flag = intr.wall_settings.shape == "nowall" ? true : false
-            benchmark_inputs = VacuumBenchmarkInputs(
-                wv_block, intr.mpert, equil.control.mtheta, ctrl.mthvac,
-                true, vac_inputs.kernelsign, false,
-                farwall_flag, vac.grri, vac.xzpts, "ahg2msc_dcon.out", intr.dir_path,
-                vac_inputs, intr.wall_settings,
-                n, ipert_n, intr.psilim
-            )
-            @save "vacuum_response_inputs.jld2" benchmark_inputs
-        end
 
         # Equation 126 in Chance 1997 - scale by (m - n*q)(m' - n*q)
         singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
@@ -130,69 +116,6 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    compute_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
-
-Compute the necessary input paramters to the VACUUM code for computing the vacuum response matrix.
-Performs the same function as `free_write_msc` in the Fortran code, except we create a data struct
-to pass in memory to the Julia VACUUM code instead of writing to a file. Computed quantities include
-the r, z, and ν values at the plasma boundary, as well as mode numbers and number of poloidal points.
-
-### Arguments
-
-  - `psifac`: Flux surface value at the plasma boundary (Float64)
-  - `n`: Toroidal mode number (Int)
-  - `equil`: Plasma equilibrium data (Equilibrium.PlasmaEquilibrium)
-  - `intr`: Internal ForceFreeStates parameters
-  - `ctrl`: ForceFreeStates control parameters
-"""
-function compute_vacuum_inputs(psifac::Float64, n::Int, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl)
-
-    # Allocations
-    theta_norm = equil.rzphi_ys
-    mtheta = equil.config.mtheta + 1
-    angle = zeros(Float64, mtheta)
-    r = zeros(Float64, mtheta)
-    z = zeros(Float64, mtheta)
-    ν = zeros(Float64, mtheta)
-    rfac = zeros(Float64, mtheta)
-
-    # Compute r, z, and ν at the plasma boundary
-    qa = equil.profiles.q_spline(psifac)
-    for itheta in 1:mtheta
-        # Evaluate geometric quantities at (ψ, θ)
-        r2 = equil.rzphi_rsquared((psifac, theta_norm[itheta]))
-        offset = equil.rzphi_offset((psifac, theta_norm[itheta]))
-        nu_val = equil.rzphi_nu((psifac, theta_norm[itheta]))
-
-        rfac[itheta] = sqrt(r2)
-        angle[itheta] = 2π * (theta_norm[itheta] + offset)
-        ν[itheta] = nu_val
-    end
-    r .= equil.ro .+ rfac .* cos.(angle)
-    z .= equil.zo .+ rfac .* sin.(angle)
-
-    # Invert values for n < 0
-    if n < 0
-        ν .= -ν
-        n = -n
-    end
-
-    return Vacuum.VacuumInput(;
-        r=reverse(r),
-        z=reverse(z),
-        ν=reverse(ν),
-        mlow=intr.mlow,
-        mpert=intr.mpert,
-        mhigh=intr.mhigh,
-        qa=qa,
-        mtheta_eq=equil.config.mtheta,
-        n=n,
-        mtheta=ctrl.mthvac,
-        force_wv_symmetry=ctrl.force_wv_symmetry
-    )
-end
-
-"""
     free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
 Compute a spline of vacuum response matrices over the range of psi from 'ctrl.psi_edge' to
@@ -234,7 +157,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         for ipert_n in 1:intr.npert
             # Compute vacuum matrix
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = compute_vacuum_inputs(intr.psilim, n, ctrl, equil, intr)
+            vac_inputs = Vacuum.create_vacuum_input_at_psi(equil, intr.psilim, intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling
