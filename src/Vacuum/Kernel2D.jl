@@ -127,7 +127,8 @@ function kernel!(
 
         # Perform Simpson integration for nonsingular source points
         for (isrc, wsimpson) in zip(nonsing_idx, simpson_weights)
-            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], source.dx_dtheta[isrc], source.dz_dtheta[isrc], n)
+            dx_dtheta, dz_dtheta = d1_spline_x(theta_grid[isrc]), d1_spline_z(theta_grid[isrc])
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta, dz_dtheta, n)
 
             # Sum contributions to Green's function matrices using Simpson weight
             if populate_greenfunction
