@@ -1,14 +1,28 @@
 module Vacuum
 
-using TOML, Interpolations, SpecialFunctions, LinearAlgebra, Printf
+using TOML, SpecialFunctions, LinearAlgebra, Printf
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 
-include("VacuumStructs.jl")
-include("VacuumInternals.jl")
+# Import parent modules
+import ..Spl
+import ..Equilibrium
 
-export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response
+# Import FourierTransforms utility for coefficient calculation and transforms
+using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
+
+# Include core data structures and functions first
+include("DataTypes.jl")
+include("Kernel2D.jl")
+include("MathUtils.jl")
+
+# Include VacuumFromEquilibrium after DataTypes so VacuumInput is defined
+include("VacuumFromEquilibrium.jl")
+
+export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
+export extract_plasma_surface_at_psi, create_vacuum_input_at_psi, compute_greens_functions_only
 
 # ======================================================================
 # Legacy fortran vacuum module interface
@@ -18,9 +32,9 @@ const libdir = joinpath(@__DIR__, "..", "..", "deps")
 const libvac = joinpath(libdir, "libvac")
 
 """
-    set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+    set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
-Initialize DCON parameters for vacuum field calculations.
+Initialize ForceFreeStates parameters for vacuum field calculations.
 
 # Arguments
 
@@ -48,14 +62,14 @@ xin = rand(Float64, n_modes)
 zin = rand(Float64, n_modes)
 deltain = rand(Float64, n_modes)
 
-set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 ```
 """
-function set_dcon_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::Integer,
+function set_surface_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::Integer,
     qa1in::Float64,
     xin::Vector{Float64}, zin::Vector{Float64}, deltain::Vector{Float64})
 
-    return ccall((:set_dcon_params_, libvac),
+    return ccall((:set_surface_params_, libvac),
         Nothing,
         (Ref{Cint}, Ref{Cint}, Ref{Cint}, Ref{Cint},
             Ref{Cdouble},
@@ -66,30 +80,30 @@ function set_dcon_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::In
 end
 
 """
-    unset_dcon_params()
+    unset_surface_params()
 
-Unset DCON parameters previously set by `set_dcon_params`.
+Unset ForceFreeStates parameters previously set by `set_surface_params`.
 
-This subroutine deallocates in-memory arrays (`x_dcon`, `z_dcon`, and `delta_dcon`)
-and resets the internal DCON state for future vacuum calculations.
+This subroutine deallocates in-memory arrays (`x`, `z`, and `delta`)
+and resets the internal ForceFreeStates state for future vacuum calculations.
 
 # Notes
 
-  - Must be called after `set_dcon_params` if you want to reset the DCON memory.
+  - Must be called after `set_surface_params` if you want to reset the surface data memory.
   - No arguments are required.
 
 # Example
 
 ```julia
 # Set parameters
-set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
-# Reset DCON parameters
-unset_dcon_params()
+# Reset surface parameters
+unset_surface_params()
 ```
 """
-function unset_dcon_params()
-    ccall((:unset_dcon_params_, libvac), Nothing, ())
+function unset_surface_params()
+    ccall((:unset_surface_params_, libvac), Nothing, ())
 end
 
 """
@@ -109,7 +123,7 @@ Compute the vacuum response matrix for magnetostatic perturbations.
   - `farwall_flag`: Whether to use far-wall approximation (Bool)
   - `grrio`: Green's function data (Array{Float64,2})
   - `xzptso`: Source point coordinates (Array{Float64,2})
-  - `op_ahgfile`: Optional communication file for when set_dcon_params is not called (String or Nothing)
+  - `op_ahgfile`: Optional communication file for when set_surface_params is not called (String or Nothing)
 
 # Returns
 
@@ -118,13 +132,13 @@ Compute the vacuum response matrix for magnetostatic perturbations.
 
 # Note
 
-Requires prior initialization with `set_dcon_params()` before calling this function.
+Requires prior initialization with `set_surface_params()` before calling this function.
 
 # Examples
 
 ```julia
 # Initialize parameters first
-set_dcon_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
+set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 
 # Set up vacuum calculation
 mpert = 5
@@ -199,12 +213,29 @@ function mscvac(
 end
 
 """
+    apply_kernelsign!(grad_greenfunction_mat, kernelsign, mtheta)
+
+Apply kernelsign transformation to Green's function matrix.
+For kernelsign < 0 (interior potential), multiply by -1 and add 2 to diagonal.
+"""
+function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::Float64, mtheta::Int)
+    if kernelsign < 0
+        grad_greenfunction_mat .*= kernelsign
+        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
+        for i in 1:(2*mtheta)
+            grad_greenfunction_mat[i, i] += 2.0
+        end
+    end
+    return nothing
+end
+
+"""
     compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
-Compute the vacuum response matrix using provided vacuum inputs.
+Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
 
 This is the pure Julia implementation that replaces the Fortran `mscvac` function.
-It returns the relevant arrays: `wv`, `grri`, and `xzpts`.
+It computes both interior (grri) and exterior (grre) Green's functions for GPEC response calculations.
 
 # Arguments
 
@@ -215,22 +246,31 @@ It returns the relevant arrays: `wv`, `grri`, and `xzpts`.
 # Returns
 
   - `wv`: Complex vacuum response matrix (mpert × mpert) relating plasma perturbations to vacuum response
-  - `grri`: Green's function response matrix (2*mtheta × 2*mpert) in Fourier space
+  - `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
+  - `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
   - `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
 
 # Notes
 
-  - This function initializes the plasma surface and wall geometry internally
+  - This function computes both Green's functions to enable proper surface inductance calculations
+  - Uses FourierTransforms utility internally for consistent coefficient calculation
   - The vacuum response includes plasma-plasma and plasma-wall coupling effects
   - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
 function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     # Initialization and allocations
-    (; mtheta, mpert, n, kernelsign, force_wv_symmetry) = inputs
+    (; mtheta, mpert, mlow, n, qa, force_wv_symmetry) = inputs
     plasma_surf = initialize_plasma_surface(inputs)
     wall = initialize_wall(inputs, plasma_surf, wall_settings)
-    grri = zeros(2 * mtheta, 2 * mpert)
+
+    # Compute Fourier basis coefficients using FourierTransforms utility
+    # We only need the coefficient arrays for the existing fourier_transform! functions
+    cos_ln_basis, sin_ln_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, qa=qa, delta=plasma_surf.delta)
+
+    # Allocate arrays for both Green's functions
+    grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
+    grre = zeros(2 * mtheta, 2 * mpert)  # Exterior (kernelsign=+1)
     grad_greenfunction_mat = zeros(2 * mtheta, 2 * mtheta)
     greenfunction_temp = zeros(mtheta, mtheta)
 
@@ -239,8 +279,11 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     kernel!(grad_greenfunction_mat, greenfunction_temp, plasma_surf.x, plasma_surf.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
     # Fourier transform plasma-plasma block
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, 0, 0)
-    fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, 0, mpert)
+    # Populate both grri and grre with the same right-hand side
+    fourier_transform!(grri, greenfunction_temp, cos_ln_basis, 0, 0)
+    fourier_transform!(grri, greenfunction_temp, sin_ln_basis, 0, mpert)
+    fourier_transform!(grre, greenfunction_temp, cos_ln_basis, 0, 0)
+    fourier_transform!(grre, greenfunction_temp, sin_ln_basis, 0, mpert)
 
     !wall.nowall && begin
         # Plasma–Wall block
@@ -255,9 +298,11 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         j1, j2 = 2, 1
         kernel!(grad_greenfunction_mat, greenfunction_temp, wall.x, wall.z, plasma_surf.x, plasma_surf.z, j1, j2, n)
 
-        # Fourier transform wall blocks into grri
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.cos_ln_basis, mtheta, 0)
-        fourier_transform!(grri, greenfunction_temp, plasma_surf.sin_ln_basis, mtheta, mpert)
+        # Fourier transform wall blocks into both grri and grre
+        fourier_transform!(grri, greenfunction_temp, cos_ln_basis, mtheta, 0)
+        fourier_transform!(grri, greenfunction_temp, sin_ln_basis, mtheta, mpert)
+        fourier_transform!(grre, greenfunction_temp, cos_ln_basis, mtheta, 0)
+        fourier_transform!(grre, greenfunction_temp, sin_ln_basis, mtheta, mpert)
     end
 
     # Add cn0 to make grdgre nonsingular for n=0 modes
@@ -270,21 +315,26 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
         end
     end
 
-    # Only needed for mutual inductance with the wall calculations
-    (kernelsign < 0) && begin
-        grad_greenfunction_mat .*= kernelsign
-        # Account for factor of 2 in diagonal terms in eq. 90 of Chance
-        for i in 1:(2*mtheta)
-            grad_greenfunction_mat[i, i] += 2.0
-        end
-    end
+    # Compute both Green's functions with different kernel signs
+    # grri: interior potential (kernelsign=-1)
+    # grre: exterior potential (kernelsign=+1)
 
-    # Invert the vacuum response system of equations, eqs. 92-94ish of Chance 1997 (gelimb in Fortran)
+    # Make copies for each kernelsign
+    grad_greenfunction_mat_interior = copy(grad_greenfunction_mat)
+    grad_greenfunction_mat_exterior = copy(grad_greenfunction_mat)
+
+    # Apply kernelsign transformations
+    apply_kernelsign!(grad_greenfunction_mat_interior, -1.0, mtheta)  # Interior
+    apply_kernelsign!(grad_greenfunction_mat_exterior, +1.0, mtheta)  # Exterior (no-op)
+
+    # Invert the vacuum response system for both cases
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        @views grri[1:mtheta, :] .= grad_greenfunction_mat[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grri[1:mtheta, :] .= grad_greenfunction_mat_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
+        @views grre[1:mtheta, :] .= grad_greenfunction_mat_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
     else
-        grri .= grad_greenfunction_mat \ grri
+        grri .= grad_greenfunction_mat_interior \ grri
+        grre .= grad_greenfunction_mat_exterior \ grre
     end
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?
@@ -294,24 +344,16 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     aii = zeros(mpert, mpert)
     ari = zeros(mpert, mpert)
     air = zeros(mpert, mpert)
-    fourier_inverse_transform!(arr, grri, plasma_surf.cos_ln_basis, 0, 0)
-    fourier_inverse_transform!(aii, grri, plasma_surf.sin_ln_basis, 0, mpert)
-    fourier_inverse_transform!(ari, grri, plasma_surf.sin_ln_basis, 0, 0)
-    fourier_inverse_transform!(air, grri, plasma_surf.cos_ln_basis, 0, mpert)
+    fourier_inverse_transform!(arr, grre, cos_ln_basis, 0, 0)
+    fourier_inverse_transform!(aii, grre, sin_ln_basis, 0, mpert)
+    fourier_inverse_transform!(ari, grre, sin_ln_basis, 0, 0)
+    fourier_inverse_transform!(air, grre, cos_ln_basis, 0, mpert)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    vacmat = arr .+ aii
-    vacmti = air .- ari
+    wv = complex.(arr .+ aii, air .- ari)
+
     # Force symmetry of response matrix if desired
-    force_wv_symmetry && begin
-        for l1 in 1:mpert
-            for l2 in l1:mpert
-                vacmat[l1, l2] = 0.5 * (vacmat[l1, l2] + vacmat[l2, l1])
-                vacmti[l1, l2] = 0.5 * (vacmti[l1, l2] - vacmti[l2, l1])
-            end
-        end
-    end
-    wv = complex.(vacmat, vacmti)
+    force_wv_symmetry && hermitianpart!(wv)
 
     # Create xzpts array
     xzpts = zeros(Float64, inputs.mtheta, 4)
@@ -319,7 +361,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     @views xzpts[:, 2] .= plasma_surf.z
     @views xzpts[:, 3] .= wall.x
     @views xzpts[:, 4] .= wall.z
-    return wv, grri, xzpts
+
+    return wv, grri, grre, xzpts
 end
 
 """

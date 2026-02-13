@@ -2,7 +2,6 @@ using Test
 using JPEC
 using JPEC.Vacuum
 using LinearAlgebra
-using Interpolations
 
 @testset "Vacuum.jl Unit Tests" begin
 
@@ -13,7 +12,7 @@ using Interpolations
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
             @test vac_in.n == 0
-            @test vac_in.kernelsign == 1.0
+            # NOTE: kernelsign field deprecated - compute_vacuum_response now computes both grri and grre
             @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
@@ -36,9 +35,9 @@ using Interpolations
             plasma_surf = JPEC.Vacuum.initialize_plasma_surface(inputs)
             @test length(plasma_surf.x) == 4
             @test length(plasma_surf.z) == 4
+            @test length(plasma_surf.delta) == 4
             @test length(plasma_surf.dx_dtheta) == 4
-            @test size(plasma_surf.cos_ln_basis) == (4, 1)
-            @test size(plasma_surf.sin_ln_basis) == (4, 1)
+            @test length(plasma_surf.dz_dtheta) == 4
             @test !any(isnan, plasma_surf.dx_dtheta)
             @test !any(isnan, plasma_surf.dz_dtheta)
         end
@@ -265,12 +264,14 @@ using Interpolations
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
-            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
 
             @test size(wv) == (2, 2);
             @test !any(isnan, wv);
             @test size(grri) == (2 * 128, 2 * 2);
             @test !any(isnan, grri);
+            @test size(grre) == (2 * 128, 2 * 2);
+            @test !any(isnan, grre);
             @test size(xzpts) == (128, 4);
             @test !any(isnan, xzpts[:, 1:2]);
         end
@@ -294,7 +295,7 @@ using Interpolations
             # Use a conformal wall
             wall_settings = WallShapeSettings(shape="conformal", a=0.5)
 
-            wv, grri, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
 
             @test size(wv) == (2, 2)
             @test !any(isnan, wv)

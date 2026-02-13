@@ -5,9 +5,9 @@ using Profile
 push!(LOAD_PATH, joinpath(@__DIR__, "../.."))
 using JPEC
 mth = 512  # Number of poloidal grid points
-inputs = JPEC.Vacuum.VacuumInput(
+inputs = JPEC.Vacuum.VacuumInput(;
     mtheta=mth,
-    n=1,
+    n=1
 )
 # settings = JPEC.Vacuum.WallGeometry()
 
@@ -133,18 +133,18 @@ println("  gren: $(size(gren))")
 # Note: This may fail if additional setup/initialization is required
 try
     JPEC.Vacuum.kernel!(
-        grdgre, gren, 
-        xobs[1:mth], zobs[1:mth], 
-        xsce[1:mth], zsce[1:mth], 
-        j1, j2, isgn, iopw, iops, wall_flag, inputs, #settings
+        grdgre, gren,
+        xobs[1:mth], zobs[1:mth],
+        xsce[1:mth], zsce[1:mth],
+        j1, j2, isgn, iopw, iops, wall_flag, inputs #settings
     )
-    
+
     println("✓ Kernel function executed successfully!")
     # println()
     # println("Result statistics:")
     # println("  grdgre: min=$(minimum(grdgre)), max=$(maximum(grdgre)), mean=$(sum(grdgre)/length(grdgre))")
     # println("  gren: min=$(minimum(gren)), max=$(maximum(gren)), mean=$(sum(gren)/length(gren))")
-    
+
 catch e
     println("✗ Error running kernel function.")
     # println(e)
@@ -178,25 +178,25 @@ if isdefined(Main, :grdgre) && isdefined(Main, :gren)
 
     println("gren first 5x5:")
     # display(gren[1:min(5,size(gren,1)), 1:min(5,size(gren,2))])
-    for i in 1:min(5,size(gren,1))
-        for j in 1:min(5,size(gren,2))
-            @printf("%12.9f  ", gren[i,j])
+    for i in 1:min(5, size(gren, 1))
+        for j in 1:min(5, size(gren, 2))
+            @printf("%12.9f  ", gren[i, j])
         end
         println()
     end
     println()
     println("grdgre first 5x5:")
-    for i in 1:min(5,size(grdgre,1))
-        for j in 1:min(5,size(grdgre,2))
-            @printf("%12.9f  ", grdgre[i,j])
+    for i in 1:min(5, size(grdgre, 1))
+        for j in 1:min(5, size(grdgre, 2))
+            @printf("%12.9f  ", grdgre[i, j])
         end
         println()
     end
-    
+
     # println("grdgre first 5x5:")
     # display(grdgre[1:min(5,size(grdgre,1)), 1:min(5,size(grdgre,2))])
     println()
-    
+
 else
     println("ERROR: Result matrices not defined!")
     println("Make sure to run the kernel execution cell first.")
@@ -227,7 +227,7 @@ if do_profile
             xobs[1:mth], zobs[1:mth],
             xsce[1:mth], zsce[1:mth],
             j1, j2, isgn, iopw, iops, wall_flag,
-            inputs, #settings
+            inputs #settings
         )
     catch e
         println("Warm-up failed: ", e)
@@ -241,7 +241,7 @@ if do_profile
             xobs[1:mth], zobs[1:mth],
             xsce[1:mth], zsce[1:mth],
             j1, j2, isgn, iopw, iops, wall_flag,
-            inputs, #settings
+            inputs #settings
         )
     end
 
@@ -253,7 +253,7 @@ if do_profile
                 xobs[1:mth], zobs[1:mth],
                 xsce[1:mth], zsce[1:mth],
                 j1, j2, isgn, iopw, iops, wall_flag,
-                inputs, #settings
+                inputs #settings
             )
         end
     end
@@ -274,39 +274,38 @@ if do_profile
             println(io, "mth=$mth, iters=$n_profile_iters, total_time=$(round(total_time, digits=6)) s, avg=$(round(total_time/n_profile_iters, digits=6)) s/iter")
             println(io)
             # Use default print signature without kwargs
-            Profile.print(io, groupby=:task, sortedby=:time)
+            Profile.print(io; groupby=:task, sortedby=:time)
         end
         println("Saved detailed profile to: ", joinpath(@__DIR__, "profile_summary.txt"))
     catch e
         println("Failed to write profile_summary.txt: ", e)
     end
 
-        # # Generate an HTML flamegraph/profile (StatProfilerHTML)
-        # try
-        #     # Try to import; if absent, activate project root and add it
-        #     try
-        #         import StatProfilerHTML
-        #     catch
-        #         # Ensure we add to the project at repo root
-        #         Base.require(Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg"))
-        #         local Pkg = Base.loaded_modules[Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg")]
-        #         Pkg.activate(joinpath(@__DIR__, "../.."))
-        #         Pkg.add(name="StatProfilerHTML")
-        #         import StatProfilerHTML
-        #     end
+    # # Generate an HTML flamegraph/profile (StatProfilerHTML)
+    # try
+    #     # Try to import; if absent, activate project root and add it
+    #     try
+    #         import StatProfilerHTML
+    #     catch
+    #         # Ensure we add to the project at repo root
+    #         Base.require(Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg"))
+    #         local Pkg = Base.loaded_modules[Base.PkgId(Base.UUID("44cfe95a-1eb2-52ea-b672-e2afdf69b78f"), "Pkg")]
+    #         Pkg.activate(joinpath(@__DIR__, "../.."))
+    #         Pkg.add(name="StatProfilerHTML")
+    #         import StatProfilerHTML
+    #     end
 
-        #     # Create HTML profile in this folder
-        #     outpath = joinpath(@__DIR__, "profile.html")
-        #     try
-        #         StatProfilerHTML.statprofilehtml(outpath)
-        #     catch
-        #         # Fallback to default path if method signature differs
-        #         StatProfilerHTML.statprofilehtml()
-        #         outpath = abspath("profile.html")
-        #     end
-        #     println("Saved HTML profile to: ", outpath)
-        # catch e
-        #     println("Failed to generate HTML profile: ", e)
-        # end
+    #     # Create HTML profile in this folder
+    #     outpath = joinpath(@__DIR__, "profile.html")
+    #     try
+    #         StatProfilerHTML.statprofilehtml(outpath)
+    #     catch
+    #         # Fallback to default path if method signature differs
+    #         StatProfilerHTML.statprofilehtml()
+    #         outpath = abspath("profile.html")
+    #     end
+    #     println("Saved HTML profile to: ", outpath)
+    # catch e
+    #     println("Failed to generate HTML profile: ", e)
+    # end
 end
-
