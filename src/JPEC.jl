@@ -25,9 +25,6 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
-include(joinpath(@__DIR__, "..", "deps", "build_helpers.jl"))
-export build_fortran, build_spline_fortran, build_vacuum_fortran
-
 # Additional imports for main function
 using TOML
 using Printf
