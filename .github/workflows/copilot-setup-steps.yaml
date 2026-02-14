@@ -37,11 +37,6 @@ jobs:
           cache-artifacts: true
           cache-registries: true
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libopenblas-dev
-
       - name: Build Julia project
         run: julia --project="." -e "using Pkg; Pkg.build()"
 
