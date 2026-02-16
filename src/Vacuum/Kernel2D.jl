@@ -177,7 +177,9 @@ function kernel!(
 
         # Perform Gaussian quadrature for singular points (source = obs point)
         # Indices of the singularity region, [j-2, j-1, j, j+1, j+2] (allocation-free)
-        sing_idx .= mod1.(j .+ ((mtheta-2):(mtheta+2)), mtheta)
+        for (offset_idx, offset) in enumerate(-2:2)
+            sing_idx[offset_idx] = mod1(j + offset + mtheta, mtheta)
+        end
         # Integrate region of length 2 * dtheta on left/right of singularity
         for leftpanel in (true, false)
             gauss_mid = theta_obs + (leftpanel ? -dtheta : dtheta)
@@ -200,13 +202,13 @@ function kernel!(
                         # Remove singular behavior by adding on leading-order term
                         G_n += log((theta_obs - theta_gauss)^2) / x_obs
                     end
-                    for stencil_idx in 1:5
+                    @inbounds for stencil_idx in 1:5
                         greenfunction[j, sing_idx[stencil_idx]] += G_n * stencil[stencil_idx] * GL8.w[ig] * dtheta
                     end
                 end
 
                 # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
-                for stencil_idx in 1:5
+                @inbounds for stencil_idx in 1:5
                     grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * stencil[stencil_idx] * GL8.w[ig] * dtheta
                 end
                 # Subtract off the diverging singular n=0 component
@@ -216,7 +218,7 @@ function kernel!(
 
         # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] if plasma-plasma block
         if populate_greenfunction && observer isa PlasmaGeometry
-            for stencil_idx in 1:5
+            @inbounds for stencil_idx in 1:5
                 greenfunction[j, sing_idx[stencil_idx]] -= log_correction_array[stencil_idx] / x_obs
             end
         end
