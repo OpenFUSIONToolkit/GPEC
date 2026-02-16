@@ -2,26 +2,23 @@ module Vacuum
 
 using TOML, SpecialFunctions, LinearAlgebra, Printf
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
+using FastGaussQuadrature: gausslegendre
+using StaticArrays: SVector
 
 # Import parent modules
 import ..Equilibrium
-
-# Import FourierTransforms utility for coefficient calculation and transforms
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
-# Include core data structures and functions first
 include("DataTypes.jl")
 include("Kernel2D.jl")
 include("MathUtils.jl")
-
-# Include VacuumFromEquilibrium after DataTypes so VacuumInput is defined
 include("VacuumFromEquilibrium.jl")
 
 export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
-export extract_plasma_surface_at_psi, create_vacuum_input_at_psi
+export extract_plasma_surface_at_psi
 
 # ======================================================================
 # Legacy fortran vacuum module interface

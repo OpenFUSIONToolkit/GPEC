@@ -1,48 +1,26 @@
-# Gaussian quadrature weights and points for 8-point integration (used for kernel! function)
-const GAUSSIANWEIGHTS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
-    0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
+"""
+    GaussLegendreRule{N,T}
 
-const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
-    0.183434642495650, 0.525532409916329, 0.796666477413627, 0.960289856497536]
+Allocation-free Gauss–Legendre nodes/weights on the canonical interval [-1, 1].
+Stored as `SVector`s so tight loops can index them efficiently.
+"""
+struct GaussLegendreRule{N,T}
+    x::SVector{N,T}
+    w::SVector{N,T}
+end
 
-# 32-point Gaussian quadrature abscissae (used for Pn_minus_half_2007 function when nρ̂>0.1)
-const GAUSSIANWEIGHTS32 = [
-    0.007018610009470096600, 0.016274394730905670605,
-    0.025392065309262059456, 0.034273862913021433103,
-    0.042835898022226680657, 0.050998059262376176196,
-    0.058684093478535547145, 0.065822222776361846838,
-    0.072345794108848506225, 0.078193895787070306472,
-    0.083311924226946755222, 0.087652093004403811143,
-    0.091173878695763884713, 0.093844399080804565639,
-    0.095638720079274859419, 0.096540088514727800567,
-    0.096540088514727800567, 0.095638720079274859419,
-    0.093844399080804565639, 0.091173878695763884713,
-    0.087652093004403811143, 0.083311924226946755222,
-    0.078193895787070306472, 0.072345794108848506225,
-    0.065822222776361846838, 0.058684093478535547145,
-    0.050998059262376176196, 0.042835898022226680657,
-    0.034273862913021433103, 0.025392065309262059456,
-    0.016274394730905670605, 0.007018610009470096600
-]
+@inline function gausslegendre_rule(::Val{N}, (::Type{T})=Float64) where {N,T}
+    x, w = gausslegendre(N) # canonical [-1, 1]
+    return GaussLegendreRule{N,T}(
+        SVector{N,T}(ntuple(i -> T(x[i]), N)),
+        SVector{N,T}(ntuple(i -> T(w[i]), N))
+    )
+end
 
-const GAUSSIANPOINTS32 = [
-    -0.997263861849481563545, -0.985611511545268335400,
-    -0.964762255587506430774, -0.934906075937739689171,
-    -0.896321155766052123965, -0.849367613732569970134,
-    -0.794483795967942406963, -0.732182118740289680387,
-    -0.663044266930215200975, -0.587715757240762329041,
-    -0.506899908932229390024, -0.421351276130635345364,
-    -0.331868602282127649780, -0.239287362252137074545,
-    -0.144471961582796493485, -0.048307665687738316235,
-    0.048307665687738316235, 0.144471961582796493485,
-    0.239287362252137074545, 0.331868602282127649780,
-    0.421351276130635345364, 0.506899908932229390024,
-    0.587715757240762329041, 0.663044266930215200975,
-    0.732182118740289680387, 0.794483795967942406963,
-    0.849367613732569970134, 0.896321155766052123965,
-    0.934906075937739689171, 0.964762255587506430774,
-    0.985611511545268335400, 0.997263861849481563545
-]
+# Rules used in hot paths (`kernel!`, `Pn_minus_half_2007`).
+# Constructed once at module load; no allocations in the inner loops.
+const GL8 = gausslegendre_rule(Val(8), Float64)
+const GL32 = gausslegendre_rule(Val(32), Float64)
 
 """
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
@@ -144,10 +122,10 @@ function kernel!(
             gauss_xleft = theta_obs - (region == "left" ? 2 * dtheta : 0)
             gauss_xright = gauss_xleft + 2 * dtheta
             gauss_xavg = (gauss_xright + gauss_xleft)/2
-            theta_gauss = gauss_xavg .+ GAUSSIANPOINTS .* dtheta # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
-            for ig in 1:8 # 8-point Gaussian quadrature
+            @inbounds for ig in 1:8 # 8-point Gaussian quadrature
                 # Compute green function for this Gaussian point
-                theta_gauss0 = mod(theta_gauss[ig], 2π)
+                theta_gauss = gauss_xavg + GL8.x[ig] * dtheta
+                theta_gauss0 = mod(theta_gauss, 2π)
                 x_gauss = spline_x(theta_gauss0)
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
@@ -155,9 +133,9 @@ function kernel!(
                 G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
                 # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
-                wgauss = GAUSSIANWEIGHTS[ig] * dtheta
+                wgauss = GL8.w[ig] * dtheta
                 # Normalized coordinate p = (θⱼ - θ')/Δθ
-                pgauss=(theta_gauss[ig]-theta_obs)/dtheta
+                pgauss = (theta_gauss - theta_obs) / dtheta
                 # 5-point Lagrange interpolation polynomials [Chance Phys. Plasmas 1997 2161 eq. 76]
                 # Weighted by Gaussian quadrature for accurate singular integral evaluation
                 A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss                    # L₀(p) centered at j
@@ -170,7 +148,7 @@ function kernel!(
                 if populate_greenfunction
                     if observer isa PlasmaGeometry
                         # Remove singular behavior by adding on leading-order term [Chance Phys. Plasmas 1997 2161 eq. 75]
-                        G_n += log((theta_obs - theta_gauss[ig])^2) / x_obs
+                        G_n += log((theta_obs - theta_gauss)^2) / x_obs
                     end
                     greenfunction[j, sing_idx[1]] += G_n * A2_minus
                     greenfunction[j, sing_idx[2]] += G_n * A1_minus
@@ -530,8 +508,8 @@ function Pn_minus_half_2007(s::Real, n::Int)
         gint = 0.0
         gintp = 0.0
 
-        for ig in 1:32
-            tg0 = agaus + GAUSSIANPOINTS32[ig] * bgaus
+        @inbounds for ig in 1:32
+            tg0 = agaus + GL32.x[ig] * bgaus
             tg02 = tg0 * tg0
             tg1 = tg02 / (2.0 * n)
             tg1p = tg02 / (2.0 * n + 2.0)
@@ -544,8 +522,8 @@ function Pn_minus_half_2007(s::Real, n::Int)
             dnom = sqrt(dnom)
             dnomp = sqrt(dnomp)
             anumr = tg0 * exp(-tg02)
-            gint += GAUSSIANWEIGHTS32[ig] * anumr / dnom
-            gintp += GAUSSIANWEIGHTS32[ig] * anumr / dnomp
+            gint += GL32.w[ig] * anumr / dnom
+            gintp += GL32.w[ig] * anumr / dnomp
         end
 
         gint *= bgaus
