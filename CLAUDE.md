@@ -223,8 +223,7 @@ JPEC consists of **seven main modules** organized in `src/`:
    - `CubicSpline.jl` - 1D cubic spline interpolation
    - `BicubicSpline.jl` - 2D bicubic spline interpolation
    - `FourierSpline.jl` - Fourier-based spline interpolation
-   - Supports both pure Julia and Fortran implementations (via `fortran/` subdirectory)
-   - Status: Mature, both implementations maintained for validation
+   - Status: Mature, pure Julia implementation
 
 2. **Utilities** (`src/Utilities/`) - Shared computational tools
    - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
@@ -336,7 +335,7 @@ The complete JPEC analysis pipeline:
    - Initialize plasma and wall surfaces from equilibrium
    - Compute vacuum response matrices (wv, grri, grre)
    - Calculate both interior and exterior Green's functions
-   - Available in pure Julia or via Fortran interface
+   - Pure Julia implementation
 
 3. **Stability Analysis** (ForceFreeStates):
    - Solve ideal MHD Euler-Lagrange equations via ODE integration

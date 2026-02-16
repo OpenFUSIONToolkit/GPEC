@@ -90,11 +90,7 @@ Clone it from GitHub directly to your virtual machine.
     cd JPEC
     ```
 
-6. Native build dependencies
-
-    JPEC no longer requires building external Fortran libraries. Proceed directly to installing the Julia packages.
-
-7. Install the Julia packages for JPEC
+6. Install the Julia packages for JPEC
     1. Launch Julia:
         ```shell
         julia
@@ -108,7 +104,7 @@ Clone it from GitHub directly to your virtual machine.
         Pkg.precompile()        # precompile all packages - probably unnecessary
         ```
 
-8. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
+7. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
     1. To open a .ipynb notebook
         1. Launch Jupyter from WSL, make sure you have exited Julia using the `exit()` command and then type in the shell
         ```shell

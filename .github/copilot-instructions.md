@@ -15,11 +15,7 @@
 - Stability: equilibrium + vacuum response → integrate ODEs → compute energies.
 - Core types: `PlasmaEquilibrium` and `EquilibriumConfig` in [src/Equilibrium/EquilibriumTypes.jl](src/Equilibrium/EquilibriumTypes.jl); `DconControl` in [src/DCON/DconStructs.jl](src/DCON/DconStructs.jl).
 
-## Build, test, docs
-- Build Fortran libraries:
-  ```bash
-  julia --project=. -e 'using Pkg; Pkg.build()'
-  ```
+## Tests and docs
 - Run all tests:
   ```bash
   julia --project=. test/runtests.jl
@@ -38,7 +34,7 @@
 - GitFlow workflow; develop is the active integration branch (see [README.md](README.md)).
 - Commit message format: `CODE - TAG - Detailed message` (examples in [CLAUDE.md](CLAUDE.md)).
 - Avoid step numbering in comments; instructions should be unnumbered (see [CLAUDE.md](CLAUDE.md)).
-- Many routines use 0-based indexing to mirror Fortran conventions before converting to 1-based Julia (see [CLAUDE.md](CLAUDE.md)).
+- Many routines use 0-based indexing for historical consistency with the original GPEC Fortran code before converting to 1-based Julia indexing (see [CLAUDE.md](CLAUDE.md)).
 
 ## Configuration examples
 - TOML configs: `equil.toml` uses `[EQUIL_CONTROL]` and `[EQUIL_OUTPUT]`; `dcon.toml` uses `[DCON_CONTROL]` and `[WALL]`.

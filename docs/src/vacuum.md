@@ -1,7 +1,7 @@
 # Vacuum Module
 
 The Vacuum module provides magnetostatic vacuum field calculations with plasma-wall interactions.
-The 2D vacuum calculations follow the approach outlined in [Chance Phys. Plasmas 1997, Chance J. Comp. Phys. 2007] and implemented in Chance's VACUUM fortran code, but does so in a new Julia implementation.
+The 2D vacuum calculations follow the approach outlined in [Chance Phys. Plasmas 1997, Chance J. Comp. Phys. 2007] with a pure Julia implementation.
 
 ## Overview
 

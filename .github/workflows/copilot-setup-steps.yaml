@@ -37,8 +37,5 @@ jobs:
           cache-artifacts: true
           cache-registries: true
 
-      - name: Build Julia project
-        run: julia --project="." -e "using Pkg; Pkg.build()"
-
       - name:  Instantiate Julia environment
         run: julia --project="." -e "using Pkg; Pkg.instantiate()"

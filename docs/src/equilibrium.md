@@ -98,8 +98,7 @@ Notes:
 - Many routines rely on spline representations; the `Splines` module is
 	used heavily and should be initialized where appropriate.
 - The Equilibrium module contains several reader routines for external
-	formats (EFIT/CHEASE) and also interfaces to older Fortran helpers —
-	ensure required data files are present for those backends.
+	formats (EFIT/CHEASE). Ensure required data files are present for these input formats.
 - For programmatic usage, prefer constructing `EquilibriumConfig` from a
 	TOML file to ensure all path resolution and defaults are handled.
 
