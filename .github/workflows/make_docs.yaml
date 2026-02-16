@@ -44,8 +44,6 @@ jobs:
           key: ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml','**/Manifest.toml') }}
           restore-keys: |
            ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml','**/Manifest.toml') }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
 
       - name: Prepare docs environment (develop local package, then instantiate)
         run: julia --project=docs -e 'using Pkg; Pkg.activate("docs"); Pkg.develop(PackageSpec(path=".")); Pkg.instantiate(update_registry=false)'

@@ -23,12 +23,10 @@
         ```
 2. Install build tools in WSL
     ```shell
-    sudo apt install build-essential gfortran cmake -y
+    sudo apt install build-essential cmake -y
     ```
 
     `build-essential` → GCC, make
-
-    `gfortran` → Fortran compiler
 
     `cmake` → sometimes needed by dependencies
 
@@ -92,35 +90,7 @@ Clone it from GitHub directly to your virtual machine.
     cd JPEC
     ```
 
-6. Build Fortran dependencies (libspline.so)
-    1. Go to the spline source folder:
-        ```shell
-        cd ~/JPEC/src/Splines/fortran
-        ```
-
-    2. Clean previous builds using
-        ```shell
-        make clean
-        ```
-
-    3. Build
-        ```shell
-        make
-        ```
-
-    4. Verify the library exists using
-        ```shell
-        ls ../../../deps/libspline.so
-        ```
-
-    5. Export library path so Julia can find it
-        ```shell
-        export LD_LIBRARY_PATH=~/JPEC/deps:$LD_LIBRARY_PATH
-        ```
-
-        Optional: add to `~/.bashrc` for persistence.
-
-7. Install the Julia packages for JPEC
+6. Install the Julia packages for JPEC
     1. Launch Julia:
         ```shell
         julia
@@ -134,7 +104,7 @@ Clone it from GitHub directly to your virtual machine.
         Pkg.precompile()        # precompile all packages - probably unnecessary
         ```
 
-8. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
+7. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
     1. To open a .ipynb notebook
         1. Launch Jupyter from WSL, make sure you have exited Julia using the `exit()` command and then type in the shell
         ```shell
@@ -154,15 +124,13 @@ Clone it from GitHub directly to your virtual machine.
         4. Open a terminal inside VS Code — it will automatically use WSL/Ubuntu.
         5. You can now run:
             ```shell
-            make        # rebuild libspline.so if needed
             julia       # run scripts
             jupyter notebook --no-browser
             ```
 
-        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the "Select Kernel" button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL.All dependencies (libspline.so, Julia packages) are accessible.
+        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the "Select Kernel" button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL. All dependencies are accessible.
     3.  Run JPEC
-        1. Make sure you are in WSL terminal, with `LD_LIBRARY_PATH` set to include deps.
-        2. Launch Julia and run your scripts as usual:
+        1. Launch Julia and run your scripts as usual:
             ```shell
             include("path/to/jpec_script.jl")
             ```

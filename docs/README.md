@@ -14,7 +14,7 @@ Or step by step:
 
 ```bash
 # From the root directory
-julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.build()'
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=docs -e 'using Pkg; Pkg.instantiate(); Pkg.develop(PackageSpec(path="."))'
 julia --project=docs docs/make.jl
 ```

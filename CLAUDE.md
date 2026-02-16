@@ -10,7 +10,7 @@ JPEC (Julia Perturbed Equilibrium Code) is a comprehensive Julia implementation 
 
 **Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
 
-JPEC is a hybrid Julia/Fortran implementation with active Julia development alongside legacy Fortran code called via ccall. The Fortran-to-Julia conversion is largely complete, with pure Julia implementations available for all major components.
+JPEC is implemented in Julia. References to “Fortran GPEC” or “legacy VACUUM” refer to the original upstream codebase, not a runtime dependency of JPEC.
 
 **Current Development Focus**: The `perturbed_equilibrium` branch is implementing full GPEC-style perturbed equilibrium functionality, including singular coupling analysis, island formation diagnostics, and mode-space field reconstruction.
 
@@ -120,19 +120,14 @@ JPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 ### Building and Testing
 
 ```bash
-# Run all tests (includes building Fortran)
-julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.build(); Pkg.instantiate(); include("test/runtests.jl")'
-
-# Build Fortran libraries only
-julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.build()'
+# Run all tests
+julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(); include("test/runtests.jl")'
 
 # Run specific test file
-julia --project=. test/runtests.jl test/runtests_spline.jl
+julia --project=. test/runtests.jl test/runtests_solovev.jl
 
 # Available test files:
-# - test/runtests_build.jl          # Fortran build verification
-# - test/runtests_spline.jl         # Spline interpolation
-# - test/runtests_vacuum_fortran.jl # Fortran vacuum module
+
 # - test/runtests_vacuum_julia.jl   # Julia vacuum module
 # - test/runtests_solovev.jl        # Analytical equilibrium
 # - test/runtests_ode.jl            # ODE integration
@@ -228,8 +223,7 @@ JPEC consists of **seven main modules** organized in `src/`:
    - `CubicSpline.jl` - 1D cubic spline interpolation
    - `BicubicSpline.jl` - 2D bicubic spline interpolation
    - `FourierSpline.jl` - Fourier-based spline interpolation
-   - Supports both pure Julia and Fortran implementations (via `fortran/` subdirectory)
-   - Status: Mature, both implementations maintained for validation
+   - Status: Mature, pure Julia implementation
 
 2. **Utilities** (`src/Utilities/`) - Shared computational tools
    - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
@@ -258,12 +252,10 @@ JPEC consists of **seven main modules** organized in `src/`:
    - Calculates both **interior** (grri) and **exterior** (grre) Green's functions
    - Main functions:
      - `compute_vacuum_response()` - Pure Julia implementation
-     - `mscvac()` - Legacy Fortran interface via ccall
    - Key files:
      - `VacuumStructs.jl` - Data structures
      - `VacuumInternals.jl` - Core algorithms
      - `VacuumFromEquilibrium.jl` - Integration with equilibrium data
-   - Fortran code in `src/Vacuum/fortran/`
    - Status: **Pure Julia implementation complete and available**
 
 5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
@@ -343,7 +335,7 @@ The complete JPEC analysis pipeline:
    - Initialize plasma and wall surfaces from equilibrium
    - Compute vacuum response matrices (wv, grri, grre)
    - Calculate both interior and exterior Green's functions
-   - Available in pure Julia or via Fortran interface
+   - Pure Julia implementation
 
 3. **Stability Analysis** (ForceFreeStates):
    - Solve ideal MHD Euler-Lagrange equations via ODE integration
@@ -408,26 +400,6 @@ JPEC
 ├── ForceFreeStates (uses Equilibrium, Vacuum, Splines)
 └── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
 ```
-
-### Fortran Integration
-
-The build system compiles Fortran code into shared libraries for performance-critical routines:
-
-- Build configuration in `deps/build.jl` and `deps/build_helpers.jl`
-- OS-specific compiler flags:
-  - macOS: Uses Accelerate framework
-  - Linux: Uses OpenBLAS
-- Current Fortran modules: Splines, Vacuum
-- Compiled libraries:
-  - `libspline.dylib` / `libspline.so`
-  - `libvac.dylib` / `libvac.so`
-- Platform support: **macOS and Linux only** (Windows unsupported, use WSL)
-- Add new Fortran builds by creating `build_*_fortran()` functions in `deps/build_helpers.jl`
-
-**Fortran-to-Julia Conversion Status**:
-- ✅ Vacuum module: Pure Julia implementation complete
-- ✅ Splines: Both implementations available for validation
-- 🔄 Both implementations maintained for testing and verification
 
 ## Git Workflow
 

@@ -12,7 +12,6 @@ if !isempty(ARGS)
         include(testfile)
     end
 else
-    include("./runtests_build.jl")
     include("./runtests_fastinterp.jl")
     include("./runtests_vacuum_julia.jl")
     include("./runtests_equil.jl")
