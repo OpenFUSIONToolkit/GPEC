@@ -139,6 +139,7 @@ function kernel!(
     # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
     stencils_left, stencils_right = get_lagrange_stencils(GL8.x)
     sing_idx = zeros(Int, 5)
+    stencil = zeros(5)
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
@@ -190,27 +191,26 @@ function kernel!(
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
                 G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
-                # Redefine Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
-                wgauss = GL8.w[ig] * dtheta
-                stencil = leftpanel ? stencils_left[ig] : stencils_right[ig] # weights at offsets (-2,-1,0,+1,+2)
+                # Get the stencil weights for the Gaussian point
+                stencil .= leftpanel ? stencils_left[ig] : stencils_right[ig]
 
-                # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
+                # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 75]
                 if populate_greenfunction
                     if observer isa PlasmaGeometry
-                        # Remove singular behavior by adding on leading-order term [Chance Phys. Plasmas 1997 2161 eq. 75]
+                        # Remove singular behavior by adding on leading-order term
                         G_n += log((theta_obs - theta_gauss)^2) / x_obs
                     end
                     for stencil_idx in 1:5
-                        greenfunction[j, sing_idx[stencil_idx]] += G_n * stencil[stencil_idx] * wgauss
+                        greenfunction[j, sing_idx[stencil_idx]] += G_n * stencil[stencil_idx] * GL8.w[ig] * dtheta
                     end
                 end
 
                 # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
                 for stencil_idx in 1:5
-                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * stencil[stencil_idx] * wgauss
+                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * stencil[stencil_idx] * GL8.w[ig] * dtheta
                 end
                 # Subtract off the diverging singular n=0 component
-                grad_greenfunction_block[j, j] -= gradG_0 * wgauss
+                grad_greenfunction_block[j, j] -= gradG_0 * GL8.w[ig] * dtheta
             end
         end
 
