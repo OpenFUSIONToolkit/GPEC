@@ -6,6 +6,7 @@ import ..Spl
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
+import IMASdd
 using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
 import StaticArrays: @MMatrix, SVector
 
@@ -66,6 +67,20 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         end
 
         eq_input = sol_run(eq_config, additional_input)
+    elseif eq_type == "imas"
+
+        # For IMAS input, additional_input must be a populated dd (data dictionary).
+        # There is no file to read — the equilibrium data comes directly from dd.
+        # Usage:
+        #   config = EquilibriumConfig(eq_type="imas", eq_filename="N/A")
+        #   dd = IMAS.json2imas("myshot.json")
+        #   plasma_eq = setup_equilibrium(config, dd)
+        if additional_input === nothing
+            error("eq_type=\"imas\" requires a dd object passed as additional_input.\n" *
+                  "Usage: setup_equilibrium(config, dd)")
+        end
+
+        eq_input = read_imas(eq_config, additional_input)
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
