@@ -16,6 +16,7 @@ else
     include("./runtests_fastinterp.jl")
     include("./runtests_vacuum_julia.jl")
     include("./runtests_equil.jl")
+    include("./runtests_imas.jl")
     include("./runtests_solovev.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_sing.jl")

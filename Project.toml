@@ -12,6 +12,7 @@ DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DynamicalSystems = "61744808-ddfa-5f27-97ff-6e42cc95d634"
+EFIT = "cda752c5-6b03-55a3-9e33-132a441b0c17"
 FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 FastInterpolations = "9ea80cae-fc13-4c00-8066-6eaedb12f34b"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
@@ -40,6 +41,7 @@ DiffEqCallbacks = "4.9.0"
 Distributions = "0.25.123"
 Documenter = "1.14.1"
 DynamicalSystems = "3.6.7"
+EFIT = "1.2.5"
 FFTW = "1.9.0"
 FastInterpolations = ">=0.2.8"
 FileIO = "1.18.0"
@@ -59,3 +61,9 @@ SpecialFunctions = "2.5.1"
 StaticArrays = "1.9.15"
 TOML = "1.0.3"
 Test = "1.11.0"
+
+[extras]
+EFIT = "cda752c5-6b03-55a3-9e33-132a441b0c17"
+
+[targets]
+test = ["EFIT"]

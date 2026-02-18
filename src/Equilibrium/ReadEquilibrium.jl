@@ -433,14 +433,20 @@ function read_imas(config::EquilibriumConfig, dd)
     # ------------------------------------------------------------------
     # BLOCK 2: Global flux values — the fundamental scale of the equilibrium
     # ------------------------------------------------------------------
-    # psi_axis:     ψ at the magnetic axis (O-point) [Wb/rad]
-    # psi_boundary: ψ at the last closed flux surface (LCFS) [Wb/rad]
-    # psio:         total flux swing = |ψ_axis - ψ_boundary| [Wb/rad]
+    # IMAS (COCOS 11) stores ψ as 2π × the value that JPEC's internal solver
+    # expects (COCOS 2 convention, matching the raw gEQDSK / read_efit units).
+    # We therefore divide all ψ values by 2π before handing them to the solver,
+    # and multiply q by 2π for the same reason (q_COCOS11 = q_COCOS2 / 2π).
+    cocos11_to_internal = 1.0 / (2π)
+
+    # psi_axis:     ψ at the magnetic axis (O-point) [Wb, JPEC internal]
+    # psi_boundary: ψ at the last closed flux surface (LCFS) [Wb, JPEC internal]
+    # psio:         total flux swing = |ψ_axis - ψ_boundary| [Wb]
     #
     # psio is the normalization scale used throughout the solver.
     # Every normalized flux coordinate psi_norm ∈ [0,1] is built from psio.
-    psi_axis     = eqt.global_quantities.psi_axis
-    psi_boundary = eqt.global_quantities.psi_boundary
+    psi_axis     = eqt.global_quantities.psi_axis     * cocos11_to_internal
+    psi_boundary = eqt.global_quantities.psi_boundary * cocos11_to_internal
     psio = abs(psi_boundary - psi_axis)
 
     if psio < 1e-10
@@ -459,10 +465,10 @@ function read_imas(config::EquilibriumConfig, dd)
     #   psi_norm = 1  at the plasma boundary
     #
     # So we compute: psi_norm = (ψ - ψ_axis) / (ψ_boundary - ψ_axis)
-    psi_1d = eqt.profiles_1d.psi        # ψ coordinate [Wb/rad], axis → boundary
-    f_1d   = eqt.profiles_1d.f          # F(ψ) = R·Bt [T·m]
-    p_1d   = eqt.profiles_1d.pressure   # plasma pressure P(ψ) [Pa]
-    q_1d   = eqt.profiles_1d.q          # safety factor q(ψ) [dimensionless]
+    psi_1d = eqt.profiles_1d.psi .* cocos11_to_internal   # ψ [Wb, JPEC internal]
+    f_1d   = eqt.profiles_1d.f                            # F(ψ) = R·Bt [T·m], COCOS-independent
+    p_1d   = eqt.profiles_1d.pressure                     # plasma pressure P(ψ) [Pa], COCOS-independent
+    q_1d   = eqt.profiles_1d.q ./ cocos11_to_internal     # q [JPEC internal] = q_IMAS × 2π
 
     nw = length(psi_1d)
     psi_norm_grid = (psi_1d .- psi_axis) ./ (psi_boundary - psi_axis)
@@ -502,7 +508,7 @@ function read_imas(config::EquilibriumConfig, dd)
     prof2d = eqt.profiles_2d[1]
     r_grid = prof2d.grid.dim1   # R coordinates [m], 1D array, length nR
     z_grid = prof2d.grid.dim2   # Z coordinates [m], 1D array, length nZ
-    psi_rz = prof2d.psi         # raw ψ(R,Z) from IMAS [Wb/rad], shape [nR × nZ]
+    psi_rz = prof2d.psi .* cocos11_to_internal  # ψ(R,Z) [Wb, JPEC internal]
 
     # The direct solver's psi_in convention (see DirectRunInput docstring):
     #
@@ -529,17 +535,17 @@ function read_imas(config::EquilibriumConfig, dd)
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
 
-    # CubicFit boundary conditions and LinearBinary search match read_efit exactly.
-    # No periodic BC here because ψ(R,Z) is on an open rectangular grid, not periodic.
+    # CubicFit boundary conditions, no periodic BC (open rectangular grid).
+    # Omitting `search` uses the same default as read_efit, keeping the
+    # DirectRunInput type consistent across all input methods.
     psi_in = cubic_interp(
         (psi_in_xs, psi_in_ys), psi_proc;
-        search = LinearBinary(),
         bc     = (CubicFit(), CubicFit()),
         extrap = (:extension, :extension)
     )
 
     println("--> IMAS equilibrium loaded:")
-    println("    psio = $(round(psio; sigdigits=5)) Wb/rad")
+    println("    psio = $(round(psio; sigdigits=5)) Wb")
     println("    1D profile points: nw = $nw")
     println("    2D grid: nR = $(length(r_grid)), nZ = $(length(z_grid))")
     println("    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m")

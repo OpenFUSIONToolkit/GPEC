@@ -16,6 +16,7 @@ import ..Util
 import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
+import IMASdd
 
 # Include all necessary files
 include("DconStructs.jl")
@@ -28,6 +29,7 @@ include("Fourfit.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
+include("WriteImas.jl")
 
 # These are used for various small tolerances and root finders throughout DCON
 global eps = 1e-10
