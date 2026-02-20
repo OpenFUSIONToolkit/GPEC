@@ -15,6 +15,7 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
     wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    wv3D = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
     dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
@@ -55,7 +56,26 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, intr.nlow, intr.npert)
         stats = @timed Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
 
-        wv3D = reshape(stats.value[1], intr.numpert_total, intr.numpert_total)
+        wv3D .= reshape(stats.value[1], intr.numpert_total, intr.numpert_total)
+
+        # Export 3D surfaces to VTK files
+        plasma_surf_3D = stats.value[3]
+        wall_surf_3D = stats.value[4]
+        if ctrl.verbose
+            println("Writing 3D surfaces to VTK files...")
+        end
+        plasma_vtk_file = Vacuum.write_surface_to_vtk(plasma_surf_3D, vac_inputs_3D.mtheta, vac_inputs_3D.nzeta,
+            joinpath(intr.dir_path, "plasma_surface_3D"))
+        if ctrl.verbose
+            println("  Plasma surface written to: $plasma_vtk_file")
+        end
+        if !(intr.wall_settings.shape == "nowall")
+            wall_vtk_file = Vacuum.write_surface_to_vtk(wall_surf_3D, vac_inputs_3D.mtheta, vac_inputs_3D.nzeta,
+                joinpath(intr.dir_path, "wall_surface_3D"))
+            if ctrl.verbose
+                println("  Wall surface written to: $wall_vtk_file")
+            end
+        end
 
         # Scale by (m - n*q)(m' - n'*q)
         singfac = vec((intr.mlow:intr.mhigh) .- intr.qlim .* (intr.nlow:intr.nhigh)')
@@ -65,10 +85,10 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
         end
 
         # DEBUG
-        println("2D Vacuum response matrix wv:")
-        display(vac.wv)
-        println("3D Vacuum response matrix wv3D:")
-        display(wv3D)
+        # println("2D Vacuum response matrix wv:")
+        # display(vac.wv)
+        # println("3D Vacuum response matrix wv3D:")
+        # display(wv3D)
         println("Maximum relative difference between 2D and 3D vacuum response matrices:")
         display(maximum(abs.(vac.wv .- wv3D)) / maximum(abs.(vac.wv)))
         println("Maximum difference between 2D and 3D vacuum response matrices:")
@@ -80,11 +100,8 @@ function free_run!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
 
         println("3D vacuum response computation time: $(round(stats.time, digits=4))s")
         println("GC allocations: $(Base.gc_alloc_count(stats.gcstats)), $(stats.bytes / 1e9) GB")
-        error("Vacuum response matrix computation complete.")
+        vac.wv .= wv3D
     end
-
-    println("2D Vacuum response matrix wv:")
-    display(vac.wv)
 
     # Compute complex energy eigenvalues and vectors
     vac.wt .= wp .+ vac.wv

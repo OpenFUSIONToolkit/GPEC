@@ -428,6 +428,10 @@ function compute_3D_kernel_matrix!(
     populate_greenfunction = source isa PlasmaGeometry3D
 
     # Initialize quadrature data
+    if PATCH_RAD > (observer.nzeta - 1) ÷ 2
+        @info "PATCH_RAD=$PATCH_RAD is too large for observer.nzeta=$(observer.nzeta); reducing PATCH_RAD to $((observer.nzeta - 1) ÷ 2)."
+        PATCH_RAD = (observer.nzeta - 1) ÷ 2
+    end
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
     @assert observer.mtheta ≥ PATCH_DIM "Must have observer.mtheta ≥ PATCH_DIM, got observer.mtheta=$(observer.mtheta), PATCH_DIM=$PATCH_DIM"

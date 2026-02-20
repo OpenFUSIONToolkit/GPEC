@@ -5,10 +5,12 @@ using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 using StaticArrays
 using FastGaussQuadrature
 using SparseArrays
+using WriteVTK
 
 export mscvac, set_dcon_params, VacuumInput, compute_vacuum_response, compute_vacuum_response_3D
 export compute_vacuum_field
 export WallShapeSettings
+export write_surface_to_vtk
 
 include("DataTypes.jl")
 include("Kernel2D.jl")
@@ -456,5 +458,62 @@ function compute_vacuum_field(inputs::VacuumInput, plasma_surf::PlasmaGeometry, 
     )
 
     return B_R, B_Z, B_phi, grid_info
+end
+
+"""
+    write_surface_to_vtk(surface_coords::Matrix{Float64}, mtheta::Int, nzeta::Int, filename::String)
+
+Write a 3D toroidal surface to a VTK unstructured grid file for visualization in ParaView.
+
+The surface is represented as a structured grid of quadrilaterals with mtheta poloidal points
+and nzeta toroidal points. The grid is periodic in both directions.
+
+# Arguments
+
+  - `surface_coords::Matrix{Float64}`: Array of shape (mtheta * nzeta, 3) containing (X, Y, Z) coordinates
+  - `mtheta::Int`: Number of poloidal grid points
+  - `nzeta::Int`: Number of toroidal grid points
+  - `filename::String`: Base filename for output (without extension)
+
+# Returns
+
+  - `String`: Full path to the created VTK file
+"""
+function write_surface_to_vtk(surface_coords::Matrix{Float64}, mtheta::Int, nzeta::Int, filename::String)
+    num_points = size(surface_coords, 1)
+    @assert num_points == mtheta * nzeta "Surface coordinates size ($num_points) must equal mtheta * nzeta ($(mtheta * nzeta))"
+
+    # WriteVTK expects points in format (dim, num_points), so transpose
+    points = transpose(surface_coords)  # (3, num_points)
+
+    # Create connectivity for quadrilateral cells
+    # Each cell connects 4 points: (i, j), (i+1, j), (i+1, j+1), (i, j+1)
+    # where i is poloidal index (0:mtheta-1) and j is toroidal index (0:nzeta-1)
+    # Handle periodicity: wrap around at boundaries
+    cells = Vector{MeshCell}()
+
+    for j in 0:(nzeta-1)
+        j_next = mod(j + 1, nzeta)
+        for i in 0:(mtheta-1)
+            i_next = mod(i + 1, mtheta)
+
+            # Indices for the 4 corners of the quadrilateral (1-based indexing)
+            idx1 = i + j * mtheta + 1  # (i, j)
+            idx2 = i_next + j * mtheta + 1  # (i+1, j)
+            idx3 = i_next + j_next * mtheta + 1  # (i+1, j+1)
+            idx4 = i + j_next * mtheta + 1  # (i, j+1)
+
+            # VTK_QUAD cell type
+            push!(cells, MeshCell(VTKCellTypes.VTK_QUAD, [idx1, idx2, idx3, idx4]))
+        end
+    end
+
+    # Create VTK grid
+    vtk = vtk_grid(filename, points, cells)
+
+    # Write the file
+    vtk_save(vtk)
+
+    return "$filename.vtu"
 end
 end
