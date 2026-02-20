@@ -196,18 +196,17 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     end
 
     # Add the term that comes from the volume integral of Green's identity
-    grad_green += 2π * I
+    for i in 1:num_points
+        grad_green[i, i] += 1.0
+    end
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1).
     # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations.
     grre .= grad_green \ grre
 
-    # TODO: Update this comment. I think the minus sign comes from a change of sign of the unit normal vector
-    # and we add 2I since we included the terms from eq. 69 in the kernel! function. We could just
-    # remove the diagonal terms from kernel! and do the mutliplication by -1 here before adding to both
-    # Interior kernel is -grad_green + 2I on diagonal [Chance Phys. Plasmas 1997 2161 eq. 69].
+    # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
     grad_green .*= -1
     for i in 1:num_points
-        grad_green[i, i] += 4π
+        grad_green[i, i] += 2.0
     end
     grri .= grad_green \ grri
 

@@ -524,4 +524,7 @@ function compute_3D_kernel_matrix!(
             grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
         end
     end
+    # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
+    grad_greenfunction_block ./= 2π
+    greenfunction ./= 2π
 end
