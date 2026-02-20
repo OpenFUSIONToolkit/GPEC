@@ -85,7 +85,9 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
 
         println("3D vacuum response computation time: $(round(stats.time, digits=4))s")
         println("GC allocations: $(Base.gc_alloc_count(stats.gcstats)), $(stats.bytes / 1e9) GB")
-
+        if (maximum(abs.(vac.wv .- wv3D)) / maximum(abs.(vac.wv)) > 2e-2)
+            error("Maximum relative difference between 2D and 3D vacuum response matrices is greater than 2e-2")
+        end
         vac.wv .= wv3D
     end
 

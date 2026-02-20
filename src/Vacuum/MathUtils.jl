@@ -49,29 +49,6 @@ function fourier_transform_old!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::
 end
 
 """
-    interp_to_new_grid(θ_out, vec_in)
-
-Resample the input array `vec_in` using a periodic cubic spline to an output array `vec_out` evaluated
-at new grid points `θ_out`. This function performs the same function as `trans` in Fortran.
-
-# Arguments
-
-  - `θ_out::Vector{Float64}`: Output grid points on [0, 2π] where the resampled values will be evaluated
-  - `vec_in::Vector{Float64}`: Input array to be resampled
-
-# Returns
-
-  - `Vector{Float64}`: The resampled output array on the θ_out grid
-"""
-function interp_to_new_grid(θ_out::AbstractRange{Float64}, vec_in::Vector{Float64})
-
-    # Input grids from DCON are from [0, 1]
-    θ_in = collect(range(0.0, 2π; length=length(vec_in)))
-    spline = cubic_interp(θ_in, vec_in; bc=PeriodicBC())
-    return spline.(θ_out)
-end
-
-"""
     periodic_deriv(theta, vals)
 
 Compute the first derivative of a periodic function defined by `vals` at points `theta` using cubic spline interpolation.

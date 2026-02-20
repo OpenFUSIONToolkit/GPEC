@@ -312,9 +312,10 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     dr_dζ = zeros(num_points, 3)
 
     # Interpolate arrays from input onto mtheta grid (same as 2D)
-    x = interp_to_new_grid(θ_grid, x)
-    z = interp_to_new_grid(θ_grid, z)
-    ν = interp_to_new_grid(θ_grid, ν)
+    θ_in = range(0.0, 2π; length=length(inputs.x)) # VacuumInput uses [0, 2π] grid
+    x = cubic_interp(θ_in, inputs.x; bc=PeriodicBC()).(θ_grid) # no endpoint handling needed!
+    z = cubic_interp(θ_in, inputs.z; bc=PeriodicBC()).(θ_grid)
+    ν = cubic_interp(θ_in, inputs.ν; bc=PeriodicBC()).(θ_grid)
 
     # Build 3D surface point-by-point from 2D contour
     for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
@@ -625,7 +626,7 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
             next = mod1(i + 1, mtheta)
             # Approximate local tangent t = (dx, dz) using centered finite differences, t ≈ (dx, dz)
             # Then, extend in normal direction, n = (-dz, dx)
-            alph = -atan(x_plasma[next] - x_plasma[prev], z_plasma[next] - z_plasma[prev])
+            alph = atan(x_plasma[next] - x_plasma[prev], z_plasma[prev] - z_plasma[next])
             R_wall = max(centerstack_min, x_plasma[i] + a * r_minor * cos(alph))
             # Map to Cartesian (X, Y, Z)
             r[idx, :] .= [R_wall * cos(ϕ), R_wall * sin(ϕ), z_plasma[i] + a * r_minor * sin(alph)]
@@ -642,7 +643,7 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
         bw_eff = (zh * cosh(zmuw)) / a
         for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
             idx = i + (j - 1) * mtheta
-            r[idx, :] .= [(r_major + a * cos(θ)) * cos(ϕ), (r_major + a * cos(θ)) * sin(ϕ), bw_eff * a * sin(θ)]
+            r[idx, :] .= [(r_major + a * cos(θ)) * cos(ϕ), (r_major + a * cos(θ)) * sin(ϕ), -bw_eff * a * sin(θ)]
         end
     elseif wall_settings.shape == "dee"
         error("Dee-shaped walls not yet implemented for 3D walls.")
@@ -656,7 +657,7 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
         open(filepath, "r") do io
             npots0 = parse(Int, readline(io))
             (npots0 != num_points) && error("ERROR: $filepath contains different points ($npots0) than mtheta * nzeta ($num_points).")
-            # TODO: add an interpolation here for if they're different
+            # TODO: add an interpolation here for if they're different?
             for i in 1:num_points
                 line = split(readline(io))
                 r[i, 1] = parse(Float64, line[1])
