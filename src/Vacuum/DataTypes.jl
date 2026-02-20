@@ -257,7 +257,6 @@ that the gradient/area elements are scaled by dθ and dζ.
   - `normal::Matrix{Float64}`: Oriented normal vectors, shape (num_gridpoints, 3)
   - `sin_mn_basis3D::Matrix{Float64}`: sin(mθ - nν - nϕ) basis functions at plasma surface
   - `cos_mn_basis3D::Matrix{Float64}`: cos(mθ - nν - nϕ) basis functions at plasma surface
-  - `aspect_ratio::Float64`: Ratio of max to min grid spacing for anisotropy analysis
   - `normal_orient::Int`: Forces normals to face out from vacuum region (+1 or -1)
 """
 @kwdef struct PlasmaGeometry3D
@@ -269,7 +268,6 @@ that the gradient/area elements are scaled by dθ and dζ.
     normal::Matrix{Float64} = zeros(1, 3)
     sin_mn_basis3D::Matrix{Float64} = zeros(1, 1)
     cos_mn_basis3D::Matrix{Float64} = zeros(1, 1)
-    aspect_ratio::Float64 = 1.0
     normal_orient::Int = 1
 end
 
@@ -307,9 +305,9 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
 
     # Allocate output arrays
     r = zeros(num_points, 3)
-    normal = zeros(num_points, 3)
     dr_dθ = zeros(num_points, 3)
     dr_dζ = zeros(num_points, 3)
+    normal = zeros(num_points, 3)
 
     # Interpolate arrays from input onto mtheta grid (same as 2D)
     θ_in = range(0.0, 2π; length=length(inputs.x)) # VacuumInput uses [0, 2π] grid
@@ -324,9 +322,17 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     end
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
-    dr_dθ, dr_dζ = periodic_deriv_2D(θ_grid, ϕ_grid, reshape(r, mtheta, nzeta, 3))
-    for i in 1:num_points
-        normal[i, :] = cross(dr_dθ[i, :], dr_dζ[i, :])
+    itps = [cubic_interp((θ_grid, ϕ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
+    grad = zeros(4)
+    for i in 1:mtheta, j in 1:nzeta
+        idx = i + (j - 1) * mtheta
+        for k in 1:3
+            # Grad stores f, fx, fy, fxy
+            grad .= itps[k].nodal_derivs.partials[:, i, j]
+            dr_dθ[idx, k] = grad[2]
+            dr_dζ[idx, k] = grad[3]
+        end
+        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
     end
 
     # Determine normal orientation (inward for plasma) and enforce it
@@ -362,7 +368,6 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
         normal=normal,
         sin_mn_basis3D=sin_mn_basis3D,
         cos_mn_basis3D=cos_mn_basis3D,
-        aspect_ratio=aspect_ratio,
         normal_orient=normal_orient
     )
 end
@@ -681,9 +686,17 @@ function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wa
     end
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
-    dr_dθ, dr_dζ = periodic_deriv_2D(θ_grid, ϕ_grid, reshape(r, mtheta, nzeta, 3))
-    for i in 1:num_points
-        normal[i, :] = cross(dr_dθ[i, :], dr_dζ[i, :])
+    itps = [cubic_interp((θ_grid, ϕ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
+    grad = zeros(4)
+    for i in 1:mtheta, j in 1:nzeta
+        idx = i + (j - 1) * mtheta
+        for k in 1:3
+            # Grad stores f, fx, fy, fxy
+            grad .= itps[k].nodal_derivs.partials[:, i, j]
+            dr_dθ[idx, k] = grad[2]
+            dr_dζ[idx, k] = grad[3]
+        end
+        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
     end
 
     # Determine normal orientation (outward for wall) and enforce it
