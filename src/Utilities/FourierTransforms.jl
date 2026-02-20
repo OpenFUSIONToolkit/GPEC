@@ -688,7 +688,7 @@ end
 # ==============================================================================
 
 """
-    fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+    fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
 
 Low-level Fourier transform with offset support for Vacuum module.
 
@@ -702,20 +702,17 @@ have specific block structure (e.g., plasma and wall contributions packed togeth
 
 - `gil::Matrix{Float64}`: Output matrix, updated in-place at offset block
 - `gij::Matrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
-- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert), either `cslth` or `snlth`
-- `m00::Int`: Row offset in `gil` matrix (0-based indexing convention)
-- `l00::Int`: Column offset in `gil` matrix (0-based indexing convention)
+- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert)
+- `row_offset::Int`: Row offset in `gil` matrix
+- `col_offset::Int`: Column offset in `gil` matrix
 
 # Operation
 
-Computes: `gil[m00+i, l00+l] = Σⱼ gij[i, j] * cs[j, l]` for i ∈ 1:mtheta, l ∈ 1:mpert
-
-The block `gil[m00+1:m00+mtheta, l00+1:l00+mpert]` is zeroed and then filled.
+Computes: `gil[row_offset+i, col_offset+l] = Σⱼ gij[i, j] * cs[j, l]` for i ∈ 1:size(cs, 1), l ∈ 1:size(cs, 2)
 
 # Notes
 
 - This function uses 0-based offset convention (add 1 for Julia indexing)
-- The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
 - Used for packing real and imaginary parts in separate blocks of `gil`
 
 # Example
@@ -726,19 +723,14 @@ gil = zeros(2*mtheta, 2*mpert)  # Packed real/imag structure
 gij = ... # Some theta-space data
 
 # Transform using cosine coefficients, real part block (offset 0, 0)
-fourier_transform!(gil, gij, ft.cslth, 0, 0)
+fourier_transform!(gil, gij, ft.cslth; row_offset=0, col_offset=0)
 
 # Transform using sine coefficients, imaginary part block (offset 0, mpert)
-fourier_transform!(gil, gij, ft.snlth, 0, mpert)
+fourier_transform!(gil, gij, ft.snlth; row_offset=0, col_offset=mpert)
 ```
 """
-function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-    # Zero out relevant gil block
-    mtheta, mpert = size(cs)
-    fill!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 0.0)
-
-    # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
-    mul!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), gij, cs)
+function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+    mul!(view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), gij, cs)
 end
 
 """
@@ -762,15 +754,13 @@ back to mode space from theta space.
 
 # Operation
 
-Computes: `gll[l2, l1] = (2π/mtheta) * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
+Computes: `gll[l2, l1] = dθdζ * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
 
 # Notes
 
-- The normalization factor `2π/mtheta` ensures proper Fourier series reconstruction
+- The normalization factor `4π^2 / size(cs, 1)` is 2π * mtheta * 2π * nzeta (nzeta = 1 for 2D)
 - This function uses 0-based offset convention (add 1 for Julia indexing)
 - The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
-- Output `gll` is completely zeroed before computation
-
 # Example
 
 ```julia
@@ -779,18 +769,11 @@ gil = ... # Transformed Green's function data
 arr = zeros(mpert, mpert)
 
 # Inverse transform from real part block using cosine coefficients
-fourier_inverse_transform!(arr, gil, ft.cslth, 0, 0)
+fourier_inverse_transform!(arr, gil, ft.cslth)
 ```
 """
-function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-    # Zero out gll block
-    mtheta, mpert = size(cs)
-    fill!(view(gll, 1:mpert, 1:mpert), 0.0)
-
-    # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
-    # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
-    dth = 2π / mtheta
-    mul!(gll, cs', view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 2π * dth, 0.0)
+function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+    mul!(gll, cs', view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), 4π^2 / size(cs, 1), 0.0)
 end
 
 end # module FourierTransforms
