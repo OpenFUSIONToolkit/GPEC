@@ -270,11 +270,10 @@ that the gradient/area elements are scaled by dθ and dζ.
 
   - `mtheta::Int`: Number of poloidal grid points
   - `nzeta::Int`: Number of toroidal grid points
-  - `num_gridpoints::Int`: Total number of surface grid points (mtheta * nzeta)
-  - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_gridpoints, 3)
+  - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_points, 3)
   - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
-  - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
-  - `normal::Matrix{Float64}`: Oriented normal vectors, shape (num_gridpoints, 3)
+  - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_points, 3)
+  - `normal::Matrix{Float64}`: Oriented normal vectors, shape (num_points, 3)
   - `normal_orient::Int`: Forces normals to face out from vacuum region (+1 or -1)
 """
 @kwdef struct PlasmaGeometry3D

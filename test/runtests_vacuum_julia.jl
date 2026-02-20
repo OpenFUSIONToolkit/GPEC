@@ -223,9 +223,9 @@ using LinearAlgebra
 
             @test size(wv) == (2, 2);
             @test !any(isnan, wv);
-            @test size(grri) == (2 * 128, 2 * 2);
+            @test size(grri) == (128, 2 * 2);  # nowall: only plasma points
             @test !any(isnan, grri);
-            @test size(grre) == (2 * 128, 2 * 2);
+            @test size(grre) == (128, 2 * 2);
             @test !any(isnan, grre);
             @test size(xzpts) == (128, 4);
             @test !any(isnan, xzpts[:, 1:2]);
