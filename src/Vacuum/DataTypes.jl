@@ -99,6 +99,40 @@ function VacuumInput(
     )
 end
 
+@kwdef struct VacuumInput3D
+    x::Vector{Float64} = Float64[]
+    z::Vector{Float64} = Float64[]
+    ν::Vector{Float64} = Float64[]
+    mlow::Int = 0
+    mpert::Int = 0
+    nlow::Int = 0
+    npert::Int = 0
+    mtheta::Int = 1
+    nzeta::Int = 1
+    force_wv_symmetry::Bool = true
+end
+
+"""
+    VacuumInput3D(inputs_2D::VacuumInput, nzeta::Int, nlow::Int, npert::Int)
+
+Convenience constructor for a 3D VacuumInput3D struct from a 2D VacuumInput with the additional
+required parameters for the toroidal grid/modes.
+"""
+function VacuumInput3D(inputs_2D::VacuumInput, nzeta::Int, nlow::Int, npert::Int)
+    return VacuumInput3D(;
+        x=inputs_2D.r,
+        z=inputs_2D.z,
+        ν=inputs_2D.ν,
+        mlow=inputs_2D.mlow,
+        mpert=inputs_2D.mpert,
+        nlow=nlow,
+        npert=npert,
+        mtheta=inputs_2D.mtheta,
+        nzeta=nzeta,
+        force_wv_symmetry=inputs_2D.force_wv_symmetry
+    )
+end
+
 """
     PlasmaGeometry
 
@@ -201,6 +235,135 @@ function PlasmaGeometry(inputs::VacuumInput)
     ν = cubic_interp(θ_in, inputs.ν; bc=PeriodicBC()).(θ_out)
 
     return PlasmaGeometry(x, z, ν)
+end
+
+"""
+    PlasmaGeometry3D
+
+3D toroidal surface geometry for vacuum boundary integral calculations.
+
+Built by toroidally extruding a 2D poloidal contour (`PlasmaGeometry`) and computing
+Cartesian coordinates, tangent vectors, normals, and differential area elements. Note
+that the gradient/area elements are scaled by dθ and dζ.
+
+# Fields
+
+  - `mtheta::Int`: Number of poloidal grid points
+  - `nzeta::Int`: Number of toroidal grid points
+  - `num_gridpoints::Int`: Total number of surface grid points (mtheta * nzeta)
+  - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_gridpoints, 3)
+  - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
+  - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
+  - `normal::Matrix{Float64}`: Oriented normal vectors, shape (num_gridpoints, 3)
+  - `sin_mn_basis3D::Matrix{Float64}`: sin(mθ - nν - nϕ) basis functions at plasma surface
+  - `cos_mn_basis3D::Matrix{Float64}`: cos(mθ - nν - nϕ) basis functions at plasma surface
+  - `aspect_ratio::Float64`: Ratio of max to min grid spacing for anisotropy analysis
+  - `normal_orient::Int`: Forces normals to face out from vacuum region (+1 or -1)
+"""
+@kwdef struct PlasmaGeometry3D
+    mtheta::Int = 1
+    nzeta::Int = 1
+    r::Matrix{Float64} = zeros(1, 3)
+    dr_dθ::Matrix{Float64} = zeros(1, 3)
+    dr_dζ::Matrix{Float64} = zeros(1, 3)
+    normal::Matrix{Float64} = zeros(1, 3)
+    sin_mn_basis3D::Matrix{Float64} = zeros(1, 1)
+    cos_mn_basis3D::Matrix{Float64} = zeros(1, 1)
+    aspect_ratio::Float64 = 1.0
+    normal_orient::Int = 1
+end
+
+"""
+    PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)
+
+Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
+
+# Algorithm
+
+ 0. Interpolate 2D arrays onto mtheta grid
+ 1. Map 2D (R, Z, ν) to 3D Cartesian: X = R cos(ϕ+ν), Y = R sin(ϕ+ν), Z = Z
+ 2. Fit periodic bicubic splines to (X, Y, Z) on (θ, ϕ) grid
+ 3. Compute tangent vectors via spline gradients
+ 4. Compute normals via cross product: n = ∂r/∂θ × ∂r/∂ζ
+
+# Arguments
+
+  - `plasma_2d`: 2D poloidal plasma geometry
+  - `nzeta`: Number of toroidal grid points
+
+# Returns
+
+  - `PlasmaGeometry3D`: Complete 3D surface description
+"""
+function PlasmaGeometry3D(inputs::VacuumInput3D)
+
+    # Extract 2D poloidal data
+    (; mtheta, nzeta, npert, nlow, mlow, mpert, x, z, ν) = inputs
+    num_points = mtheta * nzeta
+    dθ = 2π / mtheta
+    dζ = 2π / nzeta
+    θ_grid = range(; start=0, length=mtheta, step=dθ)
+    ϕ_grid = range(; start=0, length=nzeta, step=dζ)
+
+    # Allocate output arrays
+    r = zeros(num_points, 3)
+    normal = zeros(num_points, 3)
+    dr_dθ = zeros(num_points, 3)
+    dr_dζ = zeros(num_points, 3)
+
+    # Interpolate arrays from input onto mtheta grid (same as 2D)
+    x = interp_to_new_grid(θ_grid, x)
+    z = interp_to_new_grid(θ_grid, z)
+    ν = interp_to_new_grid(θ_grid, ν)
+
+    # Build 3D surface point-by-point from 2D contour
+    for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
+        idx = i + (j - 1) * mtheta
+        r[idx, :] .= [x[i] * cos(ϕ), x[i] * sin(ϕ), z[i]]
+    end
+
+    # Compute tangent vectors and normal vectors via periodic bicubic splines
+    dr_dθ, dr_dζ = periodic_deriv_2D(θ_grid, ϕ_grid, reshape(r, mtheta, nzeta, 3))
+    for i in 1:num_points
+        normal[i, :] = cross(dr_dθ[i, :], dr_dζ[i, :])
+    end
+
+    # Determine normal orientation (inward for plasma) and enforce it
+    idx = argmax(view(r, :, 1)) # outboard midplane
+    normal_orient = normal[idx, 1] < 0 ? 1 : -1
+    normal .*= normal_orient
+
+    # Warn if grid spacing is highly anisotropic
+    spacing_θ = sqrt(sum(abs2, dr_dθ) / size(dr_dθ, 1)) * dθ
+    spacing_ζ = sqrt(sum(abs2, dr_dζ) / size(dr_dζ, 1)) * dζ
+    aspect_ratio = spacing_ζ / spacing_θ
+    @info "Average grid spacing [m]: dθ=$(round(spacing_θ, digits=4)), dζ=$(round(spacing_ζ, digits=4)), aspect ratio=$(round(aspect_ratio, digits=2))"
+    aspect_ratio > 10.0 && @warn "Grid aspect ratio is highly anisotropic, which may degrade quadrature accuracy"
+
+    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
+    sin_mn_basis3D = zeros(num_points, mpert*npert)
+    cos_mn_basis3D = zeros(num_points, mpert*npert)
+    for idx_n in 1:npert, idx_m in 1:mpert
+        n = nlow + idx_n - 1
+        m = mlow + idx_m - 1
+        for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
+            cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
+            sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
+        end
+    end
+
+    return PlasmaGeometry3D(;
+        mtheta=mtheta,
+        nzeta=nzeta,
+        r=r,
+        dr_dθ=dr_dθ,
+        dr_dζ=dr_dζ,
+        normal=normal,
+        sin_mn_basis3D=sin_mn_basis3D,
+        cos_mn_basis3D=cos_mn_basis3D,
+        aspect_ratio=aspect_ratio,
+        normal_orient=normal_orient
+    )
 end
 
 """
@@ -352,4 +515,190 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     any(x_wall .<= 0.0) && error("Wall R-coordinates contain non-physical values (R <= 0). Check wall geometry.")
 
     return WallGeometry(false, x_wall, z_wall)
+end
+
+"""
+    WallGeometry3D
+
+Struct holding wall geometry data for vacuum calculations. Arrays are of length
+`mtheta`, where `mtheta` is the number of poloidal grid points and θ ∈ [0, 1).
+
+# Fields
+
+  - `nowall::Bool`: Boolean flag indicating if there is no wall
+  - `is_closed_toroidal::Bool`: Boolean flag indicating if the wall is a closed toroidal surface
+  - `mtheta::Int`: Number of poloidal grid points
+  - `nzeta::Int`: Number of toroidal grid points
+  - `r::Matrix{Float64}`: (x, y, z) wall coordinates at each grid point
+  - `dr_dθ::Matrix{Float64}`: Derivative dR/dθ at wall
+  - `dr_dζ::Matrix{Float64}`: Derivative dR/dζ at wall
+  - `normal::Matrix{Float64}`: Outward normal vectors at wall
+"""
+@kwdef struct WallGeometry3D
+    nowall::Bool = true
+    is_closed_toroidal::Bool = true
+    mtheta::Int = 1
+    nzeta::Int = 1
+    r::Matrix{Float64} = zeros(1, 3)
+    dr_dθ::Matrix{Float64} = zeros(1, 3)
+    dr_dζ::Matrix{Float64} = zeros(1, 3)
+    normal::Matrix{Float64} = zeros(1, 3)
+    normal_orient::Int = 1
+end
+
+"""
+    WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wall_settings::WallShapeSettings)
+
+Contructor to initialize the 3D wall geometry based on the provided vacuum inputs and wall shape settings.
+Currently only works for axisymmetric walls generated by toroidal extrusion of 2D poloidal contours.
+
+# Arguments
+
+  - `inputs::VacuumInput3D`: Struct containing vacuum calculation parameters
+  - `plasma_surf::PlasmaGeometry3D`: Struct with plasma surface geometry (used for reference)
+  - `wall_settings::WallShapeSettings`: Struct specifying wall shape and parameters
+
+# Returns
+
+  - `WallGeometry`: Struct containing wall surface coordinates and derivatives
+
+# Notes
+
+  - Supports multiple wall shapes: nowall, conformal, elliptical, dee, mod_dee, from_file
+  - Optionally redistributes wall points to equal arc length spacing if `equal_arc_wall=true`
+"""
+function WallGeometry3D(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wall_settings::WallShapeSettings)
+
+    # Basic wall flags
+    nowall = wall_settings.shape == "nowall"
+    is_closed_toroidal = true
+
+    (; mtheta, nzeta) = inputs
+    dθ = 2π / mtheta
+    dζ = 2π / nzeta
+    θ_grid = range(; start=0, length=mtheta, step=dθ)
+    ϕ_grid = range(; start=0, length=nzeta, step=dζ)
+    num_points = mtheta * nzeta
+
+    # Output wall coordinate arrays
+    r = zeros(num_points, 3)
+    normal = zeros(num_points, 3)
+    dr_dθ = zeros(num_points, 3)
+    dr_dζ = zeros(num_points, 3)
+    normal_orient = 1
+
+    if nowall
+        @info "Using no wall"
+        return WallGeometry3D(
+            nowall,
+            is_closed_toroidal,
+            mtheta,
+            nzeta,
+            r,
+            dr_dθ,
+            dr_dζ,
+            normal,
+            normal_orient
+        )
+    end
+
+    # Plasma surface coordinates (2D)
+    x_plasma = plasma_surf.r[1:plasma_surf.mtheta, 1]
+    z_plasma = plasma_surf.r[1:plasma_surf.mtheta, 3]
+    xmin = minimum(x_plasma)
+    xmax = maximum(x_plasma)
+    zmin = minimum(z_plasma)
+    zmax = maximum(z_plasma)
+    r_minor = 0.5 * (xmax - xmin)
+    r_major = 0.5 * (xmax + xmin)
+
+    # Destructuring settings for readability
+    (; aw, bw, cw, dw, tw, a) = wall_settings
+
+    if wall_settings.shape == "conformal"
+        dx = a * r_minor
+        @info "Calculating conformal wall shape $((@sprintf "%.2e" dx)) m from plasma surface."
+        centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
+        for (j, ϕ) in enumerate(ϕ_grid), i in 1:mtheta
+            idx = i + (j - 1) * mtheta
+            prev = mod1(i - 1, mtheta)
+            next = mod1(i + 1, mtheta)
+            # Approximate local tangent t = (dx, dz) using centered finite differences, t ≈ (dx, dz)
+            # Then, extend in normal direction, n = (-dz, dx)
+            alph = -atan(x_plasma[next] - x_plasma[prev], z_plasma[next] - z_plasma[prev])
+            R_wall = max(centerstack_min, x_plasma[i] + a * r_minor * cos(alph))
+            # Map to Cartesian (X, Y, Z)
+            r[idx, :] .= [R_wall * cos(ϕ), R_wall * sin(ϕ), z_plasma[i] + a * r_minor * sin(alph)]
+        end
+
+        if any(sqrt.(r[:, 1] .^ 2 .+ r[:, 2] .^ 2) .<= centerstack_min + eps(Float64))
+            @warn "Conformal wall with a=$a would cross R=0 axis; forcing minimum wall R to $(@sprintf "%.2e" centerstack_min) m to avoid unphysical geometry."
+        end
+    elseif wall_settings.shape == "elliptical"
+        @info "Calculating elliptical wall shape with a = $((@sprintf "%.2e" a)) m."
+        zrad = 0.5 * (zmax - zmin)
+        zh = sqrt(abs(zrad^2 - r_minor^2))
+        zmuw = log((a/zh) + sqrt((a/zh)^2 + 1))
+        bw_eff = (zh * cosh(zmuw)) / a
+        for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
+            idx = i + (j - 1) * mtheta
+            r[idx, :] .= [(r_major + a * cos(θ)) * cos(ϕ), (r_major + a * cos(θ)) * sin(ϕ), bw_eff * a * sin(θ)]
+        end
+    elseif wall_settings.shape == "dee"
+        error("Dee-shaped walls not yet implemented for 3D walls.")
+    elseif wall_settings.shape == "mod_dee"
+        error("Modified Dee-shaped walls not yet implemented for 3D walls.")
+    else
+        filepath = wall_settings.shape
+        !isfile(filepath) && error("ERROR: Wall geometry file $filepath does not exist.
+            Please set the wall shape parameter to a valid file path or a built-in shape (nowall, conformal, elliptical, dee, mod_dee).")
+
+        open(filepath, "r") do io
+            npots0 = parse(Int, readline(io))
+            (npots0 != num_points) && error("ERROR: $filepath contains different points ($npots0) than mtheta * nzeta ($num_points).")
+            # TODO: add an interpolation here for if they're different
+            for i in 1:num_points
+                line = split(readline(io))
+                r[i, 1] = parse(Float64, line[1])
+                r[i, 2] = parse(Float64, line[2])
+                r[i, 3] = parse(Float64, line[3])
+            end
+        end
+    end
+
+    # Optional: Re-parameterization for equal arc length spacing of wall points
+    # Note: we still use θ_grid for the derivatives below because we are effectively defining
+    # a new θ angle to parametrize the wall over, but maintain the equal spacing
+    if wall_settings.equal_arc_wall && (wall_settings.shape != "nowall")
+        @info "Re-distributing wall points to equal arc length spacing"
+        !is_closed_toroidal && @error "Wall is not closed toroidally; equal arc length distribution assumes periodicity as cannot be safely used."
+        x_wall, z_wall = distribute_to_equal_arc_grid(r[1:mtheta, 1], r[1:mtheta, 3])
+        for (j, ϕ) in enumerate(ϕ_grid), i in 1:mtheta
+            idx = i + (j - 1) * mtheta
+            r[idx, :] .= [x_wall[i] * cos(ϕ), x_wall[i] * sin(ϕ), z_wall[i]]
+        end
+    end
+
+    # Compute tangent vectors and normal vectors via periodic bicubic splines
+    dr_dθ, dr_dζ = periodic_deriv_2D(θ_grid, ϕ_grid, reshape(r, mtheta, nzeta, 3))
+    for i in 1:num_points
+        normal[i, :] = cross(dr_dθ[i, :], dr_dζ[i, :])
+    end
+
+    # Determine normal orientation (outward for wall) and enforce it
+    idx = argmax(view(r, :, 1)) # outboard midplane
+    normal_orient = normal[idx, 1] > 0 ? 1 : -1
+    @views normal .*= normal_orient
+
+    return WallGeometry3D(;
+        nowall=nowall,
+        is_closed_toroidal=is_closed_toroidal,
+        mtheta=mtheta,
+        nzeta=nzeta,
+        r=r,
+        dr_dθ=dr_dθ,
+        dr_dζ=dr_dζ,
+        normal=normal,
+        normal_orient=normal_orient
+    )
 end

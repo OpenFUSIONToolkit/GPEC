@@ -47,6 +47,48 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
         @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
     end
 
+    wv3D = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    if ctrl.nzvac > 1
+        if ctrl.verbose
+            println("Computing 3D vacuum response matrix in addition to 2D matrix with nzvac = $(ctrl.nzvac)")
+        end
+
+        # Compute 3D vacuum response matrix
+        vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, 1; force_wv_symmetry=ctrl.force_wv_symmetry)
+        vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, intr.nlow, intr.npert)
+        stats = @timed Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
+
+        wv3D = reshape(stats.value[1], intr.numpert_total, intr.numpert_total)
+
+        # Scale by (m - n*q)(m' - n'*q)
+        singfac = vec((intr.mlow:intr.mhigh) .- intr.qlim .* (intr.nlow:intr.nhigh)')
+        @inbounds for ipert in 1:intr.numpert_total
+            @views wv3D[ipert, :] .*= singfac[ipert]
+            @views wv3D[:, ipert] .*= singfac[ipert]
+        end
+
+        # DEBUG
+        if true
+            println("2D Vacuum response matrix wv:")
+            display(vac.wv)
+            println("3D Vacuum response matrix wv3D:")
+            display(wv3D)
+        end
+        println("Maximum relative difference between 2D and 3D vacuum response matrices:")
+        display(maximum(abs.(vac.wv .- wv3D)) / maximum(abs.(vac.wv)))
+        println("Maximum difference between 2D and 3D vacuum response matrices:")
+        display(maximum(abs.(vac.wv .- wv3D)))
+        println("Relative difference in maximum eigenvalue:")
+        display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))) / maximum(real.(eigvals(vac.wv))))
+        println("Difference in maximum eigenvalue:")
+        display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))))
+
+        println("3D vacuum response computation time: $(round(stats.time, digits=4))s")
+        println("GC allocations: $(Base.gc_alloc_count(stats.gcstats)), $(stats.bytes / 1e9) GB")
+
+        vac.wv .= wv3D
+    end
+
     # Compute complex energy eigenvalues and vectors
     vac.wt .= wp .+ vac.wv
     vac.wt0 .= vac.wt

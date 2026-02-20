@@ -1,4 +1,153 @@
 """
+    fourier_inverse_transform!(gll, gil, cs, m00, l00)
+
+Perform the inverse Fourier transform of `gil` onto `gll` using Fourier coefficients stored in `cs`.
+
+# Arguments
+
+  - `gll`: Output matrix (num_pert × num_pert) updated in-place
+  - `gil`: Input matrix (num_points × num_pert) containing Fourier-space data
+  - `cs`: Fourier coefficient matrix (num_points × num_pert)
+  - `m00`: Integer offset in the gil matrix (row offset)
+  - `l00`: Integer offset in the gil matrix (column offset)
+  - `weight`: Quadrature weight factor
+
+# Notes
+
+  - Computes: `gll[l2, l1] = weight * Σ_i cs[i, l2] * gil[i, l1]`
+  - Performs the same function as fouranv in the Fortran code.
+
+# Returns
+
+  - gll(l2,l1) : output matrix updated in-place (mpert × mpert)
+"""
+function fourier_inverse_transform_old!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int, weight::Float64)
+    # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
+    num_points, num_pert = size(cs)
+    mul!(gll, cs', view(gil, (m00+1):(m00+num_points), (l00+1):(l00+num_pert)), weight, 0.0)
+end
+
+"""
+    fourier_transform!(gil, gij, cs, m00, l00)
+
+    Purpose:
+      This routine performs a truncated Fourier transform of gij onto gil
+      using Fourier coefficients stored in cs.
+
+    Inputs:
+      gij(i,j)   : input matrix of size (num_points × num_points), the "physical-space" data
+      cs(j,l)    : Fourier coefficient matrix (num_points × num_pert)
+      m00, l00   : integer offsets in the gil matrix
+
+    Output:
+      gil(i', l') : output matrix updated in-place (num_points × num_pert), where i' = m00 + i and l' = l00 + l
+"""
+function fourier_transform_old!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+    # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
+    num_points, num_pert = size(cs)
+    mul!(view(gil, (m00+1):(m00+num_points), (l00+1):(l00+num_pert)), gij, cs)
+end
+
+"""
+    interp_to_new_grid(θ_out, vec_in)
+
+Resample the input array `vec_in` using a periodic cubic spline to an output array `vec_out` evaluated
+at new grid points `θ_out`. This function performs the same function as `trans` in Fortran.
+
+# Arguments
+
+  - `θ_out::Vector{Float64}`: Output grid points on [0, 2π] where the resampled values will be evaluated
+  - `vec_in::Vector{Float64}`: Input array to be resampled
+
+# Returns
+
+  - `Vector{Float64}`: The resampled output array on the θ_out grid
+"""
+function interp_to_new_grid(θ_out::AbstractRange{Float64}, vec_in::Vector{Float64})
+
+    # Input grids from DCON are from [0, 1]
+    θ_in = collect(range(0.0, 2π; length=length(vec_in)))
+    spline = cubic_interp(θ_in, vec_in; bc=PeriodicBC())
+    return spline.(θ_out)
+end
+
+"""
+    periodic_deriv(theta, vals)
+
+Compute the first derivative of a periodic function defined by `vals` at points `theta` using cubic spline interpolation.
+The input `theta` should be uniformly spaced and cover a full period (e.g., 0 to 2π). The output array will have the
+same length as `theta` and will represent the derivative of the periodic function at each point.
+
+# Arguments
+
+  - `theta::Vector{Float64}`: Array of theta values (should be uniformly spaced and represent a periodic domain)
+  - `vals::Vector{Float64}`: Array of function values corresponding to each theta (end point not included)
+
+# Returns
+
+  - `Vector{Float64}`: Array of the first derivative of the function at each theta point    # Close the loop for periodic BC by appending first point at the end
+"""
+function periodic_deriv(θ_grid, vals)
+    # Close the loop for periodic BC by appending first point at the end
+    θ_closed = vcat(collect(θ_grid), θ_grid[end] + (θ_grid[2] - θ_grid[1]))
+    vals_closed = vcat(vals, vals[1])
+
+    # Assemble and evaluate the periodic cubic spline to get the derivative at each point in θ_grid
+    spline = cubic_interp(θ_closed, vals_closed; bc=PeriodicBC())
+    return spline.(θ_grid; deriv=1)
+end
+
+"""
+    periodic_deriv_2D(θ_grid, ϕ_grid, r_grid)
+
+Compute periodic derivatives on a 2D toroidal grid for vector-valued data.
+This closes the periodic loops in both θ and ϕ, fits periodic bicubic splines,
+and returns the derivatives evaluated on the original grid.
+
+# Arguments
+
+  - `θ_grid`: Poloidal grid (length mtheta)
+  - `ϕ_grid`: Toroidal grid (length nzeta)
+  - `r_grid`: Surface points in Cartesian coordinates, shape (mtheta, nzeta, 3)
+
+# Returns
+
+  - `dr_dθ::Matrix{Float64}`: ∂r/∂θ evaluated on the grid, shape (mtheta*nzeta, 3)
+  - `dr_dζ::Matrix{Float64}`: ∂r/∂ζ evaluated on the grid, shape (mtheta*nzeta, 3)
+"""
+function periodic_deriv_2D(θ_grid, ϕ_grid, r_grid::AbstractArray{<:Real,3})
+
+    mtheta = length(θ_grid)
+    nzeta = length(ϕ_grid)
+
+    # Close the loop for periodic BC by appending first point at the end
+    θ_closed = vcat(collect(θ_grid), θ_grid[1] + 2π)
+    ϕ_closed = vcat(collect(ϕ_grid), ϕ_grid[1] + 2π)
+    r_closed = zeros(mtheta + 1, nzeta + 1, 3)
+    r_closed[1:mtheta, 1:nzeta, :] .= r_grid
+    r_closed[mtheta+1, 1:nzeta, :] .= r_grid[1, 1:nzeta, :]
+    r_closed[1:mtheta, nzeta+1, :] .= r_grid[1:mtheta, 1, :]
+    r_closed[mtheta+1, nzeta+1, :] .= r_grid[1, 1, :]
+
+    itps = [cubic_interp((θ_closed, ϕ_closed), r_closed[:, :, k]; bc=(PeriodicBC(), PeriodicBC())) for k in 1:3]
+
+    dr_dθ = zeros(eltype(r_grid), mtheta * nzeta, 3)
+    dr_dζ = zeros(eltype(r_grid), mtheta * nzeta, 3)
+    grad = zeros(eltype(r_grid), 4)
+    for i in 1:mtheta, j in 1:nzeta
+        idx = i + (j - 1) * mtheta
+        for k in 1:3
+            # Grad stores f, fx, fy, fxy
+            grad .= itps[k].nodal_derivs.partials[:, i, j]
+            dr_dθ[idx, k] = grad[2]
+            dr_dζ[idx, k] = grad[3]
+        end
+    end
+
+    return dr_dθ, dr_dζ
+end
+
+"""
     distribute_to_equal_arc_grid(xin, zin)
 
 Given a set of points (xin, zin) that define a closed curve in 2D, redistribute these points to be equally spaced

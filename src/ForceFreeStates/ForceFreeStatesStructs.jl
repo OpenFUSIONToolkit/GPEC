@@ -161,6 +161,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `mer_flag::Bool` - Enable Mercier stability criterion
   - `fft_flag::Bool` - Enable Fourier transform analysis
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
@@ -215,6 +216,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     mer_flag::Bool = false
     fft_flag::Bool = false
     mthvac::Int = 480
+    nzvac::Int = 1
     sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
@@ -339,8 +341,7 @@ Populated in `Free.jl`.
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
 
-    # VACUUM can't handle 3D yet, so these are temporary mpert arrays
-    # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
+    # TODO: update these
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
     xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
