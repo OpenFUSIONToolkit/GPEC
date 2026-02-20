@@ -99,6 +99,41 @@ function compute_fourier_coefficients(
 end
 
 """
+    compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; ν=zeros(mtheta))
+
+3D version of compute_fourier_coefficients for vacuum calculations.
+
+"""
+function compute_fourier_coefficients(
+    mtheta::Int,
+    mpert::Int,
+    mlow::Int,
+    nzeta::Int,
+    npert::Int,
+    nlow::Int;
+    ν::Vector{Float64}=zeros(Float64, mtheta)
+)
+
+    # Create poloidal and toroidal grids
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
+    ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+
+    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
+    sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+    cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+    for idx_n in 1:npert, idx_m in 1:mpert
+        n = nlow + idx_n - 1
+        m = mlow + idx_m - 1
+        for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
+            cos_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
+            sin_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
+        end
+    end
+
+    return cos_mn_basis, sin_mn_basis
+end
+
+"""
     FourierTransform
 
 Callable struct for efficient Fourier transforms with pre-computed basis functions.

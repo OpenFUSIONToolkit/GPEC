@@ -255,19 +255,16 @@ that the gradient/area elements are scaled by dθ and dζ.
   - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
   - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_gridpoints, 3)
   - `normal::Matrix{Float64}`: Oriented normal vectors, shape (num_gridpoints, 3)
-  - `sin_mn_basis3D::Matrix{Float64}`: sin(mθ - nν - nϕ) basis functions at plasma surface
-  - `cos_mn_basis3D::Matrix{Float64}`: cos(mθ - nν - nϕ) basis functions at plasma surface
   - `normal_orient::Int`: Forces normals to face out from vacuum region (+1 or -1)
 """
 @kwdef struct PlasmaGeometry3D
     mtheta::Int = 1
     nzeta::Int = 1
     r::Matrix{Float64} = zeros(1, 3)
+    ν::Vector{Float64} = Float64[]
     dr_dθ::Matrix{Float64} = zeros(1, 3)
     dr_dζ::Matrix{Float64} = zeros(1, 3)
     normal::Matrix{Float64} = zeros(1, 3)
-    sin_mn_basis3D::Matrix{Float64} = zeros(1, 1)
-    cos_mn_basis3D::Matrix{Float64} = zeros(1, 1)
     normal_orient::Int = 1
 end
 
@@ -296,7 +293,7 @@ Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
 function PlasmaGeometry3D(inputs::VacuumInput3D)
 
     # Extract 2D poloidal data
-    (; mtheta, nzeta, npert, nlow, mlow, mpert, x, z, ν) = inputs
+    (; mtheta, nzeta, x, z, ν) = inputs
     num_points = mtheta * nzeta
     dθ = 2π / mtheta
     dζ = 2π / nzeta
@@ -317,8 +314,7 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
 
     # Build 3D surface point-by-point from 2D contour
     for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
-        idx = i + (j - 1) * mtheta
-        r[idx, :] .= [x[i] * cos(ϕ), x[i] * sin(ϕ), z[i]]
+        r[i+mtheta*(j-1), :] .= [x[i] * cos(ϕ), x[i] * sin(ϕ), z[i]]
     end
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
@@ -347,27 +343,14 @@ function PlasmaGeometry3D(inputs::VacuumInput3D)
     @info "Average grid spacing [m]: dθ=$(round(spacing_θ, digits=4)), dζ=$(round(spacing_ζ, digits=4)), aspect ratio=$(round(aspect_ratio, digits=2))"
     aspect_ratio > 10.0 && @warn "Grid aspect ratio is highly anisotropic, which may degrade quadrature accuracy"
 
-    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
-    sin_mn_basis3D = zeros(num_points, mpert*npert)
-    cos_mn_basis3D = zeros(num_points, mpert*npert)
-    for idx_n in 1:npert, idx_m in 1:mpert
-        n = nlow + idx_n - 1
-        m = mlow + idx_m - 1
-        for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
-            cos_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
-            sin_mn_basis3D[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
-        end
-    end
-
     return PlasmaGeometry3D(;
         mtheta=mtheta,
         nzeta=nzeta,
         r=r,
+        ν=ν,
         dr_dθ=dr_dθ,
         dr_dζ=dr_dζ,
         normal=normal,
-        sin_mn_basis3D=sin_mn_basis3D,
-        cos_mn_basis3D=cos_mn_basis3D,
         normal_orient=normal_orient
     )
 end

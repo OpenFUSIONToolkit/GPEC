@@ -79,8 +79,7 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     plasma_surf = PlasmaGeometry(inputs)
     wall = WallGeometry(inputs, plasma_surf, wall_settings)
 
-    # Compute Fourier basis coefficients using FourierTransforms utility
-    # We only need the coefficient arrays for the existing fourier_transform! functions
+    # Compute Fourier basis coefficients
     cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, ν=plasma_surf.ν)
 
     # Allocate arrays for both Green's functions
@@ -187,11 +186,14 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     plasma_surf = PlasmaGeometry3D(inputs)
     wall = WallGeometry3D(inputs, plasma_surf, wall_settings)
 
-    (; mtheta, mpert, force_wv_symmetry, nzeta, npert) = inputs
+    (; mtheta, mpert, mlow, force_wv_symmetry, nzeta, npert, nlow) = inputs
     num_modes = npert * mpert
     num_points_per_surf = nzeta * mtheta
     # If no wall, only plasma points; if wall, plasma + wall points
     num_points = wall.nowall ? num_points_per_surf : 2 * num_points_per_surf
+
+    # Compute Fourier basis coefficients
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; ν=plasma_surf.ν)
 
     # Allocate matrices, accounting for whether wall is present or not
     grad_green = zeros(num_points, num_points)
@@ -208,8 +210,8 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
 
     # Fourier transform obs=plasma, src=plasma block into green_fourier
-    fourier_transform_old!(green_fourier, green_temp, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
-    fourier_transform_old!(green_fourier, green_temp, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+    fourier_transform!(green_fourier, green_temp, cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_transform!(green_fourier, green_temp, sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
     if !wall.nowall
         # Plasma–Wall block
@@ -220,8 +222,8 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
         compute_3D_kernel_matrix!(grad_green, green_temp, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
 
         # Fourier transform obs=wall, src=plasma block into green_fourier
-        fourier_transform_old!(green_fourier, green_temp, plasma_surf.cos_mn_basis3D, WALL_ROW_OFFSET, COS_COL_OFFSET)
-        fourier_transform_old!(green_fourier, green_temp, plasma_surf.sin_mn_basis3D, WALL_ROW_OFFSET, SIN_COL_OFFSET)
+        fourier_transform!(green_fourier, green_temp, cos_mn_basis, WALL_ROW_OFFSET, COS_COL_OFFSET)
+        fourier_transform!(green_fourier, green_temp, sin_mn_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
     # After last fourier_transform! call: # TODO: does this actually help?
@@ -239,10 +241,10 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
     dθdζ = 4π^2 / (num_points_per_surf)
     arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-    fourier_inverse_transform_old!(arr, green_fourier, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, dθdζ)
-    fourier_inverse_transform_old!(aii, green_fourier, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, dθdζ)
-    fourier_inverse_transform_old!(ari, green_fourier, plasma_surf.sin_mn_basis3D, PLASMA_ROW_OFFSET, COS_COL_OFFSET, dθdζ)
-    fourier_inverse_transform_old!(air, green_fourier, plasma_surf.cos_mn_basis3D, PLASMA_ROW_OFFSET, SIN_COL_OFFSET, dθdζ)
+    fourier_inverse_transform!(arr, green_fourier, cos_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_inverse_transform!(aii, green_fourier, sin_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
+    fourier_inverse_transform!(ari, green_fourier, sin_mn_basis, PLASMA_ROW_OFFSET, COS_COL_OFFSET)
+    fourier_inverse_transform!(air, green_fourier, cos_mn_basis, PLASMA_ROW_OFFSET, SIN_COL_OFFSET)
 
     # Final form of vacuum response matrix (eq. 114 of Chance 2007)
     wv = complex.(arr .+ aii, air .- ari)
