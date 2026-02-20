@@ -90,27 +90,6 @@ function main()
             pentrc_threads = 1
         end
         
-        # Run models
-        # Start log with harvest
-        ierr = init_harvest("CODEDB_PENT", hlog)
-        ierr = set_harvest_verbose(0)
-        
-        # Standard CODEDB records
-        ierr = set_harvest_payload_str(hlog, "CODE", "PENT")
-        ierr = set_harvest_payload_str(hlog, "VERSION", version)
-        
-        # Record PENT input
-        ierr = set_harvest_payload_int(hlog, "zi", zi)
-        ierr = set_harvest_payload_int(hlog, "zimp", zimp)
-        ierr = set_harvest_payload_int(hlog, "mi", mi)
-        ierr = set_harvest_payload_int(hlog, "mimp", mimp)
-        ierr = set_harvest_payload_bol(hlog, "electron", electron)
-        ierr = set_harvest_payload_str(hlog, "nutype", nutype)
-        ierr = set_harvest_payload_str(hlog, "f0type", f0type)
-        
-        # Record dcon equilibrium basics
-        idcon_harvest(hlog)
-        
         # Explicit matrix calculations
         if wxyz_flag && output_ascii
             if verbose
@@ -196,8 +175,6 @@ function main()
                         @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(tphi)/(2*nn))
                         @printf("%-24s%11.3e\n", "alpha/s  = ", real(tphi)/(-1*imag(tphi)))
                     end
-                    ierr = set_harvest_payload_dbl(hlog, "torque_$method", real(tphi))
-                    ierr = set_harvest_payload_dbl(hlog, "deltaW_$method", imag(tphi)/(2*nn))
                 end
                 
                 if equil_grid

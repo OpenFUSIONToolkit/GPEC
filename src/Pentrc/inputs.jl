@@ -98,15 +98,12 @@ end
 # read_equil: port of Fortran read_equil(file,hlog)
 # Calls into dcon_interface (stubbed) to load binary equilibrium data.
 # ======================================================================
-function read_equil(file::AbstractString; hlog::Union{Nothing,String}=nothing)
+function read_equil(file::AbstractString;)
     # set idconfile in the dcon interface
     DconInterface.idconfile = file
 
     # prepare ideal solutions. (psixy=0)
     DconInterface.idcon_read(0)
-    if hlog !== nothing
-        DconInterface.idcon_harvest(hlog)
-    end
     DconInterface.idcon_transform()
     # reconstruct metric tensors.
     DconInterface.idcon_metric()
