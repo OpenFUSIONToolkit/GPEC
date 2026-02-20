@@ -21,184 +21,148 @@ include("MathUtils.jl")
 # Include VacuumFromEquilibrium after DataTypes so VacuumInput is defined
 include("VacuumFromEquilibrium.jl")
 
-export VacuumInput, compute_vacuum_response, compute_vacuum_response_3D
+# Internal helpers for unified 2D/3D dispatch (do not export)
+_plasma_geometry(inputs::VacuumInput) = PlasmaGeometry(inputs)
+_plasma_geometry(inputs::VacuumInput3D) = PlasmaGeometry3D(inputs)
+
+_wall_geometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_settings::WallShapeSettings) =
+    WallGeometry(inputs, plasma_surf, wall_settings)
+_wall_geometry(inputs::VacuumInput3D, plasma_surf::PlasmaGeometry3D, wall_settings::WallShapeSettings) =
+    WallGeometry3D(inputs, plasma_surf, wall_settings)
+
+function _fourier_basis(inputs::VacuumInput, ν::Vector{Float64})
+    (; mtheta, mpert, mlow, n) = inputs
+    return compute_fourier_coefficients(mtheta, mpert, mlow; n=n, ν=ν)
+end
+function _fourier_basis(inputs::VacuumInput3D, ν::Vector{Float64})
+    (; mtheta, mpert, mlow, nzeta, npert, nlow) = inputs
+    return compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; ν=ν)
+end
+
+_kernel_params(inputs::VacuumInput; kwargs...) = KernelParams2D(inputs.n)
+_kernel_params(inputs::VacuumInput3D; PATCH_RAD::Int=11, RAD_DIM::Int=20, INTERP_ORDER::Int=5, kwargs...) =
+    KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER)
+
+_num_points_plasma(plasma_surf::PlasmaGeometry) = length(plasma_surf.x)
+_num_points_plasma(plasma_surf::PlasmaGeometry3D) = plasma_surf.mtheta * plasma_surf.nzeta
+
+_num_modes(inputs::VacuumInput) = inputs.mpert
+_num_modes(inputs::VacuumInput3D) = inputs.npert * inputs.mpert
+
+function _fill_xzpts!(xzpts::Matrix{Float64}, plasma_surf::PlasmaGeometry, wall::WallGeometry)
+    @views xzpts[:, 1] .= plasma_surf.x
+    @views xzpts[:, 2] .= plasma_surf.z
+    @views xzpts[:, 3] .= wall.x
+    @views xzpts[:, 4] .= wall.z
+end
+function _fill_xzpts!(xzpts::Matrix{Float64}, plasma_surf::PlasmaGeometry3D, wall::WallGeometry3D)
+    @views xzpts[:, 1] .= plasma_surf.r[:, 1]
+    @views xzpts[:, 2] .= plasma_surf.r[:, 3]
+    @views xzpts[:, 3] .= wall.r[:, 1]
+    @views xzpts[:, 4] .= wall.r[:, 3]
+end
+
+function _add_diagonal_regularization!(grad_green::Matrix{Float64}, inputs::VacuumInput, wall)
+    (; n) = inputs
+    num_points = size(grad_green, 1)
+    if n == 0 && !wall.nowall
+        cn0 = 1.0
+        @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
+        for i in 1:num_points, j in 1:num_points
+            grad_green[i, j] += cn0
+        end
+    end
+end
+function _add_diagonal_regularization!(grad_green::Matrix{Float64}, inputs::VacuumInput3D, wall)
+    num_points = size(grad_green, 1)
+    for i in 1:num_points
+        grad_green[i, i] += 1.0
+    end
+end
+
+export VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
 export extract_plasma_surface_at_psi, create_vacuum_input_at_psi
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+    compute_vacuum_response(inputs::Union{VacuumInput, VacuumInput3D}, wall_settings::WallShapeSettings;
+        green_only=false, PATCH_RAD=11, RAD_DIM=20, INTERP_ORDER=5)
 
 Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
+
+Single entry point for 2D (axisymmetric, single toroidal mode) and 3D (multiple toroidal modes)
+vacuum calculations. Dispatches on input type: use `VacuumInput` for 2D and `VacuumInput3D` for 3D.
 
 This is the pure Julia implementation that replaces the Fortran `mscvac` function.
 It computes both interior (grri) and exterior (grre) Green's functions for GPEC response calculations.
 
 # Arguments
 
-  - `inputs::VacuumInput`: Struct containing vacuum calculation parameters including mode numbers,
-    grid resolution, toroidal mode number, and plasma boundary information.
-  - `wall_settings::WallShapeSettings`: Struct specifying the wall geometry configuration.
+  - `inputs`: `VacuumInput` (2D) or `VacuumInput3D` (3D) with mode numbers, grid resolution, and boundary info.
+  - `wall_settings::WallShapeSettings`: Wall geometry configuration.
+  - `green_only`: If true, skip building the response matrix `wv` and return zeros for `wv` and `xzpts`.
+  - `PATCH_RAD`, `RAD_DIM`, `INTERP_ORDER`: 3D kernel quadrature parameters (ignored for 2D).
 
 # Returns
 
-  - `wv`: Complex vacuum response matrix (mpert × mpert) relating plasma perturbations to vacuum response
-  - `grri`: Interior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=-1
-  - `grre`: Exterior Green's function matrix (2*mtheta × 2*mpert) with kernelsign=+1
-  - `xzpts`: Coordinate array (mtheta × 4) containing [R_plasma, Z_plasma, R_wall, Z_wall]
+  - `wv`: Complex vacuum response matrix (mpert×mpert for 2D, num_modes×num_modes for 3D).
+  - `grri`: Interior Green's function matrix.
+  - `grre`: Exterior Green's function matrix.
+  - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
 
 # Notes
 
-  - This function computes both Green's functions to enable proper surface inductance calculations
-  - Uses FourierTransforms utility internally for consistent coefficient calculation
-  - The vacuum response includes plasma-plasma and plasma-wall coupling effects
-  - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
+  - For n=0 modes with closed walls (2D), a regularization factor is added to prevent singularities.
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only=false)
-
-    # Initialization and allocations
-    (; mtheta, mpert, mlow, n, force_wv_symmetry) = inputs
-    plasma_surf = PlasmaGeometry(inputs)
-    wall = WallGeometry(inputs, plasma_surf, wall_settings)
-
-    # Compute Fourier basis coefficients
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n=n, ν=plasma_surf.ν)
-
-    # If no wall, only plasma points; if wall, plasma + wall points
-    num_points = wall.nowall ? mtheta : 2 * mtheta
-
-    # Allocate arrays for both Green's functions
-    grri = zeros(num_points, 2 * mpert)  # Interior (kernelsign=-1)
-    grre = zeros(num_points, 2 * mpert)  # Exterior (kernelsign=+1)
-    grad_green = zeros(num_points, num_points)
-    green_temp = zeros(mtheta, mtheta)
-
-    # Fourier transforms offsets into grri/grre: first mtheta rows are plasma as observer, second are wall
-    # First mpert columns are real, second mpert are imaginary
-    WALL_ROW_OFFSET = mtheta
-    IMAG_COL_OFFSET = mpert
-
-    # Plasma–Plasma block
-    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, n)
-
-    # Fourier transform obs=plasma, src=plasma block
-    fourier_transform!(grre, green_temp, cos_mn_basis)
-    fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=IMAG_COL_OFFSET)
-
-    if !wall.nowall
-        # Plasma–Wall block
-        kernel!(grad_green, green_temp, plasma_surf, wall, n)
-        # Wall–Wall block
-        kernel!(grad_green, green_temp, wall, wall, n)
-        # Wall–Plasma block
-        kernel!(grad_green, green_temp, wall, plasma_surf, n)
-
-        # Fourier transform obs=wall, src=plasma block
-        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=WALL_ROW_OFFSET)
-        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=WALL_ROW_OFFSET, col_offset=IMAG_COL_OFFSET)
-    end
-
-    # Add cn0 to make grdgre nonsingular for n=0 modes
-    cn0 = 1.0 # expose to user if anyone ever actually tries to use this
-    (n == 0 && !wall.nowall) && begin
-        @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
-        mth12 = wall.nowall ? mtheta : 2 * mtheta
-        for i in 1:mth12, j in 1:mth12
-            grad_green[i, j] += cn0
-        end
-    end
-
-    # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1).
-    # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations.
-    grre .= grad_green \ grre
-
-    # TODO: Update this comment. I think the minus sign comes from a change of sign of the unit normal vector
-    # and we add 2I since we included the terms from eq. 69 in the kernel! function. We could just
-    # remove the diagonal terms from kernel! and do the mutliplication by -1 here before adding to both
-    # Interior kernel is -grad_green + 2I on diagonal [Chance Phys. Plasmas 1997 2161 eq. 69].
-    grad_green .*= -1
-    for i in 1:num_points
-        grad_green[i, i] += 2.0
-    end
-    grri .= grad_green \ grri
-
-    wv = zeros(ComplexF64, mpert, mpert)
-    xzpts = zeros(inputs.mtheta, 4)
-    if !green_only
-        # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-        arr, aii, ari, air = ntuple(_ -> zeros(mpert, mpert), 4)
-        fourier_inverse_transform!(arr, grre, cos_mn_basis)
-        fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=IMAG_COL_OFFSET)
-        fourier_inverse_transform!(ari, grre, sin_mn_basis)
-        fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=IMAG_COL_OFFSET)
-
-        # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
-        wv .= complex.(arr .+ aii, air .- ari)
-
-        # Force symmetry of response matrix if desired
-        force_wv_symmetry && hermitianpart!(wv)
-
-        # Create xzpts array
-        @views xzpts[:, 1] .= plasma_surf.x
-        @views xzpts[:, 2] .= plasma_surf.z
-        @views xzpts[:, 3] .= wall.x
-        @views xzpts[:, 4] .= wall.z
-    end
-
-    return wv, grri, grre, xzpts
-end
-
-function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallShapeSettings; PATCH_RAD::Int=11, RAD_DIM::Int=20, INTERP_ORDER::Int=5)
-
-    # Initialize surfaces
-    # TODO: Currently only supports axisymmetric surfaces
-    plasma_surf = PlasmaGeometry3D(inputs)
-    wall = WallGeometry3D(inputs, plasma_surf, wall_settings)
-
-    (; mtheta, mpert, mlow, force_wv_symmetry, nzeta, npert, nlow) = inputs
-    num_modes = npert * mpert
-    # If no wall, only plasma points; if wall, plasma + wall points
-    num_points = wall.nowall ? nzeta * mtheta : 2 * nzeta * mtheta
+function compute_vacuum_response(
+    inputs::Union{VacuumInput,VacuumInput3D},
+    wall_settings::WallShapeSettings;
+    green_only::Bool=false,
+    PATCH_RAD::Int=11,
+    RAD_DIM::Int=20,
+    INTERP_ORDER::Int=5
+)
+    # Initialize surface geometries
+    plasma_surf = _plasma_geometry(inputs)
+    wall = _wall_geometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; ν=plasma_surf.ν)
+    cos_mn_basis, sin_mn_basis = _fourier_basis(inputs, plasma_surf.ν)
+
+    # If no wall, only plasma points; if wall, plasma + wall points
+    num_points_plasma = _num_points_plasma(plasma_surf)
+    num_modes = _num_modes(inputs)
+    num_points = wall.nowall ? num_points_plasma : 2 * num_points_plasma # TODO: this is wrong for 3D
 
     # Allocate matrices, accounting for whether wall is present or not
-    grri = zeros(num_points, 2 * num_modes)  # Interior (kernelsign=-1)
-    grre = zeros(num_points, 2 * num_modes)  # Exterior (kernelsign=+1)
+    grri = zeros(num_points, 2 * num_modes) # Interior (kernelsign=-1)
+    grre = zeros(num_points, 2 * num_modes) # Exterior (kernelsign=+1)
     grad_green = zeros(num_points, num_points)
-    green_temp = zeros(nzeta * mtheta, nzeta * mtheta)
+    green_temp = zeros(num_points_plasma, num_points_plasma)
 
-    # Fourier transforms offsets into grri/grre: first mtheta rows are plasma as observer, second are wall
-    # First mpert columns are real, second mpert are imaginary
-    WALL_ROW_OFFSET = nzeta * mtheta
-    IMAG_COL_OFFSET = num_modes
+    # Create kernel parameters - used to disptach to the correct kernel function
+    kparams = _kernel_params(inputs; PATCH_RAD=PATCH_RAD, RAD_DIM=RAD_DIM, INTERP_ORDER=INTERP_ORDER)
 
     # Plasma–Plasma block
-    compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-
-    # Fourier transform obs=plasma, src=plasma block into grre
+    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
+    # Fourier transform obs=plasma, src=plasma block
     fourier_transform!(grre, green_temp, cos_mn_basis)
-    fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=IMAG_COL_OFFSET)
+    fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
 
     if !wall.nowall
         # Plasma–Wall block
-        compute_3D_kernel_matrix!(grad_green, green_temp, plasma_surf, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
         # Wall–Wall block
-        compute_3D_kernel_matrix!(grad_green, green_temp, wall, wall, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+        kernel!(grad_green, green_temp, wall, wall, kparams)
         # Wall–Plasma block
-        compute_3D_kernel_matrix!(grad_green, green_temp, wall, plasma_surf, PATCH_RAD, RAD_DIM, INTERP_ORDER)
-
-        # Fourier transform obs=wall, src=plasma block into grre
-        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=WALL_ROW_OFFSET)
-        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=WALL_ROW_OFFSET, col_offset=IMAG_COL_OFFSET)
+        kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
+        # Fourier transform obs=wall, src=plasma block
+        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_plasma)
+        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_plasma, col_offset=num_modes)
     end
 
-    # Add the term that comes from the volume integral of Green's identity
-    for i in 1:num_points
-        grad_green[i, i] += 1.0
-    end
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1).
     # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations.
     grre .= grad_green \ grre
@@ -210,20 +174,24 @@ function compute_vacuum_response_3D(inputs::VacuumInput3D, wall_settings::WallSh
     end
     grri .= grad_green \ grri
 
-    # Perform inverse Fourier transforms to get response matrix components (eq. 115-118 of Chance 2007)
-    arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-    fourier_inverse_transform!(arr, grre, cos_mn_basis)
-    fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=IMAG_COL_OFFSET)
-    fourier_inverse_transform!(ari, grre, sin_mn_basis)
-    fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=IMAG_COL_OFFSET)
+    wv = zeros(ComplexF64, num_modes, num_modes)
+    xzpts = zeros(num_points_plasma, 4)
+    if !green_only
+        # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+        arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
+        fourier_inverse_transform!(arr, grre, cos_mn_basis)
+        fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
+        fourier_inverse_transform!(ari, grre, sin_mn_basis)
+        fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
 
-    # Final form of vacuum response matrix (eq. 114 of Chance 2007)
-    wv = complex.(arr .+ aii, air .- ari)
+        # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
+        wv .= complex.(arr .+ aii, air .- ari)
+        inputs.force_wv_symmetry && hermitianpart!(wv)
 
-    # Force symmetry of response matrix if desired
-    force_wv_symmetry && hermitianpart!(wv)
+        _fill_xzpts!(xzpts, plasma_surf, wall)
+    end
 
-    return wv, grre, plasma_surf.r, wall.r
+    return wv, grri, grre, xzpts
 end
 
 """

@@ -401,7 +401,7 @@ where each entry is φ(x_obs, x_src).
 This function automatically uses all available threads (`Threads.nthreads()`).
 Start Julia with `julia -t auto` or set `JULIA_NUM_THREADS` to enable multi-threading.
 """
-function compute_3D_kernel_matrix!(
+function compute_3D_kernel_matrices!(
     grad_greenfunction::Matrix{Float64},
     greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
@@ -524,7 +524,39 @@ function compute_3D_kernel_matrix!(
             grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
         end
     end
+
     # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
+    # This makes the grri logic identical to the 2D kernel.
     grad_greenfunction_block ./= 2π
     greenfunction ./= 2π
+
+    # Add the term that comes from the volume integral of Green's identity
+    typeof(source) == typeof(observer) && begin
+        for i in 1:num_points
+            grad_greenfunction_block[i, i] += 1.0
+        end
+    end
+end
+
+"""
+    kernel!(grad_greenfunction, greenfunction, observer, source, params::KernelParams3D)
+
+Dispatch wrapper for 3D kernel that forwards to `compute_3D_kernel_matrices!` with params.
+"""
+function kernel!(
+    grad_greenfunction::Matrix{Float64},
+    greenfunction::Matrix{Float64},
+    observer::Union{PlasmaGeometry3D,WallGeometry3D},
+    source::Union{PlasmaGeometry3D,WallGeometry3D},
+    params::KernelParams3D
+)
+    return compute_3D_kernel_matrices!(
+        grad_greenfunction,
+        greenfunction,
+        observer,
+        source,
+        params.PATCH_RAD,
+        params.RAD_DIM,
+        params.INTERP_ORDER
+    )
 end

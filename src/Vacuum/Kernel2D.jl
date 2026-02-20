@@ -72,7 +72,7 @@ but grad_greenfunction is not since it fills a different block of the
   - Uses Gaussian quadrature near singular points for improved accuracy
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
-function kernel!(
+function compute_2D_kernel_matrices!(
     grad_greenfunction::Matrix{Float64},
     greenfunction::Matrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
@@ -214,6 +214,17 @@ function kernel!(
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
     greenfunction ./= 2π
+end
+
+# Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
+function kernel!(
+    grad_greenfunction::Matrix{Float64},
+    greenfunction::Matrix{Float64},
+    observer::Union{PlasmaGeometry,WallGeometry},
+    source::Union{PlasmaGeometry,WallGeometry},
+    params::KernelParams2D
+)
+    return compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, params.n)
 end
 
 #############################################################

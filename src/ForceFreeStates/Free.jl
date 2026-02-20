@@ -56,7 +56,7 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
         # Compute 3D vacuum response matrix
         vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, 1; force_wv_symmetry=ctrl.force_wv_symmetry)
         vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, intr.nlow, intr.npert)
-        stats = @timed Vacuum.compute_vacuum_response_3D(vac_inputs_3D, intr.wall_settings)
+        stats = @timed Vacuum.compute_vacuum_response(vac_inputs_3D, intr.wall_settings)
 
         wv3D = reshape(stats.value[1], intr.numpert_total, intr.numpert_total)
 
