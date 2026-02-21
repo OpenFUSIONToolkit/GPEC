@@ -31,7 +31,8 @@ using Printf
 using HDF5
 
 # Import FastInterpolations functions and types needed in main
-import FastInterpolations: cubic_interp, CubicFit
+import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
+
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
@@ -126,7 +127,7 @@ function main(args::Vector{String}=String[])
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=:extension)
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=ExtendExtrap())
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
