@@ -153,6 +153,9 @@ function equilibrium_solver(input::InverseRunInput)
     # (/"  r2  "," deta "," dphi ","  jac "/)
     rzphi_fs = zeros(Float64, mpsi+1, mtheta+1, 4)
     rzphi_xs = copy(sq_xs)
+    # rzphi_ys is the materialized Vector stored in PlasmaEquilibrium for indexing/diagnostics.
+    # The Range form (theta_range) is used for the interpolant: it skips index search during
+    # evaluation (O(1) vs binary search) and may differ at machine-precision level from Vector.
     rzphi_ys = collect(theta_range)
 
     # (/"  b0  ","      ","      " /)
@@ -162,7 +165,6 @@ function equilibrium_solver(input::InverseRunInput)
     # Preallocate arrays for periodic spline fitting in the loop
     spl_xs = zeros(Float64, mtheta+1)
     spl_fs = zeros(Float64, mtheta+1, 5)
-
 
     hint2d = (Ref(1), Ref(1))
     for ipsi in 0:mpsi

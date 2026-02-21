@@ -522,10 +522,12 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
     rzphi_xs = psi_nodes
+    # rzphi_ys is the materialized Vector stored in PlasmaEquilibrium for indexing/diagnostics.
+    # The Range form (theta_nodes) is used for the interpolant: it skips index search during
+    # evaluation (O(1) vs binary search) and may differ at machine-precision level from Vector.
     rzphi_ys = collect(theta_nodes)
 
-    # Use a hybrid-typed grid (Vector for xs, Range for ys) for better performance
-    grid2d = (rzphi_xs, theta_nodes) # Use theta_nodes (Range) instead of rzphi_ys (Vector)
+    grid2d = (rzphi_xs, theta_nodes)
 
     opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 

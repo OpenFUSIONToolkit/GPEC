@@ -269,6 +269,7 @@ end
     # Complex-valued CubicSeriesInterpolant for stability matrices
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
+    # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
     itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
 
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
@@ -289,13 +290,6 @@ end
 
     # Used in Free.jl
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
-end
-
-# Helper to create empty series interpolant for default initialization (real-valued)
-function _empty_series_interp(n_series::Int, itp_opts::NamedTuple)
-    xs = collect(range(0.0, 1.0; length=5))
-    Y = zeros(Float64, 5, n_series)
-    return cubic_interp(xs, Y; itp_opts...)
 end
 
 # Helper to create empty complex series interpolant for default initialization
