@@ -257,7 +257,7 @@ from 1:5 rather than 0:4 as in Fortran.
 
   - `bfield`: A `DirectBField` object with values at the integration start point.
 """
-function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)
+function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)::Tuple{Matrix{Float64},DirectBField}
 
     # Find the starting point on the flux surface (outboard midplane)
     psi0_guess = raw_profile.psio * (1.0 - psifac)
@@ -302,8 +302,8 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
-    sol_matrix = reduce(hcat, sol.u)'
-    return hcat(sol.t, sol_matrix), bfield
+    sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
+    return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
 end
 
 """
@@ -455,8 +455,7 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
     for ipsi in (mpsi+1):-1:1
         # Integrate along the field line for this surface
-        y_out_raw, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
-        y_out = y_out_raw::Matrix{Float64}
+        y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
         # Fit data into temporary straight fieldline poloidal angle splines
         ff_x_nodes = y_out[:, 5] ./ y_out[end, 5]
