@@ -114,13 +114,15 @@ function kernel!(
     d1_spline_x = deriv1(spline_x)
     d1_spline_z = deriv1(spline_z)
 
+    nonsing_idx = Vector{Int}(undef, mtheta - 3)
+
     # Loop through observer points
     for j in 1:mtheta
         # Get observer coordinates
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
         # Obtain nonsingular region (endpoints at j+2 and j-2, so exclude j-1, j, and j+1)
-        nonsing_idx = mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
+        nonsing_idx .= mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
 
         # Perform Simpson integration for nonsingular source points
         for (isrc, wsimpson) in zip(nonsing_idx, simpson_weights)
@@ -320,9 +322,14 @@ has a typo where the exponent should be -1/4 instead of +1/2.
   - Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_1997!(P, s, n)
+end
+
+function Pn_minus_half_1997!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     #initialize
-    P = zeros(n + 2)
+    P .= 0.0
 
     # n = 0
     P[1] = P0_minus_half(s)
@@ -479,6 +486,11 @@ This implementation uses:
   - Reference: JCP 221 (2007) 330-348    # Constants
 """
 function Pn_minus_half_2007(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_2007!(P, s, n)
+end
+
+function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
     sqpi = sqrt(π)
@@ -486,7 +498,7 @@ function Pn_minus_half_2007(s::Real, n::Int)
     sqtwo = sqrt(2.0)
 
     # Initialize output array
-    P = zeros(n + 2)
+    P .= 0.0
 
     # Preliminary computations
     xxq = s * s
