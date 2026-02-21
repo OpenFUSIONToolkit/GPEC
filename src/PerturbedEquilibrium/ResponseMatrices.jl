@@ -314,6 +314,16 @@ function apply_green_function(
     green::Matrix{Float64},
     mode_coeffs::Vector{ComplexF64}
 )::Vector{Float64}
+    mtheta = size(green, 1) ÷ 2
+    chi_theta = Vector{Float64}(undef, mtheta)
+    return apply_green_function!(chi_theta, green, mode_coeffs)
+end
+
+function apply_green_function!(
+    chi_theta::Vector{Float64},
+    green::Matrix{Float64},
+    mode_coeffs::Vector{ComplexF64}
+)
     # Pack complex coefficients to real/imag format for Green's function
     # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
     packed_coeffs = pack_complex_to_realimag(mode_coeffs)
@@ -321,9 +331,8 @@ function apply_green_function(
     # Apply Green's function: chi_theta = green * b_fourier
     # Extract only plasma surface rows (first mtheta rows)
     # Result is real-valued potential at theta points
-    mtheta = size(green, 1) ÷ 2
-    chi_theta = green[1:mtheta, :] * packed_coeffs
-
+    mtheta = length(chi_theta)
+    chi_theta .= @view(green[1:mtheta, :]) * packed_coeffs
     return chi_theta
 end
 
