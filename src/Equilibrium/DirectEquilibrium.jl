@@ -76,15 +76,15 @@ function direct_get_bfield!(
         bf_out.psi = psi_in((r, z))
     elseif derivs == 1
         bf_out.psi = psi_in((r, z))
-        bf_out.psir = psi_in((r, z); deriv=(1, 0))
-        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
+        bf_out.psir = psi_in((r, z); deriv=Val((1, 0)))
+        bf_out.psiz = psi_in((r, z); deriv=Val((0, 1)))
     else # derivs >= 2
         bf_out.psi = psi_in((r, z))
-        bf_out.psir = psi_in((r, z); deriv=(1, 0))
-        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
-        bf_out.psirr = psi_in((r, z); deriv=(2, 0))
-        bf_out.psirz = psi_in((r, z); deriv=(1, 1))
-        bf_out.psizz = psi_in((r, z); deriv=(0, 2))
+        bf_out.psir = psi_in((r, z); deriv=Val((1, 0)))
+        bf_out.psiz = psi_in((r, z); deriv=Val((0, 1)))
+        bf_out.psirr = psi_in((r, z); deriv=Val((2, 0)))
+        bf_out.psirz = psi_in((r, z); deriv=Val((1, 1)))
+        bf_out.psizz = psi_in((r, z); deriv=Val((0, 2)))
     end
 
     # Evaluate magnetic fields from equilibrium profiles
@@ -192,7 +192,7 @@ function direct_position!(raw_profile::DirectRunInput)
     new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinary(),
-        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
+        bc=CubicFit(), extrap=ExtendExtrap())
 
     # Helper function for robust Newton-Raphson search with restarts
     function find_separatrix_crossing(start_r, end_r, label)
@@ -519,19 +519,20 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             sq_nodes[:, 4]   # q
         )
     end
-
     # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
     rzphi_xs = psi_nodes
     rzphi_ys = collect(theta_nodes)
-    rzphi_rsquared = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 1]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rzphi_offset = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 2]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rzphi_nu = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 3]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rzphi_jac = cubic_interp((rzphi_xs, rzphi_ys), rzphi_nodes[:, :, 4]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+
+    # Use a hybrid-typed grid (Vector for xs, Range for ys) for better performance
+    grid2d = (rzphi_xs, theta_nodes) # Use theta_nodes (Range) instead of rzphi_ys (Vector)
+
+    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
+    rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
+    rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
+    rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
     # for use in stability and transport codes
@@ -596,12 +597,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         end
     end
     # Create 2D interpolants for physics quantities (eqfun)
-    eqfun_B = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 1]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    eqfun_metric1 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 2]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    eqfun_metric2 = cubic_interp((rzphi_xs, rzphi_ys), eqfun_fs_nodes[:, :, 3]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
+    eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
+    eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,

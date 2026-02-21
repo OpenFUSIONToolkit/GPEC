@@ -163,7 +163,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
+    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
     spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
@@ -204,14 +204,14 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
+    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = r_nodes
     rz_in_ys = collect(rzphi_y_nodes)
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio)
@@ -275,7 +275,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
-    sq_in = cubic_interp(psis, sqfs; bc=CubicFit(), extrap=:extension)
+    sq_in = cubic_interp(psis, sqfs; bc=CubicFit(), extrap=ExtendExtrap())
 
     # Compute 2D data and spline
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]
@@ -289,7 +289,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     psi_in_xs = r
     psi_in_ys = z
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; search=LinearBinary(),
-        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
+        bc=CubicFit(), extrap=ExtendExtrap())
 
     # Print out equilibrium info
     println("Generating Solovev equilibrium inputs with:")
