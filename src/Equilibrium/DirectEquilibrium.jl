@@ -182,8 +182,8 @@ function direct_position!(raw_profile::DirectRunInput)
         error("Failed to find magnetic axis after $max_iterations iterations.")
     end
 
-    ro::Float64 = r
-    zo::Float64 = z
+    ro = r
+    zo = z
 
     # Renormalize psi based on the value at the magnetic axis
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
@@ -208,9 +208,9 @@ function direct_position!(raw_profile::DirectRunInput)
                     @warn "d(psi)/dr is near zero."
                     break
                 end
-                dr = -bfield.psi / bfield.psir
-                r_sep += dr
-                if abs(dr) <= 1e-12 * abs(r_sep)
+                dr_sep = -bfield.psi / bfield.psir
+                r_sep += dr_sep
+                if abs(dr_sep) <= 1e-12 * abs(r_sep)
                     r_sol = r_sep
                     found = true
                     break
