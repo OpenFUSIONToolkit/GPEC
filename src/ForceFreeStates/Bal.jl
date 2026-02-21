@@ -142,7 +142,7 @@ function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
-            dtmin=MINIMUM_STEP, adaptive=true)
+            dtmin=MINIMUM_STEP, adaptive=true, save_everystep=false, save_end=true)
 
         if ode_solution.retcode == ReturnCode.Success
             solution_final = ode_solution.u[end]

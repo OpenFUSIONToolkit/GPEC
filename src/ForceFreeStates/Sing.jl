@@ -254,7 +254,6 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     q_d3 = deriv3(q_spline)
 
     # Initial allocations
-    q = @MVector zeros(Float64, 4)
     singfac = zeros(Float64, intr.numpert_total, 4)
     f_lower_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
     g_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
@@ -268,7 +267,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
     # Evaluate q spline and its derivatives
-    q .= (q_spline(singp.psifac),
+    q = (q_spline(singp.psifac),
         q_d1(singp.psifac),
         q_d2(singp.psifac),
         q_d3(singp.psifac))
@@ -671,12 +670,12 @@ function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::Forc
     temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
 
     # LU factorization and solve
-    temp2 .= lu(temp1) \ temp2
+    temp2 .= lu!(temp1) \ temp2
 
     # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
-    ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
+    @views ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
+    @views ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
 
     return ca
 end
