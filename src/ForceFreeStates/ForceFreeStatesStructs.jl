@@ -261,7 +261,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
 end
 
-@kwdef mutable struct FourFitVars
+@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}
     mpert::Int
     mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
@@ -269,15 +269,17 @@ end
     # Complex-valued CubicSeriesInterpolant for stability matrices
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
-    amats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    bmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    cmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    dmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    emats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    hmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    fmats_lower::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    kmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    gmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+
+    amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    dmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -290,10 +292,10 @@ end
 end
 
 # Helper to create empty series interpolant for default initialization (real-valued)
-function _empty_series_interp(n_series::Int)
+function _empty_series_interp(n_series::Int, itp_opts::NamedTuple)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(Float64, 5, n_series)
-    return cubic_interp(xs, Y)
+    return cubic_interp(xs, Y; itp_opts...)
 end
 
 # Helper to create empty complex series interpolant for default initialization
@@ -301,6 +303,12 @@ function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
     return cubic_interp(xs, Y)
+end
+
+function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Y; itp_opts...)
 end
 
 # Convenience constructor
