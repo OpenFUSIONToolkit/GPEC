@@ -2,15 +2,14 @@ module Vacuum
 
 using TOML, SpecialFunctions, LinearAlgebra, Printf
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
-using StaticArrays
-using FastGaussQuadrature
+using FastGaussQuadrature: gausslegendre
+using StaticArrays: SVector
 using SparseArrays
 
 # Import parent modules
 import ..Equilibrium
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
-# Include core data structures and functions first
 include("DataTypes.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
