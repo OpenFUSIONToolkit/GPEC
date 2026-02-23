@@ -7,7 +7,6 @@ The `PerturbedEquilibrium` module computes the plasma response to external magne
 ```@docs
 JPEC.PerturbedEquilibrium.PerturbedEquilibriumControl
 JPEC.PerturbedEquilibrium.PerturbedEquilibriumInternal
-JPEC.PerturbedEquilibrium.ForcingMode
 JPEC.PerturbedEquilibrium.PerturbedEquilibriumState
 ```
 

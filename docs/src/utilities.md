@@ -11,7 +11,7 @@ The Utilities module currently provides:
 ## API Reference
 
 ```@autodocs
-Modules = [JPEC.Utilities]
+Modules = [JPEC.Utilities, JPEC.Utilities.FourierTransforms]
 ```
 
 ## Example Usage
