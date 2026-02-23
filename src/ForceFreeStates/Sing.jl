@@ -246,7 +246,7 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     q_spline = profiles.q_spline
     q_d1 = profiles.q_deriv
@@ -254,17 +254,17 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     q_d3 = deriv3(q_spline)
 
     # Initial allocations
-    singfac = zeros(Float64, intr.numpert_total, 4)
-    f_lower_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    g_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    k_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    f_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    f0_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    ff_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    g_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    k = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
-    x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
+    singfac = zeros!(pool, Float64, intr.numpert_total, 4)
+    f_lower_interp = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, 4)
+    g_interp = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, 4)
+    k_interp = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, 4)
+    f_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
+    f0_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total)
+    ff_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
+    g_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
+    k = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
+    v = zeros!(pool, ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
+    x = zeros!(pool, ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
     # Evaluate q spline and its derivatives
     q = (q_spline(singp.psifac),
