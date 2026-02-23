@@ -1,5 +1,3 @@
-using LinearAlgebra
-
 # TODO: perhaps this isn't the best place for this function?
 # Should I do include("../ForceFreeStates/utils.jl") instead? or maybe save these functions in a separate file?
 # associated TODO: come up with Gaussian reduction test that doesn't rely on external data
