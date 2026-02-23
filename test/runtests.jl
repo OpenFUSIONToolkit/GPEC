@@ -21,7 +21,7 @@ if !isempty(ARGS)
     end
 else
     include("./runtests_utilities.jl")
-    include("./runtests_vacuum_julia.jl")
+    include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_sing.jl")

@@ -428,6 +428,13 @@ function compute_3D_kernel_matrices!(
     populate_greenfunction = source isa PlasmaGeometry3D
 
     # Initialize quadrature data
+    # This allows the code to run at lower resolution without erroring out, but will warn the user.
+    if PATCH_RAD > (observer.nzeta - 1) ÷ 2
+        warn(
+            "PATCH_RAD is greater than the number of points in the toroidal direction, which is not supported. Setting PATCH_RAD to $((observer.nzeta - 1) ÷ 2). Double check that you are converged."
+        )
+        PATCH_RAD = (observer.nzeta - 1) ÷ 2
+    end
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
     @assert observer.mtheta ≥ PATCH_DIM "Must have observer.mtheta ≥ PATCH_DIM, got observer.mtheta=$(observer.mtheta), PATCH_DIM=$PATCH_DIM"

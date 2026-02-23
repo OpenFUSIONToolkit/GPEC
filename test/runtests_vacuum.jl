@@ -391,4 +391,174 @@
             end
         end
     end
+
+    # -------------------------------------------------------------------------
+    # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
+    # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
+    @testset "Vacuum.jl (3D)" begin
+        _make_3d_inputs(; mtheta=32, mtheta_eq=17, mpert=2, nlow=0, npert=2, nzeta=32) = VacuumInput(
+            r=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
+            z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
+            ν=zeros(mtheta_eq),
+            mlow=1,
+            mpert=mpert,
+            nlow=nlow,
+            npert=npert,
+            nzeta=nzeta,
+            mtheta=mtheta
+        )
+
+        @testset "VacuumInput nzeta > 1" begin
+            vac = VacuumInput(mtheta=32, nzeta=24, mpert=2, npert=2)
+            @test vac.nzeta == 24
+            @test vac.mtheta == 32
+        end
+
+        @testset "KernelParams3D" begin
+            params = JPEC.Vacuum.KernelParams3D(11, 20, 5)
+            @test params.PATCH_RAD == 11
+            @test params.RAD_DIM == 20
+            @test params.INTERP_ORDER == 5
+        end
+
+        @testset "PlasmaGeometry3D" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            surf = JPEC.Vacuum.PlasmaGeometry3D(inputs)
+            num_points = inputs.mtheta * inputs.nzeta
+            @test surf.mtheta == 32
+            @test surf.nzeta == 32
+            @test size(surf.r) == (num_points, 3)
+            @test size(surf.dr_dθ) == (num_points, 3)
+            @test size(surf.dr_dζ) == (num_points, 3)
+            @test size(surf.normal) == (num_points, 3)
+            # ν is from 2D contour: one value per poloidal point (length mtheta)
+            @test length(surf.ν) == inputs.mtheta
+            @test surf.normal_orient in (1, -1)
+            @test all(isfinite, surf.r)
+            @test all(isfinite, surf.normal)
+            # Toroidal extrusion: first and (1+mtheta)th points differ only in (X,Y); Z same
+            @test isapprox(surf.r[1, 3], surf.r[1+32, 3])
+            @test !isapprox(surf.r[1, 1], surf.r[1+32, 1]) || !isapprox(surf.r[1, 2], surf.r[1+32, 2])
+        end
+
+        @testset "WallGeometry3D nowall" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            wall = JPEC.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="nowall"))
+            @test wall.nowall == true
+            @test wall.mtheta == 32
+            @test wall.nzeta == 32
+            @test size(wall.r) == (32 * 32, 3)
+        end
+
+        @testset "WallGeometry3D conformal" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            wall = JPEC.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="conformal", a=0.2))
+            @test wall.nowall == false
+            @test wall.mtheta == 32
+            @test wall.nzeta == 32
+            num_points = 32 * 32
+            @test size(wall.r) == (num_points, 3)
+            @test size(wall.normal) == (num_points, 3)
+            @test all(isfinite, wall.r)
+            @test all(isfinite, wall.normal)
+        end
+
+        @testset "compute_vacuum_response 3D nowall" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            wall_settings = WallShapeSettings(shape="nowall")
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+            @test size(wv) == (num_modes, num_modes)
+            @test eltype(wv) == ComplexF64
+            @test all(isfinite, wv)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test all(isfinite, grri)
+            @test all(isfinite, grre)
+            @test size(plasma_pts) == (numpoints, 3)
+            @test all(isfinite, plasma_pts)
+            @test size(wall_pts) == (numpoints, 3)
+            # 3D plasma_pts are (X,Y,Z) Cartesian
+            @test isapprox(plasma_pts[1, 1]^2 + plasma_pts[1, 2]^2, (1.7 + 0.3)^2, rtol=0.1)
+            @test isapprox(plasma_pts[1, 3], 0.0, atol=0.1)
+            @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        @testset "compute_vacuum_response 3D conformal wall" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            wall_settings = WallShapeSettings(shape="conformal", a=0.3)
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+            @test size(wv) == (num_modes, num_modes)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test all(isfinite, plasma_pts)
+            @test all(isfinite, wall_pts)
+            # Wall and plasma should differ (conformal wall offset from plasma)
+            @test !isapprox(plasma_pts, wall_pts)
+            @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        @testset "compute_vacuum_response 3D green_only" begin
+            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
+            wall_settings = WallShapeSettings(shape="nowall")
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings; green_only=true)
+
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+            @test size(wv) == (num_modes, num_modes)
+            @test all(wv .== 0)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test all(isfinite, grri)
+            @test all(isfinite, grre)
+        end
+
+        @testset "Kernel3D laplace_single_layer" begin
+            x_obs = [1.0, 0.0, 0.0]
+            x_src = [2.0, 0.0, 0.0]
+            G = JPEC.Vacuum.laplace_single_layer(x_obs, x_src)
+            # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)
+            dist = sqrt((2.0 - 1.0)^2 + 0 + 0)
+            @test isapprox(G, 1.0 / dist)
+            @test isfinite(G)
+        end
+
+        @testset "Kernel3D laplace_double_layer" begin
+            x_obs = [1.0, 0.0, 0.0]
+            x_src = [2.0, 0.0, 0.0]
+            n_src = [1.0, 0.0, 0.0]  # normal pointing away from source
+            K = JPEC.Vacuum.laplace_double_layer(x_obs, x_src, n_src)
+            @test K isa Float64
+            @test isfinite(K)
+        end
+
+        @testset "Kernel3D get_singular_quadrature" begin
+            quad = JPEC.Vacuum.get_singular_quadrature(3, 8, 5)
+            @test quad.PATCH_RAD == 3
+            @test quad.RAD_DIM == 8
+            @test quad.INTERP_ORDER == 5
+            @test quad.PATCH_DIM == 2 * 3 + 1
+            # Cached: second call returns same object
+            quad2 = JPEC.Vacuum.get_singular_quadrature(3, 8, 5)
+            @test quad === quad2
+        end
+
+        @testset "Kernel3D extract_patch!" begin
+            # 4×4 grid (npol=4, ntor=4), PATCH_DIM=3, center at (2,2); data is (16, 3)
+            data = zeros(16, 3)
+            data[:, 1] .= 1.0:16.0
+            data[:, 2] .= 1.0
+            data[:, 3] .= 0.0
+            patch_out = zeros(3, 3, 3)
+            JPEC.Vacuum.extract_patch!(patch_out, data, 2, 2, 4, 4, 3)
+            # Center of patch should be data at (2,2) = index 2+4*(2-1)=6
+            @test isapprox(patch_out[2, 2, 1], 6.0)
+            @test all(isfinite, patch_out)
+            @test size(patch_out) == (3, 3, 3)
+        end
+    end
 end
