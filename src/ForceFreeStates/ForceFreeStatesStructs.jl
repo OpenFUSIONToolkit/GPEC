@@ -397,17 +397,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape
     `(numpert_total, numpert_total, numunorms_init)`.
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
-  - Temporary workspaces used during integration calculations:
-
-      + `amat::Vector{ComplexF64}` - Flattened A matrix (length `numpert_total^2`)
-      + `bmat::Vector{ComplexF64}` - Flattened B matrix (length `numpert_total^2`)
-      + `cmat::Vector{ComplexF64}` - Flattened C matrix (length `numpert_total^2`)
-      + `fmat_lower::Vector{ComplexF64}` - Lower-triangle factor of F (length `numpert_total^2`)
-      + `kmat::Vector{ComplexF64}` - Flattened K matrix (length `numpert_total^2`)
-      + `gmat::Vector{ComplexF64}` - Flattened G matrix (length `numpert_total^2`)
-      + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
-      + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
-      + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
 """
 @kwdef mutable struct OdeState
     # Initialization parameters
@@ -451,17 +440,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
-
-    # Temporary matrices for sing_der calculations
-    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Cholesky{ComplexF64,Matrix{ComplexF64}} = cholesky(Matrix{ComplexF64}(I, numpert_total, numpert_total))
-    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups

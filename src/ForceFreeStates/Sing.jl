@@ -734,7 +734,7 @@ more simplistic code with similar performance.
 
 Implement kin_flag functionality
 """
-function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+@with_pool pool function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
         FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
@@ -742,7 +742,22 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     # Unpack structs and initialize
     # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
     _, equil, ffit, intr, odet, _ = params
-    fill!(odet.tmp, 0)
+
+    # Allocate temporary arrays from the pool
+    Npert = intr.numpert_total
+
+    singfac_vec = acquire!(pool, Float64, Npert)
+
+    amat = acquire!(pool, ComplexF64, Npert, Npert) 
+    bmat = similar!(pool, amat) 
+    cmat = similar!(pool, amat) 
+    fmat_lower = similar!(pool, amat)
+    kmat = similar!(pool, amat)
+    gmat = similar!(pool, amat)
+    tmp_mat = similar!(pool, amat)
+
+
+    fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])
     u2 = @view(u[:, :, 2])
     du1 = @view(du[:, :, 1])
@@ -751,37 +766,27 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
-    odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
+    @. singfac_vec = 1.0 / ((intr.mlow:intr.mhigh) - odet.q * (intr.nlow:intr.nhigh)')
 
     # kinetic stuff - skip for now
     if false #(TODO: kin_flag)
         error("kin_flag not implemented yet")
     else
         # Evaluate matrix splines at the current psi value using shared hint
-        ffit.amats(vec(ffit._mat_out), psieval; hint=ffit._hint)
-        amat = ffit._mat_out
+        ffit.amats(vec(amat), psieval; hint=ffit._hint)
+        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
+        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
+        ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
+        ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
 
-        # Use odet temporary buffers for subsequent matrices to avoid overwriting amat
-        ffit.bmats(odet.bmat, psieval; hint=ffit._hint)
-        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+        # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
+        # Equivalent to: Afact = cholesky!(Hermitian(amat)); ldiv!(Afact, bmat); ldiv!(Afact, cmat)
+        # but calls LAPACK directly to avoid Hermitian/Cholesky wrapper allocations in this hot loop
+        LAPACK.potrf!('U', amat)
+        LAPACK.potrs!('U', amat, bmat)
+        LAPACK.potrs!('U', amat, cmat)
 
-        ffit.cmats(odet.cmat, psieval; hint=ffit._hint)
-        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
-
-        ffit.fmats_lower(odet.fmat_lower, psieval; hint=ffit._hint)
-        fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
-
-        ffit.kmats(odet.kmat, psieval; hint=ffit._hint)
-        kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
-
-        ffit.gmats(odet.gmat, psieval; hint=ffit._hint)
-        gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
-
-        odet.Afact = cholesky!(Hermitian(amat))
-        # bmat = A⁻¹ * bmat
-        ldiv!(odet.Afact, bmat)
-        # cmat = A⁻¹ * cmat
-        ldiv!(odet.Afact, cmat)
     end
 
     # Compute du
@@ -790,25 +795,25 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
-        du1 .= u2 .* odet.singfac_vec
-        mul!(odet.tmp, kmat, u1)
-        du1 .-= odet.tmp
+        du1 .= u2 .* singfac_vec
+        mul!(tmp_mat, kmat, u1)
+        du1 .-= tmp_mat
         ldiv!(LowerTriangular(fmat_lower), du1)
         ldiv!(UpperTriangular(fmat_lower'), du1)
         # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
-        mul!(odet.tmp, gmat, u1)
-        du2 .= odet.tmp
-        mul!(odet.tmp, adjoint(kmat), du1)
-        du2 .+= odet.tmp
+        mul!(tmp_mat, gmat, u1)
+        du2 .= tmp_mat
+        mul!(tmp_mat, adjoint(kmat), du1)
+        du2 .+= tmp_mat
         # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
-        du1 .*= odet.singfac_vec
+        du1 .*= singfac_vec
     end
 
     # ud[1] = Ξ'_Ψ
     @views odet.ud[:, :, 1] .= du1
     # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), eq. 18 of Glasser 2016
-    mul!(odet.tmp, bmat, du1)
-    odet.ud[:, :, 2] .= .-odet.tmp
-    mul!(odet.tmp, cmat, u1)
-    @views odet.ud[:, :, 2] .-= odet.tmp
+    mul!(tmp_mat, bmat, du1)
+    odet.ud[:, :, 2] .= .-tmp_mat
+    mul!(tmp_mat, cmat, u1)
+    @views odet.ud[:, :, 2] .-= tmp_mat
 end
