@@ -4,14 +4,14 @@ The Utilities module provides helper functions and data structures used across J
 
 ## Overview
 
-The UtilitiesMod currently provides:
+The Utilities module currently provides:
 - `FourierCoefficients`: Lightweight FFT-based Fourier decomposition for periodic data
 - Helper functions for accessing Fourier coefficients at grid points
 
 ## API Reference
 
 ```@autodocs
-Modules = [JPEC.UtilitiesMod]
+Modules = [JPEC.Utilities, JPEC.Utilities.FourierTransforms]
 ```
 
 ## Example Usage
@@ -31,13 +31,13 @@ for i in 1:100, j in 1:64
 end
 
 # Compute Fourier coefficients, keeping 10 modes
-fc = JPEC.UtilitiesMod.FourierCoefficients(xs, ys, fs, 10)
+fc = JPEC.Utilities.FourierCoefficients(xs, ys, fs, 10)
 
 # Access individual coefficient
 # Get mode 3 at radial index 50 for quantity 1
-c = JPEC.UtilitiesMod.get_complex_coeff(fc, 50, 3, 1)
+c = JPEC.Utilities.get_complex_coeff(fc, 50, 3, 1)
 
 # Get all coefficients for a given radial index and quantity
 coeffs = Vector{ComplexF64}(undef, fc.mband + 1)
-JPEC.UtilitiesMod.get_complex_coeffs!(coeffs, fc, 50, 1)
+JPEC.Utilities.get_complex_coeffs!(coeffs, fc, 50, 1)
 ```
