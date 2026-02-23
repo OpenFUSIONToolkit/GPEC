@@ -638,7 +638,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - The coupling terms include the Jacobian factor from the coordinate transformation
   - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
+@with_pool pool function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2
@@ -660,10 +660,11 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     # Legendre functions for
     # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
+    legendre = acquire!(pool, Float64, n + 2)
     if uselegacygreenfunction
-        legendre = Pn_minus_half_1997(s, n)
+        Pn_minus_half_1997!(legendre, s, n)
     else
-        legendre = Pn_minus_half_2007(s, n)
+        Pn_minus_half_2007!(legendre, s, n)
     end
 
     p0 = legendre[1]

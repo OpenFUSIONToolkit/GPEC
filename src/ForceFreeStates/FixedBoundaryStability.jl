@@ -57,12 +57,13 @@ can do it post-integration rather than during and don't directly handle file out
   - `zero_cross::Bool`: True if a physical zero crossing was detected
   - `nonherm::Bool`: True if W⁻¹ was non-Hermitian beyond tolerance
 """
-function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
+@with_pool pool function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
 
     # Compute smallest eigenvalue (crit) at current step
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
+    u = unsafe_acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
     psi = odet.psi_store[istep]
-    u = odet.u_store[:, :, :, istep]
+    u .= odet.u_store[:, :, :, istep]
     dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2

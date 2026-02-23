@@ -33,6 +33,7 @@ using HDF5
 # Import FastInterpolations functions and types needed in main
 import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
 
+import AdaptiveArrayPools: @with_pool
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState

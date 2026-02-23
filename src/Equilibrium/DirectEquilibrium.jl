@@ -61,7 +61,7 @@ the Julia spline implementation.
   - `psio`: total toroidal flux
   - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
 """
-function direct_get_bfield!(
+@with_pool pool function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
@@ -91,8 +91,10 @@ function direct_get_bfield!(
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    f_sq = sq_in(psi_norm)
-    f1_sq = sq_in_deriv(psi_norm)
+    f_sq = acquire!(pool, eltype(sq_in.y), n_series(sq_in))
+    f1_sq = acquire!(pool, eltype(sq_in_deriv.parent.y), n_series(sq_in_deriv.parent))
+    sq_in(f_sq, psi_norm)
+    sq_in_deriv(f1_sq, psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
     bf_out.f1 = f1_sq[1] # dF/dψ
     bf_out.p = f_sq[2]  # μ0*Pressure

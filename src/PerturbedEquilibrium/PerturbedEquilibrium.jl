@@ -5,6 +5,7 @@ using HDF5
 using Printf
 using LinearAlgebra
 using Statistics
+using AdaptiveArrayPools
 
 # Import parent modules
 import ..Equilibrium
