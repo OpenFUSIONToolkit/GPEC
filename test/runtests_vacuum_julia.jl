@@ -11,8 +11,8 @@ using LinearAlgebra
             # Test default constructor for VacuumInput
             vac_in = VacuumInput()
             @test vac_in.mlow == 0
-            @test vac_in.n == 0
-            # NOTE: kernelsign field deprecated - compute_vacuum_response now computes both grri and grre
+            @test vac_in.nlow == 0
+            @test vac_in.npert == 0
             @test vac_in.mtheta == 1
             @test vac_in.force_wv_symmetry == true
 
@@ -30,7 +30,9 @@ using LinearAlgebra
                 mtheta=5,
                 mpert=1,
                 mlow=1,
-                n=1
+                nlow=1,
+                npert=1,
+                nzeta=1
             )
             plasma_surf = JPEC.Vacuum.PlasmaGeometry(inputs)
             @test length(plasma_surf.x) == 5
@@ -175,7 +177,7 @@ using LinearAlgebra
             cs = zeros(mtheta, mpert)
             cs[:, 1] .= 1.0 # Simple basis
 
-            JPEC.Vacuum.fourier_transform!(gil, gij, cs, 0, 0)
+            JPEC.Vacuum.fourier_transform!(gil, gij, cs)
 
             # gil should be the sum of columns of gij
             @test gil[:, 1] == [10.0, 26.0, 42.0, 58.0]
@@ -191,7 +193,7 @@ using LinearAlgebra
             cs[:, 1] .= 1.0
             gll = zeros(mpert, mpert)
 
-            JPEC.Vacuum.fourier_inverse_transform!(gll, gil, cs, 0, 0)
+            JPEC.Vacuum.fourier_inverse_transform!(gll, gil, cs)
 
             # gll[1,1] should be sum(cs[:,1] .* gil[:,1]) * 2pi*dth
             expected = sum([1.0, 2.0, 3.0, 4.0]) * dth * 2pi
@@ -214,21 +216,26 @@ using LinearAlgebra
                 ν=zeros(mtheta_eq),
                 mlow=1,
                 mpert=2,
-                n=1,
+                nlow=1,
+                npert=1,
+                nzeta=1,
                 mtheta=mtheta
             )
             wall_settings = WallShapeSettings(shape="nowall")
 
-            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
-            @test size(wv) == (2, 2);
-            @test !any(isnan, wv);
-            @test size(grri) == (128, 2 * 2);  # nowall: only plasma points
-            @test !any(isnan, grri);
-            @test size(grre) == (128, 2 * 2);
-            @test !any(isnan, grre);
-            @test size(xzpts) == (128, 4);
-            @test !any(isnan, xzpts[:, 1:2]);
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+            @test size(wv) == (num_modes, num_modes)
+            @test !any(isnan, wv)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test !any(isnan, grri)
+            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test !any(isnan, grre)
+            @test size(plasma_pts) == (numpoints, 3)
+            @test !any(isnan, plasma_pts)
+            @test size(wall_pts) == (numpoints, 3)
         end
 
         @testset "compute_vacuum_response_conformal" begin
@@ -244,25 +251,31 @@ using LinearAlgebra
                 ν=zeros(mtheta_eq),
                 mlow=1,
                 mpert=2,
-                n=1,
+                nlow=1,
+                npert=1,
+                nzeta=1,
                 mtheta=mtheta
             )
             # Use a conformal wall
             wall_settings = WallShapeSettings(shape="conformal", a=0.5)
 
-            wv, grri, grre, xzpts = compute_vacuum_response(inputs, wall_settings)
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
 
-            @test size(wv) == (2, 2)
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+            @test size(wv) == (num_modes, num_modes)
             @test !any(isnan, wv)
-            @test size(grri) == (2 * 128, 2 * 2)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
             @test !any(isnan, grri)
-            @test size(xzpts) == (128, 4)
+            @test size(plasma_pts) == (numpoints, 3)
+            @test size(wall_pts) == (numpoints, 3)
             # For a conformal wall, wall coordinates should exist and not be NaN
-            @test !any(isnan, xzpts)
+            @test !any(isnan, plasma_pts)
+            @test !any(isnan, wall_pts)
 
-            # Check that wall coordinates are different from plasma coordinates
-            @test !isapprox(xzpts[:, 1], xzpts[:, 3])
-            @test !isapprox(xzpts[:, 2], xzpts[:, 4])
+            # Check that wall coordinates are different from plasma (layout: col1=R, col2=0, col3=Z)
+            @test !isapprox(plasma_pts[:, 1], wall_pts[:, 1])
+            @test !isapprox(plasma_pts[:, 3], wall_pts[:, 3])
         end
     end
 
