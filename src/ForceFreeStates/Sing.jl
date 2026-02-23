@@ -550,18 +550,21 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
         @views sing_matmul!(tmp_arr, mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
         vmat[:, :, :, k+1] .+= tmp_arr
     end
+
+    a = zeros!(pool, ComplexF64, 2, 2)
     for isol in 1:(2*intr.numpert_total)
         for i in eachindex(r1) # go block by block?
             # a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ (for multi-n 2D, we make a the ith block fo M₀)
-            m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
-            a = copy(m0mat_block)
+            @views m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+            a .= m0mat_block
             a[1, 1] -= k / 2.0 + power[isol]
             a[2, 2] -= k / 2.0 + power[isol]
             det = a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]
             # Solve the resonant indices
-            x = -vmat[r1[i], isol, :, k+1]
-            vmat[r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
-            vmat[r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
+            x1 = -vmat[r1[i], isol, 1, k+1]
+            x2 = -vmat[r1[i], isol, 2, k+1]
+            vmat[r1[i], isol, 1, k+1] = (a[2, 2] * x1 - a[1, 2] * x2) / det
+            vmat[r1[i], isol, 2, k+1] = (a[1, 1] * x2 - a[2, 1] * x1) / det
         end
         # Solve the non-resonant indices (the eigenvalue α = 0, so M₀v = 0 (null space))
         vmat[n1, isol, :, k+1] ./= (power[isol] + k / 2.0)
