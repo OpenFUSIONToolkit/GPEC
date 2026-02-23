@@ -332,7 +332,7 @@ function apply_green_function!(
     # Extract only plasma surface rows (first mtheta rows)
     # Result is real-valued potential at theta points
     mtheta = length(chi_theta)
-    chi_theta .= @view(green[1:mtheta, :]) * packed_coeffs
+    mul!(chi_theta, @view(green[1:mtheta, :]), packed_coeffs)
     return chi_theta
 end
 
