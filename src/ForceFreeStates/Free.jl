@@ -13,7 +13,6 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     (; mpert, mlow, mhigh, mband, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
     vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, numpert_total, ctrl.mthvac)
     etemp = zeros(ComplexF64, numpert_total)
-    wp = zeros(ComplexF64, numpert_total, numpert_total)
     wpt = zeros(ComplexF64, numpert_total, numpert_total)
     wvt = zeros(ComplexF64, numpert_total, numpert_total)
 
@@ -25,37 +24,9 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
         @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
     end
 
-    # Compute vacuum response matrix
-    if ctrl.nzvac == 1
-        vac_data.wv .= 0.0 # need to zero to avoid multiplication of undef by singfac during scaling
-        for idx_n in 1:npert
-            # Set VACUUM run parameters and boundary shape
-            n = idx_n - 1 + nlow
-            vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, mpert, mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
-
-            # Compute vacuum energy matrix and both Green's functions
-            wv_block, grri, grre, vac_data.plasma_pts, vac_data.wall_pts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
-
-            # Store blocks into full matrices
-            block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
-            # Copy the real terms from grri to grre
-            @views vac_data.grri[:, block_idx] .= grri[:, 1:mpert]
-            @views vac_data.grre[:, block_idx] .= grre[:, 1:mpert]
-            # Copy the imaginary terms from grri to grre - offset by numpert_total
-            @views vac_data.grri[:, numpert_total .+ block_idx] .= grri[:, (mpert+1):(2*mpert)]
-            @views vac_data.grre[:, numpert_total .+ block_idx] .= grre[:, (mpert+1):(2*mpert)]
-            @views vac_data.wv[block_idx, block_idx] .= wv_block
-        end
-    else
-        if ctrl.verbose
-            println("Computing 3D vacuum response matrix in addition to 2D matrix with nzvac = $(ctrl.nzvac)")
-        end
-
-        # Compute 3D vacuum response matrix
-        vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, mpert, mlow, 1; force_wv_symmetry=ctrl.force_wv_symmetry)
-        vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, nlow, npert)
-        vac_data.wv, vac_data.grri, vac_data.grre, vac_data.plasma_pts, vac_data.wall_pts = @timev Vacuum.compute_vacuum_response(vac_inputs_3D, wall_settings)
-    end
+    # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
+    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
+    @timev Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
@@ -171,22 +142,18 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
             error("Newton iteration for psilim did not converge after $itmax iterations.")
         end
 
-        for ipert_n in 1:intr.npert
-            # Compute vacuum matrix
-            n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
-            wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+        # Compute vacuum response matrix at this psi (2D single-n, 2D multi-n block-diagonal, or 3D)
+        vac_inputs = Vacuum.VacuumInput(equil, psii, ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
+        wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
-            # Apply singular factor scaling
-            singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
-            @inbounds for ipert in 1:intr.mpert
-                @views wv_block[ipert, :] .*= singfac[ipert]
-                @views wv_block[:, ipert] .*= singfac[ipert]
-            end
-
-            # Store block in full wv matrix
-            @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
+        # Apply singular factor scaling: (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
+        singfac = vec((intr.mlow:intr.mhigh) .- qi .* (intr.nlow:intr.nhigh)')
+        @inbounds for ipert in 1:intr.numpert_total
+            @views wv[ipert, :] .*= singfac[ipert]
+            @views wv[:, ipert] .*= singfac[ipert]
         end
+
+        @views wv_array[i, :, :] .= wv
     end
 
     # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant

@@ -17,71 +17,85 @@ include("MathUtils.jl")
 include("VacuumFromEquilibrium.jl")
 
 export VacuumInput, WallShapeSettings
-export compute_vacuum_response, compute_vacuum_field
+export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 
 """
-    compute_vacuum_response(inputs::Union{VacuumInput, VacuumInput3D}, wall_settings::WallShapeSettings;
-        green_only=false, PATCH_RAD=11, RAD_DIM=20, INTERP_ORDER=5)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings;
+        green_only=false)
 
 Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
 
-Single entry point for 2D (axisymmetric, single toroidal mode) and 3D (multiple toroidal modes)
-vacuum calculations. Dispatches on input type: use `VacuumInput` for 2D and `VacuumInput3D` for 3D.
+Single entry point for vacuum calculations.
+
+  - For **3D** (`inputs.nzeta > 1`), computes the full coupled response across all (m,n) modes defined
+    by `inputs.(mlow, mpert, nlow, npert)`.
+
+  - For **2D geometry** (`inputs.nzeta == 1`), supports either:
+
+      + **single-n** (`inputs.npert == 1`): computes (m,n) response for `n = inputs.nlow`
+      + **multi-n** (`inputs.npert > 1`): loops over `n = inputs.nlow:(inputs.nlow+inputs.npert-1)` and returns
+        **blocks** of the full response matrices with one block per toroidal mode number.
 
 This is the pure Julia implementation that replaces the Fortran `mscvac` function.
 It computes both interior (grri) and exterior (grre) Green's functions for GPEC response calculations.
 
 # Arguments
 
-  - `inputs`: `VacuumInput` (2D) or `VacuumInput3D` (3D) with mode numbers, grid resolution, and boundary info.
+  - `inputs`: `VacuumInput` struct with mode numbers, grid resolution, and boundary info.
   - `wall_settings::WallShapeSettings`: Wall geometry configuration.
   - `green_only`: If true, skip building the response matrix `wv` and return zeros for `wv` and `xzpts`.
-  - `PATCH_RAD`, `RAD_DIM`, `INTERP_ORDER`: 3D kernel quadrature parameters (ignored for 2D).
 
 # Returns
 
-  - `wv`: Complex vacuum response matrix (mpert×mpert for 2D, num_modes×num_modes for 3D).
+  - `wv`: Complex vacuum response matrix.
+
+      + 2D single-n: `mpert × mpert`
+      + 2D multi-n: `(mpert*npert) × (mpert*npert)` (block diagonal)
+      + 3D: `num_modes × num_modes` (full coupled)
+
   - `grri`: Interior Green's function matrix.
   - `grre`: Exterior Green's function matrix.
   - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
-
-# Notes
-
-  - For n=0 modes with closed walls (2D), a regularization factor is added to prevent singularities.
 """
-function compute_vacuum_response(
-    inputs::Union{VacuumInput,VacuumInput3D},
+function _compute_vacuum_response_single!(
+    wv::AbstractMatrix{ComplexF64},
+    grri_in::AbstractMatrix{Float64},
+    grre_in::AbstractMatrix{Float64},
+    plasma_pts::AbstractMatrix{Float64},
+    wall_pts::AbstractMatrix{Float64},
+    inputs::VacuumInput,
     wall_settings::WallShapeSettings;
-    green_only::Bool=false,
-    PATCH_RAD::Int=11,
-    RAD_DIM::Int=20,
-    INTERP_ORDER::Int=5
+    n_override::Union{Nothing,Int}=nothing,
+    green_only::Bool=false
 )
-    # Initialize surface geometries
-    plasma_surf = inputs isa VacuumInput3D ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
-    wall = inputs isa VacuumInput3D ? WallGeometry3D(inputs, plasma_surf, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
 
-    # Compute Fourier basis coefficients and create kernel parameters
-    if inputs isa VacuumInput3D
-        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(
-            inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; ν=plasma_surf.ν)
-        kparams = KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER)
-    else
-        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(
-            inputs.mtheta, inputs.mpert, inputs.mlow; n=inputs.n, ν=plasma_surf.ν)
-        kparams = KernelParams2D(inputs.n)
-    end
+    # Initialize surface geometries
+    plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
+    wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
+
+    # Compute Fourier basis coefficients
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n=n_override, ν=plasma_surf.ν)
     num_points_plasma, num_modes = size(cos_mn_basis)
 
-    # If no wall, only plasma points; if wall, plasma + wall points
-    num_points = wall.nowall ? num_points_plasma : 2 * num_points_plasma
+    # Create kernel parameters structs used to dispatch to the correct kernel
+    if inputs.nzeta > 1
+        # Hardcode these values for now - can expose to the user in the future?
+        kparams = KernelParams3D(11, 20, 5)
+    else
+        kparams = KernelParams2D(n_override)
+    end
 
-    # Allocate matrices, accounting for whether wall is present or not
-    grri = zeros(num_points, 2 * num_modes) # Interior (kernelsign=-1)
-    grre = zeros(num_points, 2 * num_modes) # Exterior (kernelsign=+1)
-    grad_green = zeros(num_points, num_points)
+    # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
+    num_points_active = wall.nowall ? num_points_plasma : 2 * num_points_plasma
+
+    # Local work arrays
+    grad_green = zeros(num_points_active, num_points_active)
     green_temp = zeros(num_points_plasma, num_points_plasma)
+
+    # Views into output Green's function matrices for the active rows/columns
+    grre = @view grre_in[1:num_points_active, :]
+    grri = @view grri_in[1:num_points_active, :]
 
     # Plasma–Plasma block
     kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
@@ -110,14 +124,12 @@ function compute_vacuum_response(
 
     # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
     grad_green .*= -1
-    for i in 1:num_points
+    for i in 1:num_points_active
         grad_green[i, i] += 2.0
     end
     grri .= grad_green \ grri
 
-    wv = zeros(ComplexF64, num_modes, num_modes)
-    plasma_pts = zeros(num_points_plasma, 3)
-    wall_pts = zeros(num_points_plasma, 3)
+    # Always initialise wv to zero so that green_only keeps it zeroed
     if !green_only
         # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
         arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
@@ -130,18 +142,133 @@ function compute_vacuum_response(
         wv .= complex.(arr .+ aii, air .- ari)
         inputs.force_wv_symmetry && hermitianpart!(wv)
 
-        # Fill xzpts array - this is temporary until we have a better way to handle the different geometries
-        plasma_pts = plasma_surf isa PlasmaGeometry3D ? plasma_surf.r : [plasma_surf.x zeros(num_points_plasma, 1) plasma_surf.z]
-        wall_pts = wall isa WallGeometry3D ? wall.r : [wall.x zeros(num_points_plasma, 1) wall.z]
-    end
+        # Fill coordinate arrays
+        if plasma_surf isa PlasmaGeometry3D
+            @views plasma_pts[1:num_points_plasma, :] .= plasma_surf.r
+        else
+            @views plasma_pts[1:num_points_plasma, :] .= [plasma_surf.x zeros(num_points_plasma, 1) plasma_surf.z]
+        end
 
-    # Append zeros for the wall points onto grri and grre arrays for expected output shape
-    if wall.nowall
-        grri = vcat(grri, zeros(num_points_plasma, 2 * num_modes))
-        grre = vcat(grre, zeros(num_points_plasma, 2 * num_modes))
+        if wall isa WallGeometry3D
+            @views wall_pts[1:num_points_plasma, :] .= wall.r
+        else
+            @views wall_pts[1:num_points_plasma, :] .= [wall.x zeros(num_points_plasma, 1) wall.z]
+        end
     end
+end
 
-    return wv, grri, grre, plasma_pts, wall_pts
+"""
+    compute_vacuum_response(
+        inputs::VacuumInput,
+        wall_settings::WallShapeSettings;
+        green_only=false)
+
+Allocate and return the vacuum response matrix and Green's functions for the given
+vacuum inputs.
+
+This is a thin allocating wrapper around the in‑place [`compute_vacuum_response!`]
+implementation. For performance‑critical paths that already own preallocated storage
+(e.g. `ForceFreeStates.VacuumData`), prefer the in‑place method to avoid extra
+heap allocations.
+"""
+function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+
+    # Allocate storage for the vacuum response matrix and Green's functions
+    numpoints = inputs.mtheta * inputs.nzeta
+    num_modes = inputs.mpert * inputs.npert
+    vac = (
+        wv=zeros(ComplexF64, num_modes, num_modes),
+        grri=zeros(Float64, 2 * numpoints, 2 * num_modes),
+        grre=zeros(Float64, 2 * numpoints, 2 * num_modes),
+        plasma_pts=zeros(Float64, numpoints, 3),
+        wall_pts=zeros(Float64, numpoints, 3)
+    )
+
+    compute_vacuum_response!(vac, inputs, wall_settings; green_only=green_only)
+
+    return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
+end
+
+"""
+    compute_vacuum_response!(
+        vac_data,
+        inputs::VacuumInput,
+        wall_settings::WallShapeSettings;
+        green_only=false)
+
+In-place variant that computes the vacuum response and directly populates the arrays
+stored in `vac_data`.
+
+The `vac_data` argument is expected to provide the following writable fields with
+compatible sizes:
+
+  - `wv::AbstractMatrix{ComplexF64}`             – vacuum response matrix
+  - `grri::AbstractMatrix{Float64}`              – interior Green's functions
+  - `grre::AbstractMatrix{Float64}`              – exterior Green's functions
+  - `plasma_pts::AbstractMatrix{Float64}`        – plasma surface coordinates
+  - `wall_pts::AbstractMatrix{Float64}`          – wall surface coordinates
+
+This is designed to work with `ForceFreeStates.VacuumData` but does not depend on
+its concrete type (duck-typed on field names only).
+"""
+function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+
+    mpert = inputs.mpert
+    npert = inputs.npert
+    numpert_total = mpert * npert
+
+    # 3D vacuum: full coupled response across (m,n) from a single kernel call
+    if inputs.nzeta > 1
+        _compute_vacuum_response_single!(
+            vac_data.wv,
+            vac_data.grri,
+            vac_data.grre,
+            vac_data.plasma_pts,
+            vac_data.wall_pts,
+            inputs,
+            wall_settings;
+            green_only=green_only
+        )
+    else
+        # 2D vacuum: fill diagonal blocks of the response matrix
+        vac_data.wv .= 0
+
+        # Each n is independent in 2D geometry → fill diagonal blocks inside preallocated arrays
+        ns = inputs.nlow:(inputs.nlow+inputs.npert-1)
+        for (idx_n, n) in enumerate(ns)
+            block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
+            cols = vcat(block_idx, numpert_total .+ block_idx)
+
+            wv_block = @view vac_data.wv[block_idx, block_idx]
+            grri_block = @view vac_data.grri[:, cols]
+            grre_block = @view vac_data.grre[:, cols]
+
+            # TODO: this was in the Fortran, not sure if we still need it? Kinda ugly here but ok for now
+            # Invert values for n < 0
+            flip = false
+            if n < 0
+                inputs.ν .= -inputs.ν
+                n = -n
+                flip = true
+            end
+
+            _compute_vacuum_response_single!(
+                wv_block,
+                grri_block,
+                grre_block,
+                vac_data.plasma_pts,
+                vac_data.wall_pts,
+                inputs,
+                wall_settings;
+                n_override=n,
+                green_only=green_only
+            )
+
+            if flip
+                inputs.ν .= -inputs.ν
+            end
+        end
+    end
 end
 
 """

@@ -163,8 +163,9 @@ function compute_singular_coupling_metrics!(
             end
 
             # Compute Green's functions at this surface for this n
-            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, mpert, mlow, nn)
-            _, grri, grre, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
+            # TODO: this interface needs work for multi-n, just runs through for now
+            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
+            _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
 
             # Store in singular surface struct (overwrites for each n)
             ffs_intr.sing[s].grri = grri

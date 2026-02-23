@@ -43,31 +43,38 @@ export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
 
 """
-    compute_fourier_coefficients(mtheta, mpert, mlow; n=0, ν=zeros(mtheta))
+    compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; n=nothing, ν=zeros(mtheta))
 
-Compute Fourier basis function coefficients for transforms between theta-space and mode-space.
+Compute Fourier basis function coefficients for transforms between physical-space and mode-space.
+Supports both 2D and 3D geometries. In 2D, we only use one toroidal mode at a time, so we can
+just use the n argument. In 3D, we need to compute the basis for all modes and grid points.
 
 # Arguments
 
 - `mtheta::Int`: Number of poloidal grid points (theta resolution)
 - `mpert::Int`: Number of Fourier modes (spectral resolution)
 - `mlow::Int`: Lowest mode number (mode numbering starts here)
+- `nzeta::Int`: Number of toroidal grid points
+- `npert::Int`: Number of toroidal modes
+- `nlow::Int`: Lowest toroidal mode number
 
 # Keyword Arguments
 
-- `n::Int=0`: Toroidal mode number (default: 0, no toroidal coupling)
+- `n::Union{Nothing, Int}=nothing`: Toroidal mode number for 2D (default: nothing)
 - `ν::Vector{Float64}=zeros(mtheta)`: Toroidal angle offset array (default: no offset, n*ν = 0)
 
 # Returns
 
-- `cos_mn_basis::Matrix{Float64}`: Cosine coefficients [mtheta, mpert] where `cos_mn_basis[i,l] = cos(m*θᵢ - n*νᵢ)`
-- `sin_mn_basis::Matrix{Float64}`: Sine coefficients [mtheta, mpert] where `sin_mn_basis[i,l] = sin(m*θᵢ - n*νᵢ)`
+- 2D
+  - `cos_mn_basis::Matrix{Float64}`: Cosine coefficients `cos(m*θ - n*ν)` [mtheta, mpert]
+  - `sin_mn_basis::Matrix{Float64}`: Sine coefficients `sin(m*θ - n*ν)` [mtheta, mpert]
+- 3D
+  - `cos_mn_basis::Matrix{Float64}`: Cosine coefficients `cos(m*θ - n*ν - n*ϕ)` [mtheta * nzeta, mpert * npert]
+  - `sin_mn_basis::Matrix{Float64}`: Sine coefficients `sin(m*θ - n*ν - n*ϕ)` [mtheta * nzeta, mpert * npert]
 
 # Notes
 
-The theta grid is uniform: `θᵢ = 2π*i/mtheta` for `i = 0:mtheta-1`
-
-Mode numbers are: `m = mlow, mlow+1, ..., mlow+mpert-1`
+The theta and phi grids are uniform: `θᵢ = 2π*i/mtheta` for `i = 0:mtheta-1` and `ϕⱼ = 2π*j/nzeta` for `j = 0:nzeta-1`
 
 When `n=0, ν=0` (default), this reduces to simple harmonic basis:
 - `cos_mn_basis[i,l] = cos(m*θᵢ)`
@@ -76,57 +83,39 @@ When `n=0, ν=0` (default), this reduces to simple harmonic basis:
 function compute_fourier_coefficients(
     mtheta::Int,
     mpert::Int,
-    mlow::Int;
-    n::Int=0,
-    ν::Vector{Float64}=zeros(Float64, mtheta)
-)
-    # Validate inputs
-    @assert mtheta > 0 "mtheta must be positive"
-    @assert mpert >= 0 "mpert must be non-negative"
-    @assert length(ν) == mtheta "ν must have length mtheta"
-
-    # Handle edge case: mpert = 0 returns empty arrays
-    mpert == 0 && return zeros(Float64, mtheta, 0), zeros(Float64, mtheta, 0)
-
-    # Uniform theta grid: [0, 2π)
-    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-
-    # Compute sin(mθ - nν) and cos(mθ - nν) for all modes and theta points
-    sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
-    cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
-
-    return cos_mn_basis, sin_mn_basis
-end
-
-"""
-    compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; ν=zeros(mtheta))
-
-3D version of compute_fourier_coefficients for vacuum calculations.
-
-"""
-function compute_fourier_coefficients(
-    mtheta::Int,
-    mpert::Int,
     mlow::Int,
     nzeta::Int,
     npert::Int,
     nlow::Int;
+    n::Union{Nothing, Int}=nothing,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
+    # Validate inputs
+    @assert length(ν) == mtheta "ν must have length mtheta"
+    @assert !(nzeta > 1 && n !== nothing) "If nzeta > 1, don't set n since we use the full nlow - nhigh range for the toroidal modes"
+    @assert !(n === nothing && nzeta == 1) "If nzeta == 1 (2D), set n to the toroidal mode number"
 
-    # Create poloidal and toroidal grids
+    # Uniform theta grid: [0, 2π)
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
-    ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
 
-    # Precompute Fourier transform terms, sin(lθ - nν(θ) - nϕ) and cos(lθ - nν(θ) - nϕ)
-    sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
-    cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
-    for idx_n in 1:npert, idx_m in 1:mpert
-        n = nlow + idx_n - 1
-        m = mlow + idx_m - 1
-        for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
-            cos_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
-            sin_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
+    if !isnothing(n)
+        # In 2D, we only use one toroidal mode at a time
+        # Compute sin(mθ - nν) and cos(mθ - nν)
+        sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
+        cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
+    else # nzeta > 1
+        # In 3D, we need to compute the basis for all modes and grid points
+        # Compute sin(mθ - nν - nϕ) and cos(mθ - nν - nϕ)
+        ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+        sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+        cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+        for idx_n in 1:npert, idx_m in 1:mpert
+            n = nlow + idx_n - 1
+            m = mlow + idx_m - 1
+            for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
+                cos_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
+                sin_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
+            end
         end
     end
 
@@ -209,7 +198,7 @@ function FourierTransform(
     n::Int=0,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow; n, ν)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, 1, 1, 1; n, ν)
     return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
 end
 
@@ -729,7 +718,7 @@ fourier_transform!(gil, gij, ft.cslth; row_offset=0, col_offset=0)
 fourier_transform!(gil, gij, ft.snlth; row_offset=0, col_offset=mpert)
 ```
 """
-function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+function fourier_transform!(gil::AbstractMatrix{Float64}, gij::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
     mul!(view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), gij, cs)
 end
 
@@ -772,7 +761,7 @@ arr = zeros(mpert, mpert)
 fourier_inverse_transform!(arr, gil, ft.cslth)
 ```
 """
-function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+function fourier_inverse_transform!(gll::AbstractMatrix{Float64}, gil::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
     mul!(gll, cs', view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), 4π^2 / size(cs, 1), 0.0)
 end
 
