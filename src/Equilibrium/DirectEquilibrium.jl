@@ -422,7 +422,7 @@ robustness.
     including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
-function equilibrium_solver(raw_profile::DirectRunInput)
+@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput)
 
     # Shorthand
     equil_params = raw_profile.config
@@ -453,24 +453,29 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     ro, zo, rs1, rs2 = direct_position!(raw_profile)
 
     # Loop over flux surfaces from outermost to innermost, integrating over field lines
-    sq_nodes = zeros(Float64, mpsi + 1, 4)
-    rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
+    sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
+    rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
 
-    ff_val = zeros(Float64, 4)
-    ff_deriv_val = zeros(Float64, 4)
+    ff_val = zeros!(pool, Float64, 4)
+    ff_deriv_val = zeros!(pool, Float64, 4)
 
     for ipsi in (mpsi+1):-1:1
         # Integrate along the field line for this surface
         y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
+        # checkpoint pool for Float64 slot 
+        checkpoint!(pool, Float64)
+        
         # Fit data into temporary straight fieldline poloidal angle splines
-        ff_x_nodes = y_out[:, 5] ./ y_out[end, 5]
-        ff_fs_nodes = hcat(
-            y_out[:, 3] .^ 2,
-            y_out[:, 1] / (2π) .- ff_x_nodes,
-            bfield.f * (y_out[:, 4] .- ff_x_nodes .* y_out[end, 4]),
-            y_out[:, 2] ./ y_out[end, 2] .- ff_x_nodes
-        )
+        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
+        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+
+        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
+        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])   
+        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
 
@@ -497,6 +502,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq_nodes[ipsi, 2] = bfield.p
         sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
+
+        # rewind pool for Float64 slot
+        rewind!(pool, Float64)
     end
 
     # Create temporary ProfileSplines for q-profile revision calculation
