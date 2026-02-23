@@ -254,7 +254,6 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     q_d3 = deriv3(q_spline)
 
     # Initial allocations
-    q = @MVector zeros(Float64, 4)
     singfac = zeros(Float64, intr.numpert_total, 4)
     f_lower_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
     g_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
@@ -268,7 +267,7 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
 
     # Evaluate q spline and its derivatives
-    q .= (q_spline(singp.psifac),
+    q = (q_spline(singp.psifac),
         q_d1(singp.psifac),
         q_d2(singp.psifac),
         q_d3(singp.psifac))
@@ -471,9 +470,9 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     for i in 0:ctrl.sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 0:i
-                x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
+                @views x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
             end
-            x[:, isol, 2, i+1] .+= Hermitian(g_lower[:, :, i+1], :L) * v[:, isol, 1]
+            @views x[:, isol, 2, i+1] .+= Hermitian(g_lower[:, :, i+1], :L) * v[:, isol, 1]
         end
     end
 
@@ -671,12 +670,12 @@ function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::Forc
     temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
 
     # LU factorization and solve
-    temp2 .= lu(temp1) \ temp2
+    temp2 .= lu!(temp1) \ temp2
 
     # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
-    ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
+    @views ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
+    @views ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
 
     return ca
 end
@@ -749,20 +748,20 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
         amat = ffit._mat_out
 
         # Use odet temporary buffers for subsequent matrices to avoid overwriting amat
+        ffit.bmats(odet.bmat, psieval; hint=ffit._hint)
         bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
-        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
 
+        ffit.cmats(odet.cmat, psieval; hint=ffit._hint)
         cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
-        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
 
+        ffit.fmats_lower(odet.fmat_lower, psieval; hint=ffit._hint)
         fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
-        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
 
+        ffit.kmats(odet.kmat, psieval; hint=ffit._hint)
         kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
-        ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
 
+        ffit.gmats(odet.gmat, psieval; hint=ffit._hint)
         gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
-        ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
 
         odet.Afact = cholesky!(Hermitian(amat))
         # bmat = A⁻¹ * bmat

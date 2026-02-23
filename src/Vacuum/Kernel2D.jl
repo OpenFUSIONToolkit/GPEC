@@ -327,9 +327,14 @@ has a typo where the exponent should be -1/4 instead of +1/2.
   - Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_1997!(P, s, n)
+end
+
+function Pn_minus_half_1997!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     #initialize
-    P = zeros(n + 2)
+    P .= 0.0
 
     # n = 0
     P[1] = P0_minus_half(s)
@@ -486,6 +491,11 @@ This implementation uses:
   - Reference: JCP 221 (2007) 330-348    # Constants
 """
 function Pn_minus_half_2007(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_2007!(P, s, n)
+end
+
+function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
     sqpi = sqrt(π)
@@ -493,7 +503,7 @@ function Pn_minus_half_2007(s::Real, n::Int)
     sqtwo = sqrt(2.0)
 
     # Initialize output array
-    P = zeros(n + 2)
+    P .= 0.0
 
     # Preliminary computations
     xxq = s * s

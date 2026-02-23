@@ -110,7 +110,7 @@ construction but may accumulate numerical noise during integration.
 function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
 
     # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
-    wp_inverse = u[:, :, 1] / u[:, :, 2]
+    @views wp_inverse = u[:, :, 1] / u[:, :, 2]
 
     # TODO: This section not be necessary since W should be Hermitian by construction.
     # This likely just removes any numerical noise during integration

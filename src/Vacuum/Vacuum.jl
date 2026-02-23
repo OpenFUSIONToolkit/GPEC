@@ -138,11 +138,15 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     # Invert the vacuum response system for both cases
     # If plasma only, lower blocks will be empty
     if wall.nowall
-        @views grri[1:mtheta, :] .= grad_green_interior[1:mtheta, 1:mtheta] \ grri[1:mtheta, :]
-        @views grre[1:mtheta, :] .= grad_green_exterior[1:mtheta, 1:mtheta] \ grre[1:mtheta, :]
+        F_int = lu!(@view grad_green_interior[1:mtheta, 1:mtheta])
+        ldiv!(F_int, @view grri[1:mtheta, :])
+        F_ext = lu!(@view grad_green_exterior[1:mtheta, 1:mtheta])
+        ldiv!(F_ext, @view grre[1:mtheta, :])
     else
-        grri .= grad_green_interior \ grri
-        grre .= grad_green_exterior \ grre
+        F_int = lu!(grad_green_interior)
+        ldiv!(F_int, grri)
+        F_ext = lu!(grad_green_exterior)
+        ldiv!(F_ext, grre)
     end
 
     # There's some logic that computes xpass/zpass and chiwc/chiws here, might eventually be needed?

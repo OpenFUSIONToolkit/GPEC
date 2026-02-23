@@ -180,9 +180,10 @@ function direct_position!(raw_profile::DirectRunInput)
 
     if !(abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r))
         error("Failed to find magnetic axis after $max_iterations iterations.")
-    else
-        ro, zo = r, z
     end
+
+    ro = r
+    zo = z
 
     # Renormalize psi based on the value at the magnetic axis
     direct_get_bfield!(bfield, ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
@@ -207,9 +208,9 @@ function direct_position!(raw_profile::DirectRunInput)
                     @warn "d(psi)/dr is near zero."
                     break
                 end
-                dr = -bfield.psi / bfield.psir
-                r_sep += dr
-                if abs(dr) <= 1e-12 * abs(r_sep)
+                dr_sep = -bfield.psi / bfield.psir
+                r_sep += dr_sep
+                if abs(dr_sep) <= 1e-12 * abs(r_sep)
                     r_sol = r_sep
                     found = true
                     break
@@ -256,10 +257,10 @@ from 1:5 rather than 0:4 as in Fortran.
 
   - `bfield`: A `DirectBField` object with values at the integration start point.
 """
-function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)
+function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)::Tuple{Matrix{Float64},DirectBField}
 
     # Find the starting point on the flux surface (outboard midplane)
-    psi0 = raw_profile.psio * (1.0 - psifac)
+    psi0_guess = raw_profile.psio * (1.0 - psifac)
     r = ro + sqrt(psifac) * (rs2 - ro)
     z = zo
     bfield = DirectBField()
@@ -269,7 +270,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     dr = 0.0
     for _ in 1:10
         direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
-        dr = (psi0 - bfield.psi) / bfield.psir
+        dr = (psi0_guess - bfield.psi) / bfield.psir
         r += dr
         if abs(dr) <= 1e-12 * r
             break
@@ -299,9 +300,10 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true)
+    sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
-    return hcat(sol.t, hcat(sol.u...)'), bfield
+    sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
+    return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
 end
 
 """
@@ -547,19 +549,19 @@ function equilibrium_solver(raw_profile::DirectRunInput)
             theta_norm = theta_nodes[itheta]
             # Access nodal derivatives from the interpolants (grid points)
             # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
-            f = SVector{4}(
+            f = (
                 rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_nu.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
             )
-            fx = SVector{4}(
+            fx = (
                 rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[2, ipsi, itheta],
                 rzphi_nu.nodal_derivs.partials[2, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
             )
-            fy = SVector{4}(
+            fy = (
                 rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],

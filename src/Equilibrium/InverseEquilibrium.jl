@@ -215,15 +215,15 @@ function equilibrium_solver(input::InverseRunInput)
         spl = cubic_interp(spl_xs, spl_fs; bc=PeriodicBC())
         spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
-        spl_xs = spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
-        spl_fs[:, 2] .+= rzphi_ys .- spl_xs
-        spl_fs[:, 4] = (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) * spl_fsi[mtheta+1, 3] * twopi * pi
-        spl_fs[:, 3] = f_sq_in[1] * pi / psio * (spl_fsi[:, 4] - spl_fsi[mtheta+1, 4] .* spl_xs)
+        @views spl_xs = spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
+        @views spl_fs[:, 2] .+= rzphi_ys .- spl_xs
+        @views spl_fs[:, 4] = (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) * spl_fsi[mtheta+1, 3] * twopi * pi
+        @views spl_fs[:, 3] = f_sq_in[1] * pi / psio * (spl_fsi[:, 4] - spl_fsi[mtheta+1, 4] .* spl_xs)
 
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
             fs = spl(theta)
-            rzphi_fs[ipsi+1, itheta+1, :] = fs[1:4]
+            @views rzphi_fs[ipsi+1, itheta+1, :] .= fs[1:4]
         end
 
         sq_fs[ipsi+1, 1] = f_sq_in[1] * twopi
@@ -268,24 +268,25 @@ function equilibrium_solver(input::InverseRunInput)
     rzphi_nu = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 3]; itp_opts2d...)
     rzphi_jac = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 4]; itp_opts2d...)
 
+    v = zeros(Float64, 3, 3)
     for ipsi in 0:mpsi
         f_sq = sq(sq_xs[ipsi+1])
         q = f_sq[4]
         for itheta in 0:mtheta
             # Evaluate rzphi interpolants at grid points using nodal_derivs
-            f_rzphi = SVector{4}(
+            f_rzphi = (
                 rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1],
                 rzphi_offset.nodal_derivs.partials[1, ipsi+1, itheta+1],
                 rzphi_nu.nodal_derivs.partials[1, ipsi+1, itheta+1],
                 rzphi_jac.nodal_derivs.partials[1, ipsi+1, itheta+1]
             )
-            fx_rzphi = SVector{4}(
+            fx_rzphi = (
                 rzphi_rsquared.nodal_derivs.partials[2, ipsi+1, itheta+1],
                 rzphi_offset.nodal_derivs.partials[2, ipsi+1, itheta+1],
                 rzphi_nu.nodal_derivs.partials[2, ipsi+1, itheta+1],
                 rzphi_jac.nodal_derivs.partials[2, ipsi+1, itheta+1]
             )
-            fy_rzphi = SVector{4}(
+            fy_rzphi = (
                 rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1],
                 rzphi_offset.nodal_derivs.partials[3, ipsi+1, itheta+1],
                 rzphi_nu.nodal_derivs.partials[3, ipsi+1, itheta+1],
@@ -296,7 +297,7 @@ function equilibrium_solver(input::InverseRunInput)
             r = ro + rfac * cos(eta)
             jacfac = fx_rzphi[4]
 
-            v = zeros(Float64, 3, 3)
+            fill!(v, 0.0)
             v[1, 1] = fx_rzphi[1] / (2 * rfac)
             v[1, 2] = fx_rzphi[2] * twopi * rfac
             v[1, 3] = fx_rzphi[3] * r

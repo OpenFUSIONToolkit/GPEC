@@ -141,16 +141,16 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000, dense=false)
 
     r_arr = sol.t
-    y_mat = hcat(sol.u...)'
+    y_mat = reduce(hcat, sol.u)'
     steps = length(r_arr)
 
     temp = zeros(steps, 9)
     for i in 1:steps
         r = r_arr[i]
-        y = y_mat[i, :]
+        @views y = y_mat[i, :]
         x = r / lar_a
         xfac = 1 - x^2
         pval = p00 * xfac^lar_input.p_pres
@@ -158,7 +158,15 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
                 sigma0 * xfac^lar_input.p_sig :
                 sigma0 / (1 + x^(2 * lar_input.p_sig))^(1 + 1 / lar_input.p_sig)
         q = r^2 * y[2] / (lar_r0 * y[1])
-        temp[i, :] = [r; y; pval; sigma; q]
+        temp[i, 1] = r
+        temp[i, 2] = y[1]
+        temp[i, 3] = y[2]
+        temp[i, 4] = y[3]
+        temp[i, 5] = y[4]
+        temp[i, 6] = y[5]
+        temp[i, 7] = pval
+        temp[i, 8] = sigma
+        temp[i, 9] = q
     end
 
     xs_r = temp[:, 1]
