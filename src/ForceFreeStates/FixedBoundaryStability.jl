@@ -61,7 +61,7 @@ can do it post-integration rather than during and don't directly handle file out
 
     # Compute smallest eigenvalue (crit) at current step
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
-    u = unsafe_acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
+    u = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
     psi = odet.psi_store[istep]
     u .= odet.u_store[:, :, :, istep]
     dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
@@ -101,19 +101,19 @@ construction but may accumulate numerical noise during integration.
 
 ### Arguments
 
-  - `u::Array{ComplexF64, 3}`: Solution matrix at `psi`
+  - `u::AbstractArray{ComplexF64, 3}`: Solution matrix at `psi`
 
 ### Returns
 
   - `crit::Float64`: the computed scaled critical eigenvalue
   - `nonherm::Bool`: true if W⁻¹ was non-Hermitian beyond tolerance (> 1e-3)
 """
-@with_pool pool function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
+@with_pool pool function compute_smallest_eigenvalue(u::AbstractArray{ComplexF64,3})
 
     # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
     # The following is in-place operation equivalent to wp_inverse = u[:, :, 1] / u[:, :, 2]
-    wp_inverse = unsafe_acquire!(pool, ComplexF64, size(u, 1), size(u, 2))
-    U2_tmp = unsafe_similar!(pool, wp_inverse)
+    wp_inverse = acquire!(pool, ComplexF64, size(u, 1), size(u, 2))
+    U2_tmp = similar!(pool, wp_inverse)
     wp_inverse .= @view u[:, :, 1]
     U2_tmp .= @view u[:, :, 2]
     rdiv!(wp_inverse, lu!(U2_tmp))
@@ -126,9 +126,9 @@ construction but may accumulate numerical noise during integration.
     # Check to make sure W is at least close to Hermitian before enforcing it
 
     # Compute adjoint in-place to avoid allocations
-    adjoint_wp_inverse = unsafe_similar!(pool, wp_inverse)
-    tmp_mat1 = unsafe_similar!(pool, wp_inverse)
-    tmp_mat2 = unsafe_similar!(pool, wp_inverse)
+    adjoint_wp_inverse = similar!(pool, wp_inverse)
+    tmp_mat1 = similar!(pool, wp_inverse)
+    tmp_mat2 = similar!(pool, wp_inverse)
     adjoint!(adjoint_wp_inverse, wp_inverse)
     @. tmp_mat1 = 0.5 * (wp_inverse + adjoint_wp_inverse)
     @. tmp_mat2 = 0.5 * (wp_inverse - adjoint_wp_inverse)

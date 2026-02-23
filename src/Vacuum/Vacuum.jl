@@ -27,7 +27,7 @@ export extract_plasma_surface_at_psi
 Apply kernelsign transformation to Green's function matrix.
 For kernelsign < 0 (interior potential), multiply by -1 and add 2 to diagonal.
 """
-function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::Float64, mtheta::Int)
+function apply_kernelsign!(grad_greenfunction_mat::AbstractMatrix{Float64}, kernelsign::Float64, mtheta::Int)
     if kernelsign < 0
         grad_greenfunction_mat .*= kernelsign
         # Account for factor of 2 in diagonal terms [Chance Phys. Plasmas 1997 2161 eq. 90]
@@ -80,8 +80,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     # Allocate arrays for both Green's functions
     grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
     grre = zeros(2 * mtheta, 2 * mpert)  # Exterior (kernelsign=+1)
-    grad_green = unsafe_zeros!(pool, 2 * mtheta, 2 * mtheta)
-    green_temp = unsafe_zeros!(pool, mtheta, mtheta)
+    grad_green = zeros!(pool, 2 * mtheta, 2 * mtheta)
+    green_temp = zeros!(pool, mtheta, mtheta)
 
     # Fourier transforms offsets into grri/grre: first mtheta rows are plasma as observer, second are wall
     # First mpert columns are real (cosine), second mpert are imaginary (sine)
@@ -129,8 +129,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     # grre: exterior potential (kernelsign=+1)
 
     # Make copies for each kernelsign
-    grad_green_interior = unsafe_similar!(pool, grad_green)
-    grad_green_exterior = unsafe_similar!(pool, grad_green)
+    grad_green_interior = similar!(pool, grad_green)
+    grad_green_exterior = similar!(pool, grad_green)
     grad_green_interior .= grad_green
     grad_green_exterior .= grad_green
 

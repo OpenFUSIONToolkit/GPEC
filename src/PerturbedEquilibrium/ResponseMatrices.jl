@@ -241,7 +241,7 @@ function calc_plasma_inductance(
 end
 
 """
-    pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+    pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::Vector{Float64}
 
 Pack complex mode coefficients into real/imaginary pairs for Green's function application.
 
@@ -253,7 +253,7 @@ Converts [a+bi, c+di, ...] to [a, b, c, d, ...]
 ## Returns
 - Packed real/imaginary array [2*mpert]
 """
-function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+function pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::Vector{Float64}
     mpert = length(modes)
     packed = zeros(Float64, 2 * mpert)
     for i in 1:mpert
@@ -264,7 +264,7 @@ function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
 end
 
 """
-    unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+    unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
 
 Unpack real/imaginary pairs back to complex coefficients.
 
@@ -276,7 +276,7 @@ Converts [a, b, c, d, ...] to [a+bi, c+di, ...]
 ## Returns
 - Complex mode coefficients [mpert]
 """
-function unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+function unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
     mpert = length(packed) ÷ 2
     modes = zeros(ComplexF64, mpert)
     for i in 1:mpert
@@ -320,9 +320,9 @@ function apply_green_function(
 end
 
 function apply_green_function!(
-    chi_theta::Vector{Float64},
+    chi_theta::AbstractVector{Float64},
     green::Matrix{Float64},
-    mode_coeffs::Vector{ComplexF64}
+    mode_coeffs::AbstractVector{ComplexF64}
 )
     # Pack complex coefficients to real/imag format for Green's function
     # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]

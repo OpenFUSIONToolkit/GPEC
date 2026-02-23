@@ -85,8 +85,8 @@ but grad_greenfunction is not since it fills a different block of the
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
 function kernel!(
-    grad_greenfunction::Matrix{Float64},
-    greenfunction::Matrix{Float64},
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int

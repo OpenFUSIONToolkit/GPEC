@@ -580,14 +580,14 @@ fsurf_indmats = fflxmats * inv(fkaxmats)
 
     # Initialize matrices (mpert x mpert for single toroidal mode number)
     # Green's functions are computed for a specific n, so inductance is only over poloidal modes
-    flux_matrix = unsafe_zeros!(pool, ComplexF64, mpert, mpert)
-    current_matrix = unsafe_zeros!(pool, ComplexF64, mpert, mpert)
+    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
 
     # Pre-allocate loop buffers from pool
-    vbwp_mn = unsafe_zeros!(pool, ComplexF64, mpert)
-    chi_theta = unsafe_zeros!(pool, Float64, mtheta)
-    che_theta = unsafe_zeros!(pool, Float64, mtheta)
-    kax_theta = unsafe_zeros!(pool, Float64, mtheta)
+    vbwp_mn = zeros!(pool, ComplexF64, mpert)
+    chi_theta = zeros!(pool, Float64, mtheta)
+    che_theta = zeros!(pool, Float64, mtheta)
+    kax_theta = zeros!(pool, Float64, mtheta)
 
     # For each poloidal mode, compute surface current from Green's functions
     for i in 1:mpert

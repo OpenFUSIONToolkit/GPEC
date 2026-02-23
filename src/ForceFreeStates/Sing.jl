@@ -591,7 +591,7 @@ end
 
     fill!(out, zero(ComplexF64))
     # main computation
-    tmp = unsafe_acquire!(pool, ComplexF64, size(a, 1))
+    tmp = acquire!(pool, ComplexF64, size(a, 1))
     for i in 1:n
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
