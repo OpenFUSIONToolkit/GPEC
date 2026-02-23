@@ -108,10 +108,15 @@ construction but may accumulate numerical noise during integration.
   - `crit::Float64`: the computed scaled critical eigenvalue
   - `nonherm::Bool`: true if W⁻¹ was non-Hermitian beyond tolerance (> 1e-3)
 """
-function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
+@with_pool pool function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
 
     # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
-    @views wp_inverse = u[:, :, 1] / u[:, :, 2]
+    # The following is in-place operation equivalent to wp_inverse = u[:, :, 1] / u[:, :, 2]
+    wp_inverse = unsafe_acquire!(pool, ComplexF64, size(u, 1), size(u, 2))
+    U2_tmp = unsafe_similar!(pool, wp_inverse)
+    wp_inverse .= @view u[:, :, 1]
+    U2_tmp .= @view u[:, :, 2]
+    rdiv!(wp_inverse, lu!(U2_tmp))
 
     # TODO: This section not be necessary since W should be Hermitian by construction.
     # This likely just removes any numerical noise during integration
@@ -119,7 +124,16 @@ function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
     # by ignoring the lower triangle (by default, can ignore upper using `uplo=:L`), which will
     # NOT produce identical results to taking the Hermitian part as done here unless is exactly Hermitian.
     # Check to make sure W is at least close to Hermitian before enforcing it
-    nonherm_error = norm(0.5 * (wp_inverse - adjoint(wp_inverse))) / norm(0.5 * (wp_inverse + adjoint(wp_inverse)))
+
+    # Compute adjoint in-place to avoid allocations
+    adjoint_wp_inverse = unsafe_similar!(pool, wp_inverse)
+    tmp_mat1 = unsafe_similar!(pool, wp_inverse)
+    tmp_mat2 = unsafe_similar!(pool, wp_inverse)
+    adjoint!(adjoint_wp_inverse, wp_inverse)
+    @. tmp_mat1 = 0.5 * (wp_inverse + adjoint_wp_inverse)
+    @. tmp_mat2 = 0.5 * (wp_inverse - adjoint_wp_inverse)
+
+    nonherm_error = norm(tmp_mat2) / norm(tmp_mat1)
     nonherm = nonherm_error > 1e-3
 
     # Enforce that W is Hermitian
