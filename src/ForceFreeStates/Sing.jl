@@ -254,17 +254,20 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     q_d3 = deriv3(q_spline)
 
     # Initial allocations
-    singfac = zeros!(pool, Float64, intr.numpert_total, 4)
-    f_lower_interp = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    g_interp = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    k_interp = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    f_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    f0_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total)
-    ff_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    g_lower = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    k = zeros!(pool, ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    v = zeros!(pool, ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
-    x = zeros!(pool, ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
+    Npert = intr.numpert_total
+
+    singfac = zeros!(pool, Float64, Npert, 4)
+    f_lower_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    g_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    k_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    f_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    f0_lower = zeros!(pool, ComplexF64, Npert, Npert)
+    ff_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    g_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    k = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    v = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2)
+    x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, ctrl.sing_order + 1)
+    tmp_vec = acquire!(pool, ComplexF64, Npert)
 
     # Evaluate q spline and its derivatives
     q = (q_spline(singp.psifac),
@@ -451,7 +454,8 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
     # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
     for isol in 1:(2*intr.numpert_total)
-        @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
+        @views mul!(tmp_vec, k[:, :, 1], v[:, isol, 1])
+        @views x[:, isol, 1, 1] .= v[:, isol, 2] .- tmp_vec
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
@@ -459,9 +463,11 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     for i in 1:ctrl.sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 1:i
-                @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
+                @views mul!(tmp_vec, Hermitian(ff_lower[:, :, j+1], :L), x[:, isol, 1, i-j+1])
+                @views x[:, isol, 1, i+1] .-= tmp_vec
             end
-            @views x[:, isol, 1, i+1] .-= k[:, :, i+1] * v[:, isol, 1]
+            @views mul!(tmp_vec, k[:, :, i+1], v[:, isol, 1])
+            @views x[:, isol, 1, i+1] .-= tmp_vec
         end
         @views x[:, :, 1, i+1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, i+1])
     end
@@ -470,9 +476,11 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     for i in 0:ctrl.sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 0:i
-                @views x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
+                @views mul!(tmp_vec, adjoint(k[:, :, j+1]), x[:, isol, 1, i-j+1])
+                @views x[:, isol, 2, i+1] .+= tmp_vec
             end
-            @views x[:, isol, 2, i+1] .+= Hermitian(g_lower[:, :, i+1], :L) * v[:, isol, 1]
+            @views mul!(tmp_vec, Hermitian(g_lower[:, :, i+1], :L), v[:, isol, 1])
+            @views x[:, isol, 2, i+1] .+= tmp_vec
         end
     end
 
