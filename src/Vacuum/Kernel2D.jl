@@ -9,21 +9,20 @@ struct GaussLegendreRule{N,T}
     w::SVector{N,T}
 end
 
-@inline function gausslegendre_rule(::Val{N}, (::Type{T})=Float64) where {N,T}
+@inline function gausslegendre_rule(::Val{N}) where {N}
     x, w = gausslegendre(N) # canonical [-1, 1]
-    return GaussLegendreRule{N,T}(
-        SVector{N,T}(ntuple(i -> T(x[i]), N)),
-        SVector{N,T}(ntuple(i -> T(w[i]), N))
+    return GaussLegendreRule{N,Float64}(
+        SVector{N,Float64}(ntuple(i -> Float64(x[i]), N)),
+        SVector{N,Float64}(ntuple(i -> Float64(w[i]), N))
     )
 end
 
-# Rules used in hot paths (`kernel!`, `Pn_minus_half_2007`).
-# Constructed once at module load; no allocations in the inner loops.
-const GL8 = gausslegendre_rule(Val(8), Float64)
-const GL32 = gausslegendre_rule(Val(32), Float64)
+# Precomputed Gauss-Legendre rules used in hot paths (`kernel!`, `Pn_minus_half_2007`).
+const GL8 = gausslegendre_rule(Val(8))
+const GL32 = gausslegendre_rule(Val(32))
 
-# Cache for Lagrange stencils keyed by Gaussian order
-const LAGRANGE_STENCIL_CACHE = Dict{Int,Tuple{Vector{SVector{5,Float64}},Vector{SVector{5,Float64}}}}()
+# Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
+const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 
 """
     precompute_lagrange_stencils(gaussian_points)
@@ -55,19 +54,6 @@ function precompute_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
     end
 
     return left, right
-end
-
-"""
-    get_lagrange_stencils(gaussian_points)
-
-Return cached 5-point Lagrange stencils keyed by Gaussian order. Initializes
-and caches the stencils on first use for a given order.
-"""
-function get_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
-    order = length(gaussian_points)
-    return get!(LAGRANGE_STENCIL_CACHE, order) do
-        precompute_lagrange_stencils(gaussian_points)
-    end
 end
 
 """
@@ -128,7 +114,7 @@ function kernel!(
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
-    log_correction_array = [log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2]
+    log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
 
     # Set up periodic splines used for off-grid Gaussian quadrature points
     spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
@@ -137,19 +123,13 @@ function kernel!(
     d1_spline_z = deriv1(spline_z)
 
     # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
-    stencils_left, stencils_right = get_lagrange_stencils(GL8.x)
+    stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
     sing_idx = zeros(Int, 5)
-    stencil = zeros(5)
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = Vector{Float64}(undef, mtheta)
-    dz_dtheta_grid = Vector{Float64}(undef, mtheta)
-    @inbounds @simd for i in 1:mtheta
-        θi = theta_grid[i]
-        dx_dtheta_grid[i] = d1_spline_x(θi)
-        dz_dtheta_grid[i] = d1_spline_z(θi)
-    end
+    dx_dtheta_grid = d1_spline_x.(theta_grid)
+    dz_dtheta_grid = d1_spline_z.(theta_grid)
 
     # Loop through observer points
     for j in 1:mtheta
@@ -164,7 +144,7 @@ function kernel!(
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-            wsimpson = dtheta / 3 .* ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
+            wsimpson = dtheta / 3 * ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
 
             # Sum contributions to Green's function matrices using Simpson weight
             if populate_greenfunction
@@ -193,8 +173,9 @@ function kernel!(
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
                 G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
 
-                # Get the stencil weights for the Gaussian point
-                stencil .= leftpanel ? stencils_left[ig] : stencils_right[ig]
+                # Get stencil and weight for the Gaussian point
+                s = leftpanel ? stencils_left[ig] : stencils_right[ig]
+                wgauss = GL8.w[ig] * dtheta
 
                 # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 75]
                 if populate_greenfunction
@@ -203,16 +184,16 @@ function kernel!(
                         G_n += log((theta_obs - theta_gauss)^2) / x_obs
                     end
                     @inbounds for stencil_idx in 1:5
-                        greenfunction[j, sing_idx[stencil_idx]] += G_n * stencil[stencil_idx] * GL8.w[ig] * dtheta
+                        greenfunction[j, sing_idx[stencil_idx]] += G_n * s[stencil_idx] * wgauss
                     end
                 end
 
                 # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
                 @inbounds for stencil_idx in 1:5
-                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * stencil[stencil_idx] * GL8.w[ig] * dtheta
+                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * s[stencil_idx] * wgauss
                 end
                 # Subtract off the diverging singular n=0 component
-                grad_greenfunction_block[j, j] -= gradG_0 * GL8.w[ig] * dtheta
+                grad_greenfunction_block[j, j] -= gradG_0 * wgauss
             end
         end
 
