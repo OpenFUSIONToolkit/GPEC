@@ -455,6 +455,10 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros(Float64, mpsi + 1, 4)
     rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
+
+    ff_val = zeros(Float64, 4)
+    ff_deriv_val = zeros(Float64, 4)
+
     for ipsi in (mpsi+1):-1:1
         # Integrate along the field line for this surface
         y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
@@ -477,11 +481,15 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
-            ff_val = ff_interp(theta)
+
+            # In-place operation to avoid allocations
+            ff_interp(ff_val, theta)
+            ff_deriv(ff_deriv_val, theta)
+
             rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
             rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
             rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
-            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv(theta)[4]) * y_out[end, 2] * 2π * psio
+            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
         end
 
         # Store surface-averaged quantities for the `sq` spline
