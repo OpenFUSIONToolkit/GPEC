@@ -591,13 +591,13 @@ end
 
     fill!(out, zero(ComplexF64))
     # main computation
-    tmp = unsafe_zeros!(pool, ComplexF64, size(a, 1))
+    tmp = unsafe_acquire!(pool, ComplexF64, size(a, 1))
     for i in 1:n
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
-            out[:, i, j] .+= tmp
+            @views out[:, i, j] .+= tmp
             @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
-            out[:, i, j] .+= tmp
+            @views out[:, i, j] .+= tmp
         end
     end
 
