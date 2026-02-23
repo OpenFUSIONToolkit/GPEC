@@ -84,7 +84,7 @@ but grad_greenfunction is not since it fills a different block of the
   - Uses Gaussian quadrature near singular points for improved accuracy
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
-function kernel!(
+@with_pool pool function kernel!(
     grad_greenfunction::AbstractMatrix{Float64},
     greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
@@ -124,12 +124,16 @@ function kernel!(
 
     # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
     stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
-    sing_idx = zeros(Int, 5)
+    sing_idx = zeros!(pool, Int, 5)
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = d1_spline_x(theta_grid)
-    dz_dtheta_grid = d1_spline_z(theta_grid)
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
+
+    # Call in-place API to avoid allocations
+    d1_spline_x(dx_dtheta_grid, theta_grid)
+    d1_spline_z(dz_dtheta_grid, theta_grid)
 
     # Loop through observer points
     for j in 1:mtheta
