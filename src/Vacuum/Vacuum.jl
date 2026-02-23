@@ -102,7 +102,9 @@ function compute_vacuum_response(
         fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_plasma, col_offset=num_modes)
     end
 
-    # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1).
+    # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
+    grri .= grre # start from same as exterior
+
     # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations.
     grre .= grad_green \ grre
 
@@ -114,7 +116,8 @@ function compute_vacuum_response(
     grri .= grad_green \ grri
 
     wv = zeros(ComplexF64, num_modes, num_modes)
-    xzpts = zeros(num_points_plasma, 4)
+    plasma_pts = zeros(num_points_plasma, 3)
+    wall_pts = zeros(num_points_plasma, 3)
     if !green_only
         # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
         arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
@@ -128,13 +131,13 @@ function compute_vacuum_response(
         inputs.force_wv_symmetry && hermitianpart!(wv)
 
         # Fill xzpts array - this is temporary until we have a better way to handle the different geometries
-        @views xzpts[:, 1] .= plasma_surf isa PlasmaGeometry ? plasma_surf.x : plasma_surf.r[:, 1]
-        @views xzpts[:, 2] .= plasma_surf isa PlasmaGeometry ? plasma_surf.z : plasma_surf.r[:, 3]
-        @views xzpts[:, 3] .= wall isa WallGeometry ? wall.x : wall.r[:, 1]
-        @views xzpts[:, 4] .= wall isa WallGeometry ? wall.z : wall.r[:, 3]
+        @views plasma_pts[:, 1] .= plasma_surf isa PlasmaGeometry ? plasma_surf.x : plasma_surf.r[:, 1]
+        @views plasma_pts[:, 3] .= plasma_surf isa PlasmaGeometry ? plasma_surf.z : plasma_surf.r[:, 3]
+        @views wall_pts[:, 1] .= wall isa WallGeometry ? wall.x : wall.r[:, 1]
+        @views wall_pts[:, 3] .= wall isa WallGeometry ? wall.z : wall.r[:, 3]
     end
 
-    return wv, grri, grre, xzpts
+    return wv, grri, grre, plasma_pts, wall_pts
 end
 
 """

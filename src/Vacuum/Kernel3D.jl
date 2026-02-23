@@ -66,7 +66,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
     ANG_DIM = 2 * RAD_DIM
 
     # Setup radial quadrature
-    qx_raw, qw_raw = FastGaussQuadrature.gausslegendre(RAD_DIM) # points on [-1,1]
+    qx_raw, qw_raw = gausslegendre(RAD_DIM) # points on [-1,1]
     qx = (qx_raw .+ 1) ./ 2  # Map [-1, 1] to [0, 1]
     qw = qw_raw ./ 2         # Adjust weights for interval change
 

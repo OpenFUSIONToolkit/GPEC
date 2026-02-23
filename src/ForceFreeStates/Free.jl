@@ -10,14 +10,15 @@ and data dumping.
 function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
-    vac = VacuumData(ctrl.mthvac, intr.mpert, intr.numpert_total)
-    etemp = zeros(ComplexF64, intr.numpert_total)
-    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    wpt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    wvt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    (; mpert, mlow, mhigh, mband, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
+    vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, numpert_total)
+    etemp = zeros(ComplexF64, numpert_total)
+    wp = zeros(ComplexF64, numpert_total, numpert_total)
+    wpt = zeros(ComplexF64, numpert_total, numpert_total)
+    wvt = zeros(ComplexF64, numpert_total, numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
-    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
+    dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
@@ -25,118 +26,90 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     end
 
     # Compute vacuum response matrix
-    for ipert_n in 1:intr.npert
-        # Set VACUUM run parameters and boundary shape
-        n = ipert_n - 1 + intr.nlow
-        vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
-        fill!(vac.grri, 0.0)
-        fill!(vac.grre, 0.0)
-        fill!(vac.xzpts, 0.0)
+    if ctrl.nzvac == 1
+        vac_data.wv .= 0.0 # need to zero to avoid multiplication of undef by singfac during scaling
+        for idx_n in 1:npert
+            # Set VACUUM run parameters and boundary shape
+            n = idx_n - 1 + nlow
+            vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, mpert, mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
 
-        # Compute vacuum energy matrix and both Green's functions
-        wv_block, vac.grri, vac.grre, vac.xzpts = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+            # Compute vacuum energy matrix and both Green's functions
+            wv_block, grri, grre, vac_data.plasma_pts, vac_data.wall_pts = Vacuum.compute_vacuum_response(vac_inputs, wall_settings)
 
-        # Scale by (m - n*q)(m' - n*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
-        singfac = collect(intr.mlow:intr.mhigh) .- (n * intr.qlim)
-        @inbounds for ipert in 1:intr.mpert
-            @views wv_block[ipert, :] .*= singfac[ipert]
-            @views wv_block[:, ipert] .*= singfac[ipert]
+            # Store blocks into full matrices
+            block_idx = ((idx_n-1)*mpert+1):(idx_n*mpert)
+            # Copy the real terms from grri to grre
+            @views vac_data.grri[:, block_idx] .= grri[:, 1:mpert]
+            @views vac_data.grre[:, block_idx] .= grre[:, 1:mpert]
+            # Copy the imaginary terms from grri to grre - offset by numpert_total
+            @views vac_data.grri[:, numpert_total .+ block_idx] .= grri[:, (mpert+1):(2*mpert)]
+            @views vac_data.grre[:, numpert_total .+ block_idx] .= grre[:, (mpert+1):(2*mpert)]
+            @views vac_data.wv[block_idx, block_idx] .= wv_block
         end
-
-        # Store block in full wv matrix
-        @views vac.wv[((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
-    end
-
-    wv3D = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    if ctrl.nzvac > 1
+    else
         if ctrl.verbose
             println("Computing 3D vacuum response matrix in addition to 2D matrix with nzvac = $(ctrl.nzvac)")
         end
 
         # Compute 3D vacuum response matrix
-        vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, 1; force_wv_symmetry=ctrl.force_wv_symmetry)
-        vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, intr.nlow, intr.npert)
-        stats = @timed Vacuum.compute_vacuum_response(vac_inputs_3D, intr.wall_settings)
+        vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, mpert, mlow, 1; force_wv_symmetry=ctrl.force_wv_symmetry)
+        vac_inputs_3D = Vacuum.VacuumInput3D(vac_inputs, ctrl.nzvac, nlow, npert)
+        vac_data.wv, vac_data.grri, vac_data.grre, vac_data.plasma_pts, vac_data.wall_pts = @timev Vacuum.compute_vacuum_response(vac_inputs_3D, wall_settings)
+    end
 
-        wv3D = reshape(stats.value[1], intr.numpert_total, intr.numpert_total)
-
-        # Scale by (m - n*q)(m' - n'*q)
-        singfac = vec((intr.mlow:intr.mhigh) .- intr.qlim .* (intr.nlow:intr.nhigh)')
-        @inbounds for ipert in 1:intr.numpert_total
-            @views wv3D[ipert, :] .*= singfac[ipert]
-            @views wv3D[:, ipert] .*= singfac[ipert]
-        end
-
-        # DEBUG
-        if true
-            println("2D Vacuum response matrix wv:")
-            display(vac.wv)
-            println("3D Vacuum response matrix wv3D:")
-            display(wv3D)
-        end
-        println("Maximum relative difference between 2D and 3D vacuum response matrices:")
-        display(maximum(abs.(vac.wv .- wv3D)) / maximum(abs.(vac.wv)))
-        println("Maximum difference between 2D and 3D vacuum response matrices:")
-        display(maximum(abs.(vac.wv .- wv3D)))
-        println("Relative difference in maximum eigenvalue:")
-        display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))) / maximum(real.(eigvals(vac.wv))))
-        println("Difference in maximum eigenvalue:")
-        display((maximum(real.(eigvals(vac.wv))) - maximum(real.(eigvals(wv3D)))))
-
-        println("3D vacuum response computation time: $(round(stats.time, digits=4))s")
-        println("GC allocations: $(Base.gc_alloc_count(stats.gcstats)), $(stats.bytes / 1e9) GB")
-        if (maximum(abs.(vac.wv .- wv3D)) / maximum(abs.(vac.wv)) > 2e-2)
-            error("Maximum relative difference between 2D and 3D vacuum response matrices is greater than 2e-2")
-        end
-        vac.wv .= wv3D
+    # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
+    singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
+    @inbounds for ipert in 1:numpert_total
+        @views vac_data.wv[ipert, :] .*= singfac[ipert]
+        @views vac_data.wv[:, ipert] .*= singfac[ipert]
     end
 
     # Compute complex energy eigenvalues and vectors
-    vac.wt .= wp .+ vac.wv
-    vac.wt0 .= vac.wt
-    Ev = eigen(vac.wt)
-    vac.et .= Ev.values
-    eindex = sortperm(real.(vac.et); rev=true)
+    vac_data.wt .= wp .+ vac_data.wv
+    vac_data.wt0 .= vac_data.wt
+    Ev = eigen(vac_data.wt)
+    vac_data.et .= Ev.values
+    eindex = sortperm(real.(vac_data.et); rev=true)
 
-    etemp .= vac.et
+    etemp .= vac_data.et
     # Rearrange wt columns for descending real eigenvalues
-    for ipert in 1:intr.numpert_total
-        vac.wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
-        vac.et[ipert] = etemp[eindex[intr.numpert_total+1-ipert]]
+    for ipert in 1:numpert_total
+        vac_data.wt[:, ipert] .= Ev.vectors[:, eindex[numpert_total+1-ipert]]
+        vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
     end
 
     # Normalize eigenfunction and energy.
-    for isol in 1:intr.numpert_total
+    for isol in 1:numpert_total
         norm = 0.0 + 0.0im
-        for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
-            ipert = (ipert_n - 1) * intr.mpert + ipert_m
-            jpert = (ipert_n - 1) * intr.mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * vac.wt[ipert, isol] * conj(vac.wt[jpert, isol])
+        for ipert_n in 1:npert, ipert_m in 1:mpert, jpert_m in 1:mpert
+            ipert = (ipert_n - 1) * mpert + ipert_m
+            jpert = (ipert_n - 1) * mpert + jpert_m
+            norm += ffit.jmat[jpert_m-ipert_m+mband+1] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
         end
         norm /= dV_dpsi
-        vac.wt[:, isol] ./= sqrt(norm)
-        vac.et[isol] /= norm
+        vac_data.wt[:, isol] ./= sqrt(norm)
+        vac_data.et[isol] /= norm
     end
 
     # Normalize phase
     imax = 0
-    for isol in 1:intr.numpert_total
-        imax = argmax(abs.(vac.wt[:, isol]))
-        phase = abs(vac.wt[imax, isol]) / vac.wt[imax, isol]
-        vac.wt[:, isol] .*= phase
+    for isol in 1:numpert_total
+        imax = argmax(abs.(vac_data.wt[:, isol]))
+        phase = abs(vac_data.wt[imax, isol]) / vac_data.wt[imax, isol]
+        vac_data.wt[:, isol] .*= phase
     end
 
     # Compute plasma and vacuum contributions.
     # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
-    wpt .= adjoint(vac.wt) * (wp * vac.wt)
-    wvt .= adjoint(vac.wt) * (vac.wv * vac.wt)
-    for ipert in 1:intr.numpert_total
-        vac.ep[ipert] = wpt[ipert, ipert]
-        vac.ev[ipert] = wvt[ipert, ipert]
+    wpt .= adjoint(vac_data.wt) * (wp * vac_data.wt)
+    wvt .= adjoint(vac_data.wt) * (vac_data.wv * vac_data.wt)
+    for ipert in 1:numpert_total
+        vac_data.ep[ipert] = wpt[ipert, ipert]
+        vac_data.ev[ipert] = wvt[ipert, ipert]
     end
 
     # Normalize eigenvectors based on scaled wt
-    coeffs = odet.u[:, :, 1, end] \ (vac.wt .* (2π * equil.psio * 1e-3))
+    coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
     @views for istep in 1:odet.step
         mul!(odet.tmp, odet.u_store[:, :, 1, istep], coeffs)
         odet.u_store[:, :, 1, istep] .= odet.tmp
@@ -151,12 +124,12 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     # Write energies to screen
     if ctrl.verbose
         println("Least Stable Eigenmode Energies:")
-        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))
-        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))
-        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))
+        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac_data.ep[1]) imag(vac_data.ep[1])))
+        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac_data.ev[1]) imag(vac_data.ev[1])))
+        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac_data.et[1]) imag(vac_data.et[1])))
     end
 
-    return vac
+    return vac_data
 end
 
 """

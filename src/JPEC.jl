@@ -312,7 +312,13 @@ vacuum data if `vac_flag` is true.
 
 Combine spline unpacking if possible, too many extra lines
 """
-function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
+function write_outputs_to_HDF5(
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal,
+    odet::OdeState,
+    vac_data::Union{VacuumData,Nothing}
+)
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
@@ -401,15 +407,15 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
 
         # Write vacuum Data
         if ctrl.vac_flag
-            out_h5["vacuum/wt"] = vac.wt
-            out_h5["vacuum/wt0"] = vac.wt0
-            out_h5["vacuum/ep"] = vac.ep
-            out_h5["vacuum/ev"] = vac.ev
-            out_h5["vacuum/et"] = vac.et
-            out_h5["vacuum/x_plasma"] = vac.xzpts[:, 1]
-            out_h5["vacuum/z_plasma"] = vac.xzpts[:, 2]
-            out_h5["vacuum/x_wall"] = vac.xzpts[:, 3]
-            out_h5["vacuum/z_wall"] = vac.xzpts[:, 4]
+            out_h5["vacuum/wt"] = vac_data.wt
+            out_h5["vacuum/wt0"] = vac_data.wt0
+            out_h5["vacuum/ep"] = vac_data.ep
+            out_h5["vacuum/ev"] = vac_data.ev
+            out_h5["vacuum/et"] = vac_data.et
+            out_h5["vacuum/x_plasma"] = vac_data.plasma_pts[:, 1]
+            out_h5["vacuum/z_plasma"] = vac_data.plasma_pts[:, 3]
+            out_h5["vacuum/x_wall"] = vac_data.wall_pts[:, 1]
+            out_h5["vacuum/z_wall"] = vac_data.wall_pts[:, 3]
         end
     end
 end

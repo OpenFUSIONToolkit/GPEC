@@ -330,8 +330,7 @@ Populated in `Free.jl`.
   - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
-    mthvac::Int
-    mpert::Int
+    numpoints::Int
     numpert_total::Int
 
     wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
@@ -341,13 +340,13 @@ Populated in `Free.jl`.
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
 
-    # TODO: update these
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
-    grre::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
-    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
+    grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
+    plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
+    wall_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
 end
 
-VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)
+VacuumData(numpoints::Int, numpert_total::Int) = VacuumData(; numpoints, numpert_total)
 
 """
 OdeState
