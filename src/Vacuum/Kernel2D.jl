@@ -128,8 +128,8 @@ function kernel!(
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = d1_spline_x.(theta_grid)
-    dz_dtheta_grid = d1_spline_z.(theta_grid)
+    dx_dtheta_grid = d1_spline_x(theta_grid)
+    dz_dtheta_grid = d1_spline_z(theta_grid)
 
     # Loop through observer points
     for j in 1:mtheta
