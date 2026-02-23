@@ -10,11 +10,11 @@ using SparseArrays
 import ..Equilibrium
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
+include("Utilities.jl")
 include("DataTypes.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
-include("MathUtils.jl")
-include("VacuumFromEquilibrium.jl")
+include("Field.jl")
 
 export VacuumInput, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
