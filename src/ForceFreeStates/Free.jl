@@ -26,7 +26,7 @@ and data dumping.
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
-        @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+        @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
     end
 
     # Compute vacuum response matrix
@@ -89,8 +89,10 @@ and data dumping.
 
     # Compute plasma and vacuum contributions.
     # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
-    wpt .= adjoint(vac.wt) * (wp * vac.wt)
-    wvt .= adjoint(vac.wt) * (vac.wv * vac.wt)
+    mul!(tmp_mat, wp, vac.wt)
+    mul!(wpt, adjoint(vac.wt), tmp_mat)
+    mul!(tmp_mat, vac.wv, vac.wt)
+    mul!(wvt, adjoint(vac.wt), tmp_mat)
     for ipert in 1:intr.numpert_total
         vac.ep[ipert] = wpt[ipert, ipert]
         vac.ev[ipert] = wvt[ipert, ipert]
