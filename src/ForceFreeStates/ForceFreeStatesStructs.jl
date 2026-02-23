@@ -316,22 +316,24 @@ Populated in `Free.jl`.
 
 ## Fields
 
-  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
-  - `mpert::Int` - Number of poloidal modes
+  - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)s
   - `numpert_total::Int` - Total number of modes (mpert × npert)
+  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
   - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
   - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
   - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-  - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-  - `grre::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-  - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
+  - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
+  - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
+  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points [x, y, z] (mthvac * nzvac × 3)
+  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points [x, y, z] (mthvac * nzvac × 3)
 """
 @kwdef mutable struct VacuumData
     numpoints::Int
     numpert_total::Int
+    mthvac::Int # this is only needed to not break GPEC functionality currently
 
     wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wt0::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
@@ -339,14 +341,13 @@ Populated in `Free.jl`.
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
     wall_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
 end
 
-VacuumData(numpoints::Int, numpert_total::Int) = VacuumData(; numpoints, numpert_total)
+VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpoints, numpert_total, mthvac)
 
 """
 OdeState

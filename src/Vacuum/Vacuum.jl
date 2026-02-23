@@ -131,10 +131,14 @@ function compute_vacuum_response(
         inputs.force_wv_symmetry && hermitianpart!(wv)
 
         # Fill xzpts array - this is temporary until we have a better way to handle the different geometries
-        @views plasma_pts[:, 1] .= plasma_surf isa PlasmaGeometry ? plasma_surf.x : plasma_surf.r[:, 1]
-        @views plasma_pts[:, 3] .= plasma_surf isa PlasmaGeometry ? plasma_surf.z : plasma_surf.r[:, 3]
-        @views wall_pts[:, 1] .= wall isa WallGeometry ? wall.x : wall.r[:, 1]
-        @views wall_pts[:, 3] .= wall isa WallGeometry ? wall.z : wall.r[:, 3]
+        plasma_pts = plasma_surf isa PlasmaGeometry3D ? plasma_surf.r : [plasma_surf.x zeros(num_points_plasma, 1) plasma_surf.z]
+        wall_pts = wall isa WallGeometry3D ? wall.r : [wall.x zeros(num_points_plasma, 1) wall.z]
+    end
+
+    # Append zeros for the wall points onto grri and grre arrays for expected output shape
+    if wall.nowall
+        grri = vcat(grri, zeros(num_points_plasma, 2 * num_modes))
+        grre = vcat(grre, zeros(num_points_plasma, 2 * num_modes))
     end
 
     return wv, grri, grre, plasma_pts, wall_pts

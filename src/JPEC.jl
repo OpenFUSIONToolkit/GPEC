@@ -413,8 +413,10 @@ function write_outputs_to_HDF5(
             out_h5["vacuum/ev"] = vac_data.ev
             out_h5["vacuum/et"] = vac_data.et
             out_h5["vacuum/x_plasma"] = vac_data.plasma_pts[:, 1]
+            out_h5["vacuum/y_plasma"] = vac_data.plasma_pts[:, 2]
             out_h5["vacuum/z_plasma"] = vac_data.plasma_pts[:, 3]
             out_h5["vacuum/x_wall"] = vac_data.wall_pts[:, 1]
+            out_h5["vacuum/y_wall"] = vac_data.wall_pts[:, 2]
             out_h5["vacuum/z_wall"] = vac_data.wall_pts[:, 3]
         end
     end
