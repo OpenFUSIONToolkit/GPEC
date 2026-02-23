@@ -522,7 +522,7 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
   - `power::Vector{ComplexF64}`: α values for all modes (0 for nonresonant)
   - `k::Int`: The current order in the power series expansion
 """
-function solve_higher_order_vmat!(
+@with_pool pool function solve_higher_order_vmat!(
     vmat::Array{ComplexF64,4},
     mmat::Array{ComplexF64,4},
     m0mat::Matrix{ComplexF64},
@@ -536,9 +536,11 @@ function solve_higher_order_vmat!(
     k::Int
 )
 
+    tmp_arr = zeros!(pool, ComplexF64, size(vmat)[1:3])
     # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
-        vmat[:, :, :, k+1] .+= sing_matmul(mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
+        @views sing_matmul!(tmp_arr, mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
+        vmat[:, :, :, k+1] .+= tmp_arr
     end
     for isol in 1:(2*intr.numpert_total)
         for i in eachindex(r1) # go block by block?
@@ -566,14 +568,19 @@ Identical to the Fortran `sing_matmul` subroutine.
 
 ### Arguments
 
-  - `a::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
-  - `b::Array{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
+  - `a::AbstractArray{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
+  - `b::AbstractArray{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
 
 ## Returns
 
   - `c::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
 """
-function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
+function sing_matmul(a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
+    c = zeros(ComplexF64, size(a, 1), size(b, 2), 2)
+    return sing_matmul!(c, a, b)
+end
+
+@with_pool pool function sing_matmul!(out::AbstractArray{ComplexF64,3}, a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
     m = size(b, 1)
     n = size(b, 2)
 
@@ -582,20 +589,19 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
         error("Sing_matmul: size(a,2) = $(size(a,2)) != 2*size(b,1) = $(2*m)")
     end
 
-    c = zeros(ComplexF64, size(a, 1), n, 2)
-
+    fill!(out, zero(ComplexF64))
     # main computation
-    tmp = zeros(ComplexF64, size(a, 1))
+    tmp = unsafe_zeros!(pool, ComplexF64, size(a, 1))
     for i in 1:n
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
-            @views c[:, i, j] .+= tmp
+            out[:, i, j] .+= tmp
             @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
-            @views c[:, i, j] .+= tmp
+            out[:, i, j] .+= tmp
         end
     end
 
-    return c
+    return out
 end
 
 """
