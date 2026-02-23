@@ -21,9 +21,6 @@ end
 const GL8 = gausslegendre_rule(Val(8))
 const GL32 = gausslegendre_rule(Val(32))
 
-# Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
-const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
-
 """
     precompute_lagrange_stencils(gaussian_points)
 
@@ -55,6 +52,9 @@ function precompute_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
 
     return left, right
 end
+
+# Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
+const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 
 """
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
