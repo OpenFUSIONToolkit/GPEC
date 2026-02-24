@@ -198,7 +198,7 @@ function FourierTransform(
     n::Int=0,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, 1, 1, 1; n, ν)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
     return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
 end
 
