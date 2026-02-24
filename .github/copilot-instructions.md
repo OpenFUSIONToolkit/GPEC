@@ -1,7 +1,7 @@
-# Copilot instructions for JPEC
+# Copilot instructions for GPEC
 
 ## Project overview
-- JPEC is a Julia port of GPEC-style MHD equilibrium and stability analysis. Core modules live in [src](src): Utilities, Equilibrium, Vacuum, ForceFreeStates, ForcingTerms, PerturbedEquilibrium (see [CLAUDE.md](CLAUDE.md)).
+- GPEC is a Julia port of GPEC-style MHD equilibrium and stability analysis. Core modules live in [src](src): Utilities, Equilibrium, Vacuum, ForceFreeStates, ForcingTerms, PerturbedEquilibrium (see [CLAUDE.md](CLAUDE.md)).
 - Data flow: equilibrium setup → vacuum response → stability analysis (documented in [CLAUDE.md](CLAUDE.md)).
 
 ## Architecture and entry points

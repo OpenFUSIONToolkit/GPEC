@@ -149,7 +149,7 @@ end
 """
     ForceFreeStatesControl
 
-A mutable struct containing control parameters for stability analysis, set by the user in jpec.toml.
+A mutable struct containing control parameters for stability analysis, set by the user in gpec.toml.
 
 ## Fields
 
@@ -255,7 +255,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
-    HDF5_filename::String = "jpec.h5"
+    HDF5_filename::String = "gpec.h5"
     force_wv_symmetry::Bool = true
     save_interval::Int = 10
     force_termination::Bool = false

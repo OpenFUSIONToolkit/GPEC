@@ -1,5 +1,5 @@
 
-@testset "JPEC.Equilibrium Unit Tests" begin
+@testset "GeneralizedPerturbedEquilibrium.Equilibrium Unit Tests" begin
 
     # --- Directory Configuration ---
     # Define the data directory for easy maintenance
@@ -7,7 +7,7 @@
 
     # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
-        efit_config = JPEC.Equilibrium.EquilibriumConfig(;
+        efit_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
             eq_type="efit",
             jac_type="boozer",
@@ -15,15 +15,15 @@
             psilow=0.01,
             psihigh=0.994
         )
-        global plasma_eq_efit = JPEC.Equilibrium.setup_equilibrium(efit_config)
+        global plasma_eq_efit = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(efit_config)
 
-        @test plasma_eq_efit isa JPEC.Equilibrium.PlasmaEquilibrium
+        @test plasma_eq_efit isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
     end
 
     # --- 2. Load CHEASE Binary Data ---
     @testset "Load CHEASE Binary" begin
-        binary_config = JPEC.Equilibrium.EquilibriumConfig(;
+        binary_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_binary"),
             eq_type="chease_binary",
             jac_type="boozer",
@@ -33,14 +33,14 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        global plasma_eq_binary = JPEC.Equilibrium.setup_equilibrium(binary_config)
+        global plasma_eq_binary = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(binary_config)
 
-        @test plasma_eq_binary isa JPEC.Equilibrium.PlasmaEquilibrium
+        @test plasma_eq_binary isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
 
     # --- 3. Load CHEASE ASCII Data ---
     @testset "Load CHEASE ASCII" begin
-        ascii_config = JPEC.Equilibrium.EquilibriumConfig(;
+        ascii_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_ascii"),
             eq_type="chease_ascii",
             jac_type="boozer",
@@ -50,9 +50,9 @@
             r0exp=6.8,
             b0exp=7.4
         )
-        global plasma_eq_ascii = JPEC.Equilibrium.setup_equilibrium(ascii_config)
+        global plasma_eq_ascii = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(ascii_config)
 
-        @test plasma_eq_ascii isa JPEC.Equilibrium.PlasmaEquilibrium
+        @test plasma_eq_ascii isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
 
     # ----------------------------------------------------------------------

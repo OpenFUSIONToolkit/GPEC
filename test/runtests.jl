@@ -3,7 +3,7 @@ using Pkg
 
 # Activate the project environment one level up
 Pkg.activate(joinpath(@__DIR__, ".."))
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
 # Check if specific test files are requested via ARGS
 if !isempty(ARGS)

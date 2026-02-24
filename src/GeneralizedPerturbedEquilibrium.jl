@@ -1,5 +1,5 @@
-# JPEC.jl
-module JPEC
+# GeneralizedPerturbedEquilibrium.jl
+module GeneralizedPerturbedEquilibrium
 
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
@@ -45,25 +45,25 @@ function main(args::Vector{String}=String[])
     path = length(args) >= 1 ? args[1] : "./"
 
     println("\n" * "="^60)
-    println("  JPEC - Julia Perturbed Equilibrium Code")
+    println("  GPEC - Generalized Perturbed Equilibrium Code")
     println("="^60 * "\n")
 
     start_time = time()
 
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
-    inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
+    inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from jpec.toml or fallback to equil.toml if it exists
+    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
         equil = Equilibrium.setup_equilibrium(eq_config)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in jpec.toml"
+        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     else
-        error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
+        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
     end
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
@@ -416,4 +416,4 @@ end
 
 export main
 
-end # module JPEC
+end # module GeneralizedPerturbedEquilibrium

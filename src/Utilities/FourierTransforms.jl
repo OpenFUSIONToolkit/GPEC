@@ -17,7 +17,7 @@ transforms (cos(m*θ + n*qa*δ), sin(m*θ + n*qa*δ)) used in vacuum field calcu
 # Example
 
 ```julia
-using JPEC.Utilities.FourierTransforms
+using GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
 
 # For PerturbedEquilibrium (no phase shift)
 ft = FourierTransform(mtheta, mpert, mlow)

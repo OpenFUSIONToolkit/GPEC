@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 """
-benchmark_git_branches.jl - Generic Git branch benchmarking tool for JPEC
+benchmark_git_branches.jl - Generic Git branch benchmarking tool for GPEC
 
 Compares performance between two Git branches or commits by running a specified
 example multiple times to warm up Julia's JIT compiler, then measuring runtime.
@@ -34,7 +34,7 @@ julia benchmarks/benchmark_git_branches.jl --example examples/DIIID-like_ideal_e
 
 # Requirements
 
-- Example directory must contain jpec.jl file that can be run via: `using JPEC; JPEC.main(["path"])`
+- Example directory must contain a `gpec.toml` config file runnable via: `using GeneralizedPerturbedEquilibrium; GeneralizedPerturbedEquilibrium.main(["path"])`
 - Working directory must be clean or changes will be stashed during branch switching
 
 # Output Metrics
@@ -49,7 +49,7 @@ For each branch/commit, reports:
 
 ```
 ============================================================
-JPEC Branch Benchmark Comparison
+GPEC Branch Benchmark Comparison
 ============================================================
 Example: examples/DIIID-like_ideal_example
 
@@ -165,8 +165,8 @@ function run_example_benchmark(example_path, num_runs)
     println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
     cd(example_path) do
         Pkg.activate("../..")
-        using JPEC
-        @time JPEC.main(["./"])
+        using GeneralizedPerturbedEquilibrium
+        @time GeneralizedPerturbedEquilibrium.main(["./"])
     end
 
     # Warm runs for timing
@@ -174,7 +174,7 @@ function run_example_benchmark(example_path, num_runs)
     for i in 1:num_runs
         println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
         runtime = cd(example_path) do
-            @elapsed JPEC.main(["./"])
+            @elapsed GeneralizedPerturbedEquilibrium.main(["./"])
         end
         push!(runtimes, runtime)
         println("  Runtime: $(round(runtime, digits=2)) s")
@@ -205,7 +205,7 @@ end
 # Main benchmarking function
 function benchmark_branches(options)
     println("="^60)
-    println("JPEC Branch Benchmark Comparison")
+    println("GPEC Branch Benchmark Comparison")
     println("="^60)
     println("Example: $(options["example"])")
     println()
@@ -290,7 +290,7 @@ function benchmark_branches(options)
     # Write to output file if requested
     if options["output"] !== nothing
         open(options["output"], "w") do f
-            write(f, "# JPEC Benchmark Comparison\n")
+            write(f, "# GPEC Benchmark Comparison\n")
             write(f, "Example: $(options["example"])\n\n")
             write(f, "## Branch 1: $(r1.name) @ $(r1.commit)\n")
             write(f, @sprintf("- Eigenmode energy: %.4f\n", r1.metrics.eigenvalue))
