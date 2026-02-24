@@ -750,6 +750,7 @@ Implement kin_flag functionality
     Npert = intr.numpert_total
 
     singfac_vec = acquire!(pool, Float64, Npert)
+    singfac_mat = reshape(singfac_vec, intr.mpert, intr.npert)
 
     amat = acquire!(pool, ComplexF64, Npert, Npert)
     bmat = similar!(pool, amat)
@@ -769,7 +770,7 @@ Implement kin_flag functionality
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
-    singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
+    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
     # kinetic stuff - skip for now
     if false #(TODO: kin_flag)
