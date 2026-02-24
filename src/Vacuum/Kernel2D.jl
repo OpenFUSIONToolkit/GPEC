@@ -559,17 +559,26 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
         inv_2n = 1.0 / (2.0 * n)
         inv_2np2 = 1.0 / (2.0 * n + 2.0)
 
+        # Hoist loop-invariant constants for direct e² formulation:
+        # s·sinh²(x) + sinh(x)·cosh(x) = ((s+1)·e²ˣ - 2s + (s-1)·e⁻²ˣ) / 4
+        sp1 = s + 1.0
+        sm1 = s - 1.0
+        neg_two_s = -2.0 * s
+
         @inbounds for ig in 1:32
             tg02 = _PN_TG02[ig]
             tg1  = tg02 * inv_2n
             tg1p = tg02 * inv_2np2
 
-            sinhtg1 = sinh(tg1)
-            sinhtg1p = sinh(tg1p)
-            sinhtg12 = sinhtg1 * sinhtg1
-            sinhtg12p = sinhtg1p * sinhtg1p
-            dnom = sqrt(s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12))
-            dnomp = sqrt(s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p))
+            e1 = exp(tg1)
+            e1sq = e1 * e1
+            e1isq = inv(e1sq)
+            dnom = 0.5 * sqrt(muladd(sp1, e1sq, muladd(sm1, e1isq, neg_two_s)))
+
+            e1p = exp(tg1p)
+            e1psq = e1p * e1p
+            e1pisq = inv(e1psq)
+            dnomp = 0.5 * sqrt(muladd(sp1, e1psq, muladd(sm1, e1pisq, neg_two_s)))
 
             wanumr = _PN_WANUMR[ig]
             gint  = muladd(wanumr, inv(dnom),  gint)
