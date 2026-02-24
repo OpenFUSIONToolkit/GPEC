@@ -11,6 +11,7 @@ import ..Equilibrium
 using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
 
 include("DataTypes.jl")
+include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("MathUtils.jl")
 include("VacuumFromEquilibrium.jl")

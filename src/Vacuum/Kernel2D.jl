@@ -56,20 +56,8 @@ end
 # Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
 const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 
-# Pre-computed constants for 32-point Gauss quadrature in Pn_minus_half_2007!
-# Integration limits: xl=0, xu=5  →  agaus=2.5, bgaus=2.5
-# _PN_TG02[ig]   = tg0² = (agaus + GL32.x[ig] * bgaus)²
-# _PN_WANUMR[ig] = GL32.w[ig] * tg0 * exp(-tg0²)
-const _PN_AGAUS = 2.5
-const _PN_BGAUS = 2.5
-const _PN_TG02 = let
-    tg0 = [_PN_AGAUS + GL32.x[i] * _PN_BGAUS for i in 1:32]
-    NTuple{32,Float64}(t * t for t in tg0)
-end
-const _PN_WANUMR = let
-    tg0 = [_PN_AGAUS + GL32.x[i] * _PN_BGAUS for i in 1:32]
-    NTuple{32,Float64}(GL32.w[i] * tg0[i] * exp(-tg0[i]^2) for i in 1:32)
-end
+# Pre-computed Gauss quadrature constants (_PN_TG02, _PN_WANUMR, _PN_AGAUS, _PN_BGAUS)
+# and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
 """
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
@@ -554,38 +542,33 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
+        ensure_pn_quad_cache!(n)
+
+        # Grab inner vectors (pointer reads, 8 bytes each, zero copy)
+        sinh_n  = @inbounds _PN_QUAD_SINH[n]
+        cosh_n  = @inbounds _PN_QUAD_COSH[n]
+        sinhp_n = @inbounds _PN_QUAD_SINHP[n]
+        coshp_n = @inbounds _PN_QUAD_COSHP[n]
+
         gint = 0.0
         gintp = 0.0
-        inv_2n = 1.0 / (2.0 * n)
-        inv_2np2 = 1.0 / (2.0 * n + 2.0)
-
-        # Hoist loop-invariant constants for direct e² formulation:
-        # s·sinh²(x) + sinh(x)·cosh(x) = ((s+1)·e²ˣ - 2s + (s-1)·e⁻²ˣ) / 4
-        sp1 = s + 1.0
-        sm1 = s - 1.0
-        neg_two_s = -2.0 * s
 
         @inbounds for ig in 1:32
-            tg02 = _PN_TG02[ig]
-            tg1  = tg02 * inv_2n
-            tg1p = tg02 * inv_2np2
+            # dnom = sqrt(s·sinh²(x) + sinh(x)·cosh(x))  [Chance JCP 2007 eq. 16]
+            sh  = sinh_n[ig]
+            ch  = cosh_n[ig]
+            dnom = sqrt(muladd(s, sh * sh, sh * ch))
 
-            e1 = exp(tg1)
-            e1sq = e1 * e1
-            e1isq = inv(e1sq)
-            dnom = 0.5 * sqrt(muladd(sp1, e1sq, muladd(sm1, e1isq, neg_two_s)))
-
-            e1p = exp(tg1p)
-            e1psq = e1p * e1p
-            e1pisq = inv(e1psq)
-            dnomp = 0.5 * sqrt(muladd(sp1, e1psq, muladd(sm1, e1pisq, neg_two_s)))
+            shp = sinhp_n[ig]
+            chp = coshp_n[ig]
+            dnomp = sqrt(muladd(s, shp * shp, shp * chp))
 
             wanumr = _PN_WANUMR[ig]
-            gint  = muladd(wanumr, inv(dnom),  gint)
-            gintp = muladd(wanumr, inv(dnomp), gintp)
+            gint   = muladd(wanumr, inv(dnom),  gint)
+            gintp  = muladd(wanumr, inv(dnomp), gintp)
         end
 
-        gint *= _PN_BGAUS
+        gint  *= _PN_BGAUS
         gintp *= _PN_BGAUS
 
         # Calculate coefficients
