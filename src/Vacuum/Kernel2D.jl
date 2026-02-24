@@ -56,6 +56,21 @@ end
 # Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
 const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 
+# Pre-computed constants for 32-point Gauss quadrature in Pn_minus_half_2007!
+# Integration limits: xl=0, xu=5  →  agaus=2.5, bgaus=2.5
+# _PN_TG02[ig]   = tg0² = (agaus + GL32.x[ig] * bgaus)²
+# _PN_WANUMR[ig] = GL32.w[ig] * tg0 * exp(-tg0²)
+const _PN_AGAUS = 2.5
+const _PN_BGAUS = 2.5
+const _PN_TG02 = let
+    tg0 = [_PN_AGAUS + GL32.x[i] * _PN_BGAUS for i in 1:32]
+    NTuple{32,Float64}(t * t for t in tg0)
+end
+const _PN_WANUMR = let
+    tg0 = [_PN_AGAUS + GL32.x[i] * _PN_BGAUS for i in 1:32]
+    NTuple{32,Float64}(GL32.w[i] * tg0[i] * exp(-tg0[i]^2) for i in 1:32)
+end
+
 """
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
 
@@ -539,38 +554,30 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
-        # Integration limits
-        xl = 0.0
-        xu = 5.0
-
-        # Transform to integration interval
-        agaus = 0.5 * (xu + xl)
-        bgaus = 0.5 * (xu - xl)
-
-        # Calculate integrals for P^n and P^{n+1}
         gint = 0.0
         gintp = 0.0
+        inv_2n = 1.0 / (2.0 * n)
+        inv_2np2 = 1.0 / (2.0 * n + 2.0)
 
         @inbounds for ig in 1:32
-            tg0 = agaus + GL32.x[ig] * bgaus
-            tg02 = tg0 * tg0
-            tg1 = tg02 / (2.0 * n)
-            tg1p = tg02 / (2.0 * n + 2.0)
+            tg02 = _PN_TG02[ig]
+            tg1  = tg02 * inv_2n
+            tg1p = tg02 * inv_2np2
+
             sinhtg1 = sinh(tg1)
             sinhtg1p = sinh(tg1p)
             sinhtg12 = sinhtg1 * sinhtg1
             sinhtg12p = sinhtg1p * sinhtg1p
-            dnom = s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12)
-            dnomp = s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p)
-            dnom = sqrt(dnom)
-            dnomp = sqrt(dnomp)
-            anumr = tg0 * exp(-tg02)
-            gint += GL32.w[ig] * anumr / dnom
-            gintp += GL32.w[ig] * anumr / dnomp
+            dnom = sqrt(s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12))
+            dnomp = sqrt(s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p))
+
+            wanumr = _PN_WANUMR[ig]
+            gint  = muladd(wanumr, inv(dnom),  gint)
+            gintp = muladd(wanumr, inv(dnomp), gintp)
         end
 
-        gint *= bgaus
-        gintp *= bgaus
+        gint *= _PN_BGAUS
+        gintp *= _PN_BGAUS
 
         # Calculate coefficients
         pcoef = sqrt((s - 1.0) / (s + 1.0))
