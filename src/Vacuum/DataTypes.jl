@@ -18,7 +18,7 @@ Struct holding plasma boundary and mode data as provided from ForceFreeStates na
 
 # Notes
 
-  - This is a mutable struct because we need to be able to modify the ν vector in some cases.
+  - This is a mutable struct because we need to be able to modify the ν vector in n<0 cases.
 """
 @kwdef mutable struct VacuumInput
     r::Vector{Float64} = Float64[]
@@ -287,21 +287,21 @@ function PlasmaGeometry3D(inputs::VacuumInput)
 
     # Build 3D surface point-by-point from 2D contour
     for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
-        r[i+mtheta*(j-1), :] .= [surf_2D.x[i] * cos(ϕ), surf_2D.x[i] * sin(ϕ), surf_2D.z[i]]
+        r[i+mtheta*(j-1), 1] = surf_2D.x[i] * cos(ϕ)
+        r[i+mtheta*(j-1), 2] = surf_2D.x[i] * sin(ϕ)
+        r[i+mtheta*(j-1), 3] = surf_2D.z[i]
     end
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
     itps = [cubic_interp((θ_grid, ϕ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
-    grad = zeros(4)
     for i in 1:mtheta, j in 1:nzeta
         idx = i + (j - 1) * mtheta
         for k in 1:3
-            # Grad stores f, fx, fy, fxy
-            grad .= itps[k].nodal_derivs.partials[:, i, j]
-            dr_dθ[idx, k] = grad[2]
-            dr_dζ[idx, k] = grad[3]
+            partials = itps[k].nodal_derivs.partials
+            dr_dθ[idx, k] = partials[2, i, j]
+            dr_dζ[idx, k] = partials[3, i, j]
         end
-        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
+        cross3!(normal, dr_dθ, dr_dζ, idx)
     end
 
     # Determine normal orientation (inward for plasma) and enforce it
@@ -569,16 +569,14 @@ function WallGeometry3D(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
     itps = [cubic_interp((θ_grid, ϕ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
-    grad = zeros(4)
     for i in 1:mtheta, j in 1:nzeta
         idx = i + (j - 1) * mtheta
         for k in 1:3
-            # Grad stores f, fx, fy, fxy
-            grad .= itps[k].nodal_derivs.partials[:, i, j]
-            dr_dθ[idx, k] = grad[2]
-            dr_dζ[idx, k] = grad[3]
+            partials = itps[k].nodal_derivs.partials
+            dr_dθ[idx, k] = partials[2, i, j]
+            dr_dζ[idx, k] = partials[3, i, j]
         end
-        normal[idx, :] = cross(dr_dθ[idx, :], dr_dζ[idx, :])
+        cross3!(normal, dr_dθ, dr_dζ, idx)
     end
 
     # Determine normal orientation (outward for wall) and enforce it

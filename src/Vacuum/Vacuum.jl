@@ -71,31 +71,32 @@ function _compute_vacuum_response_single!(
 )
 
     # Initialize surface geometries
+    num_points_surf = inputs.mtheta * inputs.nzeta
+    num_modes = inputs.mpert * inputs.npert
     plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
     wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n=n_override, ν=plasma_surf.ν)
-    num_points_plasma, num_modes = size(cos_mn_basis)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=plasma_surf.ν)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
     if inputs.nzeta > 1
-        # Hardcode these values for now - can expose to the user in the future?
+        # Hardcode these values for now - can expose to the user in the future
         kparams = KernelParams3D(11, 20, 5)
     else
         kparams = KernelParams2D(n_override)
     end
 
     # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
-    num_points_active = wall.nowall ? num_points_plasma : 2 * num_points_plasma
+    num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
 
     # Local work arrays
-    grad_green = zeros(num_points_active, num_points_active)
-    green_temp = zeros(num_points_plasma, num_points_plasma)
+    grad_green = zeros(num_points_total, num_points_total)
+    green_temp = zeros(num_points_surf, num_points_surf)
 
     # Views into output Green's function matrices for the active rows/columns
-    grre = @view grre_in[1:num_points_active, :]
-    grri = @view grri_in[1:num_points_active, :]
+    grre = @view grre_in[1:num_points_total, :]
+    grri = @view grri_in[1:num_points_total, :]
 
     # Plasma–Plasma block
     kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
@@ -112,22 +113,25 @@ function _compute_vacuum_response_single!(
         # Wall–Plasma block
         kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
         # Fourier transform obs=wall, src=plasma block
-        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_plasma)
-        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_plasma, col_offset=num_modes)
+        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
+        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
     end
+
 
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
     grri .= grre # start from same as exterior
 
-    # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations.
-    grre .= grad_green \ grre
+    # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations
+    F_ext = lu(grad_green)
+    ldiv!(F_ext, grre)
 
     # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
     grad_green .*= -1
-    for i in 1:num_points_active
+    for i in 1:num_points_total
         grad_green[i, i] += 2.0
     end
-    grri .= grad_green \ grri
+    F_int = lu!(grad_green)
+    ldiv!(F_int, grri)
 
     # Always initialise wv to zero so that green_only keeps it zeroed
     if !green_only
@@ -143,16 +147,18 @@ function _compute_vacuum_response_single!(
         inputs.force_wv_symmetry && hermitianpart!(wv)
 
         # Fill coordinate arrays
-        if plasma_surf isa PlasmaGeometry3D
-            @views plasma_pts[1:num_points_plasma, :] .= plasma_surf.r
-        else
-            @views plasma_pts[1:num_points_plasma, :] .= [plasma_surf.x zeros(num_points_plasma, 1) plasma_surf.z]
-        end
-
-        if wall isa WallGeometry3D
-            @views wall_pts[1:num_points_plasma, :] .= wall.r
-        else
-            @views wall_pts[1:num_points_plasma, :] .= [wall.x zeros(num_points_plasma, 1) wall.z]
+        if inputs.nzeta > 1 # 3D
+            plasma_pts .= plasma_surf.r
+            wall_pts .= wall.r
+        else # 2D
+            @views begin
+                plasma_pts[:, 1] .= plasma_surf.x
+                plasma_pts[:, 2] .= 0.0
+                plasma_pts[:, 3] .= plasma_surf.z
+                wall_pts[:, 1] .= wall.x
+                wall_pts[:, 2] .= 0.0
+                wall_pts[:, 3] .= wall.z
+            end
         end
     end
 end
@@ -178,10 +184,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     num_modes = inputs.mpert * inputs.npert
     vac = (
         wv=zeros(ComplexF64, num_modes, num_modes),
-        grri=zeros(Float64, 2 * numpoints, 2 * num_modes),
-        grre=zeros(Float64, 2 * numpoints, 2 * num_modes),
-        plasma_pts=zeros(Float64, numpoints, 3),
-        wall_pts=zeros(Float64, numpoints, 3)
+        grri=zeros(2 * numpoints, 2 * num_modes),
+        grre=zeros(2 * numpoints, 2 * num_modes),
+        plasma_pts=zeros(numpoints, 3),
+        wall_pts=zeros(numpoints, 3)
     )
 
     compute_vacuum_response!(vac, inputs, wall_settings; green_only=green_only)

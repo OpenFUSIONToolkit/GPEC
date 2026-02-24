@@ -1,13 +1,4 @@
 """
-    periodic_wrap(x, n) -> Int
-
-Inline function for fast periodic wrapping for indices near the valid range [1, n].
-Equivalent to `mod1(x, n)` but avoids division for small offsets.
-Only valid when `x` is within one period of the valid range (i.e., `1-n < x < 2n`).
-"""
-@inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
-
-"""
     SingularQuadratureData
 
 Precomputed data for singular correction quadrature following BIEST approach.
@@ -81,7 +72,7 @@ function SingularQuadratureData(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int)
         Gpou[i, j] = -pou(sqrt(x^2 + y^2))
     end
 
-    # Partition of Unity on polar grid including transformation Jacobian - Ppou = χ(ρ) M²/4 r dr dt, eq. 38 in Malhotra 2019
+    # Partition of Unity on polar grid including transformation Jacobian - Ppou = χ(ρ) M²/4 r dr dt, [Malhotra Journal of Comp. Phys. 2019 108791 eq. 38]
     Ppou = zeros(RAD_DIM, ANG_DIM)
     dθ = 2π / ANG_DIM
     for j in 1:ANG_DIM, i in 1:RAD_DIM
@@ -256,16 +247,18 @@ function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
 end
 
 """
-    extract_patch!(patch, data, Nt, Np, t0, p0, PATCH_DIM)
+    extract_patch!(patch, data, idx_pol_center, idx_tor_center, npol, ntor, PATCH_DIM)
 
-Extract a PATCH_DIM × PATCH_DIM patch of data centered at (t0, p0) with periodic wrapping.
+Extract a PATCH_DIM × PATCH_DIM patch of data centered at (idx_pol_center, idx_tor_center) with periodic wrapping.
 
 # Arguments
 
   - `patch`: Preallocated output array for data around the singular point (PATCH_DIM × PATCH_DIM × dof)
   - `data`: Source data array (can be coordinates, normals, or area elements)
-  - `Nt, Np`: Grid dimensions (toroidal, poloidal)
-  - `t0, p0`: Center indices (1-based)
+  - `idx_pol_center`: Center poloidal index
+  - `idx_tor_center`: Center toroidal index
+  - `npol`: Number of poloidal points
+  - `ntor`: Number of toroidal points
   - `PATCH_DIM`: Patch size (must be odd)
 """
 function extract_patch!(patch::Array{Float64,3}, data::Matrix{Float64}, idx_pol_center::Int, idx_tor_center::Int, npol::Int, ntor::Int, PATCH_DIM::Int)
@@ -329,7 +322,7 @@ end
 """
     KernelWorkspace
 
-Thread-local workspace for `compute_3D_kernel_matrix!` to enable parallel execution.
+Thread-local workspace for `compute_3D_kernel_matrices!` to enable parallel execution.
 Each thread gets its own workspace to avoid data races on temporary arrays.
 """
 struct KernelWorkspace
@@ -368,11 +361,11 @@ function KernelWorkspace(PATCH_DIM::Int, RAD_DIM::Int, ANG_DIM::Int)
 end
 
 """
-    compute_3D_kernel_matrix!(grad_greenfunction, greenfunction, observer, source; PATCH_RAD=3, RAD_DIM=15, INTERP_ORDER=6)
+    compute_3D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER)
 
 Compute boundary integral kernel matrices for 3D geometries with the singular correction
-algorithm from Malhotra et al. 2019. Uses multi-threading for parallel computation over
-observer points.
+algorithm from [Malhotra Plasma Phys. and Cont. Fusion 2019 024004].
+Uses multi-threading for parallel computation over observer points.
 
   - Far regions: Rectangle rule with uniform weights (1/N)
   - Singular regions: Polar quadrature with partition-of-unity blending

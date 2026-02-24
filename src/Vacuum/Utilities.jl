@@ -110,3 +110,44 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     zout = cubic_interp(arc_length[1:(end-1)], zin; bc=PeriodicBC(; endpoint=:exclusive, period=arc_length[end])).(arc_length_targets)
     return xout, zout
 end
+
+"""
+    periodic_wrap(x, n) -> Int
+
+Inline function for fast periodic wrapping for indices near the valid range [1, n].
+Equivalent to `mod1(x, n)` but avoids division for small offsets.
+Only valid when `x` is within one period of the valid range (i.e., `1-n < x < 2n`).
+"""
+@inline periodic_wrap(x::Int, n::Int) = x < 1 ? x + n : (x > n ? x - n : x)
+
+"""
+    cross3!(c, a, b, idx)
+
+Inline function for fast cross product of two 3D vectors at a given index.
+
+# Arguments
+
+  - `c::AbstractMatrix`: Output matrix
+  - `a::AbstractMatrix`: First input vector
+  - `b::AbstractMatrix`: Second input vector
+  - `idx`: Index of the output vector
+"""
+@inline function cross3!(
+    c::AbstractMatrix,
+    a::AbstractMatrix,
+    b::AbstractMatrix,
+    idx::Int
+)
+    @inbounds begin
+        a1 = a[idx, 1];
+        a2 = a[idx, 2];
+        a3 = a[idx, 3]
+        b1 = b[idx, 1];
+        b2 = b[idx, 2];
+        b3 = b[idx, 3]
+
+        c[idx, 1] = a2*b3 - a3*b2
+        c[idx, 2] = a3*b1 - a1*b3
+        c[idx, 3] = a1*b2 - a2*b1
+    end
+end

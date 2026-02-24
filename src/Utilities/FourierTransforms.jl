@@ -60,7 +60,7 @@ just use the n argument. In 3D, we need to compute the basis for all modes and g
 
 # Keyword Arguments
 
-- `n::Union{Nothing, Int}=nothing`: Toroidal mode number for 2D (default: nothing)
+- `n_2D::Union{Nothing, Int}=nothing`: Toroidal mode number for 2D (default: nothing)
 - `ν::Vector{Float64}=zeros(mtheta)`: Toroidal angle offset array (default: no offset, n*ν = 0)
 
 # Returns
@@ -87,22 +87,22 @@ function compute_fourier_coefficients(
     nzeta::Int,
     npert::Int,
     nlow::Int;
-    n::Union{Nothing, Int}=nothing,
+    n_2D::Union{Nothing, Int}=nothing,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
     # Validate inputs
     @assert length(ν) == mtheta "ν must have length mtheta"
-    @assert !(nzeta > 1 && n !== nothing) "If nzeta > 1, don't set n since we use the full nlow - nhigh range for the toroidal modes"
-    @assert !(n === nothing && nzeta == 1) "If nzeta == 1 (2D), set n to the toroidal mode number"
+    @assert !(nzeta > 1 && n_2D !== nothing) "If nzeta > 1, don't set n_2D since we use the full nlow - nhigh range for the toroidal modes"
+    @assert !(n_2D === nothing && nzeta == 1) "If nzeta == 1 (2D), set n_2D to the toroidal mode number"
 
     # Uniform theta grid: [0, 2π)
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
 
-    if !isnothing(n)
+    if !isnothing(n_2D)
         # In 2D, we only use one toroidal mode at a time
         # Compute sin(mθ - nν) and cos(mθ - nν)
-        sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
-        cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n .* ν)
+        sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
+        cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
     else # nzeta > 1
         # In 3D, we need to compute the basis for all modes and grid points
         # Compute sin(mθ - nν - nϕ) and cos(mθ - nν - nϕ)
@@ -747,7 +747,7 @@ Computes: `gll[l2, l1] = dθdζ * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
 
 # Notes
 
-- The normalization factor `4π^2 / size(cs, 1)` is 2π * mtheta * 2π * nzeta (nzeta = 1 for 2D)
+- The normalization factor `4π^2 / size(cs, 1)` is 2π / mtheta * 2π / nzeta (nzeta = 1 for 2D)
 - This function uses 0-based offset convention (add 1 for Julia indexing)
 - The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
 # Example

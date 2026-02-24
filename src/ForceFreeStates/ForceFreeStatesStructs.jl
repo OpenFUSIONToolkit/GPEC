@@ -316,7 +316,7 @@ Populated in `Free.jl`.
 
 ## Fields
 
-  - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)s
+  - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
   - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
