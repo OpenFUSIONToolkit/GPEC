@@ -760,7 +760,6 @@ Implement kin_flag functionality
     gmat = similar!(pool, amat)
     tmp_mat = similar!(pool, amat)
 
-
     fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])
     u2 = @view(u[:, :, 2])
