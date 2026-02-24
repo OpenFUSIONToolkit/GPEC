@@ -505,9 +505,8 @@ end
 function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
-    sqpi = sqrt(π)
     pii = 2.0 / π
-    sqtwo = sqrt(2.0)
+    # (sqpi and sqtwo are not needed here: they are absorbed into PnQuadEntry.gauss_norm_*)
 
     # Initialize output array
     P .= 0.0
@@ -566,25 +565,14 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
         gint  *= _PN_BGAUS
         gintp *= _PN_BGAUS
 
-        # Calculate coefficients
-        pcoef = sqrt((s - 1.0) / (s + 1.0))
+        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
+        # The Γ-function prefactors and normalization constants are pre-cached in
+        # entry.gauss_norm_n / entry.gauss_norm_np1 (see PnQuadCache.jl for derivation).
+        pcoef   = sqrt((s - 1.0) / (s + 1.0))
+        pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
-        # Gamma functions: Gamma[1/2 - n] and Gamma[1/2 - (n+1)]
-        gamn = sqpi
-        gamp = -2.0 * sqpi
-
-        if n != 0
-            # Compute Gamma[1/2 - n] = sqpi / product(-(i-1) - 0.5 for i in 1:n)
-            gamn = sqpi / prod(-(i - 1) - 0.5 for i in 1:n)
-            gamp = -gamn / (n + 0.5)
-        end
-
-        # Final Legendre function values
-        gint = sqtwo * pcoef^n * gint / (n * sqpi * gamn)
-        gintp = sqtwo * pcoef^(n + 1) * gintp / ((n + 1.0) * sqpi * gamp)
-
-        P[end-1] = gint   # P^n_{-1/2}
-        P[end] = gintp    # P^{n+1}_{-1/2}
+        P[end-1] = pcoef_n * gint  * entry.gauss_norm_n    # P^n_{-1/2}
+        P[end]   = pcoef_n * pcoef * gintp * entry.gauss_norm_np1  # P^{n+1}_{-1/2}
 
     else
         # Use upward recurrence for small n*rhohat < 0.1

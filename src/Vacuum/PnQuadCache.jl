@@ -45,6 +45,17 @@ struct PnQuadEntry
     cosh::Vector{Float64}   # cosh(tg0²/(2n))
     sinhp::Vector{Float64}  # sinh(tg0²/(2n+2))
     coshp::Vector{Float64}  # cosh(tg0²/(2n+2))
+
+    # Pre-computed scale factors for the final Legendre function values.
+    # These combine all factors that depend only on n (not on s):
+    #   √2, n, √π, and the Gamma function Γ(1/2 - n).
+    # Caching them here avoids an O(n) product-formula computation on
+    # every call to Pn_minus_half_2007! (which is called ~3.7M times per run).
+    #
+    #   gauss_norm_n   = √2 / (n · √π · Γ(1/2 - n))      — scale for P^n_{-1/2}
+    #   gauss_norm_np1 = √2 / ((n+1) · √π · Γ(-1/2 - n)) — scale for P^{n+1}_{-1/2}
+    gauss_norm_n::Float64
+    gauss_norm_np1::Float64
 end
 
 # Dict-based storage: works for any positive n, no upper limit.
@@ -54,7 +65,7 @@ const _PN_CACHE_LOCK = Threads.SpinLock()
 # Fast-path: last-used n. Since n is constant within a vacuum run,
 # this avoids Dict lookup + lock for ~100% of calls.
 const _PN_LAST_N = Threads.Atomic{Int}(0)
-const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[]))
+const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0))
 
 """
     get_pn_quad_cache(n::Int) -> PnQuadEntry
@@ -89,5 +100,19 @@ function _make_pn_quad_entry(n::Int)
         sh[ig]  = sinh(x);  ch[ig]  = cosh(x)
         shp[ig] = sinh(xp); chp[ig] = cosh(xp)
     end
-    return PnQuadEntry(sh, ch, shp, chp)
+
+    # Compute the Gamma function Γ(1/2 - n) via the product formula.
+    # Γ(1/2 - n) = √π / ∏_{i=1}^{n} (1/2 - i)  for n ≥ 1.
+    # (n ≥ 1 is guaranteed: this cache is only populated when n·rhohat ≥ 0.1.)
+    sqpi = sqrt(π)
+    gamn = sqpi / prod(0.5 - i for i in 1:n)  # Γ(1/2 - n)
+    gamp = -gamn / (n + 0.5)                   # Γ(-1/2 - n) = Γ(1/2 - (n+1)), via Γ(z-1) = Γ(z)/(z-1)
+
+    # Combine into scale factors used in the final Legendre function assembly.
+    # Pre-computing these once per n avoids repeating the Gamma product on every s-call.
+    sqtwo = sqrt(2.0)
+    gauss_norm_n   = sqtwo / (n * sqpi * gamn)
+    gauss_norm_np1 = sqtwo / ((n + 1.0) * sqpi * gamp)
+
+    return PnQuadEntry(sh, ch, shp, chp, gauss_norm_n, gauss_norm_np1)
 end
