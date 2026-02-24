@@ -23,7 +23,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
-        val_str = strip(data_str[i:(i+field_width-1)])
+        val_str = strip(@view(data_str[i:(i+field_width-1)]))
         if !isempty(val_str)
             try
                 push!(parsed_values, parse(Float64, val_str))

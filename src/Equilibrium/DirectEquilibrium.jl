@@ -61,7 +61,7 @@ the Julia spline implementation.
   - `psio`: total toroidal flux
   - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
 """
-function direct_get_bfield!(
+@with_pool pool function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
@@ -91,8 +91,10 @@ function direct_get_bfield!(
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    f_sq = sq_in(psi_norm)
-    f1_sq = sq_in_deriv(psi_norm)
+    f_sq = acquire!(pool, eltype(sq_in.y), n_series(sq_in))
+    f1_sq = acquire!(pool, eltype(sq_in_deriv.parent.y), n_series(sq_in_deriv.parent))
+    sq_in(f_sq, psi_norm)
+    sq_in_deriv(f1_sq, psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
     bf_out.f1 = f1_sq[1] # dF/dψ
     bf_out.p = f_sq[2]  # μ0*Pressure
@@ -420,7 +422,7 @@ robustness.
     including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
-function equilibrium_solver(raw_profile::DirectRunInput)
+@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput)
 
     # Shorthand
     equil_params = raw_profile.config
@@ -451,20 +453,29 @@ function equilibrium_solver(raw_profile::DirectRunInput)
     ro, zo, rs1, rs2 = direct_position!(raw_profile)
 
     # Loop over flux surfaces from outermost to innermost, integrating over field lines
-    sq_nodes = zeros(Float64, mpsi + 1, 4)
-    rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
+    sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
+    rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
+
+    ff_val = zeros!(pool, Float64, 4)
+    ff_deriv_val = zeros!(pool, Float64, 4)
+
     for ipsi in (mpsi+1):-1:1
         # Integrate along the field line for this surface
         y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
+        # checkpoint pool for Float64 slot 
+        checkpoint!(pool, Float64)
+        
         # Fit data into temporary straight fieldline poloidal angle splines
-        ff_x_nodes = y_out[:, 5] ./ y_out[end, 5]
-        ff_fs_nodes = hcat(
-            y_out[:, 3] .^ 2,
-            y_out[:, 1] / (2π) .- ff_x_nodes,
-            bfield.f * (y_out[:, 4] .- ff_x_nodes .* y_out[end, 4]),
-            y_out[:, 2] ./ y_out[end, 2] .- ff_x_nodes
-        )
+        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
+        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+
+        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
+        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])   
+        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
 
@@ -475,11 +486,15 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
-            ff_val = ff_interp(theta)
+
+            # In-place operation to avoid allocations
+            ff_interp(ff_val, theta)
+            ff_deriv(ff_deriv_val, theta)
+
             rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
             rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
             rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
-            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv(theta)[4]) * y_out[end, 2] * 2π * psio
+            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
         end
 
         # Store surface-averaged quantities for the `sq` spline
@@ -487,6 +502,9 @@ function equilibrium_solver(raw_profile::DirectRunInput)
         sq_nodes[ipsi, 2] = bfield.p
         sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
+
+        # rewind pool for Float64 slot
+        rewind!(pool, Float64)
     end
 
     # Create temporary ProfileSplines for q-profile revision calculation

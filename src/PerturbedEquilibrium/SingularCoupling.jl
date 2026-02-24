@@ -563,7 +563,7 @@ ENDDO
 fsurf_indmats = fflxmats * inv(fkaxmats)
 ```
 """
-function compute_surface_inductance_from_greens(
+@with_pool pool function compute_surface_inductance_from_greens(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
     ffs_intr::ForceFreeStatesInternal,
@@ -580,21 +580,27 @@ function compute_surface_inductance_from_greens(
 
     # Initialize matrices (mpert x mpert for single toroidal mode number)
     # Green's functions are computed for a specific n, so inductance is only over poloidal modes
-    flux_matrix = zeros(ComplexF64, mpert, mpert)
-    current_matrix = zeros(ComplexF64, mpert, mpert)
+    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+
+    # Pre-allocate loop buffers from pool
+    vbwp_mn = zeros!(pool, ComplexF64, mpert)
+    chi_theta = zeros!(pool, Float64, mtheta)
+    che_theta = zeros!(pool, Float64, mtheta)
+    kax_theta = zeros!(pool, Float64, mtheta)
 
     # For each poloidal mode, compute surface current from Green's functions
     for i in 1:mpert
         # Unit flux for mode i
-        vbwp_mn = zeros(ComplexF64, mpert)
+        vbwp_mn .= 0.0
         vbwp_mn[i] = 1.0
 
         # Apply Green's functions using same approach as ResponseMatrices.jl
-        chi_theta = apply_green_function(grri, vbwp_mn)
-        che_theta = apply_green_function(grre, vbwp_mn)
+        apply_green_function!(chi_theta, grri, vbwp_mn)
+        apply_green_function!(che_theta, grre, vbwp_mn)
 
         # Surface current from potential jump
-        kax_theta = (chi_theta .- che_theta) ./ μ₀
+        @. kax_theta = (chi_theta - che_theta) / μ₀
 
         # Transform back to Fourier mode space
         kax_modes = ft(kax_theta)

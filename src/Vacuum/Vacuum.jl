@@ -4,6 +4,7 @@ using TOML, SpecialFunctions, LinearAlgebra, Printf
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 using FastGaussQuadrature: gausslegendre
 using StaticArrays: SVector
+using AdaptiveArrayPools
 
 # Import parent modules
 import ..Equilibrium
@@ -26,7 +27,7 @@ export extract_plasma_surface_at_psi
 Apply kernelsign transformation to Green's function matrix.
 For kernelsign < 0 (interior potential), multiply by -1 and add 2 to diagonal.
 """
-function apply_kernelsign!(grad_greenfunction_mat::Matrix{Float64}, kernelsign::Float64, mtheta::Int)
+function apply_kernelsign!(grad_greenfunction_mat::AbstractMatrix{Float64}, kernelsign::Float64, mtheta::Int)
     if kernelsign < 0
         grad_greenfunction_mat .*= kernelsign
         # Account for factor of 2 in diagonal terms [Chance Phys. Plasmas 1997 2161 eq. 90]
@@ -65,7 +66,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
   - The vacuum response includes plasma-plasma and plasma-wall coupling effects
   - For n=0 modes with closed walls, a regularization factor is added to prevent singularities
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only=false)
+@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only=false)
 
     # Initialization and allocations
     (; mtheta, mpert, mlow, n, force_wv_symmetry) = inputs
@@ -79,8 +80,8 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     # Allocate arrays for both Green's functions
     grri = zeros(2 * mtheta, 2 * mpert)  # Interior (kernelsign=-1)
     grre = zeros(2 * mtheta, 2 * mpert)  # Exterior (kernelsign=+1)
-    grad_green = zeros(2 * mtheta, 2 * mtheta)
-    green_temp = zeros(mtheta, mtheta)
+    grad_green = zeros!(pool, 2 * mtheta, 2 * mtheta)
+    green_temp = zeros!(pool, mtheta, mtheta)
 
     # Fourier transforms offsets into grri/grre: first mtheta rows are plasma as observer, second are wall
     # First mpert columns are real (cosine), second mpert are imaginary (sine)
@@ -128,8 +129,10 @@ function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSe
     # grre: exterior potential (kernelsign=+1)
 
     # Make copies for each kernelsign
-    grad_green_interior = copy(grad_green)
-    grad_green_exterior = copy(grad_green)
+    grad_green_interior = similar!(pool, grad_green)
+    grad_green_exterior = similar!(pool, grad_green)
+    grad_green_interior .= grad_green
+    grad_green_exterior .= grad_green
 
     # Apply kernelsign transformations
     apply_kernelsign!(grad_green_interior, -1.0, mtheta)  # Interior

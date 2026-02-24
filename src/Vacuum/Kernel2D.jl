@@ -84,9 +84,9 @@ but grad_greenfunction is not since it fills a different block of the
   - Uses Gaussian quadrature near singular points for improved accuracy
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
-function kernel!(
-    grad_greenfunction::Matrix{Float64},
-    greenfunction::Matrix{Float64},
+@with_pool pool function kernel!(
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int
@@ -124,12 +124,16 @@ function kernel!(
 
     # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
     stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
-    sing_idx = zeros(Int, 5)
+    sing_idx = zeros!(pool, Int, 5)
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = d1_spline_x(theta_grid)
-    dz_dtheta_grid = d1_spline_z(theta_grid)
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
+
+    # Call in-place API to avoid allocations
+    d1_spline_x(dx_dtheta_grid, theta_grid)
+    d1_spline_z(dz_dtheta_grid, theta_grid)
 
     # Loop through observer points
     for j in 1:mtheta
@@ -638,7 +642,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - The coupling terms include the Jacobian factor from the coordinate transformation
   - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
+@with_pool pool function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2
@@ -660,10 +664,11 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     # Legendre functions for
     # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
+    legendre = acquire!(pool, Float64, n + 2)
     if uselegacygreenfunction
-        legendre = Pn_minus_half_1997(s, n)
+        Pn_minus_half_1997!(legendre, s, n)
     else
-        legendre = Pn_minus_half_2007(s, n)
+        Pn_minus_half_2007!(legendre, s, n)
     end
 
     p0 = legendre[1]
