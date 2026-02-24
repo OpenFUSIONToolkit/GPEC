@@ -554,7 +554,8 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
         gintp = 0.0
 
         @inbounds for ig in 1:32
-            # dnom = sqrt(s·sinh²(x) + sinh(x)·cosh(x))  [Chance JCP 2007 eq. 16]
+            # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
+            # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
             sh  = sinh_n[ig]
             ch  = cosh_n[ig]
             dnom = sqrt(muladd(s, sh * sh, sh * ch))
