@@ -17,9 +17,8 @@ end
     )
 end
 
-# Precomputed Gauss-Legendre rules used in hot paths (`kernel!`, `Pn_minus_half_2007`).
+# Precomputed Gauss-Legendre rule used in the hot path (`kernel!`).
 const GL8 = gausslegendre_rule(Val(8))
-const GL32 = gausslegendre_rule(Val(32))
 
 """
     precompute_lagrange_stencils(gaussian_points)
@@ -55,6 +54,9 @@ end
 
 # Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
 const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
+
+# Pre-computed Gauss quadrature constants (_PN_TG02, _PN_WANUMR, _PN_AGAUS, _PN_BGAUS)
+# and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
 """
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
@@ -502,9 +504,7 @@ end
 function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
-    sqpi = sqrt(π)
     pii = 2.0 / π
-    sqtwo = sqrt(2.0)
 
     # Initialize output array
     P .= 0.0
@@ -539,58 +539,38 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
-        # Integration limits
-        xl = 0.0
-        xu = 5.0
+        pn_cache = get_pn_quad_cache(n)
 
-        # Transform to integration interval
-        agaus = 0.5 * (xu + xl)
-        bgaus = 0.5 * (xu - xl)
-
-        # Calculate integrals for P^n and P^{n+1}
         gint = 0.0
         gintp = 0.0
 
         @inbounds for ig in 1:32
-            tg0 = agaus + GL32.x[ig] * bgaus
-            tg02 = tg0 * tg0
-            tg1 = tg02 / (2.0 * n)
-            tg1p = tg02 / (2.0 * n + 2.0)
-            sinhtg1 = sinh(tg1)
-            sinhtg1p = sinh(tg1p)
-            sinhtg12 = sinhtg1 * sinhtg1
-            sinhtg12p = sinhtg1p * sinhtg1p
-            dnom = s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12)
-            dnomp = s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p)
-            dnom = sqrt(dnom)
-            dnomp = sqrt(dnomp)
-            anumr = tg0 * exp(-tg02)
-            gint += GL32.w[ig] * anumr / dnom
-            gintp += GL32.w[ig] * anumr / dnomp
+            # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
+            # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
+            sh  = pn_cache.sinh[ig]
+            ch  = pn_cache.cosh[ig]
+            dnom = sqrt(muladd(s, sh * sh, sh * ch))
+
+            shp = pn_cache.sinhp[ig]
+            chp = pn_cache.coshp[ig]
+            dnomp = sqrt(muladd(s, shp * shp, shp * chp))
+
+            wanumr = _PN_WANUMR[ig]
+            gint   = muladd(wanumr, inv(dnom),  gint)
+            gintp  = muladd(wanumr, inv(dnomp), gintp)
         end
 
-        gint *= bgaus
-        gintp *= bgaus
+        gint  *= _PN_BGAUS
+        gintp *= _PN_BGAUS
 
-        # Calculate coefficients
-        pcoef = sqrt((s - 1.0) / (s + 1.0))
+        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
+        # The Γ-function prefactors and normalization constants are pre-cached in
+        # pn_cache.gauss_norm_n / pn_cache.gauss_norm_np1 (see PnQuadCache.jl for derivation).
+        pcoef   = sqrt((s - 1.0) / (s + 1.0))
+        pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
-        # Gamma functions: Gamma[1/2 - n] and Gamma[1/2 - (n+1)]
-        gamn = sqpi
-        gamp = -2.0 * sqpi
-
-        if n != 0
-            # Compute Gamma[1/2 - n] = sqpi / product(-(i-1) - 0.5 for i in 1:n)
-            gamn = sqpi / prod(-(i - 1) - 0.5 for i in 1:n)
-            gamp = -gamn / (n + 0.5)
-        end
-
-        # Final Legendre function values
-        gint = sqtwo * pcoef^n * gint / (n * sqpi * gamn)
-        gintp = sqtwo * pcoef^(n + 1) * gintp / ((n + 1.0) * sqpi * gamp)
-
-        P[end-1] = gint   # P^n_{-1/2}
-        P[end] = gintp    # P^{n+1}_{-1/2}
+        P[end-1] = pcoef_n * gint  * pn_cache.gauss_norm_n    # P^n_{-1/2}
+        P[end]   = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
 
     else
         # Use upward recurrence for small n*rhohat < 0.1
