@@ -163,8 +163,8 @@ using LinearAlgebra
             ]
             for (s, n, Pn_ref, Pnp1_ref) in ref
                 P = JPEC.Vacuum.Pn_minus_half_2007(s, n)
-                @test isapprox(P[end-1], Pn_ref,   rtol=1e-15) || @show (s, n, P[end-1], Pn_ref)
-                @test isapprox(P[end],   Pnp1_ref, rtol=1e-15) || @show (s, n, P[end],   Pnp1_ref)
+                @test isapprox(P[end-1], Pn_ref,   rtol=1e-15)
+                @test isapprox(P[end],   Pnp1_ref, rtol=1e-15)
             end
         end
 

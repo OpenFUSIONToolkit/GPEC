@@ -64,6 +64,11 @@ const _PN_CACHE_LOCK = Threads.SpinLock()
 
 # Fast-path: last-used n. Since n is constant within a vacuum run,
 # this avoids Dict lookup + lock for ~100% of calls.
+#
+# Thread safety: _PN_LAST_ENTRY (plain Ref) is safe because the slow path
+# always writes the entry *before* updating the atomic sentinel _PN_LAST_N.
+# A reader that sees _PN_LAST_N == n is therefore guaranteed to see a valid
+# entry — the atomic store acts as a release fence for the preceding write.
 const _PN_LAST_N = Threads.Atomic{Int}(0)
 const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[], 0.0, 0.0))
 
@@ -82,8 +87,8 @@ end
 
 @noinline function _get_pn_quad_cache_slow(n::Int)
     entry = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
-    @inbounds _PN_LAST_ENTRY[] = entry
-    @inbounds _PN_LAST_N[] = n   # write n last so readers see valid entry
+    @inbounds _PN_LAST_ENTRY[] = entry   # plain store (data) — must precede sentinel
+    @inbounds _PN_LAST_N[] = n           # seq_cst store-release — makes data visible
     return entry
 end
 
