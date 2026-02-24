@@ -1,4 +1,4 @@
-@testset "Equilibrium Tests" begin
+@testset "Equilibrium Unit Tests" begin
 
     # --- Directory Configuration ---
     # Define the data directory for easy maintenance

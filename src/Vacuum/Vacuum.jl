@@ -71,13 +71,12 @@ function _compute_vacuum_response_single!(
 )
 
     # Initialize surface geometries
-    num_points_surf = inputs.mtheta * inputs.nzeta
-    num_modes = inputs.mpert * inputs.npert
     plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
     wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
     cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=plasma_surf.ν)
+    num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
     if inputs.nzeta > 1
