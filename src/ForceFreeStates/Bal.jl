@@ -142,7 +142,7 @@ function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
-            dtmin=MINIMUM_STEP, adaptive=true)
+            dtmin=MINIMUM_STEP, adaptive=true, save_everystep=false, save_end=true)
 
         if ode_solution.retcode == ReturnCode.Success
             solution_final = ode_solution.u[end]
@@ -292,7 +292,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     spl0_interp = cubic_interp(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); search=LinearBinary(), bc=PeriodicBC())
     spl0_d1 = deriv1(spl0_interp)
     # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
-    spl0_fs1 = stack(spl0_d1.(theta_grid))
+    spl0_fs1 = stack(spl0_d1(theta_grid))
 
     kappas .= -spl0_fs1[:, 1] .* two_pi_f ./ (2 .* jac)
     kappan .= ((pressure_gradient ./ bsq .- fx_psi[4, :] ./ jac) ./ chi_prime .+
@@ -372,7 +372,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     spl1_interp = cubic_interp(theta_grid, spl1_fs; search=LinearBinary(), bc=PeriodicBC())
     spl1_d1 = deriv1(spl1_interp)
     # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
-    spl1_fs1 = stack(spl1_d1.(theta_grid))
+    spl1_fs1 = stack(spl1_d1(theta_grid))
 
     # Compute derivatives for second-order terms
     spl3_fs = zeros(mtheta + 1, 4)

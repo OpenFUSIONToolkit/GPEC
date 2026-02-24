@@ -5,6 +5,7 @@ authors = ["Matthew Pharr <matthewcpharr@gmail.com>", "Rithik Banerjee <rb3736@c
 version = "0.1.0"
 
 [deps]
+AdaptiveArrayPools = "4f381ef7-9af0-4cbe-99d4-cf36d7b0f233"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
@@ -25,12 +26,13 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
+AdaptiveArrayPools = "0.2.0"
 DelimitedFiles = "1.9.1"
 DiffEqCallbacks = "4.9.0"
 Documenter = "1.14.1"
 FFTW = "1.9.0"
+FastInterpolations = ">=0.2.13"
 FastGaussQuadrature = "1.1.0"
-FastInterpolations = ">=0.2.8"
 HDF5 = "0.17.2"
 JLD2 = "0.6.3"
 LinearAlgebra = "1.11.0"

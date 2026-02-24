@@ -5,7 +5,8 @@ module Equilibrium
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
+using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
@@ -111,7 +112,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             it += 1
             # Evaluate offset and its derivative
             offset = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=(0, 1), hint=hint2d)
+            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
 
             eta = theta + offset - eta0
             eta_theta = 1 + offset_y
@@ -148,11 +149,11 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             iter += 1
             # Evaluate rcoord and offset with derivatives
             r2 = pe.rzphi_rsquared((psi_edge, theta); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=(0, 1), hint=hint2d)
-            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=(0, 2), hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
+            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
             eta = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0, 1), hint=hint2d)
-            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0, 2), hint=hint2d)
+            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
+            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
 
             rfac = sqrt(r2)
             rfac1 = r2y / (2 * rfac)
@@ -442,18 +443,19 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    flux_opts = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
+    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
+
     # Compute flux derivatives at all grid points for diagnostics
     hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1, 0), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1, 0), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0, 1), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0, 1), hint=hint2d)
+            query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint2d)
         end
     end
 

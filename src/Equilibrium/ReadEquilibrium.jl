@@ -23,7 +23,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
-        val_str = strip(data_str[i:(i+field_width-1)])
+        val_str = strip(@view(data_str[i:(i+field_width-1)]))
         if !isempty(val_str)
             try
                 push!(parsed_values, parse(Float64, val_str))
@@ -96,7 +96,7 @@ function read_efit(config::EquilibriumConfig)
         sqrt.(psi_norm_grid)
     )
     sq_xs = collect(psi_norm_grid)
-    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=:extension)
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -116,7 +116,7 @@ function read_efit(config::EquilibriumConfig)
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinary(),
-        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
+        bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
@@ -178,7 +178,7 @@ function read_chease_binary(config::EquilibriumConfig)
         fs_copy = copy(fs)
         fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
         # Create final spline with modified data
-        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=:extension)
+        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
 
         # --- 2D Geometry ---
         mtau = ntnova + 1  # Same with ASCII
@@ -211,9 +211,9 @@ function read_chease_binary(config::EquilibriumConfig)
         rz_in_xs = xs
         rz_in_ys = range(0, 2π; length=mtau) |> collect
         rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
-            bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
         rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
-            bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
         println("--> Finished reading CHEASE equilibrium (Binary).")
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
@@ -359,7 +359,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
     # Create final spline with modified data
-    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=:extension)
+    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -375,9 +375,9 @@ function read_chease_ascii(config::EquilibriumConfig)
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
