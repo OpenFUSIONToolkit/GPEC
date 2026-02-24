@@ -9,7 +9,7 @@
 #
 #  2. Per-n sinh/cosh cache (PnQuadEntry): depend on toroidal mode number n
 #     but not on the Legendre argument s. Since n is fixed per vacuum run, we
-#     cache them on first use and serve ~3.7M subsequent calls from reads.
+#     cache them on first use and serve millions of subsequent calls from reads.
 #
 # Thread safety: Dict + SpinLock for storage, atomic last-used entry for
 # lock-free fast path. Since n is constant within a vacuum run, the fast
@@ -17,8 +17,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Quadrature node constants (integration limits: xl=0, xu=5) ───────────────
-# Uses gausslegendre(32) directly so this file is self-contained
-# (included before Kernel2D.jl where GL32 is defined).
+# Uses gausslegendre(32) directly; this file is included before Kernel2D.jl
+# and needs to be self-contained.
 # _PN_TG02[ig]   = tg0² = (agaus + x[ig] * bgaus)²
 # _PN_WANUMR[ig] = w[ig] * tg0 * exp(-tg0²)
 const _PN_AGAUS = 2.5
@@ -50,7 +50,7 @@ struct PnQuadEntry
     # These combine all factors that depend only on n (not on s):
     #   √2, n, √π, and the Gamma function Γ(1/2 - n) or Γ(-1/2 - n).
     # Caching them here avoids an O(n) product-formula computation on
-    # every call to Pn_minus_half_2007! (which is called ~3.7M times per run).
+    # every call to Pn_minus_half_2007! (which is called millions of times per run).
     #
     #   gauss_norm_n   = √2 / (n · √π · Γ(1/2 - n))      — scale for P^n_{-1/2}
     #   gauss_norm_np1 = √2 / ((n+1) · √π · Γ(-1/2 - n)) — scale for P^{n+1}_{-1/2}

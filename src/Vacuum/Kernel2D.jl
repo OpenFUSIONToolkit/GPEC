@@ -17,9 +17,8 @@ end
     )
 end
 
-# Precomputed Gauss-Legendre rules used in hot paths (`kernel!`, `Pn_minus_half_2007`).
+# Precomputed Gauss-Legendre rule used in the hot path (`kernel!`).
 const GL8 = gausslegendre_rule(Val(8))
-const GL32 = gausslegendre_rule(Val(32))
 
 """
     precompute_lagrange_stencils(gaussian_points)
@@ -540,7 +539,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
-        entry = get_pn_quad_cache(n)
+        pn_cache = get_pn_quad_cache(n)
 
         gint = 0.0
         gintp = 0.0
@@ -548,12 +547,12 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
         @inbounds for ig in 1:32
             # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
             # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
-            sh  = entry.sinh[ig]
-            ch  = entry.cosh[ig]
+            sh  = pn_cache.sinh[ig]
+            ch  = pn_cache.cosh[ig]
             dnom = sqrt(muladd(s, sh * sh, sh * ch))
 
-            shp = entry.sinhp[ig]
-            chp = entry.coshp[ig]
+            shp = pn_cache.sinhp[ig]
+            chp = pn_cache.coshp[ig]
             dnomp = sqrt(muladd(s, shp * shp, shp * chp))
 
             wanumr = _PN_WANUMR[ig]
@@ -566,12 +565,12 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
         # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
         # The Γ-function prefactors and normalization constants are pre-cached in
-        # entry.gauss_norm_n / entry.gauss_norm_np1 (see PnQuadCache.jl for derivation).
+        # pn_cache.gauss_norm_n / pn_cache.gauss_norm_np1 (see PnQuadCache.jl for derivation).
         pcoef   = sqrt((s - 1.0) / (s + 1.0))
         pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
-        P[end-1] = pcoef_n * gint  * entry.gauss_norm_n    # P^n_{-1/2}
-        P[end]   = pcoef_n * pcoef * gintp * entry.gauss_norm_np1  # P^{n+1}_{-1/2}
+        P[end-1] = pcoef_n * gint  * pn_cache.gauss_norm_n    # P^n_{-1/2}
+        P[end]   = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
 
     else
         # Use upward recurrence for small n*rhohat < 0.1
