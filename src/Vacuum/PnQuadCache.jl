@@ -81,14 +81,14 @@ Works for any `n ≥ 1` with no upper limit.
 The fast path (same `n` as last call) is lock-free: one atomic read + comparison.
 """
 @inline function get_pn_quad_cache(n::Int)
-    @inbounds _PN_LAST_N[] == n && return @inbounds _PN_LAST_ENTRY[]
+    _PN_LAST_N[] == n && return _PN_LAST_ENTRY[]
     return _get_pn_quad_cache_slow(n)
 end
 
 @noinline function _get_pn_quad_cache_slow(n::Int)
     entry = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
-    @inbounds _PN_LAST_ENTRY[] = entry   # plain store (data) — must precede sentinel
-    @inbounds _PN_LAST_N[] = n           # seq_cst store-release — makes data visible
+    _PN_LAST_ENTRY[] = entry   # plain store (data) — must precede sentinel
+    _PN_LAST_N[] = n           # seq_cst store-release — makes data visible
     return entry
 end
 

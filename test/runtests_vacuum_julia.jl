@@ -131,7 +131,7 @@ using LinearAlgebra
         @testset "Pn_minus_half_2007 regression (develop reference values)" begin
             # Reference values computed on develop branch (pre-optimization).
             # Tests the Gaussian quadrature branch (n*rhohat >= 0.1) across a
-            # wide range of s and n values. Tolerance rtol=1e-14 allows for
+            # wide range of s and n values. Tolerance rtol=1e-15 allows for
             # minor FMA (muladd) rounding differences while catching real bugs.
             ref = [
                 #  s         n    P^n_{-1/2}                P^{n+1}_{-1/2}
