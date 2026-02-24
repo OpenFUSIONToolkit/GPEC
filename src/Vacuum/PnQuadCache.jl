@@ -7,12 +7,13 @@
 #  1. Node-level constants (_PN_TG02, _PN_WANUMR): depend only on the
 #     quadrature rule, computed once at module load time as NTuples.
 #
-#  2. Per-n sinh/cosh cache: depend on toroidal mode number n but not on
-#     the Legendre argument s. Since n is fixed per vacuum run, we cache
-#     them on first use and serve ~3.7M subsequent calls from array reads.
+#  2. Per-n sinh/cosh cache (PnQuadEntry): depend on toroidal mode number n
+#     but not on the Legendre argument s. Since n is fixed per vacuum run, we
+#     cache them on first use and serve ~3.7M subsequent calls from reads.
 #
-# Thread safety: per-n Atomic{Bool} flag + SpinLock (double-checked locking).
-# Fast path (cache hit) is lock-free: one atomic read + array index.
+# Thread safety: Dict + SpinLock for storage, atomic last-used entry for
+# lock-free fast path. Since n is constant within a vacuum run, the fast
+# path (same n as last call) hits ~100% of the time.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Quadrature node constants (integration limits: xl=0, xu=5) ───────────────
@@ -31,64 +32,62 @@ const (_PN_TG02, _PN_WANUMR) = let
 end
 
 # ── Per-n sinh/cosh cache ────────────────────────────────────────────────────
-const _PN_QUAD_MAX_N = 64
-
-# Pre-allocated storage indexed by toroidal mode number n ∈ 1:_PN_QUAD_MAX_N.
-# Each inner Vector{Float64} has 32 elements (one per Gauss node).
-# Stores sinh and cosh values for mode n and n+1 quadrature arguments.
-const _PN_QUAD_SINH  = [Vector{Float64}(undef, 32) for _ in 1:_PN_QUAD_MAX_N]
-const _PN_QUAD_COSH  = [Vector{Float64}(undef, 32) for _ in 1:_PN_QUAD_MAX_N]
-const _PN_QUAD_SINHP = [Vector{Float64}(undef, 32) for _ in 1:_PN_QUAD_MAX_N]
-const _PN_QUAD_COSHP = [Vector{Float64}(undef, 32) for _ in 1:_PN_QUAD_MAX_N]
-
-# Per-n readiness flag (atomic for lock-free fast path) and shared lock for population
-const _PN_QUAD_READY = [Threads.Atomic{Bool}(false) for _ in 1:_PN_QUAD_MAX_N]
-const _PN_QUAD_LOCK  = Threads.SpinLock()
 
 """
-    ensure_pn_quad_cache!(n::Int)
+    PnQuadEntry
 
-Ensure that the Gaussian quadrature sinh/cosh cache is populated for toroidal mode `n`.
-After this call, `_PN_QUAD_SINH[n]`, `_PN_QUAD_COSH[n]`, `_PN_QUAD_SINHP[n]`,
-and `_PN_QUAD_COSHP[n]` contain valid pre-computed values.
-
-Thread-safe via atomic flags with double-checked locking. The fast path (cache hit)
-is lock-free and costs ~1ns (one atomic Bool read).
+Cached sinh/cosh values for the 32-point Gaussian quadrature at a given
+toroidal mode number `n`. Each field is a 32-element vector indexed by
+Gauss node `ig`.
 """
-@inline function ensure_pn_quad_cache!(n::Int)
-    @boundscheck 1 <= n <= _PN_QUAD_MAX_N || throw(
-        DomainError(n, "toroidal mode number n must be in 1:$_PN_QUAD_MAX_N"))
-    @inbounds _PN_QUAD_READY[n][] && return nothing
-    _populate_pn_quad_cache!(n)
-    return nothing
+struct PnQuadEntry
+    sinh::Vector{Float64}   # sinh(tg0²/(2n))
+    cosh::Vector{Float64}   # cosh(tg0²/(2n))
+    sinhp::Vector{Float64}  # sinh(tg0²/(2n+2))
+    coshp::Vector{Float64}  # cosh(tg0²/(2n+2))
 end
 
-@noinline function _populate_pn_quad_cache!(n::Int)
-    @lock _PN_QUAD_LOCK begin
-        # Double-check after acquiring lock (another thread may have populated)
-        @inbounds _PN_QUAD_READY[n][] && return nothing
+# Dict-based storage: works for any positive n, no upper limit.
+const _PN_CACHE = Dict{Int,PnQuadEntry}()
+const _PN_CACHE_LOCK = Threads.SpinLock()
 
-        inv_2n   = 1.0 / (2.0 * n)
-        inv_2np2 = 1.0 / (2.0 * n + 2.0)
+# Fast-path: last-used n. Since n is constant within a vacuum run,
+# this avoids Dict lookup + lock for ~100% of calls.
+const _PN_LAST_N = Threads.Atomic{Int}(0)
+const _PN_LAST_ENTRY = Ref{PnQuadEntry}(PnQuadEntry(Float64[], Float64[], Float64[], Float64[]))
 
-        sinh_v  = @inbounds _PN_QUAD_SINH[n]
-        cosh_v  = @inbounds _PN_QUAD_COSH[n]
-        sinhp_v = @inbounds _PN_QUAD_SINHP[n]
-        coshp_v = @inbounds _PN_QUAD_COSHP[n]
+"""
+    get_pn_quad_cache(n::Int) -> PnQuadEntry
 
-        @inbounds for ig in 1:32
-            tg1  = _PN_TG02[ig] * inv_2n
-            tg1p = _PN_TG02[ig] * inv_2np2
+Return cached sinh/cosh values for toroidal mode `n`, computing on first access.
+Works for any `n ≥ 1` with no upper limit.
 
-            sinh_v[ig]  = sinh(tg1)
-            cosh_v[ig]  = cosh(tg1)
-            sinhp_v[ig] = sinh(tg1p)
-            coshp_v[ig] = cosh(tg1p)
-        end
+The fast path (same `n` as last call) is lock-free: one atomic read + comparison.
+"""
+@inline function get_pn_quad_cache(n::Int)
+    @inbounds _PN_LAST_N[] == n && return @inbounds _PN_LAST_ENTRY[]
+    return _get_pn_quad_cache_slow(n)
+end
 
-        # Atomic store acts as release barrier — all writes above are visible
-        # to any thread that subsequently reads true from this flag.
-        @inbounds _PN_QUAD_READY[n][] = true
+@noinline function _get_pn_quad_cache_slow(n::Int)
+    entry = @lock _PN_CACHE_LOCK get!(() -> _make_pn_quad_entry(n), _PN_CACHE, n)
+    @inbounds _PN_LAST_ENTRY[] = entry
+    @inbounds _PN_LAST_N[] = n   # write n last so readers see valid entry
+    return entry
+end
+
+function _make_pn_quad_entry(n::Int)
+    inv_2n   = 1.0 / (2.0 * n)
+    inv_2np2 = 1.0 / (2.0 * n + 2.0)
+    sh  = Vector{Float64}(undef, 32)
+    ch  = Vector{Float64}(undef, 32)
+    shp = Vector{Float64}(undef, 32)
+    chp = Vector{Float64}(undef, 32)
+    @inbounds for ig in 1:32
+        x  = _PN_TG02[ig] * inv_2n
+        xp = _PN_TG02[ig] * inv_2np2
+        sh[ig]  = sinh(x);  ch[ig]  = cosh(x)
+        shp[ig] = sinh(xp); chp[ig] = cosh(xp)
     end
-    return nothing
+    return PnQuadEntry(sh, ch, shp, chp)
 end

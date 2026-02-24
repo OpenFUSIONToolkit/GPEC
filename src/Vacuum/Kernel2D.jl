@@ -542,13 +542,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
-        ensure_pn_quad_cache!(n)
-
-        # Grab inner vectors (pointer reads, 8 bytes each, zero copy)
-        sinh_n  = @inbounds _PN_QUAD_SINH[n]
-        cosh_n  = @inbounds _PN_QUAD_COSH[n]
-        sinhp_n = @inbounds _PN_QUAD_SINHP[n]
-        coshp_n = @inbounds _PN_QUAD_COSHP[n]
+        entry = get_pn_quad_cache(n)
 
         gint = 0.0
         gintp = 0.0
@@ -556,12 +550,12 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
         @inbounds for ig in 1:32
             # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
             # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
-            sh  = sinh_n[ig]
-            ch  = cosh_n[ig]
+            sh  = entry.sinh[ig]
+            ch  = entry.cosh[ig]
             dnom = sqrt(muladd(s, sh * sh, sh * ch))
 
-            shp = sinhp_n[ig]
-            chp = coshp_n[ig]
+            shp = entry.sinhp[ig]
+            chp = entry.coshp[ig]
             dnomp = sqrt(muladd(s, shp * shp, shp * chp))
 
             wanumr = _PN_WANUMR[ig]
