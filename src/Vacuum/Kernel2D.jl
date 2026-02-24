@@ -506,7 +506,6 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
     pii = 2.0 / π
-    # (sqpi and sqtwo are not needed here: they are absorbed into PnQuadEntry.gauss_norm_*)
 
     # Initialize output array
     P .= 0.0

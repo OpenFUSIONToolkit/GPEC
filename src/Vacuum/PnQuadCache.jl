@@ -48,7 +48,7 @@ struct PnQuadEntry
 
     # Pre-computed scale factors for the final Legendre function values.
     # These combine all factors that depend only on n (not on s):
-    #   √2, n, √π, and the Gamma function Γ(1/2 - n).
+    #   √2, n, √π, and the Gamma function Γ(1/2 - n) or Γ(-1/2 - n).
     # Caching them here avoids an O(n) product-formula computation on
     # every call to Pn_minus_half_2007! (which is called ~3.7M times per run).
     #
@@ -88,6 +88,7 @@ end
 end
 
 function _make_pn_quad_entry(n::Int)
+    @assert n >= 1 "PnQuadEntry is only defined for n ≥ 1 (Γ(1/2 - n) diverges at n = 0)"
     inv_2n   = 1.0 / (2.0 * n)
     inv_2np2 = 1.0 / (2.0 * n + 2.0)
     sh  = Vector{Float64}(undef, 32)
