@@ -1,4 +1,4 @@
-# Master benchmark script: runs full DCON walkthrough and benchmarks each method within each step.
+# Master benchmark script: runs full ForceFreeStates (stability) walkthrough and benchmarks each method within each step.
 # Reports runtime (mean ± std) and memory allocations per method, sorted by runtime.
 # Output is suppressed during benchmarks; final run output is shown for verification.
 # MUST change path in the config to whichever example want to benchmark
@@ -11,6 +11,8 @@ using TOML
 
 Pkg.activate(joinpath(@__DIR__, ".."))
 using JPEC
+using FastInterpolations: cubic_interp, CubicFit
+import FastInterpolations
 
 # --- Config ---
 # CHANGE THIS TO THE PATH YOU WANT!
@@ -39,52 +41,47 @@ function run_quietly(f)
     end
 end
 
-# --- DCON phases (replicates Main.jl flow with per-phase timing). Pass precomputed `equil`. ---
+# --- ForceFreeStates phases (replicates JPEC.main flow with per-phase timing). Pass precomputed `equil`. ---
 function run_dcon_phases(path, equil)
-    DCON = JPEC.DCON
-    Spl = JPEC.Spl
+    FFS = JPEC.ForceFreeStates
     Vacuum = JPEC.Vacuum
 
-    intr = DCON.DconInternal(; dir_path=path)
-    inputs = TOML.parsefile(joinpath(path, "dcon.toml"))
-    ctrl = DCON.DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
+    intr = FFS.ForceFreeStatesInternal(; dir_path=path)
+    inputs = TOML.parsefile(joinpath(path, "jpec.toml"))
+    ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
     ctrl.verbose = false
-    ctrl.write_outputs_to_HDF5 = false  # Skip HDF5 during benchmark to avoid I/O noise
+    ctrl.write_outputs_to_HDF5 = false
 
-    if "WALL" in keys(inputs)
-        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
+    if "Wall" in keys(inputs)
+        intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     end
     if "DEBUG" in keys(inputs)
-        intr.debug_settings = DCON.DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
+        intr.debug_settings = FFS.DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     end
     ctrl.delta_mhigh *= 2
 
-    phases = Tuple{String,Float64,Int64}[]  # (name, time_s, alloc_bytes)
+    phases = Tuple{String,Float64,Int64}[]
 
-    # sing_lim!
-    _, t, b, _, _ = @timed DCON.sing_lim!(intr, ctrl, equil)
-    push!(phases, ("DCON.sing_lim!", t, b))
+    _, t, b, _, _ = @timed FFS.sing_lim!(intr, ctrl, equil)
+    push!(phases, ("ForceFreeStates.sing_lim!", t, b))
 
     if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
         ctrl.psiedge = 1.0
     end
 
-    # mercier_scan!
-    locstab_fs = zeros(Float64, length(equil.sq.xs), 5)
+    locstab_fs = zeros(Float64, length(equil.profiles.xs), 5)
     if ctrl.mer_flag
-        _, t, b, _, _ = @timed DCON.mercier_scan!(locstab_fs, equil)
-        push!(phases, ("DCON.mercier_scan!", t, b))
+        _, t, b, _, _ = @timed FFS.mercier_scan!(locstab_fs, equil)
+        push!(phases, ("ForceFreeStates.mercier_scan!", t, b))
     end
     if ctrl.bal_flag
-        _, t, b, _, _ = @timed DCON.compute_ballooning_stability!(ctrl, locstab_fs, equil)
-        push!(phases, ("DCON.compute_ballooning_stability!", t, b))
+        _, t, b, _, _ = @timed FFS.compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        push!(phases, ("ForceFreeStates.compute_ballooning_stability!", t, b))
     end
 
-    # locstab spline
-    _, t, b, _, _ = @timed intr.locstab = Spl.CubicSpline(Vector(equil.sq.xs), locstab_fs; bctype="extrap")
-    push!(phases, ("DCON.locstab_spline", t, b))
+    _, t, b, _, _ = @timed intr.locstab = cubic_interp(equil.profiles.xs, locstab_fs; bc=CubicFit(), extrap=FastInterpolations.ExtendExtrap())
+    push!(phases, ("ForceFreeStates.locstab_spline", t, b))
 
-    # Mode number setup
     if ctrl.nn_low == 0
         ctrl.nn_low = ctrl.nn_high
     end
@@ -95,11 +92,9 @@ function run_dcon_phases(path, equil)
     intr.nhigh = ctrl.nn_high
     intr.npert = intr.nhigh - intr.nlow + 1
 
-    # sing_find!
-    _, t, b, _, _ = @timed DCON.sing_find!(intr, equil)
-    push!(phases, ("DCON.sing_find!", t, b))
+    _, t, b, _, _ = @timed FFS.sing_find!(intr, equil)
+    push!(phases, ("ForceFreeStates.sing_find!", t, b))
 
-    # m low/high setup (matches Main.jl)
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
@@ -110,11 +105,11 @@ function run_dcon_phases(path, equil)
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
-        intr.mmin = Inf
+        mmin = Inf
         for ising in Int(ctrl.sing_start):intr.msing
-            intr.mmin = min(intr.mmin, minimum(intr.sing[ising].m))
+            mmin = min(mmin, minimum(intr.sing[ising].m))
         end
-        intr.mlow = trunc(Int, intr.mmin) - ctrl.delta_mlow
+        intr.mlow = trunc(Int, mmin) - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
@@ -131,24 +126,21 @@ function run_dcon_phases(path, equil)
     vac_data = nothing
 
     if ctrl.mat_flag || ctrl.ode_flag
-        metric, t, b, _, _ = @timed DCON.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
-        push!(phases, ("DCON.make_metric", t, b))
+        metric, t, b, _, _ = @timed FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        push!(phases, ("ForceFreeStates.make_metric", t, b))
 
-        ffit, t, b, _, _ = @timed DCON.make_matrix(equil, intr, metric)
-        push!(phases, ("DCON.make_matrix", t, b))
-
-        _, t, b, _, _ = @timed DCON.sing_scan!(intr, ctrl, equil, ffit)
-        push!(phases, ("DCON.sing_scan!", t, b))
+        ffit, t, b, _, _ = @timed FFS.make_matrix(equil, intr, metric)
+        push!(phases, ("ForceFreeStates.make_matrix", t, b))
     end
 
     if ctrl.ode_flag
-        odet, t, b, _, _ = @timed DCON.ode_run(ctrl, equil, ffit, intr)
-        push!(phases, ("DCON.ode_run", t, b))
+        odet, t, b, _, _ = @timed FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+        push!(phases, ("ForceFreeStates.eulerlagrange_integration", t, b))
     end
 
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
-        vac_data, t, b, _, _ = @timed DCON.free_run!(odet, ctrl, equil, ffit, intr)
-        push!(phases, ("DCON.free_run!", t, b))
+        vac_data, t, b, _, _ = @timed FFS.free_run!(odet, ctrl, equil, ffit, intr)
+        push!(phases, ("ForceFreeStates.free_run!", t, b))
     end
 
     (phases, intr, ctrl, equil, ffit, odet, vac_data)
@@ -156,8 +148,9 @@ end
 
 # --- Run benchmarks N_RUNS times, collect stats ---
 function collect_benchmark_stats(path)
-    equil_toml = joinpath(path, "equil.toml")
     Eq = JPEC.Equilibrium
+    inputs = TOML.parsefile(joinpath(path, "jpec.toml"))
+    eq_config = Eq.EquilibriumConfig(inputs["Equilibrium"], path)
 
     all_phase_times = Dict{String,Vector{Float64}}()
     all_phase_allocs = Dict{String,Vector{Int64}}()
@@ -166,8 +159,6 @@ function collect_benchmark_stats(path)
 
     for run in 1:N_RUNS
         run_quietly() do
-            # Equilibrium phases with timing
-            eq_config = Eq.EquilibriumConfig(equil_toml)
             eq_input, t, b, _, _ = @timed Eq.read_efit(eq_config)
             record_phase!(all_phase_times, all_phase_allocs, "Equilibrium.read_efit", t, b)
 
@@ -183,7 +174,6 @@ function collect_benchmark_stats(path)
             _, t, b, _, _ = @timed Eq.equilibrium_gse!(pe)
             record_phase!(all_phase_times, all_phase_allocs, "Equilibrium.equilibrium_gse!", t, b)
 
-            # DCON (uses equil from above)
             phases, _, _, _, _, odet, vac = run_dcon_phases(path, pe)
             last_odet = odet
             last_vac = vac
@@ -250,15 +240,14 @@ function print_results_table(results)
     println("="^100)
     println("BENCHMARK RESULTS (sorted by runtime descending)")
     println("="^100)
-    fmt = "%-45s | %10s | %12s | %6s | %12s"
-    println(Printf.sprintf(fmt, "Method", "Avg Time (s)", "Std Dev (s)", "Runs", "Alloc (MB)"))
+    println(@sprintf("%-45s | %10s | %12s | %6s | %12s", "Method", "Avg Time (s)", "Std Dev (s)", "Runs", "Alloc (MB)"))
     println("-"^100)
     for r in sorted
         t_str = @sprintf("%.4f", r.time_avg)
         t_std_str = r.time_std > 0 ? @sprintf("%.4f", r.time_std) : "-"
         alloc_mb = r.alloc_bytes_avg / 1e6
         alloc_str = alloc_mb > 0 ? @sprintf("%.2f", alloc_mb) : "-"
-        println(Printf.sprintf(fmt, r.method, t_str, t_std_str, r.n_runs, alloc_str))
+        println(@sprintf("%-45s | %10s | %12s | %6s | %12s", r.method, t_str, t_std_str, r.n_runs, alloc_str))
     end
     println("="^100)
 end
@@ -290,7 +279,7 @@ function main()
     println("\n")
     println("FINAL RUN (output visible):")
     println("-"^60)
-    JPEC.DCON.Main(BENCHMARK_PATH)
+    JPEC.main([BENCHMARK_PATH])
     println("-"^60)
     println("Benchmark complete.")
 end
