@@ -11,7 +11,7 @@ and data dumping.
 
     # Initializations and allocations
     (; mpert, mlow, mhigh, mband, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
-    vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, intr.mpert, ctrl.mthvac)
+    vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, intr.numpert_total, ctrl.mthvac)
     etemp = zeros!(pool, ComplexF64, numpert_total)
     wp = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     wpt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
