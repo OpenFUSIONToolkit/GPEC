@@ -123,7 +123,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     grad_green_interior = similar!(pool, grad_green)
     grad_green_interior .= grad_green
 
-    # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations
+    # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
     F_ext = lu!(grad_green)
     ldiv!(F_ext, grre)
 
@@ -179,17 +179,17 @@ implementation. For performance‑critical paths that already own preallocated s
 (e.g. `ForceFreeStates.VacuumData`), prefer the in‑place method to avoid extra
 heap allocations.
 """
-function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
 
     # Allocate storage for the vacuum response matrix and Green's functions
     numpoints = inputs.mtheta * inputs.nzeta
     num_modes = inputs.mpert * inputs.npert
     vac = (
-        wv=zeros(ComplexF64, num_modes, num_modes),
-        grri=zeros(2 * numpoints, 2 * num_modes),
-        grre=zeros(2 * numpoints, 2 * num_modes),
-        plasma_pts=zeros(numpoints, 3),
-        wall_pts=zeros(numpoints, 3)
+        wv=zeros!(pool, ComplexF64, num_modes, num_modes),
+        grri=zeros!(pool, 2 * numpoints, 2 * num_modes),
+        grre=zeros!(pool, 2 * numpoints, 2 * num_modes),
+        plasma_pts=zeros!(pool, numpoints, 3),
+        wall_pts=zeros!(pool, numpoints, 3)
     )
 
     compute_vacuum_response!(vac, inputs, wall_settings; green_only=green_only)
