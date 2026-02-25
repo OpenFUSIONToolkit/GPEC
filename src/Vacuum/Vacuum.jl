@@ -118,16 +118,13 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
     end
 
-
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
     grri .= grre # start from same as exterior
     grad_green_interior = similar!(pool, grad_green)
-    grad_green_exterior = similar!(pool, grad_green)
     grad_green_interior .= grad_green
-    grad_green_exterior .= grad_green
 
     # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations
-    F_ext = lu!(grad_green_exterior)
+    F_ext = lu!(grad_green)
     ldiv!(F_ext, grre)
 
     # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal

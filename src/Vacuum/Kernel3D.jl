@@ -544,8 +544,8 @@ end
 Dispatch wrapper for 3D kernel that forwards to `compute_3D_kernel_matrices!` with params.
 """
 function kernel!(
-    grad_greenfunction::Matrix{Float64},
-    greenfunction::Matrix{Float64},
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     params::KernelParams3D
