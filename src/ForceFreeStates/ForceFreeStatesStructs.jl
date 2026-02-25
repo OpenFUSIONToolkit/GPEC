@@ -263,7 +263,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
 end
 
-@kwdef mutable struct FourFitVars
+@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
     mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
@@ -271,15 +271,18 @@ end
     # Complex-valued CubicSeriesInterpolant for stability matrices
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
-    amats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    bmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    cmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    dmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    emats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    hmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    fmats_lower::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    kmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    gmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
+    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+
+    amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    dmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -291,18 +294,17 @@ end
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
-# Helper to create empty series interpolant for default initialization (real-valued)
-function _empty_series_interp(n_series::Int)
-    xs = collect(range(0.0, 1.0; length=5))
-    Y = zeros(Float64, 5, n_series)
-    return cubic_interp(xs, Y)
-end
-
 # Helper to create empty complex series interpolant for default initialization
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
     return cubic_interp(xs, Y)
+end
+
+function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(ComplexF64, 5, n_series)
+    return cubic_interp(xs, Y; itp_opts...)
 end
 
 # Convenience constructor
@@ -396,17 +398,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape
     `(numpert_total, numpert_total, numunorms_init)`.
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
-  - Temporary workspaces used during integration calculations:
-
-      + `amat::Vector{ComplexF64}` - Flattened A matrix (length `numpert_total^2`)
-      + `bmat::Vector{ComplexF64}` - Flattened B matrix (length `numpert_total^2`)
-      + `cmat::Vector{ComplexF64}` - Flattened C matrix (length `numpert_total^2`)
-      + `fmat_lower::Vector{ComplexF64}` - Lower-triangle factor of F (length `numpert_total^2`)
-      + `kmat::Vector{ComplexF64}` - Flattened K matrix (length `numpert_total^2`)
-      + `gmat::Vector{ComplexF64}` - Flattened G matrix (length `numpert_total^2`)
-      + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
-      + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
-      + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
 """
 @kwdef mutable struct OdeState
     # Initialization parameters
@@ -450,17 +441,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
-
-    # Temporary matrices for sing_der calculations
-    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
-    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    Afact::Cholesky{ComplexF64,Matrix{ComplexF64}} = cholesky(Matrix{ComplexF64}(I, numpert_total, numpert_total))
-    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups

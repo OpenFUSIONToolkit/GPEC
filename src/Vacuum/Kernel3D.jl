@@ -395,8 +395,8 @@ This function automatically uses all available threads (`Threads.nthreads()`).
 Start Julia with `julia -t auto` or set `JULIA_NUM_THREADS` to enable multi-threading.
 """
 function compute_3D_kernel_matrices!(
-    grad_greenfunction::Matrix{Float64},
-    greenfunction::Matrix{Float64},
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,

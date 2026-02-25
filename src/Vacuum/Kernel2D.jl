@@ -17,9 +17,8 @@ end
     )
 end
 
-# Precomputed Gauss-Legendre rules used in hot paths (`kernel!`, `Pn_minus_half_2007`).
+# Precomputed Gauss-Legendre rule used in the hot path (`kernel!`).
 const GL8 = gausslegendre_rule(Val(8))
-const GL32 = gausslegendre_rule(Val(32))
 
 """
     precompute_lagrange_stencils(gaussian_points)
@@ -56,6 +55,9 @@ end
 # Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
 const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 
+# Pre-computed Gauss quadrature constants (_PN_TG02, _PN_WANUMR, _PN_AGAUS, _PN_BGAUS)
+# and per-n sinh/cosh cache are defined in PnQuadCache.jl.
+
 """
     kernel!(grad_greenfunction, greenfunction, observer, source, n)
 
@@ -84,9 +86,9 @@ but grad_greenfunction is not since it fills a different block of the
   - Uses Gaussian quadrature near singular points for improved accuracy
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
-function compute_2D_kernel_matrices!(
-    grad_greenfunction::Matrix{Float64},
-    greenfunction::Matrix{Float64},
+@with_pool pool function compute_2D_kernel_matrices!(
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int
@@ -124,12 +126,16 @@ function compute_2D_kernel_matrices!(
 
     # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
     stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
-    sing_idx = zeros(Int, 5)
+    sing_idx = zeros!(pool, Int, 5)
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = d1_spline_x.(theta_grid)
-    dz_dtheta_grid = d1_spline_z.(theta_grid)
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
+
+    # Call in-place API to avoid allocations
+    d1_spline_x(dx_dtheta_grid, theta_grid)
+    d1_spline_z(dz_dtheta_grid, theta_grid)
 
     # Loop through observer points
     for j in 1:mtheta
@@ -225,8 +231,8 @@ end
 
 # Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
 function kernel!(
-    grad_greenfunction::Matrix{Float64},
-    greenfunction::Matrix{Float64},
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     params::KernelParams2D
@@ -338,9 +344,14 @@ has a typo where the exponent should be -1/4 instead of +1/2.
   - Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_1997!(P, s, n)
+end
+
+function Pn_minus_half_1997!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     #initialize
-    P = zeros(n + 2)
+    P .= 0.0
 
     # n = 0
     P[1] = P0_minus_half(s)
@@ -497,14 +508,17 @@ This implementation uses:
   - Reference: JCP 221 (2007) 330-348    # Constants
 """
 function Pn_minus_half_2007(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_2007!(P, s, n)
+end
+
+function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
-    sqpi = sqrt(π)
     pii = 2.0 / π
-    sqtwo = sqrt(2.0)
 
     # Initialize output array
-    P = zeros(n + 2)
+    P .= 0.0
 
     # Preliminary computations
     xxq = s * s
@@ -536,58 +550,38 @@ function Pn_minus_half_2007(s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
-        # Integration limits
-        xl = 0.0
-        xu = 5.0
+        pn_cache = get_pn_quad_cache(n)
 
-        # Transform to integration interval
-        agaus = 0.5 * (xu + xl)
-        bgaus = 0.5 * (xu - xl)
-
-        # Calculate integrals for P^n and P^{n+1}
         gint = 0.0
         gintp = 0.0
 
         @inbounds for ig in 1:32
-            tg0 = agaus + GL32.x[ig] * bgaus
-            tg02 = tg0 * tg0
-            tg1 = tg02 / (2.0 * n)
-            tg1p = tg02 / (2.0 * n + 2.0)
-            sinhtg1 = sinh(tg1)
-            sinhtg1p = sinh(tg1p)
-            sinhtg12 = sinhtg1 * sinhtg1
-            sinhtg12p = sinhtg1p * sinhtg1p
-            dnom = s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12)
-            dnomp = s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p)
-            dnom = sqrt(dnom)
-            dnomp = sqrt(dnomp)
-            anumr = tg0 * exp(-tg02)
-            gint += GL32.w[ig] * anumr / dnom
-            gintp += GL32.w[ig] * anumr / dnomp
+            # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
+            # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
+            sh = pn_cache.sinh[ig]
+            ch = pn_cache.cosh[ig]
+            dnom = sqrt(muladd(s, sh * sh, sh * ch))
+
+            shp = pn_cache.sinhp[ig]
+            chp = pn_cache.coshp[ig]
+            dnomp = sqrt(muladd(s, shp * shp, shp * chp))
+
+            wanumr = _PN_WANUMR[ig]
+            gint = muladd(wanumr, inv(dnom), gint)
+            gintp = muladd(wanumr, inv(dnomp), gintp)
         end
 
-        gint *= bgaus
-        gintp *= bgaus
+        gint *= _PN_BGAUS
+        gintp *= _PN_BGAUS
 
-        # Calculate coefficients
+        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
+        # The Γ-function prefactors and normalization constants are pre-cached in
+        # pn_cache.gauss_norm_n / pn_cache.gauss_norm_np1 (see PnQuadCache.jl for derivation).
         pcoef = sqrt((s - 1.0) / (s + 1.0))
+        pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
-        # Gamma functions: Gamma[1/2 - n] and Gamma[1/2 - (n+1)]
-        gamn = sqpi
-        gamp = -2.0 * sqpi
-
-        if n != 0
-            # Compute Gamma[1/2 - n] = sqpi / product(-(i-1) - 0.5 for i in 1:n)
-            gamn = sqpi / prod(-(i - 1) - 0.5 for i in 1:n)
-            gamp = -gamn / (n + 0.5)
-        end
-
-        # Final Legendre function values
-        gint = sqtwo * pcoef^n * gint / (n * sqpi * gamn)
-        gintp = sqtwo * pcoef^(n + 1) * gintp / ((n + 1.0) * sqpi * gamp)
-
-        P[end-1] = gint   # P^n_{-1/2}
-        P[end] = gintp    # P^{n+1}_{-1/2}
+        P[end-1] = pcoef_n * gint * pn_cache.gauss_norm_n    # P^n_{-1/2}
+        P[end] = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
 
     else
         # Use upward recurrence for small n*rhohat < 0.1
@@ -639,7 +633,16 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - The coupling terms include the Jacobian factor from the coordinate transformation
   - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
+@with_pool pool function green(
+    x_obs::Float64,
+    z_obs::Float64,
+    x_source::Float64,
+    z_source::Float64,
+    dx_dtheta::Float64,
+    dz_dtheta::Float64,
+    n::Int;
+    uselegacygreenfunction::Bool=false
+)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2
@@ -661,10 +664,11 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     # Legendre functions for
     # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
+    legendre = acquire!(pool, Float64, n + 2)
     if uselegacygreenfunction
-        legendre = Pn_minus_half_1997(s, n)
+        Pn_minus_half_1997!(legendre, s, n)
     else
-        legendre = Pn_minus_half_2007(s, n)
+        Pn_minus_half_2007!(legendre, s, n)
     end
 
     p0 = legendre[1]

@@ -5,6 +5,7 @@ using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
 using FastGaussQuadrature: gausslegendre
 using StaticArrays: SVector
 using SparseArrays
+using AdaptiveArrayPools
 
 # Import parent modules
 import ..Equilibrium
@@ -12,6 +13,7 @@ using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_trans
 
 include("Utilities.jl")
 include("DataTypes.jl")
+include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
 include("Field.jl")
@@ -58,7 +60,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
   - `grre`: Exterior Green's function matrix.
   - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
 """
-function _compute_vacuum_response_single!(
+@with_pool pool function _compute_vacuum_response_single!(
     wv::AbstractMatrix{ComplexF64},
     grri_in::AbstractMatrix{Float64},
     grre_in::AbstractMatrix{Float64},
@@ -90,8 +92,8 @@ function _compute_vacuum_response_single!(
     num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
 
     # Local work arrays
-    grad_green = zeros(num_points_total, num_points_total)
-    green_temp = zeros(num_points_surf, num_points_surf)
+    grad_green = zeros!(pool, num_points_total, num_points_total)
+    green_temp = zeros!(pool, num_points_surf, num_points_surf)
 
     # Views into output Green's function matrices for the active rows/columns
     grre = @view grre_in[1:num_points_total, :]
@@ -119,17 +121,21 @@ function _compute_vacuum_response_single!(
 
     # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
     grri .= grre # start from same as exterior
+    grad_green_interior = similar!(pool, grad_green)
+    grad_green_exterior = similar!(pool, grad_green)
+    grad_green_interior .= grad_green
+    grad_green_exterior .= grad_green
 
     # Solve exterior first, then overwrite grad_green with interior kernel to avoid extra allocations
-    F_ext = lu(grad_green)
+    F_ext = lu!(grad_green_exterior)
     ldiv!(F_ext, grre)
 
     # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
-    grad_green .*= -1
+    grad_green_interior .*= -1
     for i in 1:num_points_total
-        grad_green[i, i] += 2.0
+        grad_green_interior[i, i] += 2.0
     end
-    F_int = lu!(grad_green)
+    F_int = lu!(grad_green_interior)
     ldiv!(F_int, grri)
 
     # Always initialise wv to zero so that green_only keeps it zeroed

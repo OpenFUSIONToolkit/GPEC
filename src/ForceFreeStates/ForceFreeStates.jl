@@ -10,12 +10,13 @@ using HDF5
 using JLD2
 using FastInterpolations
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary
+using AdaptiveArrayPools
 
 import ..Equilibrium
 import ..Utilities
 import ..Vacuum
 using Printf
-import StaticArrays: @MVector, @MMatrix
+import StaticArrays: @MMatrix
 
 # Include all necessary files
 include("ForceFreeStatesStructs.jl")

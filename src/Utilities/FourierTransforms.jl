@@ -677,7 +677,7 @@ end
 # ==============================================================================
 
 """
-    fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+    fourier_transform!(gil::AbstractMatrix{Float64}, gij::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
 
 Low-level Fourier transform with offset support for Vacuum module.
 
@@ -689,8 +689,8 @@ have specific block structure (e.g., plasma and wall contributions packed togeth
 
 # Arguments
 
-- `gil::Matrix{Float64}`: Output matrix, updated in-place at offset block
-- `gij::Matrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
+- `gil::AbstractMatrix{Float64}`: Output matrix, updated in-place at offset block
+- `gij::AbstractMatrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
 - `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert)
 - `row_offset::Int`: Row offset in `gil` matrix
 - `col_offset::Int`: Column offset in `gil` matrix

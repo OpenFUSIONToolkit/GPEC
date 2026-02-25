@@ -7,21 +7,23 @@ modifies `odet` in place to normalize the eigenfunctions stored in `u_store` and
 and returns a `VacuumData` struct containing the data needed for perturbed equilibrium calculations
 and data dumping.
 """
-function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
     (; mpert, mlow, mhigh, mband, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
-    vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, numpert_total, ctrl.mthvac)
-    etemp = zeros(ComplexF64, numpert_total)
-    wpt = zeros(ComplexF64, numpert_total, numpert_total)
-    wvt = zeros(ComplexF64, numpert_total, numpert_total)
+    vac_data = VacuumData(ctrl.mthvac, intr.mpert, intr.numpert_total)
+    etemp = zeros!(pool, ComplexF64, numpert_total)
+    wp = zeros!(pool, ComplexF64, numpert_total, numpert_total)
+    wpt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
+    wvt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
+    tmp_mat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
 
     # Evaluate dV/dpsi at the plasma edge
     dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
-        @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+        @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
     end
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
@@ -72,8 +74,10 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Compute plasma and vacuum contributions.
     # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
-    wpt .= adjoint(vac_data.wt) * (wp * vac_data.wt)
-    wvt .= adjoint(vac_data.wt) * (vac_data.wv * vac_data.wt)
+    mul!(tmp_mat, wp, vac_data.wt)
+    mul!(wpt, adjoint(vac_data.wt), tmp_mat)
+    mul!(tmp_mat, vac_data.wv, vac_data.wt)
+    mul!(wvt, adjoint(vac_data.wt), tmp_mat)
     for ipert in 1:numpert_total
         vac_data.ep[ipert] = wpt[ipert, ipert]
         vac_data.ev[ipert] = wvt[ipert, ipert]
@@ -82,14 +86,14 @@ function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibr
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
     @views for istep in 1:odet.step
-        mul!(odet.tmp, odet.u_store[:, :, 1, istep], coeffs)
-        odet.u_store[:, :, 1, istep] .= odet.tmp
-        mul!(odet.tmp, odet.u_store[:, :, 2, istep], coeffs)
-        odet.u_store[:, :, 2, istep] .= odet.tmp
-        mul!(odet.tmp, odet.ud_store[:, :, 1, istep], coeffs)
-        odet.ud_store[:, :, 1, istep] .= odet.tmp
-        mul!(odet.tmp, odet.ud_store[:, :, 2, istep], coeffs)
-        odet.ud_store[:, :, 2, istep] .= odet.tmp
+        mul!(tmp_mat, odet.u_store[:, :, 1, istep], coeffs)
+        odet.u_store[:, :, 1, istep] .= tmp_mat
+        mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
+        odet.u_store[:, :, 2, istep] .= tmp_mat
+        mul!(tmp_mat, odet.ud_store[:, :, 1, istep], coeffs)
+        odet.ud_store[:, :, 1, istep] .= tmp_mat
+        mul!(tmp_mat, odet.ud_store[:, :, 2, istep], coeffs)
+        odet.ud_store[:, :, 2, istep] .= tmp_mat
     end
 
     # Write energies to screen
@@ -161,7 +165,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
 
     # FastInterpolations now natively supports complex values - create complex series interpolant directly
     # Use CubicFit() for native endpoint handling
-    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
+    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
 
     return wvmat
 end
