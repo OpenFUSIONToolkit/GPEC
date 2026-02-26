@@ -175,7 +175,7 @@ function direct_position!(raw_profile::DirectRunInput)
         r += dr
         z += dz
         if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
-            @printf("   Magnetic axis found at R = %.5f, Z = %.5f\n", r, z)
+            @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
             break
         end
     end

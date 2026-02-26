@@ -110,10 +110,6 @@ function compute_singular_coupling_metrics!(
         return
     end
 
-    if ctrl.verbose
-        @info "Singular surfaces: $msing, toroidal modes (n): $npert"
-    end
-
     # Get vacuum calculation parameters
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
@@ -124,14 +120,15 @@ function compute_singular_coupling_metrics!(
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     if ctrl.verbose
-        @info "Processing toroidal modes n = $nlow:$nhigh"
+        nstr = nlow == nhigh ? "$nlow" : "$nlow:$nhigh"
+        @info "Computing surface Green's functions at $msing resonant surfaces (n = $nstr, no wall)"
     end
 
     # Main loop: Process each toroidal mode number separately
     for nn in nlow:nhigh
         n_idx = nn - nlow + 1  # Index for storing in [npert, msing] arrays
 
-        if ctrl.verbose
+        if ctrl.verbose && npert > 1
             @info "Computing metrics for n = $nn"
         end
 

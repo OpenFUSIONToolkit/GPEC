@@ -216,7 +216,8 @@ function main(args::Vector{String}=String[])
     # Compute free boundary energies
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
-            @info "Computing free boundary energies"
+            wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
+            @info "Computing free boundary energies ($wall_desc)"
         end
         vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0

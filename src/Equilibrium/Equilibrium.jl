@@ -42,8 +42,6 @@ function setup_equilibrium(path::String="equil.toml")
 end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
-    @printf "Equilibrium file: %s\n" eq_config.eq_filename
-
     eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
