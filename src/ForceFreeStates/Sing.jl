@@ -95,7 +95,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         if ctrl.nn_low != ctrl.nn_high
             error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
         end
-        @info "Setting psilim via dmlim: initial qlim = $(intr.qlim), dmlim = $(ctrl.dmlim)"
+        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)
         intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
