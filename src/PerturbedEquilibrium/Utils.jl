@@ -79,10 +79,6 @@ function write_outputs_to_HDF5(
     ctrl::PerturbedEquilibriumControl,
     filename::String
 )
-    if ctrl.verbose
-        @info "Writing perturbed equilibrium data to $filename"
-    end
-
     h5open(filename, "cw") do file  # "cw" = create or read/write
         # Create perturbed_equilibrium group
         pe_group = haskey(file, "perturbed_equilibrium") ? file["perturbed_equilibrium"] : create_group(file, "perturbed_equilibrium")
@@ -132,7 +128,4 @@ function write_outputs_to_HDF5(
         energy_group["total_energy"] = state.total_energy
     end
 
-    if ctrl.verbose
-        @info "Perturbed equilibrium output complete"
-    end
 end

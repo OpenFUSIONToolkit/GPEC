@@ -42,13 +42,20 @@ using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
+const _BANNER = "="^60
+
 function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
-    @info "\n" * "="^60 * "\n  JPEC - Julia Perturbed Equilibrium Code\n" * "="^60
+    @info "\n$_BANNER\n  JPEC - Julia Perturbed Equilibrium Code\n$_BANNER"
+    total_start = time()
 
-    start_time = time()
+    # ----------------------------------------------------------------
+    # Equilibrium
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  Equilibrium\n$_BANNER"
+    equil_start = time()
 
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
@@ -65,13 +72,14 @@ function main(args::Vector{String}=String[])
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
     end
+
+    @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
+
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
-        end_time = time() - start_time
-        @info "Equilibrium setup complete (force_termination = true). Run time: $(@sprintf("%.3e", end_time)) s. Normal termination."
+        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
-
 
     if "Wall" in keys(inputs)
         intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
@@ -84,6 +92,12 @@ function main(args::Vector{String}=String[])
     else
         intr.debug_settings = DebugSettings()
     end
+
+    # ----------------------------------------------------------------
+    # Force-Free States
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  Force-Free States\n$_BANNER"
+    ffs_start = time()
 
     # Set up variables
     # TODO: parallel threads logic
@@ -106,8 +120,6 @@ function main(args::Vector{String}=String[])
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
     profiles_xs = equil.profiles.xs
@@ -232,18 +244,23 @@ function main(args::Vector{String}=String[])
     end
 
     if ctrl.write_outputs_to_HDF5
-        if ctrl.verbose
-            @info "Writing saved data to $(ctrl.HDF5_filename)"
-        end
         write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
+        @info "Results written to $(ctrl.HDF5_filename)"
     end
+
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
     # Early exit if user only requested force-free states
     if ctrl.force_termination
-        end_time = time() - start_time
-        @info "Force-free states complete (force_termination = true). Run time: $(@sprintf("%.3e", end_time)) s. Normal termination."
+        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
+
+    # ----------------------------------------------------------------
+    # Perturbed Equilibrium
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  Perturbed Equilibrium\n$_BANNER"
+    pe_start = time()
 
     # Check for PerturbedEquilibrium section and run if present
     if "PerturbedEquilibrium" in keys(inputs)
@@ -273,11 +290,16 @@ function main(args::Vector{String}=String[])
             PerturbedEquilibrium.write_outputs_to_HDF5(
                 pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
             )
+            @info "Results written to $output_file"
         end
     end
 
-    end_time = time() - start_time
-    @info "Run time: $(@sprintf("%.3e", end_time)) s. Normal termination."
+    @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
+
+    # ----------------------------------------------------------------
+    # Done
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 

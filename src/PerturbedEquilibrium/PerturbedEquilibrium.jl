@@ -83,11 +83,6 @@ function compute_perturbed_equilibrium(
     intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
 
-    if ctrl.verbose
-        @info "Perturbed equilibrium start"
-    end
-    start_time = time()
-
     state = PerturbedEquilibriumState()
 
     # Step 0: Initialize mode arrays for convenient indexing
@@ -116,11 +111,6 @@ function compute_perturbed_equilibrium(
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)
     # This is handled by write_outputs_to_HDF5 in main()
-
-    end_time = time() - start_time
-    if ctrl.verbose
-        @info "Perturbed equilibrium complete. Run time: $(@sprintf("%.3e", end_time)) s"
-    end
 
     return state
 end
