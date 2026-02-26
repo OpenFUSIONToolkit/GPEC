@@ -3,6 +3,7 @@ module Equilibrium
 # --- Module-level Dependencies ---
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
+using Roots
 using TOML
 import FastInterpolations
 using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
