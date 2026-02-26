@@ -78,7 +78,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=plasma_surf.ν)
+    ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=ν)
     num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
@@ -154,12 +155,9 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
             plasma_pts .= plasma_surf.r
             wall_pts .= wall.r
             # Export 3D surfaces to VTK files
-            plasma_vtk_file = write_surface_to_vtk(plasma_surf.r, inputs.mtheta, inputs.nzeta, "plasma_surface_3D")
-            println("  Plasma surface written to: $plasma_vtk_file")
-            if !wall.nowall
-                wall_vtk_file = write_surface_to_vtk(wall.r, inputs.mtheta, inputs.nzeta, "wall_surface_3D")
-                println("  Wall surface written to: $wall_vtk_file")
-            end
+            println("Writing 3D surfaces to VTK files...")
+            write_surface_to_vtk(plasma_surf.r, inputs.mtheta, inputs.nzeta, "plasma_surface_3D")
+            !wall.nowall && write_surface_to_vtk(wall.r, inputs.mtheta, inputs.nzeta, "wall_surface_3D")
         else # 2D
             @views begin
                 plasma_pts[:, 1] .= plasma_surf.x

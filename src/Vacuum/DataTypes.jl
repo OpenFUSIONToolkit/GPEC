@@ -229,7 +229,6 @@ that the gradient/area elements are scaled by dθ and dζ.
   - `mtheta::Int`: Number of poloidal grid points
   - `nzeta::Int`: Number of toroidal grid points
   - `r::Matrix{Float64}`: Surface points in Cartesian (X,Y,Z), shape (num_points, 3)
-  - `ν::Vector{Float64}`: Magnetic toroidal angle offset from geometric toroidal angle (same as 2D PlasmaGeometry)
   - `dr_dθ::Matrix{Float64}`: Poloidal tangent vector ∂r/∂θ × dθ, shape (num_gridpoints, 3)
   - `dr_dζ::Matrix{Float64}`: Toroidal tangent vector ∂r/∂ζ × dζ, shape (num_points, 3)
   - `normal::Matrix{Float64}`: Oriented normal vectors, shape (num_points, 3)
@@ -239,7 +238,6 @@ struct PlasmaGeometry3D
     mtheta::Int
     nzeta::Int
     r::Matrix{Float64}
-    ν::Vector{Float64}
     dr_dθ::Matrix{Float64}
     dr_dζ::Matrix{Float64}
     normal::Matrix{Float64}
@@ -276,7 +274,7 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     dθ = 2π / mtheta
     dζ = 2π / nzeta
     θ_grid = range(; start=0, length=mtheta, step=dθ)
-    ϕ_grid = range(; start=0, length=nzeta, step=dζ)
+    ζ_grid = range(; start=0, length=nzeta, step=dζ)
 
     # Allocate output arrays
     r = zeros(num_points, 3)
@@ -288,14 +286,15 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     surf_2D = PlasmaGeometry(inputs)
 
     # Build 3D surface point-by-point from 2D contour
-    for i in 1:mtheta, (j, ϕ) in enumerate(ϕ_grid)
-        r[i+mtheta*(j-1), 1] = surf_2D.x[i] * cos(ϕ)
-        r[i+mtheta*(j-1), 2] = surf_2D.x[i] * sin(ϕ)
+    for i in 1:mtheta, (j, ζ) in enumerate(ζ_grid)
+        # Our 3D grids are the SFL angle ζ = ϕ - ν
+        r[i+mtheta*(j-1), 1] = surf_2D.x[i] * cos(ζ - surf_2D.ν[i])
+        r[i+mtheta*(j-1), 2] = surf_2D.x[i] * sin(ζ - surf_2D.ν[i])
         r[i+mtheta*(j-1), 3] = surf_2D.z[i]
     end
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
-    itps = [cubic_interp((θ_grid, ϕ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
+    itps = [cubic_interp((θ_grid, ζ_grid), reshape(r[:, k], mtheta, nzeta); bc=(PeriodicBC(; endpoint=:exclusive), PeriodicBC(; endpoint=:exclusive))) for k in 1:3]
     for i in 1:mtheta, j in 1:nzeta
         idx = i + (j - 1) * mtheta
         for k in 1:3
@@ -322,7 +321,6 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         mtheta,
         nzeta,
         r,
-        surf_2D.ν,
         dr_dθ,
         dr_dζ,
         normal,
