@@ -464,7 +464,7 @@ This function modifies `locstab_fs` in place with:
 function compute_ballooning_stability!(ctrl::ForceFreeStatesControl, locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
     if ctrl.verbose
-        println("Evaluating high-n ballooning criterion...")
+        @info "Evaluating high-n ballooning criterion"
     end
 
     profiles = plasma_eq.profiles
@@ -493,7 +493,7 @@ function compute_ballooning_stability!(ctrl::ForceFreeStatesControl, locstab_fs:
     end
 
     if ctrl.verbose
-        println("Ballooning analysis complete.")
+        @info "Ballooning analysis complete"
     end
 
 end

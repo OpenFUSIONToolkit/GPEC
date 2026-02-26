@@ -46,9 +46,7 @@ function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
-    println("\n" * "="^60)
-    println("  JPEC - Julia Perturbed Equilibrium Code")
-    println("="^60 * "\n")
+    @info "\n" * "="^60 * "\n  JPEC - Julia Perturbed Equilibrium Code\n" * "="^60
 
     start_time = time()
 
@@ -70,11 +68,7 @@ function main(args::Vector{String}=String[])
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
         end_time = time() - start_time
-        println("\n" * "="^60)
-        println("Equilibrium setup complete (force_termination = true).")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("Normal termination.")
-        println("="^60)
+        @info "Equilibrium setup complete (force_termination = true). Run time: $(@sprintf("%.3e", end_time)) s. Normal termination."
         return
     end
 
@@ -120,7 +114,7 @@ function main(args::Vector{String}=String[])
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
     if ctrl.mer_flag
         if ctrl.verbose
-            println("Evaluating Mercier criterion")
+            @info "Evaluating Mercier criterion"
         end
         mercier_scan!(locstab_fs, equil)
     end
@@ -179,23 +173,19 @@ function main(args::Vector{String}=String[])
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
-            println("Run parameters:")
-            println(
-                "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))"
-            )
-            println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
-            println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println(
-                "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))"
-            )
-            println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
+            @info "Run parameters:\n" *
+                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
+                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
         metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
-            println("   Computing F, G, and K Matrices")
+            @info "Computing F, G, and K matrices"
         end
 
         # Compute matrices and populate FourFitVars struct
@@ -215,34 +205,34 @@ function main(args::Vector{String}=String[])
     # Integrate Euler-Lagrange Equation
     if ctrl.ode_flag
         if ctrl.verbose
-            println("Integrating Euler-Lagrange equation")
+            @info "Integrating Euler-Lagrange equation"
         end
         odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
-            println("Fixed-boundary mode unstable for n = $nstring.")
+            @warn "Fixed-boundary mode unstable for n = $nstring"
         end
     end
 
     # Compute free boundary energies
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
-            println("Computing free boundary energies")
+            @info "Computing free boundary energies"
         end
         vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
-                println("Free-boundary mode unstable for n = $nstring.")
+                @warn "Free-boundary mode unstable for n = $nstring"
             end
         else
             if ctrl.verbose
-                println("All free-boundary modes stable for n = $nstring.")
+                @info "All free-boundary modes stable for n = $nstring"
             end
         end
     end
 
     if ctrl.write_outputs_to_HDF5
         if ctrl.verbose
-            println("Writing saved data to $(ctrl.HDF5_filename)")
+            @info "Writing saved data to $(ctrl.HDF5_filename)"
         end
         write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
     end
@@ -250,11 +240,7 @@ function main(args::Vector{String}=String[])
     # Early exit if user only requested force-free states
     if ctrl.force_termination
         end_time = time() - start_time
-        println("\n" * "="^60)
-        println("Force-free states complete (force_termination = true).")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("Normal termination.")
-        println("="^60)
+        @info "Force-free states complete (force_termination = true). Run time: $(@sprintf("%.3e", end_time)) s. Normal termination."
         return
     end
 
@@ -290,10 +276,7 @@ function main(args::Vector{String}=String[])
     end
 
     end_time = time() - start_time
-    println("\n" * "="^60)
-    println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-    println("Normal termination.")
-    println("="^60)
+    @info "Run time: $(@sprintf("%.3e", end_time)) s. Normal termination."
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
@@ -384,7 +367,8 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
-        out_h5["integration/nstep"] = odet.step
+        out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
+        out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
         out_h5["integration/psi"] = odet.psi_store
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]

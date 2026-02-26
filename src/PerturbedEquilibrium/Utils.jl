@@ -80,7 +80,7 @@ function write_outputs_to_HDF5(
     filename::String
 )
     if ctrl.verbose
-        println("Writing perturbed equilibrium data to $filename")
+        @info "Writing perturbed equilibrium data to $filename"
     end
 
     h5open(filename, "cw") do file  # "cw" = create or read/write
@@ -133,6 +133,6 @@ function write_outputs_to_HDF5(
     end
 
     if ctrl.verbose
-        println("  Perturbed equilibrium output complete")
+        @info "Perturbed equilibrium output complete"
     end
 end

@@ -84,8 +84,7 @@ function compute_perturbed_equilibrium(
 )::PerturbedEquilibriumState
 
     if ctrl.verbose
-        println("\nPERTURBED EQUILIBRIUM START")
-        println("----------------------------------")
+        @info "Perturbed equilibrium start"
     end
     start_time = time()
 
@@ -120,9 +119,7 @@ function compute_perturbed_equilibrium(
 
     end_time = time() - start_time
     if ctrl.verbose
-        println("----------------------------------")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("PERTURBED EQUILIBRIUM COMPLETE")
+        @info "Perturbed equilibrium complete. Run time: $(@sprintf("%.3e", end_time)) s"
     end
 
     return state
