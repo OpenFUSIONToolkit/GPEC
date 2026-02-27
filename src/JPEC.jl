@@ -384,13 +384,13 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
-        out_h5["integration/nstep"] = odet.step
+        out_h5["integration/nstep"] = odet.solver_steps
         out_h5["integration/psi"] = odet.psi_store
-        out_h5["integration/q"] = odet.q_store
-        out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
-        out_h5["integration/u2"] = odet.u_store[:, :, 2, :] # TODO: what to name this? These are the "conjugate momenta" of u1
-        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
-        out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
+        out_h5["integration/q"] = equil.profiles.q_spline.(odet.psi_store)
+        out_h5["integration/xi_psi"] = odet.u_store[:, :, :, 1]
+        out_h5["integration/u2"] = odet.u_store[:, :, :, 2] # TODO: what to name this? These are the "conjugate momenta" of u1
+        out_h5["integration/dxi_psi"] = odet.ud_store[:, :, :, 1]
+        out_h5["integration/xi_s"] = odet.ud_store[:, :, :, 2]
         out_h5["integration/crit"] = odet.crit_store
 
         # Write singular surface data

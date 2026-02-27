@@ -22,8 +22,8 @@ An OdeState struct containing the final state of the ODE solver after integratio
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Initialization
-    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    # Initialization: create minimal OdeState just to compute starting position and chunks
+    odet = OdeState(intr.numpert_total, 1, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
@@ -33,8 +33,19 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
     end
 
-    # Pre-compute all integration chunks
-    chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    # Pre-compute all integration chunks from the initial position
+    chunks = chunk_el_integration_bounds(odet.psifac, odet.ising_start, ctrl, intr)
+
+    # Pre-allocate storage arrays with exact size: each chunk contributes save_npoints_per_chunk
+    # solution points, plus one point per singular surface crossing
+    n_per_chunk = max(2, ctrl.save_npoints_per_chunk)
+    total_steps = length(chunks) * n_per_chunk + count(c -> c.needs_crossing, chunks)
+    np = intr.numpert_total
+    odet.psi_store = Vector{Float64}(undef, total_steps)
+    odet.u_store = Array{ComplexF64}(undef, np, np, total_steps, 2)
+    odet.ud_store = Array{ComplexF64}(undef, np, np, total_steps, 2)
+    odet.crit_store = Vector{Float64}(undef, total_steps)
+    odet.dW_edge = Array{ComplexF64}(undef, total_steps)
 
     # Print initial integration condition
     if ctrl.verbose
@@ -46,7 +57,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  uratio = $((@sprintf "%.2e" odet.uratio)),  steps = $(odet.solver_steps)")
         end
 
         # Cross a rational surface after integration if this chunk requires it
@@ -65,13 +76,14 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+            q_at_step = equil.profiles.q_spline(odet.psi_store[odet.step])
+            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" q_at_step))")
         end
 
         # Update u, psilim, and qlim for usage in determining wp and wt
         intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
-        odet.u .= odet.u_store[:, :, :, end]
+        intr.qlim = equil.profiles.q_spline(odet.psi_store[end])
+        odet.u .= odet.u_store[:, :, end, :]
     else
         odet.step -= 1 # step was incremented one extra time in integrate_el_region!
         trim_storage!(odet)
@@ -83,8 +95,24 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
-    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
+    # Form the true solution vectors, undoing the Gaussian reduction applied during integration
     transform_u!(odet, intr)
+
+    # Compute ud_store post-integration from the transformed solution arrays.
+    # ud_store (ξ'_ψ and ξ_s) is computed by evaluating sing_der! on each stored u, so it is
+    # consistent with the transformed u_store and can be used directly by downstream code.
+    dummy_chunk = IntegrationChunk(0.0, 0.0, false, 0)
+    params = (ctrl, equil, ffit, intr, odet, dummy_chunk)
+    u_tmp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    du_tmp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    odet.spline_hint[] = 1
+    ffit._hint[] = 1
+    for istep in 1:odet.step
+        psi_val = odet.psi_store[istep]
+        u_tmp .= odet.u_store[:, :, istep, :]
+        sing_der!(du_tmp, u_tmp, params, psi_val)
+        odet.ud_store[:, :, istep, :] .= odet.ud
+    end
 
     return odet
 end
@@ -173,12 +201,12 @@ making the integration flow more predictable and easier to parallelize (e.g., fo
 
 Support for `kin_flag`
 """
-function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
+function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
     chunks = IntegrationChunk[]
 
     # Start from current position
-    psi_current = odet.psifac
-    ising_current = odet.ising_start
+    psi_current = psifac
+    ising_current = ising_start
 
     # Wrapper to find next singular surface to integrate toward that is resonant within integration limits
     function find_next_resonant_surface!(ising::Int, intr::ForceFreeStatesInternal)
@@ -304,11 +332,9 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Store values after crossing step and advance
+    # Store psi and u at the crossing point (ud is computed post-integration)
     odet.psi_store[odet.step] = odet.psifac
-    odet.q_store[odet.step] = odet.q
-    odet.u_store[:, :, :, odet.step] = odet.u
-    odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.u_store[:, :, odet.step, :] = odet.u
     odet.step += 1
 end
 
@@ -322,13 +348,13 @@ end
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
 Integrate the Euler-Lagrange equations from `psi_start` to `psi_end`.
-Formerly `ode_step!`. Performs the same function as `ode_step` in the Fortran code, with the addition of
-a callback function to handle tolerances, normalization, and storage at each
-step of the integration. In Fortran, this was performed by running LSODE in one-step
-mode (so ode_step was called hundreds of times) and calling the relevant functions in
-a DO loop. Here, we use the DifferentialEquations.jl interface to achieve the same
-functionality in a more Julian way. The integration bounds are now explicit arguments,
-making it clear what region is being integrated.
+Formerly `ode_step!`. Uses OrdinaryDiffEq's built-in `saveat` to store
+`save_npoints_per_chunk` uniformly-spaced solution points per chunk,
+replacing the previous DiscreteCallback-based storage and tolerance-switching logic.
+After integration, checks whether Gaussian reduction is needed at the chunk boundary
+and applies it if the solution spread exceeds `ctrl.ucrit`. The reduction is skipped
+here when the chunk ends at a singular surface, since `cross_ideal_singular_surf!`
+applies forced reduction immediately after.
 
 ### Arguments
 
@@ -338,133 +364,32 @@ making it clear what region is being integrated.
   - `ffit::FourFitVars` - Fourier fit variables
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
-
-### TODOs
-
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    # Callback to be run at every step, handles fixups, tolerances, and data storage
-    cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
-
-    # Advance differential equation from psi_start to psi_end
-    rtol = compute_tols(ctrl, intr, odet, chunk.ising) # initial tolerances
+    # Advance differential equation from psi_start to psi_end, saving at uniform grid
+    saveat_psi = range(chunk.psi_start, chunk.psi_end; length=max(2, ctrl.save_npoints_per_chunk))
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
-    # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
+    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, saveat=saveat_psi, save_everystep=false)
+    odet.solver_steps += sol.stats.naccept
 
-    # Update u and psifac with the solution at the end of the interval
-    odet.u .= sol.u[end]
-    odet.psifac = sol.t[end]
-end
-
-"""
-    integrator_callback!(integrator)
-
-Callback function for ODE integrator to handle normalization, output, and storage
-at each step. This handles the solution normalization logic that was previously
-in a DO loop within eulerlagrange_integration and called every step by running LSODE in one step mode
-in the Fortran code. However, we now perform the equivalent of `ode_output_step`
-and `ode_record_edge` post-integration using the saved data.
-
-With save_interval > 1, this only saves every Nth step to reduce array copying overhead,
-but always saves steps near rational surfaces (beginning and end of each integration segment).
-"""
-function integrator_callback!(integrator)
-
-    # unpack parameters. Note the 2 unused items are needed to match the signature in the integrand sing_der!
-    ctrl, _, _, intr, odet, chunk = integrator.p
-
-    # Update integration tolerances
-    integrator.opts.reltol = compute_tols(ctrl, intr, odet, chunk.ising)
-
-    # Check if the solution norms are above a threshold, if so apply Gaussian reduction
-    compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
-
-    # Determine if we should save this step
-    # Always save if:
-    # 1. First few steps of integration (ensures we capture point right after rational/axis)
-    # 2. Every Nth step (save_interval)
-    # 3. Near the end of integration segment (ensures we capture point right before next rational)
-
-    # Check if we're near the end of this integration segment
-    psi_range = abs(integrator.sol.prob.tspan[2] - integrator.sol.prob.tspan[1])
-    psi_remaining = abs(integrator.sol.prob.tspan[2] - integrator.t)
-    near_end = psi_remaining < 0.05 * psi_range || psi_remaining < 1e-4
-
-    # Check if we're at the beginning (first 2 steps capture the point right after rational)
-    # Count steps within this segment (not global step count)
-    steps_in_segment = length(integrator.sol.t)
-    near_start = steps_in_segment <= 2
-
-    # Save if interval condition met, or near start/end
-    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
-
-    if should_save
-        # Grow arrays if out of storage space
-        if odet.step >= size(odet.u_store, 4)
-            resize_storage!(odet)
-        end
-        odet.psi_store[odet.step] = integrator.t
-        @views odet.u_store[:, :, :, odet.step] .= integrator.u
-        odet.q_store[odet.step] = odet.q # these two were set in sing_der!
-        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-
-        # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
+    # Append saved solution points to storage arrays (only u and psi; ud computed post-integration)
+    for i in eachindex(sol.t)
+        odet.psi_store[odet.step] = sol.t[i]
+        @views odet.u_store[:, :, odet.step, :] .= sol.u[i]
         odet.step += 1
     end
-end
 
-"""
-    compute_tols(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
+    # Update current state to end of chunk
+    odet.u .= sol.u[end]
+    odet.psifac = sol.t[end]
 
-Compute relative and absolute tolerances for the ODE solver based on proximity
-to singular surfaces and magnitude of the solution vectors. In Fortran, this was
-previously a part of ode_step, and called every integration step due to LSODE's
-one-step mode. Here, we call it within the integrator callback to achieve the same
-functionality.
-
-### Arguments
-
-  - ising: Int index of the singular surface to process
-
-### TODOs
-
-Support for `kin_flag`
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Add back absolute tolerance calculation if needed
-
-### Returns
-
-  - rtol: Relative tolerance
-"""
-function compute_tols(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState, ising::Int)
-    singfac_local = Inf
-    # Relative tolerance
-    if false  # kin_flag (not implemented)
-    # Insert kin_flag branch if needed
-    else
-        # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
-        # Note: odet.q is updated within the derivative calculation
-        if ising > 0 && ising <= intr.msing
-            singfac_local = abs(minimum(intr.sing[ising].n) * (intr.sing[ising].q - odet.q))
-        end
-        # If in between singular surfaces, check distance to both
-        if ising > 1
-            singfac_local = min(singfac_local, abs(minimum(intr.sing[ising-1].n) * (intr.sing[ising-1].q - odet.q)))
-        end
-    end
-    rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
-    # Absolute tolerances (not used for now, if so, will need to pass in integrator.u)
-    # atol = similar(odet.u, Float64)
-    # for ieq in 1:size(odet.u, 3), isol in 1:size(odet.u, 2)
-    #     @views atol0 = maximum(abs, odet.u[:, isol, ieq]) * tol
-    #     atol0 == 0 && (atol0 = Inf)
-    #     atol[:, isol, ieq] .= atol0
-    # end
-    return rtol
+    # Check solution norms at every chunk boundary. This ensures odet.new=false before any
+    # singular surface crossing, so cross_ideal_singular_surf!'s forced reduction always fires.
+    # In practice, uratio > ucrit should not trigger here since chunks stop well before
+    # singularities (at singfac_min). If it does trigger, the non-forced reduction fires here
+    # and the forced reduction at the subsequent crossing is skipped (new=true → baseline only).
+    compute_solution_norms!(odet.u, odet, ctrl, intr, false)
 end
 
 """
@@ -476,12 +401,8 @@ Throws an error if any vector norm is zero. It then compares the variation in no
 relative to initial values after a fixup, and applies the Gaussian reduction via
 `apply_gaussian_reduction!` if the variation exceeds `ctrl.ucrit` or if `sing_flag` is true.
 Performs the same function as `ode_unorm` in the Fortran code, with minor differences in indexing
-and array handling.
-
-Note that we pass `u` as an argument to reduce the number of copies that are
-necessary in the integration callback, since otherwise we'd need to copy from
-the integrator state to `odet.u` and then back again. This way, we can just
-operate on `u` directly without extra copies.
+and array handling. Called at chunk boundaries (after `integrate_el_region!` returns) and
+at singular surface crossings (via `cross_ideal_singular_surf!`).
 
 ### Arguments
 
@@ -507,8 +428,8 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         odet.unorm0 .= odet.unorm
     else
         odet.unorm ./= odet.unorm0
-        uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if uratio > ctrl.ucrit || sing_flag
+        odet.uratio = maximum(odet.unorm) / minimum(odet.unorm)
+        if odet.uratio > ctrl.ucrit || sing_flag
             # TODO: add resizing logic here as well
             if odet.ifix < ctrl.numunorms_init
                 odet.ifix += 1
@@ -597,7 +518,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     for istep in 1:odet.step
         odet.psifac = odet.psi_store[istep]
         if odet.psifac >= ctrl.psiedge
-            odet.u .= odet.u_store[:, :, :, istep]
+            odet.u .= odet.u_store[:, :, istep, :]
             odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
         end
     end
@@ -662,21 +583,19 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     end
 
     # Now that we have the transform matrices, we can apply them to the solution vectors
-    # "undoing" the Gaussian reductions to get the true solution vectors
+    # "undoing" the Gaussian reductions to get the true solution vectors.
+    # ud_store is not transformed here; it is computed post-transformation from the
+    # transformed u_store via a sing_der! pass in eulerlagrange_integration.
     jfix = 1
     for ifix in 1:(odet.ifix+1)
         # If after the last fixup, go to the end of integration
         kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
-            mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
-            odet.u_store[:, :, 1, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.u_store[:, :, 2, istep], transforms[:, :, ifix])
-            odet.u_store[:, :, 2, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.ud_store[:, :, 1, istep], transforms[:, :, ifix])
-            odet.ud_store[:, :, 1, istep] .= gauss_buffer
-            mul!(gauss_buffer, odet.ud_store[:, :, 2, istep], transforms[:, :, ifix])
-            odet.ud_store[:, :, 2, istep] .= gauss_buffer
+            mul!(gauss_buffer, odet.u_store[:, :, istep, 1], transforms[:, :, ifix])
+            odet.u_store[:, :, istep, 1] .= gauss_buffer
+            mul!(gauss_buffer, odet.u_store[:, :, istep, 2], transforms[:, :, ifix])
+            odet.u_store[:, :, istep, 2] .= gauss_buffer
         end
         jfix = kfix + 1
     end

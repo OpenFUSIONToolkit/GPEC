@@ -743,7 +743,7 @@ Implement kin_flag functionality
     psieval::Float64)
 
     # Unpack structs and initialize
-    # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
+    # ctrl (position 1) and chunk (position 6) are not used in sing_der! itself
     _, equil, ffit, intr, odet, _ = params
 
     # Allocate temporary arrays from the pool

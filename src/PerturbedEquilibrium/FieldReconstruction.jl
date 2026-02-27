@@ -78,7 +78,7 @@ function reconstruct_physical_fields(
     intr::PerturbedEquilibriumInternal
 )
     # Get dimensions
-    npsi = size(ForceFreeStates_results.u_store, 4)
+    npsi = size(ForceFreeStates_results.u_store, 3)
     mpert = ffs_intr.mpert
 
     # Step 1: Sum weighted eigenmode contributions to get covariant ξ_ψ in mode space
@@ -154,7 +154,7 @@ function sum_eigenmode_contributions(
 )
     # Extract dimensions
     numpert_total = length(response_vector)
-    npsi = size(ForceFreeStates_results.u_store, 4)
+    npsi = size(ForceFreeStates_results.u_store, 3)
     mpert = ffs_intr.mpert
 
     # Initialize output array (npsi × mpert)
@@ -176,9 +176,9 @@ function sum_eigenmode_contributions(
             # Add this eigenmode's contribution to each radial point
             # Accumulate into mode i (diagonal contribution)
             for ipsi in 1:npsi
-                # u_store[i, j, component, radial_index]
+                # u_store[i, j, radial_index, component]
                 # Component 1 = ξ_ψ (covariant radial displacement)
-                xi_psi_modes[ipsi, i] += coeff * ForceFreeStates_results.u_store[i, j, 1, ipsi]
+                xi_psi_modes[ipsi, i] += coeff * ForceFreeStates_results.u_store[i, j, ipsi, 1]
             end
 
             idx += 1

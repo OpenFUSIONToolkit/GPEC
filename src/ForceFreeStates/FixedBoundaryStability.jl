@@ -61,9 +61,9 @@ can do it post-integration rather than during and don't directly handle file out
 
     # Compute smallest eigenvalue (crit) at current step
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
-    u = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
+    u = acquire!(pool, eltype(odet.u_store), size(odet.u)...)
     psi = odet.psi_store[istep]
-    u .= odet.u_store[:, :, :, istep]
+    u .= odet.u_store[:, :, istep, :]
     dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
@@ -76,7 +76,7 @@ can do it post-integration rather than during and don't directly handle file out
         # Ensure the zero crossing is physical and not just numerical noise
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
-        u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
+        u_mid = u .- fac .* (u .- odet.u_store[:, :, istep-1, :])
         dVdpsi = profiles.dVdpsi_spline(psi_mid; hint=odet.spline_hint)
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2

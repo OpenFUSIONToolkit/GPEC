@@ -170,11 +170,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
-  - `tol_nr::Float64` - Relative tolerance of dynamic integration steps away from rationals
-  - `tol_r::Float64` - Relative tolerance of dynamic integration steps near rationals
-  - `crossover::Float64` - Fractional distance from rational q at which tolerance is switched to tol_r
+  - `eulerlagrange_tolerance::Float64` - Relative tolerance for the ODE solver throughout integration
   - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization
-  - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
@@ -203,7 +200,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
-  - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
+  - `save_npoints_per_chunk::Int` - Number of solution points saved per integration chunk using uniform saveat grid
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
 """
 @kwdef mutable struct ForceFreeStatesControl
@@ -224,11 +221,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
-    tol_nr::Float64 = 1e-5
-    tol_r::Float64 = 1e-5
-    crossover::Float64 = 1e-2
+    eulerlagrange_tolerance::Float64 = 1e-6
     ucrit::Float64 = 1e4
-    numsteps_init::Int = 4000
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
@@ -257,7 +251,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "jpec.h5"
     force_wv_symmetry::Bool = true
-    save_interval::Int = 10
+    save_npoints_per_chunk::Int = 50
     force_termination::Bool = false
 end
 
@@ -364,12 +358,13 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
-  - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
+  - `numsteps_init::Int` - Exact number of solution points allocated (set from chunk structure before integration).
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
+  - `solver_steps::Int` - Cumulative number of ODE solver steps accepted across all chunks.
+  - `uratio::Float64` - Ratio of max to min solution norm at the end of the most recent chunk (1.0 before first comparison).
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
-  - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
-    `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
+    `(numpert_total, numpert_total, numsteps_init, 2)` (complex solution state used by the solver).
   - `ud_store::Array{ComplexF64,4}` - Stored derivatives of the solution at each saved step with same shape as `u_store`.
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
@@ -407,10 +402,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
+    solver_steps::Int = 0
+    uratio::Float64 = 1.0
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
-    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
-    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
+    u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init, 2)
+    ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init, 2)
     crit_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)

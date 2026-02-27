@@ -101,14 +101,14 @@ and data dumping.
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac.wt .* (2π * equil.psio * 1e-3))
     @views for istep in 1:odet.step
-        mul!(tmp_mat, odet.u_store[:, :, 1, istep], coeffs)
-        odet.u_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.u_store[:, :, 2, istep], coeffs)
-        odet.u_store[:, :, 2, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 1, istep], coeffs)
-        odet.ud_store[:, :, 1, istep] .= tmp_mat
-        mul!(tmp_mat, odet.ud_store[:, :, 2, istep], coeffs)
-        odet.ud_store[:, :, 2, istep] .= tmp_mat
+        mul!(tmp_mat, odet.u_store[:, :, istep, 1], coeffs)
+        odet.u_store[:, :, istep, 1] .= tmp_mat
+        mul!(tmp_mat, odet.u_store[:, :, istep, 2], coeffs)
+        odet.u_store[:, :, istep, 2] .= tmp_mat
+        mul!(tmp_mat, odet.ud_store[:, :, istep, 1], coeffs)
+        odet.ud_store[:, :, istep, 1] .= tmp_mat
+        mul!(tmp_mat, odet.ud_store[:, :, istep, 2], coeffs)
+        odet.ud_store[:, :, istep, 2] .= tmp_mat
     end
 
     # Write energies to screen

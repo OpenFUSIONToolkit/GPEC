@@ -65,7 +65,7 @@ function extract_boundary_displacements(
 
     # Evaluate equilibrium quantities at boundary
     # Safety factor at boundary
-    q_boundary = ForceFreeStates_results.q_store[ForceFreeStates_results.step]
+    q_boundary = equil.profiles.q_spline(psi_boundary)
 
     # Flux surface spacing dΨ/dρ
     # In ForceFreeStates, ρ = √ψ where ψ is normalized poloidal flux

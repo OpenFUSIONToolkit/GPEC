@@ -276,7 +276,7 @@ function interpolate_field_derivative(
 
     if idx_right === nothing
         # psi is beyond stored range, use last value
-        return ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, ForceFreeStates_results.step]
+        return ForceFreeStates_results.ud_store[mode_idx, forcing_idx, ForceFreeStates_results.step, 1]
     elseif idx_right == 1
         # psi is before stored range, use first value
         return ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, 1]
@@ -288,8 +288,8 @@ function interpolate_field_derivative(
         psi_right = psi_store[idx_right]
         weight = (psi - psi_left) / (psi_right - psi_left)
 
-        val_left = ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_left]
-        val_right = ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_right]
+        val_left = ForceFreeStates_results.ud_store[mode_idx, forcing_idx, idx_left, 1]
+        val_right = ForceFreeStates_results.ud_store[mode_idx, forcing_idx, idx_right, 1]
 
         return val_left * (1.0 - weight) + val_right * weight
     end
@@ -329,7 +329,7 @@ function interpolate_field_at_surface(
     idx_right = findfirst(p -> p >= psi, psi_store)
 
     if idx_right === nothing
-        xi_psi = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, ForceFreeStates_results.step]
+        xi_psi = ForceFreeStates_results.u_store[mode_idx, forcing_idx, ForceFreeStates_results.step, 1]
     elseif idx_right == 1
         xi_psi = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, 1]
     else
@@ -338,8 +338,8 @@ function interpolate_field_at_surface(
         psi_right = psi_store[idx_right]
         weight = (psi - psi_left) / (psi_right - psi_left)
 
-        val_left = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, idx_left]
-        val_right = ForceFreeStates_results.u_store[mode_idx, forcing_idx, 1, idx_right]
+        val_left = ForceFreeStates_results.u_store[mode_idx, forcing_idx, idx_left, 1]
+        val_right = ForceFreeStates_results.u_store[mode_idx, forcing_idx, idx_right, 1]
 
         xi_psi = val_left * (1.0 - weight) + val_right * weight
     end
