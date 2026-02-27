@@ -130,48 +130,41 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         eta0 = (iside == 1) ? 0.0 : 0.5
         idx = findmin(abs.(vector .- eta0))[2]
         theta = pe.rzphi_ys[idx]
-        rfac = 0.0
-        cosfac = 0.0
-        z = 0.0
-        max_iter = 1000
-        iter = 0
-        hint2d = (Ref(1), Ref(1))  # Shared 2D hint for Newton iteration
-        while iter < max_iter
-            iter += 1
-            # Evaluate rcoord and offset with derivatives
-            r2 = pe.rzphi_rsquared((psi_edge, theta); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
-            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
-            eta = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
-            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
+        hint2d = (Ref(1), Ref(1))
+        rfac = 0.0; cos_phase = 0.0; z = 0.0; iter = 0
 
-            rfac = sqrt(r2)
+        # Newton iteration: find θ where ∂z/∂θ = 0 (top/bottom separatrix extremum).
+        # z(θ) = zo + rfac·sin(2π(θ+η)), where rfac = √r²(θ) and η(θ) is the angular
+        # offset spline. z1 = ∂z/∂θ and z2 = ∂²z/∂θ² are derived via chain rule;
+        # rfac1, rfac2 are derivatives of rfac w.r.t. θ, and phase1, phase2 are
+        # derivatives of 2π(θ+η). The converged rfac and
+        # cos_phase are read below to compute rext without re-evaluating the splines.
+        while iter < 1000
+            iter += 1
+            r2    = pe.rzphi_rsquared((psi_edge, theta); hint=hint2d)
+            r2y   = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
+            r2yy  = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
+            η     = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
+            η1    = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
+            η2    = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
+            rfac  = sqrt(r2)
             rfac1 = r2y / (2 * rfac)
             rfac2 = (r2yy - r2y * rfac1 / rfac) / (2 * rfac)
-            phase = 2π * (theta + eta)
-            phase1 = 2π * (1 + eta1)
-            phase2 = 2π * eta2
-            cosfac = cos(phase)
-            sinfac = sin(phase)
-            z = pe.zo + rfac * sinfac
-            z1 = rfac * phase1 * cosfac + rfac1 * sinfac
-            z2 = (2 * rfac1 * phase1 + rfac * phase2) * cosfac + (rfac2 - rfac * phase1^2) * sinfac
+            phase1    = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
+            phase2    = 2π * η2          # d²[2π(θ+η)]/dθ²
+            cos_phase = cos(2π * (theta + η))
+            sin_phase = sin(2π * (theta + η))
+            z  = pe.zo + rfac * sin_phase
+            z1 = rfac * phase1 * cos_phase + rfac1 * sin_phase                                            # ∂z/∂θ
+            z2 = (2 * rfac1 * phase1 + rfac * phase2) * cos_phase + (rfac2 - rfac * phase1^2) * sin_phase # ∂²z/∂θ²
             dtheta = -z1 / z2
             theta += dtheta
-            # Wrap theta back into valid periodic range [0, 2π)
-            y_period = pe.rzphi_ys[end] - pe.rzphi_ys[1] + (pe.rzphi_ys[2] - pe.rzphi_ys[1])
-            theta = mod(theta - pe.rzphi_ys[1], y_period) + pe.rzphi_ys[1]
-            if abs(dtheta) < 1e-12 * y_period
-                break
-            end
+            abs(dtheta) < 1e-12 && break  # note the theta range is 1
         end
-        if iter >= max_iter
-            @warn "Newton iteration for separatrix extrema did not converge" iside eta0 theta
-        end
-        rext[iside] = pe.ro + rfac * cosfac
-        zsep[iside] = z
-        zext[iside] = z
+        iter >= 1000 && @warn "Newton iteration for separatrix extrema did not converge" iside eta0 theta
+
+        rext[iside] = pe.ro + rfac * cos_phase
+        zsep[iside] = zext[iside] = z
     end
 
     pe.params.rsep = rsep
