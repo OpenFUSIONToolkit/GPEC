@@ -107,22 +107,12 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     rsep = zeros(2)
 
     for iside in 1:2
-        it = 0
-        hint2d = (Ref(1), Ref(1))  # Shared 2D hint for Newton iteration
-        while true
-            it += 1
-            # Evaluate offset and its derivative
-            offset = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
-
-            eta = theta + offset - eta0
-            eta_theta = 1 + offset_y
-            dtheta = -eta / eta_theta
-            theta += dtheta
-            if abs(eta) <= 1e-10 || it > 100
-                break
-            end
-        end
+        hint2d = (Ref(1), Ref(1))
+        theta = find_zero(
+            (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
+             theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
+            theta, Roots.Newton()
+        )
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
