@@ -201,6 +201,16 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_npoints_per_chunk::Int` - Number of solution points saved per integration chunk using uniform saveat grid
+  - `n_subchunks_per_region::Int` - Number of sub-chunks per inter-rational integration region. Each region between
+    consecutive rational surfaces is split into this many sub-chunks. When N >= 3, the first and last sub-chunks
+    use `edge_chunk_fraction` of the region width (packed near the rational surfaces where solutions grow fastest),
+    and the N-2 middle sub-chunks share the remaining width equally. The last sub-chunk always carries
+    `needs_crossing=true`. Default N=3 gives [edge, middle, edge] layout. Increase for finer resolution.
+  - `edge_chunk_fraction::Float64` - Fraction of each inter-rational region width assigned to the left edge
+    chunk (just after the previous crossing) and the right edge chunk (just before the next crossing).
+    Default 0.05 matches the user-prescribed layout, e.g. q=2→3 becomes [2-2.05, 2.05-2.95, 2.95-3]
+    in q-space. Solutions grow as power laws near the rational surfaces, so concentrating norm checks
+    there enables Gaussian reduction to fire at the right time.
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
 """
 @kwdef mutable struct ForceFreeStatesControl
@@ -252,6 +262,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     HDF5_filename::String = "jpec.h5"
     force_wv_symmetry::Bool = true
     save_npoints_per_chunk::Int = 50
+    n_subchunks_per_region::Int = 3
+    edge_chunk_fraction::Float64 = 0.05
     force_termination::Bool = false
 end
 

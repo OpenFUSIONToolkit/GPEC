@@ -54,20 +54,33 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Iterate through each integration chunk
     for chunk in chunks
-        # Integrate this region and display progress
+        # Integrate this region (norm check fires at boundary only for non-crossing chunks)
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
-        if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  uratio = $((@sprintf "%.2e" odet.uratio)),  steps = $(odet.solver_steps)")
-        end
 
         # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
+            if ctrl.verbose
+                println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  uratio = $((@sprintf "%.2e" odet.uratio)),  steps = $(odet.solver_steps)")
+            end
             if ctrl.kin_flag
                 error("kin_flag = true not implemented yet!")
             else
+                # Before crossing: ensure odet.new=false so compute_solution_norms! fires
+                # Gaussian reduction (the else branch). If a prior sub-chunk fired an
+                # intermediate reduction and set odet.new=true, we clear it here without
+                # resetting unorm0, so the crossing sort uses growth from that reduction's
+                # baseline (not a trivial all-ones baseline).
+                odet.new = false
                 cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+                # Establish a fresh norm baseline at the post-crossing state. This mirrors
+                # the Fortran callback's first-step-after-crossing baseline and ensures
+                # the next crossing's Gaussian sort measures growth from this point.
+                compute_solution_norms!(odet.u, odet, ctrl, intr, false)
             end
         end
+    end
+    if ctrl.verbose
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac))),  uratio = $((@sprintf "%.2e" odet.uratio)),  steps = $(odet.solver_steps)")
     end
 
     # Deallocate unused storage of integration data
@@ -182,14 +195,29 @@ end
 
 Pre-compute all integration chunks from the current position to the edge.
 Returns a vector of `IntegrationChunk` objects, each representing a region to integrate
-and whether it needs a rational surface crossing beforehand.
+and whether it needs a rational surface crossing.
 
-This function replaces the iterative while-loop logic with a single upfront computation,
-making the integration flow more predictable and easier to parallelize (e.g., for STRIDE).
+Each inter-rational region is split into `ctrl.n_subchunks_per_region` sub-chunks with
+edge weighting: the first and last sub-chunks each occupy `ctrl.edge_chunk_fraction` of the
+region width (concentrating norm checks near the rational surfaces where solutions diverge
+fastest), while the N-2 interior sub-chunks share the remainder equally. When N=3 and
+edge_chunk_fraction=0.05, the layout is [5%, 90%, 5%] — matching the user-prescribed
+example "2-2.05, 2.1-2.9, 2.95-3" in q-space.
+
+This layout ensures that:
+1. Immediately after each crossing, a short left-edge chunk establishes the norm baseline
+   close to the crossing point (where solutions are smallest after asymptotic reinit).
+2. Intermediate norm checks in the large middle chunk can fire Gaussian reduction if uratio
+   exceeds `ctrl.ucrit` far from both surfaces.
+3. A short right-edge chunk (needs_crossing=true) provides a final norm check just before the
+   approaching rational surface, where the resonant solution grows fastest.
+
+When N=1, the region is a single crossing chunk (no sub-chunking).
 
 ### Arguments
 
-  - `odet::OdeState` - ODE state struct (starting position and singular surface index)
+  - `psifac::Float64` - Starting psi position
+  - `ising_start::Int` - Index of singular surface to start from
   - `ctrl::ForceFreeStatesControl` - Control parameters
   - `intr::ForceFreeStatesInternal` - Internal data (singular surfaces, limits)
 
@@ -207,9 +235,11 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
     # Start from current position
     psi_current = psifac
     ising_current = ising_start
+    N = max(1, ctrl.n_subchunks_per_region)
+    f = clamp(ctrl.edge_chunk_fraction, 0.0, 0.45)  # edge fraction, clamped to leave room for middle
 
-    # Wrapper to find next singular surface to integrate toward that is resonant within integration limits
-    function find_next_resonant_surface!(ising::Int, intr::ForceFreeStatesInternal)
+    # Find next singular surface that is resonant and within integration limits
+    function find_next_resonant_surface(ising::Int)
         ising += 1
         while ising <= intr.msing
             if intr.psilim < intr.sing[ising].psifac ||
@@ -221,12 +251,40 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
         return ising
     end
 
+    # Add N edge-weighted sub-chunks for a region [psi_start, psi_end].
+    # Layout: [f, (1-2f)/(N-2), ..., f] for N≥3; [1-f, f] for N=2; [1] for N=1.
+    # The last sub-chunk carries needs_crossing=true when the region ends at a singular surface.
+    function add_region_chunks!(psi_start, psi_end, needs_crossing, ising)
+        width = psi_end - psi_start
+        if N == 1
+            push!(chunks, IntegrationChunk(;
+                psi_start      = psi_start,
+                psi_end        = psi_end,
+                needs_crossing = needs_crossing,
+                ising          = needs_crossing ? ising : 0
+            ))
+        elseif N == 2
+            push!(chunks, IntegrationChunk(psi_start, psi_start + (1 - f) * width, false, 0))
+            push!(chunks, IntegrationChunk(psi_start + (1 - f) * width, psi_end, needs_crossing, needs_crossing ? ising : 0))
+        else
+            # N ≥ 3: [f, equal × (N-2), f]
+            mid_width = (1 - 2f) * width / (N - 2)
+            push!(chunks, IntegrationChunk(psi_start, psi_start + f * width, false, 0))
+            for k in 1:(N - 2)
+                sub_start = psi_start + f * width + (k - 1) * mid_width
+                sub_end   = sub_start + mid_width
+                push!(chunks, IntegrationChunk(sub_start, sub_end, false, 0))
+            end
+            push!(chunks, IntegrationChunk(psi_end - f * width, psi_end, needs_crossing, needs_crossing ? ising : 0))
+        end
+    end
+
     # -------------------- Create chunks ------------------------
     if false  # TODO: kin_flag
     # Kinetic not implemented yet, some of the below code might be able to be reused?
     else
         # Loop through singular surfaces to cross until edge is reached
-        ising_current = find_next_resonant_surface!(ising_current, intr)
+        ising_current = find_next_resonant_surface(ising_current)
         while ising_current <= intr.msing && intr.psilim >= intr.sing[ising_current].psifac && ctrl.singfac_min != 0
             # Set integration limit to just before the next singular surface
             psi_end = intr.sing[ising_current].psifac - ctrl.singfac_min /
@@ -236,31 +294,22 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
             @assert psi_current < psi_end "Invalid chunk bounds: psi_start=$psi_current >= psi_end=$psi_end"
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
 
-            push!(chunks, IntegrationChunk(;
-                psi_start=psi_current,
-                psi_end=psi_end,
-                needs_crossing=true,
-                ising=ising_current
-            ))
+            add_region_chunks!(psi_current, psi_end, true, ising_current)
 
             # After crossing, we jump to the other side of the singular surface
             dpsi = intr.sing[ising_current].psifac - psi_end
             psi_current = psi_end + 2 * dpsi
 
             # Move to next singular surface that is either resonant or beyond integration limits
-            ising_current = find_next_resonant_surface!(ising_current, intr)
+            ising_current = find_next_resonant_surface(ising_current)
         end
 
-        # No more singular surfaces to cross, set integration limit to edge
-        @assert psi_current < intr.psilim * (1 - eps) "Final chunk has invalid bounds"
+        # No more singular surfaces to cross, add final region to edge
+        final_end = intr.psilim * (1 - eps)
+        @assert psi_current < final_end "Final chunk has invalid bounds"
         @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Final chunk overlaps with previous chunk"
 
-        push!(chunks, IntegrationChunk(;
-            psi_start=psi_current,
-            psi_end=(intr.psilim * (1 - eps)),
-            needs_crossing=false,
-            ising=0
-        ))
+        add_region_chunks!(psi_current, final_end, false, 0)
     end
 
     return chunks
@@ -283,7 +332,11 @@ that asymptotic calculations are specific to ideal ForceFreeStates and not inher
 """
 function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, ising::Int)
 
-    # Fixup solution at singular surface
+    # Fixup solution at singular surface. The pre-crossing logic in eulerlagrange_integration
+    # guarantees odet.new=false here, so compute_solution_norms! enters the else branch and
+    # fires Gaussian reduction with sing_flag=true. The sort uses normalized growth from the
+    # post-previous-crossing baseline (established by compute_solution_norms! right after each
+    # crossing), matching the Fortran callback's first-step-after-crossing baseline behavior.
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
 
     # Compute asymptotic power series for this singular surface
@@ -351,10 +404,12 @@ Integrate the Euler-Lagrange equations from `psi_start` to `psi_end`.
 Formerly `ode_step!`. Uses OrdinaryDiffEq's built-in `saveat` to store
 `save_npoints_per_chunk` uniformly-spaced solution points per chunk,
 replacing the previous DiscreteCallback-based storage and tolerance-switching logic.
-After integration, checks whether Gaussian reduction is needed at the chunk boundary
-and applies it if the solution spread exceeds `ctrl.ucrit`. The reduction is skipped
-here when the chunk ends at a singular surface, since `cross_ideal_singular_surf!`
-applies forced reduction immediately after.
+After integration, checks solution norms at every chunk boundary. For crossing chunks
+where a prior sub-chunk fired an intermediate reduction (`odet.new == true`), the
+norm check fires the if-new branch and establishes a fresh baseline from the
+post-integration norms — equivalent to the Fortran callback's first-step-after-
+reduction baseline. The crossing then uses growth from this post-integration baseline
+for the Gaussian sort in `cross_ideal_singular_surf!`.
 
 ### Arguments
 
@@ -384,11 +439,12 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
 
-    # Check solution norms at every chunk boundary. This ensures odet.new=false before any
-    # singular surface crossing, so cross_ideal_singular_surf!'s forced reduction always fires.
-    # In practice, uratio > ucrit should not trigger here since chunks stop well before
-    # singularities (at singfac_min). If it does trigger, the non-forced reduction fires here
-    # and the forced reduction at the subsequent crossing is skipped (new=true → baseline only).
+    # Check solution norms at every chunk boundary, including crossing chunks.
+    # For crossing chunks with new=true (set by an intermediate reduction in a prior
+    # sub-chunk), this fires the if-new branch and establishes a fresh baseline using the
+    # post-integration norms — equivalent to the Fortran callback's first-step-after-
+    # reduction baseline. For crossing chunks with new=false, this checks uratio and may
+    # fire an intermediate reduction before the crossing.
     compute_solution_norms!(odet.u, odet, ctrl, intr, false)
 end
 
@@ -450,9 +506,9 @@ Applies Gaussian reduction to orthogonalize solution vectors in `u`.
 Formerly `ode_fixup!`. Performs the same function as `ode_fixup` in the Fortran code,
 except now relevant `fixfac` data are stored in memory instead of dumped to `euler.bin`.
 Used when the spread in norms exceeds a threshold or when a rational surface is reached.
-This will update both `u` and relevant fields in `odet` in-place. See the
-description of `compute_solution_norms!` for more details on the benefits of in-place `u`
-updates.
+Columns are sorted by normalized growth from the last established baseline (`odet.unorm`),
+matching the Fortran callback's sort behavior. This will update both `u` and relevant fields
+in `odet` in-place. See the description of `compute_solution_norms!` for more details.
 """
 function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
@@ -467,7 +523,12 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
     for isol in 1:intr.numpert_total
         odet.fixfac[isol, isol, ifix] = 1
     end
-    # Sort unorm in descending order (since we triangularize from largest to smallest)
+    # Sort columns by normalized growth from the last established baseline to detect which
+    # solutions have grown the most since the last fixup. At singular surface crossings
+    # (sing_flag=true), the baseline is the one set immediately after the previous crossing
+    # by the post-crossing compute_solution_norms! call, so odet.unorm correctly reflects
+    # growth of each solution from that point to the current crossing — matching the Fortran
+    # callback's sort behavior.
     odet.index[:, ifix] = sortperm(odet.unorm; rev=true)
 
     # Triangularize primary solutions

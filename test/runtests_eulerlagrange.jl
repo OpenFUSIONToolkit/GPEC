@@ -253,17 +253,18 @@ end
     @testset "chunk_el_integration_bounds tests" begin
         ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
         ctrl.numunorms_init = 5
+        ctrl.n_subchunks_per_region = 3  # N=3: each region gets edge-weighted sub-chunks [5%, 90%, 5%]
 
-        # Case 1: No singular surfaces -> single chunk to edge
+        # Case 1: No singular surfaces -> N chunks to edge (all non-crossing)
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.msing = 0
         intr.psilim = 1.0
         ctrl.singfac_min = 1e-4
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 1
-        @test chunks[1].needs_crossing == false
+        @test length(chunks) == 3         # N sub-chunks for the single final region
+        @test all(c.needs_crossing == false for c in chunks)
 
-        # Case 2: One singular surface within limits -> crossing chunk then edge
+        # Case 2: One singular surface within limits -> N pre-crossing sub-chunks + N final sub-chunks
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         s = JPEC.ForceFreeStates.SingType()
         s.psifac = 0.5
@@ -277,12 +278,12 @@ end
         intr.mhigh = 1
         ctrl.singfac_min = 1e-4
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 2
-        @test chunks[1].needs_crossing == true
-        @test chunks[2].needs_crossing == false
-        @test chunks[1].psi_end < intr.sing[1].psifac
+        @test length(chunks) == 6         # N sub-chunks per region × 2 regions
+        @test chunks[3].needs_crossing == true  # last sub-chunk of first region has crossing
+        @test all(c.needs_crossing == false for c in [chunks[1], chunks[2], chunks[4], chunks[5], chunks[6]])
+        @test chunks[3].psi_end < intr.sing[1].psifac
 
-        # Case 3: Multiple singular surfaces -> multiple crossing chunks
+        # Case 3: Multiple singular surfaces -> N sub-chunks per region × (n_crossings + 1) regions
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         s1 = JPEC.ForceFreeStates.SingType(; psifac=0.3, n=[1], m=[1], q1=1.5)
         s2 = JPEC.ForceFreeStates.SingType(; psifac=0.6, n=[1], m=[1], q1=2.5)
@@ -293,18 +294,19 @@ end
         intr.mhigh = 1
         ctrl.singfac_min = 1e-6
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 3
-        @test all(c.needs_crossing == true for c in chunks[1:2])
-        @test chunks[3].needs_crossing == false
+        @test length(chunks) == 9         # N sub-chunks per region × 3 regions
+        @test chunks[3].needs_crossing == true   # last sub-chunk of region 1
+        @test chunks[6].needs_crossing == true   # last sub-chunk of region 2
+        @test all(c.needs_crossing == false for c in chunks[[1,2,4,5,7,8,9]])
 
-        # Case 4: singfac_min == 0 should disable crossing logic -> single chunk
+        # Case 4: singfac_min == 0 should disable crossing logic -> N chunks (all non-crossing)
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.sing = [JPEC.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
         intr.msing = 1
         intr.psilim = 1.0
         ctrl.singfac_min = 0.0
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 1
-        @test chunks[1].needs_crossing == false
+        @test length(chunks) == 3         # N sub-chunks for the single final region (singfac_min=0 bypasses crossing)
+        @test all(c.needs_crossing == false for c in chunks)
     end
 end
