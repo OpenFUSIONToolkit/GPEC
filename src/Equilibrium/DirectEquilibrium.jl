@@ -254,7 +254,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     # which is populated by the preceding f call — Newton guarantees f is evaluated first.
     r = find_zero(
         (r -> (direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.psi - psi0_guess),
-         _  -> bfield.psir),
+            _ -> bfield.psir),
         r, Roots.Newton()
     )
 
@@ -335,10 +335,7 @@ end
     direct_refine(rfac, eta, psi0, params)
 
 Refines the radial distance `rfac` at a given angle `eta` to ensure the
-point lies exactly on the target flux surface `psi0`. Uses Halley's method
-(cubic convergence) with first and second directional derivatives of ψ along
-the rfac direction, reducing the number of expensive `direct_get_bfield!` calls
-compared to Newton's method.
+point lies exactly on the target flux surface `psi0`.
 
 ## Arguments:
 
@@ -351,38 +348,27 @@ compared to Newton's method.
 
   - The refined `rfac` value.
 """
-function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::FieldLineDerivParams; max_iter::Int=50)::Float64
-
+function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::FieldLineDerivParams)::Float64
     cos_eta, sin_eta = cos(eta), sin(eta)
-    r = params.ro + rfac * cos_eta
-    z = params.zo + rfac * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=2)
-    dpsi = params.bfield.psi - psi0
 
-    for _ in 1:max_iter
-        # Halley's method: uses first and second directional derivatives along rfac.
-        # d(ψ)/d(rfac) = ψ_r cos η + ψ_z sin η
-        dpsi_drfac = params.bfield.psir * cos_eta + params.bfield.psiz * sin_eta
-        if abs(dpsi_drfac) < 1e-14
-            @warn "Refinement failed at eta=$eta: d(psi)/d(rfac) is zero."
-            return rfac
-        end
-        # d²(ψ)/d(rfac)² = ψ_rr cos²η + 2 ψ_rz cosη sinη + ψ_zz sin²η
-        d2psi_drfac2 = params.bfield.psirr * cos_eta^2 + 2 * params.bfield.psirz * cos_eta * sin_eta + params.bfield.psizz * sin_eta^2
-        # Halley step (numerically robust form avoids division by near-zero denominator)
-        drfac = -2 * dpsi * dpsi_drfac / (2 * dpsi_drfac^2 - dpsi * d2psi_drfac2)
-        rfac += drfac
-        r = params.ro + rfac * cos_eta
-        z = params.zo + rfac * sin_eta
-        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=2)
-        dpsi = params.bfield.psi - psi0
-
-        if abs(dpsi) <= 1e-12 * psi0 || abs(drfac) <= 1e-12 * abs(rfac)
-            return rfac
-        end
+    function f(rfac_inner)
+        r = params.ro + rfac_inner * cos_eta
+        z = params.zo + rfac_inner * sin_eta
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
+            params.sq_in_deriv, params.psio; derivs=0)
+        return params.bfield.psi - psi0
     end
 
-    error("direct_refine did not converge after $max_iter iterations at eta=$eta.")
+    function fp(rfac_inner)
+        r = params.ro + rfac_inner * cos_eta
+        z = params.zo + rfac_inner * sin_eta
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
+            params.sq_in_deriv, params.psio; derivs=1)
+        return params.bfield.psir * cos_eta + params.bfield.psiz * sin_eta
+    end
+
+    return find_zero((f, fp), rfac, Roots.Newton();
+        atol=1e-12*abs(psi0), rtol=1e-12, maxevals=50)
 end
 
 """
@@ -446,9 +432,9 @@ robustness.
         # Integrate along the field line for this surface
         y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
-        # checkpoint pool for Float64 slot 
+        # checkpoint pool for Float64 slot
         checkpoint!(pool, Float64)
-        
+
         # Fit data into temporary straight fieldline poloidal angle splines
         ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
         @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
@@ -456,7 +442,7 @@ robustness.
         ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
         @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
         @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])   
+        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
         @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
