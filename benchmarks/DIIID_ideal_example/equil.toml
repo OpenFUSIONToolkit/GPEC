@@ -1,6 +1,6 @@
 [EQUIL_CONTROL]
 eq_type = "efit"             # Type of the input 2D equilibrium file
-eq_filename = "TKMKR_D3Dlike_default_Hmode.geqdsk"  # path to equilibrium file
+eq_filename = "TkMkr_D3Dlike_inexp=1.0.geqdsk"  # path to equilibrium file
 
 jac_type = "hamada"          # Coordinate system (hamada, pest, boozer, equal_arc)
 power_bp = 0                 # del.B ~ B_p^power_bp * B^power_b / R^power_r
