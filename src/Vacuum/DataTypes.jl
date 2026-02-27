@@ -2,18 +2,25 @@
     VacuumInput
 
 Struct holding plasma boundary and mode data as provided from ForceFreeStates namelist and computed quantities.
+For an axisymmetric boundary, nzeta_in = 1 and only the x and z arrays need to be provided - the code can then
+be run with nzeta = 1 for 2D vacuum calculation or nzeta > 1 for 3D vacuum calculation. For a non-axisymmetric boundary,
+nzeta_in > 1 and the x, y, and z arrays need to be provided - the code can then be run with nzeta = 1 for 2D vacuum calculation or
+nzeta > 1 for 3D vacuum calculation.
 
 # Fields
 
-  - `r::Vector{Float64}`: Plasma boundary R-coordinate as a function of poloidal angle
-  - `z::Vector{Float64}`: Plasma boundary Z-coordinate as a function of poloidal angle
-  - `ν::Vector{Float64}`: Free parameter in specifying toroidal angle, ϕ = 2πζ + ν(ψ, θ), on theta grid
+  - `x::Vector{Float64}`: Plasma boundary X-coordinate (length mtheta_in * nzeta_in)
+  - `y::Vector{Float64}`: Plasma boundary Y-coordinate (length mtheta_in * nzeta_in)
+  - `z::Vector{Float64}`: Plasma boundary Z-coordinate (length mtheta_in * nzeta_in)
+  - `ν::Vector{Float64}`: Free parameter in specifying toroidal angle, ζ = ϕ + ν(θ), on input theta grid (axisymmetric only, length mtheta_in)
+  - `mtheta_in::Int`: Number of input poloidal grid points
+  - `nzeta_in::Int`: Number of input toroidal grid points (1 for axisymmetric, > 1 for non-axisymmetric)
   - `mlow::Int`: Lower poloidal mode number
   - `mpert::Int`: Number of poloidal modes
   - `nlow::Int`: Lower toroidal mode number
   - `npert::Int`: Number of toroidal modes
   - `mtheta::Int`: Number of vacuum calculation poloidal grid points
-  - `nzeta::Int`: Number of vacuum calculation toroidal grid points
+  - `nzeta::Int`: Number of vacuum calculation toroidal grid points (1 for 2D vacuum calculation, > 1 for 3D vacuum calculation)
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
 
 # Notes
@@ -21,13 +28,16 @@ Struct holding plasma boundary and mode data as provided from ForceFreeStates na
   - This is a mutable struct because we need to be able to modify the ν vector in n<0 cases.
 """
 @kwdef mutable struct VacuumInput
-    r::Vector{Float64} = Float64[]
+    x::Vector{Float64} = Float64[]
+    y::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
     ν::Vector{Float64} = Float64[]
-    mlow::Int = 0
-    mpert::Int = 0
-    nlow::Int = 0
-    npert::Int = 0
+    mtheta_in::Int = 0
+    nzeta_in::Int = 1
+    mlow::Int = 1
+    mpert::Int = 1
+    nlow::Int = 1
+    npert::Int = 1
     mtheta::Int = 1
     nzeta::Int = 1
     force_wv_symmetry::Bool = true
@@ -76,9 +86,10 @@ function VacuumInput(
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
 
     return VacuumInput(;
-        r=reverse(r),
+        x=reverse(r),
         z=reverse(z),
         ν=reverse(ν),
+        mtheta_in=length(r),
         mlow=mlow,
         mpert=mpert,
         nlow=nlow,
@@ -203,12 +214,15 @@ We interpolate the input plasma boundary arrays from the inputs struct onto the 
 """
 function PlasmaGeometry(inputs::VacuumInput)
 
+    @assert !isempty(inputs.ν) "ν must be specified for 2D calculations"
+    @assert length(inputs.x) == length(inputs.z) == length(inputs.ν) "x, z, and ν must have the same length"
+
     # Interpolate arrays from input onto mtheta grid
-    θ_in = range(0.0, 2π; length=length(inputs.r)) # VacuumInput uses [0, 2π] grid
+    θ_in = range(0.0, 2π; length=inputs.mtheta_in) # VacuumInput uses [0, 2π] grid
     θ_out = range(; start=0, length=inputs.mtheta, step=2π/inputs.mtheta) # VACUUM uses [0, 2π) grid
 
     # Use one-shot API with PeriodicBC
-    x = cubic_interp(θ_in, inputs.r, θ_out; bc=PeriodicBC()) # no endpoint handling needed!
+    x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC()) # no endpoint handling needed!
     z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC())
     ν = cubic_interp(θ_in, inputs.ν, θ_out; bc=PeriodicBC())
 
@@ -249,6 +263,8 @@ end
 
 Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
 
+# TODO: update this
+
 # Algorithm
 
  0. Interpolate 2D arrays onto mtheta grid
@@ -283,14 +299,27 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     normal = zeros(num_points, 3)
 
     # Interpolate arrays from input onto mtheta grid (same as 2D)
-    surf_2D = PlasmaGeometry(inputs)
-
-    # Build 3D surface point-by-point from 2D contour
-    for i in 1:mtheta, (j, ζ) in enumerate(ζ_grid)
-        # Our 3D grids are the SFL angle ζ = ϕ - ν
-        r[i+mtheta*(j-1), 1] = surf_2D.x[i] * cos(ζ - surf_2D.ν[i])
-        r[i+mtheta*(j-1), 2] = surf_2D.x[i] * sin(ζ - surf_2D.ν[i])
-        r[i+mtheta*(j-1), 3] = surf_2D.z[i]
+    if inputs.nzeta_in == 1
+        # Build 3D surface point-by-point from 2D contour
+        surf_2D = PlasmaGeometry(inputs)
+        for i in 1:mtheta, (j, ζ) in enumerate(ζ_grid)
+            # Our 3D grids are the SFL angle ζ = ϕ - ν
+            r[i+mtheta*(j-1), 1] = surf_2D.x[i] * cos(ζ - surf_2D.ν[i])
+            r[i+mtheta*(j-1), 2] = surf_2D.x[i] * sin(ζ - surf_2D.ν[i])
+            r[i+mtheta*(j-1), 3] = surf_2D.z[i]
+        end
+    else
+        # TODO: make this better
+        # Interpolate inputs onto vacuum grid (there's gotta be a better way to do this)
+        θ_in = range(0.0, 2π; length=inputs.mtheta_in)
+        ζ_in = range(0.0, 2π; length=inputs.nzeta_in)
+        θ_flat = repeat(collect(θ_grid); inner=nzeta)
+        ζ_flat = repeat(collect(ζ_grid); outer=mtheta)
+        grid_points = (θ_flat, ζ_flat)
+        for (k, data) in enumerate((inputs.x, inputs.y, inputs.z))
+            itp = cubic_interp((θ_in, ζ_in), reshape(data, inputs.mtheta_in, inputs.nzeta_in); bc=(PeriodicBC(), PeriodicBC()))
+            r[:, k] = itp(grid_points)
+        end
     end
 
     # Compute tangent vectors and normal vectors via periodic bicubic splines
