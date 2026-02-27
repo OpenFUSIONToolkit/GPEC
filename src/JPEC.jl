@@ -43,6 +43,7 @@ using .ForceFreeStates: make_metric, make_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
 const _BANNER = "="^60
+const _SECTION = "-"^40
 
 function main(args::Vector{String}=String[])
     # Parse command line arguments
@@ -61,7 +62,7 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     # Equilibrium
     # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  Equilibrium\n$_BANNER"
+    @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
     # Read input data and set up data structures
@@ -103,7 +104,7 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     # Force-Free States
     # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  Force-Free States\n$_BANNER"
+    @info "\n  Force-Free States\n$_SECTION"
     ffs_start = time()
 
     # Set up variables
@@ -266,7 +267,7 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     # Perturbed Equilibrium
     # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  Perturbed Equilibrium\n$_BANNER"
+    @info "\n  Perturbed Equilibrium\n$_SECTION"
     pe_start = time()
 
     # Check for PerturbedEquilibrium section and run if present
