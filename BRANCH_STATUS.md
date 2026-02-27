@@ -3,13 +3,80 @@
 > This file is for Claude Code context when resuming work on this branch.
 > Delete it before merging to develop.
 
-## Goal
+---
 
-PR 1 of the ODE Callback Removal and Parallelization plan. Remove the `DiscreteCallback`
-from Euler-Lagrange integration and replace it with chunk-boundary Gaussian reduction,
-ODE built-in `saveat` storage, and edge-weighted sub-chunking.
+## Full Plan: ODE Callback Removal and Parallelization
 
-Full plan: `~/.claude/plans/binary-whistling-llama.md` (local) — key details reproduced below.
+### Context
+
+The Euler-Lagrange (EL) ODE integration in `ForceFreeStates` currently uses a `DiscreteCallback`
+that fires at every integrator step to do three jobs: (1) switch tolerances near rational surfaces,
+(2) apply Gaussian triangularization to prevent solution divergence, and (3) manually store psi/q/u/ud.
+
+Because JPEC already pre-chunks the integration between singular surfaces (unlike the original Fortran
+which handled singularities dynamically), the callback is no longer the right tool for any of these
+jobs. This plan removes the callback entirely, leverages OrdinaryDiffEq's built-in storage, and
+simplifies the tolerance and regularization logic. A second PR then adds optional parallel integration
+via the Riccati reformulation.
+
+### PR 1: Remove Callback, Use Built-in ODE Storage
+
+**Critical files:**
+- `src/ForceFreeStates/EulerLagrange.jl` — main changes (solve call, chunk loop, Gaussian reduction)
+- `src/ForceFreeStates/ForceFreeStatesStructs.jl` — simplify `OdeState`, `ForceFreeStatesControl`
+- `examples/*/jpec.toml` — rename config params
+- `test/runtests_eulerlagrange.jl` — update tests
+
+**Step 1: Unify tolerances** ✅ DONE
+Remove `tol_r`, `tol_nr`, `crossover` from `ForceFreeStatesControl`. Add single
+`eulerlagrange_tolerance`. Remove `compute_tols()` entirely.
+
+**Step 2: Move Gaussian reduction to chunk boundaries** ✅ DONE (but has correctness bug — see below)
+Remove Gaussian reduction from the callback. After each `integrate_el_region!` returns, call
+`compute_solution_norms!` once as a safety check; apply reduction only if `uratio > ctrl.ucrit`
+at the chunk end. At `cross_ideal_singular_surf!`, the forced reduction call is unchanged.
+
+**Step 3: Replace manual storage with ODE built-in** ✅ DONE
+Use `saveat` in the solve call instead of the callback storage loop. Removed `q_store`,
+removed `resize_storage!` (exact pre-allocation from chunk structure). u_store/ud_store
+layout is `(np, np, nsteps, 2)`.
+
+**Step 4: Remove DiscreteCallback** ✅ DONE
+Deleted `integrator_callback!`. Removed `cb` from the solve call. Set `save_everystep=false`.
+
+**Step 5: Edge-weighted sub-chunking** ✅ DONE
+Each inter-rational region split into `n_subchunks_per_region` sub-chunks with
+`[edge_chunk_fraction, middle..., edge_chunk_fraction]` layout. Default N=3, f=0.05 gives
+[5%, 90%, 5%] — concentrating norm checks near rational surfaces where solutions grow fastest.
+
+**Verification** ❌ BLOCKED
+- All 53 unit tests pass
+- DIIID full-run gives `et[1] = -72.15` (target: ~1.707) — bug described below
+
+### PR 2: Optional Riccati Parallelization (future work, not started)
+
+Define the impedance matrix `W(ψ) = U₂ U₁⁻¹`. It satisfies:
+```
+dW/dψ = C + DW − WA − WBW
+```
+where A, B, C, D are N×N blocks of the EL coefficient matrices. This is N×N instead of 2N×N.
+
+**Key parallelism**: Forward impedance `W⁺(ψ)` (from axis) and backward admittance `W⁻(ψ)`
+(from edge backward) are independent and can run on separate threads. Stability criterion
+computed from `W⁺` and `W⁻` at each ψ — following Glasser 2018 §III.
+
+**Critical requirement**: Full U₁, U₂ profiles must be reconstructed for PerturbedEquilibrium
+compatibility. Given W⁺(ψ), solve the reduced N×N equation `dU₁/dψ = (A + B·W⁺)·U₁`, then
+U₂ = W⁺·U₁. This replaces the 2N×N pass and gives identical u_store output.
+
+**New file**: `src/ForceFreeStates/Riccati.jl`
+**Modify**: `EulerLagrange.jl` (parallel dispatch branch), `ForceFreeStatesStructs.jl`
+**New tests**: `test/runtests_riccati.jl`
+**Reference**: `docs/resources/2018-Glasser-A Riccati solution for the ideal MHD plasma response...pdf`
+
+---
+
+## Current Status
 
 ---
 
