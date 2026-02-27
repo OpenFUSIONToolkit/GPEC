@@ -26,46 +26,6 @@ function load_u_matrix(filename)
 end
 
 @testset "ODE Tests" begin
-    @testset "resize_storage!" begin
-        # Test that resize_storage! doubles the size of storage arrays
-        mpert = 3
-        numsteps_init = 10
-        odet = JPEC.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
-
-        # Fill some data
-        odet.step = 8
-        for i in 1:odet.step
-            odet.psi_store[i] = Float64(i)
-            odet.q_store[i] = Float64(i * 2)
-            odet.u_store[:, :, :, i] .= ComplexF64(i)
-            odet.ud_store[:, :, :, i] .= ComplexF64(i + 0.5)
-        end
-
-        # Resize storage
-        JPEC.ForceFreeStates.resize_storage!(odet)
-
-        # Check new size is doubled
-        @test length(odet.psi_store) == 2 * numsteps_init
-        @test length(odet.q_store) == 2 * numsteps_init
-        @test size(odet.u_store, 4) == 2 * numsteps_init
-        @test size(odet.ud_store, 4) == 2 * numsteps_init
-
-        # Check data is preserved
-        @test all(odet.psi_store[1:odet.step] .== Float64.(1:odet.step))
-        @test all(odet.q_store[1:odet.step] .== Float64.(2:2:(2*odet.step)))
-        for i in 1:odet.step
-            @test all(odet.u_store[:, :, :, i] .== ComplexF64(i))
-            @test all(odet.ud_store[:, :, :, i] .== ComplexF64(i + 0.5))
-        end
-
-        # Check that you can resize again
-        JPEC.ForceFreeStates.resize_storage!(odet)
-        @test length(odet.psi_store) == 4 * numsteps_init
-        @test length(odet.q_store) == 4 * numsteps_init
-        @test size(odet.u_store, 4) == 4 * numsteps_init
-        @test size(odet.ud_store, 4) == 4 * numsteps_init
-    end
-
     @testset "trim_storage!" begin
         # Test that trim_storage! resizes arrays to actual step count
         mpert = 3
@@ -76,9 +36,8 @@ end
         odet.step = 12
         for i in 1:odet.step
             odet.psi_store[i] = Float64(i)
-            odet.q_store[i] = Float64(i * 2)
-            odet.u_store[:, :, :, i] .= ComplexF64(i)
-            odet.ud_store[:, :, :, i] .= ComplexF64(i + 0.5)
+            odet.u_store[:, :, i, :] .= ComplexF64(i)
+            odet.ud_store[:, :, i, :] .= ComplexF64(i + 0.5)
         end
 
         # Trim storage
@@ -86,75 +45,11 @@ end
 
         # Check sizes match step count
         @test length(odet.psi_store) == odet.step
-        @test length(odet.q_store) == odet.step
-        @test size(odet.u_store, 4) == odet.step
-        @test size(odet.ud_store, 4) == odet.step
+        @test size(odet.u_store, 3) == odet.step
+        @test size(odet.ud_store, 3) == odet.step
 
         # Check all data is preserved
         @test all(odet.psi_store .== Float64.(1:odet.step))
-        @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
-    end
-
-    @testset "compute_tols" begin
-        # Test tolerance computation
-        mpert = 3
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        intr.msing = 2
-        intr.sing = [JPEC.ForceFreeStates.SingType(), JPEC.ForceFreeStates.SingType()]
-        intr.sing[1].q = 2.0
-        intr.sing[1].n = [1]
-        intr.sing[2].q = 3.0
-        intr.sing[2].n = [1]
-
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 2)
-
-        # Test 1: Far from singular surface (singfac > crossover)
-        ising = 1
-        odet.q = 1.5  # Far from q=2.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr  # Should use non-resonant tolerance
-
-        # Test 2: Close to singular surface (singfac < crossover)
-        ising = 1
-        odet.q = 1.999  # Very close to q=2.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_r  # Should use resonant tolerance
-
-        # Test 3: Between two singular surfaces
-        ising = 2
-        odet.q = 2.5  # Between q=2.0 and q=3.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr  # Should use min distance to either surface
-
-        # Test 4: Beyond all singular surfaces
-        ising = 3
-        odet.q = 4.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr
-
-        # Edge case - no singular surfaces
-        mpert = 2
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        intr.msing = 0
-        intr.sing = []
-
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 0)
-        ising = 1
-        odet.q = 2.0
-
-        # Should return non-resonant tolerance when no singular surfaces
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr
     end
 
     @testset "transform_u!" begin
@@ -181,10 +76,10 @@ end
 
         # Set up some u_store and ud_store data
         for i in 1:odet.step
-            odet.u_store[:, :, 1, i] .= ComplexF64(i)
-            odet.u_store[:, :, 2, i] .= ComplexF64(i + 0.1)
-            odet.ud_store[:, :, 1, i] .= ComplexF64(i + 0.2)
-            odet.ud_store[:, :, 2, i] .= ComplexF64(i + 0.3)
+            odet.u_store[:, :, i, 1] .= ComplexF64(i)
+            odet.u_store[:, :, i, 2] .= ComplexF64(i + 0.1)
+            odet.ud_store[:, :, i, 1] .= ComplexF64(i + 0.2)
+            odet.ud_store[:, :, i, 2] .= ComplexF64(i + 0.3)
         end
 
         u_orig = copy(odet.u_store)
@@ -336,6 +231,8 @@ end
         @test odet.numunorms_init == numunorms_init
         @test odet.msing == msing
         @test odet.step == 1
+        @test odet.solver_steps == 0
+        @test odet.uratio == 1.0
         @test odet.new == true
         @test odet.ifix == 0
         @test odet.nzero == 0
@@ -343,10 +240,9 @@ end
         # Check array dimensions
         @test size(odet.u) == (numpert_total, numpert_total, 2)
         @test size(odet.ud) == (numpert_total, numpert_total, 2)
-        @test size(odet.u_store) == (numpert_total, numpert_total, 2, numsteps_init)
-        @test size(odet.ud_store) == (numpert_total, numpert_total, 2, numsteps_init)
+        @test size(odet.u_store) == (numpert_total, numpert_total, numsteps_init, 2)
+        @test size(odet.ud_store) == (numpert_total, numpert_total, numsteps_init, 2)
         @test length(odet.psi_store) == numsteps_init
-        @test length(odet.q_store) == numsteps_init
         @test size(odet.ca_r) == (numpert_total, numpert_total, 2, msing)
         @test size(odet.ca_l) == (numpert_total, numpert_total, 2, msing)
         @test size(odet.fixfac) == (numpert_total, numpert_total, numunorms_init)
@@ -355,21 +251,15 @@ end
     end
 
     @testset "chunk_el_integration_bounds tests" begin
-        # Helper to build a minimal control and internal structs
         ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.numsteps_init = 10
         ctrl.numunorms_init = 5
 
         # Case 1: No singular surfaces -> single chunk to edge
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.msing = 0
         intr.psilim = 1.0
-
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        odet.psifac = 0.0
-
         ctrl.singfac_min = 1e-4
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
 
@@ -385,16 +275,11 @@ end
         intr.psilim = 1.0
         intr.mlow = 1
         intr.mhigh = 1
-
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        odet.psifac = 0.0
         ctrl.singfac_min = 1e-4
-
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
         @test length(chunks) == 2
         @test chunks[1].needs_crossing == true
         @test chunks[2].needs_crossing == false
-        # Ensure the first chunk ends just before the singular surface
         @test chunks[1].psi_end < intr.sing[1].psifac
 
         # Case 3: Multiple singular surfaces -> multiple crossing chunks
@@ -406,10 +291,8 @@ end
         intr.psilim = 1.0
         intr.mlow = 1
         intr.mhigh = 1
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        odet.psifac = 0.0
         ctrl.singfac_min = 1e-6
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
         @test length(chunks) == 3
         @test all(c.needs_crossing == true for c in chunks[1:2])
         @test chunks[3].needs_crossing == false
@@ -419,10 +302,8 @@ end
         intr.sing = [JPEC.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
         intr.msing = 1
         intr.psilim = 1.0
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        odet.psifac = 0.0
         ctrl.singfac_min = 0.0
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
     end
