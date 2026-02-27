@@ -197,32 +197,14 @@ function direct_position!(raw_profile::DirectRunInput)
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinary(),
         bc=CubicFit(), extrap=ExtendExtrap())
 
-    # Helper function for robust Newton-Raphson search with restarts
+    # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
+    # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is
+    # globally convergent within the bracket (start_r, end_r) and needs no restarts.
     function find_separatrix_crossing(start_r, end_r, label)
-        local r_sol::Float64
-        found = false
-        for ird in 0:5 # 6 restart attempts
-            r_sep = (start_r * (3.0 - 0.5 * ird) + end_r) / (4.0 - 0.5 * ird)
-            for _ in 1:max_iterations
-
-                direct_get_bfield!(bfield, r_sep, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
-                if abs(bfield.psir) < 1e-14
-                    @warn "d(psi)/dr is near zero."
-                    break
-                end
-                dr_sep = -bfield.psi / bfield.psir
-                r_sep += dr_sep
-                if abs(dr_sep) <= 1e-12 * abs(r_sep)
-                    r_sol = r_sep
-                    found = true
-                    break
-                end
-            end
-            if found
-                break
-            end
-        end
-        !found && error("Could not find $label separatrix after all attempts.")
+        r_sol = find_zero(
+            r -> (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi),
+            (start_r, end_r), Roots.Brent()
+        )
         println("   $label separatrix found at R = $(r_sol).")
         return r_sol
     end
@@ -268,17 +250,13 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     sq_in_deriv = deriv1(raw_profile.sq_in)
 
-    # Refine starting R using Newton's method
-    dr = 0.0
-    for _ in 1:10
-        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1)
-        dr = (psi0_guess - bfield.psi) / bfield.psir
-        r += dr
-        if abs(dr) <= 1e-12 * r
-            break
-        end
-    end
-    !(abs(dr) <= 1e-12 * r) && error("Failed to refine starting R on flux surface.")
+    # Refine starting R: find r where ψ(r, zo) = ψ₀. The df closure reads bfield.psir
+    # which is populated by the preceding f call — Newton guarantees f is evaluated first.
+    r = find_zero(
+        (r -> (direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.psi - psi0_guess),
+            _ -> bfield.psir),
+        r, Roots.Newton()
+    )
 
     direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
     psi0 = bfield.psi
@@ -357,9 +335,7 @@ end
     direct_refine(rfac, eta, psi0, params)
 
 Refines the radial distance `rfac` at a given angle `eta` to ensure the
-point lies exactly on the target flux surface `psi0`. This performs the
-same function as the Fortran `direct_refine` subroutine, with more clear
-iteration control and error handling.
+point lies exactly on the target flux surface `psi0`.
 
 ## Arguments:
 
@@ -372,34 +348,27 @@ iteration control and error handling.
 
   - The refined `rfac` value.
 """
-function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::FieldLineDerivParams; max_iter::Int=50)::Float64
-
+function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::FieldLineDerivParams)::Float64
     cos_eta, sin_eta = cos(eta), sin(eta)
-    r = params.ro + rfac * cos_eta
-    z = params.zo + rfac * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
-    dpsi = params.bfield.psi - psi0
 
-    for _ in 1:max_iter
-        # Newton's method derivative: d(psi)/d(rfac)
-        dpsi_drfac = params.bfield.psir * cos_eta + params.bfield.psiz * sin_eta
-        if abs(dpsi_drfac) < 1e-14
-            @warn "Refinement failed at eta=$eta: d(psi)/d(rfac) is zero."
-            return rfac # Return current best guess
-        end
-        drfac = -dpsi / dpsi_drfac
-        rfac += drfac
-        r = params.ro + rfac * cos_eta
-        z = params.zo + rfac * sin_eta
-        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
-        dpsi = params.bfield.psi - psi0
-
-        if abs(dpsi) <= 1e-12 * psi0 || abs(drfac) <= 1e-12 * abs(rfac)
-            return rfac
-        end
+    function f(rfac_inner)
+        r = params.ro + rfac_inner * cos_eta
+        z = params.zo + rfac_inner * sin_eta
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
+            params.sq_in_deriv, params.psio; derivs=0)
+        return params.bfield.psi - psi0
     end
 
-    error("direct_refine did not converge after $max_iter iterations at eta=$eta.")
+    function fp(rfac_inner)
+        r = params.ro + rfac_inner * cos_eta
+        z = params.zo + rfac_inner * sin_eta
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
+            params.sq_in_deriv, params.psio; derivs=1)
+        return params.bfield.psir * cos_eta + params.bfield.psiz * sin_eta
+    end
+
+    return find_zero((f, fp), rfac, Roots.Newton();
+        atol=1e-12*abs(psi0), rtol=1e-12, maxevals=50)
 end
 
 """
@@ -463,9 +432,9 @@ robustness.
         # Integrate along the field line for this surface
         y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
-        # checkpoint pool for Float64 slot 
+        # checkpoint pool for Float64 slot
         checkpoint!(pool, Float64)
-        
+
         # Fit data into temporary straight fieldline poloidal angle splines
         ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
         @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
@@ -473,7 +442,7 @@ robustness.
         ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
         @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
         @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])   
+        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
         @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
         # Enforce exact endpoint matching for periodic data (removes floating-point noise)
