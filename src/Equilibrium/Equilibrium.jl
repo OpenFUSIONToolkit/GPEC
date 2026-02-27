@@ -110,7 +110,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         hint2d = (Ref(1), Ref(1))
         theta = find_zero(
             (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-             theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
+                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
             theta, Roots.Newton()
         )
         r2 = pe.rzphi_rsquared((psi_edge, theta))
@@ -131,40 +131,58 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         idx = findmin(abs.(vector .- eta0))[2]
         theta = pe.rzphi_ys[idx]
         hint2d = (Ref(1), Ref(1))
-        rfac = 0.0; cos_phase = 0.0; z = 0.0; iter = 0
 
-        # Newton iteration: find θ where ∂z/∂θ = 0 (top/bottom separatrix extremum).
+        # Cache variables that we need after convergence
+        rfac = Ref(0.0)
+        cos_phase = Ref(0.0)
+        z_val = Ref(0.0)
+
+        # Find θ where ∂z/∂θ = 0 (top/bottom separatrix extremum).
         # z(θ) = zo + rfac·sin(2π(θ+η)), where rfac = √r²(θ) and η(θ) is the angular
-        # offset spline. z1 = ∂z/∂θ and z2 = ∂²z/∂θ² are derived via chain rule;
-        # rfac1, rfac2 are derivatives of rfac w.r.t. θ, and phase1, phase2 are
-        # derivatives of 2π(θ+η). The converged rfac and
-        # cos_phase are read below to compute rext without re-evaluating the splines.
-        while iter < 1000
-            iter += 1
-            r2    = pe.rzphi_rsquared((psi_edge, theta); hint=hint2d)
-            r2y   = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
-            r2yy  = pe.rzphi_rsquared((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
-            η     = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            η1    = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)
-            η2    = pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 2)), hint=hint2d)
-            rfac  = sqrt(r2)
-            rfac1 = r2y / (2 * rfac)
-            rfac2 = (r2yy - r2y * rfac1 / rfac) / (2 * rfac)
-            phase1    = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
-            phase2    = 2π * η2          # d²[2π(θ+η)]/dθ²
-            cos_phase = cos(2π * (theta + η))
-            sin_phase = sin(2π * (theta + η))
-            z  = pe.zo + rfac * sin_phase
-            z1 = rfac * phase1 * cos_phase + rfac1 * sin_phase                                            # ∂z/∂θ
-            z2 = (2 * rfac1 * phase1 + rfac * phase2) * cos_phase + (rfac2 - rfac * phase1^2) * sin_phase # ∂²z/∂θ²
-            dtheta = -z1 / z2
-            theta += dtheta
-            abs(dtheta) < 1e-12 && break  # note the theta range is 1
-        end
-        iter >= 1000 && @warn "Newton iteration for separatrix extrema did not converge" iside eta0 theta
+        # offset spline. We solve z1(θ) = 0 where z1 = ∂z/∂θ.
+        function z_deriv(theta_inner)
+            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            rfac_local = sqrt(r2)
+            rfac1 = r2y / (2 * rfac_local)
+            phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
+            sin_phase = sin(2π * (theta_inner + η))
+            cos_phase_local = cos(2π * (theta_inner + η))
 
-        rext[iside] = pe.ro + rfac * cos_phase
-        zsep[iside] = zext[iside] = z
+            # Cache values for later use
+            rfac[] = rfac_local
+            cos_phase[] = cos_phase_local
+            z_val[] = pe.zo + rfac_local * sin_phase
+
+            return rfac_local * phase1 * cos_phase_local + rfac1 * sin_phase  # ∂z/∂θ
+        end
+
+        function z_deriv2(theta_inner)
+            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            r2yy = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
+            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
+            rfac_local = sqrt(r2)
+            rfac1 = r2y / (2 * rfac_local)
+            rfac2 = (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local)
+            phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
+            phase2 = 2π * η2          # d²[2π(θ+η)]/dθ²
+            cos_phase_local = cos(2π * (theta_inner + η))
+            sin_phase = sin(2π * (theta_inner + η))
+
+            return (2 * rfac1 * phase1 + rfac_local * phase2) * cos_phase_local +
+                   (rfac2 - rfac_local * phase1^2) * sin_phase  # ∂²z/∂θ²
+        end
+
+        theta = find_zero((z_deriv, z_deriv2), theta, Roots.Newton();
+            atol=1e-12, rtol=1e-12, maxevals=1000)
+
+        rext[iside] = pe.ro + rfac[] * cos_phase[]
+        zsep[iside] = zext[iside] = z_val[]
     end
 
     pe.params.rsep = rsep
