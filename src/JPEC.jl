@@ -48,7 +48,14 @@ function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
-    @info "\n$_BANNER\n  JPEC - Julia Perturbed Equilibrium Code\n$_BANNER"
+    # Capture git version for reproducibility
+    git_version = try
+        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
+    catch
+        "unknown"
+    end
+
+    @info "\n$_BANNER\n  JPEC - Julia Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
     total_start = time()
 
     # ----------------------------------------------------------------
@@ -244,7 +251,7 @@ function main(args::Vector{String}=String[])
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, git_version)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -320,9 +327,12 @@ vacuum data if `vac_flag` is true.
 
 Combine spline unpacking if possible, too many extra lines
 """
-function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
+function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing}, git_version::String="unknown")
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
+
+        # Store git version for reproducibility
+        out_h5["info/git_version"] = git_version
 
         # Store input parameters
         for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
