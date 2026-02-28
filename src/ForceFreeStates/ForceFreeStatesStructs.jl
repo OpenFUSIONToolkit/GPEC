@@ -205,6 +205,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
+  - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -259,6 +260,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_wv_symmetry::Bool = true
     save_interval::Int = 10
     force_termination::Bool = false
+    use_riccati::Bool = false
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}

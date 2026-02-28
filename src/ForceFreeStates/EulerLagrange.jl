@@ -22,6 +22,11 @@ An OdeState struct containing the final state of the ODE solver after integratio
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
+    # Dispatch to Riccati solver if requested
+    if ctrl.use_riccati
+        return riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
+    end
+
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0

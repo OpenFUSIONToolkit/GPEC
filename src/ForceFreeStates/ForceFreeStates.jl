@@ -29,6 +29,7 @@ include("Fourfit.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
+include("Riccati.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
