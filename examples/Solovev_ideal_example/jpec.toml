@@ -73,7 +73,6 @@ eulerlagrange_tolerance = 1e-6 # Relative tolerance for the ODE solver throughou
 n_subchunks_per_region = 3
 edge_chunk_fraction = 0.05
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
 
 [WALL]

@@ -54,33 +54,22 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Iterate through each integration chunk
     for chunk in chunks
-        # Integrate this region (norm check fires at boundary only for non-crossing chunks)
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
 
         # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
             if ctrl.verbose
-                println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  uratio = $((@sprintf "%.2e" odet.uratio)),  steps = $(odet.solver_steps)")
+                println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  steps = $(odet.solver_steps)")
             end
             if ctrl.kin_flag
                 error("kin_flag = true not implemented yet!")
             else
-                # Before crossing: ensure odet.new=false so compute_solution_norms! fires
-                # Gaussian reduction (the else branch). If a prior sub-chunk fired an
-                # intermediate reduction and set odet.new=true, we clear it here without
-                # resetting unorm0, so the crossing sort uses growth from that reduction's
-                # baseline (not a trivial all-ones baseline).
-                odet.new = false
                 cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
-                # Establish a fresh norm baseline at the post-crossing state. This mirrors
-                # the Fortran callback's first-step-after-crossing baseline and ensures
-                # the next crossing's Gaussian sort measures growth from this point.
-                compute_solution_norms!(odet.u, odet, ctrl, intr, false)
             end
         end
     end
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac))),  uratio = $((@sprintf "%.2e" odet.uratio)),  steps = $(odet.solver_steps)")
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac))),  steps = $(odet.solver_steps)")
     end
 
     # Deallocate unused storage of integration data
@@ -332,12 +321,10 @@ that asymptotic calculations are specific to ideal ForceFreeStates and not inher
 """
 function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, ising::Int)
 
-    # Fixup solution at singular surface. The pre-crossing logic in eulerlagrange_integration
-    # guarantees odet.new=false here, so compute_solution_norms! enters the else branch and
-    # fires Gaussian reduction with sing_flag=true. The sort uses normalized growth from the
-    # post-previous-crossing baseline (established by compute_solution_norms! right after each
-    # crossing), matching the Fortran callback's first-step-after-crossing baseline behavior.
-    compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+    # Sort by growth ratio from the post-previous-crossing baseline and apply Gaussian reduction.
+    # The column with the largest growth ratio is the resonant solution to zero and replace
+    # with the asymptotic solution on the other side of the surface.
+    apply_gaussian_reduction!(odet.u, odet, intr, true)
 
     # Compute asymptotic power series for this singular surface
     singp = intr.sing[ising]
@@ -385,6 +372,12 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
+    # Record post-crossing norms as baseline for the next crossing's growth-ratio sort.
+    # After reinit, the asymptotic column is small and the other columns are at their
+    # current (post-reduction) magnitudes. Using these as the denominator ensures that
+    # the next crossing sorts by how much each solution has grown since this point.
+    odet.unorm0 .= norm.(eachcol(odet.u[:, :, 1]))
+
     # Store psi and u at the crossing point (ud is computed post-integration)
     odet.psi_store[odet.step] = odet.psifac
     odet.u_store[:, :, odet.step, :] = odet.u
@@ -402,14 +395,13 @@ end
 
 Integrate the Euler-Lagrange equations from `psi_start` to `psi_end`.
 Formerly `ode_step!`. Uses OrdinaryDiffEq's built-in `saveat` to store
-`save_npoints_per_chunk` uniformly-spaced solution points per chunk,
-replacing the previous DiscreteCallback-based storage and tolerance-switching logic.
-After integration, checks solution norms at every chunk boundary. For crossing chunks
-where a prior sub-chunk fired an intermediate reduction (`odet.new == true`), the
-norm check fires the if-new branch and establishes a fresh baseline from the
-post-integration norms — equivalent to the Fortran callback's first-step-after-
-reduction baseline. The crossing then uses growth from this post-integration baseline
-for the Gaussian sort in `cross_ideal_singular_surf!`.
+`save_npoints_per_chunk` uniformly-spaced solution points per chunk.
+
+For non-crossing chunks, a Gaussian reduction is applied at the end to keep the
+solution matrix numerically conditioned (prevents exponential growth from making the
+matrix ill-conditioned). For crossing chunks, no intermediate reduction is applied
+here — the crossing itself fires its reduction, and two reductions at the same
+fixstep would break `transform_u!`.
 
 ### Arguments
 
@@ -439,97 +431,52 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
 
-    # Check solution norms at every chunk boundary, including crossing chunks.
-    # For crossing chunks with new=true (set by an intermediate reduction in a prior
-    # sub-chunk), this fires the if-new branch and establishes a fresh baseline using the
-    # post-integration norms — equivalent to the Fortran callback's first-step-after-
-    # reduction baseline. For crossing chunks with new=false, this checks uratio and may
-    # fire an intermediate reduction before the crossing.
-    compute_solution_norms!(odet.u, odet, ctrl, intr, false)
-end
-
-"""
-    compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
-
-Computes norms of the solution vectors of the array `u` and normalizes them
-if this is not the first call after a fixup. Formerly `ode_unorm!`.
-Throws an error if any vector norm is zero. It then compares the variation in norms
-relative to initial values after a fixup, and applies the Gaussian reduction via
-`apply_gaussian_reduction!` if the variation exceeds `ctrl.ucrit` or if `sing_flag` is true.
-Performs the same function as `ode_unorm` in the Fortran code, with minor differences in indexing
-and array handling. Called at chunk boundaries (after `integrate_el_region!` returns) and
-at singular surface crossings (via `cross_ideal_singular_surf!`).
-
-### Arguments
-
-  - u: Current solution vector array, updated in-place if fixfac is called
-  - sing_flag: Indicates if normalization is occuring at a singular surface or not
-
-### TODOs
-
-Add resizing logic for unorm arrays when ifix exceeds allocated size
-"""
-function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
-
-    # Compute norms of first solution vectors, abort if any are zero
-    odet.unorm .= norm.(eachcol(u[:, :, 1]))
-    if minimum(odet.unorm) == 0
-        jmax = argmin(odet.unorm)
-        error("One of the first solution vector norms unorm(1,$jmax) = 0")
-    end
-
-    # Normalize unorm and perform Gaussian reduction if required
-    if odet.new
-        odet.new = false
-        odet.unorm0 .= odet.unorm
-    else
-        odet.unorm ./= odet.unorm0
-        odet.uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if odet.uratio > ctrl.ucrit || sing_flag
-            # TODO: add resizing logic here as well
-            if odet.ifix < ctrl.numunorms_init
-                odet.ifix += 1
-            else
-                @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
-                Increase `numunorms_init` if needed. Automatic resizing will be added in a future version."
-            end
-            apply_gaussian_reduction!(u, odet, intr, sing_flag)
-            odet.new = true
-        end
+    # Apply Gaussian reduction for non-crossing chunks to maintain numerical conditioning.
+    # Skipped for crossing chunks: the crossing fires its own reduction immediately after,
+    # and two reductions at the same fixstep would create identical fixstep boundaries
+    # that break the region assignment in transform_u!.
+    if !chunk.needs_crossing
+        apply_gaussian_reduction!(odet.u, odet, intr, false)
+        odet.unorm0 .= norm.(eachcol(odet.u[:, :, 1]))
     end
 end
 
 """
     apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
-Applies Gaussian reduction to orthogonalize solution vectors in `u`.
-Formerly `ode_fixup!`. Performs the same function as `ode_fixup` in the Fortran code,
-except now relevant `fixfac` data are stored in memory instead of dumped to `euler.bin`.
-Used when the spread in norms exceeds a threshold or when a rational surface is reached.
-Columns are sorted by normalized growth from the last established baseline (`odet.unorm`),
-matching the Fortran callback's sort behavior. This will update both `u` and relevant fields
-in `odet` in-place. See the description of `compute_solution_norms!` for more details.
+Applies Gaussian reduction to orthogonalize solution vectors in `u` at a singular
+surface crossing. Formerly `ode_fixup!`. Performs the same function as `ode_fixup`
+in the Fortran code, except relevant `fixfac` data are stored in memory instead of
+dumped to `euler.bin`. Columns are sorted by their current norm (largest first) to
+identify the resonant solution that has grown fastest since the previous crossing;
+that column is eliminated and replaced by the asymptotic solution on the other side.
+This updates both `u` and relevant fields in `odet` in-place.
 """
 function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
 
-    # Store data for the current fixup
+    # Increment and store fixup data
+    odet.ifix += 1
+    if odet.ifix > length(odet.sing_flag)
+        error("Gaussian reduction storage exceeded. Increase numunorms_init (currently $(length(odet.sing_flag))).")
+    end
     ifix = odet.ifix
     odet.sing_flag[ifix] = sing_flag
-    # Since the current step has been fixed-up, we denote the end of the previous
-    # fixup region as the previous step (this just avoids a -1 index later)
+    # Denote the end of the previous fixup region as the step before the crossing point
     odet.fixstep[ifix] = odet.step - 1
 
-    # Initialize fixfac
+    # Initialize fixfac to identity
     for isol in 1:intr.numpert_total
         odet.fixfac[isol, isol, ifix] = 1
     end
-    # Sort columns by normalized growth from the last established baseline to detect which
-    # solutions have grown the most since the last fixup. At singular surface crossings
-    # (sing_flag=true), the baseline is the one set immediately after the previous crossing
-    # by the post-crossing compute_solution_norms! call, so odet.unorm correctly reflects
-    # growth of each solution from that point to the current crossing — matching the Fortran
-    # callback's sort behavior.
-    odet.index[:, ifix] = sortperm(odet.unorm; rev=true)
+
+    # Sort columns by growth ratio (current norm / post-crossing baseline norm), largest first.
+    # The column with the largest ratio has grown the most since the last crossing and is the
+    # resonant solution to zero. Using ratios rather than absolute norms correctly handles the
+    # case where the asymptotic solution introduced at the previous crossing starts small and
+    # grows to dominance — it may not have the largest absolute norm yet, but it has the
+    # largest growth ratio relative to the post-crossing baseline stored in odet.unorm0.
+    current_norms = norm.(eachcol(u[:, :, 1]))
+    odet.index[:, ifix] = sortperm(current_norms ./ odet.unorm0; rev=true)
 
     # Triangularize primary solutions
     mask = trues(2, intr.numpert_total)

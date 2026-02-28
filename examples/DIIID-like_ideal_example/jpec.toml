@@ -58,11 +58,10 @@ ktw = 50.0                    # Parameter for ktanh_flag (default: 50.0)
 ion_flag = true               # Include ion dW_k when kin_flag is true
 electron_flag = false         # Include electron dW_k when kin_flag is true
 
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for the ODE solver throughout integration
-n_subchunks_per_region = 3
+eulerlagrange_tolerance = 1e-8 # Relative tolerance for the ODE solver throughout integration
+n_subchunks_per_region = 6
 edge_chunk_fraction = 0.05
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                   # Maximum fraction of solutions allowed before re-normalized
 
 [ForcingTerms]
 forcing_data_file = "forcing.dat"       # Path to forcing data file (n, m, complex amplitude)

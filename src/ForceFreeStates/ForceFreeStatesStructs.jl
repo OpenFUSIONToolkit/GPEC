@@ -171,7 +171,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for the ODE solver throughout integration
-  - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
@@ -232,7 +231,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     nstep::Int = typemax(Int)
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-6
-    ucrit::Float64 = 1e4
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
@@ -373,7 +371,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numsteps_init::Int` - Exact number of solution points allocated (set from chunk structure before integration).
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
   - `solver_steps::Int` - Cumulative number of ODE solver steps accepted across all chunks.
-  - `uratio::Float64` - Ratio of max to min solution norm at the end of the most recent chunk (1.0 before first comparison).
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, numsteps_init, 2)` (complex solution state used by the solver).
@@ -393,9 +390,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
-  - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
-  - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
-  - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
   - `index::Array{Int,2}` - Index matrix used for sorting solution norms with shape `(numpert_total, numunorms_init)`.
   - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions
@@ -404,6 +398,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape
     `(numpert_total, numpert_total, numunorms_init)`.
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
+  - `unorm0::Vector{Float64}` - Norm baseline established immediately after each crossing; growth ratios `current_norm/unorm0` determine sort order at the next crossing (length `numpert_total`).
 """
 @kwdef mutable struct OdeState
     # Initialization parameters
@@ -415,7 +410,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Saved data throughout integration
     step::Int = 1
     solver_steps::Int = 0
-    uratio::Float64 = 1.0
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init, 2)
     ud_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, numsteps_init, 2)
@@ -439,15 +433,13 @@ and a small set of temporary matrices and factors used to compute singular-layer
     nzero::Int = 0
 
     # Used for Gaussian reduction
-    new::Bool = true
-    unorm::Vector{Float64} = zeros(Float64, numpert_total)
-    unorm0::Vector{Float64} = zeros(Float64, numpert_total)
     ifix::Int = 0
     index::Array{Int,2} = zeros(Int, numpert_total, numunorms_init)
     sing_flag::Vector{Bool} = falses(numunorms_init)
     zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
+    unorm0::Vector{Float64} = ones(numpert_total)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
