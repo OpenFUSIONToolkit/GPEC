@@ -1,4 +1,137 @@
 """
+    compute_delta_prime_from_ca!(odet, intr, equil)
+
+Compute the tearing stability parameter Δ' for each singular surface from the
+asymptotic coefficients `ca_l` and `ca_r` accumulated during integration.
+
+Δ' measures the jump in the radial field derivative across a rational surface:
+
+  Δ'[i] = (ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π² · psio)
+
+where i = ipert_res is the linear mode index for the resonant (m,n) pair and s is
+the singular surface index. Stores results in `intr.sing[s].delta_prime`.
+
+This matches the formula in `PerturbedEquilibrium/SingularCoupling.jl` (lines ~197):
+  `delta_prime_val = (rbwp1 - lbwp1) / (twopi * chi1)`
+with `chi1 = 2π·psio`, so the denominators are identical.
+"""
+function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
+    for s in 1:intr.msing
+        sing = intr.sing[s]
+        n_modes = length(sing.m)
+        resize!(intr.sing[s].delta_prime, n_modes)
+        for i in 1:n_modes
+            ipert_res = 1 + sing.m[i] - intr.mlow + (sing.n[i] - intr.nlow) * intr.mpert
+            if 1 <= ipert_res <= intr.numpert_total
+                Δca = odet.ca_r[ipert_res, ipert_res, 2, s] - odet.ca_l[ipert_res, ipert_res, 2, s]
+                intr.sing[s].delta_prime[i] = Δca / denom
+            else
+                intr.sing[s].delta_prime[i] = 0.0 + 0.0im
+            end
+        end
+    end
+end
+
+"""
+    ode_itime_cost(psi1, psi2, intr) -> Float64
+
+Estimate the relative ODE integration cost for the interval [ψ₁, ψ₂] using the
+empirical log-divergent cost model from STRIDE (Glasser 2018).
+
+The cost is a sum of logarithmic contributions from reference points:
+  - Magnetic axis (ψ_ref = 0): steep divergence, (a,b) = (39695, 212830)
+  - Each rational surface (ψ_ref = ψ_s): moderate divergence, (a,b) = (17147, 470710)
+  - Edge (ψ_ref = ψ_lim): mild divergence, (a,b) = (1646, 4683)
+
+For each reference: cost += (a/b) * |log(1 + b|ψ₂-ref|) - log(1 + b|ψ₁-ref|)|
+
+The cost model is additive for sub-intervals not containing rational surfaces,
+which makes it suitable for equal-cost splitting via bisection.
+"""
+function ode_itime_cost(psi1::Float64, psi2::Float64, intr::ForceFreeStatesInternal)
+    a_ax, b_ax = 39695.0, 212830.0
+    a_rat, b_rat = 17147.0, 470710.0
+    a_edge, b_edge = 1646.0, 4683.0
+
+    cost = (a_ax / b_ax) * abs(log(1.0 + b_ax * abs(psi2)) - log(1.0 + b_ax * abs(psi1)))
+
+    for sing in intr.sing
+        ref = sing.psifac
+        cost += (a_rat / b_rat) * abs(log(1.0 + b_rat * abs(psi2 - ref)) - log(1.0 + b_rat * abs(psi1 - ref)))
+    end
+
+    ref_edge = intr.psilim
+    cost += (a_edge / b_edge) * abs(log(1.0 + b_edge * abs(psi2 - ref_edge)) - log(1.0 + b_edge * abs(psi1 - ref_edge)))
+
+    return cost
+end
+
+"""
+    balance_integration_chunks(chunks, ctrl, intr) -> Vector{IntegrationChunk}
+
+Sub-divide integration chunks to produce a load-balanced set for parallel execution.
+Starts from the output of `chunk_el_integration_bounds` and iteratively splits the
+highest-cost chunk (by `ode_itime_cost`) until the total chunk count reaches
+`max(2*msing + 3, 4 * Threads.nthreads())`.
+
+Each split finds the equal-cost midpoint ψ_mid via bisection:
+  ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
+
+Sub-chunks inherit `needs_crossing=false` and `ising=0`. Only the LAST sub-chunk of
+each original chunk retains `needs_crossing=true` and the original `ising`, so the
+rational surface crossing still fires at the correct ψ in the serial assembly phase.
+"""
+function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
+    min_chunks = 2 * intr.msing + 3
+    target_n = max(min_chunks, 4 * Threads.nthreads())
+
+    result = collect(chunks)
+
+    while length(result) < target_n
+        # Find the highest-cost splittable chunk
+        best_idx = 0
+        best_cost = -Inf
+        for (i, chunk) in enumerate(result)
+            width = chunk.psi_end - chunk.psi_start
+            if width > 1e-8
+                c = ode_itime_cost(chunk.psi_start, chunk.psi_end, intr)
+                if c > best_cost
+                    best_cost = c
+                    best_idx = i
+                end
+            end
+        end
+
+        best_idx == 0 && break  # No more splittable chunks
+
+        chunk = result[best_idx]
+        total_cost = best_cost
+        target_cost = total_cost / 2.0
+
+        # Bisect to find ψ_mid where cost(psi_start, ψ_mid) ≈ target_cost
+        lo, hi = chunk.psi_start, chunk.psi_end
+        for _ in 1:50
+            mid = (lo + hi) / 2.0
+            if ode_itime_cost(chunk.psi_start, mid, intr) < target_cost
+                lo = mid
+            else
+                hi = mid
+            end
+        end
+        psi_mid = (lo + hi) / 2.0
+
+        left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
+                                  needs_crossing=false, ising=0)
+        right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
+                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising)
+        splice!(result, best_idx, [left, right])
+    end
+
+    return result
+end
+
+"""
     eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
 Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
@@ -22,8 +155,10 @@ An OdeState struct containing the final state of the ODE solver after integratio
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Dispatch to Riccati solver if requested
-    if ctrl.use_riccati
+    # Dispatch to parallel or Riccati solver if requested
+    if ctrl.use_parallel
+        return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
+    elseif ctrl.use_riccati
         return riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
     end
 
@@ -90,6 +225,9 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
     transform_u!(odet, intr)
+
+    # Compute Δ' from asymptotic coefficients accumulated at each crossing
+    compute_delta_prime_from_ca!(odet, intr, equil)
 
     return odet
 end

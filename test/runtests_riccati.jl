@@ -107,6 +107,42 @@ using TOML
         @test steps_ric <= 2 * steps_std
     end
 
+    @testset "Standard integration populates Δ' — Solovev" begin
+        # Verify that the standard EL integration computes delta_prime for each singular surface.
+        # Note: the Riccati path intentionally does NOT populate delta_prime because ca_l is
+        # computed when u = (S, I) (Riccati convention), which is inconsistent with the
+        # standard (U1, U2) normalization assumed by the Δ' formula. Only the standard path
+        # and the parallel FM path correctly compute delta_prime.
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        inputs["ForceFreeStates"]["use_riccati"] = false
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
+        intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        JPEC.ForceFreeStates.sing_find!(intr, equil)
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.mband = intr.mpert - 1
+        intr.numpert_total = intr.mpert * intr.npert
+        metric = JPEC.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit = JPEC.ForceFreeStates.make_matrix(equil, intr, metric)
+        JPEC.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+
+        # Standard path should populate delta_prime for every singular surface
+        @test all(s -> !isempty(s.delta_prime), intr.sing)
+
+        # All Δ' values should be finite
+        @test all(s -> all(isfinite, s.delta_prime), intr.sing)
+    end
+
     @testset "Riccati end state has U₂ ≈ I" begin
         # After riccati_eulerlagrange_integration, odet.u[:,:,2] should be identity
         # (canonical Riccati convention after final renorm)

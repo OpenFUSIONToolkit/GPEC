@@ -401,6 +401,18 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
+        # Write Δ' if computed (one complex value per resonant mode per singular surface)
+        if intr.msing > 0 && all(s -> !isempty(s.delta_prime), intr.sing)
+            max_modes = maximum(s -> length(s.delta_prime), intr.sing)
+            dp_matrix = zeros(ComplexF64, intr.msing, max_modes)
+            for (s, sing) in enumerate(intr.sing)
+                for i in 1:length(sing.delta_prime)
+                    dp_matrix[s, i] = sing.delta_prime[i]
+                end
+            end
+            out_h5["singular/delta_prime"] = dp_matrix
+        end
+
         # Write vacuum Data
         if ctrl.vac_flag
             out_h5["vacuum/wt"] = vac.wt

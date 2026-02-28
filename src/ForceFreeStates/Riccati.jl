@@ -433,5 +433,231 @@ function riccati_eulerlagrange_integration(
     # At crossing steps, u_store has U₁_new/U₂_new which compute_smallest_eigenvalue
     # correctly resolves to S_new via rdiv. No transformation is needed.
 
+    # Note: compute_delta_prime_from_ca! is intentionally NOT called here.
+    # In the Riccati path, ca_l is computed when u = (S, I) (Riccati convention)
+    # while ca_r is computed from (U1_new, U2_new) (before renormalization).
+    # These have inconsistent normalizations relative to the Δ' formula, which
+    # assumes both sides are in the standard (U1, U2) representation. The parallel
+    # FM path correctly uses (U1, U2) form at both ca computation points and does
+    # populate delta_prime.
+
+    return odet
+end
+
+"""
+    integrate_propagator_chunk!(prop, chunk, ctrl, equil, ffit, intr, odet_proxy)
+
+Compute the fundamental matrix (propagator) for one integration chunk by solving the
+EL ODE twice from identity-block initial conditions.
+
+The first solve uses IC = (I_N, 0_N) (U₁=I, U₂=0) and stores the result in
+`prop.block_upper_ic`. The second uses IC = (0_N, I_N) (U₁=0, U₂=I) and stores
+the result in `prop.block_lower_ic`.
+
+`odet_proxy` is a per-thread lightweight `OdeState` used to provide thread-local
+storage for `sing_der!` side effects (`q`, `ud`, `spline_hint`). Multiple threads
+may call this function concurrently using distinct `odet_proxy` objects.
+
+No callback is used: the propagator integration proceeds without normalization or
+storage steps, since the identity ICs ensure bounded solutions within each chunk.
+"""
+function integrate_propagator_chunk!(
+    prop::ChunkPropagator,
+    chunk::IntegrationChunk,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal,
+    odet_proxy::OdeState
+)
+    N = intr.numpert_total
+    tspan = (chunk.psi_start, chunk.psi_end)
+    rtol = chunk.ising > 0 ? ctrl.tol_r : ctrl.tol_nr
+    params = (ctrl, equil, ffit, intr, odet_proxy, chunk)
+
+    # Upper block IC: U₁ = I, U₂ = 0
+    u_upper = zeros(ComplexF64, N, N, 2)
+    for i in 1:N
+        u_upper[i, i, 1] = 1
+    end
+    odet_proxy.spline_hint[] = 1
+    prob = ODEProblem(sing_der!, u_upper, tspan, params)
+    sol = solve(prob, BS5(); reltol=rtol, save_everystep=false, save_end=true)
+    prop.block_upper_ic .= sol.u[end]
+
+    # Lower block IC: U₁ = 0, U₂ = I
+    u_lower = zeros(ComplexF64, N, N, 2)
+    for i in 1:N
+        u_lower[i, i, 2] = 1
+    end
+    odet_proxy.spline_hint[] = 1
+    prob = ODEProblem(sing_der!, u_lower, tspan, params)
+    sol = solve(prob, BS5(); reltol=rtol, save_everystep=false, save_end=true)
+    prop.block_lower_ic .= sol.u[end]
+end
+
+"""
+    apply_propagator!(odet, prop)
+
+Apply the chunk propagator `prop` to the current state `odet.u` in-place.
+
+The propagator acts as a linear map on the (U₁, U₂) pair:
+
+  U₁_new = block_upper_ic[:,:,1] · U₁_prev + block_lower_ic[:,:,1] · U₂_prev
+  U₂_new = block_upper_ic[:,:,2] · U₁_prev + block_lower_ic[:,:,2] · U₂_prev
+
+This correctly propagates any state (not just the identity), including the
+(S, I) form produced by Riccati-style crossings.
+"""
+function apply_propagator!(odet::OdeState, prop::ChunkPropagator)
+    U1_upper = @view prop.block_upper_ic[:, :, 1]
+    U2_upper = @view prop.block_upper_ic[:, :, 2]
+    U1_lower = @view prop.block_lower_ic[:, :, 1]
+    U2_lower = @view prop.block_lower_ic[:, :, 2]
+
+    u1_prev = copy(@view odet.u[:, :, 1])
+    u2_prev = copy(@view odet.u[:, :, 2])
+    tmp = similar(u1_prev)
+
+    # U₁_new = U1_upper · u1_prev + U1_lower · u2_prev
+    mul!(view(odet.u, :, :, 1), U1_upper, u1_prev)
+    mul!(tmp, U1_lower, u2_prev)
+    odet.u[:, :, 1] .+= tmp
+
+    # U₂_new = U2_upper · u1_prev + U2_lower · u2_prev
+    mul!(view(odet.u, :, :, 2), U2_upper, u1_prev)
+    mul!(tmp, U2_lower, u2_prev)
+    odet.u[:, :, 2] .+= tmp
+end
+
+"""
+    parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
+
+Parallel fundamental matrix (propagator) driver for the EL integration.
+
+Functionally equivalent to `eulerlagrange_integration`, but integrates all chunks
+concurrently using `Threads.@threads` for potential ~Nthreads× speedup:
+
+1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
+   to sub-divide chunks for load-balanced parallel execution.
+2. **Parallel phase**: `integrate_propagator_chunk!` integrates each chunk independently
+   from identity initial conditions (no accumulated state, no normalization/callback).
+   Each thread uses a private `OdeState` proxy for `sing_der!` side effects.
+3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
+   Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian
+   reduction) matching the Riccati path convention.
+
+Enable via `use_parallel = true` in `[ForceFreeStates]` of jpec.toml, or by setting
+`ctrl.use_parallel = true` programmatically. Requires `singfac_min != 0`.
+
+**Key differences from standard integration:**
+- No Gaussian reduction (crossings use riccati-style, odet.ifix stays 0)
+- `transform_u!` is called but is a no-op (identity transform, ifix=0)
+- `ud_store` is approximate (set to zeros; does not affect energies or Δ')
+- `u_store` has one entry per chunk plus one per crossing (fewer than standard)
+"""
+function parallel_eulerlagrange_integration(
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal
+)
+    # Initialization — same as eulerlagrange_integration
+    odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    if ctrl.sing_start <= 0
+        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+    elseif ctrl.sing_start <= intr.msing
+        error("sing_start > 0 not implemented yet!")
+    else
+        error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
+    end
+
+    # Prime odet.new = false (consistent with riccati path — no Gaussian reduction used)
+    odet.new = false
+    fill!(odet.unorm0, 1.0)
+
+    # Build chunks and sub-divide for load-balanced parallel execution
+    base_chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    chunks = balance_integration_chunks(base_chunks, ctrl, intr)
+
+    N = intr.numpert_total
+    propagators = [ChunkPropagator(N) for _ in chunks]
+
+    # Per-thread lightweight proxy OdeState for sing_der! side effects
+    nthreads = Threads.nthreads()
+    odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:nthreads]
+
+    if ctrl.verbose
+        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
+        println("   Parallel FM: $(length(chunks)) chunks, $nthreads threads")
+    end
+
+    # PARALLEL phase: integrate all chunks independently from identity IC
+    Threads.@threads for i in eachindex(chunks)
+        integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
+                                    odet_proxies[Threads.threadid()])
+    end
+
+    # SERIAL assembly: apply propagators and handle crossings in order
+    for (i, chunk) in enumerate(chunks)
+        apply_propagator!(odet, propagators[i])
+        odet.psifac = chunk.psi_end
+        odet.q = equil.profiles.q_spline(odet.psifac)
+
+        if ctrl.verbose
+            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+        end
+
+        if chunk.needs_crossing
+            if ctrl.kin_flag
+                error("kin_flag = true not implemented yet!")
+            else
+                # After apply_propagator!, odet.u is a general (U1, U2) state.
+                # Renormalize to (S, I) form before the crossing: riccati_cross_ideal_singular_surf!
+                # zeros column ipert_res directly (the resonant mode), which is the physically
+                # correct choice regardless of column norms. Using the standard crossing with GR
+                # would zero the column with the largest norm, which may differ from ipert_res
+                # in the FM-accumulated state, giving an incorrect solution subspace.
+                renormalize_riccati_inplace!(odet.u, N)
+                riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            end
+        else
+            # Save non-crossing end-of-chunk state for stability criterion evaluation
+            if odet.step >= size(odet.u_store, 4)
+                resize_storage!(odet)
+            end
+            odet.psi_store[odet.step] = odet.psifac
+            odet.q_store[odet.step] = odet.q
+            @views odet.u_store[:, :, :, odet.step] .= odet.u
+            # ud not available from propagator integration — left as zeros
+            odet.step += 1
+        end
+    end
+
+    # Find peak dW in edge region (same as standard path)
+    if ctrl.psiedge < intr.psilim
+        odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+        trim_storage!(odet)
+        if ctrl.verbose
+            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+        end
+        intr.psilim = odet.psi_store[end]
+        intr.qlim = odet.q_store[end]
+        odet.u .= odet.u_store[:, :, :, end]
+    else
+        odet.step -= 1
+        trim_storage!(odet)
+    end
+
+    # Evaluate fixed-boundary stability criterion
+    if ctrl.verbose
+        println("Evaluating fixed-boundary stability criterion")
+    end
+    odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
+
+    # transform_u! is called for consistency but is a no-op (ifix=0, no Gaussian reduction)
+    transform_u!(odet, intr)
+
+    # Compute Δ' from asymptotic coefficients accumulated at each crossing
+    compute_delta_prime_from_ca!(odet, intr, equil)
+
     return odet
 end

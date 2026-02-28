@@ -13,6 +13,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `q1::Float64` - Derivative of safety factor with respect to ψ
   - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
   - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
+  - `delta_prime::Vector{ComplexF64}` - Tearing stability Δ' per resonant mode (indexed same as m/n)
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -23,6 +24,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     q1::Float64 = 0.0
     grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
     grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
+    delta_prime::Vector{ComplexF64} = ComplexF64[]
 end
 
 """
@@ -74,6 +76,31 @@ A struct representing a region of integration in the Euler-Lagrange solver.
     needs_crossing::Bool
     ising::Int = 0
 end
+
+"""
+    ChunkPropagator
+
+Fundamental matrix for one integration chunk, stored as two N×N×2 solution blocks.
+Represents the propagator Φ(ψ₂,ψ₁) computed by integrating the EL ODE from two
+identity-block initial conditions:
+
+  - `block_upper_ic`: result of integrating with IC = (I_N, 0_N)  (U₁ = I, U₂ = 0)
+  - `block_lower_ic`: result of integrating with IC = (0_N, I_N)  (U₁ = 0, U₂ = I)
+
+Applying the propagator to the current state `u_prev`:
+
+  u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
+  u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
+
+Since each chunk starts from a bounded identity IC (rather than the accumulated state),
+exponential growth within a chunk does not affect the conditioning of the overall
+assembly. This enables `Threads.@threads` parallel integration across all chunks.
+"""
+struct ChunkPropagator
+    block_upper_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (I, 0)
+    block_lower_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (0, I)
+end
+ChunkPropagator(N::Int) = ChunkPropagator(zeros(ComplexF64, N, N, 2), zeros(ComplexF64, N, N, 2))
 
 """
 DebugSettings
@@ -206,6 +233,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
+  - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -261,6 +289,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     save_interval::Int = 10
     force_termination::Bool = false
     use_riccati::Bool = false
+    use_parallel::Bool = false
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}
