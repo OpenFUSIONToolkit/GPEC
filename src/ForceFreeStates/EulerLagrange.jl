@@ -443,11 +443,14 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Note: Δ' is NOT computed for the standard path. The Gaussian Reduction normalization
-    # inflates ca_l for the resonant column, giving non-physical Δ' values. Δ' is instead
-    # computed for the Riccati and parallel-FM paths in riccati_cross_ideal_singular_surf!,
-    # which maintains a bounded (U₁, U₂) state giving consistent normalization.
-    # For SingularCoupling.jl, use odet.ca_l/ca_r diagonal elements directly.
+    # Note: Δ' is NOT computed for the standard path. The physical Δ' is a complex
+    # normalization-convention-dependent quantity: the correct value requires the solution
+    # columns to be in the Riccati gauge (U₂=I), which is maintained by the Riccati
+    # renormalization. The standard path's solution columns grow from the axis with an
+    # arbitrary complex phase; dividing by the outer asymptotic coefficient normalizes the
+    # magnitude but not the complex phase, so the result is in a different convention.
+    # Δ' is computed inline in riccati_cross_ideal_singular_surf! for the Riccati and
+    # parallel FM paths, where the renormalization convention is consistent.
 
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
