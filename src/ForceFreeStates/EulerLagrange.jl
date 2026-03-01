@@ -600,7 +600,9 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Since we search for the maximum dW, initialize to -Infinity
+    # Since we search for the maximum dW, initialize to -Infinity.
+    # Resize to match current step count (integration may have grown beyond numsteps_init).
+    resize!(odet.dW_edge, odet.step)
     fill!(odet.dW_edge, -Inf * (1 + im))
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
@@ -611,7 +613,13 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
         odet.psifac = odet.psi_store[istep]
         if odet.psifac >= ctrl.psiedge
             odet.u .= odet.u_store[:, :, :, istep]
-            odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
+            try
+                odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
+            catch e
+                e isa LinearAlgebra.SingularException || rethrow(e)
+                # U₁ is singular at this step (degenerate near-surface solution) — skip it.
+                # dW_edge remains -Inf so this step is ignored in the max search.
+            end
         end
     end
 
@@ -678,8 +686,9 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # "undoing" the Gaussian reductions to get the true solution vectors
     jfix = 1
     for ifix in 1:(odet.ifix+1)
-        # If after the last fixup, go to the end of integration
-        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
+        jfix > odet.step && break
+        # If after the last fixup (or the fixup is beyond trimmed storage), go to stored end
+        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])

@@ -128,21 +128,10 @@ end
 """
     sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute and set integration ψ, q, and q' limits by handling cases where user truncates
-before the last singular surface. Performs a similar function to `sing_lim`
-in the Fortran code. Main differences include renaming of sas_flag -> set_psilim_via_dmlim,
-removing dW edge storage variables since we now store all integration terms in memory, and
-simplification of the logic.
-
-The target value `qlim` is first determined from user-specified control parameters
-(`ctrl.qhigh` or `ctrl.dmlim`), subject to the constraint that it does not exceed
-`equil.params.qmax`. If set_psilim_via_dmlim is true, `qlim` is adjusted to the largest
-rational surface such that `nq + dmlim < qmax`, where qmax is the maximum q value in the equilibrium.
-If `qlim < qmax`, a Newton iteration is performed to find the corresponding
-`psilim` to integrate to.
-
-Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
-or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
+Compute and set integration ψ, q, and q' limits. For diverted plasmas, `psilim` is set
+to the last edge rational surface found above psihigh (or psihigh if none). For limited
+plasmas, `psilim` is psihigh. If `ctrl.qhigh < equil.params.qmax`, a Newton iteration
+is performed to find the core `psilim` where q = qhigh.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
@@ -154,7 +143,9 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     if is_diverted
         edge_surfs = filter(s -> s.psifac > equil.config.psihigh, intr.sing)
         if !isempty(edge_surfs)
-            intr.psilim = edge_surfs[end].psifac
+            # Set psilim half an edge_layer_width beyond the last surface so the final
+            # ODE chunk (from just past the crossed surface to psilim) is well-formed.
+            intr.psilim = edge_surfs[end].psifac + ctrl.edge_layer_width / 2
         else
             intr.psilim = equil.config.psihigh
         end
@@ -170,24 +161,6 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     else
         intr.qlim = min(equil.params.qmax, ctrl.qhigh)
         intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
-    end
-
-    # Optionally override qlim based on dmlim
-    if ctrl.set_psilim_via_dmlim
-        if ctrl.nn_low != ctrl.nn_high
-            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
-        end
-        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
-        # Normalize dmlim ∈ [0,1)
-        ctrl.dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
-
-        # For limited: reduce qlim if above qmax. For diverted: no qmax cap (Inf).
-        if !is_diverted
-            while intr.qlim > equil.params.qmax
-                intr.qlim -= 1.0 / ctrl.nn_low
-            end
-        end
     end
 
     # If qlim is finite and in the core (psi ≤ psihigh), do Newton iteration with direct spline.

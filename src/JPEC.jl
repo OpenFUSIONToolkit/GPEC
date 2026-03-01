@@ -111,14 +111,6 @@ function main(args::Vector{String}=String[])
     # TODO: parallel threads logic
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
-    # Determine psilim and qlim (where we will integrate to)
-    sing_lim!(intr, ctrl, equil)
-    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
-        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
-            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
-        ctrl.psiedge = 1.0
-    end
-
     # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
         @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.psihigh)."
@@ -160,8 +152,12 @@ function main(args::Vector{String}=String[])
     intr.npert = intr.nhigh - intr.nlow + 1
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
-    # Find all singular surfaces in the equilibrium
+    # Find all singular surfaces in the equilibrium (must run before sing_lim! for diverted edge surfaces)
     sing_find!(intr, ctrl, equil)
+
+    # Determine psilim and qlim (where we will integrate to).
+    # Runs after sing_find! so that edge surfaces above psihigh are available for diverted plasmas.
+    sing_lim!(intr, ctrl, equil)
 
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
