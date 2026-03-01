@@ -415,25 +415,60 @@ have grown disproportionately relative to the post-crossing or post-reduction ba
 stored in `odet.unorm0`, and fires `apply_gaussian_reduction!` when the growth ratio
 exceeds `ctrl.ucrit`. Does not switch tolerances or save solution data.
 
+The norm check is sampled every 10 accepted steps to avoid O(np²) overhead on every step.
+Reduction is triggered promptly enough since growth happens on the scale of many steps.
+
 The `fixstep` for the reduction is `odet.chunk_step_offset + length(integrator.sol.t)`,
 which is the count of saveat points already appended to `sol.t` before the current step
 (DiscreteCallback fires after step acceptance but before the current saveat point is added).
+
+A duplicate-fixstep guard prevents a second reduction from firing at the same `fixstep_val`.
+On stiff problems (e.g., high-n modes near many rational surfaces), the ODE solver may take
+many accepted steps between consecutive saveat points, causing multiple `%10` callbacks to
+fire with the same `n_saved` and thus the same `fixstep_val`. A second `apply_gaussian_reduction!`
+at the same fixstep would create an empty region in `transform_u!`, corrupting the solution.
 """
 function gaussian_reduction_callback!(integrator)
-    ctrl, _, _, intr, odet, _ = integrator.p
+    # Sample every 10 accepted steps to reduce per-step O(np²) norm overhead.
+    # Guard naccept > 0: OrdinaryDiffEq runs an initial callback check at t=t_start before
+    # the first step (naccept=0), which would fire a spurious reduction at fixstep=chunk_start.
+    na = integrator.stats.naccept
+    (na > 0 && na % 10 == 0) || return
+
+    ctrl, _, _, intr, odet, chunk = integrator.p
     u = integrator.u
+
+    # Compute fixstep_val eagerly (cheap) before the expensive norm computation so we can
+    # early-exit cleanly.
+    n_saved = length(integrator.sol.t)
+    N = max(2, ctrl.save_npoints_per_chunk)
+    # For crossing chunks: the crossing itself owns fixstep = chunk_step_offset + N.
+    # If the callback fires at that same value it creates an empty crossing region
+    # in transform_u!, excluding the crossing's Gaussian from the transform chain.
+    chunk.needs_crossing && n_saved >= N && return
+    fixstep_val = odet.chunk_step_offset + n_saved
+    # Guard against duplicate fixstep values: in a stiff system many accepted steps can
+    # occur between consecutive saveat points, causing multiple %10 callbacks with the
+    # same n_saved (and thus the same fixstep_val). A second reduction at the same fixstep
+    # creates an empty region in transform_u! that corrupts the transformed solution.
+    odet.ifix > 0 && odet.fixstep[odet.ifix] == fixstep_val && return
 
     current_norms = norm.(eachcol(u[:, :, 1]))
 
     # u[:,:,1] starts at zero (axis init); skip until it has grown
     minimum(current_norms) == 0.0 && return
 
+    # After a crossing, the asymptotic column's u1 component is zero so unorm0=0 for that
+    # column. Dividing by zero gives Inf ratios and fires spurious reductions. Instead,
+    # reset the baseline to the current norms and wait for genuine growth from here.
+    if minimum(odet.unorm0) == 0.0
+        odet.unorm0 .= current_norms
+        return
+    end
+
     uratio = maximum(current_norms ./ odet.unorm0) / minimum(current_norms ./ odet.unorm0)
 
     if uratio > ctrl.ucrit
-        # fixstep = count of saveat points saved before the current step
-        n_saved = length(integrator.sol.t)
-        fixstep_val = odet.chunk_step_offset + n_saved
         if odet.ifix < ctrl.numunorms_init
             apply_gaussian_reduction!(u, odet, intr, false, fixstep_val)
             # Reset baseline so next check measures growth since this reduction
