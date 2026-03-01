@@ -180,28 +180,13 @@ function initialize_el_at_singular_surf()
 end
 
 """
-    chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
+    chunk_el_integration_bounds(psifac, ising_start, ctrl, intr)
 
 Pre-compute all integration chunks from the current position to the edge.
-Returns a vector of `IntegrationChunk` objects, each representing a region to integrate
-and whether it needs a rational surface crossing.
-
-Each inter-rational region is split into `ctrl.n_subchunks_per_region` sub-chunks with
-edge weighting: the first and last sub-chunks each occupy `ctrl.edge_chunk_fraction` of the
-region width (concentrating norm checks near the rational surfaces where solutions diverge
-fastest), while the N-2 interior sub-chunks share the remainder equally. When N=3 and
-edge_chunk_fraction=0.05, the layout is [5%, 90%, 5%] — matching the user-prescribed
-example "2-2.05, 2.1-2.9, 2.95-3" in q-space.
-
-This layout ensures that:
-1. Immediately after each crossing, a short left-edge chunk establishes the norm baseline
-   close to the crossing point (where solutions are smallest after asymptotic reinit).
-2. Intermediate norm checks in the large middle chunk can fire Gaussian reduction if uratio
-   exceeds `ctrl.ucrit` far from both surfaces.
-3. A short right-edge chunk (needs_crossing=true) provides a final norm check just before the
-   approaching rational surface, where the resonant solution grows fastest.
-
-When N=1, the region is a single crossing chunk (no sub-chunking).
+Returns a vector of `IntegrationChunk` objects, one per inter-rational region plus a
+final chunk to the edge. Each chunk runs from just after the previous crossing to just
+before the next one. Adaptive Gaussian reduction fires within each chunk via the
+`gaussian_reduction_callback!` DiscreteCallback rather than sub-chunk boundaries.
 
 ### Arguments
 
@@ -224,8 +209,6 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
     # Start from current position
     psi_current = psifac
     ising_current = ising_start
-    N = max(1, ctrl.n_subchunks_per_region)
-    f = clamp(ctrl.edge_chunk_fraction, 0.0, 0.45)  # edge fraction, clamped to leave room for middle
 
     # Find next singular surface that is resonant and within integration limits
     function find_next_resonant_surface(ising::Int)
@@ -238,34 +221,6 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
             ising += 1
         end
         return ising
-    end
-
-    # Add N edge-weighted sub-chunks for a region [psi_start, psi_end].
-    # Layout: [f, (1-2f)/(N-2), ..., f] for N≥3; [1-f, f] for N=2; [1] for N=1.
-    # The last sub-chunk carries needs_crossing=true when the region ends at a singular surface.
-    function add_region_chunks!(psi_start, psi_end, needs_crossing, ising)
-        width = psi_end - psi_start
-        if N == 1
-            push!(chunks, IntegrationChunk(;
-                psi_start      = psi_start,
-                psi_end        = psi_end,
-                needs_crossing = needs_crossing,
-                ising          = needs_crossing ? ising : 0
-            ))
-        elseif N == 2
-            push!(chunks, IntegrationChunk(psi_start, psi_start + (1 - f) * width, false, 0))
-            push!(chunks, IntegrationChunk(psi_start + (1 - f) * width, psi_end, needs_crossing, needs_crossing ? ising : 0))
-        else
-            # N ≥ 3: [f, equal × (N-2), f]
-            mid_width = (1 - 2f) * width / (N - 2)
-            push!(chunks, IntegrationChunk(psi_start, psi_start + f * width, false, 0))
-            for k in 1:(N - 2)
-                sub_start = psi_start + f * width + (k - 1) * mid_width
-                sub_end   = sub_start + mid_width
-                push!(chunks, IntegrationChunk(sub_start, sub_end, false, 0))
-            end
-            push!(chunks, IntegrationChunk(psi_end - f * width, psi_end, needs_crossing, needs_crossing ? ising : 0))
-        end
     end
 
     # -------------------- Create chunks ------------------------
@@ -283,7 +238,12 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
             @assert psi_current < psi_end "Invalid chunk bounds: psi_start=$psi_current >= psi_end=$psi_end"
             @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Overlapping chunks detected"
 
-            add_region_chunks!(psi_current, psi_end, true, ising_current)
+            push!(chunks, IntegrationChunk(;
+                psi_start      = psi_current,
+                psi_end        = psi_end,
+                needs_crossing = true,
+                ising          = ising_current
+            ))
 
             # After crossing, we jump to the other side of the singular surface
             dpsi = intr.sing[ising_current].psifac - psi_end
@@ -298,7 +258,12 @@ function chunk_el_integration_bounds(psifac::Float64, ising_start::Int, ctrl::Fo
         @assert psi_current < final_end "Final chunk has invalid bounds"
         @assert isempty(chunks) || psi_current >= chunks[end].psi_end "Final chunk overlaps with previous chunk"
 
-        add_region_chunks!(psi_current, final_end, false, 0)
+        push!(chunks, IntegrationChunk(;
+            psi_start      = psi_current,
+            psi_end        = final_end,
+            needs_crossing = false,
+            ising          = 0
+        ))
     end
 
     return chunks
@@ -324,7 +289,7 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl
     # Sort by growth ratio from the post-previous-crossing baseline and apply Gaussian reduction.
     # The column with the largest growth ratio is the resonant solution to zero and replace
     # with the asymptotic solution on the other side of the surface.
-    apply_gaussian_reduction!(odet.u, odet, intr, true)
+    apply_gaussian_reduction!(odet.u, odet, intr, true, odet.step - 1)
 
     # Compute asymptotic power series for this singular surface
     singp = intr.sing[ising]
@@ -394,14 +359,13 @@ end
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
 Integrate the Euler-Lagrange equations from `psi_start` to `psi_end`.
-Formerly `ode_step!`. Uses OrdinaryDiffEq's built-in `saveat` to store
-`save_npoints_per_chunk` uniformly-spaced solution points per chunk.
+Formerly `ode_step!`. Uses OrdinaryDiffEq's built-in `saveat` with ldp-spacing
+(`sin²(i/(N-1)·π/2)`) to cluster save points near both ends of each chunk, where
+solutions grow fastest near rational surfaces.
 
-For non-crossing chunks, a Gaussian reduction is applied at the end to keep the
-solution matrix numerically conditioned (prevents exponential growth from making the
-matrix ill-conditioned). For crossing chunks, no intermediate reduction is applied
-here — the crossing itself fires its reduction, and two reductions at the same
-fixstep would break `transform_u!`.
+A `DiscreteCallback` fires `gaussian_reduction_callback!` at each accepted ODE step,
+applying adaptive Gaussian reduction when the column growth ratio exceeds `ctrl.ucrit`.
+This replaces the per-chunk end-of-integration reduction from the develop branch.
 
 ### Arguments
 
@@ -414,10 +378,21 @@ fixstep would break `transform_u!`.
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    # Advance differential equation from psi_start to psi_end, saving at uniform grid
-    saveat_psi = range(chunk.psi_start, chunk.psi_end; length=max(2, ctrl.save_npoints_per_chunk))
+    # ldp-spaced saveat: sin²(i/(N-1)·π/2) clusters points near both ends of the chunk,
+    # where solution growth is fastest (near rational surfaces)
+    N = max(2, ctrl.save_npoints_per_chunk)
+    saveat_psi = [chunk.psi_start + (chunk.psi_end - chunk.psi_start) * sin(i / (N - 1) * π / 2)^2
+                  for i in 0:(N - 1)]
+
+    # Record global step offset so the callback can compute fixstep correctly
+    odet.chunk_step_offset = odet.step - 1
+
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, saveat=saveat_psi, save_everystep=false)
+    # save_positions=(false, false): callback must not add extra points to sol.t;
+    # only the saveat grid controls what gets saved.
+    cb = DiscreteCallback((_, _, _) -> true, gaussian_reduction_callback!; save_positions=(false, false))
+    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, saveat=saveat_psi,
+                save_everystep=false, callback=cb)
     odet.solver_steps += sol.stats.naccept
 
     # Append saved solution points to storage arrays (only u and psi; ud computed post-integration)
@@ -430,19 +405,47 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     # Update current state to end of chunk
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
+end
 
-    # Apply Gaussian reduction for non-crossing chunks to maintain numerical conditioning.
-    # Skipped for crossing chunks: the crossing fires its own reduction immediately after,
-    # and two reductions at the same fixstep would create identical fixstep boundaries
-    # that break the region assignment in transform_u!.
-    if !chunk.needs_crossing
-        apply_gaussian_reduction!(odet.u, odet, intr, false)
-        odet.unorm0 .= norm.(eachcol(odet.u[:, :, 1]))
+"""
+    gaussian_reduction_callback!(integrator)
+
+`DiscreteCallback` function fired at each accepted ODE step. Checks if solution columns
+have grown disproportionately relative to the post-crossing or post-reduction baseline
+stored in `odet.unorm0`, and fires `apply_gaussian_reduction!` when the growth ratio
+exceeds `ctrl.ucrit`. Does not switch tolerances or save solution data.
+
+The `fixstep` for the reduction is `odet.chunk_step_offset + length(integrator.sol.t)`,
+which is the count of saveat points already appended to `sol.t` before the current step
+(DiscreteCallback fires after step acceptance but before the current saveat point is added).
+"""
+function gaussian_reduction_callback!(integrator)
+    ctrl, _, _, intr, odet, _ = integrator.p
+    u = integrator.u
+
+    current_norms = norm.(eachcol(u[:, :, 1]))
+
+    # u[:,:,1] starts at zero (axis init); skip until it has grown
+    minimum(current_norms) == 0.0 && return
+
+    uratio = maximum(current_norms ./ odet.unorm0) / minimum(current_norms ./ odet.unorm0)
+
+    if uratio > ctrl.ucrit
+        # fixstep = count of saveat points saved before the current step
+        n_saved = length(integrator.sol.t)
+        fixstep_val = odet.chunk_step_offset + n_saved
+        if odet.ifix < ctrl.numunorms_init
+            apply_gaussian_reduction!(u, odet, intr, false, fixstep_val)
+            # Reset baseline so next check measures growth since this reduction
+            odet.unorm0 .= norm.(eachcol(u[:, :, 1]))
+        else
+            @warn "unorm storage reached, Gaussian reduction skipped. Increase numunorms_init."
+        end
     end
 end
 
 """
-    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
+    apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool, fixstep_val::Int)
 
 Applies Gaussian reduction to orthogonalize solution vectors in `u` at a singular
 surface crossing. Formerly `ode_fixup!`. Performs the same function as `ode_fixup`
@@ -451,8 +454,14 @@ dumped to `euler.bin`. Columns are sorted by their current norm (largest first) 
 identify the resonant solution that has grown fastest since the previous crossing;
 that column is eliminated and replaced by the asymptotic solution on the other side.
 This updates both `u` and relevant fields in `odet` in-place.
+
+### Arguments
+
+  - `fixstep_val::Int` - Global step index to record as the boundary of this fixup region.
+    For crossings, pass `odet.step - 1`. For callback-triggered reductions, pass
+    `odet.chunk_step_offset + length(integrator.sol.t)`.
 """
-function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool)
+function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr::ForceFreeStatesInternal, sing_flag::Bool, fixstep_val::Int)
 
     # Increment and store fixup data
     odet.ifix += 1
@@ -461,8 +470,7 @@ function apply_gaussian_reduction!(u::Array{ComplexF64,3}, odet::OdeState, intr:
     end
     ifix = odet.ifix
     odet.sing_flag[ifix] = sing_flag
-    # Denote the end of the previous fixup region as the step before the crossing point
-    odet.fixstep[ifix] = odet.step - 1
+    odet.fixstep[ifix] = fixstep_val
 
     # Initialize fixfac to identity
     for isol in 1:intr.numpert_total

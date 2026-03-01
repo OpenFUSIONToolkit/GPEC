@@ -172,6 +172,10 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for the ODE solver throughout integration
   - `numunorms_init::Int` - Initial array size for solution normalization data
+  - `ucrit::Float64` - Threshold for adaptive Gaussian reduction during ODE integration. When the ratio of
+    maximum to minimum growth of solution columns (relative to post-crossing or post-reduction baseline)
+    exceeds `ucrit`, `apply_gaussian_reduction!` is called to re-orthogonalize. Lower values trigger more
+    frequent reductions.
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
   - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim
@@ -199,17 +203,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
-  - `save_npoints_per_chunk::Int` - Number of solution points saved per integration chunk using uniform saveat grid
-  - `n_subchunks_per_region::Int` - Number of sub-chunks per inter-rational integration region. Each region between
-    consecutive rational surfaces is split into this many sub-chunks. When N >= 3, the first and last sub-chunks
-    use `edge_chunk_fraction` of the region width (packed near the rational surfaces where solutions grow fastest),
-    and the N-2 middle sub-chunks share the remaining width equally. The last sub-chunk always carries
-    `needs_crossing=true`. Default N=3 gives [edge, middle, edge] layout. Increase for finer resolution.
-  - `edge_chunk_fraction::Float64` - Fraction of each inter-rational region width assigned to the left edge
-    chunk (just after the previous crossing) and the right edge chunk (just before the next crossing).
-    Default 0.05 matches the user-prescribed layout, e.g. q=2→3 becomes [2-2.05, 2.05-2.95, 2.95-3]
-    in q-space. Solutions grow as power laws near the rational surfaces, so concentrating norm checks
-    there enables Gaussian reduction to fire at the right time.
+  - `save_npoints_per_chunk::Int` - Number of solution points saved per integration chunk using ldp-spaced saveat grid
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
 """
 @kwdef mutable struct ForceFreeStatesControl
@@ -232,6 +226,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     ksing::Int = -1
     eulerlagrange_tolerance::Float64 = 1e-6
     numunorms_init::Int = 100
+    ucrit::Float64 = 1e4
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
     set_psilim_via_dmlim::Bool = false
@@ -260,8 +255,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     HDF5_filename::String = "jpec.h5"
     force_wv_symmetry::Bool = true
     save_npoints_per_chunk::Int = 50
-    n_subchunks_per_region::Int = 3
-    edge_chunk_fraction::Float64 = 0.05
     force_termination::Bool = false
 end
 
@@ -399,6 +392,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     `(numpert_total, numpert_total, numunorms_init)`.
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
   - `unorm0::Vector{Float64}` - Norm baseline established immediately after each crossing; growth ratios `current_norm/unorm0` determine sort order at the next crossing (length `numpert_total`).
+  - `chunk_step_offset::Int` - Global step index at the start of the current chunk's ODE solve; used by
+    `gaussian_reduction_callback!` to compute the correct `fixstep` value for `apply_gaussian_reduction!`.
+    Set to `odet.step - 1` before each chunk's `solve()` call.
 """
 @kwdef mutable struct OdeState
     # Initialization parameters
@@ -440,6 +436,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
     unorm0::Vector{Float64} = ones(numpert_total)
+    chunk_step_offset::Int = 0
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups

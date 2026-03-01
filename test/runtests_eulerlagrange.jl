@@ -103,9 +103,9 @@ end
         odet.u = randn(ComplexF64, mpert, mpert, 2)
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
 
-        # Save copy of original u and run
+        # Save copy of original u and run (fixstep_val = odet.step - 1 = 0)
         u_orig = copy(odet.u)
-        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false, odet.step - 1)
 
         # Very simple tests
         @test !all(odet.u .== u_orig)  # u should have changed
@@ -122,7 +122,7 @@ end
         odet.u = load_u_matrix(joinpath(@__DIR__, "test_data", "u_prefixup.dat"))
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
 
-        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false, odet.step - 1)
 
         u_fortran = load_u_matrix(joinpath(@__DIR__, "test_data", "u_postfixup.dat"))
         # test that the outputs are approximately equivalent (1e-3 seems ok to account for loading differences)
@@ -143,7 +143,7 @@ end
 
         u_before = copy(odet.u)
 
-        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false, odet.step - 1)
 
         # After fixup:
         # - index should sort by norm: [1, 2] (largest first)
@@ -194,18 +194,17 @@ end
     @testset "chunk_el_integration_bounds tests" begin
         ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
         ctrl.numunorms_init = 5
-        ctrl.n_subchunks_per_region = 3  # N=3: each region gets edge-weighted sub-chunks [5%, 90%, 5%]
 
-        # Case 1: No singular surfaces -> N chunks to edge (all non-crossing)
+        # Case 1: No singular surfaces -> 1 chunk to edge (non-crossing)
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.msing = 0
         intr.psilim = 1.0
         ctrl.singfac_min = 1e-4
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 3         # N sub-chunks for the single final region
+        @test length(chunks) == 1
         @test all(c.needs_crossing == false for c in chunks)
 
-        # Case 2: One singular surface within limits -> N pre-crossing sub-chunks + N final sub-chunks
+        # Case 2: One singular surface within limits -> 1 crossing chunk + 1 final chunk
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         s = JPEC.ForceFreeStates.SingType()
         s.psifac = 0.5
@@ -219,12 +218,12 @@ end
         intr.mhigh = 1
         ctrl.singfac_min = 1e-4
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 6         # N sub-chunks per region × 2 regions
-        @test chunks[3].needs_crossing == true  # last sub-chunk of first region has crossing
-        @test all(c.needs_crossing == false for c in [chunks[1], chunks[2], chunks[4], chunks[5], chunks[6]])
-        @test chunks[3].psi_end < intr.sing[1].psifac
+        @test length(chunks) == 2
+        @test chunks[1].needs_crossing == true
+        @test chunks[2].needs_crossing == false
+        @test chunks[1].psi_end < intr.sing[1].psifac
 
-        # Case 3: Multiple singular surfaces -> N sub-chunks per region × (n_crossings + 1) regions
+        # Case 3: Two singular surfaces -> 2 crossing chunks + 1 final chunk
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         s1 = JPEC.ForceFreeStates.SingType(; psifac=0.3, n=[1], m=[1], q1=1.5)
         s2 = JPEC.ForceFreeStates.SingType(; psifac=0.6, n=[1], m=[1], q1=2.5)
@@ -235,19 +234,19 @@ end
         intr.mhigh = 1
         ctrl.singfac_min = 1e-6
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 9         # N sub-chunks per region × 3 regions
-        @test chunks[3].needs_crossing == true   # last sub-chunk of region 1
-        @test chunks[6].needs_crossing == true   # last sub-chunk of region 2
-        @test all(c.needs_crossing == false for c in chunks[[1,2,4,5,7,8,9]])
+        @test length(chunks) == 3
+        @test chunks[1].needs_crossing == true
+        @test chunks[2].needs_crossing == true
+        @test chunks[3].needs_crossing == false
 
-        # Case 4: singfac_min == 0 should disable crossing logic -> N chunks (all non-crossing)
+        # Case 4: singfac_min == 0 should disable crossing logic -> 1 chunk (non-crossing)
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.sing = [JPEC.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
         intr.msing = 1
         intr.psilim = 1.0
         ctrl.singfac_min = 0.0
         chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(0.0, 0, ctrl, intr)
-        @test length(chunks) == 3         # N sub-chunks for the single final region (singfac_min=0 bypasses crossing)
+        @test length(chunks) == 1
         @test all(c.needs_crossing == false for c in chunks)
     end
 end

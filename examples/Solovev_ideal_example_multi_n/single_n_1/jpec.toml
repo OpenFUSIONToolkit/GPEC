@@ -58,9 +58,7 @@ ion_flag = true               # Include ion dW_k when kin_flag is true
 electron_flag = false         # Include electron dW_k when kin_flag is true
 
 eulerlagrange_tolerance = 1e-6 # Relative tolerance for the ODE solver throughout integration
-n_subchunks_per_region = 3
-edge_chunk_fraction = 0.05
+ucrit = 1e3                   # Gaussian reduction threshold: max/min growth ratio
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 write_outputs_to_HDF5 = true
 HDF5_filename = "euler_n1.h5"
