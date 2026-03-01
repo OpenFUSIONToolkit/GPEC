@@ -11,6 +11,7 @@ using JLD2
 using FastInterpolations
 using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary
 using AdaptiveArrayPools
+using Roots
 
 import ..Equilibrium
 import ..Utilities
