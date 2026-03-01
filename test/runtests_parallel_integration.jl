@@ -224,4 +224,50 @@ using TOML
         @test isapprox(cost_ac, cost_ab + cost_bc; rtol=1e-10)
     end
 
+    @testset "delta_prime_matrix — STRIDE BVP Solovev regression" begin
+        # Verify that the parallel FM path computes a well-formed inter-surface Δ' matrix
+        # via the STRIDE global BVP [Glasser 2018 Phys. Plasmas 25, 032501].
+        # Shape: (2·msing × 2·msing), where index 2j-1 = left side and 2j = right side
+        # of surface j. Each entry is the U₂[ipert_res] response amplitude for one
+        # driving configuration.
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        inputs["ForceFreeStates"]["use_parallel"] = true
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
+        intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        JPEC.ForceFreeStates.sing_find!(intr, equil)
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.mband = intr.mpert - 1
+        intr.numpert_total = intr.mpert * intr.npert
+        metric = JPEC.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit = JPEC.ForceFreeStates.make_matrix(equil, intr, metric)
+        JPEC.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+
+        msing = intr.msing
+        dpm = intr.delta_prime_matrix
+
+        # Matrix is populated with correct shape (2·msing × 2·msing)
+        @test !isempty(dpm)
+        @test size(dpm) == (2 * msing, 2 * msing)
+
+        # All elements are finite
+        @test all(isfinite, dpm)
+
+        # Diagonal (self-response) elements are non-zero for each surface side
+        for j in 1:msing
+            @test abs(dpm[2j-1, 2j-1]) > 1e-10
+            @test abs(dpm[2j,   2j  ]) > 1e-10
+        end
+    end
+
 end

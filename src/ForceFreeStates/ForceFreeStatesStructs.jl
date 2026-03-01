@@ -178,6 +178,16 @@ A mutable struct holding internal state variables for stability calculations.
     locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
+    """
+    Inter-surface tearing stability matrix of shape (2*msing × 2*msing).
+    delta_prime_matrix[2j-1, 2k-1] = small-asymptotic amplitude at left of surface j
+                                       when left of surface k is driven with unit amplitude.
+    Populated by `compute_delta_prime_matrix!` (parallel FM path only).
+    Requires the STRIDE segment propagators (uShootL, uShootR) to be well-conditioned,
+    which holds for small N (N ≲ 10). For large N, diagonal elements match `delta_prime`
+    but off-diagonal elements may have reduced accuracy.
+    """
+    delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """

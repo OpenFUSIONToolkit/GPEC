@@ -64,6 +64,179 @@ This is compatible with downstream code (which uses U₁/U₂ ratio):
 """
 
 """
+    assemble_fm_matrix(propagators, idx_range) -> Matrix{ComplexF64}
+
+Assemble the 2N×2N fundamental matrix (propagator) by multiplying chunk propagators
+in order for indices `idx_range`. Returns Φ_end * ... * Φ_start, so that the result
+maps the IC at the start of `idx_range[1]` to the state at the end of `idx_range[end]`.
+
+Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks:
+  block_upper_ic[:,:,1:2] ↔ Φ[:,1:N]   (result from IC=(I,0))
+  block_lower_ic[:,:,1:2] ↔ Φ[:,N+1:2N]  (result from IC=(0,I))
+"""
+function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range)
+    N = size(propagators[first(idx_range)].block_upper_ic, 1)
+    Phi = Matrix{ComplexF64}(I, 2N, 2N)
+    for i in idx_range
+        p = propagators[i]
+        Phi_i = [p.block_upper_ic[:,:,1]  p.block_lower_ic[:,:,1];
+                 p.block_upper_ic[:,:,2]  p.block_lower_ic[:,:,2]]
+        Phi = Phi_i * Phi
+    end
+    return Phi
+end
+
+"""
+    compute_delta_prime_matrix!(intr, propagators, chunks)
+
+Compute the inter-surface tearing stability matrix (2·msing × 2·msing) using the
+STRIDE global BVP formulation [Glasser 2018 Phys. Plasmas 25, 032501, Sec. III.B].
+
+The BVP encodes the full plasma response with unknowns at each surface boundary:
+  x_axis   (N):    free IC parameters at the axis  (U₁ = 0 regular solutions)
+  x_left[j]  (2N): state at left inner-layer boundary of surface j
+  x_right[j] (2N): state at right inner-layer boundary of surface j
+  x_edge   (N):    free IC parameters at the edge  (conducting wall, U₁ = 0)
+Total unknowns: nMat = (2 + 4·msing)·N.
+
+The BVP matrix M is assembled from segment propagators (products of chunk FMs between
+consecutive inner-layer boundaries), inner-layer continuity equations (non-resonant
+modes are continuous through each surface), and driving terms (unit U₂[ipert_res]
+amplitude at each surface side). Each of the 2·msing driving configurations is
+solved independently by LU back-substitution.
+
+Element delta_prime_matrix[dRow, 2k-1] = U₂[ipert_k] component at the left side
+of surface k when driving term dRow is active. dRow = 2j-1 (left of surface j) or
+2j (right of surface j). This is the raw BVP coefficient; it differs from `delta_prime`
+(which uses the asymptotic normalization from sing_get_ca).
+
+Only called from `parallel_eulerlagrange_integration` (requires FM propagators).
+The result is stored in `intr.delta_prime_matrix`.
+
+## Limitations
+- Assumes exactly one resonant mode per singular surface (standard single-n case).
+- Uses a conducting wall edge BC (U₁ = 0). Vacuum BC is deferred.
+- Segment FMs are raw products of chunk FMs without intermediate renormalization;
+  for N ≳ 20 the products can be ill-conditioned (same issue as the parallel FM energy).
+"""
+function compute_delta_prime_matrix!(
+    intr::ForceFreeStatesInternal,
+    propagators::Vector{ChunkPropagator},
+    chunks::Vector{IntegrationChunk}
+)
+    msing = intr.msing
+    msing == 0 && return
+    N = intr.numpert_total
+
+    # Find the index of the crossing chunk for each surface
+    i_crossings = findall(c -> c.needs_crossing, chunks)
+    @assert length(i_crossings) == msing
+
+    # Segment FMs (2N×2N):
+    #   Phi_segs[1]:       axis         → singIntervalL[1]
+    #   Phi_segs[j+1]:     singIntervalR[j] → singIntervalL[j+1]  (j = 1..msing-1)
+    #   Phi_segs[msing+1]: singIntervalR[msing] → edge
+    Phi_segs = Vector{Matrix{ComplexF64}}(undef, msing + 1)
+    Phi_segs[1] = assemble_fm_matrix(propagators, 1:i_crossings[1])
+    for j in 1:msing-1
+        Phi_segs[j+1] = assemble_fm_matrix(propagators, i_crossings[j]+1:i_crossings[j+1])
+    end
+    Phi_segs[msing+1] = assemble_fm_matrix(propagators, i_crossings[msing]+1:length(chunks))
+
+    # Resonant mode index (1:N) for each surface (single-resonance case)
+    ipert_all = [begin
+        sp = intr.sing[j]
+        idx = 1 + sp.m[1] - intr.mlow + (sp.n[1] - intr.nlow) * intr.mpert
+        @assert 1 <= idx <= N "Resonant mode index out of range"
+        idx
+    end for j in 1:msing]
+
+    # BVP dimensions
+    nMat = (2 + 4 * msing) * N
+    s2   = 2 * msing
+
+    # Column layout (1-indexed):
+    #   x_axis:     1:N
+    #   x_left[j]:  N + 4N*(j-1)+1 : N + 4N*(j-1)+2N
+    #   x_right[j]: N + 4N*(j-1)+2N+1 : N + 4N*j
+    #   x_edge:     N + 4N*msing+1 : nMat
+    col_axis     = 1:N
+    col_left(j)  = (N + 4N*(j-1)+1) : (N + 4N*(j-1)+2N)
+    col_right(j) = (N + 4N*(j-1)+2N+1) : (N + 4N*j)
+    col_edge     = (N + 4N*msing+1) : nMat
+
+    # Row layout:
+    #   Axis matching:     1:2N   (2N rows)
+    #   For each surface j:
+    #     Continuity:      2N + (4N-2)*(j-1)+1 : 2N + (4N-2)*(j-1)+(2N-2)  (2N-2 rows)
+    #     Junction/edge:   2N + (4N-2)*(j-1)+(2N-2)+1 : 2N + (4N-2)*j      (2N rows)
+    #   Driving terms:     2N + (4N-2)*msing+1 : nMat                        (2·msing rows)
+    row_drive_base = 2N + (4N-2)*msing
+
+    M = zeros(ComplexF64, nMat, nMat)
+
+    # Axis matching: x_left[1] = Phi_segs[1][:,N+1:2N] * x_axis
+    # i.e., I·x_left[1] - Phi_segs[1][:,N+1:2N]·x_axis = 0
+    M[1:2N, col_left(1)] .= I(2N)
+    M[1:2N, col_axis]    .= -view(Phi_segs[1], :, N+1:2N)
+
+    for j in 1:msing
+        ipert_j = ipert_all[j]
+
+        # Continuity at surface j: x_left[j][i] = x_right[j][i] for non-resonant i
+        # (skip i = ipert_j and i = ipert_j+N, the two resonant-mode rows)
+        row_cont = 2N + (4N-2)*(j-1)
+        for i in 1:2N
+            if i != ipert_j && i != ipert_j + N
+                row_cont += 1
+                M[row_cont, col_left(j)[i]]  =  1
+                M[row_cont, col_right(j)[i]] = -1
+            end
+        end
+
+        # Junction / edge matching (2N rows starting at row_cont+1)
+        junc_rows = (row_cont+1) : (2N + (4N-2)*j)
+        if j < msing
+            # Phi_segs[j+1] * x_right[j] - I * x_left[j+1] = 0
+            M[junc_rows, col_right(j)]   .=  Phi_segs[j+1]
+            M[junc_rows, col_left(j+1)]  .= -I(2N)
+        else
+            # Conducting wall: Phi_segs[msing+1] * x_right[msing] = [0; I] * x_edge
+            # Upper N rows: U₁ = 0  (no x_edge contribution)
+            # Lower N rows: U₂ = x_edge  (contribution from -I * x_edge)
+            M[junc_rows, col_right(msing)] .= Phi_segs[msing+1]
+            M[junc_rows[N+1:end], col_edge] .= -I(N)
+        end
+
+        # Driving terms: unit U₂[ipert_j] amplitude at left and right of surface j
+        M[row_drive_base + 2j-1, col_left(j)[ipert_j+N]]  = 1
+        M[row_drive_base + 2j,   col_right(j)[ipert_j+N]] = 1
+    end
+
+    M_lu = lu(M)
+    delta_mat = zeros(ComplexF64, s2, s2)
+    b = zeros(ComplexF64, nMat)
+
+    for jsing in 1:msing
+        for side in 1:2   # side=1: left drive; side=2: right drive
+            dRow = 2jsing - (2 - side)   # 2j-1 for left, 2j for right
+            fill!(b, 0)
+            b[row_drive_base + dRow] = 1
+            x = M_lu \ b
+
+            for ksing in 1:msing
+                ipert_k = ipert_all[ksing]
+                # Extract U₂[ipert_k] at left and right boundaries of surface ksing
+                delta_mat[dRow, 2ksing-1] = x[col_left(ksing)[ipert_k+N]]
+                delta_mat[dRow, 2ksing]   = x[col_right(ksing)[ipert_k+N]]
+            end
+        end
+    end
+
+    intr.delta_prime_matrix = delta_mat
+end
+
+"""
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:
@@ -645,34 +818,41 @@ function parallel_eulerlagrange_integration(
     end
 
     # SERIAL assembly: apply propagators and handle crossings in order.
+    # After each apply_propagator!, renormalize to (S, I) form. This is the Julia
+    # equivalent of STRIDE's ode_fixup: it prevents exponential growth of the
+    # accumulated state between crossings. Without this renorm, products of N chunk
+    # FMs can have condition numbers up to (cond_per_chunk)^N, causing catastrophic
+    # cancellation for large N (N ≳ 20). With renorm, each chunk is applied as a
+    # Möbius transformation on the bounded S matrix, keeping errors at O(eps × cond_chunk)
+    # rather than O(eps × cond_chunk^N). [STRIDE ode.F: ode_fixup called after each uAxis step]
+    #
     # last_crossing_step tracks the u_store index of the most recent crossing so that
     # the outer plasma (from last rational surface to psilim) can be re-integrated.
     last_crossing_step = 1
     for (i, chunk) in enumerate(chunks)
         apply_propagator!(odet, propagators[i])
+        # Renorm to (S, I) after every chunk — equivalent to STRIDE's ode_fixup.
+        # The state entering each crossing is already in (S, I) form.
+        renormalize_riccati_inplace!(odet.u, N)
         odet.psifac = chunk.psi_end
         odet.q = equil.profiles.q_spline(odet.psifac)
 
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)")
         end
 
         if chunk.needs_crossing
             if ctrl.kin_flag
                 error("kin_flag = true not implemented yet!")
             else
-                # After apply_propagator!, odet.u is a general (U1, U2) state.
-                # Renormalize to (S, I) form before the crossing: riccati_cross_ideal_singular_surf!
-                # zeros column ipert_res directly (the resonant mode), which is the physically
-                # correct choice regardless of column norms. Using the standard crossing with GR
-                # would zero the column with the largest norm, which may differ from ipert_res
-                # in the FM-accumulated state, giving an incorrect solution subspace.
-                renormalize_riccati_inplace!(odet.u, N)
+                # State is already (S, I) from the renorm above.
+                # riccati_cross_ideal_singular_surf! zeros column ipert_res directly
+                # (the resonant mode, no GR permutation needed in Riccati form).
                 riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
                 last_crossing_step = odet.step - 1  # u_store index of the crossing state
             end
         else
-            # Save non-crossing end-of-chunk state for stability criterion evaluation
+            # Save non-crossing end-of-chunk state (now always in (S, I) form)
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end
@@ -726,6 +906,13 @@ function parallel_eulerlagrange_integration(
         odet.step -= 1
         trim_storage!(odet)
         # odet.u is already in (S, I) from riccati_integrate_chunk! above
+    end
+
+    # Compute inter-surface Δ' matrix using the STRIDE global BVP.
+    # Uses the chunk propagators from the parallel phase (all chunks, including outer plasma).
+    # Only called when there are singular surfaces to couple.
+    if !ctrl.con_flag && intr.msing > 0
+        compute_delta_prime_matrix!(intr, propagators, chunks)
     end
 
     # Evaluate fixed-boundary stability criterion

@@ -442,6 +442,12 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
             out_h5["singular/delta_prime_col"] = dp_col_tensor
         end
 
+        # Write inter-surface Δ' matrix if computed (parallel FM path only).
+        # Shape: [2·msing × 2·msing] where rows/columns index (surface, side) pairs.
+        if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
+            out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+        end
+
         # Write vacuum Data
         if ctrl.vac_flag
             out_h5["vacuum/wt"] = vac.wt
