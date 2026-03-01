@@ -372,6 +372,59 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
+    direct_xpoint_find(raw_profile, ro, zo, rs1)
+
+Detect the magnetic x-point (if any) by searching for a null of the poloidal field (Br=0, Bz=0)
+near the plasma boundary. Tries the lower null first (below the magnetic axis), then upper null.
+Returns `(r_xpoint, z_xpoint, is_diverted)`.
+
+After `direct_position!` renormalizes ψ, the separatrix satisfies ψ≈0 and Bp=0.
+An x-point is detected when the Newton iteration converges to a point with |ψ| < ψ_threshold.
+"""
+function direct_xpoint_find(raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs1::Float64)
+    bfield = DirectBField()
+    sq_in_deriv = deriv1(raw_profile.sq_in)
+    max_iterations = 100
+    psi_threshold = 1e-3  # convergence criterion: |ψ| < threshold at x-point candidate
+
+    # X-points in diverted plasmas lie on the inboard side, between rs1 and the magnetic axis.
+    # A guess of rs1 + 0.35*(ro-rs1) places the starting R in this inboard region; using
+    # (rs1+rs2)/2 overshoots to the plasma center and Newton misses the basin of attraction.
+    r_xguess = rs1 + 0.35 * (ro - rs1)
+
+    # Try lower null first, then upper null
+    for (label, z_guess) in (("lower", raw_profile.zmin + 0.15 * (zo - raw_profile.zmin)),
+                              ("upper", raw_profile.zmax - 0.15 * (raw_profile.zmax - zo)))
+        r, z = r_xguess, z_guess
+        dr, dz = 0.0, 0.0
+        converged = false
+        for _ in 1:max_iterations
+            direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+            det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
+            abs(det) < 1e-20 && break
+            dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
+            dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
+            r += dr
+            z += dz
+            if abs(dr) <= 1e-8 * abs(r) && abs(dz) <= 1e-8 * abs(r)
+                converged = true
+                break
+            end
+        end
+        # Accept candidate if Newton converged and ψ is near zero (≈ separatrix)
+        if converged
+            direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0)
+            if abs(bfield.psi / raw_profile.psio) < psi_threshold
+                @printf("   X-point (%s null) found at R = %.5f, Z = %.5f\n", label, r, z)
+                return r, z, true
+            end
+        end
+    end
+
+    return NaN, NaN, false
+end
+
+"""
     equilibrium_solver(raw_profile)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
@@ -420,6 +473,14 @@ robustness.
 
     # Find radial position of magnetic axis and separatrix
     ro, zo, rs1, rs2 = direct_position!(raw_profile)
+
+    # Detect x-point (diverted vs limited topology)
+    r_xpoint, z_xpoint, is_diverted = direct_xpoint_find(raw_profile, ro, zo, rs1)
+    if is_diverted
+        println("   Plasma topology: DIVERTED (x-point detected)")
+    else
+        println("   Plasma topology: LIMITED (no x-point)")
+    end
 
     # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
@@ -508,6 +569,29 @@ robustness.
             sq_nodes[:, 4]   # q
         )
     end
+    # For diverted plasmas, build edge inverse splines for q and dV/dψ that are well-behaved
+    # toward psin=1. The reciprocals iota=1/q and 1/(dV/dψ) are anchored to 0 at the separatrix.
+    if is_diverted
+        # Edge spline covers the transition region from ~90% of psihigh to psifac=1.0
+        psi_edge_start = psihigh * 0.9
+        edge_mask = findall(psi -> psi >= psi_edge_start, psi_nodes)
+
+        edge_psi = vcat(psi_nodes[edge_mask], 1.0)
+
+        # Iota = 1/q; anchor iota(1.0) = 0 (q → ∞ at separatrix)
+        q_iota_vals = vcat([1.0 / sq_nodes[i, 4] for i in edge_mask], 0.0)
+        q_iota_inner = cubic_interp(edge_psi, q_iota_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+        profiles.q_spline_iota_inverse = InverseCubicSpline(q_iota_inner)
+
+        # 1/(dV/dψ); anchor (dV/dψ)⁻¹(1.0) = 0 (dV/dψ → ∞ at separatrix)
+        dVdpsi_inv_vals = vcat([1.0 / sq_nodes[i, 3] for i in edge_mask], 0.0)
+        dVdpsi_inv_inner = cubic_interp(edge_psi, dVdpsi_inv_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+        profiles.dVdpsi_spline_inv = InverseCubicSpline(dVdpsi_inv_inner)
+
+        @printf("   Edge inverse splines built over psin ∈ [%.4f, 1.0] (%d nodes)\n",
+            psi_edge_start, length(edge_psi))
+    end
+
     # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
     rzphi_xs = psi_nodes
@@ -592,9 +676,16 @@ robustness.
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
+    pe = PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
         ro, zo, psio)
+
+    # Store x-point topology in equilibrium parameters
+    pe.params.r_xpoint = is_diverted ? r_xpoint : nothing
+    pe.params.z_xpoint = is_diverted ? z_xpoint : nothing
+    pe.params.is_diverted = is_diverted
+
+    return pe
 end

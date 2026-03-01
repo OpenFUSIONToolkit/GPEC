@@ -161,25 +161,34 @@ function main(args::Vector{String}=String[])
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
     # Find all singular surfaces in the equilibrium
-    sing_find!(intr, equil)
+    sing_find!(intr, ctrl, equil)
 
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
+    # For diverted plasmas qmax = Inf; use the q of the outermost found rational surface
+    # (which is the last element of intr.sing after sing_find!) to compute the mode range.
+    # If no surfaces found, fall back to the direct-spline edge q or ctrl.qhigh.
+    q_for_mode_range = if isinf(equil.params.qmax)
+        isempty(intr.sing) ? equil.profiles.q_spline_direct.y[end] : intr.sing[end].q
+    else
+        equil.params.qmax
+    end
+
     if ctrl.cyl_flag
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     elseif ctrl.sing_start == 0
         intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * q_for_mode_range) + ctrl.delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
         for ising in Int(ctrl.sing_start):intr.msing
             intr.mmin = min(intr.mmin, sing[ising].m)
         end
         intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * q_for_mode_range) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     if ctrl.delta_mband >= intr.mpert

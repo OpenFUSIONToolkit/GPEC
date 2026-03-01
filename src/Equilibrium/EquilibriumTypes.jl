@@ -427,6 +427,41 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     li1::Union{Nothing,Float64} = nothing  # Internal inductance at the axis
     li2::Union{Nothing,Float64} = nothing  # External inductance at the axis
     li3::Union{Nothing,Float64} = nothing  # Total inductance at the axis
+    r_xpoint::Union{Nothing,Float64} = nothing   # R-coordinate of x-point [m]
+    z_xpoint::Union{Nothing,Float64} = nothing   # Z-coordinate of x-point [m]
+    is_diverted::Union{Nothing,Bool} = nothing   # Whether plasma has a magnetic x-point
+end
+
+"""
+    InverseCubicSpline{S}
+
+Wraps a cubic interpolant that stores 1/f (e.g. iota = 1/q). Returns f = 1/stored when called.
+Used for quantities that diverge at the separatrix (q, dV/dψ), where the reciprocal (iota, 1/dVdpsi)
+is well-behaved and anchored to zero at psin=1.
+
+Uses a self-contained `_hint` field so that the caller's hint (which is keyed to the direct
+spline's grid) does not interfere with interval lookups on the edge grid.
+
+Defines a `.y` property that returns the physical values (1/inner.y) so that
+`profiles.q_spline.y[ipsi]` gives q even when the pointer is set to this type.
+"""
+struct InverseCubicSpline{S}
+    inner::S                       # Stores iota = 1/q (or 1/(dV/dψ), etc.)
+    _hint::Base.RefValue{Int}      # self-contained search hint for the edge grid
+end
+InverseCubicSpline(inner::S) where {S} = InverseCubicSpline{S}(inner, Ref(1))
+
+# Ignore caller's kwargs (particularly hint) — use the self-contained hint instead.
+# The caller's hint is keyed to the direct spline's grid and would be invalid here.
+(ics::InverseCubicSpline)(psi; kwargs...) = 1.0 / ics.inner(psi; hint=ics._hint)
+
+# .y property returns physical values (q = 1/iota) for backward compat with .y[ipsi] access
+function Base.getproperty(ics::InverseCubicSpline, sym::Symbol)
+    if sym === :y
+        return 1.0 ./ ics.inner.y
+    else
+        return getfield(ics, sym)
+    end
 end
 
 """
@@ -440,33 +475,48 @@ Each profile is stored as a separate spline for code clarity.
   - `xs::Vector{Float64}`: Shared x-axis (normalized psi)
   - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
   - `P_spline`: μ₀*P (plasma pressure × μ₀)
-  - `dVdpsi_spline`: dV/dψ (volume derivative)
-  - `q_spline`: q (safety factor)
+  - `dVdpsi_spline`: dV/dψ (volume derivative), always the direct spline
+  - `q_spline`: q (safety factor) pointer — initially points to q_spline_direct;
+    for integration chunks that extend beyond psihigh in diverted plasmas, this is
+    temporarily switched to q_spline_iota_inverse for type-stable evaluation
 
 # Derivative Interpolants (for continuous derivative evaluation)
 
   - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
+    (always the direct-spline derivatives; use q_spline_direct for deriv2/deriv3)
+
+# Edge Extension Fields (Nothing for limited plasmas)
+
+  - `q_spline_direct`: Original direct q spline (for restoring after pointer swap)
+  - `q_spline_iota_inverse`: Edge inverse spline for q in diverted plasmas (Nothing if limited)
+  - `dVdpsi_spline_inv`: Edge inverse spline for dV/dψ used in post-processing (Nothing if limited)
 
 # Notes
 
   - Node values at grid points: Access via `spline.y[i]`
   - Derivative at any point: Call `deriv(x)` (derivative views are callable)
   - Grid: Access via `xs` field or `spline.cache.x`
+  - For deriv2/deriv3 of q, always use `profiles.q_spline_direct` to avoid Union dispatch issues
 """
-struct ProfileSplines{S,D}
+mutable struct ProfileSplines{S,I,D}
     xs::Vector{Float64}
     npts::Int          # length(xs), avoids redundant length() calls
     npts_minus_1::Int  # npts - 1, for hint at last interval
-    # Value interpolants
+    # Value interpolants (dVdpsi always direct; q_spline is a switchable pointer)
     F_spline::S
     P_spline::S
     dVdpsi_spline::S
-    q_spline::S
+    q_spline::Union{S,I}   # pointer: starts as q_spline_direct, optionally switched for edge chunks
     # Derivative views (callable, share data with value interpolants)
     F_deriv::D
     P_deriv::D
     dVdpsi_deriv::D
     q_deriv::D
+    # Stored direct splines for restoring after pointer swap and for deriv2/deriv3 access
+    q_spline_direct::S
+    # Edge inverse splines: Nothing for limited plasmas, set by equilibrium_solver for diverted
+    q_spline_iota_inverse::Union{Nothing,I}
+    dVdpsi_spline_inv::Union{Nothing,I}
 end
 
 """
@@ -474,6 +524,8 @@ end
 
 Create ProfileSplines from arrays of profile values.
 Uses CubicFit boundary conditions with extension extrapolation.
+Edge inverse splines are initially nothing and are set later by equilibrium_solver
+for diverted plasmas.
 """
 function ProfileSplines(xs::Vector{Float64},
     F_vals::Vector{Float64},
@@ -500,10 +552,18 @@ function ProfileSplines(xs::Vector{Float64},
     dVdpsi_deriv = deriv1(dVdpsi_spline)
     q_deriv = deriv1(q_spline)
 
-    ProfileSplines{typeof(F_spline),typeof(F_deriv)}(
+    S = typeof(q_spline)
+    I = InverseCubicSpline{S}
+    D = typeof(q_deriv)
+
+    ProfileSplines{S,I,D}(
         xs, npts, npts_minus_1,
-        F_spline, P_spline, dVdpsi_spline, q_spline,
-        F_deriv, P_deriv, dVdpsi_deriv, q_deriv
+        F_spline, P_spline, dVdpsi_spline,
+        q_spline,          # q_spline pointer starts as direct
+        F_deriv, P_deriv, dVdpsi_deriv, q_deriv,
+        q_spline,          # q_spline_direct = same object
+        nothing,           # q_spline_iota_inverse: set later for diverted
+        nothing            # dVdpsi_spline_inv: set later for diverted
     )
 end
 

@@ -18,7 +18,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
+export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines, InverseCubicSpline
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -296,7 +296,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.psi_boundary_sign = -1
     pe.params.psi_boundary_zero = false
 
-    pe.params.q0 = profiles.q_spline.y[1]
+    pe.params.q0 = profiles.q_spline_direct.y[1]
     pe.params.b0 = bt0
 
     pe.params.volume = volume
@@ -326,8 +326,10 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     psiexl = Float64[]
     qexl = Float64[]
 
-    # Create derivative views for q-spline
-    q_spline = profiles.q_spline
+    # Use the direct q spline for deriv2/deriv3 (works for both limited and diverted).
+    # profiles.q_spline is a Union type (direct or inverse pointer), but deriv2/deriv3
+    # are only defined for the direct spline; all extremum analysis uses core-region q.
+    q_spline = profiles.q_spline_direct
     q_d1 = deriv1(q_spline)
     q_d2 = deriv2(q_spline)
     q_d3 = deriv3(q_spline)
@@ -376,7 +378,16 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     qmax_edge = q_spline.y[end]
     qmin = min(minimum(qexl), q0)
     qmax = max(maximum(qexl), qmax_edge)
-    qa = q_spline.y[end] + profiles.q_deriv(xs[end]; hint=Ref(profiles.npts_minus_1)) * (1.0 - xs[end])
+
+    # For diverted plasmas q → ∞ at the separatrix; set qa = Inf and qmax = Inf
+    # so that sing_find! and sing_lim! know there is no finite q boundary.
+    if !isnothing(equil.params.is_diverted) && equil.params.is_diverted
+        qa = Inf
+        qmax = Inf
+    else
+        qa = q_spline.y[end] + profiles.q_deriv(xs[end]; hint=Ref(profiles.npts_minus_1)) * (1.0 - xs[end])
+        qmax = max(qmax, qa)
+    end
 
     q95 = q_spline(0.95)
 

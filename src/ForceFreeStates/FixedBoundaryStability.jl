@@ -61,10 +61,21 @@ can do it post-integration rather than during and don't directly handle file out
 
     # Compute smallest eigenvalue (crit) at current step
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
+    # Helper: evaluate dV/dψ using the edge inverse spline when psi is beyond the direct
+    # spline domain (psi > psihigh). This arises in post-integration stability evaluation
+    # when the ODE integrated beyond psihigh in a diverted plasma.
+    function eval_dVdpsi(psi_eval)
+        if psi_eval <= profiles.xs[end] || isnothing(profiles.dVdpsi_spline_inv)
+            return profiles.dVdpsi_spline(psi_eval; hint=odet.spline_hint)
+        else
+            return profiles.dVdpsi_spline_inv(psi_eval)
+        end
+    end
+
     u = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
     psi = odet.psi_store[istep]
     u .= odet.u_store[:, :, :, istep]
-    dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
+    dVdpsi = eval_dVdpsi(psi)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
 
@@ -77,7 +88,7 @@ can do it post-integration rather than during and don't directly handle file out
         fac = crit / (crit - crit_prev)
         psi_mid = psi - fac * (psi - odet.psi_store[istep-1])
         u_mid = u .- fac .* (u .- @view(odet.u_store[:, :, :, istep-1]))
-        dVdpsi = profiles.dVdpsi_spline(psi_mid; hint=odet.spline_hint)
+        dVdpsi = eval_dVdpsi(psi_mid)
         crit_mid_val, _ = compute_smallest_eigenvalue(u_mid)
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
