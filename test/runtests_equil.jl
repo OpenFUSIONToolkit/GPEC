@@ -76,4 +76,51 @@
         @test isapprox(plasma_eq_efit.zo, plasma_eq_ascii.zo, atol=1e-3)
     end
 
+    @testset "Edge inverse splines (limited plasma)" begin
+        # For a limited plasma, no edge inverse splines are built
+        @test isnothing(plasma_eq_efit.profiles.q_spline_iota_inverse)
+        @test isnothing(plasma_eq_efit.profiles.dVdpsi_spline_inv)
+        @test plasma_eq_efit.params.is_diverted == false
+    end
+
+    @testset "Edge inverse splines (diverted plasma)" begin
+        # Load the DIIID-like diverted equilibrium
+        diiid_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        diiid_config = JPEC.Equilibrium.EquilibriumConfig(;
+            eq_type="efit",
+            eq_filename=joinpath(diiid_dir, "TKMKR_D3Dlike_default_Hmode.geqdsk"),
+            jac_type="hamada",
+            grid_type="ldp",
+            psilow=1e-4,
+            psihigh=0.993,
+            mpsi=128,
+            mtheta=256
+        )
+        pe_diverted = JPEC.Equilibrium.setup_equilibrium(diiid_config)
+
+        psihigh = pe_diverted.config.psihigh
+        ics = pe_diverted.profiles.q_spline_iota_inverse
+
+        # X-point detection
+        @test pe_diverted.params.is_diverted == true
+        @test pe_diverted.params.z_xpoint < pe_diverted.zo   # lower null is below the axis
+
+        # Edge splines are built
+        @test !isnothing(ics)
+        @test !isnothing(pe_diverted.profiles.dVdpsi_spline_inv)
+
+        # qa = Inf for diverted
+        @test isinf(pe_diverted.params.qa)
+
+        # Anchor: iota(1.0) = 0 (separatrix)
+        @test ics.inner.y[end] ≈ 0.0
+
+        # Coverage: edge spline starts in the near-edge region (between 85% and 100% of psihigh)
+        @test 0.85 * psihigh < ics.inner.cache.x[1] < psihigh
+
+        # Continuity at psihigh: q and dV/dψ match to machine precision
+        @test ics(psihigh) ≈ pe_diverted.profiles.q_spline_direct(psihigh)
+        @test pe_diverted.profiles.dVdpsi_spline_inv(psihigh) ≈ pe_diverted.profiles.dVdpsi_spline(psihigh)
+    end
+
 end

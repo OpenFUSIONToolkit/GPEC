@@ -159,7 +159,69 @@ vline!(p3, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, c
 savefig(p3, joinpath(output_dir, "edge_spline_dVdpsi.png"))
 println("Saved: edge_spline_dVdpsi.png")
 
-# --- Plot 4: Rational surface density in edge zone ---
+# --- Helper: reconstruct (R, Z) from stored rzphi 2D splines ---
+# rzphi_rsquared stores rfac² = (R-ro)² + (Z-zo)²
+# rzphi_offset stores η/(2π) - θ, where η is the geometric poloidal angle
+# R = ro + rfac * cos(η),  Z = zo + rfac * sin(η)
+function RZ_at(pe, psi, theta)
+    rsq    = pe.rzphi_rsquared((psi, theta))
+    offset = pe.rzphi_offset((psi, theta))
+    rfac   = sqrt(max(0.0, rsq))
+    eta    = 2π * (theta + offset)
+    R = pe.ro + rfac * cos(eta)
+    Z = pe.zo + rfac * sin(eta)
+    return R, Z
+end
+
+# --- Plot 4: R(psin) and Z(psin) for several fixed theta values toward the edge ---
+theta_vals  = [0.0, 0.25, 0.5, 0.75]                # outboard, top, inboard, bottom
+theta_names = ["θ=0 (outboard)", "θ=0.25 (top)", "θ=0.5 (inboard)", "θ=0.75 (bottom)"]
+psi_rz_plot = range(psi_core[1], psihigh, length=150)  # only in valid spline domain
+
+p4a = plot(; xlabel="ψₙ", ylabel="R [m]",
+           title="Major radius R(ψₙ) for fixed poloidal angles", legend=:topright)
+p4b = plot(; xlabel="ψₙ", ylabel="Z [m]",
+           title="Vertical position Z(ψₙ) for fixed poloidal angles", legend=:topright)
+
+for (theta, name) in zip(theta_vals, theta_names)
+    R_vals = [RZ_at(pe, psi, theta)[1] for psi in psi_rz_plot]
+    Z_vals = [RZ_at(pe, psi, theta)[2] for psi in psi_rz_plot]
+    plot!(p4a, collect(psi_rz_plot), R_vals; label=name, lw=2)
+    plot!(p4b, collect(psi_rz_plot), Z_vals; label=name, lw=2)
+end
+vline!(p4a, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+vline!(p4b, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+
+p4 = plot(p4a, p4b; layout=(1, 2), size=(900, 400))
+savefig(p4, joinpath(output_dir, "edge_spline_RZ_vs_psin.png"))
+println("Saved: edge_spline_RZ_vs_psin.png")
+
+# --- Plot 5: Flux surface cross-section with x-point ---
+theta_fs   = range(0.0, 1.0, length=200)   # full poloidal circuit
+psin_surfaces = [0.5, 0.7, 0.85, 0.93, 0.97, psihigh]  # core → edge
+
+p5 = plot(; xlabel="R [m]", ylabel="Z [m]",
+           title="Flux surface cross-section",
+           aspect_ratio=:equal, legend=:topright)
+
+colors = cgrad(:blues, length(psin_surfaces); rev=false)
+for (i, psin_val) in enumerate(psin_surfaces)
+    R_fs = [RZ_at(pe, psin_val, th)[1] for th in theta_fs]
+    Z_fs = [RZ_at(pe, psin_val, th)[2] for th in theta_fs]
+    lbl  = @sprintf("ψₙ = %.3f%s", psin_val, psin_val == psihigh ? " (LCFS)" : "")
+    plot!(p5, R_fs, Z_fs; label=lbl, lw=1.5, color=colors[i])
+end
+
+# Mark magnetic axis and x-point
+scatter!(p5, [pe.ro], [pe.zo]; label="Axis", marker=:cross, ms=8, color=:black)
+scatter!(p5, [params.r_xpoint], [params.z_xpoint];
+         label=@sprintf("X-point (R=%.3f, Z=%.3f)", params.r_xpoint, params.z_xpoint),
+         marker=:x, ms=10, color=:red, markerstrokewidth=2)
+
+savefig(p5, joinpath(output_dir, "edge_spline_cross_section.png"))
+println("Saved: edge_spline_cross_section.png")
+
+# --- Plot 6: Rational surface density in edge zone ---
 # Scan for q = m/n rational surfaces using the iota inverse spline
 println("Scanning rational surfaces in edge zone [psihigh, 0.9999]...")
 nn = 1
@@ -195,7 +257,7 @@ end
 println(@sprintf("  Found %d rational surfaces (n=%d) in edge zone before density cutoff",
     length(edge_surfaces), nn))
 
-p4 = plot(
+p6 = plot(
     collect(psi_plot_edge), q_edge_vals;
     xlabel = "ψₙ",
     ylabel = "q",
@@ -206,10 +268,10 @@ p4 = plot(
 )
 for (i, psi_s) in enumerate(edge_surfaces)
     lbl = i == 1 ? "Edge rational surfaces" : ""
-    vline!(p4, [psi_s]; label = lbl, color = :red, alpha = 0.5, lw = 0.8)
+    vline!(p6, [psi_s]; label = lbl, color = :red, alpha = 0.5, lw = 0.8)
 end
-vline!(p4, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
-savefig(p4, joinpath(output_dir, "edge_spline_rational_surfaces.png"))
+vline!(p6, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
+savefig(p6, joinpath(output_dir, "edge_spline_rational_surfaces.png"))
 println("Saved: edge_spline_rational_surfaces.png")
 
 # --- Final summary ---

@@ -21,8 +21,12 @@ and data dumping.
 
     tmp_mat = zeros!(pool, ComplexF64, Npert, Npert)
 
-    # Evaluate dV/dpsi at the plasma edge
-    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
+    # Evaluate dV/dpsi at the plasma edge. For diverted plasmas psilim can exceed psihigh,
+    # so route to the edge inverse spline when available and psilim is beyond the core grid.
+    profiles = equil.profiles
+    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && intr.psilim > profiles.xs[end]) ?
+              profiles.dVdpsi_spline_inv(intr.psilim) :
+              profiles.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
@@ -196,7 +200,10 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     tot_eigvals = zeros(ComplexF64, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
-    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
+    profiles = equil.profiles
+    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && intr.psilim > profiles.xs[end]) ?
+              profiles.dVdpsi_spline_inv(intr.psilim) :
+              profiles.dVdpsi_spline(intr.psilim)
 
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
