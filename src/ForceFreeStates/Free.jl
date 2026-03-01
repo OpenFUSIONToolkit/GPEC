@@ -113,10 +113,10 @@ and data dumping.
 
     # Write energies to screen
     if ctrl.verbose
-        println("Least Stable Eigenmode Energies:")
-        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))
-        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))
-        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))
+        @info "Least Stable Eigenmode Energies:\n" *
+              "  Plasma = $((@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))\n" *
+              "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))\n" *
+              "  Total  = $((@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))"
     end
 
     return vac
