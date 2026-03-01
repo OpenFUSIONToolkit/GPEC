@@ -416,6 +416,12 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
 
+        # Edge stability diagnostic: et[1] from psiedge → psilim (before trimming)
+        if !isempty(odet.psi_edge_scan)
+            out_h5["integration/psi_edge_scan"] = odet.psi_edge_scan
+            out_h5["integration/et_edge_scan"]  = odet.et_edge_scan
+        end
+
         # Write singular surface data
         out_h5["singular/msing"] = intr.msing
         out_h5["singular/psi"] = [sing.psifac for sing in intr.sing]

@@ -623,6 +623,12 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
         end
     end
 
+    # Extract psi and et[1] for all edge-zone steps (where dW_edge was computed)
+    # before storage is trimmed to the peak-dW step.  psi_store still has the full range here.
+    edge_mask = .!isinf.(real.(odet.dW_edge))
+    odet.psi_edge_scan = odet.psi_store[edge_mask]
+    odet.et_edge_scan  = odet.dW_edge[edge_mask]
+
     # Return the index that maximizes dW_edge to identify truncation point
     return findmax(real.(odet.dW_edge))[2]
 end

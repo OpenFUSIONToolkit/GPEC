@@ -8,7 +8,10 @@ For a diverted plasma, it produces the following plots saved alongside the input
   1. iota (= 1/q) vs psin: shows the iota inner spline descending smoothly to 0 at psin=1
   2. q vs psin: compares the direct spline (ExtendExtrap) vs the edge inverse spline
   3. dV/dψ vs psin: same comparison
-  4. Rational surface density in the edge zone
+  4. R(psin) and Z(psin) for fixed poloidal angles toward the edge
+  5. Flux surface cross-section with x-point marked
+  6. Rational surface density in the edge zone
+  7. et[1] vs psi in the edge zone (stability diagnostic, requires a prior jpec.h5 output)
 
 For a limited plasma (no x-point), the script prints a summary and exits since no
 edge inverse splines are built.
@@ -21,6 +24,7 @@ If no path is given, defaults to examples/DIIID-like_ideal_example/jpec.toml.
 
 using JPEC
 using JPEC.Equilibrium: InverseCubicSpline
+using HDF5
 using Roots
 using Plots
 using TOML
@@ -273,6 +277,40 @@ end
 vline!(p6, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
 savefig(p6, joinpath(output_dir, "edge_spline_rational_surfaces.png"))
 println("Saved: edge_spline_rational_surfaces.png")
+
+# --- Plot 7: et[1] vs psi — edge stability diagnostic (from jpec.h5) ---
+h5file = joinpath(output_dir, "jpec.h5")
+if isfile(h5file)
+    h5open(h5file, "r") do f
+        if haskey(f, "integration/psi_edge_scan") && haskey(f, "integration/et_edge_scan")
+            psi_es  = read(f["integration/psi_edge_scan"])
+            et_es   = read(f["integration/et_edge_scan"])
+            et_real = real.(et_es)
+            et_peak_idx = argmax(et_real)
+            psi_peak    = psi_es[et_peak_idx]
+
+            p7 = plot(
+                psi_es, et_real;
+                xlabel = "ψₙ",
+                ylabel = "Re(et[1])",
+                title  = "Edge stability: Re(et[1]) from ψ = psiedge to psilim",
+                label  = "Re(et[1])",
+                lw = 2, color = :blue, legend = :topright
+            )
+            vline!(p7, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh),
+                   ls = :dash, color = :gray)
+            scatter!(p7, [psi_peak], [et_real[et_peak_idx]];
+                     label = @sprintf("peak (ψ=%.4f, et=%.3e)", psi_peak, et_real[et_peak_idx]),
+                     marker = :star5, ms = 10, color = :red)
+            savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
+            println("Saved: edge_spline_stability.png")
+        else
+            println("Note: integration/psi_edge_scan not found in jpec.h5 — run JPEC with psiedge < psilim first")
+        end
+    end
+else
+    println("Note: jpec.h5 not found in $output_dir — run JPEC first to generate edge stability plot")
+end
 
 # --- Final summary ---
 println()
