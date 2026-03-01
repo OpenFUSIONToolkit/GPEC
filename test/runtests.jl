@@ -17,6 +17,8 @@ else
     include("./runtests_equil.jl")
     include("./runtests_solovev.jl")
     include("./runtests_eulerlagrange.jl")
+    include("./runtests_riccati.jl")
+    include("./runtests_parallel_integration.jl")
     include("./runtests_sing.jl")
     include("./runtests_fullruns.jl")
 end

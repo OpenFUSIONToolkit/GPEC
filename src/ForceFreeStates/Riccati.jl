@@ -210,8 +210,14 @@ function riccati_integrate_chunk!(
     sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
-    # Renormalize end state to (S, I) convention for the next chunk or crossing
-    renormalize_riccati_inplace!(odet.u, intr.numpert_total)
+    # Renormalize end state to (S, I) convention for the next chunk.
+    # When a crossing follows (needs_crossing=true), skip renorm so that ca_l is computed
+    # from the bounded (U₁, U₂) state in riccati_cross_ideal_singular_surf!: this gives
+    # consistent normalization with ca_r (also from pre-renorm state), enabling correct Δ'.
+    # The callback guarantees max(|U₁|), max(|U₂|) ≤ ucrit, so the state is bounded.
+    if !chunk.needs_crossing
+        renormalize_riccati_inplace!(odet.u, intr.numpert_total)
+    end
 end
 
 """
@@ -275,6 +281,13 @@ for the Riccati integration path with two key differences:
    column to zero, we use `ipert_res` directly (the resonant mode index). This is valid since
    without GR there is no permutation applied to the columns of S.
 
+**Δ' normalization**: This function expects `odet.u` in the bounded (U₁, U₂) form produced by
+`riccati_integrate_chunk!` with `needs_crossing=true` (final renorm skipped). ca_l is computed
+from (U₁, U₂) before the crossing, and ca_r from (U₁_new, U₂_new) before `renormalize_riccati!`.
+Since column `ipert_res` of [U₁_new; U₂_new] equals the introduced asymptotic solution exactly,
+ca_r[ipert_res,ipert_res,2] = 1 regardless of other column normalizations. This gives a
+physically meaningful Δ' = ca_r - ca_l with consistent left/right normalization.
+
 After the predictor step and asymptotic introduction, `renormalize_riccati!` is called
 to restore the canonical (S_new, I) form before continuing integration.
 
@@ -330,7 +343,21 @@ function riccati_cross_ideal_singular_surf!(
             odet.u[:, ipert_res[i], :] .= ua[:, ipert_res[i]+intr.numpert_total, :]
         end
     end
+    # Compute ca_r from (U₁_new, U₂_new) before renormalization.
+    # Column ipert_res of [U₁_new; U₂_new] = ua[:,ipert_res+N,:] (the introduced small asymptotic),
+    # so ca_r[:,ipert_res] = e_{ipert_res+N} and ca_r[ipert_res,ipert_res,2] = 1 regardless of
+    # the normalization of the other columns. This gives Δ' = 1 - ca_l[ipert_res,ipert_res,2].
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+
+    # Compute Δ' using ipert_res directly (no GR → perm_col = ipert_res, ca_r diagonal = 1).
+    if !ctrl.con_flag
+        denom = (2π)^2 * equil.psio
+        resize!(intr.sing[ising].delta_prime, length(sing_asymp.r1))
+        for i in eachindex(sing_asymp.r1)
+            Δca = odet.ca_r[ipert_res[i], ipert_res[i], 2, ising] - odet.ca_l[ipert_res[i], ipert_res[i], 2, ising]
+            intr.sing[ising].delta_prime[i] = Δca / denom
+        end
+    end
 
     # Store (U₁_new, U₂_new) before renormalization so evaluate_stability_criterion!
     # can recover S_new = U₁_new / U₂_new correctly via compute_smallest_eigenvalue
@@ -432,14 +459,6 @@ function riccati_eulerlagrange_integration(
     # and u_store entries have u[:,:,1]=S, u[:,:,2]=I throughout integration.
     # At crossing steps, u_store has U₁_new/U₂_new which compute_smallest_eigenvalue
     # correctly resolves to S_new via rdiv. No transformation is needed.
-
-    # Note: compute_delta_prime_from_ca! is intentionally NOT called here.
-    # In the Riccati path, ca_l is computed when u = (S, I) (Riccati convention)
-    # while ca_r is computed from (U1_new, U2_new) (before renormalization).
-    # These have inconsistent normalizations relative to the Δ' formula, which
-    # assumes both sides are in the standard (U1, U2) representation. The parallel
-    # FM path correctly uses (U1, U2) form at both ca computation points and does
-    # populate delta_prime.
 
     return odet
 end
@@ -655,9 +674,6 @@ function parallel_eulerlagrange_integration(
 
     # transform_u! is called for consistency but is a no-op (ifix=0, no Gaussian reduction)
     transform_u!(odet, intr)
-
-    # Compute Δ' from asymptotic coefficients accumulated at each crossing
-    compute_delta_prime_from_ca!(odet, intr, equil)
 
     return odet
 end

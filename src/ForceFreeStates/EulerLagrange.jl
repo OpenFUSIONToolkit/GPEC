@@ -4,12 +4,16 @@
 Compute the tearing stability parameter Δ' for each singular surface from the
 asymptotic coefficients `ca_l` and `ca_r` accumulated during integration.
 
-Δ' measures the jump in the radial field derivative across a rational surface:
+Uses the diagonal formula Δ'[i] = (ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π² · psio),
+which is correct when the small asymptotic was introduced in column `ipert_res` directly
+(no GR permutation).
 
-  Δ'[i] = (ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π² · psio)
+**Note**: This function is no longer called from any integration driver. Δ' is now computed
+inline inside each crossing function where the correct column index is known:
+- `cross_ideal_singular_surf!` uses `perm_col` (GR-permuted column)
+- `riccati_cross_ideal_singular_surf!` uses the diagonal `ipert_res` (no GR permutation)
 
-where i = ipert_res is the linear mode index for the resonant (m,n) pair and s is
-the singular surface index. Stores results in `intr.sing[s].delta_prime`.
+Retained for reference and potential use in testing.
 
 This matches the formula in `PerturbedEquilibrium/SingularCoupling.jl` (lines ~197):
   `delta_prime_val = (rbwp1 - lbwp1) / (twopi * chi1)`
@@ -226,9 +230,6 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
     transform_u!(odet, intr)
 
-    # Compute Δ' from asymptotic coefficients accumulated at each crossing
-    compute_delta_prime_from_ca!(odet, intr, equil)
-
     return odet
 end
 
@@ -441,6 +442,12 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl
     end
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+
+    # Note: Δ' is NOT computed for the standard path. The Gaussian Reduction normalization
+    # inflates ca_l for the resonant column, giving non-physical Δ' values. Δ' is instead
+    # computed for the Riccati and parallel-FM paths in riccati_cross_ideal_singular_surf!,
+    # which maintains a bounded (U₁, U₂) state giving consistent normalization.
+    # For SingularCoupling.jl, use odet.ca_l/ca_r diagonal elements directly.
 
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
