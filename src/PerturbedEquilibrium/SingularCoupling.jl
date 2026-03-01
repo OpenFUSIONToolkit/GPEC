@@ -71,7 +71,7 @@ function compute_singular_coupling_metrics!(
     ctrl::PerturbedEquilibriumControl
 )
     if ctrl.verbose
-        println("Computing singular coupling metrics (GPEC method)")
+        @info "Computing singular coupling metrics (GPEC method)"
     end
 
     # Extract dimensions
@@ -82,7 +82,7 @@ function compute_singular_coupling_metrics!(
 
     if msing == 0
         if ctrl.verbose
-            println("  No singular surfaces found. Skipping singular coupling calculation.")
+            @info "No singular surfaces found. Skipping singular coupling calculation."
         end
         return
     end
@@ -110,16 +110,6 @@ function compute_singular_coupling_metrics!(
         return
     end
 
-    if ctrl.verbose
-        println("  Number of singular surfaces: $msing")
-        println("  Number of toroidal modes (n): $npert")
-        if npert > 1
-            println("  Metric arrays: [$npert × $msing]")
-        else
-            println("  Metric arrays: [$msing] (single n)")
-        end
-    end
-
     # Get vacuum calculation parameters
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
@@ -130,15 +120,16 @@ function compute_singular_coupling_metrics!(
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     if ctrl.verbose
-        println("  Processing toroidal modes n = $nlow:$nhigh")
+        nstr = nlow == nhigh ? "$nlow" : "$nlow:$nhigh"
+        @info "Computing surface Green's functions at $msing resonant surfaces (n = $nstr, no wall)"
     end
 
     # Main loop: Process each toroidal mode number separately
     for nn in nlow:nhigh
         n_idx = nn - nlow + 1  # Index for storing in [npert, msing] arrays
 
-        if ctrl.verbose
-            println("  Computing metrics for n = $nn...")
+        if ctrl.verbose && npert > 1
+            @info "Computing metrics for n = $nn"
         end
 
         # For each singular surface, compute Green's functions for this n
@@ -231,9 +222,7 @@ function compute_singular_coupling_metrics!(
             state.resonant_flux[n_idx, s] = singflx_mn / area
 
             if ctrl.verbose && n_idx == 1 && s == 1
-                println("    Surface 1: q = $(sing_surf.q), ψ = $(sing_surf.psifac)")
-                println("      Resonant mode: m = $m_res, n = $nn")
-                println("      Delta': $(real(delta_prime_val))")
+                @info "Surface 1: q = $(@sprintf("%.3f", sing_surf.q)), ψ = $(@sprintf("%.3f", sing_surf.psifac)), m = $m_res, n = $nn, Δ' = $(@sprintf("%.3e", real(delta_prime_val)))"
             end
         end
     end
@@ -242,11 +231,9 @@ function compute_singular_coupling_metrics!(
     compute_island_diagnostics!(state, ffs_intr, equil, chi1, twopi)
 
     if ctrl.verbose
-        println("  Singular coupling calculation complete")
         max_island_width = maximum(abs.(state.island_half_width))
         max_delta_prime = maximum(abs.(real.(state.delta_prime)))
-        println("    Max island half-width: $(@sprintf("%.3e", max_island_width))")
-        println("    Max Delta': $(@sprintf("%.3e", max_delta_prime))")
+        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island_width)), max Δ' = $(@sprintf("%.3e", max_delta_prime))"
     end
 end
 

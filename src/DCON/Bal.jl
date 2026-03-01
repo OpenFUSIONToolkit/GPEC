@@ -114,7 +114,7 @@ function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
     ode_coeff_interp::CubicSeriesInterpolant,
     asymptotic_interp::CubicSeriesInterpolant,
     eigenfunctions::Matrix{Float64}, reference_angle::Float64,
-    control::ForceFreeStatesControl)
+    control::DconControl)
 
     TOLERANCE = 1e-5
     MINIMUM_STEP = 1e-10
@@ -142,7 +142,7 @@ function integrate_ballooning_ode(ipsi::Int, growth_parameter::Float64,
 
     try
         ode_solution = solve(ode_problem, DP5(); reltol=TOLERANCE, abstol=TOLERANCE^2,
-            dtmin=MINIMUM_STEP, adaptive=true, save_everystep=false, save_end=true)
+            dtmin=MINIMUM_STEP, adaptive=true)
 
         if ode_solution.retcode == ReturnCode.Success
             solution_final = ode_solution.u[end]
@@ -292,7 +292,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     spl0_interp = cubic_interp(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); search=LinearBinary(), bc=PeriodicBC())
     spl0_d1 = deriv1(spl0_interp)
     # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
-    spl0_fs1 = stack(spl0_d1(theta_grid))
+    spl0_fs1 = stack(spl0_d1.(theta_grid))
 
     kappas .= -spl0_fs1[:, 1] .* two_pi_f ./ (2 .* jac)
     kappan .= ((pressure_gradient ./ bsq .- fx_psi[4, :] ./ jac) ./ chi_prime .+
@@ -310,8 +310,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
 
     # initialize bg values
     spl0_bg_fs = -pressure_gradient .* q_derivative .* two_pi_f ./ (bsq .* chi_prime^2)
-    itp_bg = cubic_interp(theta_grid, spl0_bg_fs; bc=PeriodicBC())
-    spl0_bg_fsi = FastInterpolations.cumulative_integrate(itp_bg)
+    spl0_bg_fsi = Spl.cumulative_integral(theta_grid, spl0_bg_fs; bc=PeriodicBC())
     bg_fs = zeros(mtheta + 1, 5)
     bg_fs[:, 5] = spl0_bg_fsi .- spl0_bg_fsi[end]
 
@@ -329,8 +328,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
         spl1_fs[itheta, 4] = -spl1_fs[itheta, 1]
     end
 
-    itp_spl1 = cubic_interp(theta_grid, spl1_fs; bc=PeriodicBC())
-    spl1_totals = FastInterpolations.integrate(itp_spl1)
+    spl1_totals = Spl.total_integral(theta_grid, spl1_fs; bc=PeriodicBC())
 
     d0bar = [spl1_totals[1] spl1_totals[2]; spl1_totals[3] spl1_totals[4]]
 
@@ -363,8 +361,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
         spl2_fs[itheta, 4] = spl1_fs[itheta, 3] * v0[1, 2] + (spl1_fs[itheta, 4] + alpha) * v0[2, 2]
     end
 
-    itp_spl2 = cubic_interp(theta_grid, spl2_fs; bc=PeriodicBC())
-    spl2_fsi = FastInterpolations.cumulative_integrate(itp_spl2)
+    spl2_fsi = Spl.cumulative_integral(theta_grid, spl2_fs; bc=PeriodicBC())
     # CRITICAL: Use integrated values as the new fs (matching Fortran's spl2%fs=spl2%fsi)
     spl2_fs_new = copy(spl2_fsi)
 
@@ -372,7 +369,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     spl1_interp = cubic_interp(theta_grid, spl1_fs; search=LinearBinary(), bc=PeriodicBC())
     spl1_d1 = deriv1(spl1_interp)
     # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
-    spl1_fs1 = stack(spl1_d1(theta_grid))
+    spl1_fs1 = stack(spl1_d1.(theta_grid))
 
     # Compute derivatives for second-order terms
     spl3_fs = zeros(mtheta + 1, 4)
@@ -403,8 +400,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
                              d1_21 * v0[1, 2] + d1_22 * v0[2, 2]
     end
 
-    itp_spl3 = cubic_interp(theta_grid, spl3_fs; bc=PeriodicBC())
-    spl3_totals = FastInterpolations.integrate(itp_spl3)
+    spl3_totals = Spl.total_integral(theta_grid, spl3_fs; bc=PeriodicBC())
 
     # Compute first-order constants for both eigenfunctions
     # First eigenfunction (with -alpha correction)
@@ -452,7 +448,7 @@ equation if the surface is Mercier unstable.
 
 ## Arguments
 
-  - `ctrl::ForceFreeStatesControl`: Control parameters for the analysis.
+  - `ctrl::DconControl`: Control parameters for the analysis.
   - `locstab_fs::Matrix{Float64}`: Local stability matrix to store results (modified in place).
   - `plasma_eq::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data.
 
@@ -461,10 +457,10 @@ This function modifies `locstab_fs` in place with:
   - Column 1: Mercier criterion × ψ
   - Columns 4-5: Asymptotic coefficients ca₁ and ca₂
 """
-function compute_ballooning_stability!(ctrl::ForceFreeStatesControl, locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function compute_ballooning_stability!(ctrl::DconControl, locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
     if ctrl.verbose
-        @info "Evaluating high-n ballooning criterion"
+        println("Evaluating high-n ballooning criterion...")
     end
 
     profiles = plasma_eq.profiles
@@ -493,7 +489,7 @@ function compute_ballooning_stability!(ctrl::ForceFreeStatesControl, locstab_fs:
     end
 
     if ctrl.verbose
-        @info "Ballooning analysis complete"
+        println("Ballooning analysis complete.")
     end
 
 end

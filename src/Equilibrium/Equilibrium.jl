@@ -1,13 +1,13 @@
 module Equilibrium
 
 # --- Module-level Dependencies ---
+import ..Spl
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
-using Roots
 using TOML
 import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
-using AdaptiveArrayPools
+import IMASdd
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
 import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
@@ -18,7 +18,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
+export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutput, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -43,9 +43,9 @@ function setup_equilibrium(path::String="equil.toml")
 end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
-    @printf "Equilibrium file: %s\n" eq_config.eq_filename
+    @printf "Equilibrium file: %s\n" eq_config.control.eq_filename
 
-    eq_type = eq_config.eq_type
+    eq_type = eq_config.control.eq_type
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
         eq_input = read_efit(eq_config)
@@ -56,17 +56,31 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     elseif eq_type == "lar"
 
         if additional_input === nothing
-            additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
+            additional_input = LargeAspectRatioConfig(eq_config.control.eq_filename)
         end
 
         eq_input = lar_run(eq_config, additional_input)
     elseif eq_type == "sol"
 
         if additional_input === nothing
-            additional_input = SolovevConfig(eq_config.eq_filename)
+            additional_input = SolovevConfig(eq_config.control.eq_filename)
         end
 
         eq_input = sol_run(eq_config, additional_input)
+    elseif eq_type == "imas"
+
+        # For IMAS input, additional_input must be a populated dd (data dictionary).
+        # There is no file to read — the equilibrium data comes directly from dd.
+        # Usage:
+        #   config = EquilibriumConfig(eq_type="imas", eq_filename="N/A")
+        #   dd = IMAS.json2imas("myshot.json")
+        #   plasma_eq = setup_equilibrium(config, dd)
+        if additional_input === nothing
+            error("eq_type=\"imas\" requires a dd object passed as additional_input.\n" *
+                  "Usage: setup_equilibrium(config, dd)")
+        end
+
+        eq_input = read_imas(eq_config, additional_input)
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
@@ -107,12 +121,21 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     rsep = zeros(2)
 
     for iside in 1:2
-        hint2d = (Ref(1), Ref(1))
-        theta = find_zero(
-            (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
-            theta, Roots.Newton()
-        )
+        it = 0
+        while true
+            it += 1
+            # Evaluate offset and its derivative
+            offset = pe.rzphi_offset((psi_edge, theta))
+            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
+
+            eta = theta + offset - eta0
+            eta_theta = 1 + offset_y
+            dtheta = -eta / eta_theta
+            theta += dtheta
+            if abs(eta) <= 1e-10 || it > 100
+                break
+            end
+        end
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
@@ -130,59 +153,47 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         eta0 = (iside == 1) ? 0.0 : 0.5
         idx = findmin(abs.(vector .- eta0))[2]
         theta = pe.rzphi_ys[idx]
-        hint2d = (Ref(1), Ref(1))
+        rfac = 0.0
+        cosfac = 0.0
+        z = 0.0
+        max_iter = 1000
+        iter = 0
+        while iter < max_iter
+            iter += 1
+            # Evaluate rcoord and offset with derivatives
+            r2 = pe.rzphi_rsquared((psi_edge, theta))
+            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=(0,1))
+            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=(0,2))
+            eta = pe.rzphi_offset((psi_edge, theta))
+            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0,1))
+            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0,2))
 
-        # Cache variables that we need after convergence
-        rfac = Ref(0.0)
-        cos_phase = Ref(0.0)
-        z_val = Ref(0.0)
-
-        # Find θ where ∂z/∂θ = 0 (top/bottom separatrix extremum).
-        # z(θ) = zo + rfac·sin(2π(θ+η)), where rfac = √r²(θ) and η(θ) is the angular
-        # offset spline. We solve z1(θ) = 0 where z1 = ∂z/∂θ.
-        function z_deriv(theta_inner)
-            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
-            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            rfac_local = sqrt(r2)
-            rfac1 = r2y / (2 * rfac_local)
-            phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
-            sin_phase = sin(2π * (theta_inner + η))
-            cos_phase_local = cos(2π * (theta_inner + η))
-
-            # Cache values for later use
-            rfac[] = rfac_local
-            cos_phase[] = cos_phase_local
-            z_val[] = pe.zo + rfac_local * sin_phase
-
-            return rfac_local * phase1 * cos_phase_local + rfac1 * sin_phase  # ∂z/∂θ
+            rfac = sqrt(r2)
+            rfac1 = r2y / (2 * rfac)
+            rfac2 = (r2yy - r2y * rfac1 / rfac) / (2 * rfac)
+            phase = 2π * (theta + eta)
+            phase1 = 2π * (1 + eta1)
+            phase2 = 2π * eta2
+            cosfac = cos(phase)
+            sinfac = sin(phase)
+            z = pe.zo + rfac * sinfac
+            z1 = rfac * phase1 * cosfac + rfac1 * sinfac
+            z2 = (2 * rfac1 * phase1 + rfac * phase2) * cosfac + (rfac2 - rfac * phase1^2) * sinfac
+            dtheta = -z1 / z2
+            theta += dtheta
+            # Wrap theta back into valid periodic range [0, 2π)
+            y_period = pe.rzphi_ys[end] - pe.rzphi_ys[1] + (pe.rzphi_ys[2] - pe.rzphi_ys[1])
+            theta = mod(theta - pe.rzphi_ys[1], y_period) + pe.rzphi_ys[1]
+            if abs(dtheta) < 1e-12 * y_period
+                break
+            end
         end
-
-        function z_deriv2(theta_inner)
-            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            r2yy = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
-            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
-            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
-            rfac_local = sqrt(r2)
-            rfac1 = r2y / (2 * rfac_local)
-            rfac2 = (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local)
-            phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
-            phase2 = 2π * η2          # d²[2π(θ+η)]/dθ²
-            cos_phase_local = cos(2π * (theta_inner + η))
-            sin_phase = sin(2π * (theta_inner + η))
-
-            return (2 * rfac1 * phase1 + rfac_local * phase2) * cos_phase_local +
-                   (rfac2 - rfac_local * phase1^2) * sin_phase  # ∂²z/∂θ²
+        if iter >= max_iter
+            @warn "Newton iteration for separatrix extrema did not converge" iside eta0 theta
         end
-
-        theta = find_zero((z_deriv, z_deriv2), theta, Roots.Newton();
-            atol=1e-12, rtol=1e-12, maxevals=1000)
-
-        rext[iside] = pe.ro + rfac[] * cos_phase[]
-        zsep[iside] = zext[iside] = z_val[]
+        rext[iside] = pe.ro + rfac * cosfac
+        zsep[iside] = z
+        zext[iside] = z
     end
 
     pe.params.rsep = rsep
@@ -445,19 +456,17 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux_opts = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
-    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
-
+    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2];
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     # Compute flux derivatives at all grid points for diagnostics
-    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1,0))
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1,0))
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0,1))
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0,1))
         end
     end
 
@@ -498,9 +507,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
 
-        # Compute total integral using FastInterpolations native integration
-        itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=PeriodicBC())
-        term[ipsi, :] .= FastInterpolations.integrate(itp)
+        # Compute total integral using exact spline integration (only final value needed)
+        term[ipsi, :] .= Spl.total_integral(equil.rzphi_ys, fs_matrix; bc=Spl.PeriodicBC())
     end
 
     totali = sum(term; dims=2)
@@ -513,7 +521,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write contour data
-        h5open(joinpath(dirname(equil.config.eq_filename), "gsec.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.control.eq_filename), "gsec.h5"), "w") do file
             file["mpsi"] = mpsi
             file["mtheta"] = mtheta
             file["r"] = Float32.(r)
@@ -527,7 +535,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write xy plot data
-        h5open(joinpath(dirname(equil.config.eq_filename), "gse.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.control.eq_filename), "gse.h5"), "w") do file
             gse_data = Array{Float32,3}(undef, mpsi + 1, mtheta + 1, 7)
             for ipsi in 0:mpsi
                 for itheta in 0:mtheta
@@ -544,7 +552,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write integrated error criterion
-        h5open(joinpath(dirname(equil.config.eq_filename), "gsei.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.control.eq_filename), "gsei.h5"), "w") do file
             file["xs"] = Float32.(flux.xs)
             file["term"] = Float32.(term)
             file["totali"] = Float32.(totali)

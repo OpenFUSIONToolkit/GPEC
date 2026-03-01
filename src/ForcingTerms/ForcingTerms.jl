@@ -76,7 +76,7 @@ function load_forcing_data!(
     filepath = joinpath(dir_path, forcing_data_file)
 
     if verbose
-        println("Loading forcing data from $filepath")
+        @info "Loading forcing data from $filepath"
     end
 
     if forcing_data_format == "ascii"
@@ -88,7 +88,7 @@ function load_forcing_data!(
     end
 
     if verbose
-        println("  Loaded $(length(forcing_modes)) forcing modes")
+        @info "Loaded $(length(forcing_modes)) forcing modes"
     end
 end
 

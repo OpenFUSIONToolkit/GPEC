@@ -23,7 +23,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
-        val_str = strip(@view(data_str[i:(i+field_width-1)]))
+        val_str = strip(data_str[i:(i+field_width-1)])
         if !isempty(val_str)
             try
                 push!(parsed_values, parse(Float64, val_str))
@@ -55,8 +55,8 @@ them into a `DirectRunInput` object.
   - A `DirectRunInput` object ready for the direct solver.
 """
 function read_efit(config::EquilibriumConfig)
-    println("--> Processing EFIT g-file: $(config.eq_filename)")
-    lines = readlines(config.eq_filename)
+    println("--> Processing EFIT g-file: $(config.control.eq_filename)")
+    lines = readlines(config.control.eq_filename)
 
     # --- Parse Header ---
     header1_parts = split(lines[1])
@@ -96,7 +96,7 @@ function read_efit(config::EquilibriumConfig)
         sqrt.(psi_norm_grid)
     )
     sq_xs = collect(psi_norm_grid)
-    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=ExtendExtrap())
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=:extension)
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -115,8 +115,8 @@ function read_efit(config::EquilibriumConfig)
 
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinary(),
-        bc=CubicFit(), extrap=ExtendExtrap())
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc;
+        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
@@ -130,12 +130,12 @@ Parses a binary CHEASE file, creates initial 1D and 2D splines with proper
 normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object.
 """
 function read_chease_binary(config::EquilibriumConfig)
-    println("--> Reading CHEASE file (Binary): $(config.eq_filename)")
+    println("--> Reading CHEASE file (Binary): $(config.control.eq_filename)")
 
-    R0EXP = config.r0exp
-    B0EXP = config.b0exp
+    R0EXP = config.control.r0exp
+    B0EXP = config.control.b0exp
 
-    open(config.eq_filename, "r") do io
+    open(config.control.eq_filename, "r") do io
         seekstart(io)
         read(io, UInt32)
         ntnova = read(io, Int32)
@@ -171,14 +171,12 @@ function read_chease_binary(config::EquilibriumConfig)
         fs[:, 2] .= zcppr
         fs[:, 3] .= zq
 
-        # Compute cumulative integral of pressure column for normalization using FastInterpolations
-        itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
-        fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
-        # Make a writable copy and normalize pressure integral
-        fs_copy = copy(fs)
-        fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
-        # Create final spline with modified data
-        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
+        sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
+        Spl.spline_integrate!(sq_in)
+
+        fs_copy = copy(sq_in.fs)
+        fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
+        sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
 
         # --- 2D Geometry ---
         mtau = ntnova + 1  # Same with ASCII
@@ -210,10 +208,10 @@ function read_chease_binary(config::EquilibriumConfig)
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
         rz_in_ys = range(0, 2π; length=mtau) |> collect
-        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
-            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
-            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1];
+            bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2];
+            bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
 
         println("--> Finished reading CHEASE equilibrium (Binary).")
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
@@ -236,10 +234,10 @@ them into a `InverseRunInput` object.
   - A `InverseRunInput` object ready for the inverse solver.
 """
 function read_chease_ascii(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.eq_filename)")
-    lines = readlines(config.eq_filename)
-    R0EXP = config.r0exp
-    B0EXP = config.b0exp
+    println("--> Reading CHEASE file: $(config.control.eq_filename)")
+    lines = readlines(config.control.eq_filename)
+    R0EXP = config.control.r0exp
+    B0EXP = config.control.b0exp
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])
@@ -352,14 +350,13 @@ function read_chease_ascii(config::EquilibriumConfig)
     fs[:, 2] .= zcppr # normalized Pressure
     fs[:, 3] .= zq # q profile
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    # Compute cumulative integral of pressure column for normalization using FastInterpolations
-    itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
-    fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
+    # Compute cumulative integral of pressure column for normalization
+    fsi_pressure = Spl.cumulative_integral(xs, fs[:, 2]; bc=CubicFit())
     # Make a writable copy and normalize pressure integral
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
     # Create final spline with modified data
-    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
+    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=:extension)
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -374,11 +371,185 @@ function read_chease_ascii(config::EquilibriumConfig)
 
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data;
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data;
+        bc=(CubicFit(), Spl.PeriodicBC()), extrap=(:extension, :wrap))
     println("--> Finished reading CHEASE equilibrium.")
     println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
     return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
+end
+
+"""
+    read_imas(config, dd)
+
+Reads equilibrium data from an IMAS data dictionary (`dd`), builds the same
+1D and 2D splines that the direct solver expects, and returns a `DirectRunInput`.
+
+This function is the IMAS equivalent of `read_efit`: instead of parsing a text
+file (g-file), it pulls data directly from the standardized IMAS data structure.
+The output format is identical so the rest of the solver chain is unchanged.
+
+## Why DirectRunInput and not InverseRunInput?
+
+IMAS equilibrium data always contains a 2D ψ(R,Z) map (just like an EFIT g-file).
+The direct solver starts from that map and integrates along field lines to build
+flux coordinates. The inverse solver (CHEASE path) starts from R(ψ,θ), Z(ψ,θ)
+which IMAS does not provide in a convenient form.
+
+## Arguments
+
+  - `config`: The `EquilibriumConfig` object containing grid and solver settings.
+  - `dd`: An IMAS data dictionary. Must have `dd.equilibrium` populated with at
+    least one time slice containing `profiles_1d` and `profiles_2d` data.
+
+## Returns
+
+  - A `DirectRunInput` object ready to be passed to `equilibrium_solver`.
+
+## IMAS fields used
+
+  - `dd.equilibrium.time_slice[].global_quantities.psi_axis`     — ψ at magnetic axis [Wb/rad]
+  - `dd.equilibrium.time_slice[].global_quantities.psi_boundary` — ψ at LCFS [Wb/rad]
+  - `dd.equilibrium.time_slice[].profiles_1d.psi`                — 1D ψ grid [Wb/rad]
+  - `dd.equilibrium.time_slice[].profiles_1d.f`                  — F = R·Bt [T·m]
+  - `dd.equilibrium.time_slice[].profiles_1d.pressure`           — plasma pressure [Pa]
+  - `dd.equilibrium.time_slice[].profiles_1d.q`                  — safety factor
+  - `dd.equilibrium.time_slice[].profiles_2d[1].grid.dim1`       — R grid [m]
+  - `dd.equilibrium.time_slice[].profiles_2d[1].grid.dim2`       — Z grid [m]
+  - `dd.equilibrium.time_slice[].profiles_2d[1].psi`             — 2D ψ(R,Z) [Wb/rad]
+"""
+function read_imas(config::EquilibriumConfig, dd)
+    println("--> Processing IMAS equilibrium at global_time = $(dd.global_time) s")
+
+    # ------------------------------------------------------------------
+    # BLOCK 1: Get the equilibrium time slice
+    # ------------------------------------------------------------------
+    # The [] syntax means "at the current dd.global_time" — the standard
+    # IMAS way to access time-dependent arrays of structures.
+    # All equilibrium data for this moment in time lives inside eqt.
+    eqt = dd.equilibrium.time_slice[]
+
+    # ------------------------------------------------------------------
+    # BLOCK 2: Global flux values — the fundamental scale of the equilibrium
+    # ------------------------------------------------------------------
+    # IMAS (COCOS 11) stores ψ as 2π × the value that JPEC's internal solver
+    # expects (COCOS 2 convention, matching the raw gEQDSK / read_efit units).
+    # We therefore divide all ψ values by 2π before handing them to the solver,
+    # and multiply q by 2π for the same reason (q_COCOS11 = q_COCOS2 / 2π).
+    cocos11_to_internal = 1.0 / (2π)
+
+    # psi_axis:     ψ at the magnetic axis (O-point) [Wb, JPEC internal]
+    # psi_boundary: ψ at the last closed flux surface (LCFS) [Wb, JPEC internal]
+    # psio:         total flux swing = |ψ_axis - ψ_boundary| [Wb]
+    #
+    # psio is the normalization scale used throughout the solver.
+    # Every normalized flux coordinate psi_norm ∈ [0,1] is built from psio.
+    psi_axis     = eqt.global_quantities.psi_axis     * cocos11_to_internal
+    psi_boundary = eqt.global_quantities.psi_boundary * cocos11_to_internal
+    psio = abs(psi_boundary - psi_axis)
+
+    if psio < 1e-10
+        error("read_imas: |psi_axis - psi_boundary| = $psio is too small. " *
+              "Check that dd.equilibrium is properly populated.")
+    end
+
+    # ------------------------------------------------------------------
+    # BLOCK 3: Extract and normalize the 1D profiles
+    # ------------------------------------------------------------------
+    # IMAS profiles_1d stores quantities as 1D arrays indexed by ψ,
+    # running from the axis (ψ_axis) to the boundary (ψ_boundary).
+    #
+    # The solver's sq_in spline uses psi_norm ∈ [0,1]:
+    #   psi_norm = 0  at the magnetic axis
+    #   psi_norm = 1  at the plasma boundary
+    #
+    # So we compute: psi_norm = (ψ - ψ_axis) / (ψ_boundary - ψ_axis)
+    psi_1d = eqt.profiles_1d.psi .* cocos11_to_internal   # ψ [Wb, JPEC internal]
+    f_1d   = eqt.profiles_1d.f                            # F(ψ) = R·Bt [T·m], COCOS-independent
+    p_1d   = eqt.profiles_1d.pressure                     # plasma pressure P(ψ) [Pa], COCOS-independent
+    q_1d   = eqt.profiles_1d.q ./ cocos11_to_internal     # q [JPEC internal] = q_IMAS × 2π
+
+    nw = length(psi_1d)
+    psi_norm_grid = (psi_1d .- psi_axis) ./ (psi_boundary - psi_axis)
+    # clamp protects against tiny floating-point overshoot past [0, 1]
+    psi_norm_grid = clamp.(psi_norm_grid, 0.0, 1.0)
+
+    # Build the 4-column table that sq_in expects — same format as read_efit:
+    #   column 1: |F|          toroidal flux function [T·m]
+    #             abs() enforces the sign convention used by the solver
+    #   column 2: μ₀·P         pressure in magnetic units [T²]
+    #             IMAS gives P in [Pa]; μ₀ = 4π×10⁻⁷ [T²/Pa] converts to [T²]
+    #             max(..., 0) prevents unphysical negative pressure from spline overshoot
+    #   column 3: q            safety factor [dimensionless]
+    #   column 4: √(psi_norm)  square root of normalized flux
+    sq_fs_nodes = hcat(
+        abs.(f_1d),
+        max.(p_1d .* mu0, 0.0),
+        q_1d,
+        sqrt.(psi_norm_grid)
+    )
+    sq_in = cubic_interp(psi_norm_grid, sq_fs_nodes; bc=CubicFit(), extrap=:extension)
+
+    # ------------------------------------------------------------------
+    # BLOCK 4: Extract the 2D ψ(R,Z) map and apply the solver's convention
+    # ------------------------------------------------------------------
+    # IMAS stores the full 2D poloidal flux map on a rectangular (R,Z) grid
+    # in profiles_2d[1] (grid_type.index = 1 in the IMAS standard).
+    #
+    # Grid layout:
+    #   dim1 → R values [m]  (first array dimension)
+    #   dim2 → Z values [m]  (second array dimension)
+    #   psi  → ψ(R,Z) [Wb/rad], array of shape [nR × nZ]
+    if isempty(eqt.profiles_2d)
+        error("read_imas: no profiles_2d found in equilibrium time slice. " *
+              "Ensure the 2D ψ(R,Z) map is stored in dd.equilibrium.")
+    end
+    prof2d = eqt.profiles_2d[1]
+    r_grid = prof2d.grid.dim1   # R coordinates [m], 1D array, length nR
+    z_grid = prof2d.grid.dim2   # Z coordinates [m], 1D array, length nZ
+    psi_rz = prof2d.psi .* cocos11_to_internal  # ψ(R,Z) [Wb, JPEC internal]
+
+    # The direct solver's psi_in convention (see DirectRunInput docstring):
+    #
+    #   psi_in(R,Z) = ψ_boundary - ψ(R,Z)
+    #
+    # This makes:
+    #   psi_in = 0    at the plasma boundary  (ψ = ψ_boundary)
+    #   psi_in = psio at the magnetic axis    (ψ = ψ_axis)
+    #
+    # The solver then internally computes psi_norm = 1 - psi_in/psio,
+    # giving psi_norm = 0 at the axis and 1 at the boundary.
+    #
+    # If ψ_boundary < ψ_axis (ψ decreases outward, common in many machines),
+    # then ψ_boundary - ψ(R,Z) is negative at the axis, so we flip the sign
+    # to ensure the axis value is positive — matching the solver's expectation.
+    psi_proc = psi_boundary .- psi_rz
+    if psi_boundary - psi_axis < 0.0
+        psi_proc .*= -1.0
+    end
+
+    rmin, rmax = extrema(r_grid)
+    zmin, zmax = extrema(z_grid)
+
+    psi_in_xs = collect(r_grid)
+    psi_in_ys = collect(z_grid)
+
+    # CubicFit boundary conditions, no periodic BC (open rectangular grid).
+    # Omitting `search` uses the same default as read_efit, keeping the
+    # DirectRunInput type consistent across all input methods.
+    psi_in = cubic_interp(
+        (psi_in_xs, psi_in_ys), psi_proc;
+        bc     = (CubicFit(), CubicFit()),
+        extrap = (:extension, :extension)
+    )
+
+    println("--> IMAS equilibrium loaded:")
+    println("    psio = $(round(psio; sigdigits=5)) Wb")
+    println("    1D profile points: nw = $nw")
+    println("    2D grid: nR = $(length(r_grid)), nZ = $(length(z_grid))")
+    println("    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m")
+    println("    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m")
+
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end

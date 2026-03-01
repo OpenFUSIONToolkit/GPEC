@@ -1,0 +1,78 @@
+"""
+    mercier_scan!(locstab_fs::Array{Float64,5}, plasma_eq::PlasmaEquilibrium)
+
+Evaluates Mercier criterion for local stability and modifies results in place
+within the local stability array. Performs the same function as `mercier_scan`
+in the Fortran code.
+"""
+function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
+
+    # Shorthand
+    profiles = plasma_eq.profiles
+
+    # Allocate splines
+    ff_fs = zeros(length(plasma_eq.rzphi_ys), 5)
+
+    # Compute surface quantities
+    hint = Ref(1)  # Linear search hint for sequential psi access
+    for ipsi in 1:profiles.npts
+        psi = profiles.xs[ipsi]
+        twopif = profiles.F_spline.y[ipsi]
+        p1 = profiles.P_deriv(psi; hint=hint)
+        v1 = profiles.dVdpsi_spline.y[ipsi]
+        v2 = profiles.dVdpsi_deriv(psi; hint=hint)
+        q = profiles.q_spline.y[ipsi]
+        q1 = profiles.q_deriv(psi; hint=hint)
+        chi1 = 2π * plasma_eq.psio
+
+        # Evaluate coordinates and jacobian
+        for itheta in 1:length(plasma_eq.rzphi_ys)
+            theta = plasma_eq.rzphi_ys[itheta]
+
+            # Access nodal derivatives at grid points
+            f1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
+            f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+            jac = plasma_eq.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+            fy1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
+            fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
+            fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, ipsi, itheta]
+
+            rfac = sqrt(f1)
+            eta = 2π * (theta + f2)
+            r = plasma_eq.ro + rfac * cos(eta)
+
+            # Evaluate other local quantities
+            v21 = fy1 / (2.0 * rfac * jac)
+            v22 = (1.0 + fy2) * 2π * rfac / jac
+            v23 = fy3 * r / jac
+            v33 = 2π * r / jac
+            bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
+            dpsisq = (2π * r)^2 * (v21^2 + v22^2)
+
+            # Evaluate integrands
+            ff_fs[itheta, 1] = bsq / dpsisq
+            ff_fs[itheta, 2] = 1.0 / dpsisq
+            ff_fs[itheta, 3] = 1.0 / bsq
+            ff_fs[itheta, 4] = 1.0 / (bsq * dpsisq)
+            ff_fs[itheta, 5] = bsq
+
+            # Weight by jacobian and volume element
+            @views ff_fs[itheta, :] .*= jac / v1
+        end
+
+        # Integrate quantities with respect to theta using exact spline integral
+        avg = Spl.total_integral(plasma_eq.rzphi_ys, ff_fs; bc=Spl.PeriodicBC())
+
+        # Evaluate Mercier criterion and related quantities
+        term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]
+        di = -0.25 + term * (1 - term) +
+             p1 * (v1 / (q1 * chi1^2))^2 * avg[1] *
+             (p1 * (avg[3] + (twopif / chi1)^2 * avg[4]) - v2 / v1)
+        h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
+
+        # Store results in output spline structure
+        locstab_fs[ipsi, 1] = di * profiles.xs[ipsi]
+        locstab_fs[ipsi, 2] = (di + (h - 0.5)^2) * profiles.xs[ipsi]
+        locstab_fs[ipsi, 3] = h
+    end
+end

@@ -300,10 +300,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
         bc=CubicFit(), extrap=ExtendExtrap())
 
     # Print out equilibrium info
-    println("Generating Solovev equilibrium inputs with:")
-    println("   mr=$mr, mz=$mz, ma=$ma")
-    println("   e=$e, a=$a, r0=$r0")
-    println("   q0=$q0, p0fac=$p0fac, b0fac=$b0fac, f0fac=$f0fac")
+    @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
 
     return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end

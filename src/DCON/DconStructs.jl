@@ -11,8 +11,6 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `n::Vector{Int}` - Toroidal mode number(s)
   - `q::Float64` - Safety factor (= m/n)
   - `q1::Float64` - Derivative of safety factor with respect to ψ
-  - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
-  - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -21,14 +19,12 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     n::Vector{Int} = Int[]
     q::Float64 = 0.0
     q1::Float64 = 0.0
-    grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
-    grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
 end
 
 """
     SingAsymptotics
 
-A struct containing asymptotic expansion data for ideal ForceFreeStates calculations at a singular surface.
+A struct containing asymptotic expansion data for ideal DCON calculations at a singular surface.
 This data is computed on-demand during singular surface crossings in `cross_ideal_singular_surf!`.
 
 ## Fields
@@ -89,7 +85,7 @@ A mutable struct containing settings for debugging and benchmarking output.
 end
 
 """
-    ForceFreeStatesInternal
+    DconInternal
 
 A mutable struct holding internal state variables for stability calculations.
 
@@ -119,7 +115,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `locstab::CubicSeriesInterpolant` - Spline for local stability analysis
   - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings for vacuum calculations
 """
-@kwdef mutable struct ForceFreeStatesInternal
+@kwdef mutable struct DconInternal
     dir_path::String = ""
     mlow::Int = 0
     mhigh::Int = 0
@@ -147,9 +143,9 @@ A mutable struct holding internal state variables for stability calculations.
 end
 
 """
-    ForceFreeStatesControl
+    DconControl
 
-A mutable struct containing control parameters for stability analysis, set by the user in jpec.toml.
+A mutable struct containing control parameters for stability analysis, set by the user in dcon.toml.
 
 ## Fields
 
@@ -197,6 +193,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
+  - `dcon_kin_threads::Int` - Number of threads for kinetic calculations (not yet implemented)
   - `parallel_threads::Int` - Number of parallel threads (not yet implemented)
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
@@ -204,9 +201,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `HDF5_filename::String` - Name of HDF5 output file
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
-  - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
 """
-@kwdef mutable struct ForceFreeStatesControl
+@kwdef mutable struct DconControl
     verbose::Bool = true
     bal_flag::Bool = false
     mat_flag::Bool = false
@@ -251,17 +247,17 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
+    dcon_kin_threads::Int = 1
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
-    HDF5_filename::String = "jpec.h5"
+    HDF5_filename::String = "euler.h5"
     force_wv_symmetry::Bool = true
     save_interval::Int = 10
-    force_termination::Bool = false
 end
 
-@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}
+@kwdef mutable struct FourFitVars
     mpert::Int
     mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
@@ -269,18 +265,15 @@ end
     # Complex-valued CubicSeriesInterpolant for stability matrices
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
-    # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
-    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
-
-    amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    dmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    amats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    bmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    cmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    dmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    emats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    hmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    fmats_lower::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    kmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    gmats::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -292,17 +285,18 @@ end
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
+# Helper to create empty series interpolant for default initialization (real-valued)
+function _empty_series_interp(n_series::Int)
+    xs = collect(range(0.0, 1.0; length=5))
+    Y = zeros(Float64, 5, n_series)
+    return cubic_interp(xs, Y)
+end
+
 # Helper to create empty complex series interpolant for default initialization
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
     return cubic_interp(xs, Y)
-end
-
-function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
-    xs = collect(range(0.0, 1.0; length=5))
-    Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Y; itp_opts...)
 end
 
 # Convenience constructor
@@ -326,7 +320,6 @@ Populated in `Free.jl`.
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
   - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-  - `grre::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
   - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
 """
 @kwdef mutable struct VacuumData
@@ -344,7 +337,6 @@ Populated in `Free.jl`.
     # VACUUM can't handle 3D yet, so these are temporary mpert arrays
     # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
-    grre::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
     xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
 end
 
@@ -353,7 +345,7 @@ VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, m
 """
 OdeState
 
-A mutable struct to hold the state of the ODE solver used by the ForceFreeStates integration routines.
+A mutable struct to hold the state of the ODE solver used by the DCON integration routines.
 This struct stores configuration parameters used to allocate arrays, the evolving stored
 solution during integration, diagnostic arrays used for normalization / Gaussian reduction,
 and a small set of temporary matrices and factors used to compute singular-layer corrections.
@@ -397,6 +389,17 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape
     `(numpert_total, numpert_total, numunorms_init)`.
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
+  - Temporary workspaces used during integration calculations:
+
+      + `amat::Vector{ComplexF64}` - Flattened A matrix (length `numpert_total^2`)
+      + `bmat::Vector{ComplexF64}` - Flattened B matrix (length `numpert_total^2`)
+      + `cmat::Vector{ComplexF64}` - Flattened C matrix (length `numpert_total^2`)
+      + `fmat_lower::Vector{ComplexF64}` - Lower-triangle factor of F (length `numpert_total^2`)
+      + `kmat::Vector{ComplexF64}` - Flattened K matrix (length `numpert_total^2`)
+      + `gmat::Vector{ComplexF64}` - Flattened G matrix (length `numpert_total^2`)
+      + `tmp::Matrix{ComplexF64}` - Workspace matrix for EL derivative calculations with shape `(numpert_total, numpert_total)`.
+      + `Afact::Union{Cholesky{ComplexF64, Matrix{ComplexF64}}, Nothing}` - Cholesky factor
+      + `singfac_vec::Vector{Float64}` - Vector of m-nq factors
 """
 @kwdef mutable struct OdeState
     # Initialization parameters
@@ -407,7 +410,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
-    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
@@ -442,15 +444,80 @@ and a small set of temporary matrices and factors used to compute singular-layer
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
 
+    # Temporary matrices for sing_der calculations
+    amat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    bmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    cmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    fmat_lower::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    kmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    gmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total^2)
+    tmp::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    Afact::Cholesky{ComplexF64,Matrix{ComplexF64}} = cholesky(Matrix{ComplexF64}(I, numpert_total, numpert_total))
+    singfac_vec::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
     spline_hint::Base.RefValue{Int} = Ref(1)
     # Separate hint for wvmat splines (different grid size than equilibrium profiles)
     wv_hint::Base.RefValue{Int} = Ref(1)
-    # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
-    # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
-    rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 end
 
 # Initialize function for OdeState with relevant parameters for array initialization
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+# Below here are debug output structs used for benchmarking and unit testing
+
+
+
+
+"""
+    VacuumBenchmarkInputs
+
+A struct to hold all inputs required for vacuum benchmarking between Fortran and Julia implementations.
+
+## Fields
+
+  - `wv_block::Matrix{ComplexF64}` - Vacuum response matrix block
+  - `mpert::Int` - Number of poloidal modes
+  - `mtheta_eq::Int` - Number of poloidal grid points in input equilibrium (corresponds to `mtheta_eq` in VacuumInput)
+  - `mthvac::Int` - Number of poloidal grid points in vacuum calculations (corresponds to `mtheta` in VacuumInput)
+  - `complex_flag::Bool` - Flag indicating if complex arithmetic is used
+  - `kernelsign::Float64` - Sign of the kernel for vacuum calculation
+  - `wall_flag::Bool` - Flag indicating presence of wall
+  - `farwall_flag::Bool` - Flag indicating presence of far wall
+  - `grri::Matrix{Float64}` - Green's function response matrix
+  - `xzpts::Matrix{Float64}` - Coordinate points on plasma boundary [R, Z]
+  - `ahg_file::String` - Filename for AHG data
+  - `dir_path::String` - Directory path for input/output files
+  - `vac_inputs::Vacuum.VacuumInput` - VacuumInput struct for Julia vacuum code
+  - `wall_settings::Vacuum.WallShapeSettings` - Wall shape settings
+  - `n::Int` - Toroidal mode number
+  - `ipert_n::Int` - Index of perturbed toroidal mode
+  - `psifac::Float64` - Normalized flux coordinate
+"""
+@kwdef struct VacuumBenchmarkInputs
+    # Vacuum computation parameters
+    wv_block::Matrix{ComplexF64}
+    mpert::Int
+    mtheta_eq::Int
+    mthvac::Int
+    complex_flag::Bool
+    kernelsign::Float64
+    wall_flag::Bool
+    farwall_flag::Bool
+    grri::Matrix{Float64}
+    xzpts::Matrix{Float64}
+    ahg_file::String
+    dir_path::String
+
+    # VacuumInput struct for Julia code
+    vac_inputs::Vacuum.VacuumInput
+
+    # Wall settings
+    wall_settings::Vacuum.WallShapeSettings
+
+    # Additional context
+    n::Int
+    ipert_n::Int
+    psifac::Float64
+end
