@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Setup · JPEC.jl</title><meta name="title" content="Setup · JPEC.jl"/><meta property="og:title" content="Setup · JPEC.jl"/><meta property="twitter:title" content="Setup · JPEC.jl"/><meta name="description" content="Documentation for JPEC.jl."/><meta property="og:description" content="Documentation for JPEC.jl."/><meta property="twitter:description" content="Documentation for JPEC.jl."/><meta property="og:url" content="https://OpenFUSIONToolkit.github.io/JPEC/set_up/"/><meta property="twitter:url" content="https://OpenFUSIONToolkit.github.io/JPEC/set_up/"/><link rel="canonical" href="https://OpenFUSIONToolkit.github.io/JPEC/set_up/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">JPEC.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Setup</a><ul class="internal"><li><a class="tocitem" href="#On-Windows-via-WSL-(Ubuntu)"><span>On Windows via WSL (Ubuntu)</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-JPEC-on-one-of-the-included-examples"><span>Run JPEC on one of the included examples</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-in-the-current-directory-(must-contain-jpec.toml)"><span>Run in the current directory (must contain jpec.toml)</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-the-full-JPEC-analysis-pipeline"><span>Run the full JPEC analysis pipeline</span></a></li><li class="toplevel"><a class="tocitem" href="#Or-access-individual-modules"><span>Or access individual modules</span></a></li><li class="toplevel"><a class="tocitem" href="#Set-up-equilibrium-only"><span>Set up equilibrium only</span></a></li><li class="toplevel"><a class="tocitem" href="#Access-equilibrium-data"><span>Access equilibrium data</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-pre-commit-(requires-Python/pip)"><span>Install pre-commit (requires Python/pip)</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)"><span>Install JuliaFormatter globally (required for Julia code formatting hook)</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-the-git-hooks-in-your-local-repository"><span>Install the git hooks in your local repository</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-on-all-files-in-the-repository"><span>Run on all files in the repository</span></a></li><li class="toplevel"><a class="tocitem" href="#Run-only-on-currently-staged-files"><span>Run only on currently staged files</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-nbstripout-globally"><span>Install nbstripout globally</span></a></li><li class="toplevel"><a class="tocitem" href="#Install-filter-for-this-repository"><span>Install filter for this repository</span></a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../vacuum/">Vacuum</a></li><li><a class="tocitem" href="../equilibrium/">Equilibrium</a></li><li><a class="tocitem" href="../utilities/">Utilities</a></li><li><a class="tocitem" href="../forcing_terms/">Forcing Terms</a></li><li><a class="tocitem" href="../perturbed_equilibrium/">Perturbed Equilibrium</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Setup</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Setup</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/OpenFUSIONToolkit/JPEC/blob/develop/docs/src/set_up.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Setting-up-JPEC"><a class="docs-heading-anchor" href="#Setting-up-JPEC">Setting up JPEC</a><a id="Setting-up-JPEC-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-up-JPEC" title="Permalink"></a></h1><ul><li><a href="#setting-up-jpec">Setting up JPEC</a><ul><li><a href="#on-windows-via-wsl-ubuntu">On Windows via WSL (Ubuntu)</a></li><li><a href="#on-macos">On macOS</a></li><li><a href="#pre-commit-hooks-optional-developer-tools">Pre-commit Hooks (Optional Developer Tools)</a></li></ul></li></ul><h2 id="On-Windows-via-WSL-(Ubuntu)"><a class="docs-heading-anchor" href="#On-Windows-via-WSL-(Ubuntu)">On Windows via WSL (Ubuntu)</a><a id="On-Windows-via-WSL-(Ubuntu)-1"></a><a class="docs-heading-anchor-permalink" href="#On-Windows-via-WSL-(Ubuntu)" title="Permalink"></a></h2><ol><li><p>Install WSL and Ubuntu If you don&#39;t already have WSL and Ubuntu installed, set this up. <a href="https://learn.microsoft.com/en-us/windows/wsl/install">This page</a> gives detailed instructions on how to complete the installation. In the Windows Powershell,</p><ol><li>Make sure WSL is installed:   <code>PowerShell   wsl --install</code></li><li>Set Ubuntu as your default WSL distro:   <code>PowerShell   wsl --set-default Ubuntu</code></li><li>Launch Ubuntu and update:   <code>PowerShell   sudo apt update &amp;&amp; sudo apt upgrade -y</code></li></ol></li><li><p>Install build tools in WSL  <code>shell  sudo apt install build-essential cmake -y</code></p><p><code>build-essential</code> → GCC, make</p><p><code>cmake</code> → sometimes needed by dependencies</p></li><li><p>Install Julia in WSL</p><ol><li><p>Download the latest Linux tarball from the official site <a href="https://julialang.org/downloads/">Julia downloads</a>. It will look like  <code>shell  wget https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.3-linux-x86_64.tar.gz</code></p><p>☆ Replace the URL with the latest stable version.</p></li><li><p>Extract and move it to /opt (or any path):</p><p><code>shell  tar -xvzf julia-1.11.3-linux-x86_64.tar.gz  sudo mv julia-1.11.3 /opt/</code></p><p>☆ Ensure these commands match the tarball you installed. These commands match the above tarball and might need to be modified for you installation.</p></li><li><p>Add Julia to PATH:</p><p><code>shell  echo &#39;export PATH=/opt/julia-1.11.3/bin:$PATH&#39; &gt;&gt; ~/.bashrc  source ~/.bashrc</code></p></li><li><p>Test it is properly installed</p><p><code>shell  julia --version</code></p></li></ol></li><li><p>Install Python/Jupyter in WSL</p><p>This step is only really required if you want to run the <code>.ipynb</code> test notebooks. You do not necessarily need Python3 installed, but Jupyter runs on a Python server. If you do not want to install Python3 and Jupyter, you can install the &quot;IJulia&quot; package to your Julia environment instead and run the command &#39;notebook()&#39; in the terminal.</p><ol><li>To install Python3 and Jupyter notebooks, use these commands   <code>shell   sudo apt install python3-pip python3-venv -y   python3 -m pip install --user jupyter jupyterlab notebook ipykernel</code></li></ol><p>⚠ Important: Add local Python scripts to PATH:</p><pre><code class="nohighlight hljs"> ```shell
+ echo &#39;export PATH=$HOME/.local/bin:$PATH&#39; &gt;&gt; ~/.bashrc
+ source ~/.bashrc
+ ```</code></pre><ol><li><p>Verify it is properly installed</p><p><code>shell  jupyter --version</code></p></li></ol></li><li><p>Clone JPEC into your WSL home folder.</p></li></ol><p>Clone it from GitHub directly to your virtual machine.</p><pre><code class="language-shell hljs">    git clone https://github.com/OpenFUSIONToolkit/JPEC.git
+    cd JPEC
+    ```
+
+6. Install the Julia packages for JPEC
+    1. Launch Julia:
+        ```shell
+        julia
+        ```
+    2. In Julia REPL:
+        ``` julia
+        using Pkg
+        Pkg.instantiate()       # install recorded dependencies
+        Pkg.add(&quot;Preferences&quot;)  # install missing dependency if needed
+        Pkg.build(&quot;IJulia&quot;)     # rebuild kernel
+        Pkg.precompile()        # precompile all packages - probably unnecessary
+        ```
+
+7. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
+    1. To open a .ipynb notebook
+        1. Launch Jupyter from WSL, make sure you have exited Julia using the `exit()` command and then type in the shell
+        ```shell
+        jupyter notebook --no-browser
+        ```
+        It will print a URL with a token.
+
+        2. Copy the URL into your Windows browser **OR** open the notebook in VS Code using the **Remote - WSL** extension.
+
+    2. (Optionally) Integrate WSL with VS Code
+        1. Install **Remote - WSL** extension in VS Code.
+        2. Open VS Code → Connect To → Connect to WSL.
+        3. Click Open Folder and then navigate to the JPEC folder on your VM. Open your JPEC folder from WSL: ~/JPEC.
+
+        If this is not working, you can launch vscode from the WSL shell you have using the command `code .`
+
+        4. Open a terminal inside VS Code — it will automatically use WSL/Ubuntu.
+        5. You can now run:
+            ```shell
+            julia       # run scripts
+            jupyter notebook --no-browser
+            ```
+
+        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the &quot;Select Kernel&quot; button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL. All dependencies are accessible.
+    3.  Run JPEC
+        1. Launch Julia and run your scripts as usual:
+            ```shell
+            include(&quot;path/to/jpec_script.jl&quot;)
+            ```
+
+## On macOS
+
+(To be completed)
+
+## Running JPEC
+
+Once JPEC is installed and built, you can run it in two ways:
+
+### As a Command-Line Script
+
+JPEC includes an executable script (`jpec`) in the project root directory. To run JPEC on a directory containing a `jpec.toml` configuration file:
+</code></pre><p>bash ./jpec path/to/directory</p><pre><code class="nohighlight hljs">
+**Example:**</code></pre><p>bash</p><h1 id="Run-JPEC-on-one-of-the-included-examples"><a class="docs-heading-anchor" href="#Run-JPEC-on-one-of-the-included-examples">Run JPEC on one of the included examples</a><a id="Run-JPEC-on-one-of-the-included-examples-1"></a><a class="docs-heading-anchor-permalink" href="#Run-JPEC-on-one-of-the-included-examples" title="Permalink"></a></h1><p>./jpec examples/DIIID-like<em>ideal</em>example</p><h1 id="Run-in-the-current-directory-(must-contain-jpec.toml)"><a class="docs-heading-anchor" href="#Run-in-the-current-directory-(must-contain-jpec.toml)">Run in the current directory (must contain jpec.toml)</a><a id="Run-in-the-current-directory-(must-contain-jpec.toml)-1"></a><a class="docs-heading-anchor-permalink" href="#Run-in-the-current-directory-(must-contain-jpec.toml)" title="Permalink"></a></h1><p>./jpec</p><pre><code class="nohighlight hljs">
+The script will:
+1. Read configuration from `jpec.toml` in the specified directory
+2. Load or generate the equilibrium based on the `[Equilibrium]` section
+3. Compute force-free states (stability analysis) based on the `[ForceFreeStates]` section
+4. If a `[PerturbedEquilibrium]` section exists, compute the plasma response to external perturbations
+5. Write output to HDF5 files as configured
+
+**Early Termination:** You can stop execution early by setting:
+- `force_termination = true` in `[Equilibrium]` to stop after equilibrium setup
+- `force_termination = true` in `[ForceFreeStates]` to stop after stability analysis (before perturbed equilibrium)
+
+### As a Julia Library
+
+You can also use JPEC programmatically in your own Julia scripts or notebooks:
+</code></pre><p>julia using JPEC</p><h1 id="Run-the-full-JPEC-analysis-pipeline"><a class="docs-heading-anchor" href="#Run-the-full-JPEC-analysis-pipeline">Run the full JPEC analysis pipeline</a><a id="Run-the-full-JPEC-analysis-pipeline-1"></a><a class="docs-heading-anchor-permalink" href="#Run-the-full-JPEC-analysis-pipeline" title="Permalink"></a></h1><p>JPEC.main([&quot;path/to/directory&quot;])</p><h1 id="Or-access-individual-modules"><a class="docs-heading-anchor" href="#Or-access-individual-modules">Or access individual modules</a><a id="Or-access-individual-modules-1"></a><a class="docs-heading-anchor-permalink" href="#Or-access-individual-modules" title="Permalink"></a></h1><p>using JPEC.Equilibrium using JPEC.Vacuum using JPEC.ForceFreeStates</p><h1 id="Set-up-equilibrium-only"><a class="docs-heading-anchor" href="#Set-up-equilibrium-only">Set up equilibrium only</a><a id="Set-up-equilibrium-only-1"></a><a class="docs-heading-anchor-permalink" href="#Set-up-equilibrium-only" title="Permalink"></a></h1><p>equil = Equilibrium.setup_equilibrium(&quot;path/to/jpec.toml&quot;)</p><h1 id="Access-equilibrium-data"><a class="docs-heading-anchor" href="#Access-equilibrium-data">Access equilibrium data</a><a id="Access-equilibrium-data-1"></a><a class="docs-heading-anchor-permalink" href="#Access-equilibrium-data" title="Permalink"></a></h1><p>println(&quot;q at axis: &quot;, equil.params.q0) println(&quot;Beta-N: &quot;, equil.params.betan)</p><pre><code class="nohighlight hljs">
+### Configuration Files
+
+JPEC uses TOML configuration files (`jpec.toml`) with the following main sections:
+
+- **`[Equilibrium]`**: Equilibrium solver settings (input file, grid resolution, coordinate system, etc.)
+- **`[Wall]`**: Wall geometry for vacuum calculations (shape, size, position)
+- **`[ForceFreeStates]`**: Stability analysis settings (mode numbers, tolerances, flags)
+- **`[PerturbedEquilibrium]`**: Plasma response settings (forcing data, output options)
+
+See the example directories for complete configuration file templates.
+
+(Setup instructions to be added)
+
+## Pre-commit Hooks (Optional Developer Tools)
+
+The repository uses pre-commit hooks to maintain code quality and prevent noisy commits from Jupyter notebook metadata and outputs.
+
+### Why Use Pre-commit Hooks?
+
+Pre-commit hooks automatically:
+- Strip Jupyter notebook outputs, execution counts, and metadata (prevents merge conflicts and noisy diffs)
+- Format Julia code according to `.JuliaFormatter.toml` settings
+- Remove trailing whitespace and fix line endings
+- Validate YAML/TOML syntax
+- Prevent accidentally committing large files (&gt;5MB)
+
+### Installation
+</code></pre><p>bash</p><h1 id="Install-pre-commit-(requires-Python/pip)"><a class="docs-heading-anchor" href="#Install-pre-commit-(requires-Python/pip)">Install pre-commit (requires Python/pip)</a><a id="Install-pre-commit-(requires-Python/pip)-1"></a><a class="docs-heading-anchor-permalink" href="#Install-pre-commit-(requires-Python/pip)" title="Permalink"></a></h1><p>pip install pre-commit</p><h1 id="Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)"><a class="docs-heading-anchor" href="#Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)">Install JuliaFormatter globally (required for Julia code formatting hook)</a><a id="Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)-1"></a><a class="docs-heading-anchor-permalink" href="#Install-JuliaFormatter-globally-(required-for-Julia-code-formatting-hook)" title="Permalink"></a></h1><p>julia -e &#39;using Pkg; Pkg.add(&quot;JuliaFormatter&quot;)&#39;</p><h1 id="Install-the-git-hooks-in-your-local-repository"><a class="docs-heading-anchor" href="#Install-the-git-hooks-in-your-local-repository">Install the git hooks in your local repository</a><a id="Install-the-git-hooks-in-your-local-repository-1"></a><a class="docs-heading-anchor-permalink" href="#Install-the-git-hooks-in-your-local-repository" title="Permalink"></a></h1><p>cd /path/to/JPEC pre-commit install</p><pre><code class="nohighlight hljs">
+### Usage
+
+Once installed, the hooks run automatically on `git commit`. You can also run them manually:
+</code></pre><p>bash</p><h1 id="Run-on-all-files-in-the-repository"><a class="docs-heading-anchor" href="#Run-on-all-files-in-the-repository">Run on all files in the repository</a><a id="Run-on-all-files-in-the-repository-1"></a><a class="docs-heading-anchor-permalink" href="#Run-on-all-files-in-the-repository" title="Permalink"></a></h1><p>pre-commit run –all-files</p><h1 id="Run-only-on-currently-staged-files"><a class="docs-heading-anchor" href="#Run-only-on-currently-staged-files">Run only on currently staged files</a><a id="Run-only-on-currently-staged-files-1"></a><a class="docs-heading-anchor-permalink" href="#Run-only-on-currently-staged-files" title="Permalink"></a></h1><p>pre-commit run</p><pre><code class="nohighlight hljs">
+### Bypassing Hooks (Not Recommended)
+
+In rare cases where you need to bypass the hooks:
+</code></pre><p>bash git commit –no-verify</p><pre><code class="nohighlight hljs">
+However, this is discouraged as it may introduce notebook clutter or formatting inconsistencies.
+
+### Optional: Standalone nbstripout Filter
+
+For additional protection beyond pre-commit, you can install nbstripout as a git filter:
+</code></pre><p>bash</p><h1 id="Install-nbstripout-globally"><a class="docs-heading-anchor" href="#Install-nbstripout-globally">Install nbstripout globally</a><a id="Install-nbstripout-globally-1"></a><a class="docs-heading-anchor-permalink" href="#Install-nbstripout-globally" title="Permalink"></a></h1><p>pip install nbstripout</p><h1 id="Install-filter-for-this-repository"><a class="docs-heading-anchor" href="#Install-filter-for-this-repository">Install filter for this repository</a><a id="Install-filter-for-this-repository-1"></a><a class="docs-heading-anchor-permalink" href="#Install-filter-for-this-repository" title="Permalink"></a></h1><p>cd /path/to/JPEC nbstripout –install ```</p><p>This ensures notebooks are cleaned even if pre-commit is bypassed with <code>--no-verify</code>. However, this is <strong>optional</strong> and not required for normal development - the pre-commit hook is sufficient for most workflows.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../vacuum/">Vacuum »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Sunday 1 March 2026 03:04">Sunday 1 March 2026</span>. Using Julia version 1.11.9.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
