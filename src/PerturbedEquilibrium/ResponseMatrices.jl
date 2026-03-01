@@ -24,7 +24,7 @@ plasma surface from ForceFreeStates eigenmode solutions.
 
 ## What's extracted:
 
-1. **Boundary displacement**: ξ_ψ from `u_store[:, :, 1, end]`
+1. **Boundary displacement**: ξ_ψ from `u_store[:, :, end, 1]`
    - This is the radial (normal) component of the eigenmode displacement
    - At the last radial integration point (plasma edge)
    - Dimensions: [numpert_total, numpert_total]
@@ -55,10 +55,10 @@ function extract_boundary_displacements(
     intr::ForceFreeStatesInternal
 )
     # Extract boundary displacement (normal component)
-    # u_store dimensions: [numpert_total, numpert_total, 2, numsteps]
-    # Index 1 in 3rd dimension is ξ_ψ (radial displacement)
-    # Last index in 4th dimension is the boundary
-    ξ_psi_boundary = ForceFreeStates_results.u_store[:, :, 1, ForceFreeStates_results.step]
+    # u_store dimensions: [numpert_total, numpert_total, numsteps, 2]
+    # Index 1 in 4th dimension is ξ_ψ (radial displacement)
+    # Last index in 3rd dimension is the boundary step
+    ξ_psi_boundary = ForceFreeStates_results.u_store[:, :, ForceFreeStates_results.step, 1]
 
     # Get boundary location in normalized flux coordinates
     psi_boundary = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
