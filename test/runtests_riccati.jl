@@ -159,6 +159,19 @@ using TOML
         # for this configuration.
         @test isapprox(real(intr_ric.sing[1].delta_prime[1]),  57.3; rtol=0.05)
         @test isapprox(real(intr_ric.sing[2].delta_prime[1]), -4.03; rtol=0.05)
+
+        # delta_prime_col is populated, has correct shape (N × n_res_modes), and
+        # its diagonal elements match delta_prime exactly.
+        N = intr_ric.numpert_total
+        @test all(s -> !isempty(s.delta_prime_col), intr_ric.sing)
+        @test all(s -> size(s.delta_prime_col, 1) == N, intr_ric.sing)
+        @test all(s -> size(s.delta_prime_col, 2) == length(s.delta_prime), intr_ric.sing)
+        for s in intr_ric.sing
+            ipert_res_vals = 1 .+ s.m .- intr_ric.mlow .+ (s.n .- intr_ric.nlow) .* intr_ric.mpert
+            for (i, ipr) in enumerate(ipert_res_vals)
+                @test s.delta_prime_col[ipr, i] ≈ s.delta_prime[i]  rtol=1e-10
+            end
+        end
     end
 
     @testset "Riccati end state has U₂ ≈ I" begin

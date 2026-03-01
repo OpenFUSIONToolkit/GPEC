@@ -14,6 +14,12 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
   - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
   - `delta_prime::Vector{ComplexF64}` - Tearing stability Δ' per resonant mode (indexed same as m/n)
+  - `delta_prime_col::Matrix{ComplexF64}` - Full Δ' column: shape (numpert_total × n_res_modes).
+    `delta_prime_col[j, i]` = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio),
+    the coupling of mode j to resonant mode i through the singular layer.
+    The diagonal element `delta_prime_col[ipert_res_i, i]` equals `delta_prime[i]`.
+    Off-diagonal elements represent intra-surface mode coupling via the small asymptotic.
+    Only populated for the Riccati/parallel FM paths (not the standard path).
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -25,6 +31,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
     grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
     delta_prime::Vector{ComplexF64} = ComplexF64[]
+    delta_prime_col::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """

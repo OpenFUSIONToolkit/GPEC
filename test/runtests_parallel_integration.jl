@@ -125,6 +125,12 @@ using TOML
     @testset "Parallel FM integration matches standard ODE — Solovev example" begin
         # Run standard and parallel FM integrations on the Solovev regression test.
         # The energy eigenvalue et[1] should match to within 2%.
+        #
+        # Note: this test uses the Solovev example (N=8 modes) where FM propagators
+        # are well-conditioned. For large-N problems (N ≳ 20, e.g. DIIID with N=26),
+        # FM propagator ill-conditioning leads to ~10% energy error with no speedup
+        # over the serial Riccati path. See parallel_eulerlagrange_integration docstring
+        # for details and deferred fix approaches (bidirectional integration / continuous QR).
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
         function run_solovev(use_parallel)
@@ -165,6 +171,20 @@ using TOML
         # (U1,U2) normalization, so absolute Δ' values are not compared here.
         @test all(s -> !isempty(s.delta_prime), intr_par.sing)
         @test all(s -> all(isfinite, s.delta_prime), intr_par.sing)
+
+        # delta_prime_col is populated and has the correct shape (N × n_res_modes)
+        N = intr_par.numpert_total
+        @test all(s -> !isempty(s.delta_prime_col), intr_par.sing)
+        @test all(s -> size(s.delta_prime_col, 1) == N, intr_par.sing)
+        @test all(s -> size(s.delta_prime_col, 2) == length(s.delta_prime), intr_par.sing)
+
+        # Diagonal of delta_prime_col matches delta_prime (consistency check)
+        for s in intr_par.sing
+            ipert_res_vals = 1 .+ s.m .- intr_par.mlow .+ (s.n .- intr_par.nlow) .* intr_par.mpert
+            for (i, ipr) in enumerate(ipert_res_vals)
+                @test s.delta_prime_col[ipr, i] ≈ s.delta_prime[i]  rtol=1e-10
+            end
+        end
     end
 
     @testset "ode_itime_cost is additive over sub-intervals" begin

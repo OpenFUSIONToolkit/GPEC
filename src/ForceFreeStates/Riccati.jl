@@ -350,12 +350,17 @@ function riccati_cross_ideal_singular_surf!(
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
     # Compute Δ' using ipert_res directly (no GR → perm_col = ipert_res, ca_r diagonal = 1).
+    # Also compute the full column Δ' (all N modes) for the off-diagonal coupling.
     if !ctrl.con_flag
         denom = (2π)^2 * equil.psio
-        resize!(intr.sing[ising].delta_prime, length(sing_asymp.r1))
+        n_res = length(sing_asymp.r1)
+        N = intr.numpert_total
+        resize!(intr.sing[ising].delta_prime, n_res)
+        intr.sing[ising].delta_prime_col = zeros(ComplexF64, N, n_res)
         for i in eachindex(sing_asymp.r1)
-            Δca = odet.ca_r[ipert_res[i], ipert_res[i], 2, ising] - odet.ca_l[ipert_res[i], ipert_res[i], 2, ising]
-            intr.sing[ising].delta_prime[i] = Δca / denom
+            Δca_col = (odet.ca_r[:, ipert_res[i], 2, ising] - odet.ca_l[:, ipert_res[i], 2, ising]) / denom
+            intr.sing[ising].delta_prime_col[:, i] .= Δca_col
+            intr.sing[ising].delta_prime[i] = Δca_col[ipert_res[i]]
         end
     end
 
@@ -554,8 +559,8 @@ end
 
 Parallel fundamental matrix (propagator) driver for the EL integration.
 
-Functionally equivalent to `eulerlagrange_integration`, but integrates all chunks
-concurrently using `Threads.@threads` for potential ~Nthreads× speedup:
+Functionally equivalent to `eulerlagrange_integration`, integrating all bulk chunks
+concurrently using `Threads.@threads`, then re-integrating the outer plasma serially:
 
 1. **Chunk generation**: calls `chunk_el_integration_bounds`, then `balance_integration_chunks`
    to sub-divide chunks for load-balanced parallel execution.
@@ -565,6 +570,11 @@ concurrently using `Threads.@threads` for potential ~Nthreads× speedup:
 3. **Serial assembly**: propagators are applied sequentially with `apply_propagator!`.
    Rational surface crossings use `riccati_cross_ideal_singular_surf!` (no Gaussian
    reduction) matching the Riccati path convention.
+4. **Outer plasma re-integration**: after the last rational surface crossing, the outer
+   plasma (from last ψ_s to psilim) is re-integrated using `riccati_integrate_chunk!`.
+   FM propagation in this region is prone to precision loss for high N (exponential growth
+   without renormalization); Riccati integration keeps matrices bounded and provides dense
+   checkpoints for `findmax_dW_edge!`.
 
 Enable via `use_parallel = true` in `[ForceFreeStates]` of jpec.toml, or by setting
 `ctrl.use_parallel = true` programmatically. Requires `singfac_min != 0`.
@@ -572,8 +582,27 @@ Enable via `use_parallel = true` in `[ForceFreeStates]` of jpec.toml, or by sett
 **Key differences from standard integration:**
 - No Gaussian reduction (crossings use riccati-style, odet.ifix stays 0)
 - `transform_u!` is called but is a no-op (identity transform, ifix=0)
-- `ud_store` is approximate (set to zeros; does not affect energies or Δ')
-- `u_store` has one entry per chunk plus one per crossing (fewer than standard)
+- `ud_store` is approximate (set to zeros for FM chunks; does not affect energies or Δ')
+- Outer plasma uses serial Riccati integration for numerical stability
+
+**Known numerical limitation — large N:**
+The FM propagator approach integrates each chunk from identity initial conditions without
+renormalization. For problems with many coupled modes (N ≳ 20), the ODE solution grows
+exponentially within each chunk. Without Riccati-style renormalization, the individual
+U₁ and U₂ blocks can become large and ill-conditioned. When `apply_propagator!` is
+applied, the computed state at each crossing can have significant numerical error —
+even after renormalization — because the ill-conditioned U₁/U₂ blocks cancel incorrectly.
+
+In benchmarks on the DIIID-like example (N=26, n=1), this produces ~10% energy error
+with no wall-clock speedup over the serial Riccati path. For small N (N ≲ 10, e.g.
+Solovev), the FM propagators are well-conditioned and the parallel path gives correct
+results with 1–2× speedup.
+
+**Deferred fix**: bidirectional integration (integrating backward from the edge and
+forward from the axis, then matching at midpoints) would keep each propagator half as
+wide and dramatically reduce condition numbers. Alternatively, continuous QR
+orthogonalization within each chunk integration would eliminate the ill-conditioning
+entirely. Both approaches are deferred to future PRs.
 """
 function parallel_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -615,7 +644,10 @@ function parallel_eulerlagrange_integration(
                                     odet_proxies[Threads.threadid()])
     end
 
-    # SERIAL assembly: apply propagators and handle crossings in order
+    # SERIAL assembly: apply propagators and handle crossings in order.
+    # last_crossing_step tracks the u_store index of the most recent crossing so that
+    # the outer plasma (from last rational surface to psilim) can be re-integrated.
+    last_crossing_step = 1
     for (i, chunk) in enumerate(chunks)
         apply_propagator!(odet, propagators[i])
         odet.psifac = chunk.psi_end
@@ -637,6 +669,7 @@ function parallel_eulerlagrange_integration(
                 # in the FM-accumulated state, giving an incorrect solution subspace.
                 renormalize_riccati_inplace!(odet.u, N)
                 riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+                last_crossing_step = odet.step - 1  # u_store index of the crossing state
             end
         else
             # Save non-crossing end-of-chunk state for stability criterion evaluation
@@ -651,7 +684,33 @@ function parallel_eulerlagrange_integration(
         end
     end
 
-    # Find peak dW in edge region (same as standard path)
+    # Re-integrate the outer plasma (from last rational surface crossing to psilim) using
+    # Riccati for numerical stability and dense checkpoint storage.
+    #
+    # FM propagation in the outer plasma (no rational surfaces) is prone to precision loss
+    # for high N: the solution grows exponentially without renormalization, causing matrix
+    # condition numbers to grow and wp = U₂·U₁⁻¹ to lose accuracy. Riccati integration
+    # keeps matrices bounded via periodic renormalization.
+    #
+    # Dense checkpoints from this re-integration are also required for findmax_dW_edge! to
+    # accurately locate the peak dW in the edge region (psiedge < psilim case).
+    #
+    # The u_store entry at last_crossing_step contains (U₁_new, U₂_new) stored by
+    # riccati_cross_ideal_singular_surf! before renormalization; renormalizing here gives
+    # (S_new, I) as the correct Riccati starting state for the re-integration.
+    odet.u .= odet.u_store[:, :, :, last_crossing_step]
+    odet.psifac = odet.psi_store[last_crossing_step]
+    odet.q = odet.q_store[last_crossing_step]
+    odet.step = last_crossing_step + 1
+    renormalize_riccati_inplace!(odet.u, N)
+    outer_chunk = IntegrationChunk(; psi_start=odet.psifac, psi_end=intr.psilim,
+                                     needs_crossing=false, ising=0)
+    riccati_integrate_chunk!(odet, ctrl, equil, ffit, intr, outer_chunk)
+    # After riccati_integrate_chunk! with needs_crossing=false:
+    #   odet.u is in (S, I) form (renorm'd at end of integration)
+    #   odet.step points to next empty slot; dense checkpoints stored for outer region
+
+    # Find peak dW in edge region (same as standard/Riccati path)
     if ctrl.psiedge < intr.psilim
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
@@ -661,9 +720,12 @@ function parallel_eulerlagrange_integration(
         intr.psilim = odet.psi_store[end]
         intr.qlim = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
+        # The stored state may be a pre-renorm callback snapshot; renorm to (S, I) for free_run!
+        renormalize_riccati_inplace!(odet.u, N)
     else
         odet.step -= 1
         trim_storage!(odet)
+        # odet.u is already in (S, I) from riccati_integrate_chunk! above
     end
 
     # Evaluate fixed-boundary stability criterion

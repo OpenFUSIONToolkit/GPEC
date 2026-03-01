@@ -401,6 +401,21 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
+        if intr.msing > 0
+            # Mode numbers at each surface (jagged — pad with 0 to max_modes width)
+            max_modes = maximum(s -> length(s.m), intr.sing)
+            m_matrix = zeros(Int, intr.msing, max_modes)
+            n_matrix = zeros(Int, intr.msing, max_modes)
+            for (s, sing) in enumerate(intr.sing)
+                for i in 1:length(sing.m)
+                    m_matrix[s, i] = sing.m[i]
+                    n_matrix[s, i] = sing.n[i]
+                end
+            end
+            out_h5["singular/m"] = m_matrix
+            out_h5["singular/n"] = n_matrix
+        end
+
         # Write Δ' if computed (one complex value per resonant mode per singular surface)
         if intr.msing > 0 && all(s -> !isempty(s.delta_prime), intr.sing)
             max_modes = maximum(s -> length(s.delta_prime), intr.sing)
@@ -411,6 +426,20 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
                 end
             end
             out_h5["singular/delta_prime"] = dp_matrix
+        end
+
+        # Write full off-diagonal Δ' column if computed (Riccati/parallel FM paths only).
+        # Shape: [numpert_total × max_modes × msing], where delta_prime_col[:, i, s] is
+        # the coupling of all N modes to resonant mode i at surface s.
+        if intr.msing > 0 && all(s -> !isempty(s.delta_prime_col), intr.sing)
+            N = size(intr.sing[1].delta_prime_col, 1)
+            max_modes = maximum(s -> size(s.delta_prime_col, 2), intr.sing)
+            dp_col_tensor = zeros(ComplexF64, N, max_modes, intr.msing)
+            for (s, sing) in enumerate(intr.sing)
+                n_res = size(sing.delta_prime_col, 2)
+                dp_col_tensor[:, 1:n_res, s] = sing.delta_prime_col
+            end
+            out_h5["singular/delta_prime_col"] = dp_col_tensor
         end
 
         # Write vacuum Data
