@@ -130,16 +130,24 @@ function main(args::Vector{String}=String[])
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=ExtendExtrap())
 
-    # Determine toroidal mode numbers
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
-        error("Either nn_low or nn_high must be set in ForceFreeStates (both are 0)")
+        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
     elseif ctrl.nn_low == 0
         ctrl.nn_low = ctrl.nn_high
     elseif ctrl.nn_high == 0
         ctrl.nn_high = ctrl.nn_low
     end
     if ctrl.nn_low > ctrl.nn_high
-        error("nn_low cannot be greater than nn_high")
+        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
+    end
+    if ctrl.nn_high < 1
+        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
+              "n < 1 modes are not supported")
+    end
+    if ctrl.nn_low < 1
+        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
+        ctrl.nn_low = 1
     end
     intr.nlow = ctrl.nn_low
     intr.nhigh = ctrl.nn_high
@@ -157,7 +165,7 @@ function main(args::Vector{String}=String[])
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     elseif ctrl.sing_start == 0
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
@@ -376,7 +384,9 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
             out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
-            out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
+            if !isempty(intr.sing)
+                out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
+            end
         end
         if ctrl.bal_flag
             out_h5["locstab/ca1"] = intr.locstab.y[:, 4]
