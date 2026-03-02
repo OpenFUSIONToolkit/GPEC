@@ -76,12 +76,19 @@ A struct representing a region of integration in the Euler-Lagrange solver.
   - `psi_end::Float64` - Ending ψ coordinate for this integration region
   - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
   - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
+  - `direction::Int` - Integration direction: +1 forward (axis→edge), -1 backward (edge→axis).
+    For `direction=-1` chunks, `psi_start` < `psi_end` but integration proceeds from `psi_end`
+    toward `psi_start`. The resulting propagator maps state at `psi_end` → state at `psi_start`.
+    Used in bidirectional parallel FM to produce well-conditioned crossing-chunk propagators:
+    solutions that grow exponentially forward (toward a singularity) decay when integrated
+    backward, so the backward propagator is well-conditioned.
 """
 @kwdef struct IntegrationChunk
     psi_start::Float64
     psi_end::Float64
     needs_crossing::Bool
     ising::Int = 0
+    direction::Int = 1   # +1 forward, -1 backward
 end
 
 """
@@ -183,9 +190,8 @@ A mutable struct holding internal state variables for stability calculations.
     delta_prime_matrix[2j-1, 2k-1] = small-asymptotic amplitude at left of surface j
                                        when left of surface k is driven with unit amplitude.
     Populated by `compute_delta_prime_matrix!` (parallel FM path only).
-    Requires the STRIDE segment propagators (uShootL, uShootR) to be well-conditioned,
-    which holds for small N (N ≲ 10). For large N, diagonal elements match `delta_prime`
-    but off-diagonal elements may have reduced accuracy.
+    Uses bidirectional propagators (backward crossing chunks + forward intermediate chunks)
+    for a well-conditioned BVP, improving accuracy for large N (N ≳ 20).
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end

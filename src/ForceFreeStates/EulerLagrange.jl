@@ -126,9 +126,10 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
         psi_mid = (lo + hi) / 2.0
 
         left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
-                                  needs_crossing=false, ising=0)
+                                  needs_crossing=false, ising=0, direction=1)
         right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
-                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising)
+                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising,
+                                   direction=chunk.direction)
         splice!(result, best_idx, [left, right])
     end
 
@@ -312,7 +313,7 @@ making the integration flow more predictable and easier to parallelize (e.g., fo
 
 Support for `kin_flag`
 """
-function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
+function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal; bidirectional::Bool=false)
     chunks = IntegrationChunk[]
 
     # Start from current position
@@ -351,7 +352,8 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 psi_start=psi_current,
                 psi_end=psi_end,
                 needs_crossing=true,
-                ising=ising_current
+                ising=ising_current,
+                direction = bidirectional ? -1 : 1
             ))
 
             # After crossing, we jump to the other side of the singular surface
@@ -422,7 +424,7 @@ function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl
     end
 
     # Re-initialize on opposite side of rational surface by approximating solution
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising))
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     sing_der!(du1, odet.u, params, odet.psifac)

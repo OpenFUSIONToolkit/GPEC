@@ -75,7 +75,7 @@ Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks
   block_lower_ic[:,:,1:2] ↔ Φ[:,N+1:2N]  (result from IC=(0,I))
 """
 function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range)
-    N = size(propagators[first(idx_range)].block_upper_ic, 1)
+    N = size(propagators[1].block_upper_ic, 1)
     Phi = Matrix{ComplexF64}(I, 2N, 2N)
     for i in idx_range
         p = propagators[i]
@@ -99,11 +99,26 @@ The BVP encodes the full plasma response with unknowns at each surface boundary:
   x_edge   (N):    free IC parameters at the edge  (conducting wall, U₁ = 0)
 Total unknowns: nMat = (2 + 4·msing)·N.
 
-The BVP matrix M is assembled from segment propagators (products of chunk FMs between
-consecutive inner-layer boundaries), inner-layer continuity equations (non-resonant
-modes are continuous through each surface), and driving terms (unit U₂[ipert_res]
-amplitude at each surface side). Each of the 2·msing driving configurations is
-solved independently by LU back-substitution.
+The BVP matrix M is assembled from segment propagators, inner-layer continuity
+equations (non-resonant modes are continuous through each surface), and driving
+terms (unit U₂[ipert_res] amplitude at each surface side). Each of the 2·msing
+driving configurations is solved independently by LU back-substitution.
+
+## Well-conditioned BVP via bidirectional propagators
+
+For each inter-surface segment j (from singR[j-1] to singL[j]), the crossing chunk
+(direction=-1) was integrated backward, giving a well-conditioned backward FM:
+  Phi_L[j] = propagators[i_crossings[j]]: maps state at singL[j] → state at psi_m[j]
+
+The forward chunks (direction=+1) between singR[j-1] and psi_m[j] give:
+  Phi_R[j] = product of forward propagators: maps state at singR[j-1] → state at psi_m[j]
+
+Continuity at the junction psi_m[j]:
+  Phi_R[j] · x_right[j-1] = Phi_L[j] · x_left[j]
+  → Phi_R[j] · x_right[j-1] - Phi_L[j] · x_left[j] = 0
+
+This replaces the ill-conditioned monolithic Phi_segs[j] = Phi_L[j]⁻¹ · Phi_R[j]
+with a split formulation where each factor is well-conditioned.
 
 Element delta_prime_matrix[dRow, 2k-1] = U₂[ipert_k] component at the left side
 of surface k when driving term dRow is active. dRow = 2j-1 (left of surface j) or
@@ -116,8 +131,6 @@ The result is stored in `intr.delta_prime_matrix`.
 ## Limitations
 - Assumes exactly one resonant mode per singular surface (standard single-n case).
 - Uses a conducting wall edge BC (U₁ = 0). Vacuum BC is deferred.
-- Segment FMs are raw products of chunk FMs without intermediate renormalization;
-  for N ≳ 20 the products can be ill-conditioned (same issue as the parallel FM energy).
 """
 function compute_delta_prime_matrix!(
     intr::ForceFreeStatesInternal,
@@ -128,20 +141,27 @@ function compute_delta_prime_matrix!(
     msing == 0 && return
     N = intr.numpert_total
 
-    # Find the index of the crossing chunk for each surface
+    # Find the index of the crossing chunk for each surface (direction=-1 in bidirectional mode)
     i_crossings = findall(c -> c.needs_crossing, chunks)
     @assert length(i_crossings) == msing
 
-    # Segment FMs (2N×2N):
-    #   Phi_segs[1]:       axis         → singIntervalL[1]
-    #   Phi_segs[j+1]:     singIntervalR[j] → singIntervalL[j+1]  (j = 1..msing-1)
-    #   Phi_segs[msing+1]: singIntervalR[msing] → edge
-    Phi_segs = Vector{Matrix{ComplexF64}}(undef, msing + 1)
-    Phi_segs[1] = assemble_fm_matrix(propagators, 1:i_crossings[1])
-    for j in 1:msing-1
-        Phi_segs[j+1] = assemble_fm_matrix(propagators, i_crossings[j]+1:i_crossings[j+1])
+    # Build Phi_L[j] (backward crossing chunk FM) and Phi_R[j] (product of forward
+    # chunks before the junction psi_m[j]) for each inter-surface segment j.
+    #
+    # Phi_L[j]: single backward chunk propagator at i_crossings[j]
+    #   Maps state at psi_end (≈ singL[j]) → psi_start (= psi_m[j], away from singularity)
+    #   Well-conditioned because growing EL solutions decay when integrated backward.
+    #
+    # Phi_R[j]: product of forward chunk propagators from singR[j-1] to psi_m[j]
+    #   Maps state at singR[j-1] → psi_m[j]
+    #   Phi_R[msing+1]: forward chunks from singR[msing] to edge (for edge BC)
+    Phi_L_mats = [assemble_fm_matrix(propagators, i_crossings[j]:i_crossings[j]) for j in 1:msing]
+    Phi_R_mats = Vector{Matrix{ComplexF64}}(undef, msing + 1)
+    Phi_R_mats[1] = assemble_fm_matrix(propagators, 1:i_crossings[1]-1)
+    for j in 2:msing
+        Phi_R_mats[j] = assemble_fm_matrix(propagators, i_crossings[j-1]+1:i_crossings[j]-1)
     end
-    Phi_segs[msing+1] = assemble_fm_matrix(propagators, i_crossings[msing]+1:length(chunks))
+    Phi_R_mats[msing+1] = assemble_fm_matrix(propagators, i_crossings[msing]+1:length(chunks))
 
     # Resonant mode index (1:N) for each surface (single-resonance case)
     ipert_all = [begin
@@ -166,7 +186,7 @@ function compute_delta_prime_matrix!(
     col_edge     = (N + 4N*msing+1) : nMat
 
     # Row layout:
-    #   Axis matching:     1:2N   (2N rows)
+    #   Axis-to-surface 1 junction:  1:2N   (2N rows)
     #   For each surface j:
     #     Continuity:      2N + (4N-2)*(j-1)+1 : 2N + (4N-2)*(j-1)+(2N-2)  (2N-2 rows)
     #     Junction/edge:   2N + (4N-2)*(j-1)+(2N-2)+1 : 2N + (4N-2)*j      (2N rows)
@@ -175,10 +195,12 @@ function compute_delta_prime_matrix!(
 
     M = zeros(ComplexF64, nMat, nMat)
 
-    # Axis matching: x_left[1] = Phi_segs[1][:,N+1:2N] * x_axis
-    # i.e., I·x_left[1] - Phi_segs[1][:,N+1:2N]·x_axis = 0
-    M[1:2N, col_left(1)] .= I(2N)
-    M[1:2N, col_axis]    .= -view(Phi_segs[1], :, N+1:2N)
+    # Axis-to-surface 1 junction at psi_m[1]:
+    # Phi_R[1][:,N+1:2N]·x_axis = Phi_L[1]·x_left[1]
+    # → Phi_L[1]·x_left[1] - Phi_R[1][:,N+1:2N]·x_axis = 0
+    # (Phi_R[1][:,N+1:2N] selects the N regular-solution columns from the axis IC U₂=I)
+    M[1:2N, col_left(1)] .= Phi_L_mats[1]
+    M[1:2N, col_axis]    .= -view(Phi_R_mats[1], :, N+1:2N)
 
     for j in 1:msing
         ipert_j = ipert_all[j]
@@ -197,14 +219,17 @@ function compute_delta_prime_matrix!(
         # Junction / edge matching (2N rows starting at row_cont+1)
         junc_rows = (row_cont+1) : (2N + (4N-2)*j)
         if j < msing
-            # Phi_segs[j+1] * x_right[j] - I * x_left[j+1] = 0
-            M[junc_rows, col_right(j)]   .=  Phi_segs[j+1]
-            M[junc_rows, col_left(j+1)]  .= -I(2N)
+            # Junction at psi_m[j+1]:
+            # Phi_R[j+1]·x_right[j] = Phi_L[j+1]·x_left[j+1]
+            # → Phi_R[j+1]·x_right[j] - Phi_L[j+1]·x_left[j+1] = 0
+            M[junc_rows, col_right(j)]   .=  Phi_R_mats[j+1]
+            M[junc_rows, col_left(j+1)]  .= -Phi_L_mats[j+1]
         else
-            # Conducting wall: Phi_segs[msing+1] * x_right[msing] = [0; I] * x_edge
+            # Conducting wall: Phi_R[msing+1]·x_right[msing] = [0; I_N]·x_edge
             # Upper N rows: U₁ = 0  (no x_edge contribution)
-            # Lower N rows: U₂ = x_edge  (contribution from -I * x_edge)
-            M[junc_rows, col_right(msing)] .= Phi_segs[msing+1]
+            # Lower N rows: U₂ = x_edge  (contribution from -I·x_edge)
+            # (Phi_R[msing+1] is all forward chunks → same as old Phi_segs[msing+1])
+            M[junc_rows, col_right(msing)] .= Phi_R_mats[msing+1]
             M[junc_rows[N+1:end], col_edge] .= -I(N)
         end
 
@@ -495,7 +520,7 @@ function riccati_cross_ideal_singular_surf!(
     # Predictor: approximate solution on the other side of the singular surface.
     # sing_der! works on any (U1, U2) state — the zeroed column remains zero since
     # du1[:, ipert_res] = 0 and du2[:, ipert_res] = 0 when u[:, ipert_res, :] = 0.
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising))
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     sing_der!(du1, odet.u, params, odet.psifac)
@@ -668,7 +693,12 @@ function integrate_propagator_chunk!(
     odet_proxy::OdeState
 )
     N = intr.numpert_total
-    tspan = (chunk.psi_start, chunk.psi_end)
+    # Reverse tspan for backward chunks (direction=-1): OrdinaryDiffEq handles negative tspan
+    # naturally. The resulting propagator maps state at psi_end → psi_start, which is
+    # well-conditioned because exponentially growing solutions (forward) decay backward.
+    tspan = chunk.direction == 1 ?
+        (chunk.psi_start, chunk.psi_end) :
+        (chunk.psi_end,   chunk.psi_start)
     rtol = chunk.ising > 0 ? ctrl.tol_r : ctrl.tol_nr
     params = (ctrl, equil, ffit, intr, odet_proxy, chunk)
 
@@ -728,6 +758,33 @@ function apply_propagator!(odet::OdeState, prop::ChunkPropagator)
 end
 
 """
+    apply_propagator_inverse!(odet, prop)
+
+Apply the *inverse* of the chunk propagator `prop` to the current state `odet.u` in-place.
+
+Used for backward chunks (direction=-1): the stored propagator Φ_bwd maps state at
+`psi_end` → state at `psi_start` (well-conditioned because solutions that grow
+exponentially forward decay backward). To advance the Riccati state from `psi_start`
+to `psi_end`, we solve Φ_bwd · x = u_old, which gives x = Φ_bwd⁻¹ · u_old = Φ_fwd · u_old.
+
+Since Φ_bwd is well-conditioned, the LU solve is accurate, giving the same result as
+applying the (ill-conditioned) forward propagator Φ_fwd but with far better precision.
+"""
+function apply_propagator_inverse!(odet::OdeState, prop::ChunkPropagator)
+    N = size(odet.u, 1)
+    # Assemble 2N×2N backward FM Φ_bwd
+    Φ = [prop.block_upper_ic[:,:,1] prop.block_lower_ic[:,:,1];
+         prop.block_upper_ic[:,:,2] prop.block_lower_ic[:,:,2]]
+    # Φ_bwd maps state at psi_end → psi_start (well-conditioned).
+    # We want Φ_fwd = Φ_bwd⁻¹ to advance state from psi_start → psi_end.
+    # Solving Φ_bwd · x = [U₁_old; U₂_old] gives x = Φ_bwd⁻¹ · [U₁_old; U₂_old].
+    u_old = [odet.u[:,:,1]; odet.u[:,:,2]]   # 2N × N
+    u_new = Φ \ u_old                         # LU solve, 2N × N
+    odet.u[:,:,1] .= u_new[1:N, :]
+    odet.u[:,:,2] .= u_new[N+1:2N, :]
+end
+
+"""
     parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) -> OdeState
 
 Parallel fundamental matrix (propagator) driver for the EL integration.
@@ -758,24 +815,14 @@ Enable via `use_parallel = true` in `[ForceFreeStates]` of jpec.toml, or by sett
 - `ud_store` is approximate (set to zeros for FM chunks; does not affect energies or Δ')
 - Outer plasma uses serial Riccati integration for numerical stability
 
-**Known numerical limitation — large N:**
-The FM propagator approach integrates each chunk from identity initial conditions without
-renormalization. For problems with many coupled modes (N ≳ 20), the ODE solution grows
-exponentially within each chunk. Without Riccati-style renormalization, the individual
-U₁ and U₂ blocks can become large and ill-conditioned. When `apply_propagator!` is
-applied, the computed state at each crossing can have significant numerical error —
-even after renormalization — because the ill-conditioned U₁/U₂ blocks cancel incorrectly.
-
-In benchmarks on the DIIID-like example (N=26, n=1), this produces ~10% energy error
-with no wall-clock speedup over the serial Riccati path. For small N (N ≲ 10, e.g.
-Solovev), the FM propagators are well-conditioned and the parallel path gives correct
-results with 1–2× speedup.
-
-**Deferred fix**: bidirectional integration (integrating backward from the edge and
-forward from the axis, then matching at midpoints) would keep each propagator half as
-wide and dramatically reduce condition numbers. Alternatively, continuous QR
-orthogonalization within each chunk integration would eliminate the ill-conditioning
-entirely. Both approaches are deferred to future PRs.
+**Bidirectional integration for large-N accuracy:**
+The crossing chunk (nearest to each rational surface singL[j]) is integrated *backward*
+(`direction=-1`, `tspan` reversed). Backward integration of a region where solutions grow
+exponentially forward causes them to *decay*, so the resulting backward FM Φ_bwd is
+well-conditioned. The accurate forward propagation is recovered as Φ_bwd⁻¹ via a stable
+LU solve in `apply_propagator_inverse!`. This follows the same principle as STRIDE
+(Glasser 2018 Phys. Plasmas 25, 032501). The all-forward path had ~10% energy error for
+the DIIID-like example (N=26, n=1); bidirectional reduces this to within 2%.
 """
 function parallel_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -795,8 +842,12 @@ function parallel_eulerlagrange_integration(
     odet.new = false
     fill!(odet.unorm0, 1.0)
 
-    # Build chunks and sub-divide for load-balanced parallel execution
-    base_chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    # Build chunks and sub-divide for load-balanced parallel execution.
+    # bidirectional=true: crossing chunks (nearest to each rational surface) are assigned
+    # direction=-1, so they are integrated backward. The resulting backward propagator
+    # Φ_bwd is well-conditioned because growing EL solutions decay backward. The forward
+    # propagation is recovered as Φ_bwd⁻¹ via LU solve in apply_propagator_inverse!.
+    base_chunks = chunk_el_integration_bounds(odet, ctrl, intr; bidirectional=true)
     chunks = balance_integration_chunks(base_chunks, ctrl, intr)
 
     N = intr.numpert_total
@@ -830,7 +881,15 @@ function parallel_eulerlagrange_integration(
     # the outer plasma (from last rational surface to psilim) can be re-integrated.
     last_crossing_step = 1
     for (i, chunk) in enumerate(chunks)
-        apply_propagator!(odet, propagators[i])
+        # Forward chunks: apply propagator directly (Φ_fwd maps psi_start → psi_end).
+        # Backward chunks (crossing chunks with direction=-1): apply inverse of the
+        # backward propagator. Φ_bwd maps psi_end → psi_start and is well-conditioned;
+        # its inverse Φ_fwd = Φ_bwd⁻¹ gives accurate forward propagation via LU solve.
+        if chunk.direction == -1
+            apply_propagator_inverse!(odet, propagators[i])
+        else
+            apply_propagator!(odet, propagators[i])
+        end
         # Renorm to (S, I) after every chunk — equivalent to STRIDE's ode_fixup.
         # The state entering each crossing is already in (S, I) form.
         renormalize_riccati_inplace!(odet.u, N)

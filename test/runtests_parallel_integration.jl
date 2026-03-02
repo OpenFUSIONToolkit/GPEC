@@ -187,6 +187,49 @@ using TOML
         end
     end
 
+    @testset "Parallel FM integration matches standard ODE — DIIID-like example (large N)" begin
+        # Run standard and parallel FM integrations on the DIIID-like example (N≈26 modes).
+        # Before bidirectional integration, the all-forward FM propagators were ill-conditioned
+        # for large N, producing ~10% energy error. Bidirectional integration (backward crossing
+        # chunks + forward intermediate chunks) restores accuracy to within 2%.
+        #
+        # This is the key regression test for the bidirectional parallel FM fix.
+        ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+
+        function run_diiid(use_parallel)
+            inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+            inputs["ForceFreeStates"]["verbose"] = false
+            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
+            intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+            ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
+                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+            eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+            equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
+            intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+            JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+            JPEC.ForceFreeStates.sing_find!(intr, equil)
+            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+            intr.mpert = intr.mhigh - intr.mlow + 1
+            intr.mband = intr.mpert - 1
+            intr.numpert_total = intr.mpert * intr.npert
+            metric = JPEC.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+            ffit = JPEC.ForceFreeStates.make_matrix(equil, intr, metric)
+            odet = JPEC.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            vac = JPEC.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+            return real(vac.et[1])
+        end
+
+        et_std = run_diiid(false)
+        et_par = run_diiid(true)
+
+        # Energy eigenvalue matches to 2% (bidirectional fix: was ~10% error without it)
+        @test isapprox(et_par, et_std; rtol=0.02)
+    end
+
     @testset "ode_itime_cost is additive over sub-intervals" begin
         # Verify cost(a, c) ≈ cost(a, b) + cost(b, c) for b ∈ (a, c) where no
         # rational surface is inside [a, c]. The cost function uses abs(Δlog) for
