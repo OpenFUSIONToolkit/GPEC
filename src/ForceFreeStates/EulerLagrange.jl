@@ -38,7 +38,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Print initial integration condition
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
     # Iterate through each integration chunk
@@ -46,7 +46,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+            @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
         # Cross a rational surface after integration if this chunk requires it
@@ -65,7 +65,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
         end
 
         # Update u, psilim, and qlim for usage in determining wp and wt
@@ -79,7 +79,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if ctrl.verbose
-        println("Evaluating fixed-boundary stability criterion")
+        @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
@@ -112,16 +112,11 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
-        # Refine psifac using Newton iteration
-        converged = false
-        for _ in 1:itmax
-            dpsi = (ctrl.qlow - profiles.q_spline(odet.psifac)) / profiles.q_deriv(odet.psifac)
-            odet.psifac += dpsi
-            abs(dpsi) < eps * abs(odet.psifac) && (converged=true; break)
-        end
-        if !converged
-            error("Newton iteration for psifac did not converge after $itmax iterations.")
-        end
+        odet.psifac = find_zero(
+            (psi -> profiles.q_spline(psi) - ctrl.qlow,
+             psi -> profiles.q_deriv(psi)),
+            odet.psifac, Roots.Newton()
+        )
     end
 
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
@@ -376,6 +371,9 @@ function integrator_callback!(integrator)
 
     # unpack parameters. Note the 2 unused items are needed to match the signature in the integrand sing_der!
     ctrl, _, _, intr, odet, chunk = integrator.p
+
+    # Count every ODE step taken (not just saved ones)
+    odet.total_steps += 1
 
     # Update integration tolerances
     integrator.opts.reltol = compute_tols(ctrl, intr, odet, chunk.ising)

@@ -230,7 +230,6 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     z_wall = zeros(mtheta)
 
     if wall_settings.shape == "nowall"
-        @info "Using no wall"
         return WallGeometry(
             true,
             x_wall,

@@ -113,10 +113,10 @@ and data dumping.
 
     # Write energies to screen
     if ctrl.verbose
-        println("Least Stable Eigenmode Energies:")
-        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))
-        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))
-        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))
+        @info "Least Stable Eigenmode Energies:\n" *
+              "  Plasma = $((@sprintf "%+.3e %+.3ei" real(vac.ep[1]) imag(vac.ep[1])))\n" *
+              "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(vac.ev[1]) imag(vac.ev[1])))\n" *
+              "  Total  = $((@sprintf "%+.3e %+.3ei" real(vac.et[1]) imag(vac.et[1])))"
     end
 
     return vac
@@ -145,21 +145,12 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         # Space points evenly in q
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
-        # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
-        converged = false
-        for _ in 1:itmax
-            dpsi = (qi - profiles.q_spline(psii)) / profiles.q_deriv(psii)
-            psii += dpsi
-            if abs(dpsi) < eps * abs(psii)
-                converged = true
-                psi_array[i] = psii
-                break
-            end
-        end
-        if !converged
-            error("Newton iteration for psilim did not converge after $itmax iterations.")
-        end
+        psi_array[i] = find_zero(
+            (psi -> profiles.q_spline(psi) - qi,
+             psi -> profiles.q_deriv(psi)),
+            psii, Roots.Newton()
+        )
 
         for ipert_n in 1:intr.npert
             # Compute vacuum matrix

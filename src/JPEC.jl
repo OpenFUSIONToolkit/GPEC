@@ -42,15 +42,28 @@ using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
+const _BANNER = "="^60
+const _SECTION = "-"^40
+
 function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
-    println("\n" * "="^60)
-    println("  JPEC - Julia Perturbed Equilibrium Code")
-    println("="^60 * "\n")
+    # Capture git version for reproducibility
+    git_version = try
+        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
+    catch
+        "unknown"
+    end
 
-    start_time = time()
+    @info "\n$_BANNER\n  JPEC - Julia Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
+    total_start = time()
+
+    # ----------------------------------------------------------------
+    # Equilibrium
+    # ----------------------------------------------------------------
+    @info "\n  Equilibrium\n$_SECTION"
+    equil_start = time()
 
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
@@ -67,17 +80,14 @@ function main(args::Vector{String}=String[])
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
     end
+
+    @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
+
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
-        end_time = time() - start_time
-        println("\n" * "="^60)
-        println("Equilibrium setup complete (force_termination = true).")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("Normal termination.")
-        println("="^60)
+        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
-
 
     if "Wall" in keys(inputs)
         intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
@@ -90,6 +100,12 @@ function main(args::Vector{String}=String[])
     else
         intr.debug_settings = DebugSettings()
     end
+
+    # ----------------------------------------------------------------
+    # Force-Free States
+    # ----------------------------------------------------------------
+    @info "\n  Force-Free States\n$_SECTION"
+    ffs_start = time()
 
     # Set up variables
     # TODO: parallel threads logic
@@ -114,13 +130,11 @@ function main(args::Vector{String}=String[])
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
     if ctrl.mer_flag
         if ctrl.verbose
-            println("Evaluating Mercier criterion")
+            @info "Evaluating Mercier criterion"
         end
         mercier_scan!(locstab_fs, equil)
     end
@@ -187,23 +201,19 @@ function main(args::Vector{String}=String[])
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
-            println("Run parameters:")
-            println(
-                "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))"
-            )
-            println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
-            println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println(
-                "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))"
-            )
-            println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
+            @info "Run parameters:\n" *
+                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
+                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
         metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
-            println("   Computing F, G, and K Matrices")
+            @info "Computing F, G, and K matrices"
         end
 
         # Compute matrices and populate FourFitVars struct
@@ -223,48 +233,50 @@ function main(args::Vector{String}=String[])
     # Integrate Euler-Lagrange Equation
     if ctrl.ode_flag
         if ctrl.verbose
-            println("Integrating Euler-Lagrange equation")
+            @info "Integrating Euler-Lagrange equation"
         end
         odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
-            println("Fixed-boundary mode unstable for n = $nstring.")
+            @warn "Fixed-boundary mode unstable for n = $nstring"
         end
     end
 
     # Compute free boundary energies
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
-            println("Computing free boundary energies")
+            wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
+            @info "Computing free boundary energies ($wall_desc)"
         end
         vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
-                println("Free-boundary mode unstable for n = $nstring.")
+                @warn "Free-boundary mode unstable for n = $nstring"
             end
         else
             if ctrl.verbose
-                println("All free-boundary modes stable for n = $nstring.")
+                @info "All free-boundary modes stable for n = $nstring"
             end
         end
     end
 
     if ctrl.write_outputs_to_HDF5
-        if ctrl.verbose
-            println("Writing saved data to $(ctrl.HDF5_filename)")
-        end
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, git_version)
+        @info "Results written to $(ctrl.HDF5_filename)"
     end
+
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
     # Early exit if user only requested force-free states
     if ctrl.force_termination
-        end_time = time() - start_time
-        println("\n" * "="^60)
-        println("Force-free states complete (force_termination = true).")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("Normal termination.")
-        println("="^60)
+        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
+
+    # ----------------------------------------------------------------
+    # Perturbed Equilibrium
+    # ----------------------------------------------------------------
+    @info "\n  Perturbed Equilibrium\n$_SECTION"
+    pe_start = time()
 
     # Check for PerturbedEquilibrium section and run if present
     if "PerturbedEquilibrium" in keys(inputs)
@@ -294,14 +306,16 @@ function main(args::Vector{String}=String[])
             PerturbedEquilibrium.write_outputs_to_HDF5(
                 pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
             )
+            @info "Results written to $output_file"
         end
     end
 
-    end_time = time() - start_time
-    println("\n" * "="^60)
-    println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-    println("Normal termination.")
-    println("="^60)
+    @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
+
+    # ----------------------------------------------------------------
+    # Done
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
@@ -322,9 +336,12 @@ vacuum data if `vac_flag` is true.
 
 Combine spline unpacking if possible, too many extra lines
 """
-function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
+function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing}, git_version::String="unknown")
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
+
+        # Store git version for reproducibility
+        out_h5["info/git_version"] = git_version
 
         # Store input parameters
         for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
@@ -394,7 +411,8 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
-        out_h5["integration/nstep"] = odet.step
+        out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
+        out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
         out_h5["integration/psi"] = odet.psi_store
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
