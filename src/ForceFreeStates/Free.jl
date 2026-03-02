@@ -137,31 +137,49 @@ q-window minimum.
 function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
     profiles = equil.profiles
+    psihigh = profiles.xs[end]  # upper boundary of the equilibrium rzphi spline domain
 
-    # Number of psi grid points for the spline: 4 per q-window minimum
-    # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = profiles.q_spline(ctrl.psiedge)
-    npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
+    # Build psi grid in ψ-space (not q-space) so that we stay within the equilibrium domain.
+    # For diverted plasmas psilim ≫ psihigh, so a q-space grid would require inverting the
+    # direct q spline beyond its valid range, producing physically wrong psi values.
+    # Instead sample with:
+    #   - 20 points in [psiedge, psihigh] where the vacuum response varies with psi
+    #   - 20 points in [psihigh, psilim] where the vacuum surface is fixed at psihigh
+    #     but singfac(q) continues to change as q → ∞ near the separatrix
+    npsi_core = max(4, 20)
+    npsi_edge = max(4, 20)
+    npsi = npsi_core + npsi_edge
     psi_array = zeros(Float64, npsi + 1)
+
+    for i in 1:npsi_core
+        psi_array[i] = ctrl.psiedge + (psihigh - ctrl.psiedge) * (i - 1) / (npsi_core - 1)
+    end
+    for i in 1:(npsi_edge + 1)
+        psi_array[npsi_core + i] = psihigh + (intr.psilim - psihigh) * i / (npsi_edge + 1)
+    end
+
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:(npsi+1)
-        # Space points evenly in q
-        qi = qedge + (intr.qlim - qedge) * (i / npsi)
-
-        psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
-        psi_array[i] = find_zero(
-            (psi -> profiles.q_spline(psi) - qi,
-             psi -> profiles.q_deriv(psi)),
-            psii, Roots.Newton()
-        )
+        # Evaluate q at psi_array[i] using the correct spline:
+        #   - direct spline for psi ≤ psihigh (equilibrium domain)
+        #   - iota inverse spline for psi > psihigh (diverted edge)
+        qi = if psi_array[i] > psihigh && !isnothing(profiles.q_spline_iota_inverse)
+            profiles.q_spline_iota_inverse(psi_array[i])
+        else
+            profiles.q_spline_direct(psi_array[i])
+        end
 
         for ipert_n in 1:intr.npert
             # Compute vacuum matrix using the scan psi (psi_array[i]) as the plasma boundary,
             # not the fixed psilim. The vacuum geometry must correspond to the current surface
             # being scanned, not the final integration boundary.
+            # For diverted plasmas the scan extends beyond psihigh (where the rzphi spline ends),
+            # so cap the vacuum surface at psihigh — the equilibrium geometry is only known up to
+            # that boundary, and using the psihigh surface is the best available approximation.
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+            vac_psi = min(psi_array[i], psihigh)
+            vac_inputs = Vacuum.VacuumInput(equil, vac_psi, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling

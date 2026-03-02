@@ -420,8 +420,14 @@ function integrator_callback!(integrator)
     steps_in_segment = length(integrator.sol.t)
     near_start = steps_in_segment <= 2
 
-    # Save if interval condition met, or near start/end
-    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
+    # Always save every step in the edge dW scan zone [psiedge, psilim].
+    # This ensures findmax_dW_edge! has dense coverage of the core portion of the scan
+    # (psiedge to psihigh) where the stability peak often lives and where rational-surface
+    # near-start/near-end saves do not apply (no resonant surfaces in that band).
+    in_edge_scan_zone = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
+
+    # Save if interval condition met, or near start/end, or in edge scan zone
+    should_save = in_edge_scan_zone || near_start || near_end || (odet.step % ctrl.save_interval == 0)
 
     if should_save
         # Grow arrays if out of storage space
