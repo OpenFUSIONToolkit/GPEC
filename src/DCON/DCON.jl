@@ -19,6 +19,10 @@ import StaticArrays: @MVector, @MMatrix
 # TODO (IMAS Edit #1): Add IMASdd import here
 #   Add: import IMASdd
 
+import IMASdd
+
+#import the Imas module
+
 # Include all necessary files
 include("DconStructs.jl")
 include("Main.jl")
@@ -32,6 +36,11 @@ include("Utils.jl")
 include("Free.jl")
 # TODO (IMAS Edit #2): Include WriteImas.jl here
 #   Add: include("WriteImas.jl")
+
+#add the file with the function write.imas();
+
+include("WriteImas.jl) 
+  
 
 # These are used for various small tolerances and root finders throughout DCON
 global eps = 1e-10
