@@ -157,9 +157,11 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         )
 
         for ipert_n in 1:intr.npert
-            # Compute vacuum matrix
+            # Compute vacuum matrix using the scan psi (psi_array[i]) as the plasma boundary,
+            # not the fixed psilim. The vacuum geometry must correspond to the current surface
+            # being scanned, not the final integration boundary.
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling
@@ -201,9 +203,12 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     profiles = equil.profiles
-    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && intr.psilim > profiles.xs[end]) ?
-              profiles.dVdpsi_spline_inv(intr.psilim) :
-              profiles.dVdpsi_spline(intr.psilim)
+    # Evaluate dV/dpsi at the current scan psi (odet.psifac), not at the fixed psilim.
+    # In findmax_dW_edge!, odet.psifac is updated at each step; using psilim here would
+    # give a ~100x wrong normalization near the separatrix where dV/dpsi diverges.
+    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && odet.psifac > profiles.xs[end]) ?
+              profiles.dVdpsi_spline_inv(odet.psifac) :
+              profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2

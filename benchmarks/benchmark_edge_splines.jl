@@ -135,6 +135,7 @@ p2 = plot(
     title  = "Safety factor q: direct vs edge inverse spline",
     label  = "Direct spline (ExtendExtrap beyond psihigh)",
     lw = 2, color = :orange, ls = :dash,
+    xlims = (0.8, 1.0),
     ylims = (q_at_psihigh_direct * 0.5, q_cap * 1.05)
 )
 plot!(p2, collect(psi_plot_edge), q_edge_plot;
@@ -278,7 +279,9 @@ vline!(p6, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, c
 savefig(p6, joinpath(output_dir, "edge_spline_rational_surfaces.png"))
 println("Saved: edge_spline_rational_surfaces.png")
 
-# --- Plot 7: et[1] vs psi — edge stability diagnostic (from jpec.h5) ---
+# --- Plot 7: et[1] vs q — edge stability diagnostic (from jpec.h5) ---
+# x-axis is q (safety factor), converted from psi via the iota inverse spline.
+# A stability boundary line at et=0 and a reference value from the develop branch are overlaid.
 h5file = joinpath(output_dir, "jpec.h5")
 if isfile(h5file)
     h5open(h5file, "r") do f
@@ -286,21 +289,38 @@ if isfile(h5file)
             psi_es  = read(f["integration/psi_edge_scan"])
             et_es   = read(f["integration/et_edge_scan"])
             et_real = real.(et_es)
+
+            # Convert psi → q using iota inverse spline (above psihigh) or direct spline (below)
+            hint_q7 = Ref(1)
+            q_es = map(psi_es) do psi
+                if psi > psihigh && !isnothing(profiles.q_spline_iota_inverse)
+                    profiles.q_spline_iota_inverse(psi)
+                else
+                    profiles.q_spline_direct(psi; hint=hint_q7)
+                end
+            end
+
+            q_at_psihigh = profiles.q_spline_direct(psihigh)
             et_peak_idx = argmax(et_real)
-            psi_peak    = psi_es[et_peak_idx]
+            q_peak      = q_es[et_peak_idx]
 
             p7 = plot(
-                psi_es, et_real;
-                xlabel = "ψₙ",
+                q_es, et_real;
+                xlabel = "q (safety factor)",
                 ylabel = "Re(et[1])",
-                title  = "Edge stability: Re(et[1]) from ψ = psiedge to psilim",
+                title  = "Edge stability: Re(et[1]) vs q from psiedge to psilim",
                 label  = "Re(et[1])",
-                lw = 2, color = :blue, legend = :topright
+                lw = 2, color = :blue, legend = :topright,
+                xlims = (4.0, q_es[end])
             )
-            vline!(p7, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh),
+            hline!(p7, [0.0]; label = "stability boundary (et = 0)",
+                   ls = :dot, color = :black, lw = 1.5)
+            vline!(p7, [q_at_psihigh]; label = @sprintf("q(psihigh) = %.3f", q_at_psihigh),
                    ls = :dash, color = :gray)
-            scatter!(p7, [psi_peak], [et_real[et_peak_idx]];
-                     label = @sprintf("peak (ψ=%.4f, et=%.3e)", psi_peak, et_real[et_peak_idx]),
+            hline!(p7, [1.707]; label = "develop branch ref: q≈5.2, et=+1.707",
+                   ls = :dash, color = :green, lw = 1.5)
+            scatter!(p7, [q_peak], [et_real[et_peak_idx]];
+                     label = @sprintf("peak (q=%.4f, et=%.3e)", q_peak, et_real[et_peak_idx]),
                      marker = :star5, ms = 10, color = :red)
             savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
             println("Saved: edge_spline_stability.png")
@@ -310,6 +330,106 @@ if isfile(h5file)
     end
 else
     println("Note: jpec.h5 not found in $output_dir — run JPEC first to generate edge stability plot")
+end
+
+# --- Plot 8: F(ψ) direct vs F_iota_matched in the far edge ---
+if !isnothing(profiles.F_spline_iota_matched)
+    psi_far_plot = range(psihigh, 1.0 - 1e-4, length=200)
+    F_direct_vals  = [profiles.F_spline_direct(psi)        for psi in psi_far_plot]
+    F_matched_vals = [profiles.F_spline_iota_matched(psi)  for psi in psi_far_plot]
+    dF_direct_vals  = [profiles.F_deriv_direct(psi)         for psi in psi_far_plot]
+    dF_matched_vals = [profiles.F_deriv_iota_matched(psi)   for psi in psi_far_plot]
+
+    p8a = plot(collect(psi_far_plot), F_direct_vals;
+        xlabel="ψₙ", ylabel="F = 2π·R·Bₜ",
+        title="F(ψ): direct vs iota-matched in far edge",
+        label="F_direct (ExtendExtrap)", lw=2, color=:orange, ls=:dash)
+    plot!(p8a, collect(psi_far_plot), F_matched_vals;
+        label="F_iota_matched", lw=2, color=:blue)
+    vline!(p8a, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+
+    p8b = plot(collect(psi_far_plot), dF_direct_vals;
+        xlabel="ψₙ", ylabel="dF/dψ",
+        title="dF/dψ: direct vs iota-matched",
+        label="dF_direct", lw=2, color=:orange, ls=:dash)
+    plot!(p8b, collect(psi_far_plot), dF_matched_vals;
+        label="dF_iota_matched", lw=2, color=:blue)
+    vline!(p8b, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+
+    p8 = plot(p8a, p8b; layout=(1,2), size=(950, 400))
+    savefig(p8, joinpath(output_dir, "edge_spline_F_comparison.png"))
+    println("Saved: edge_spline_F_comparison.png")
+else
+    println("Note: F_spline_iota_matched not built (limited plasma or old run) — skipping Plot 8")
+end
+
+# --- Plots 9 and 10: GS residual diagnostics ---
+# Re-run equilibrium_gse! with diagnose_src=true to write gsei.h5 and gsec.h5,
+# then read and plot the θ-integrated GS error per flux surface.
+println("Running GSE diagnostics (diagnose_src=true)...")
+pe.params.diagnose_src = true
+JPEC.Equilibrium.equilibrium_gse!(pe)
+pe.params.diagnose_src = false
+
+gsec_file = joinpath(output_dir, "gsec.h5")
+gsei_file = joinpath(output_dir, "gsei.h5")
+
+if isfile(gsec_file) && isfile(gsei_file)
+    # --- Plot 9: GS residual by poloidal angle from gsec.h5 ---
+    h5open(gsec_file, "r") do f
+        psi_xs_gse = read(f["mpsi"]) + 1  # number of ψ grid points
+        flux_fsx_data = read(f["flux_fsx"])  # gs_div_dpsi[:,:,1]
+        source_data   = read(f["source"])
+        total_data    = read(f["total"])
+
+        # Per-θ residual: |flux_fsx + source| summed over θ (proxy for residual)
+        mt_gse = size(flux_fsx_data, 2)
+        theta_fracs = [0.0, 0.25, 0.5, 0.75]
+        theta_labels = ["θ=0.00 (outboard)", "θ=0.25 (top)", "θ=0.50 (inboard)", "θ=0.75 (bottom)"]
+        theta_idxs = [max(1, round(Int, th * (mt_gse-1) + 1)) for th in theta_fracs]
+
+        psi_gse_vals = pe.rzphi_xs
+
+        p9 = plot(; xlabel="ψₙ", ylabel="|GS residual (per θ)|",
+            title="GS residual by poloidal angle", yscale=:log10, legend=:topleft)
+        for (idx, lbl) in zip(theta_idxs, theta_labels)
+            res_col = abs.(flux_fsx_data[:, idx] .+ source_data[:, idx])
+            plot!(p9, psi_gse_vals, max.(res_col, 1e-15); label=lbl, lw=1.5)
+        end
+        hline!(p9, [1e-2]; label="warning threshold", ls=:dash, color=:red, lw=1.5)
+        vline!(p9, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+        savefig(p9, joinpath(output_dir, "edge_spline_gse_by_theta.png"))
+        println("Saved: edge_spline_gse_by_theta.png")
+    end
+
+    # --- Plot 10: θ-integrated GS error from gsei.h5 ---
+    h5open(gsei_file, "r") do f
+        errori_data = read(f["errori"])  # gse_abs_error (θ-integrated)
+        xs_gse      = read(f["xs"])
+
+        errori_vec = vec(errori_data)
+        max_err = maximum(errori_vec)
+        if max_err > 1e-2
+            @warn @sprintf("GS residual exceeds threshold: max |gse_integrated| = %.2e at psin=%.4f",
+                max_err, xs_gse[argmax(errori_vec)])
+        else
+            println(@sprintf("  GS residual OK: max |gse_integrated| = %.2e", max_err))
+        end
+
+        p10 = plot(
+            xs_gse, max.(errori_vec, 1e-15);
+            xlabel="ψₙ", ylabel="|ΔΨ + source| (θ-integrated)",
+            title="θ-integrated GS error per flux surface",
+            label="|gse_integrated|", lw=2, color=:blue,
+            yscale=:log10, legend=:topleft
+        )
+        hline!(p10, [1e-2]; label="warning threshold (1e-2)", ls=:dash, color=:red, lw=1.5)
+        vline!(p10, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+        savefig(p10, joinpath(output_dir, "edge_spline_gse_integrated.png"))
+        println("Saved: edge_spline_gse_integrated.png")
+    end
+else
+    println("Note: GSE HDF5 files not found — skipping Plots 9 and 10")
 end
 
 # --- Final summary ---

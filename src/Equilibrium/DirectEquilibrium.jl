@@ -425,6 +425,123 @@ function direct_xpoint_find(raw_profile::DirectRunInput, ro::Float64, zo::Float6
 end
 
 """
+    direct_build_F_iota_matched!(profiles, psi_nodes, rzphi_nodes, ro, theta_nodes; edge_layer_width=1e-4)
+
+Build a far-edge F(ψ) spline that is self-consistent with the iota inverse spline,
+and store it in `profiles.F_spline_iota_matched`.
+
+**Physics**: The safety factor satisfies q(ψ) = F(ψ) · J(ψ), where
+
+    J(ψ) = (1/2π) ∫₀¹ J_coord(ψ,θ) / R²(ψ,θ) dθ
+
+and J_coord is the coordinate Jacobian. Inverting gives:
+
+    F_iota_matched(ψ) = q_target(ψ) · 2π / J(ψ),   q_target = 1 / iota_inner(ψ)
+
+J(ψ) is computed by trapezoidal integration over θ using the raw node data (`rzphi_nodes`),
+then a cubic spline is fit to extrapolate J smoothly into the far edge (psin > psihigh).
+
+The far-edge ψ grid is constructed with 10 points per rational surface window (n=1 surfaces
+from the iota inverse spline), concentrating resolution where ODE sensitivity is highest.
+
+Only called for diverted plasmas (when `profiles.q_spline_iota_inverse !== nothing`).
+"""
+function direct_build_F_iota_matched!(profiles::ProfileSplines,
+    psi_nodes::AbstractVector{Float64},
+    rzphi_nodes::AbstractArray{Float64,3},
+    ro::Float64,
+    theta_nodes;
+    edge_layer_width::Float64=1e-4)
+
+    isnothing(profiles.q_spline_iota_inverse) && return  # limited plasma, no-op
+
+    iota_inner = profiles.q_spline_iota_inverse.inner
+    mtheta = size(rzphi_nodes, 2) - 1  # number of intervals (mtheta+1 nodes, 0..1 periodic)
+    psihigh = psi_nodes[end]
+
+    # Compute J_integral = (1/2π) ∫₀¹ J_coord/R² dθ at each core grid node using raw data.
+    # At each ψ node, integrate over the closed periodic θ grid [0,1] (mtheta intervals).
+    J_integral_core = zeros(Float64, length(psi_nodes))
+    for (ipsi, _) in enumerate(psi_nodes)
+        J_sum = 0.0
+        # Periodic trapezoidal: mtheta+1 nodes where index 1 and end are the same,
+        # so we sum mtheta intervals (skip the repeated endpoint contribution).
+        for itheta in 1:mtheta
+            rfac_sq = rzphi_nodes[ipsi, itheta, 1]
+            rfac = sqrt(max(0.0, rfac_sq))
+            offset = rzphi_nodes[ipsi, itheta, 2]
+            theta_val = theta_nodes[itheta]
+            eta = 2π * (theta_val + offset)
+            R = ro + rfac * cos(eta)
+            J_coord = rzphi_nodes[ipsi, itheta, 4]
+            J_sum += J_coord / max(R^2, 1e-20)
+        end
+        J_integral_core[ipsi] = J_sum / mtheta / (2π)  # average over mtheta intervals, normalize by 2π
+    end
+
+    # Fit cubic spline to J_integral on core grid; ExtendExtrap extrapolates into the far edge.
+    J_spline = cubic_interp(psi_nodes, J_integral_core; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+
+    # Build far-edge ψ grid with 10 points per rational surface window.
+    # First, scan for n=1 rational surfaces in the far edge using the iota inverse spline.
+    iota_at_psihigh = iota_inner(psihigh)
+    edge_surfaces = Float64[]
+    hint_scan = Ref(1)
+    m_start = trunc(Int, 1.0 / max(iota_at_psihigh, 1e-10)) + 1
+    m_end   = min(m_start + 500, 100_000)
+    for m in m_start:m_end
+        iota_target = 1.0 / m
+        iota_target < 1e-10 && break
+        iota_target >= iota_at_psihigh && continue
+        try
+            psi_surf = find_zero(
+                psi -> iota_inner(psi; hint=hint_scan) - iota_target,
+                (psihigh, 1.0 - 1e-8), Roots.Brent(); xatol=1e-8
+            )
+            push!(edge_surfaces, psi_surf)
+            if length(edge_surfaces) >= 2 && edge_surfaces[end] - edge_surfaces[end-1] < edge_layer_width
+                break
+            end
+        catch
+        end
+    end
+
+    # Build grid: 10 points per window between consecutive rational surfaces, then 10 to separatrix.
+    psi_far = Float64[psihigh]
+    boundaries = vcat([psihigh], edge_surfaces)
+    for i in 1:(length(boundaries)-1)
+        psi_a, psi_b = boundaries[i], boundaries[i+1]
+        pts = range(psi_a, psi_b; length=12)   # 12 pts → 10 interior pts + 2 endpoints
+        append!(psi_far, pts[2:end])            # skip first (already in list), keep rest
+    end
+    last_surf = isempty(edge_surfaces) ? psihigh : edge_surfaces[end]
+    pts = range(last_surf, 1.0 - 1e-6; length=12)
+    append!(psi_far, pts[2:end])
+    unique!(sort!(psi_far))
+
+    # Compute F_iota_matched at each far-edge ψ: F = q_target · 2π / J_integral
+    F_far = zeros(Float64, length(psi_far))
+    hint_iota = Ref(1)
+    for (i, psi) in enumerate(psi_far)
+        q_target = profiles.q_spline_iota_inverse(psi; hint=hint_iota)
+        J_val = J_spline(psi)
+        F_far[i] = abs(J_val) > 1e-20 ? q_target * 2π / J_val : profiles.F_spline.y[end]
+    end
+
+    # Build the iota-matched F spline and its derivative, then store in profiles.
+    F_matched_spline = cubic_interp(psi_far, F_far; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    F_matched_deriv  = deriv1(F_matched_spline)
+
+    profiles.F_spline_direct        = profiles.F_spline
+    profiles.F_deriv_direct         = profiles.F_deriv
+    profiles.F_spline_iota_matched  = F_matched_spline
+    profiles.F_deriv_iota_matched   = F_matched_deriv
+
+    @printf("   F_iota_matched spline built over psin ∈ [%.4f, %.6f] (%d nodes, %d edge rational surfaces)\n",
+        psi_far[1], psi_far[end], length(psi_far), length(edge_surfaces))
+end
+
+"""
     equilibrium_solver(raw_profile)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
@@ -590,6 +707,10 @@ robustness.
 
         @printf("   Edge inverse splines built over psin ∈ [%.4f, 1.0] (%d nodes)\n",
             psi_edge_start, length(edge_psi))
+
+        # Build F_spline_iota_matched: an F(ψ) spline matched to the iota inverse spline in the
+        # far edge (psin > psihigh), so that the ODE integration uses a self-consistent F(ψ) there.
+        direct_build_F_iota_matched!(profiles, psi_nodes, rzphi_nodes, ro, theta_nodes)
     end
 
     # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.

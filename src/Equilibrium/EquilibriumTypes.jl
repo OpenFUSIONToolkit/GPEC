@@ -473,7 +473,7 @@ Each profile is stored as a separate spline for code clarity.
 # Fields
 
   - `xs::Vector{Float64}`: Shared x-axis (normalized psi)
-  - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
+  - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal) — switchable pointer
   - `P_spline`: μ₀*P (plasma pressure × μ₀)
   - `dVdpsi_spline`: dV/dψ (volume derivative), always the direct spline
   - `q_spline`: q (safety factor) pointer — initially points to q_spline_direct;
@@ -482,7 +482,8 @@ Each profile is stored as a separate spline for code clarity.
 
 # Derivative Interpolants (for continuous derivative evaluation)
 
-  - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
+  - `F_deriv`: Derivative of F_spline — switchable pointer (switches with F_spline)
+  - `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
     (always the direct-spline derivatives; use q_spline_direct for deriv2/deriv3)
 
 # Edge Extension Fields (Nothing for limited plasmas)
@@ -490,6 +491,10 @@ Each profile is stored as a separate spline for code clarity.
   - `q_spline_direct`: Original direct q spline (for restoring after pointer swap)
   - `q_spline_iota_inverse`: Edge inverse spline for q in diverted plasmas (Nothing if limited)
   - `dVdpsi_spline_inv`: Edge inverse spline for dV/dψ used in post-processing (Nothing if limited)
+  - `F_spline_direct`: Original direct F spline (for restoring after edge pointer swap)
+  - `F_deriv_direct`: Original direct F derivative (for restoring after edge pointer swap)
+  - `F_spline_iota_matched`: F spline matched to iota inverse in far edge (Nothing if limited)
+  - `F_deriv_iota_matched`: Derivative of `F_spline_iota_matched` (Nothing if limited)
 
 # Notes
 
@@ -497,18 +502,19 @@ Each profile is stored as a separate spline for code clarity.
   - Derivative at any point: Call `deriv(x)` (derivative views are callable)
   - Grid: Access via `xs` field or `spline.cache.x`
   - For deriv2/deriv3 of q, always use `profiles.q_spline_direct` to avoid Union dispatch issues
+  - For F in edge ODE chunks, profiles.F_spline switches to F_spline_iota_matched automatically
 """
 mutable struct ProfileSplines{S,I,D}
     xs::Vector{Float64}
     npts::Int          # length(xs), avoids redundant length() calls
     npts_minus_1::Int  # npts - 1, for hint at last interval
-    # Value interpolants (dVdpsi always direct; q_spline is a switchable pointer)
-    F_spline::S
+    # Value interpolants (dVdpsi always direct; q_spline and F_spline are switchable pointers)
+    F_spline::S        # pointer: starts as F_spline_direct, switched to F_spline_iota_matched for edge chunks
     P_spline::S
     dVdpsi_spline::S
     q_spline::Union{S,I}   # pointer: starts as q_spline_direct, optionally switched for edge chunks
     # Derivative views (callable, share data with value interpolants)
-    F_deriv::D
+    F_deriv::D         # pointer: starts as F_deriv_direct, switched with F_spline
     P_deriv::D
     dVdpsi_deriv::D
     q_deriv::D
@@ -517,6 +523,12 @@ mutable struct ProfileSplines{S,I,D}
     # Edge inverse splines: Nothing for limited plasmas, set by equilibrium_solver for diverted
     q_spline_iota_inverse::Union{Nothing,I}
     dVdpsi_spline_inv::Union{Nothing,I}
+    # Stored direct F splines for restoring after edge pointer swap
+    F_spline_direct::S
+    F_deriv_direct::D
+    # Edge iota-matched F splines: Nothing for limited plasmas, set by direct_build_F_iota_matched! for diverted
+    F_spline_iota_matched::Union{Nothing, S}
+    F_deriv_iota_matched::Union{Nothing, D}
 end
 
 """
@@ -563,7 +575,11 @@ function ProfileSplines(xs::Vector{Float64},
         F_deriv, P_deriv, dVdpsi_deriv, q_deriv,
         q_spline,          # q_spline_direct = same object
         nothing,           # q_spline_iota_inverse: set later for diverted
-        nothing            # dVdpsi_spline_inv: set later for diverted
+        nothing,           # dVdpsi_spline_inv: set later for diverted
+        F_spline,          # F_spline_direct = same object initially
+        F_deriv,           # F_deriv_direct = same object initially
+        nothing,           # F_spline_iota_matched: set later by direct_build_F_iota_matched!
+        nothing            # F_deriv_iota_matched: set later by direct_build_F_iota_matched!
     )
 end
 

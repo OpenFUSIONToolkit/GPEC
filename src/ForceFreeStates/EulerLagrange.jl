@@ -341,14 +341,18 @@ Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    # For integration chunks that extend beyond psihigh in diverted plasmas, switch the
-    # q_spline pointer from the direct spline to the iota inverse spline. This allows
-    # sing_der! (which evaluates equil.profiles.q_spline at each ODE step) to use the
-    # well-behaved iota = 1/q spline near the separatrix without any per-call conditionals.
+    # For integration chunks that extend beyond psihigh in diverted plasmas, switch both
+    # the q_spline and F_spline pointers to their respective edge splines. This allows
+    # sing_der! (which evaluates equil.profiles.q_spline and profiles.F_spline at each ODE step)
+    # to use the well-behaved edge splines near the separatrix without per-call conditionals.
     profiles = equil.profiles
     using_edge_spline = chunk.psi_end > profiles.xs[end] && !isnothing(profiles.q_spline_iota_inverse)
     if using_edge_spline
         profiles.q_spline = profiles.q_spline_iota_inverse
+        if !isnothing(profiles.F_spline_iota_matched)
+            profiles.F_spline = profiles.F_spline_iota_matched
+            profiles.F_deriv  = profiles.F_deriv_iota_matched
+        end
     end
 
     # Callback to be run at every step, handles fixups, tolerances, and data storage
@@ -360,9 +364,13 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
-    # Restore the direct q_spline after the edge chunk completes
+    # Restore the direct q_spline and F_spline after the edge chunk completes
     if using_edge_spline
         profiles.q_spline = profiles.q_spline_direct
+        if profiles.F_spline !== profiles.F_spline_direct
+            profiles.F_spline = profiles.F_spline_direct
+            profiles.F_deriv  = profiles.F_deriv_direct
+        end
     end
 
     # Update u and psifac with the solution at the end of the interval
