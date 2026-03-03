@@ -407,7 +407,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
-    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
+    total_steps::Int = 0            # Total ODE solver steps taken (all steps, not just saved ones)
+    chunk_callback_count::Int = 0   # Callback invocations within the current integration chunk (reset per chunk)
+    chunk_steps_start::Int = 0      # total_steps at the start of the current above-psihigh chunk
+    chunk_is_above_psihigh::Bool = false  # whether the current chunk started above psihigh
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)

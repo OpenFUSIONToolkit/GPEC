@@ -44,18 +44,24 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Iterate through each integration chunk
     psihigh = equil.profiles.xs[end]
     for chunk in chunks
-        # When the edge scan is active, stop integrating once we pass psihigh.
-        # findmax_dW_edge! only scans [psiedge, psihigh]; chunks starting above psihigh
-        # contribute nothing to the dW peak search but take exponentially more computation
-        # near the separatrix (q→∞ causes extreme ODE stiffness and OOM).
-        if ctrl.psiedge < intr.psilim && chunk.psi_start > psihigh
-            break
-        end
+        is_above_psihigh = ctrl.psiedge < intr.psilim && chunk.psi_start >= psihigh
 
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
+        end
+
+        # Detect early termination: integrator_callback! called terminate!(integrator) when the
+        # per-chunk step budget was exceeded. In that case odet.psifac < chunk.psi_end, so we
+        # did not reach the rational surface — skip the crossing and stop the edge scan here.
+        # (ODE stiffness grows exponentially as q→∞: each above-psihigh chunk takes ~8× more steps;
+        # the 20k-step budget in the callback prevents any single chunk from hanging the run.)
+        if is_above_psihigh && odet.psifac < chunk.psi_end - 1e-6
+            if ctrl.verbose
+                @info "Above-psihigh step limit reached at ψ = $((@sprintf "%.4f" odet.psifac)), stopping edge scan"
+            end
+            break
         end
 
         # Cross a rational surface after integration if this chunk requires it
@@ -77,9 +83,12 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
             @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
         end
 
-        # Update u, psilim, and qlim for usage in determining wp and wt
+        # Update psilim, qlim, and u to the truncated boundary (peak dW step).
+        # qlim is updated to q at the truncation psi so that free_run!'s singfac = (m - n*q_boundary)
+        # matches the actual safety factor at the plasma boundary, consistent with free_compute_total's
+        # scan metric and with the develop-branch convention (qlim = q at psilim).
         intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
+        intr.qlim   = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
         odet.step -= 1 # step was incremented one extra time in integrate_el_region!
@@ -368,13 +377,23 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
         end
     end
 
-    # Callback to be run at every step, handles fixups, tolerances, and data storage
-    cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
+    # Reset per-chunk tracking fields used by integrator_callback!.
+    # chunk_is_above_psihigh flags the callback to apply a per-chunk step budget so that
+    # exponentially-growing near-separatrix stiffness (q→∞) cannot hang the integration.
+    # chunk_steps_start records total_steps at the chunk boundary for the per-chunk counter.
+    # save_positions=(false, false) prevents integrator.sol.u from accumulating all accepted ODE
+    # steps (the default (true,true) causes OOM near the separatrix where q→∞ stiffness produces
+    # tens of thousands of tiny steps per chunk). With (false,false), sol.t stays fixed at [t0],
+    # so we cannot use length(sol.t) for near_start — odet.chunk_callback_count replaces it.
+    odet.chunk_is_above_psihigh = using_edge_spline
+    odet.chunk_steps_start = using_edge_spline ? odet.total_steps : 0
+    odet.chunk_callback_count = 0
+    cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!; save_positions=(false, false))
 
     # Advance differential equation from psi_start to psi_end
     rtol = compute_tols(ctrl, intr, odet, chunk.ising) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true, dense=false)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
     # Restore the direct q_spline and F_spline after the edge chunk completes
@@ -410,6 +429,7 @@ function integrator_callback!(integrator)
 
     # Count every ODE step taken (not just saved ones)
     odet.total_steps += 1
+    odet.chunk_callback_count += 1
 
     # Update integration tolerances
     integrator.opts.reltol = compute_tols(ctrl, intr, odet, chunk.ising)
@@ -417,40 +437,40 @@ function integrator_callback!(integrator)
     # Check if the solution norms are above a threshold, if so apply Gaussian reduction
     compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
-    # For diverted plasmas with edge scan, u_store is only needed for psi in [psiedge, psihigh].
-    # Beyond psihigh (the near-separatrix region) the ODE takes many tiny steps, but those
-    # steps are never used by findmax_dW_edge! (et << 0 there) and storing them causes OOM.
-    psihigh = equil.profiles.xs[end]
-    # Skip saving entirely when edge scan is active and we're above psihigh.
-    # findmax_dW_edge! only needs steps in [psiedge, psihigh]; storing the many tiny steps
-    # in the near-separatrix region [psihigh, psilim] causes OOM without providing useful data.
-    edge_scan_active = ctrl.psiedge < intr.psilim
-    if edge_scan_active && integrator.t > psihigh
-        return
-    end
-
-    # Determine if we should save this step
+    # Determine if we should save this step.
     # Always save if:
-    # 1. First few steps of integration (ensures we capture point right after rational/axis)
+    # 1. First few steps of the chunk (captures the point right after rational/axis)
     # 2. Every Nth step (save_interval)
-    # 3. Near the end of integration segment (ensures we capture point right before next rational)
+    # 3. Near the end of integration segment (captures the point right before next rational)
+    # 4. Every step in [psiedge, psihigh] (dense coverage for edge dW scan)
+    # 5. Sparsely in [psihigh, psilim] so findmax_dW_edge! can scan beyond psihigh
+    #    while avoiding OOM from q→∞ stiffness that produces many tiny steps per chunk.
 
     # Check if we're near the end of this integration segment
     psi_range = abs(integrator.sol.prob.tspan[2] - integrator.sol.prob.tspan[1])
     psi_remaining = abs(integrator.sol.prob.tspan[2] - integrator.t)
     near_end = psi_remaining < 0.05 * psi_range || psi_remaining < 1e-4
 
-    # Check if we're at the beginning (first 2 steps capture the point right after rational)
-    # Count steps within this segment (not global step count)
-    steps_in_segment = length(integrator.sol.t)
-    near_start = steps_in_segment <= 2
+    # Use chunk_callback_count (not length(integrator.sol.t)) for near_start detection.
+    # With save_positions=(false, false), sol.t does not accumulate accepted steps and
+    # length(sol.t) is always 1, so it cannot distinguish the first few steps of a chunk.
+    near_start = odet.chunk_callback_count <= 2
 
-    # Always save every step in [psiedge, psihigh] so findmax_dW_edge! has dense coverage
-    # of the core portion of the edge scan where the stability peak lives.
-    in_edge_scan_zone = ctrl.psiedge < intr.psilim && ctrl.psiedge <= integrator.t <= psihigh
+    psihigh = equil.profiles.xs[end]
+    edge_scan_active = ctrl.psiedge < intr.psilim
+    # Dense saving throughout [psiedge, psihigh]
+    in_edge_scan_zone = edge_scan_active && ctrl.psiedge <= integrator.t <= psihigh
+    # Above psihigh: sparse saving avoids OOM while keeping enough coverage for the scan
+    above_psihigh_zone = edge_scan_active && integrator.t > psihigh
 
-    # Save if interval condition met, or near start/end, or in edge scan zone
-    should_save = in_edge_scan_zone || near_start || near_end || (odet.step % ctrl.save_interval == 0)
+    if above_psihigh_zone
+        # Save near chunk boundaries and every ~100×save_interval total steps.
+        # This gives roughly 1 saved step per 1000 ODE steps, preventing OOM from the
+        # extreme step counts near the separatrix while still covering [psihigh, psilim].
+        should_save = near_start || near_end || (odet.total_steps % (ctrl.save_interval * 100) == 0)
+    else
+        should_save = in_edge_scan_zone || near_start || near_end || (odet.step % ctrl.save_interval == 0)
+    end
 
     if should_save
         # Grow arrays if out of storage space
@@ -464,6 +484,17 @@ function integrator_callback!(integrator)
 
         # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
         odet.step += 1
+    end
+
+    # Cap above-psihigh chunks to prevent exponential compute growth as q→∞ near the separatrix.
+    # Observed empirically: each successive above-psihigh chunk takes ~8× more steps than the previous
+    # (q=5.57→7: 1214 steps; q=7→8: ~10k steps; q=8→9: ~83k steps; q=9→10: ~664k steps ...).
+    # terminate!(integrator) stops the ODE solver at the current step without error; the chunk loop
+    # in eulerlagrange_integration then detects the early termination and breaks before the surface crossing.
+    max_steps_per_above_psihigh_chunk = 20_000
+    if above_psihigh_zone && odet.chunk_is_above_psihigh &&
+       (odet.total_steps - odet.chunk_steps_start) >= max_steps_per_above_psihigh_chunk
+        terminate!(integrator)
     end
 end
 
@@ -645,14 +676,12 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
-    # Loop through integration, compute dW at steps in [psiedge, psihigh].
-    # Steps above psihigh are not stored in u_store (skipped in integrator_callback! to avoid OOM)
-    # and are always deeply negative (many rational surfaces near separatrix), so scanning them
-    # would only find instability — the peak is always within the core edge region.
-    psihigh = equil.profiles.xs[end]
+    # Loop through all stored steps in [psiedge, psilim] and compute dW at each.
+    # Steps in [psiedge, psihigh] are densely sampled; steps above psihigh are sparsely saved
+    # (see integrator_callback!). We scan the full range so the peak is not artificially capped.
     for istep in 1:odet.step
         odet.psifac = odet.psi_store[istep]
-        if ctrl.psiedge <= odet.psifac <= psihigh
+        if ctrl.psiedge <= odet.psifac
             odet.u .= odet.u_store[:, :, :, istep]
             try
                 odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)

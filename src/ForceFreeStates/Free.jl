@@ -139,66 +139,50 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     profiles = equil.profiles
     psihigh = profiles.xs[end]  # upper boundary of the equilibrium rzphi spline domain
 
-    # Build psi grid in ψ-space (not q-space) so that we stay within the equilibrium domain.
-    # For diverted plasmas psilim ≫ psihigh, so a q-space grid would require inverting the
-    # direct q spline beyond its valid range, producing physically wrong psi values.
-    # Instead sample with:
-    #   - 20 points in [psiedge, psihigh] where the vacuum response varies with psi
-    #   - 20 points in [psihigh, psilim] where the vacuum surface is fixed at psihigh
-    #     but singfac(q) continues to change as q → ∞ near the separatrix
+    # Build psi grid over the CORE region only [psiedge, psihigh], where the vacuum
+    # geometry actually varies with psi. For above-psihigh queries, ExtendExtrap returns
+    # the value at the last knot (psihigh), which is the correct physics: the equilibrium
+    # rzphi spline ends at psihigh, so the plasma boundary geometry is pinned there for
+    # all psi > psihigh.
+    #
+    # NOTE: Including above-psihigh grid points with constant wv values (all capped at psihigh)
+    # causes a cubic spline derivative discontinuity at psihigh that corrupts interpolated
+    # values in the last core interval [psi[-2], psihigh], shifting the scan peak away from
+    # the true maximum. Using only core knots + ExtendExtrap avoids this completely.
+    #
+    # IMPORTANT: the spline stores RAW vacuum response without singfac scaling.
+    # Singfac = (m - n*q) diverges as q → ∞ near the separatrix; baking it into the spline
+    # causes the wv values to vary by ~10^6 across [psiedge, psilim], which destroys cubic
+    # spline accuracy at the left endpoint (psiedge). free_compute_total applies the correct
+    # singfac analytically at each scan psi, keeping the spline well-conditioned throughout.
     npsi_core = max(4, 20)
-    npsi_edge = max(4, 20)
-    npsi = npsi_core + npsi_edge
-    psi_array = zeros(Float64, npsi + 1)
+    psi_array = zeros(Float64, npsi_core)
 
     for i in 1:npsi_core
         psi_array[i] = ctrl.psiedge + (psihigh - ctrl.psiedge) * (i - 1) / (npsi_core - 1)
     end
-    for i in 1:(npsi_edge + 1)
-        psi_array[npsi_core + i] = psihigh + (intr.psilim - psihigh) * i / (npsi_edge + 1)
-    end
 
-    wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
+    wv_array = zeros(ComplexF64, npsi_core, intr.numpert_total, intr.numpert_total)
 
-    for i in 1:(npsi+1)
-        # Evaluate q at psi_array[i] using the correct spline:
-        #   - direct spline for psi ≤ psihigh (equilibrium domain)
-        #   - iota inverse spline for psi > psihigh (diverted edge)
-        qi = if psi_array[i] > psihigh && !isnothing(profiles.q_spline_iota_inverse)
-            profiles.q_spline_iota_inverse(psi_array[i])
-        else
-            profiles.q_spline_direct(psi_array[i])
-        end
-
+    for i in 1:npsi_core
         for ipert_n in 1:intr.npert
-            # Compute vacuum matrix using the scan psi (psi_array[i]) as the plasma boundary,
-            # not the fixed psilim. The vacuum geometry must correspond to the current surface
-            # being scanned, not the final integration boundary.
-            # For diverted plasmas the scan extends beyond psihigh (where the rzphi spline ends),
-            # so cap the vacuum surface at psihigh — the equilibrium geometry is only known up to
-            # that boundary, and using the psihigh surface is the best available approximation.
+            # Compute vacuum matrix at the core scan psi (psi_array[i]) as the plasma boundary.
+            # All grid points are within [psiedge, psihigh] so no capping is needed.
             n = ipert_n - 1 + intr.nlow
-            vac_psi = min(psi_array[i], psihigh)
-            vac_inputs = Vacuum.VacuumInput(equil, vac_psi, ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
-            # Apply singular factor scaling
-            singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
-            @inbounds for ipert in 1:intr.mpert
-                @views wv_block[ipert, :] .*= singfac[ipert]
-                @views wv_block[:, ipert] .*= singfac[ipert]
-            end
-
-            # Store block in full wv matrix
+            # Store raw block WITHOUT singfac scaling. Singfac is applied in free_compute_total
+            # using the q value at the actual scan psi, not the spline grid psi.
             @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
         end
     end
 
-    # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
-    wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
+    # Flatten 3D array to (npsi_core × numpert_total^2) for series interpolant
+    wv_flat = reshape(wv_array, npsi_core, intr.numpert_total^2)
 
-    # FastInterpolations now natively supports complex values - create complex series interpolant directly
-    # Use CubicFit() for native endpoint handling
+    # FastInterpolations native complex series interpolant.
+    # ExtendExtrap returns the psihigh boundary value for all psi > psihigh (correct physics).
     wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
 
     return wvmat
@@ -231,10 +215,23 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
-    # FastInterpolations now natively supports complex values
+    # Retrieve raw vacuum matrix from the spline (singfac NOT pre-applied; see free_compute_wv_spline).
+    # Apply singfac = (m - n*q(psifac)) analytically: this is the physically correct choice for
+    # the scan, since at each scan step we are evaluating stability as if the plasma boundary
+    # were at psifac, where q(psifac) is the actual safety factor at that boundary.
+    # For psi > psihigh, use the iota inverse spline (if available) to get q.
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
-    wv = odet._wv_out
+    wv = copy(odet._wv_out)
+    q_at_psifac = (odet.psifac > profiles.xs[end] && !isnothing(profiles.q_spline_iota_inverse)) ?
+                  profiles.q_spline_iota_inverse(odet.psifac) :
+                  profiles.q_spline_direct(odet.psifac)
+    for ipert_n in 1:intr.npert
+        n = ipert_n - 1 + intr.nlow
+        singfac = collect(intr.mlow:intr.mhigh) .- (n * q_at_psifac)
+        block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
+        # wv[i,j] = wv_raw[i,j] * singfac[i] * singfac[j] (outer-product row×column scaling)
+        @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
+    end
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
