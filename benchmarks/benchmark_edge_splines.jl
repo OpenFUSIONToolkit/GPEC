@@ -281,7 +281,9 @@ println("Saved: edge_spline_rational_surfaces.png")
 
 # --- Plot 7: et[1] vs q — edge stability diagnostic (from jpec.h5) ---
 # x-axis is q (safety factor), converted from psi via the iota inverse spline.
-# A stability boundary line at et=0 and a reference value from the develop branch are overlaid.
+# Only the CORE scan region [psiedge, psihigh] is plotted: above psihigh, ExtendExtrap
+# pins the wv matrix to the psihigh plasma boundary geometry, making the et values
+# physically unreliable there. A second panel shows the full scan for completeness.
 h5file = joinpath(output_dir, "jpec.h5")
 if isfile(h5file)
     h5open(h5file, "r") do f
@@ -301,18 +303,30 @@ if isfile(h5file)
             end
 
             q_at_psihigh = profiles.q_spline_direct(psihigh)
-            et_peak_idx = argmax(et_real)
-            q_peak      = q_es[et_peak_idx]
 
+            # Split into core (physically reliable) and above-psihigh (extrapolated wv)
+            core_mask  = psi_es .<= psihigh
+            above_mask = psi_es .>  psihigh
+
+            et_peak_idx  = argmax(et_real)
+            q_peak       = q_es[et_peak_idx]
+
+            # --- Plot 7a: core scan only (main stability figure) ---
             p7 = plot(
-                q_es, et_real;
+                q_es[core_mask], et_real[core_mask];
                 xlabel = "q (safety factor)",
                 ylabel = "Re(et[1])",
-                title  = "Edge stability: Re(et[1]) vs q from psiedge to psilim",
-                label  = "Re(et[1])",
-                lw = 2, color = :blue, legend = :topright,
-                xlims = (4.0, q_es[end])
+                title  = "Edge stability: Re(et[1]) vs q  [core scan, psiedge→psihigh]",
+                label  = "Re(et[1])  [core scan, wv interpolated]",
+                lw = 2, color = :blue, legend = :bottomleft,
+                xlims = (4.0, q_at_psihigh * 1.02)
             )
+            if any(above_mask)
+                # Show that the scan continues beyond psihigh but is extrapolated
+                plot!(p7, q_es[above_mask], clamp.(et_real[above_mask], -10.0, 10.0);
+                      label = "above psihigh (wv extrapolated — not reliable)",
+                      lw = 1, color = :orange, ls = :dash, alpha = 0.6)
+            end
             hline!(p7, [0.0]; label = "stability boundary (et = 0)",
                    ls = :dot, color = :black, lw = 1.5)
             vline!(p7, [q_at_psihigh]; label = @sprintf("q(psihigh) = %.3f", q_at_psihigh),
@@ -320,7 +334,7 @@ if isfile(h5file)
             hline!(p7, [1.707]; label = "develop branch ref: q≈5.2, et=+1.707",
                    ls = :dash, color = :green, lw = 1.5)
             scatter!(p7, [q_peak], [et_real[et_peak_idx]];
-                     label = @sprintf("peak (q=%.4f, et=%.3e)", q_peak, et_real[et_peak_idx]),
+                     label = @sprintf("peak (q=%.4f, et=%+.3f)", q_peak, et_real[et_peak_idx]),
                      marker = :star5, ms = 10, color = :red)
             savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
             println("Saved: edge_spline_stability.png")
@@ -430,6 +444,79 @@ if isfile(gsec_file) && isfile(gsei_file)
     end
 else
     println("Note: GSE HDF5 files not found — skipping Plots 9 and 10")
+end
+
+# --- Plot 11: Edge GSE diagnostic — q deviation and GS source mismatch in the far edge ---
+# In the far edge (psin > psihigh), the EFIT F(ψ) is extrapolated (constant via ExtendExtrap)
+# and no longer matches the physical q profile dictated by iota(ψ). This causes a GS equation
+# residual because the toroidal current source term FF′(ψ) is wrong.
+#
+# Panels:
+#  A. q_direct (EFIT, extrapolated) vs q_target = 1/iota(ψ) in the far edge
+#  B. Relative q deviation: (q_direct − q_target) / q_target  [%]
+#  C. GS source mismatch: ΔFF′ = F_direct·F′_direct − F_matched·F′_matched
+if !isnothing(profiles.F_spline_iota_matched)
+    println("Computing edge GSE diagnostic (q deviation from F_direct)...")
+
+    # Dense grid spanning a little into the core for context, then through far edge
+    psi_edge_gse = vcat(
+        collect(range(psihigh - 0.005, psihigh, length=20)),
+        collect(range(psihigh, 1.0 - 1e-4, length=280))
+    )
+    unique!(sort!(psi_edge_gse))
+
+    # q from direct spline (extrapolated beyond psihigh via ExtendExtrap)
+    q_direct_edge  = profiles.q_spline_direct.(psi_edge_gse)
+
+    # q_target = 1/iota(ψ) from the edge inverse spline (only valid above psihigh)
+    q_target_edge = map(psi_edge_gse) do psi
+        psi >= psihigh ? profiles.q_spline_iota_inverse(psi) : profiles.q_spline_direct(psi)
+    end
+
+    # Relative q deviation (only meaningful above psihigh)
+    above_mask_gse = psi_edge_gse .>= psihigh
+    rel_dev_q = (q_direct_edge .- q_target_edge) ./ q_target_edge
+
+    # GS source term: FF′(ψ) = F(ψ) · dF/dψ (the toroidal current contribution to GS)
+    FF_prime_direct  = profiles.F_spline_direct.(psi_edge_gse)  .* profiles.F_deriv_direct.(psi_edge_gse)
+    FF_prime_matched = profiles.F_spline_iota_matched.(psi_edge_gse) .* profiles.F_deriv_iota_matched.(psi_edge_gse)
+    delta_FF_prime   = FF_prime_direct .- FF_prime_matched
+
+    # Panel A: q_direct vs q_target in the far edge
+    p11a = plot(psi_edge_gse, q_direct_edge;
+        xlabel="ψₙ", ylabel="q",
+        title="Far-edge q: EFIT F(ψ) vs iota-matched",
+        label="q_direct (EFIT, ExtendExtrap beyond psihigh)", lw=2, color=:orange, ls=:dash,
+        legend=:topleft)
+    plot!(p11a, psi_edge_gse[above_mask_gse], q_target_edge[above_mask_gse];
+        label="q_target = 1/ι(ψ)  [iota inverse spline]", lw=2, color=:blue)
+    vline!(p11a, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
+
+    # Panel B: relative q deviation
+    p11b = plot(psi_edge_gse[above_mask_gse], rel_dev_q[above_mask_gse] .* 100;
+        xlabel="ψₙ", ylabel="(q_direct − q_target) / q_target  [%]",
+        title="Relative q deviation (proxy for GS F-error in far edge)",
+        label="q deviation [%]", lw=2, color=:red, legend=:topleft)
+    hline!(p11b, [0.0]; ls=:dot, color=:black, lw=1.5, label="0%")
+    vline!(p11b, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
+
+    # Panel C: FF′ mismatch in the far edge
+    p11c = plot(psi_edge_gse[above_mask_gse], delta_FF_prime[above_mask_gse];
+        xlabel="ψₙ", ylabel="ΔFF′  [T² m² / Wb]",
+        title="GS source mismatch: ΔFF′ = F_direct·F′_direct − F_matched·F′_matched",
+        label="ΔFF′", lw=2, color=:purple, legend=:topleft)
+    hline!(p11c, [0.0]; ls=:dot, color=:black, lw=1.5, label="")
+    vline!(p11c, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
+
+    p11 = plot(p11a, p11b, p11c; layout=(3,1), size=(800, 900))
+    savefig(p11, joinpath(output_dir, "edge_spline_gse_edge.png"))
+    println("Saved: edge_spline_gse_edge.png")
+    max_rel_dev = maximum(abs.(rel_dev_q[above_mask_gse])) * 100
+    max_dFF     = maximum(abs.(delta_FF_prime[above_mask_gse]))
+    println(@sprintf("  Max |rel q deviation (F_direct vs F_matched)|: %.2f%%", max_rel_dev))
+    println(@sprintf("  Max |ΔFF′| in far edge:                        %.4g T²m²/Wb", max_dFF))
+else
+    println("Note: F_spline_iota_matched not available — skipping edge GSE diagnostic")
 end
 
 # --- Final summary ---
