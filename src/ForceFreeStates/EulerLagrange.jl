@@ -33,7 +33,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
     end
 
-    # Pre-compute all integration chunks
+    # Pre-compute all integration chunks (stable type: Vector{IntegrationChunk}, empty if none)
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
 
     # Print initial integration condition
@@ -41,20 +41,22 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
     end
 
-    # Iterate through each integration chunk
-    for chunk in chunks
-        # Integrate this region and display progress
-        integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
-        if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
-        end
+    # Build one ODEProblem for reuse; remake(prob; ...) per chunk keeps types constant and reduces setup
+    if !isempty(chunks)
+        prob = ODEProblem(sing_der!, odet.u, (chunks[1].psi_start, chunks[1].psi_end), (ctrl, equil, ffit, intr, odet, chunks[1]))
+        for chunk in chunks
+            integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk, prob)
+            if ctrl.verbose
+                println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+            end
 
-        # Cross a rational surface after integration if this chunk requires it
-        if chunk.needs_crossing
-            if ctrl.kin_flag
-                error("kin_flag = true not implemented yet!")
-            else
-                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            # Cross a rational surface after integration if this chunk requires it
+            if chunk.needs_crossing
+                if ctrl.kin_flag
+                    error("kin_flag = true not implemented yet!")
+                else
+                    cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+                end
             end
         end
     end
@@ -318,8 +320,11 @@ function cross_kinetic_singular_surf()
     return
 end
 
+# Named condition for DiscreteCallback to avoid inference barriers from anonymous closures
+@inline always_true(u, t, integrator) = true
+
 """
-    integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
+    integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk, prob)
 
 Integrate the Euler-Lagrange equations from `psi_start` to `psi_end`.
 Formerly `ode_step!`. Performs the same function as `ode_step` in the Fortran code, with the addition of
@@ -328,7 +333,8 @@ step of the integration. In Fortran, this was performed by running LSODE in one-
 mode (so ode_step was called hundreds of times) and calling the relevant functions in
 a DO loop. Here, we use the DifferentialEquations.jl interface to achieve the same
 functionality in a more Julian way. The integration bounds are now explicit arguments,
-making it clear what region is being integrated.
+making it clear what region is being integrated. Uses `remake(prob; ...)` so that
+problem types stay constant across chunks and solver setup is reused.
 
 ### Arguments
 
@@ -338,26 +344,21 @@ making it clear what region is being integrated.
   - `ffit::FourFitVars` - Fourier fit variables
   - `intr::ForceFreeStatesInternal` - Internal data
   - `chunk::IntegrationChunk` - Integration chunk containing start and end ψ for integration
+  - `prob` - ODEProblem template (remade per chunk for type-stable reuse)
 
 ### TODOs
 
 Check sensitivity of results to tolerances, currently using same logic as Fortran
 Check absolute tolerances, currently only relative tolerances are updated
 """
-function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
-
-    # Callback to be run at every step, handles fixups, tolerances, and data storage
-    cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
-
-    # Advance differential equation from psi_start to psi_end
-    rtol = compute_tols(ctrl, intr, odet, chunk.ising) # initial tolerances
-    prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
-    # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
-
-    # Update u and psifac with the solution at the end of the interval
+function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk, prob)::Nothing
+    cb = DiscreteCallback(always_true, integrator_callback!)
+    rtol = compute_tols(ctrl, intr, odet, chunk.ising)
+    prob_chunk = remake(prob; u0=odet.u, tspan=(chunk.psi_start, chunk.psi_end), p=(ctrl, equil, ffit, intr, odet, chunk))
+    sol = solve(prob_chunk, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
+    return nothing
 end
 
 """
