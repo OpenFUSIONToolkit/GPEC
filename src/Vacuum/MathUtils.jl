@@ -245,6 +245,10 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
     n = inputs.n
     dtheta = 2pi / mtheta
 
+    # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
+    # This is constant for all source points within this loop.
+    gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
+
     # Pre-calculate Green's function for the observation point
     g_real = zeros(mtheta, mpert)
     g_imag = zeros(mtheta, mpert)
@@ -258,7 +262,7 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
         # Call the low-level Green's function calculator.
         # The `green` function returns the Green's function value itself (G_n) and
         # the coupling terms for mode n and mode 0.
-        G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n)
+        G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n, gamma_prefactor)
 
         # The term `aval` in the original Fortran CHI routine corresponds to the coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ,
         # which is directly returned as `coupling_n` by the Julia `green` function.
