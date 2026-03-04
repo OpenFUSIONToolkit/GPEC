@@ -470,7 +470,7 @@ struct ProfileSplines{S,D}
 end
 
 """
-    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=ExtendExtrap())
+    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=:extension)
 
 Create ProfileSplines from arrays of profile values.
 Uses CubicFit boundary conditions with extension extrapolation.
@@ -480,7 +480,7 @@ function ProfileSplines(xs::Vector{Float64},
     P_vals::Vector{Float64},
     dVdpsi_vals::Vector{Float64},
     q_vals::Vector{Float64};
-    extrap::AbstractExtrap=ExtendExtrap())
+    extrap=:extension)
     npts = length(xs)
     npts_minus_1 = npts - 1
     @assert length(F_vals) == npts
