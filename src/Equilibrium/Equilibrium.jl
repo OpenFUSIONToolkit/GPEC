@@ -9,6 +9,7 @@ import FastInterpolations
 import IMASdd
 using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
 import StaticArrays: @MMatrix, SVector
+using AdaptiveArrayPools: @with_pool
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
