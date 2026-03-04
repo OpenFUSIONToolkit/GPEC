@@ -16,8 +16,7 @@ import ..Util
 import ..Vacuum
 using Printf
 import StaticArrays: @MVector, @MMatrix
-# TODO (IMAS Edit #1): Add IMASdd import here
-#   Add: import IMASdd
+
 
 import IMASdd
 
@@ -34,10 +33,6 @@ include("Fourfit.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
-# TODO (IMAS Edit #2): Include WriteImas.jl here
-#   Add: include("WriteImas.jl")
-
-#add the file with the function write.imas();
 
 include("WriteImas.jl) 
   
