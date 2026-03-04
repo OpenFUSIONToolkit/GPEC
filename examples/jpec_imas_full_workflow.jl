@@ -66,6 +66,8 @@ imas_config = JPEC.Equilibrium.EquilibriumConfig(;
     psihigh = 0.994,
 )
 
+
+
 # Load equilibrium through JPEC using IMAS path
 equil = JPEC.Equilibrium.setup_equilibrium(imas_config, dd)
 println("✓ JPEC equilibrium loaded via IMAS")
