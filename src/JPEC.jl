@@ -155,6 +155,9 @@ function main(args::Vector{String}=String[])
     if ctrl.nn_low > ctrl.nn_high
         error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
     end
+    # checks for negative n
+    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
+    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
     if ctrl.nn_high < 1
         error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
               "n < 1 modes are not supported")
@@ -336,7 +339,14 @@ vacuum data if `vac_flag` is true.
 
 Combine spline unpacking if possible, too many extra lines
 """
-function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing}, git_version::String="unknown")
+function write_outputs_to_HDF5(
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal,
+    odet::OdeState,
+    vac::Union{VacuumData,Nothing},
+    git_version::String="unknown"
+)
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
