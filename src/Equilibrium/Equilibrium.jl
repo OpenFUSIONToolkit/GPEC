@@ -8,6 +8,7 @@ using TOML
 import FastInterpolations
 import IMASdd
 using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
+import FastInterpolations: AbstractExtrap, ExtendExtrap
 import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
