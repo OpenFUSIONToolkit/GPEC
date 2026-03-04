@@ -41,7 +41,7 @@ DiffEqCallbacks = "4.9.0"
 Distributions = "0.25.123"
 Documenter = "1.14.1"
 DynamicalSystems = "3.6.7"
-EFIT = "1.2.5"
+EFIT = "8" # prevents breaking changes
 FFTW = "1.9.0"
 FastInterpolations = ">=0.2.8"
 FileIO = "1.18.0"
