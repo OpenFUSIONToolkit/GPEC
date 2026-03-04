@@ -419,88 +419,56 @@ which IMAS does not provide in a convenient form.
   - `dd.equilibrium.time_slice[].profiles_2d[1].grid.dim2`       — Z grid [m]
   - `dd.equilibrium.time_slice[].profiles_2d[1].psi`             — 2D ψ(R,Z) [Wb/rad]
 """
-function read_imas(config::EquilibriumConfig, dd)
-    println("--> Processing IMAS equilibrium at global_time = $(dd.global_time) s")
+function read_imas(config::EquilibriumConfig,dd) #new function in similar to efit 
 
-    # ------------------------------------------------------------------
-    # BLOCK 1: Get the equilibrium time slice
-    # ------------------------------------------------------------------
-    # The [] syntax means "at the current dd.global_time" — the standard
-    # IMAS way to access time-dependent arrays of structures.
-    # All equilibrium data for this moment in time lives inside eqt.
-    eqt = dd.equilibrium.time_slice[]
+  println("--> Processing IMAS equilibrium at a global_time = $(dd.global_time) s")
 
-    # ------------------------------------------------------------------
-    # BLOCK 2: Global flux values — the fundamental scale of the equilibrium
-    # ------------------------------------------------------------------
-    # IMAS (COCOS 11) stores ψ as 2π × the value that JPEC's internal solver
+  eqt = dd.equilibrium.time_slice[] # All equilibrium data for this moment in time lives inside eqt.
+   
+   
+    
+
+   
+    cocos11_to_internal = 1.0 / (2π)  # IMAS (COCOS 11) stores ψ as 2π × the value that JPEC's internal solver
     # expects (COCOS 2 convention, matching the raw gEQDSK / read_efit units).
-    # We therefore divide all ψ values by 2π before handing them to the solver,
-    # and multiply q by 2π for the same reason (q_COCOS11 = q_COCOS2 / 2π).
-    cocos11_to_internal = 1.0 / (2π)
 
-    # psi_axis:     ψ at the magnetic axis (O-point) [Wb, JPEC internal]
-    # psi_boundary: ψ at the last closed flux surface (LCFS) [Wb, JPEC internal]
-    # psio:         total flux swing = |ψ_axis - ψ_boundary| [Wb]
-    #
-    # psio is the normalization scale used throughout the solver.
-    # Every normalized flux coordinate psi_norm ∈ [0,1] is built from psio.
-    psi_axis     = eqt.global_quantities.psi_axis     * cocos11_to_internal
-    psi_boundary = eqt.global_quantities.psi_boundary * cocos11_to_internal
-    psio = abs(psi_boundary - psi_axis)
+   
+   
+   
+    psi_axis     = eqt.global_quantities.psi_axis     * cocos11_to_internal  # psi_axis:     ψ at the magnetic axis (O-point) [Wb, JPEC internal]
+    psi_boundary = eqt.global_quantities.psi_boundary * cocos11_to_internal  # psi_boundary: ψ at the last closed flux surface (LCFS) [Wb, JPEC internal]
+    psio = abs(psi_boundary - psi_axis) # psio: total flux swing = |ψ_axis - ψ_boundary| [Wb]
+
+  
 
     if psio < 1e-10
         error("read_imas: |psi_axis - psi_boundary| = $psio is too small. " *
               "Check that dd.equilibrium is properly populated.")
     end
 
-    # ------------------------------------------------------------------
-    # BLOCK 3: Extract and normalize the 1D profiles
-    # ------------------------------------------------------------------
+    
     # IMAS profiles_1d stores quantities as 1D arrays indexed by ψ,
-    # running from the axis (ψ_axis) to the boundary (ψ_boundary).
-    #
-    # The solver's sq_in spline uses psi_norm ∈ [0,1]:
-    #   psi_norm = 0  at the magnetic axis
-    #   psi_norm = 1  at the plasma boundary
-    #
-    # So we compute: psi_norm = (ψ - ψ_axis) / (ψ_boundary - ψ_axis)
     psi_1d = eqt.profiles_1d.psi .* cocos11_to_internal   # ψ [Wb, JPEC internal]
     f_1d   = eqt.profiles_1d.f                            # F(ψ) = R·Bt [T·m], COCOS-independent
     p_1d   = eqt.profiles_1d.pressure                     # plasma pressure P(ψ) [Pa], COCOS-independent
     q_1d   = eqt.profiles_1d.q ./ cocos11_to_internal     # q [JPEC internal] = q_IMAS × 2π
 
-    nw = length(psi_1d)
+    nw = length(psi_1d) #number of 1D grids
     psi_norm_grid = (psi_1d .- psi_axis) ./ (psi_boundary - psi_axis)
     # clamp protects against tiny floating-point overshoot past [0, 1]
     psi_norm_grid = clamp.(psi_norm_grid, 0.0, 1.0)
 
-    # Build the 4-column table that sq_in expects — same format as read_efit:
-    #   column 1: |F|          toroidal flux function [T·m]
-    #             abs() enforces the sign convention used by the solver
-    #   column 2: μ₀·P         pressure in magnetic units [T²]
-    #             IMAS gives P in [Pa]; μ₀ = 4π×10⁻⁷ [T²/Pa] converts to [T²]
-    #             max(..., 0) prevents unphysical negative pressure from spline overshoot
-    #   column 3: q            safety factor [dimensionless]
-    #   column 4: √(psi_norm)  square root of normalized flux
+  #4column table 
+  
     sq_fs_nodes = hcat(
-        abs.(f_1d),
-        max.(p_1d .* mu0, 0.0),
-        q_1d,
-        sqrt.(psi_norm_grid)
+        abs.(f_1d), #absolute value of F
+        max.(p_1d .* mu0, 0.0), #pressure magnetic units
+        q_1d, #safety factor
+        sqrt.(psi_norm_grid) # the square root of flux
     )
-    sq_in = cubic_interp(psi_norm_grid, sq_fs_nodes; bc=CubicFit(), extrap=:extension)
+    sq_in = cubic_interp(psi_norm_grid, sq_fs_nodes; bc=CubicFit(), extrap=:extension) # can tell the 4 quantities at any pso point
 
-    # ------------------------------------------------------------------
-    # BLOCK 4: Extract the 2D ψ(R,Z) map and apply the solver's convention
-    # ------------------------------------------------------------------
-    # IMAS stores the full 2D poloidal flux map on a rectangular (R,Z) grid
-    # in profiles_2d[1] (grid_type.index = 1 in the IMAS standard).
-    #
-    # Grid layout:
-    #   dim1 → R values [m]  (first array dimension)
-    #   dim2 → Z values [m]  (second array dimension)
-    #   psi  → ψ(R,Z) [Wb/rad], array of shape [nR × nZ]
+   
     if isempty(eqt.profiles_2d)
         error("read_imas: no profiles_2d found in equilibrium time slice. " *
               "Ensure the 2D ψ(R,Z) map is stored in dd.equilibrium.")
@@ -510,20 +478,11 @@ function read_imas(config::EquilibriumConfig, dd)
     z_grid = prof2d.grid.dim2   # Z coordinates [m], 1D array, length nZ
     psi_rz = prof2d.psi .* cocos11_to_internal  # ψ(R,Z) [Wb, JPEC internal]
 
-    # The direct solver's psi_in convention (see DirectRunInput docstring):
-    #
+   
     #   psi_in(R,Z) = ψ_boundary - ψ(R,Z)
-    #
-    # This makes:
     #   psi_in = 0    at the plasma boundary  (ψ = ψ_boundary)
     #   psi_in = psio at the magnetic axis    (ψ = ψ_axis)
-    #
-    # The solver then internally computes psi_norm = 1 - psi_in/psio,
-    # giving psi_norm = 0 at the axis and 1 at the boundary.
-    #
-    # If ψ_boundary < ψ_axis (ψ decreases outward, common in many machines),
-    # then ψ_boundary - ψ(R,Z) is negative at the axis, so we flip the sign
-    # to ensure the axis value is positive — matching the solver's expectation.
+    
     psi_proc = psi_boundary .- psi_rz
     if psi_boundary - psi_axis < 0.0
         psi_proc .*= -1.0
@@ -535,14 +494,14 @@ function read_imas(config::EquilibriumConfig, dd)
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
 
-    # CubicFit boundary conditions, no periodic BC (open rectangular grid).
+   
     # Omitting `search` uses the same default as read_efit, keeping the
     # DirectRunInput type consistent across all input methods.
     psi_in = cubic_interp(
         (psi_in_xs, psi_in_ys), psi_proc;
         bc     = (CubicFit(), CubicFit()),
         extrap = (:extension, :extension)
-    )
+    ) #extrapolate outside domain
 
     println("--> IMAS equilibrium loaded:")
     println("    psio = $(round(psio; sigdigits=5)) Wb")
@@ -552,4 +511,4 @@ function read_imas(config::EquilibriumConfig, dd)
     println("    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m")
 
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
-end
+end #Since both EFIT and IMAS reurn DirectRunInput DCON solver doesnt care where data came from
