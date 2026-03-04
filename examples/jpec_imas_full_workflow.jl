@@ -18,6 +18,13 @@ This proves that JPEC can fully integrate with IMAS-based workflows.
 
 #JPEC.main(DIII exmaple, dd)
 
+# make sure the input are the same except for the efit and imas 
+
+# output the same ?
+# is et[1] the same just looking at it says it s the same 
+# the dd are equivalent to the hdf5 file 
+
+#
 println("="^70)
 println("Full JPEC IMAS Integration Workflow")
 println("="^70)
