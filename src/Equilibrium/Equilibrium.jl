@@ -6,7 +6,6 @@ import ..Spl
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
-import FastInterpolations: ExtendExtrap, WrapExtrap
 import IMASdd
 import Roots
 using Roots: find_zero

@@ -7,8 +7,8 @@ import .Utilities as Util  # Alias for compatibility with DCON
 export Utilities
 
 include("Splines/Splines.jl")
-import .Splines as Splines
-import .Splines as Spl  # Alias for compatibility with DCON and Equilibrium
+import .SplinesMod as Splines
+import .SplinesMod as Spl  # Alias for compatibility with DCON and Equilibrium
 export Splines
 
 include("Equilibrium/Equilibrium.jl")

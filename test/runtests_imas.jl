@@ -253,6 +253,6 @@ end
     #I checked here if the energy values will match the real parts of the et
 
     #finish line of the testing: 1.Test read_imas matches read_efit 4 @test
-                                2.Test if IMAS populates correctly dd.mhd_linear 8 @test
+    #                            2.Test if IMAS populates correctly dd.mhd_linear 8 @test
 
 end

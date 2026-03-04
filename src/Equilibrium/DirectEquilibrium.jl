@@ -518,7 +518,7 @@ robustness.
 
     grid2d = (rzphi_xs, theta_nodes)
 
-    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)

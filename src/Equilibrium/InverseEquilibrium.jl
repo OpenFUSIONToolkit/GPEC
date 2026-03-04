@@ -117,7 +117,7 @@ function equilibrium_solver(input::InverseRunInput)
     r2[:, end] .= r2[:, 1]
     deta[:, end] .= deta[:, 1]
 
-    itp_opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
 
     # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
@@ -136,7 +136,7 @@ function equilibrium_solver(input::InverseRunInput)
     if grid_type == "ldp"
         sq_xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
         sq_fs = zeros(Float64, mpsi+1, 4)
-        sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
+        sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=:extension)
     else
         error("Only 'ldp' grid_type is implemented for now.")
     end
@@ -232,7 +232,7 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[ipsi+1, 4] = spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
     end
 
-    sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
+    sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=:extension)
 
     # Evaluate sq and its derivative at all grid points
     f_sq = zeros(Float64, mpsi+1, 4)
@@ -257,7 +257,7 @@ function equilibrium_solver(input::InverseRunInput)
             sq_fs[ipsi+1, 4] *= ffac
             rzphi_fs[ipsi+1, :, 3] *= ffac
         end
-        sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
+        sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=:extension)
     end
     qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
     # Create 2D interpolants for geometric quantities (rzphi)
