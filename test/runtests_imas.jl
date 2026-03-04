@@ -50,15 +50,15 @@ import EFIT #read EFIT g-files and converts them to IMAS
 
 import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
-@testset "IMAS equilbrium: read_imas mathces read_efit" begin #if any test of the following fails the failure will come from IMAS eq testset
+@testset "IMAS equilibrium: read_imas matches read_efit" begin #if any test of the following fails the failure will come from IMAS eq testset
 
-  data_dir = joinpath(@__DIR__,"test data", "regression_equilibrium_example)
+  data_dir = joinpath(@__DIR__, "test_data", "regression_equilibrium_example")
     geqdsk_path = joinpath(data_dir, "EQDSK_COCOS_02")
 
 
-    
-    
-    efit_control = JPEC.Equilbrium.EquilbriumControl(;
+
+
+    efit_control = JPEC.Equilibrium.EquilibriumControl(;
 
     eq_type = "efit",
 
@@ -66,12 +66,12 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
   jac_type = "boozer",
 
-    psilow = 0.01, 
+    psilow = 0.01,
 
     psihigh = 0.994,
     )
 
-    efit_config = JPEC.Equilibrium.EquilibriumConfig(efit_control, JPEC.Equilibrium.EquilibriumOutput)
+    efit_config = JPEC.Equilibrium.EquilibriumConfig(efit_control, JPEC.Equilibrium.EquilibriumOutput())
 
     equil_efit = JPEC.Equilibrium.setup_equilibrium(efit_config)
 
@@ -82,39 +82,39 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     g = EFIT.readg(geqdsk_path; set_time = 0.0) #read g file in a EFIT.jl internal format
 
-    dd = IMAS.dd() #create a new empty IMAS structure
+    dd = IMASdd.dd() #create a new empty IMAS structure
 
     dd.global_time = g.time
 
-    dd.equilbrium.time = [g.time]
+    dd.equilibrium.time = [g.time]
 
     resize!(dd.equilibrium.time_slice, 1)
 
     dd.equilibrium.time_slice[1].time = g.time
 
-    EFIT.geqdsk2imas!(g, dd.equilbrium.time_slice[1]; wall = nothing) #converted the g file to IMAS for the test
+    EFIT.geqdsk2imas!(g, dd.equilibrium.time_slice[1]; wall = nothing) #converted the g file to IMAS for the test
 
-                                                                    #wall = nothing : didnt include the wall geometry 
+                                                                    #wall = nothing : didnt include the wall geometry
                                                                     #fills 1D profiles and 2D profile(psi map)
                                                                     #Conversion g file COCOS2 -> IMAS COCOS11
 
     #now we load IMAS path
 
-    imas_control = JPEC.Equilibrium.EquilibriumControl(; 
+    imas_control = JPEC.Equilibrium.EquilibriumControl(;
 
     eq_type = "imas", #JPEC reads from IMAS
 
-    eq_filename = joipath(data_dir, "imas_placeholder"), #filename cause eq_filename directory is used for diagnostic output files, but the actual equilibrium data is from a dd file
+    eq_filename = joinpath(data_dir, "imas_placeholder"), #filename cause eq_filename directory is used for diagnostic output files, but the actual equilibrium data is from a dd file
 
-    jac_type = "boozer"
+    jac_type = "boozer",
 
-    psilow = 0.01
+    psilow = 0.01,
 
     psihigh = 0.994, #same settings, bith must match efit_control for comparison
     )
 
     imas_config = JPEC.Equilibrium.EquilibriumConfig(imas_control, JPEC.Equilibrium.EquilibriumOutput()) #imas_config from imas_control plus JPEC.Equilibrium.EquilibriumOutput()
-    equil_imas = JPEC.Equilibrium.setup_equilibrium(imas_config, dd) #fills the ouput values 
+    equil_imas = JPEC.Equilibrium.setup_equilibrium(imas_config, dd) #fills the ouput values
                                                                     # I used function setup_equilibrium(...) to do the phyiscs
     @test equil_imas isa JPEC.Equilibrium.PlasmaEquilibrium
     #testing if read_imas() returned the right type.
@@ -128,13 +128,13 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
     # ryol is relative tolerance, as values must match with 0.1 tolerance.
     # we tested ro = major radius of magnetic axis in m.
 
-    @test isaprox(equil_efit.psio, equil_imas.psio, rtol = 1e-3)
+    @test isapprox(equil_efit.psio, equil_imas.psio, rtol = 1e-3)
 
-    # psio = total flux swing 
+    # psio = total flux swing
 
   # Normalising flux |psi_boundary - psi_axis|
 
-    @test isaprox(equil_efit.profiles.q_spline.y, equil_imas.profiles.q_spline.ym rtol = 1e-2)
+    @test isapprox(equil_efit.profiles.q_spline.y, equil_imas.profiles.q_spline.y, rtol = 1e-2)
 
     # testing the q values of cubic spline(all grid point values, not the spline function itself)
 
@@ -144,12 +144,13 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     # done the first test we sucessfully checked that read_imas matches read_efit
 
-    
+end
+
 # Test 2: see if write_imas populates correctly dd.mhd_linear
 
     #Creates fake DCON results without running the full solver, verify IMAS struct is filled correctly
 
-    @testset "IMAS write: write_imas pupulates dd.mhd_linear" begin
+@testset "IMAS write: write_imas populates dd.mhd_linear" begin
 
     dd_out = IMASdd.dd()
 
@@ -163,7 +164,7 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
 
     #building the control panel for DCON
-    
+
     ctrl = JPEC.DCON.DconControl(;
 
     nn_low = 1,
@@ -187,7 +188,7 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     mhigh = 3,
 
-    mpert = n_modes
+    mpert = n_modes,
 
     numpert_total = n_modes,
     ) # set the DconInternal
@@ -195,8 +196,8 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
     vac_data = JPEC.DCON.VacuumData(10, n_modes, n_modes)
 
 
-    vac_data.et .= ComplexF64[-0.3, 0.1,0.2,0.4,0.6,0.8,1,2] #et[1] < 0 unstable as -0.3<0 
-    
+    vac_data.et .= ComplexF64[-0.3, 0.1, 0.2, 0.4, 0.6, 0.8, 1.2] #et[1] < 0 unstable as -0.3<0
+
 
     #fake eigenvalues but kept the strucutre, fast and simple
     # as testing if write_imas is stores correctly not that the phyiscs behin is right.
@@ -208,17 +209,17 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     #write_imas needs ctrl, intr, vac_data fields
 
-    # the rest are unused by Imas so I set them to nothing 
+    # the rest are unused by Imas so I set them to nothing
 
     #Also worth to note that this is the format a Main() is returining
 
-    JPEC.DCON.write_imas(dd_out, fake_result) #the function I am testing in action 
+    JPEC.DCON.write_imas(dd_out, fake_result) #the function I am testing in action
 
     mhd = dd_out.mhd_linear #contains stabilty results
 
     #verify IMAS metadata
     @test mhd.ideal_flag ==1
-    @test mhd.ids_properties.homogenous_time ==1
+    @test mhd.ids_properties.homogeneous_time ==1
     @test mhd.code.name == "JPEC"
 
     @test length(mhd.time_slice) == 1 #single time slice so 1
@@ -240,9 +241,8 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     for i in 1:n_modes
 
-    @test isapprox(mhd.time_slice[1].toroidal_mode[i].energy_perturbed
-
-    real(vac_data.et[i]); atol = 1e-10)
+    @test isapprox(mhd.time_slice[1].toroidal_mode[i].energy_perturbed,
+                   real(vac_data.et[i]); atol = 1e-10)
 
   end
 
@@ -250,21 +250,5 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     #finish line of the testing: 1.Test read_imas matches read_efit 4 @test
                                 2.Test if IMAS populates correctly dd.mhd_linear 8 @test
-    
 
-    
-    
-
-    
-
-    
-
-    
-    
-
-    
-
-    
-
-
-            
+end

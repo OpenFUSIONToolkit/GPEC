@@ -37,44 +37,20 @@ TODO: Implement this function to write stability results to dd.mhd_linear
 """
 function write_imas(dd::IMASdd.dd, result::NamedTuple)
 
-    # TODO: Your code here!
-    # Extract ctrl, intr, vac_data from result
-
-    # TODO: Get time from dd.equilibrium.time_slice[1].time
-
-    # TODO: Get mhd = dd.mhd_linear
-
-    # TODO: Set all the metadata fields listed above
-
-    # TODO: Create the time slice and resize to 1
-
-    # TODO: Loop over eigenmodes and fill toroidal_mode entries
-
-    # TODO: Return dd
-
-end
-
-"""
-write_imas(dd::IMASdd.dd, result::NamedTuple) -> IMAS.dd
-
-"""
-
-function write_imas(dd::IMAS.dd, result::NamedTuple)
-
     ctrl = result.ctrl # extracts DconControl struct run parameters(nn_low, vac_flag)
     intr = result.intr #Dcon internal data
     vac_data = result.vac_data #vacuum caluclations
                                #also contains eigenvalue array et-- important for stability info
 
-t = dd.equilbrium.time_slice[1].time # variable to hold time valuse, IMAS time dependent data
+t = dd.equilibrium.time_slice[1].time # variable to hold time valuse, IMAS time dependent data
 mhd = dd.mhd_linear
 
-    mhd.ids_properites.comment = "JPEC DCON ideal linear stability, n = $(intr.nlow):$(intr.nhigh)"
-    
-    mhd.ids.properties.homogenous_time = 1 # true: that all the data in this IDS corresponds to a single value
+    mhd.ids_properties.comment = "JPEC DCON ideal linear stability, n = $(intr.nlow):$(intr.nhigh)"
+
+    mhd.ids_properties.homogeneous_time = 1 # true: that all the data in this IDS corresponds to a single value
                                            #this is also a data consistency check
 
-    mhd.ideal-flag #as DCON is an ideal MHD code
+    mhd.ideal_flag = 1 #as DCON is an ideal MHD code
 
     mhd.code.name = "JPEC"
 
@@ -92,14 +68,14 @@ for i in 1:intr.numpert_total
 
         tm = ts.toroidal_mode[i]
 
-        ipert_n = (i-1)/ intr.mper + 1
+        ipert_n = (i-1) ÷ intr.mpert + 1
 
         tm.n_tor = intr.nlow + ipert_n - 1 #tm.n toroidal mode number
 
         if ctrl.vac_flag && vac_data !==nothing #
 
-            tm.energy_perturbed = real(vac_data.et[i])#checking the sign of the energy 
-                                                      #if the energy is negative then stable, if positive unstable
+            tm.energy_perturbed = real(vac_data.et[i])#checking the sign of the energy
+                                                      #if the energy is negative then unstable, if positive stable
 
         end
 
@@ -107,13 +83,13 @@ for i in 1:intr.numpert_total
 
         return dd #dd .mhd_linear now is populated with results
 
-        
+
 
     end
 
 #important notes: dd.mhd_linear now has stabilty results, the list of eigenvalues mode numbers and metadata
 
-   
+
 
 
 
