@@ -26,9 +26,7 @@ using EFIT.IMASdd
 println("✓ Packages loaded")
 println()
 
-# ============================================================================
-# STEP 1: Load equilibrium via IMAS path
-# ============================================================================
+#load data with IMAS
 println("STEP 1: Loading equilibrium via IMAS")
 println("-"^70)
 
@@ -76,14 +74,12 @@ println("  Flux swing: ψ₀ = $(round(equil.psio, digits=3)) Wb/rad")
 println("  Safety factor: q₀ = $(round(equil.params.q0, digits=2)), q₉₅ = $(round(equil.params.q95, digits=2))")
 println()
 
-# ============================================================================
-# STEP 2: Run JPEC/DCON stability analysis
-# ============================================================================
+#Now JPEC/DCON stability analysis
 println("STEP 2: Running JPEC/DCON Stability Analysis")
 println("-"^70)
 
 # Create synthetic DCON result (simulating what full JPEC would produce)
-# In a real workflow, this would come from running the full JPEC analysis
+
 println("Creating synthetic DCON result for n=1 mode...")
 
 # Build synthetic control structure
@@ -123,9 +119,7 @@ println("  Poloidal modes: $(n_modes)")
 println("  First eigenvalue: δW = $(real(eigenvalues[1])) ($(real(eigenvalues[1]) < 0 ? "UNSTABLE" : "stable"))")
 println()
 
-# ============================================================================
-# STEP 3: Write results to IMAS mhd_linear structure
-# ============================================================================
+
 println("STEP 3: Writing results to IMAS")
 println("-"^70)
 
@@ -135,9 +129,7 @@ JPEC.DCON.write_imas(dd, result)
 println("✓ Results written to dd.mhd_linear")
 println()
 
-# ============================================================================
-# STEP 4: Verify the complete workflow
-# ============================================================================
+
 println("STEP 4: Verifying IMAS Output")
 println("-"^70)
 
@@ -180,9 +172,7 @@ end
 println("  Summary: $unstable_count unstable, $stable_count stable")
 println()
 
-# ============================================================================
-# VERIFICATION CHECKS
-# ============================================================================
+
 println("="^70)
 println("VERIFICATION SUMMARY")
 println("="^70)
@@ -238,7 +228,7 @@ all_checks_pass = all_checks_pass && check7
 
 println()
 if all_checks_pass
-    println("🎉 SUCCESS: Full JPEC IMAS workflow is FUNCTIONAL!")
+    println(" SUCCESS: Full JPEC IMAS workflow is FUNCTIONAL!")
     println()
     println("This demonstrates:")
     println("  • JPEC can read equilibrium from IMAS format")
@@ -246,7 +236,7 @@ if all_checks_pass
     println("  • JPEC can write stability results to IMAS mhd_linear")
     println("  • Complete IMAS integration workflow is operational")
 else
-    println("❌ FAILURE: Some checks did not pass")
+    println(" FAILURE: Some checks did not pass")
 end
 
 println()
