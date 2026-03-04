@@ -128,6 +128,10 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
     # ryol is relative tolerance, as values must match with 0.1 tolerance.
     # we tested ro = major radius of magnetic axis in m.
 
+    @test isapprox(equil_efit.zo, equil_imas.zo, atol = 1e-3)
+
+    # zo = magnetic axis Z position, using absolute tolerance since value may be near zero.
+
     @test isapprox(equil_efit.psio, equil_imas.psio, rtol = 1e-3)
 
     # psio = total flux swing
