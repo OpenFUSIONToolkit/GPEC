@@ -1,7 +1,4 @@
 """
-Standalone IMAS Integration Test
-=================================
-
 This script tests IMAS functionality without requiring full JPEC compilation.
 It directly includes the IMAS source files and demonstrates they work correctly.
 
@@ -14,8 +11,8 @@ println("Standalone IMAS Integration Test")
 println("="^70)
 println()
 
-# Activate the JPEC environment to access dependencies
-using Pkg
+ 
+using Pkg # Activate the JPEC environment to access dependencies
 Pkg.activate(joinpath(@__DIR__, ".."))
 
 # Test if we can at least import EFIT and IMASdd
