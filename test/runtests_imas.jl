@@ -61,7 +61,7 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
 
 
-    efit_control = JPEC.Equilibrium.EquilibriumControl(;
+    efit_config = JPEC.Equilibrium.EquilibriumConfig(;
 
     eq_type = "efit",
 
@@ -73,8 +73,6 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     psihigh = 0.994,
     )
-
-    efit_config = JPEC.Equilibrium.EquilibriumConfig(efit_control, JPEC.Equilibrium.EquilibriumOutput())
 
     equil_efit = JPEC.Equilibrium.setup_equilibrium(efit_config)
 
@@ -103,7 +101,7 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     #now we load IMAS path
 
-    imas_control = JPEC.Equilibrium.EquilibriumControl(;
+    imas_config = JPEC.Equilibrium.EquilibriumConfig(;
 
     eq_type = "imas", #JPEC reads from IMAS
 
@@ -113,10 +111,9 @@ import EFIT.IMASdd #because IMAS is a submodule of EFIT pack
 
     psilow = 0.01,
 
-    psihigh = 0.994, #same settings, bith must match efit_control for comparison
+    psihigh = 0.994, #same settings, must match efit_config for comparison
     )
 
-    imas_config = JPEC.Equilibrium.EquilibriumConfig(imas_control, JPEC.Equilibrium.EquilibriumOutput()) #imas_config from imas_control plus JPEC.Equilibrium.EquilibriumOutput()
     equil_imas = JPEC.Equilibrium.setup_equilibrium(imas_config, dd) #fills the ouput values
                                                                     # I used function setup_equilibrium(...) to do the phyiscs
     @test equil_imas isa JPEC.Equilibrium.PlasmaEquilibrium

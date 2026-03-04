@@ -194,8 +194,8 @@ function direct_position!(raw_profile::DirectRunInput)
     # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
     new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinary(),
-        bc=CubicFit(), extrap=ExtendExtrap())
+    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs;
+        bc=CubicFit(), extrap=:extension)
 
     # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
     # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is

@@ -55,8 +55,8 @@ them into a `DirectRunInput` object.
   - A `DirectRunInput` object ready for the direct solver.
 """
 function read_efit(config::EquilibriumConfig)
-    println("--> Processing EFIT g-file: $(config.control.eq_filename)")
-    lines = readlines(config.control.eq_filename)
+    println("--> Processing EFIT g-file: $(config.eq_filename)")
+    lines = readlines(config.eq_filename)
 
     # --- Parse Header ---
     header1_parts = split(lines[1])
@@ -130,12 +130,12 @@ Parses a binary CHEASE file, creates initial 1D and 2D splines with proper
 normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object.
 """
 function read_chease_binary(config::EquilibriumConfig)
-    println("--> Reading CHEASE file (Binary): $(config.control.eq_filename)")
+    println("--> Reading CHEASE file (Binary): $(config.eq_filename)")
 
-    R0EXP = config.control.r0exp
-    B0EXP = config.control.b0exp
+    R0EXP = config.r0exp
+    B0EXP = config.b0exp
 
-    open(config.control.eq_filename, "r") do io
+    open(config.eq_filename, "r") do io
         seekstart(io)
         read(io, UInt32)
         ntnova = read(io, Int32)
@@ -234,10 +234,10 @@ them into a `InverseRunInput` object.
   - A `InverseRunInput` object ready for the inverse solver.
 """
 function read_chease_ascii(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.control.eq_filename)")
-    lines = readlines(config.control.eq_filename)
-    R0EXP = config.control.r0exp
-    B0EXP = config.control.b0exp
+    println("--> Reading CHEASE file: $(config.eq_filename)")
+    lines = readlines(config.eq_filename)
+    R0EXP = config.r0exp
+    B0EXP = config.b0exp
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])

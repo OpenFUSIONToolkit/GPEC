@@ -6,10 +6,13 @@ import ..Spl
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using TOML
 import FastInterpolations
+import FastInterpolations: ExtendExtrap, WrapExtrap
 import IMASdd
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit
+import Roots
+using Roots: find_zero
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, n_series, PeriodicBC
 import StaticArrays: @MMatrix, SVector
-using AdaptiveArrayPools: @with_pool
+using AdaptiveArrayPools: @with_pool, checkpoint!, rewind!
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
@@ -45,9 +48,9 @@ end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)# not used dd::Union{IMASdd.dd, Nothing}=nothing, but rahter additional_input becuase it contains IMAS and after I can just call it setup_equilibrium(config,dd) 
                                                                                   #so in that case additional_input = dd(IMAS.dd type)
 
-    @printf "Equilibrium file: %s\n" eq_config.control.eq_filename
+    @printf "Equilibrium file: %s\n" eq_config.eq_filename
 
-    eq_type = eq_config.control.eq_type
+    eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
         eq_input = read_efit(eq_config)
@@ -58,14 +61,14 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     elseif eq_type == "lar"
 
         if additional_input === nothing
-            additional_input = LargeAspectRatioConfig(eq_config.control.eq_filename)
+            additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
 
         eq_input = lar_run(eq_config, additional_input)
     elseif eq_type == "sol"
 
         if additional_input === nothing
-            additional_input = SolovevConfig(eq_config.control.eq_filename)
+            additional_input = SolovevConfig(eq_config.eq_filename)
         end
 
         eq_input = sol_run(eq_config, additional_input)
@@ -518,7 +521,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write contour data
-        h5open(joinpath(dirname(equil.config.control.eq_filename), "gsec.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.eq_filename), "gsec.h5"), "w") do file
             file["mpsi"] = mpsi
             file["mtheta"] = mtheta
             file["r"] = Float32.(r)
@@ -532,7 +535,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write xy plot data
-        h5open(joinpath(dirname(equil.config.control.eq_filename), "gse.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.eq_filename), "gse.h5"), "w") do file
             gse_data = Array{Float32,3}(undef, mpsi + 1, mtheta + 1, 7)
             for ipsi in 0:mpsi
                 for itheta in 0:mtheta
@@ -549,7 +552,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
 
         # Write integrated error criterion
-        h5open(joinpath(dirname(equil.config.control.eq_filename), "gsei.h5"), "w") do file
+        h5open(joinpath(dirname(equil.config.eq_filename), "gsei.h5"), "w") do file
             file["xs"] = Float32.(flux.xs)
             file["term"] = Float32.(term)
             file["totali"] = Float32.(totali)
