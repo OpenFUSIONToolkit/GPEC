@@ -115,16 +115,6 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         fourier_transform!(grre, green_temp, sin_mn_basis, WALL_ROW_OFFSET, SIN_COL_OFFSET)
     end
 
-    # Add cn0 to make grdgre nonsingular for n=0 modes
-    cn0 = 1.0 # expose to user if anyone ever actually tries to use this
-    (n == 0 && !wall.nowall) && begin
-        @warn "Adding $cn0 to diagonal of grdgre to regularize n=0 mode; this may affect accuracy of results."
-        mth12 = wall.nowall ? mtheta : 2 * mtheta
-        for i in 1:mth12, j in 1:mth12
-            grad_green[i, j] += cn0
-        end
-    end
-
     # Compute both Green's functions with different kernel signs
     # grri: interior potential (kernelsign=-1)
     # grre: exterior potential (kernelsign=+1)
