@@ -41,7 +41,8 @@ returning the final processed `PlasmaEquilibrium` object.
 function setup_equilibrium(path::String="equil.toml")
     return setup_equilibrium(EquilibriumConfig(path))
 end
-function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
+function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)# not used dd::Union{IMASdd.dd, Nothing}=nothing, but rahter additional_input becuase it contains IMAS and after I can just call it setup_equilibrium(config,dd) 
+                                                                                  #so in that case additional_input = dd(IMAS.dd type)
 
     @printf "Equilibrium file: %s\n" eq_config.control.eq_filename
 
@@ -67,20 +68,15 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         end
 
         eq_input = sol_run(eq_config, additional_input)
-    elseif eq_type == "imas"
+    elseif eq_type == "imas" #Check for IMAS data
 
-        # For IMAS input, additional_input must be a populated dd (data dictionary).
-        # There is no file to read — the equilibrium data comes directly from dd.
-        # Usage:
-        #   config = EquilibriumConfig(eq_type="imas", eq_filename="N/A")
-        #   dd = IMAS.json2imas("myshot.json")
-        #   plasma_eq = setup_equilibrium(config, dd)
-        if additional_input === nothing
+       
+        if additional_input === nothing # check if dd got passed in 
             error("eq_type=\"imas\" requires a dd object passed as additional_input.\n" *
-                  "Usage: setup_equilibrium(config, dd)")
+                  "Usage: setup_equilibrium(config, dd)") 
         end
 
-        eq_input = read_imas(eq_config, additional_input)
+        eq_input = read_imas(eq_config, additional_input) #if dd provided read the data
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
