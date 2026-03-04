@@ -6,7 +6,7 @@ using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using Roots
 using TOML
 import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinarySearch, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
 using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
 
@@ -443,7 +443,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux_opts = (search=LinearBinarySearch(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    flux_opts = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
 

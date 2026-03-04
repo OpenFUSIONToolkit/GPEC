@@ -106,7 +106,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         hint = Ref(jpsi)
         intr.psilim = find_zero(
             (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
-                psi -> profiles.q_deriv(psi; hint=hint)),
+             psi -> profiles.q_deriv(psi; hint=hint)),
             profiles.xs[jpsi], Roots.Newton()
         )
         intr.q1lim = profiles.q_deriv(intr.psilim)
@@ -229,14 +229,7 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-@with_pool pool function compute_sing_mmat!(
-    mmat::Array{ComplexF64,4},
-    singp::SingType,
-    ctrl::ForceFreeStatesControl,
-    profiles::Equilibrium.ProfileSplines,
-    ffit::FourFitVars,
-    intr::ForceFreeStatesInternal
-)
+@with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     q_spline = profiles.q_spline
     q_d1 = profiles.q_deriv
@@ -267,21 +260,21 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 
     # Evaluate fmats_lower and derivatives using series interpolants
     ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate gmats and derivatives
     ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate kmats and derivatives
     ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')

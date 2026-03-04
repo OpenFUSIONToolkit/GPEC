@@ -117,7 +117,7 @@ function equilibrium_solver(input::InverseRunInput)
     r2[:, end] .= r2[:, 1]
     deta[:, end] .= deta[:, 1]
 
-    itp_opts2d = (search=LinearBinarySearch(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
