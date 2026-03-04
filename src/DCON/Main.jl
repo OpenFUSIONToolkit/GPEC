@@ -7,16 +7,9 @@ function Main(path::String="./")
     return Main(path, nothing)
 end
 
-"""
-    Main(path::String, dd::IMASdd.dd)
 
-Run DCON using IMAS data dictionary `dd` for the equilibrium instead of an
-`equil.toml` file. The directory `path` must still contain `dcon.toml` for
-DCON control parameters. Equilibrium resolution settings (mpsi, mtheta, etc.)
-use their defaults; override by constructing your own `EquilibriumConfig` and
-calling `Equilibrium.setup_equilibrium` directly if needed.
-"""
-function Main(path::String, dd::Union{IMASdd.dd, Nothing})
+function Main(path::String, dd::Union{IMASdd.dd, Nothing}) #changed from function Main(path::String="./")
+                                                           #can either be IMAS workflow now or file-based workflow
 
     println("DCON START")
     println("----------------------------------")
@@ -24,23 +17,23 @@ function Main(path::String, dd::Union{IMASdd.dd, Nothing})
 
     # Read input data and set up data structures
     intr = DconInternal(; dir_path=path)
-    # TODO: leaving DCON_CONTROL as a part of the toml file, eventually can combine equil, gpec, etc. into one input file?
+    
     inputs = TOML.parsefile(joinpath(intr.dir_path, "dcon.toml"))
     ctrl = DconControl(; (Symbol(k) => v for (k, v) in inputs["DCON_CONTROL"])...)
 
     if dd === nothing
-        # Standard file-based equilibrium: read equil.toml from the run directory
-        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
+        
+        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml")) # Standard file-based equilibrium: read equil.toml from the run directory
     else
-        # IMAS-based equilibrium: build config with defaults; data comes from dd.
-        # eq_filename is a placeholder — its directory is used for any diagnostic outputs.
+       #build EquilibriumConfig - the config package manually
         eq_config = Equilibrium.EquilibriumConfig(;
             control = Equilibrium.EquilibriumControl(;
-                eq_type    = "imas",
+                eq_type    = "imas", #data coming from IMAS
                 eq_filename = joinpath(path, "imas_equilibrium"),
             )
         )
-        equil = Equilibrium.setup_equilibrium(eq_config, dd)
+        equil = Equilibrium.setup_equilibrium(eq_config, dd) #run the actual equilibrium
+        #rest of DCON runs as normal
     end
     if "WALL" in keys(inputs)
         intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["WALL"])...)
@@ -210,14 +203,13 @@ function Main(path::String, dd::Union{IMASdd.dd, Nothing})
         write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
     end
 
-    result = (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
+    result = (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing) #vac_data = ctrl.vac_flag ? if we asked for vac_data yes, output it, no - nothing
 
-    # Write linear stability results back to the IMAS data dictionary (Task 5).
-    # Only done when dd was supplied by the caller (IMAS workflow).
+
     if dd !== nothing
-        write_imas(dd, result)
+        write_imas(dd, result) #dd continues stability data
         if ctrl.verbose
-            println("Stability results written to dd.mhd_linear ✓")
+            println("Stability results written to dd.mhd_linear")
         end
     end
 
