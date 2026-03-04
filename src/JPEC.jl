@@ -3,7 +3,13 @@ module JPEC
 
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
+import .Utilities as Util  # Alias for compatibility with DCON
 export Utilities
+
+include("Splines/Splines.jl")
+import .Splines as Splines
+import .Splines as Spl  # Alias for compatibility with DCON and Equilibrium
+export Splines
 
 include("Equilibrium/Equilibrium.jl")
 import .Equilibrium as Equilibrium
@@ -12,6 +18,10 @@ export Equilibrium
 include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
+
+include("DCON/DCON.jl")
+import .DCON as DCON
+export DCON
 
 include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates

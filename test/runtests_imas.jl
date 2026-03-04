@@ -45,7 +45,10 @@ println("\n" * "="^70)
 println("IMAS integration tests need to be implemented!")
 println("="^70)
 
-
+using Test
+using JPEC
+using JPEC.Equilibrium
+using JPEC.DCON
 import EFIT #read EFIT g-files and converts them to IMAS
 
 import EFIT.IMASdd #because IMAS is a submodule of EFIT pack

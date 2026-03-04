@@ -16,7 +16,7 @@ TODO: Implement this function to write stability results to dd.mhd_linear
 2. Get time from dd.equilibrium.time_slice[1].time
 
 3. Set top-level mhd_linear metadata:
-   - mhd.ids_properties.comment = "JPEC DCON ideal MHD linear stability, n = $(intr.nlow):$(intr.nhigh)"
+   - mhd.ids_properties.comment = "JPEC DCON ideal MHD linear stability, n = nlow:nhigh"
    - mhd.ids_properties.homogeneous_time = 1
    - mhd.ideal_flag = 1
    - mhd.code.name = "JPEC"
@@ -27,10 +27,10 @@ TODO: Implement this function to write stability results to dd.mhd_linear
    - Set ts.time = t
 
 5. Create toroidal_mode entries (one per eigenmode):
-   - resize!(ts.toroidal_mode, intr.numpert_total)
+   - resize!(ts.toroidal_mode, numpert_total)
    - For each eigenmode i:
-     * Calculate n_tor from block position: ipert_n = (i-1) ÷ intr.mpert + 1
-     * Set tm.n_tor = intr.nlow + ipert_n - 1
+     * Calculate n_tor from block position: ipert_n = (i-1) ÷ mpert + 1
+     * Set tm.n_tor = nlow + ipert_n - 1
      * Set tm.energy_perturbed = real(vac_data.et[i]) if vac_flag is true
 
 6. Return dd
