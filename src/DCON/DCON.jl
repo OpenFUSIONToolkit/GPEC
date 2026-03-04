@@ -34,7 +34,7 @@ include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 
-include("WriteImas.jl) 
+include("WriteImas.jl") 
   
 
 # These are used for various small tolerances and root finders throughout DCON
