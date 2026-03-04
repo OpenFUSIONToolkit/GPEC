@@ -141,7 +141,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=ZeroCurvBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
@@ -261,7 +261,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
 end
 
-@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}
+@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
     mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
@@ -270,7 +270,7 @@ end
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
     # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
-    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinarySearch(), extrap=ExtendExtrap())
 
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)

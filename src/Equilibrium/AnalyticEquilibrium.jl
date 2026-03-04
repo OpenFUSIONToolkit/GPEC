@@ -171,7 +171,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinarySearch(), extrap=ExtendExtrap())
     spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
@@ -212,13 +212,13 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinarySearch(), extrap=ExtendExtrap())
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = r_nodes
     rz_in_ys = collect(rzphi_y_nodes)
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; search=LinearBinary(),
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; search=LinearBinarySearch(),
         bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; search=LinearBinary(),
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; search=LinearBinarySearch(),
         bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0
@@ -296,7 +296,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     end
     psi_in_xs = r
     psi_in_ys = z
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; search=LinearBinary(),
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; search=LinearBinarySearch(),
         bc=CubicFit(), extrap=ExtendExtrap())
 
     # Print out equilibrium info

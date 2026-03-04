@@ -31,8 +31,8 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
     for i in 1:mtheta
         # Use a mid-point derivative approximation
         theta_mid = θ_grid[i] + dθ / 2.0
-        d_xin = spline_x(theta_mid; deriv=1)
-        d_zin = spline_z(theta_mid; deriv=1)
+        d_xin = spline_x(theta_mid; deriv=DerivOp(1))
+        d_zin = spline_z(theta_mid; deriv=DerivOp(1))
         # Accumulate length: ds = (ds/dt) * dt
         ds_dθ = sqrt(d_xin^2 + d_zin^2)
         arc_length[i+1] = arc_length[i] + ds_dθ * dθ

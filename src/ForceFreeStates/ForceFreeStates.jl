@@ -9,7 +9,7 @@ using OrdinaryDiffEq
 using HDF5
 using JLD2
 using FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinarySearch, ZeroCurvBC, DerivOp
 using AdaptiveArrayPools
 using Roots
 

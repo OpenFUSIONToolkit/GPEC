@@ -115,7 +115,7 @@ function read_efit(config::EquilibriumConfig)
 
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinary(),
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinarySearch(),
         bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Bundle everything for the solver ---
@@ -210,9 +210,9 @@ function read_chease_binary(config::EquilibriumConfig)
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
         rz_in_ys = range(0, 2π; length=mtau) |> collect
-        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinarySearch(),
             bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinarySearch(),
             bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
         @info "Finished reading CHEASE equilibrium (Binary)"
@@ -374,9 +374,9 @@ function read_chease_ascii(config::EquilibriumConfig)
 
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinary(),
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinarySearch(),
         bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinarySearch(),
         bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
     return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)

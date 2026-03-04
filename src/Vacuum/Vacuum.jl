@@ -1,7 +1,7 @@
 module Vacuum
 
 using TOML, SpecialFunctions, LinearAlgebra, Printf
-using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, DerivOp
 using FastGaussQuadrature: gausslegendre
 using StaticArrays: SVector
 using AdaptiveArrayPools

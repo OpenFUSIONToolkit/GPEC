@@ -148,7 +148,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         psi_array[i] = find_zero(
             (psi -> profiles.q_spline(psi) - qi,
-             psi -> profiles.q_deriv(psi)),
+                psi -> profiles.q_deriv(psi)),
             psii, Roots.Newton()
         )
 
@@ -175,7 +175,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
 
     # FastInterpolations now natively supports complex values - create complex series interpolant directly
     # Use CubicFit() for native endpoint handling
-    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinarySearch())
 
     return wvmat
 end

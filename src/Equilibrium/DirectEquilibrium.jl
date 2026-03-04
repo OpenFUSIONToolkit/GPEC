@@ -194,7 +194,7 @@ function direct_position!(raw_profile::DirectRunInput)
     # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
     new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinary(),
+    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinarySearch(),
         bc=CubicFit(), extrap=ExtendExtrap())
 
     # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
@@ -518,7 +518,7 @@ robustness.
 
     grid2d = (rzphi_xs, theta_nodes)
 
-    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (search=LinearBinarySearch(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
