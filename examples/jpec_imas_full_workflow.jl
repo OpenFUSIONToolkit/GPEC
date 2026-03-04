@@ -10,6 +10,14 @@ This script demonstrates a complete end-to-end JPEC workflow using IMAS:
 This proves that JPEC can fully integrate with IMAS-based workflows.
 """
 
+# JPEC.main( DIII example, ...)
+
+#output 
+
+#convert g file (make sure the same) to IMAS (did this)
+
+#JPEC.main(DIII exmaple, dd)
+
 println("="^70)
 println("Full JPEC IMAS Integration Workflow")
 println("="^70)
