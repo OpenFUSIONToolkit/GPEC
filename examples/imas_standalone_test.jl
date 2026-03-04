@@ -2,7 +2,7 @@
 Standalone IMAS Integration Test
 =================================
 
-This script tests IMAS functionality WITHOUT requiring full JPEC compilation.
+This script tests IMAS functionality without requiring full JPEC compilation.
 It directly includes the IMAS source files and demonstrates they work correctly.
 
 This is useful when the main JPEC package has compilation issues unrelated
@@ -32,10 +32,6 @@ catch e
     exit(1)
 end
 println()
-
-#=============================================================================
-Test 1: Verify IMAS data structures work
-==============================================================================#
 
 println("TEST 1: IMAS Data Structure Verification")
 println("-"^70)
@@ -99,16 +95,13 @@ test1_pass = (
 )
 
 if test1_pass
-    println("✅ TEST 1 PASSED: IMAS structures work correctly")
+    println(" TEST 1 PASSED: IMAS structures work correctly")
 else
-    println("⚠️  TEST 1 FAILED")
+    println(" TEST 1 FAILED")
 end
 println()
 
-#=============================================================================
-Test 2: Read a gEQDSK file and convert to IMAS
-==============================================================================#
-
+# Test 2: I checked gEQDSK -> IMAS conversion
 println()
 println("TEST 2: gEQDSK → IMAS Conversion")
 println("-"^70)
@@ -118,7 +111,7 @@ data_dir = joinpath(@__DIR__, "..", "test", "test_data", "regression_equilibrium
 geqdsk_path = joinpath(data_dir, "EQDSK_COCOS_02")
 
 if !isfile(geqdsk_path)
-    println("⚠️  Test file not found: $geqdsk_path")
+    println(" Test file not found: $geqdsk_path")
     println("   Skipping Test 2")
 else
     println("Reading gEQDSK file...")
@@ -176,17 +169,15 @@ else
     )
 
     if test2_pass
-        println("✅ TEST 2 PASSED: gEQDSK → IMAS conversion works")
+        println(" TEST 2 PASSED: gEQDSK → IMAS conversion works")
     else
-        println("⚠️  TEST 2 FAILED")
+        println("  TEST 2 FAILED")
     end
 end
 
 println()
 
-#=============================================================================
-Test 3: Verify write_imas source code exists
-==============================================================================#
+#I checked now if IMAS Source Code exists
 
 println()
 println("TEST 3: IMAS Source Code Verification")
@@ -258,16 +249,14 @@ end
 test3_pass = all_exist && write_imas_ok && read_imas_ok
 
 if test3_pass
-    println("✅ TEST 3 PASSED: All IMAS source files present and correct")
+    println(" TEST 3 PASSED: All IMAS source files present and correct")
 else
-    println("⚠️  TEST 3 FAILED: Missing files or incomplete implementation")
+    println(" TEST 3 FAILED: Missing files or incomplete implementation")
 end
 
 println()
 
-#=============================================================================
-SUMMARY
-==============================================================================#
+
 
 println()
 println("="^70)
@@ -276,23 +265,23 @@ println("="^70)
 println()
 
 if test1_pass
-    println("✅ IMAS data structures work")
+    println(" IMAS data structures work")
 else
-    println("⚠️  IMAS data structures failed")
+    println("  IMAS data structures failed")
 end
 
 if @isdefined(test2_pass) && test2_pass
-    println("✅ gEQDSK → IMAS conversion works")
+    println(" gEQDSK → IMAS conversion works")
 elseif @isdefined(test2_pass)
-    println("⚠️  gEQDSK → IMAS conversion failed")
+    println("  gEQDSK → IMAS conversion failed")
 else
-    println("⚠️  Test file not available, skipped")
+    println("  Test file not available, skipped")
 end
 
 if test3_pass
-    println("✅ IMAS source code complete and correct")
+    println(" IMAS source code complete and correct")
 else
-    println("⚠️  IMAS source code incomplete")
+    println("  IMAS source code incomplete")
 end
 
 println()
@@ -300,13 +289,13 @@ println()
 overall_pass = test1_pass && test3_pass && (@isdefined(test2_pass) ? test2_pass : true)
 
 if overall_pass
-    println("🎉 IMAS INTEGRATION IS FUNCTIONAL!")
+    println(" IMAS INTEGRATION IS FUNCTIONAL!")
     println()
     println("Note: Full end-to-end tests require JPEC to compile successfully.")
     println("      The IMAS code itself is correct; compilation issues are")
     println("      unrelated to the IMAS integration work.")
 else
-    println("⚠️  Some tests failed. Review output above.")
+    println(" Some tests failed. Review output above.")
 end
 
 println()
