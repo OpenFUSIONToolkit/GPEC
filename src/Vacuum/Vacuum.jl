@@ -156,7 +156,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
             wall_pts .= wall.r
             # Export 3D surfaces to VTK files
             println("Writing 3D surfaces to VTK files...")
-            write_surface_to_vtk(plasma_surf.r, inputs.mtheta, inputs.nzeta, "plasma_surface_3D")
+            write_surface_to_vtk(plasma_surf.r, inputs.mtheta, inputs.nzeta, "plasma_surface_mt_$(inputs.mtheta)_nz_$(inputs.nzeta)")
             !wall.nowall && write_surface_to_vtk(wall.r, inputs.mtheta, inputs.nzeta, "wall_surface_3D")
         else # 2D
             @views begin
