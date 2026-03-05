@@ -24,6 +24,7 @@ If no path is given, defaults to examples/DIIID-like_ideal_example/jpec.toml.
 
 using JPEC
 using JPEC.Equilibrium: InverseCubicSpline
+using FastInterpolations
 using HDF5
 using Roots
 using Plots
@@ -385,32 +386,121 @@ pe.params.diagnose_src = true
 JPEC.Equilibrium.equilibrium_gse!(pe)
 pe.params.diagnose_src = false
 
+# --- Compute far-edge GSE using F_iota_matched ---
+# Above psihigh, rzphi splines use ExtendExtrap (geometry frozen at psihigh), so:
+#   gs_div_dpsi[:,:,1] = 0  (psi-derivative of a frozen function)
+#   gs_div_dtheta[:,:,2] = 0 (cross-term has fx1=fx2=0 → gs_div_term[:,:,2] = 0)
+# The GS residual reduces to the source term alone:
+#   total_far(ψ,θ) ≈ source = J / (2π·ψ₀·π²) · (F·F' / (2πR)² + P')
+# with F and F' from F_spline_iota_matched.
+# Evaluated at both spline NODES and inter-node MIDPOINTS to check interpolation quality.
+far_edge_gse_available = false
+psi_far_eval  = Float64[]
+is_node_far   = Bool[]
+gse_far_per_theta_mat = Matrix{Float64}(undef, 0, 4)
+gse_far_int   = Float64[]
+theta_labels_gse = ["θ=0.00 (outboard)", "θ=0.25 (top)", "θ=0.50 (inboard)", "θ=0.75 (bottom)"]
+theta_colors_gse = [:blue, :orange, :green, :red]
+
+if !isnothing(profiles.F_spline_iota_matched)
+    theta_all  = pe.rzphi_ys
+    psio_gse   = pe.psio
+    mtheta_bc  = length(theta_all) - 1  # number of periodic intervals
+    dtheta_bc  = (theta_all[end] - theta_all[1]) / mtheta_bc
+    theta_fracs_gse = [0.0, 0.25, 0.5, 0.75]
+    theta_idxs_gse  = [max(1, round(Int, th * (length(theta_all)-1) + 1)) for th in theta_fracs_gse]
+
+    # Reconstruct the psi_far grid used by direct_build_F_iota_matched! (12 pts per window).
+    # Same construction: 10 interior pts between each consecutive rational surface pair.
+    # IMPORTANT: Stop at edge_surfaces[end] (the last rational surface), NOT at psi=1.
+    # Beyond edge_surfaces[end], q→∞ and F_iota_matched diverges, making GS residuals
+    # unphysically large. The physically relevant region is [psihigh, edge_surfaces[end]].
+    psi_far_limit = isempty(edge_surfaces) ? psihigh + 0.005 : edge_surfaces[end]
+    psi_far_nodes = Float64[psihigh]
+    boundaries_bm = vcat([psihigh], filter(s -> s < psi_far_limit, edge_surfaces))
+    for i in 1:(lastindex(boundaries_bm)-1)
+        local win_pts = range(boundaries_bm[i], boundaries_bm[i+1]; length=12)
+        append!(psi_far_nodes, win_pts[2:end])   # skip first (already in list)
+    end
+    local last_pts = range(boundaries_bm[lastindex(boundaries_bm)], psi_far_limit; length=12)
+    append!(psi_far_nodes, last_pts[2:end])
+    unique!(sort!(psi_far_nodes))
+
+    # Interleave midpoints with nodes: each consecutive pair contributes a midpoint.
+    # is_node_far[i] = true means psi_far_eval[i] is a spline node; false = interpolated midpoint.
+    for i in eachindex(psi_far_nodes)
+        push!(psi_far_eval, psi_far_nodes[i])
+        push!(is_node_far, true)
+        if i < lastindex(psi_far_nodes)
+            push!(psi_far_eval, (psi_far_nodes[i] + psi_far_nodes[i+1]) / 2)
+            push!(is_node_far, false)
+        end
+    end
+
+    gse_far_per_theta_mat = zeros(Float64, length(psi_far_eval), 4)
+    gse_far_int = zeros(Float64, length(psi_far_eval))
+
+    for (ipsi, psi) in enumerate(psi_far_eval)
+        F_val   = profiles.F_spline_iota_matched(psi)
+        dF_dpsi = profiles.F_deriv_iota_matched(psi)
+        dP_dpsi = profiles.P_deriv(psi)
+
+        source_theta = zeros(Float64, length(theta_all))
+        for (itheta, theta) in enumerate(theta_all)
+            f4   = pe.rzphi_jac((psi, theta))      # frozen at psihigh geometry (ExtendExtrap)
+            R, _ = RZ_at(pe, psi, theta)            # frozen at psihigh geometry (ExtendExtrap)
+            source_theta[itheta] = f4 / (2π * psio_gse * π^2) *
+                                   (F_val * dF_dpsi / (2π * R)^2 + dP_dpsi)
+        end
+
+        for (k, itheta) in enumerate(theta_idxs_gse)
+            gse_far_per_theta_mat[ipsi, k] = abs(source_theta[itheta])
+        end
+
+        # Trapezoidal θ-integration over period [0,1): sum mtheta_bc intervals (skip periodic endpoint)
+        gse_far_int[ipsi] = abs(sum(source_theta[1:mtheta_bc]) * dtheta_bc)
+    end
+
+    max_far_gse = maximum(gse_far_int)
+    println(@sprintf("  Far-edge GSE (F_iota_matched): max θ-integrated |source| = %.2e", max_far_gse))
+    far_edge_gse_available = true
+end
+
 gsec_file = joinpath(output_dir, "gsec.h5")
 gsei_file = joinpath(output_dir, "gsei.h5")
 
 if isfile(gsec_file) && isfile(gsei_file)
     # --- Plot 9: GS residual by poloidal angle from gsec.h5 ---
     h5open(gsec_file, "r") do f
-        psi_xs_gse = read(f["mpsi"]) + 1  # number of ψ grid points
         flux_fsx_data = read(f["flux_fsx"])  # gs_div_dpsi[:,:,1]
         source_data   = read(f["source"])
-        total_data    = read(f["total"])
 
-        # Per-θ residual: |flux_fsx + source| summed over θ (proxy for residual)
         mt_gse = size(flux_fsx_data, 2)
         theta_fracs = [0.0, 0.25, 0.5, 0.75]
         theta_labels = ["θ=0.00 (outboard)", "θ=0.25 (top)", "θ=0.50 (inboard)", "θ=0.75 (bottom)"]
         theta_idxs = [max(1, round(Int, th * (mt_gse-1) + 1)) for th in theta_fracs]
-
         psi_gse_vals = pe.rzphi_xs
 
         p9 = plot(; xlabel="ψₙ", ylabel="|GS residual (per θ)|",
-            title="GS residual by poloidal angle", yscale=:log10, legend=:topleft)
-        for (idx, lbl) in zip(theta_idxs, theta_labels)
+            title="GS residual by poloidal angle (core + far edge)", yscale=:log10, legend=:topleft)
+
+        # Core region: per-theta |flux_fsx + source| from equilibrium_gse!
+        for (k, (idx, lbl)) in enumerate(zip(theta_idxs, theta_labels))
             res_col = abs.(flux_fsx_data[:, idx] .+ source_data[:, idx])
-            plot!(p9, psi_gse_vals, max.(res_col, 1e-15); label=lbl, lw=1.5)
+            plot!(p9, psi_gse_vals, max.(res_col, 1e-15);
+                  label=lbl, lw=1.5, color=theta_colors_gse[k])
         end
-        hline!(p9, [1e-2]; label="warning threshold", ls=:dash, color=:red, lw=1.5)
+
+        # Far-edge overlay: per-theta |source_far| using F_iota_matched (dashed, same colors)
+        if far_edge_gse_available
+            for (k, lbl) in enumerate(theta_labels_gse)
+                far_lbl = k == 1 ? "far edge, F_iota_matched (dashed)" : ""
+                plot!(p9, psi_far_eval, max.(gse_far_per_theta_mat[:, k], 1e-15);
+                      label=far_lbl, lw=1.5, ls=:dash, color=theta_colors_gse[k], alpha=0.8)
+            end
+        end
+
+        hline!(p9, [1e-2]; label="warning threshold", ls=:dot, color=:black, lw=1.5)
         vline!(p9, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
         savefig(p9, joinpath(output_dir, "edge_spline_gse_by_theta.png"))
         println("Saved: edge_spline_gse_by_theta.png")
@@ -432,12 +522,27 @@ if isfile(gsec_file) && isfile(gsei_file)
 
         p10 = plot(
             xs_gse, max.(errori_vec, 1e-15);
-            xlabel="ψₙ", ylabel="|ΔΨ + source| (θ-integrated)",
-            title="θ-integrated GS error per flux surface",
-            label="|gse_integrated|", lw=2, color=:blue,
+            xlabel="ψₙ", ylabel="|θ-integrated GS residual|",
+            title="θ-integrated GS error: core grid + far-edge F_iota_matched",
+            label="core |gse_integrated|", lw=2, color=:blue,
             yscale=:log10, legend=:topleft
         )
-        hline!(p10, [1e-2]; label="warning threshold (1e-2)", ls=:dash, color=:red, lw=1.5)
+
+        # Far-edge overlay: θ-integrated |source| with node vs midpoint distinction
+        if far_edge_gse_available
+            node_mask_far = is_node_far
+            mid_mask_far  = .!is_node_far
+            scatter!(p10, psi_far_eval[node_mask_far],
+                     max.(gse_far_int[node_mask_far], 1e-15);
+                     label="far edge nodes (spline knots)", marker=:circle, ms=5,
+                     color=:red, markerstrokewidth=0)
+            scatter!(p10, psi_far_eval[mid_mask_far],
+                     max.(gse_far_int[mid_mask_far], 1e-15);
+                     label="far edge midpoints (interpolated between knots)", marker=:diamond, ms=4,
+                     color=:orange, alpha=0.8, markerstrokewidth=0)
+        end
+
+        hline!(p10, [1e-2]; label="warning threshold (1e-2)", ls=:dot, color=:black, lw=1.5)
         vline!(p10, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
         savefig(p10, joinpath(output_dir, "edge_spline_gse_integrated.png"))
         println("Saved: edge_spline_gse_integrated.png")
