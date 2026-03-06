@@ -118,6 +118,10 @@ but grad_greenfunction is not since it fills a different block of the
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
     log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
 
+    # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
+    # This is constant for all source/observer point pairs within this kernel call.
+    gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
+
     # Set up periodic splines used for off-grid Gaussian quadrature points
     spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
     spline_z = cubic_interp(theta_grid, source.z; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
@@ -146,7 +150,7 @@ but grad_greenfunction is not since it fills a different block of the
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
         @inbounds for k in 1:(mtheta-3)
             isrc = mod1(j + 1 + k, mtheta)
-            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
@@ -177,7 +181,7 @@ but grad_greenfunction is not since it fills a different block of the
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n, gamma_prefactor)
 
                 # Get stencil and weight for the Gaussian point
                 s = leftpanel ? stencils_left[ig] : stencils_right[ig]
@@ -604,7 +608,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=false)
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n, gamma_prefactor; uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
@@ -618,6 +622,9 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
   - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
   - `n`: Toroidal mode number (Int)
+  - `gamma_prefactor`: Precomputed value of `2√π · Γ(1/2 - n)` [Chance Phys. Plasmas 1997 eq. 40].
+    Constant for a given `n`; callers in tight loops should compute this once and pass it in.
+    Defaults to `2 * sqrt(π) * gamma(0.5 - n)` if omitted.
   - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
 
 # Returns
@@ -641,6 +648,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     dx_dtheta::Float64,
     dz_dtheta::Float64,
     n::Int;
+    gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
     uselegacygreenfunction::Bool=false
 )
 
@@ -677,7 +685,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     pn = legendre[end-1]
 
     # Green's function 2π𝒢ⁿ = G_n [Chance Phys. Plasmas 1997 2161 eq. 40]
-    gg = 2 * sqrt(π) * gamma(0.5 - n) / R
+    gg = gamma_prefactor / R
     G_n = gg * pn
 
     # Gradient factor [Chance Phys. Plasmas 1997 2161 eq. 44]

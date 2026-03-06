@@ -40,8 +40,8 @@ julia benchmarks/benchmark_git_branches.jl --example examples/DIIID-like_ideal_e
 # Output Metrics
 
 For each branch/commit, reports:
-- Eigenmode energy (et[1]) from euler.h5
-- Integration steps from euler.h5
+- Eigenmode energy (et[1]) from jpec.h5
+- Integration steps from jpec.h5
 - Runtime (averaged over warm runs)
 - Git commit hash
 
@@ -158,48 +158,53 @@ end
 
 # Run the example benchmark
 function run_example_benchmark(example_path, num_runs)
-    println("\nRunning example: $example_path")
+    abs_example_path = abspath(example_path)
+    project_root = abspath(joinpath(example_path, "../.."))
+    println("\nRunning example: $abs_example_path")
     println("Warming up with $(num_runs + 1) runs...")
 
-    # First run for JIT compilation
-    println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
-    cd(example_path) do
-        Pkg.activate("../..")
-        using JPEC
-        @time JPEC.main(["./"])
-    end
+    # Write a temp script so `using JPEC` is at top-level in each subprocess.
+    # Pkg.instantiate() handles branches whose environments haven't been resolved yet.
+    tmpscript = tempname() * ".jl"
+    write(tmpscript, "using Pkg; Pkg.instantiate(); using JPEC; JPEC.main([ARGS[1]])\n")
 
-    # Warm runs for timing
-    runtimes = Float64[]
-    for i in 1:num_runs
-        println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
-        runtime = cd(example_path) do
-            @elapsed JPEC.main(["./"])
+    try
+        # First run for JIT compilation
+        println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
+        run(`julia --project=$project_root $tmpscript $abs_example_path`)
+
+        # Warm runs for timing
+        runtimes = Float64[]
+        for i in 1:num_runs
+            println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
+            t_start = time()
+            run(`julia --project=$project_root $tmpscript $abs_example_path`)
+            runtime = time() - t_start
+            push!(runtimes, runtime)
+            println("  Runtime: $(round(runtime, digits=2)) s")
         end
-        push!(runtimes, runtime)
-        println("  Runtime: $(round(runtime, digits=2)) s")
+
+        # Extract metrics from jpec.h5
+        jpec_path = joinpath(abs_example_path, "jpec.h5")
+        if !isfile(jpec_path)
+            error("jpec.h5 not found at $jpec_path")
+        end
+
+        h5 = h5open(jpec_path, "r")
+        et = read(h5["vacuum/et"])
+        nsteps = read(h5["integration/nstep"])
+        close(h5)
+
+        avg_runtime = sum(runtimes) / length(runtimes)
+
+        return (
+            eigenvalue = real(et[1]),
+            steps = nsteps,
+            runtime = avg_runtime
+        )
+    finally
+        rm(tmpscript, force=true)
     end
-
-    # Extract metrics from euler.h5
-    euler_path = joinpath(example_path, "euler.h5")
-    if !isfile(euler_path)
-        error("euler.h5 not found at $euler_path")
-    end
-
-    h5 = h5open(euler_path, "r")
-    et = read(h5["vacuum/et"])
-    xi_psi = read(h5["integration/xi_psi"])
-    psifac = read(h5["integration/psi"])
-    close(h5)
-
-    nsteps = length(psifac)
-    avg_runtime = sum(runtimes) / length(runtimes)
-
-    return (
-        eigenvalue = real(et[1]),
-        steps = nsteps,
-        runtime = avg_runtime
-    )
 end
 
 # Main benchmarking function

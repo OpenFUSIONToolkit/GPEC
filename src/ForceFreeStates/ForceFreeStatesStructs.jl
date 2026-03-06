@@ -408,6 +408,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
+    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
