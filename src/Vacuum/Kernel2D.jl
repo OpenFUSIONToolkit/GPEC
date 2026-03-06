@@ -150,7 +150,7 @@ but grad_greenfunction is not since it fills a different block of the
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
         @inbounds for k in 1:(mtheta-3)
             isrc = mod1(j + 1 + k, mtheta)
-            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, gamma_prefactor)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
@@ -181,7 +181,7 @@ but grad_greenfunction is not since it fills a different block of the
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n, gamma_prefactor)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor)
 
                 # Get stencil and weight for the Gaussian point
                 s = leftpanel ? stencils_left[ig] : stencils_right[ig]
@@ -608,7 +608,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n, gamma_prefactor; uselegacygreenfunction=false)
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.

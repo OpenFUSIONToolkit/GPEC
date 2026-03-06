@@ -211,7 +211,7 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
         # Call the low-level Green's function calculator.
         # The `green` function returns the Green's function value itself (G_n) and
         # the coupling terms for mode n and mode 0.
-        G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n, gamma_prefactor)
+        G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n; gamma_prefactor)
 
         # The term `aval` in the original Fortran CHI routine corresponds to the coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ,
         # which is directly returned as `coupling_n` by the Julia `green` function.
