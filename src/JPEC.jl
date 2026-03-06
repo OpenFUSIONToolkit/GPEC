@@ -406,18 +406,18 @@ function write_outputs_to_HDF5(
         out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
-        # Write local stability data
+        # Write local stability data; always write all entries, using empty arrays when not computed
         if ctrl.mer_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
             out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
-            if !isempty(intr.sing)
-                out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
-            end
+        else
+            out_h5["locstab/di"] = Float64[]
+            out_h5["locstab/dr"] = Float64[]
         end
-        if ctrl.bal_flag
-            out_h5["locstab/ca1"] = intr.locstab.y[:, 4]
-        end
+        out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
+                                 [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
+        out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
@@ -439,20 +439,18 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
-        # Write vacuum Data
-        if ctrl.vac_flag
-            out_h5["vacuum/wt"] = vac_data.wt
-            out_h5["vacuum/wt0"] = vac_data.wt0
-            out_h5["vacuum/ep"] = vac_data.ep
-            out_h5["vacuum/ev"] = vac_data.ev
-            out_h5["vacuum/et"] = vac_data.et
-            out_h5["vacuum/x_plasma"] = vac_data.plasma_pts[:, 1]
-            out_h5["vacuum/y_plasma"] = vac_data.plasma_pts[:, 2]
-            out_h5["vacuum/z_plasma"] = vac_data.plasma_pts[:, 3]
-            out_h5["vacuum/x_wall"] = vac_data.wall_pts[:, 1]
-            out_h5["vacuum/y_wall"] = vac_data.wall_pts[:, 2]
-            out_h5["vacuum/z_wall"] = vac_data.wall_pts[:, 3]
-        end
+        # Write vacuum data; always write all entries, using empty arrays when not computed
+        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
+        out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
+        out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+        out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
+        out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
+        out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
+        out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
+        out_h5["vacuum/y_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
+        out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
     end
 end
 
