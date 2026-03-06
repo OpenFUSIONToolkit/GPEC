@@ -1,5 +1,13 @@
 using Test
 using Pkg
+using JPEC.Vacuum
+using JPEC.Equilibrium
+using JPEC.ForceFreeStates
+using JPEC.ForcingTerms
+using JPEC.PerturbedEquilibrium
+using JPEC.Utilities
+using FastInterpolations
+using LinearAlgebra
 
 # Activate the project environment one level up
 Pkg.activate(joinpath(@__DIR__, ".."))
@@ -12,10 +20,9 @@ if !isempty(ARGS)
         include(testfile)
     end
 else
-    include("./runtests_fastinterp.jl")
-    include("./runtests_vacuum_julia.jl")
+    include("./runtests_utilities.jl")
+    include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
-    include("./runtests_solovev.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_sing.jl")
     include("./runtests_fullruns.jl")
