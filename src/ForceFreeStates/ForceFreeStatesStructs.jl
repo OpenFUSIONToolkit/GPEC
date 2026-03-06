@@ -170,9 +170,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
-  - `tol_nr::Float64` - Relative tolerance of dynamic integration steps away from rationals
-  - `tol_r::Float64` - Relative tolerance of dynamic integration steps near rationals
-  - `crossover::Float64` - Fractional distance from rational q at which tolerance is switched to tol_r
+  - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
   - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
@@ -224,9 +222,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
-    tol_nr::Float64 = 1e-5
-    tol_r::Float64 = 1e-5
-    crossover::Float64 = 1e-2
+    eulerlagrange_tolerance::Float64 = 1e-7
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
