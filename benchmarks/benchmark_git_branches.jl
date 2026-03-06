@@ -40,8 +40,8 @@ julia benchmarks/benchmark_git_branches.jl --example examples/DIIID-like_ideal_e
 # Output Metrics
 
 For each branch/commit, reports:
-- Eigenmode energy (et[1]) from jpec.h5
-- Integration steps from jpec.h5
+- Eigenmode energy (et[1]) from gpec.h5
+- Integration steps from gpec.h5
 - Runtime (averaged over warm runs)
 - Git commit hash
 
