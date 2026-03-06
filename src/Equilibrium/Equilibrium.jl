@@ -3,9 +3,11 @@ module Equilibrium
 # --- Module-level Dependencies ---
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
+using Roots
 using TOML
 import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC
+using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
+using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
@@ -40,8 +42,6 @@ function setup_equilibrium(path::String="equil.toml")
     return setup_equilibrium(EquilibriumConfig(path))
 end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
-
-    @printf "Equilibrium file: %s\n" eq_config.eq_filename
 
     eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
@@ -105,22 +105,12 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     rsep = zeros(2)
 
     for iside in 1:2
-        it = 0
-        hint2d = (Ref(1), Ref(1))  # Shared 2D hint for Newton iteration
-        while true
-            it += 1
-            # Evaluate offset and its derivative
-            offset = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            offset_y = pe.rzphi_offset((psi_edge, theta); deriv=(0, 1), hint=hint2d)
-
-            eta = theta + offset - eta0
-            eta_theta = 1 + offset_y
-            dtheta = -eta / eta_theta
-            theta += dtheta
-            if abs(eta) <= 1e-10 || it > 100
-                break
-            end
-        end
+        hint2d = (Ref(1), Ref(1))
+        theta = find_zero(
+            (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
+                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
+            theta, Roots.Newton()
+        )
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
@@ -138,48 +128,59 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         eta0 = (iside == 1) ? 0.0 : 0.5
         idx = findmin(abs.(vector .- eta0))[2]
         theta = pe.rzphi_ys[idx]
-        rfac = 0.0
-        cosfac = 0.0
-        z = 0.0
-        max_iter = 1000
-        iter = 0
-        hint2d = (Ref(1), Ref(1))  # Shared 2D hint for Newton iteration
-        while iter < max_iter
-            iter += 1
-            # Evaluate rcoord and offset with derivatives
-            r2 = pe.rzphi_rsquared((psi_edge, theta); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta); deriv=(0, 1), hint=hint2d)
-            r2yy = pe.rzphi_rsquared((psi_edge, theta); deriv=(0, 2), hint=hint2d)
-            eta = pe.rzphi_offset((psi_edge, theta); hint=hint2d)
-            eta1 = pe.rzphi_offset((psi_edge, theta); deriv=(0, 1), hint=hint2d)
-            eta2 = pe.rzphi_offset((psi_edge, theta); deriv=(0, 2), hint=hint2d)
+        hint2d = (Ref(1), Ref(1))
 
-            rfac = sqrt(r2)
-            rfac1 = r2y / (2 * rfac)
-            rfac2 = (r2yy - r2y * rfac1 / rfac) / (2 * rfac)
-            phase = 2π * (theta + eta)
-            phase1 = 2π * (1 + eta1)
-            phase2 = 2π * eta2
-            cosfac = cos(phase)
-            sinfac = sin(phase)
-            z = pe.zo + rfac * sinfac
-            z1 = rfac * phase1 * cosfac + rfac1 * sinfac
-            z2 = (2 * rfac1 * phase1 + rfac * phase2) * cosfac + (rfac2 - rfac * phase1^2) * sinfac
-            dtheta = -z1 / z2
-            theta += dtheta
-            # Wrap theta back into valid periodic range [0, 2π)
-            y_period = pe.rzphi_ys[end] - pe.rzphi_ys[1] + (pe.rzphi_ys[2] - pe.rzphi_ys[1])
-            theta = mod(theta - pe.rzphi_ys[1], y_period) + pe.rzphi_ys[1]
-            if abs(dtheta) < 1e-12 * y_period
-                break
-            end
+        # Cache variables that we need after convergence
+        rfac = Ref(0.0)
+        cos_phase = Ref(0.0)
+        z_val = Ref(0.0)
+
+        # Find θ where ∂z/∂θ = 0 (top/bottom separatrix extremum).
+        # z(θ) = zo + rfac·sin(2π(θ+η)), where rfac = √r²(θ) and η(θ) is the angular
+        # offset spline. We solve z1(θ) = 0 where z1 = ∂z/∂θ.
+        function z_deriv(theta_inner)
+            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            rfac_local = sqrt(r2)
+            rfac1 = r2y / (2 * rfac_local)
+            phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
+            sin_phase = sin(2π * (theta_inner + η))
+            cos_phase_local = cos(2π * (theta_inner + η))
+
+            # Cache values for later use
+            rfac[] = rfac_local
+            cos_phase[] = cos_phase_local
+            z_val[] = pe.zo + rfac_local * sin_phase
+
+            return rfac_local * phase1 * cos_phase_local + rfac1 * sin_phase  # ∂z/∂θ
         end
-        if iter >= max_iter
-            @warn "Newton iteration for separatrix extrema did not converge" iside eta0 theta
+
+        function z_deriv2(theta_inner)
+            r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            r2yy = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
+            η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
+            rfac_local = sqrt(r2)
+            rfac1 = r2y / (2 * rfac_local)
+            rfac2 = (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local)
+            phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
+            phase2 = 2π * η2          # d²[2π(θ+η)]/dθ²
+            cos_phase_local = cos(2π * (theta_inner + η))
+            sin_phase = sin(2π * (theta_inner + η))
+
+            return (2 * rfac1 * phase1 + rfac_local * phase2) * cos_phase_local +
+                   (rfac2 - rfac_local * phase1^2) * sin_phase  # ∂²z/∂θ²
         end
-        rext[iside] = pe.ro + rfac * cosfac
-        zsep[iside] = z
-        zext[iside] = z
+
+        theta = find_zero((z_deriv, z_deriv2), theta, Roots.Newton();
+            atol=1e-12, rtol=1e-12, maxevals=1000)
+
+        rext[iside] = pe.ro + rfac[] * cos_phase[]
+        zsep[iside] = zext[iside] = z_val[]
     end
 
     pe.params.rsep = rsep
@@ -406,7 +407,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     diagnose_maxima = equil.params.diagnose_maxima
 
     if verbose
-        println("Diagnosing Grad-Shafranov solution...")
+        @info "Diagnosing Grad-Shafranov solution"
     end
 
     # Compute R, Z coordinates using nodal_derivs access
@@ -442,18 +443,19 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+    flux_opts = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
+    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
+
     # Compute flux derivatives at all grid points for diagnostics
     hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1, 0), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(1, 0), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0, 1), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2((equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1]); deriv=(0, 1), hint=hint2d)
+            query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint2d)
         end
     end
 
@@ -483,8 +485,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         emax = maximum(abs.(error))
         lmax = maximum(errlog)
         jmax = ind2sub(size(errlog), argmax(errlog))
-        println(" fxmax = $fxmax, fymax = $fymax, smax = $smax")
-        println(" emax = $emax, lmax = $lmax, maxloc = ", jmax .- 1)
+        @info "GS residuals: fxmax = $(@sprintf("%.3e", fxmax)), fymax = $(@sprintf("%.3e", fymax)), smax = $(@sprintf("%.3e", smax)), emax = $(@sprintf("%.3e", emax)), lmax = $(@sprintf("%.3f", lmax)), maxloc = $(jmax .- 1)"
     end
 
     # Integrated error criterion
@@ -505,7 +506,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     if diagnose_src
         if verbose
-            println("Writing diagnostics to HDF5 files...")
+            @info "Writing diagnostics to HDF5 files"
         end
 
         # Write contour data

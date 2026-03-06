@@ -31,7 +31,9 @@ using Printf
 using HDF5
 
 # Import FastInterpolations functions and types needed in main
-import FastInterpolations: cubic_interp, CubicFit
+import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
+
+import AdaptiveArrayPools: @with_pool
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
@@ -40,15 +42,28 @@ using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
+const _BANNER = "="^60
+const _SECTION = "-"^40
+
 function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
-    println("\n" * "="^60)
-    println("  GPEC - Generalized Perturbed Equilibrium Code")
-    println("="^60 * "\n")
+    # Capture git version for reproducibility
+    git_version = try
+        String(readchomp(`git -C $(@__DIR__) describe --tags --always`))
+    catch
+        "unknown"
+    end
 
-    start_time = time()
+    @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
+    total_start = time()
+
+    # ----------------------------------------------------------------
+    # Equilibrium
+    # ----------------------------------------------------------------
+    @info "\n  Equilibrium\n$_SECTION"
+    equil_start = time()
 
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
@@ -65,17 +80,14 @@ function main(args::Vector{String}=String[])
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
     end
+
+    @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
+
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
-        end_time = time() - start_time
-        println("\n" * "="^60)
-        println("Equilibrium setup complete (force_termination = true).")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("Normal termination.")
-        println("="^60)
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
-
 
     if "Wall" in keys(inputs)
         intr.wall_settings = Vacuum.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
@@ -88,6 +100,12 @@ function main(args::Vector{String}=String[])
     else
         intr.debug_settings = DebugSettings()
     end
+
+    # ----------------------------------------------------------------
+    # Force-Free States
+    # ----------------------------------------------------------------
+    @info "\n  Force-Free States\n$_SECTION"
+    ffs_start = time()
 
     # Set up variables
     # TODO: parallel threads logic
@@ -112,13 +130,11 @@ function main(args::Vector{String}=String[])
 
     # Compute Mercier and Ballooning stability (if desired)
     # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
     if ctrl.mer_flag
         if ctrl.verbose
-            println("Evaluating Mercier criterion")
+            @info "Evaluating Mercier criterion"
         end
         mercier_scan!(locstab_fs, equil)
     end
@@ -126,18 +142,29 @@ function main(args::Vector{String}=String[])
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=:extension)
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=ExtendExtrap())
 
-    # Determine toroidal mode numbers
+    # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
-        error("Either nn_low or nn_high must be set in ForceFreeStates (both are 0)")
+        error("Either nn_low or nn_high must be set in [ForceFreeStates] (both are 0)")
     elseif ctrl.nn_low == 0
         ctrl.nn_low = ctrl.nn_high
     elseif ctrl.nn_high == 0
         ctrl.nn_high = ctrl.nn_low
     end
     if ctrl.nn_low > ctrl.nn_high
-        error("nn_low cannot be greater than nn_high")
+        error("nn_low=$(ctrl.nn_low) cannot be greater than nn_high=$(ctrl.nn_high)")
+    end
+    # checks for negative n
+    # note that negative n in fortran had code adding the identitiy matrix to grad Green for n=0
+    # and some n, nu sign switching in vacuum but was not actually supported by DCON sing_find, etc.
+    if ctrl.nn_high < 1
+        error("All requested toroidal modes (n=$(ctrl.nn_low):$(ctrl.nn_high)) are below 1; " *
+              "n < 1 modes are not supported")
+    end
+    if ctrl.nn_low < 1
+        @warn "Clamping nn_low from $(ctrl.nn_low) to 1; n < 1 modes are not supported"
+        ctrl.nn_low = 1
     end
     intr.nlow = ctrl.nn_low
     intr.nhigh = ctrl.nn_high
@@ -155,7 +182,7 @@ function main(args::Vector{String}=String[])
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     elseif ctrl.sing_start == 0
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
@@ -177,23 +204,19 @@ function main(args::Vector{String}=String[])
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
-            println("Run parameters:")
-            println(
-                "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))"
-            )
-            println("   qlim = $(@sprintf("%.5f", intr.qlim)), psilim = $(@sprintf("%.9f", intr.psilim))")
-            println("   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))")
-            println(
-                "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))"
-            )
-            println("   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))")
+            @info "Run parameters:\n" *
+                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
+                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
         metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 
         if ctrl.verbose
-            println("   Computing F, G, and K Matrices")
+            @info "Computing F, G, and K matrices"
         end
 
         # Compute matrices and populate FourFitVars struct
@@ -213,48 +236,50 @@ function main(args::Vector{String}=String[])
     # Integrate Euler-Lagrange Equation
     if ctrl.ode_flag
         if ctrl.verbose
-            println("Integrating Euler-Lagrange equation")
+            @info "Integrating Euler-Lagrange equation"
         end
         odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
-            println("Fixed-boundary mode unstable for n = $nstring.")
+            @warn "Fixed-boundary mode unstable for n = $nstring"
         end
     end
 
     # Compute free boundary energies
     if ctrl.vac_flag && !(ctrl.ksing > 0 && ctrl.ksing <= intr.msing + 1)
         if ctrl.verbose
-            println("Computing free boundary energies")
+            wall_desc = intr.wall_settings.shape == "nowall" ? "no wall" : intr.wall_settings.shape
+            @info "Computing free boundary energies ($wall_desc)"
         end
         vac_data = free_run!(odet, ctrl, equil, ffit, intr)
         if real(vac_data.et[1]) < 0
             if ctrl.verbose
-                println("Free-boundary mode unstable for n = $nstring.")
+                @warn "Free-boundary mode unstable for n = $nstring"
             end
         else
             if ctrl.verbose
-                println("All free-boundary modes stable for n = $nstring.")
+                @info "All free-boundary modes stable for n = $nstring"
             end
         end
     end
 
     if ctrl.write_outputs_to_HDF5
-        if ctrl.verbose
-            println("Writing saved data to $(ctrl.HDF5_filename)")
-        end
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, git_version)
+        @info "Results written to $(ctrl.HDF5_filename)"
     end
+
+    @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
     # Early exit if user only requested force-free states
     if ctrl.force_termination
-        end_time = time() - start_time
-        println("\n" * "="^60)
-        println("Force-free states complete (force_termination = true).")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("Normal termination.")
-        println("="^60)
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
+
+    # ----------------------------------------------------------------
+    # Perturbed Equilibrium
+    # ----------------------------------------------------------------
+    @info "\n  Perturbed Equilibrium\n$_SECTION"
+    pe_start = time()
 
     # Check for PerturbedEquilibrium section and run if present
     if "PerturbedEquilibrium" in keys(inputs)
@@ -284,14 +309,16 @@ function main(args::Vector{String}=String[])
             PerturbedEquilibrium.write_outputs_to_HDF5(
                 pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
             )
+            @info "Results written to $output_file"
         end
     end
 
-    end_time = time() - start_time
-    println("\n" * "="^60)
-    println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-    println("Normal termination.")
-    println("="^60)
+    @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
+
+    # ----------------------------------------------------------------
+    # Done
+    # ----------------------------------------------------------------
+    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
@@ -312,9 +339,19 @@ vacuum data if `vac_flag` is true.
 
 Combine spline unpacking if possible, too many extra lines
 """
-function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, odet::OdeState, vac::Union{VacuumData,Nothing})
+function write_outputs_to_HDF5(
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal,
+    odet::OdeState,
+    vac_data::Union{VacuumData,Nothing},
+    git_version::String="unknown"
+)
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
+
+        # Store git version for reproducibility
+        out_h5["info/git_version"] = git_version
 
         # Store input parameters
         for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
@@ -369,20 +406,23 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
-        # Write local stability data
+        # Write local stability data; always write all entries, using empty arrays when not computed
         if ctrl.mer_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
             out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
-            out_h5["singular/di0"] = [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing]
+        else
+            out_h5["locstab/di"] = Float64[]
+            out_h5["locstab/dr"] = Float64[]
         end
-        if ctrl.bal_flag
-            out_h5["locstab/ca1"] = intr.locstab.y[:, 4]
-        end
+        out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
+                                 [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
+        out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
-        out_h5["integration/nstep"] = odet.step
+        out_h5["integration/nstep"] = odet.step            # Number of saved solution snapshots
+        out_h5["integration/nstep_total"] = odet.total_steps  # Total ODE solver steps taken
         out_h5["integration/psi"] = odet.psi_store
         out_h5["integration/q"] = odet.q_store
         out_h5["integration/xi_psi"] = odet.u_store[:, :, 1, :]
@@ -399,18 +439,18 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
-        # Write vacuum Data
-        if ctrl.vac_flag
-            out_h5["vacuum/wt"] = vac.wt
-            out_h5["vacuum/wt0"] = vac.wt0
-            out_h5["vacuum/ep"] = vac.ep
-            out_h5["vacuum/ev"] = vac.ev
-            out_h5["vacuum/et"] = vac.et
-            out_h5["vacuum/x_plasma"] = vac.xzpts[:, 1]
-            out_h5["vacuum/z_plasma"] = vac.xzpts[:, 2]
-            out_h5["vacuum/x_wall"] = vac.xzpts[:, 3]
-            out_h5["vacuum/z_wall"] = vac.xzpts[:, 4]
-        end
+        # Write vacuum data; always write all entries, using empty arrays when not computed
+        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
+        out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
+        out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+        out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
+        out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
+        out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
+        out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
+        out_h5["vacuum/y_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
+        out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
     end
 end
 

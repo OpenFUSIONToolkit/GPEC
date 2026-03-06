@@ -51,15 +51,13 @@ Implements GPEC algorithm from gpout.f:
 
 Populates the following fields in `state`:
 
-  - `resonant_flux[msing, numpert_total]`: Normalized resonant flux Φ_r/A
-  - `resonant_current[msing, numpert_total]`: Resonant current density
-  - `island_width_sq[msing, numpert_total]`: Square of island half-width (w/2)²
-  - `penetrated_field[msing, numpert_total]`: Normal field at resonant surface
-  - `delta_prime[msing, numpert_total]`: Tearing stability parameter Δ'
-  - `island_half_width[msing]`: Dimensional island half-width
+  - `resonant_flux[npert, msing]`: Normalized resonant flux Φ_r/A, indexed by (n-index, surface)
+  - `resonant_current[npert, msing]`: Resonant current density
+  - `island_width_sq[npert, msing]`: Square of island half-width (w/2)²
+  - `penetrated_field[npert, msing]`: Normal field at resonant surface
+  - `delta_prime[npert, msing]`: Tearing stability parameter Δ'
+  - `island_half_width[msing]`: Dimensional island half-width (maximum over all n)
   - `chirikov_parameter[msing]`: Island overlap metric
-
-Note: numpert_total = mpert × npert handles all (m,n) mode combinations
 """
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
@@ -71,7 +69,7 @@ function compute_singular_coupling_metrics!(
     ctrl::PerturbedEquilibriumControl
 )
     if ctrl.verbose
-        println("Computing singular coupling metrics (GPEC method)")
+        @info "Computing singular coupling metrics (GPEC method)"
     end
 
     # Extract dimensions
@@ -82,7 +80,7 @@ function compute_singular_coupling_metrics!(
 
     if msing == 0
         if ctrl.verbose
-            println("  No singular surfaces found. Skipping singular coupling calculation.")
+            @info "No singular surfaces found. Skipping singular coupling calculation."
         end
         return
     end
@@ -110,16 +108,6 @@ function compute_singular_coupling_metrics!(
         return
     end
 
-    if ctrl.verbose
-        println("  Number of singular surfaces: $msing")
-        println("  Number of toroidal modes (n): $npert")
-        if npert > 1
-            println("  Metric arrays: [$npert × $msing]")
-        else
-            println("  Metric arrays: [$msing] (single n)")
-        end
-    end
-
     # Get vacuum calculation parameters
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
@@ -130,15 +118,16 @@ function compute_singular_coupling_metrics!(
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     if ctrl.verbose
-        println("  Processing toroidal modes n = $nlow:$nhigh")
+        nstr = nlow == nhigh ? "$nlow" : "$nlow:$nhigh"
+        @info "Computing surface Green's functions at $msing resonant surfaces (n = $nstr, no wall)"
     end
 
     # Main loop: Process each toroidal mode number separately
     for nn in nlow:nhigh
         n_idx = nn - nlow + 1  # Index for storing in [npert, msing] arrays
 
-        if ctrl.verbose
-            println("  Computing metrics for n = $nn...")
+        if ctrl.verbose && npert > 1
+            @info "Computing metrics for n = $nn"
         end
 
         # For each singular surface, compute Green's functions for this n
@@ -163,8 +152,9 @@ function compute_singular_coupling_metrics!(
             end
 
             # Compute Green's functions at this surface for this n
-            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, mpert, mlow, nn)
-            _, grri, grre, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
+            # TODO: This assumes an initial 2D equilibrum, getting 2D Green's functions for independent n
+            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
+            _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
 
             # Store in singular surface struct (overwrites for each n)
             ffs_intr.sing[s].grri = grri
@@ -231,9 +221,7 @@ function compute_singular_coupling_metrics!(
             state.resonant_flux[n_idx, s] = singflx_mn / area
 
             if ctrl.verbose && n_idx == 1 && s == 1
-                println("    Surface 1: q = $(sing_surf.q), ψ = $(sing_surf.psifac)")
-                println("      Resonant mode: m = $m_res, n = $nn")
-                println("      Delta': $(real(delta_prime_val))")
+                @info "Surface 1: q = $(@sprintf("%.3f", sing_surf.q)), ψ = $(@sprintf("%.3f", sing_surf.psifac)), m = $m_res, n = $nn, Δ' = $(@sprintf("%.3e", real(delta_prime_val)))"
             end
         end
     end
@@ -242,11 +230,9 @@ function compute_singular_coupling_metrics!(
     compute_island_diagnostics!(state, ffs_intr, equil, chi1, twopi)
 
     if ctrl.verbose
-        println("  Singular coupling calculation complete")
         max_island_width = maximum(abs.(state.island_half_width))
         max_delta_prime = maximum(abs.(real.(state.delta_prime)))
-        println("    Max island half-width: $(@sprintf("%.3e", max_island_width))")
-        println("    Max Delta': $(@sprintf("%.3e", max_delta_prime))")
+        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island_width)), max Δ' = $(@sprintf("%.3e", max_delta_prime))"
     end
 end
 
@@ -437,8 +423,8 @@ function compute_current_density(
         r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)           # rfac²
         deta = equil.rzphi_offset((psi, theta); hint=hint2d)           # angle offset
         jac = equil.rzphi_jac((psi, theta); hint=hint2d)               # Jacobian
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1), hint=hint2d)  # ∂(rfac²)/∂theta
-        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1), hint=hint2d)  # ∂(deta)/∂theta
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=Val((0, 1)), hint=hint2d)  # ∂(rfac²)/∂theta
+        deta_y = equil.rzphi_offset((psi, theta); deriv=Val((0, 1)), hint=hint2d)  # ∂(deta)/∂theta
 
         rfac = sqrt(abs(r2))
         fy_rfac2 = r2_y
@@ -563,7 +549,7 @@ ENDDO
 fsurf_indmats = fflxmats * inv(fkaxmats)
 ```
 """
-function compute_surface_inductance_from_greens(
+@with_pool pool function compute_surface_inductance_from_greens(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
     ffs_intr::ForceFreeStatesInternal,
@@ -580,21 +566,27 @@ function compute_surface_inductance_from_greens(
 
     # Initialize matrices (mpert x mpert for single toroidal mode number)
     # Green's functions are computed for a specific n, so inductance is only over poloidal modes
-    flux_matrix = zeros(ComplexF64, mpert, mpert)
-    current_matrix = zeros(ComplexF64, mpert, mpert)
+    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+
+    # Pre-allocate loop buffers from pool
+    vbwp_mn = zeros!(pool, ComplexF64, mpert)
+    chi_theta = zeros!(pool, Float64, mtheta)
+    che_theta = zeros!(pool, Float64, mtheta)
+    kax_theta = zeros!(pool, Float64, mtheta)
 
     # For each poloidal mode, compute surface current from Green's functions
     for i in 1:mpert
         # Unit flux for mode i
-        vbwp_mn = zeros(ComplexF64, mpert)
+        vbwp_mn .= 0.0
         vbwp_mn[i] = 1.0
 
         # Apply Green's functions using same approach as ResponseMatrices.jl
-        chi_theta = apply_green_function(grri, vbwp_mn)
-        che_theta = apply_green_function(grre, vbwp_mn)
+        apply_green_function!(chi_theta, grri, vbwp_mn)
+        apply_green_function!(che_theta, grre, vbwp_mn)
 
         # Surface current from potential jump
-        kax_theta = (chi_theta .- che_theta) ./ μ₀
+        @. kax_theta = (chi_theta - che_theta) / μ₀
 
         # Transform back to Fourier mode space
         kax_modes = ft(kax_theta)
@@ -781,8 +773,8 @@ function compute_surface_area(
         r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
         jac = equil.rzphi_jac((psi, theta); hint=hint2d)
         deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1), hint=hint2d)
-        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1), hint=hint2d)
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=Val((0, 1)), hint=hint2d)
+        deta_y = equil.rzphi_offset((psi, theta); deriv=Val((0, 1)), hint=hint2d)
 
         # Compute rfac
         rfac = sqrt(abs(r2))

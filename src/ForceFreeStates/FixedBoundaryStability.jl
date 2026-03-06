@@ -57,12 +57,13 @@ can do it post-integration rather than during and don't directly handle file out
   - `zero_cross::Bool`: True if a physical zero crossing was detected
   - `nonherm::Bool`: True if W⁻¹ was non-Hermitian beyond tolerance
 """
-function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
+@with_pool pool function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
 
     # Compute smallest eigenvalue (crit) at current step
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
+    u = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
     psi = odet.psi_store[istep]
-    u = odet.u_store[:, :, :, istep]
+    u .= odet.u_store[:, :, :, istep]
     dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
     crit_val, nonherm = compute_smallest_eigenvalue(u)
     odet.crit_store[istep] = crit_val * dVdpsi^2
@@ -81,7 +82,7 @@ function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.Profile
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
             zero_cross = true
-            println("Zero crossing detected at psi = $psi_mid")
+            @info "Zero crossing detected at ψ = $(@sprintf("%.3f", psi_mid))"
         end
     end
     return zero_cross, nonherm
@@ -100,17 +101,22 @@ construction but may accumulate numerical noise during integration.
 
 ### Arguments
 
-  - `u::Array{ComplexF64, 3}`: Solution matrix at `psi`
+  - `u::AbstractArray{ComplexF64, 3}`: Solution matrix at `psi`
 
 ### Returns
 
   - `crit::Float64`: the computed scaled critical eigenvalue
   - `nonherm::Bool`: true if W⁻¹ was non-Hermitian beyond tolerance (> 1e-3)
 """
-function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
+@with_pool pool function compute_smallest_eigenvalue(u::AbstractArray{ComplexF64,3})
 
     # Compute inverse plasma response matrix W⁻¹ = U₁ * U₂⁻¹
-    wp_inverse = u[:, :, 1] / u[:, :, 2]
+    # The following is in-place operation equivalent to wp_inverse = u[:, :, 1] / u[:, :, 2]
+    wp_inverse = acquire!(pool, ComplexF64, size(u, 1), size(u, 2))
+    U2_tmp = similar!(pool, wp_inverse)
+    wp_inverse .= @view u[:, :, 1]
+    U2_tmp .= @view u[:, :, 2]
+    rdiv!(wp_inverse, lu!(U2_tmp))
 
     # TODO: This section not be necessary since W should be Hermitian by construction.
     # This likely just removes any numerical noise during integration
@@ -118,7 +124,16 @@ function compute_smallest_eigenvalue(u::Array{ComplexF64,3})
     # by ignoring the lower triangle (by default, can ignore upper using `uplo=:L`), which will
     # NOT produce identical results to taking the Hermitian part as done here unless is exactly Hermitian.
     # Check to make sure W is at least close to Hermitian before enforcing it
-    nonherm_error = norm(0.5 * (wp_inverse - adjoint(wp_inverse))) / norm(0.5 * (wp_inverse + adjoint(wp_inverse)))
+
+    # Compute adjoint in-place to avoid allocations
+    adjoint_wp_inverse = similar!(pool, wp_inverse)
+    tmp_mat1 = similar!(pool, wp_inverse)
+    tmp_mat2 = similar!(pool, wp_inverse)
+    adjoint!(adjoint_wp_inverse, wp_inverse)
+    @. tmp_mat1 = 0.5 * (wp_inverse + adjoint_wp_inverse)
+    @. tmp_mat2 = 0.5 * (wp_inverse - adjoint_wp_inverse)
+
+    nonherm_error = norm(tmp_mat2) / norm(tmp_mat1)
     nonherm = nonherm_error > 1e-3
 
     # Enforce that W is Hermitian

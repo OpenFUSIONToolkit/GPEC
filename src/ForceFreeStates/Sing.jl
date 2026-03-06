@@ -27,18 +27,9 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
 
-                # Bisection method to find singular surface
-                converged = false
-                for _ in 1:itmax
-                    psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * profiles.q_spline(psifac; hint=hint)) * dm
-                    abs(singfac) < 1e-8 && (converged=true; break)
-                    singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
-                end
+                psifac = find_zero(psi -> m - n * profiles.q_spline(psi; hint=hint), (psi0, psi1), Roots.Brent())
 
-                if !converged
-                    error("Bisection did not converge for m = $m after $itmax iterations.")
-                elseif any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
+                if any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
                     # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
                     # Technically only need m or n, but simplifies some later code and cheap to store both
                     push!(intr.sing[findfirst(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)].m, m)
@@ -95,7 +86,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         if ctrl.nn_low != ctrl.nn_high
             error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
         end
-        @info "Setting psilim via dmlim: initial qlim = $(intr.qlim), dmlim = $(ctrl.dmlim)"
+        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)
         intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
@@ -112,21 +103,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
         jpsi = min(jpsi, equil.config.mpsi - 1)
 
-        intr.psilim = profiles.xs[jpsi]
-        converged = false
         hint = Ref(jpsi)
-        for _ in 1:itmax
-            dpsi = (intr.qlim - profiles.q_spline(intr.psilim; hint=hint)) / profiles.q_deriv(intr.psilim; hint=hint)
-            intr.psilim += dpsi
-            if abs(dpsi) < eps * abs(intr.psilim)
-                converged = true
-                intr.q1lim = profiles.q_deriv(intr.psilim)
-                break
-            end
-        end
-        if !converged
-            error("Can't find psilim after $itmax iterations.")
-        end
+        intr.psilim = find_zero(
+            (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
+             psi -> profiles.q_deriv(psi; hint=hint)),
+            profiles.xs[jpsi], Roots.Newton()
+        )
+        intr.q1lim = profiles.q_deriv(intr.psilim)
     end
 end
 
@@ -246,7 +229,7 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     q_spline = profiles.q_spline
     q_d1 = profiles.q_deriv
@@ -254,21 +237,23 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     q_d3 = deriv3(q_spline)
 
     # Initial allocations
-    q = @MVector zeros(Float64, 4)
-    singfac = zeros(Float64, intr.numpert_total, 4)
-    f_lower_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    g_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    k_interp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 4)
-    f_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    f0_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    ff_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    g_lower = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    k = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, ctrl.sing_order + 1)
-    v = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2)
-    x = zeros(ComplexF64, intr.numpert_total, 2 * intr.numpert_total, 2, ctrl.sing_order + 1)
+    Npert = intr.numpert_total
+
+    singfac = zeros!(pool, Float64, Npert, 4)
+    f_lower_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    g_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    k_interp = zeros!(pool, ComplexF64, Npert, Npert, 4)
+    f_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    f0_lower = zeros!(pool, ComplexF64, Npert, Npert)
+    ff_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    g_lower = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    k = zeros!(pool, ComplexF64, Npert, Npert, ctrl.sing_order + 1)
+    v = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2)
+    x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, ctrl.sing_order + 1)
+    tmp_vec = acquire!(pool, ComplexF64, Npert)
 
     # Evaluate q spline and its derivatives
-    q .= (q_spline(singp.psifac),
+    q = (q_spline(singp.psifac),
         q_d1(singp.psifac),
         q_d2(singp.psifac),
         q_d3(singp.psifac))
@@ -452,7 +437,8 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     # Solve the Taylor expansion according to F * x¹ = v² - K v¹ at each order
     # 0ᵗʰ order: x¹₀ = F⁻¹(v² - K v¹)
     for isol in 1:(2*intr.numpert_total)
-        @views x[:, isol, 1, 1] .= v[:, isol, 2] .- k[:, :, 1] * v[:, isol, 1]
+        @views mul!(tmp_vec, k[:, :, 1], v[:, isol, 1])
+        @views x[:, isol, 1, 1] .= v[:, isol, 2] .- tmp_vec
     end
     @views x[:, :, 1, 1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, 1])
 
@@ -460,9 +446,11 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     for i in 1:ctrl.sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 1:i
-                @views x[:, isol, 1, i+1] .-= Hermitian(ff_lower[:, :, j+1], :L) * x[:, isol, 1, i-j+1]
+                @views mul!(tmp_vec, Hermitian(ff_lower[:, :, j+1], :L), x[:, isol, 1, i-j+1])
+                @views x[:, isol, 1, i+1] .-= tmp_vec
             end
-            @views x[:, isol, 1, i+1] .-= k[:, :, i+1] * v[:, isol, 1]
+            @views mul!(tmp_vec, k[:, :, i+1], v[:, isol, 1])
+            @views x[:, isol, 1, i+1] .-= tmp_vec
         end
         @views x[:, :, 1, i+1] = UpperTriangular(f0_lower') \ (LowerTriangular(f0_lower) \ x[:, :, 1, i+1])
     end
@@ -471,9 +459,11 @@ function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::Fo
     for i in 0:ctrl.sing_order
         for isol in 1:(2*intr.numpert_total)
             for j in 0:i
-                x[:, isol, 2, i+1] .+= adjoint(k[:, :, j+1]) * x[:, isol, 1, i-j+1]
+                @views mul!(tmp_vec, adjoint(k[:, :, j+1]), x[:, isol, 1, i-j+1])
+                @views x[:, isol, 2, i+1] .+= tmp_vec
             end
-            x[:, isol, 2, i+1] .+= Hermitian(g_lower[:, :, i+1], :L) * v[:, isol, 1]
+            @views mul!(tmp_vec, Hermitian(g_lower[:, :, i+1], :L), v[:, isol, 1])
+            @views x[:, isol, 2, i+1] .+= tmp_vec
         end
     end
 
@@ -523,7 +513,7 @@ See equation 47 in the Glasser 2016 DCON paper. Identical to the Fortran
   - `power::Vector{ComplexF64}`: α values for all modes (0 for nonresonant)
   - `k::Int`: The current order in the power series expansion
 """
-function solve_higher_order_vmat!(
+@with_pool pool function solve_higher_order_vmat!(
     vmat::Array{ComplexF64,4},
     mmat::Array{ComplexF64,4},
     m0mat::Matrix{ComplexF64},
@@ -537,22 +527,27 @@ function solve_higher_order_vmat!(
     k::Int
 )
 
+    tmp_arr = zeros!(pool, ComplexF64, size(vmat)[1:3])
     # Compute ∑Mₗvₖ₋ₗ
     for l in 1:k
-        vmat[:, :, :, k+1] .+= sing_matmul(mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
+        @views sing_matmul!(tmp_arr, mmat[:, :, :, l+1], vmat[:, :, :, k-l+1])
+        vmat[:, :, :, k+1] .+= tmp_arr
     end
+
+    a = zeros!(pool, ComplexF64, 2, 2)
     for isol in 1:(2*intr.numpert_total)
         for i in eachindex(r1) # go block by block?
             # a = M₀ - (α + k/2)I = ∑Mₗvₖ₋ₗ (for multi-n 2D, we make a the ith block fo M₀)
-            m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
-            a = copy(m0mat_block)
+            @views m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
+            a .= m0mat_block
             a[1, 1] -= k / 2.0 + power[isol]
             a[2, 2] -= k / 2.0 + power[isol]
             det = a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]
             # Solve the resonant indices
-            x = -vmat[r1[i], isol, :, k+1]
-            vmat[r1[i], isol, 1, k+1] = (a[2, 2] * x[1] - a[1, 2] * x[2]) / det
-            vmat[r1[i], isol, 2, k+1] = (a[1, 1] * x[2] - a[2, 1] * x[1]) / det
+            x1 = -vmat[r1[i], isol, 1, k+1]
+            x2 = -vmat[r1[i], isol, 2, k+1]
+            vmat[r1[i], isol, 1, k+1] = (a[2, 2] * x1 - a[1, 2] * x2) / det
+            vmat[r1[i], isol, 2, k+1] = (a[1, 1] * x2 - a[2, 1] * x1) / det
         end
         # Solve the non-resonant indices (the eigenvalue α = 0, so M₀v = 0 (null space))
         vmat[n1, isol, :, k+1] ./= (power[isol] + k / 2.0)
@@ -567,14 +562,19 @@ Identical to the Fortran `sing_matmul` subroutine.
 
 ### Arguments
 
-  - `a::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
-  - `b::Array{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
+  - `a::AbstractArray{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
+  - `b::AbstractArray{ComplexF64,3}`: shape (mmpert, 2 * mpert, 2)
 
 ## Returns
 
   - `c::Array{ComplexF64,3}`: shape (mpert, 2 * mpert, 2)
 """
-function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
+function sing_matmul(a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
+    c = zeros(ComplexF64, size(a, 1), size(b, 2), 2)
+    return sing_matmul!(c, a, b)
+end
+
+@with_pool pool function sing_matmul!(out::AbstractArray{ComplexF64,3}, a::AbstractArray{ComplexF64,3}, b::AbstractArray{ComplexF64,3})
     m = size(b, 1)
     n = size(b, 2)
 
@@ -583,20 +583,19 @@ function sing_matmul(a::Array{ComplexF64,3}, b::Array{ComplexF64,3})
         error("Sing_matmul: size(a,2) = $(size(a,2)) != 2*size(b,1) = $(2*m)")
     end
 
-    c = zeros(ComplexF64, size(a, 1), n, 2)
-
+    fill!(out, zero(ComplexF64))
     # main computation
-    tmp = zeros(ComplexF64, size(a, 1))
+    tmp = acquire!(pool, ComplexF64, size(a, 1))
     for i in 1:n
         for j in 1:2
             @views mul!(tmp, a[:, 1:m, j], b[:, i, 1])
-            @views c[:, i, j] .+= tmp
+            @views out[:, i, j] .+= tmp
             @views mul!(tmp, a[:, (m+1):(2*m), j], b[:, i, 2])
-            @views c[:, i, j] .+= tmp
+            @views out[:, i, j] .+= tmp
         end
     end
 
-    return c
+    return out
 end
 
 """
@@ -671,12 +670,12 @@ function sing_get_ca(u::Array{ComplexF64,3}, ua::Array{ComplexF64,3}, intr::Forc
     temp2[(intr.numpert_total+1):(2*intr.numpert_total), :] .= u[:, :, 2]
 
     # LU factorization and solve
-    temp2 .= lu(temp1) \ temp2
+    temp2 .= lu!(temp1) \ temp2
 
     # Build ca
     ca = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
-    ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
-    ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
+    @views ca[:, :, 1] .= temp2[1:intr.numpert_total, :]
+    @views ca[:, :, 2] .= temp2[(intr.numpert_total+1):(2*intr.numpert_total), :]
 
     return ca
 end
@@ -721,7 +720,7 @@ more simplistic code with similar performance.
 
 Implement kin_flag functionality
 """
-function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
+@with_pool pool function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
         FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
@@ -729,7 +728,22 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     # Unpack structs and initialize
     # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
     _, equil, ffit, intr, odet, _ = params
-    fill!(odet.tmp, 0)
+
+    # Allocate temporary arrays from the pool
+    Npert = intr.numpert_total
+
+    singfac_vec = acquire!(pool, Float64, Npert)
+    singfac_mat = reshape(singfac_vec, intr.mpert, intr.npert)
+
+    amat = acquire!(pool, ComplexF64, Npert, Npert)
+    bmat = similar!(pool, amat)
+    cmat = similar!(pool, amat)
+    fmat_lower = similar!(pool, amat)
+    kmat = similar!(pool, amat)
+    gmat = similar!(pool, amat)
+    tmp_mat = similar!(pool, amat)
+
+    fill!(tmp_mat, zero(ComplexF64))
     u1 = @view(u[:, :, 1])
     u2 = @view(u[:, :, 2])
     du1 = @view(du[:, :, 1])
@@ -738,37 +752,27 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
-    odet.singfac_vec .= vec(1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'))
+    singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
     # kinetic stuff - skip for now
     if false #(TODO: kin_flag)
         error("kin_flag not implemented yet")
     else
         # Evaluate matrix splines at the current psi value using shared hint
-        ffit.amats(vec(ffit._mat_out), psieval; hint=ffit._hint)
-        amat = ffit._mat_out
-
-        # Use odet temporary buffers for subsequent matrices to avoid overwriting amat
-        bmat = reshape(odet.bmat, intr.numpert_total, intr.numpert_total)
+        ffit.amats(vec(amat), psieval; hint=ffit._hint)
         ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
-
-        cmat = reshape(odet.cmat, intr.numpert_total, intr.numpert_total)
         ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
-
-        fmat_lower = reshape(odet.fmat_lower, intr.numpert_total, intr.numpert_total)
         ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
-
-        kmat = reshape(odet.kmat, intr.numpert_total, intr.numpert_total)
         ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
-
-        gmat = reshape(odet.gmat, intr.numpert_total, intr.numpert_total)
         ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
 
-        odet.Afact = cholesky!(Hermitian(amat))
-        # bmat = A⁻¹ * bmat
-        ldiv!(odet.Afact, bmat)
-        # cmat = A⁻¹ * cmat
-        ldiv!(odet.Afact, cmat)
+        # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
+        # Equivalent to: Afact = cholesky!(Hermitian(amat)); ldiv!(Afact, bmat); ldiv!(Afact, cmat)
+        # but calls LAPACK directly to avoid Hermitian/Cholesky wrapper allocations in this hot loop
+        LAPACK.potrf!('U', amat)
+        LAPACK.potrs!('U', amat, bmat)
+        LAPACK.potrs!('U', amat, cmat)
+
     end
 
     # Compute du
@@ -777,25 +781,25 @@ function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
-        du1 .= u2 .* odet.singfac_vec
-        mul!(odet.tmp, kmat, u1)
-        du1 .-= odet.tmp
+        du1 .= u2 .* singfac_vec
+        mul!(tmp_mat, kmat, u1)
+        du1 .-= tmp_mat
         ldiv!(LowerTriangular(fmat_lower), du1)
         ldiv!(UpperTriangular(fmat_lower'), du1)
         # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
-        mul!(odet.tmp, gmat, u1)
-        du2 .= odet.tmp
-        mul!(odet.tmp, adjoint(kmat), du1)
-        du2 .+= odet.tmp
+        mul!(tmp_mat, gmat, u1)
+        du2 .= tmp_mat
+        mul!(tmp_mat, adjoint(kmat), du1)
+        du2 .+= tmp_mat
         # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
-        du1 .*= odet.singfac_vec
+        du1 .*= singfac_vec
     end
 
     # ud[1] = Ξ'_Ψ
     @views odet.ud[:, :, 1] .= du1
     # ud[2] = Ξ_s = - A⁻¹(B * Ξ'_Ψ - C * Ξ_Ψ), eq. 18 of Glasser 2016
-    mul!(odet.tmp, bmat, du1)
-    odet.ud[:, :, 2] .= .-odet.tmp
-    mul!(odet.tmp, cmat, u1)
-    @views odet.ud[:, :, 2] .-= odet.tmp
+    mul!(tmp_mat, bmat, du1)
+    odet.ud[:, :, 2] .= .-tmp_mat
+    mul!(tmp_mat, cmat, u1)
+    @views odet.ud[:, :, 2] .-= tmp_mat
 end

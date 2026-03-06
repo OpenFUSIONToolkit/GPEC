@@ -4,7 +4,7 @@ The Utilities module provides helper functions and data structures used across G
 
 ## Overview
 
-The UtilitiesMod currently provides:
+The Utilities module currently provides:
 - `FourierCoefficients`: Lightweight FFT-based Fourier decomposition for periodic data
 - Helper functions for accessing Fourier coefficients at grid points
 

@@ -5,6 +5,7 @@ using HDF5
 using Printf
 using LinearAlgebra
 using Statistics
+using AdaptiveArrayPools
 
 # Import parent modules
 import ..Equilibrium
@@ -82,12 +83,6 @@ function compute_perturbed_equilibrium(
     intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
 
-    if ctrl.verbose
-        println("\nPERTURBED EQUILIBRIUM START")
-        println("----------------------------------")
-    end
-    start_time = time()
-
     state = PerturbedEquilibriumState()
 
     # Step 0: Initialize mode arrays for convenient indexing
@@ -116,13 +111,6 @@ function compute_perturbed_equilibrium(
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)
     # This is handled by write_outputs_to_HDF5 in main()
-
-    end_time = time() - start_time
-    if ctrl.verbose
-        println("----------------------------------")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("PERTURBED EQUILIBRIUM COMPLETE")
-    end
 
     return state
 end
