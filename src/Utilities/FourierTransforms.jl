@@ -109,12 +109,21 @@ function compute_fourier_coefficients(
         ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
         sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
         cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
-        for idx_n in 1:npert, idx_m in 1:mpert
+        for idx_n in 1:npert
             n = nlow + idx_n - 1
-            m = mlow + idx_m - 1
-            for (j, ϕ) in enumerate(ϕ_grid), (i, θ) in enumerate(θ_grid)
-                cos_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * (ν[i] + ϕ))
-                sin_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * (ν[i] + ϕ))
+            n_col_offset = (idx_n - 1) * mpert
+            # Precompute n*(ν + ϕ) for all (theta, phi) pairs once per n — (mtheta, nzeta)
+            nν_nϕ = n .* (ν .+ ϕ_grid')
+            for idx_m in 1:mpert
+                m = mlow + idx_m - 1
+                col = idx_m + n_col_offset
+                # Broadcast m*θ over all phi; sincos halves trig evaluations
+                arg = m .* θ_grid .- nν_nϕ  # (mtheta, nzeta)
+                for k in eachindex(arg)
+                    s, c = sincos(arg[k])
+                    cos_mn_basis[k, col] = c
+                    sin_mn_basis[k, col] = s
+                end
             end
         end
     end
