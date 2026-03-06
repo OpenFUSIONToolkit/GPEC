@@ -7,7 +7,6 @@ The `PerturbedEquilibrium` module computes the plasma response to external magne
 ```@docs
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumControl
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumInternal
-GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.ForcingMode
 GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```
 
