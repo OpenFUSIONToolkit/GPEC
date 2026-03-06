@@ -3,9 +3,10 @@ function symbolize_keys(dict::Dict{String,Any})
 end
 
 """
-    EquilibriumControl
+    EquilibriumConfig(...)
 
-A mutable struct containing control parameters for equilibrium reconstruction.
+A mutable struct containing configuration parameters for equilibrium reconstruction.
+Bundles all necessary settings originally specified in the equil fortran namelists.
 
 ## Fields
 
@@ -15,6 +16,8 @@ A mutable struct containing control parameters for equilibrium reconstruction.
   - `power_bp::Int` - Poloidal field power exponent for Jacobian
   - `power_b::Int` - Toroidal field power exponent for Jacobian
   - `power_r::Int` - Major radius power exponent for Jacobian
+  - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
+  - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
@@ -22,13 +25,14 @@ A mutable struct containing control parameters for equilibrium reconstruction.
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
-  - `use_classic_splines::Bool` - Use classic spline interpolation method
-  - `input_only::Bool` - Only process input without full reconstruction
+  - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
   - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
-@kwdef mutable struct EquilibriumControl
+@kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
     eq_filename::String = "mypath"
+    r0exp::Float64 = 1.0
+    b0exp::Float64 = 1.0
 
     jac_type::String = "hamada"
     power_bp::Int = 0
@@ -43,17 +47,16 @@ A mutable struct containing control parameters for equilibrium reconstruction.
 
     newq0::Int = 0
     etol::Float64 = 1e-7
-    use_classic_splines::Bool = false
 
-    input_only::Bool = false
+    force_termination::Bool = false
     use_galgrid::Bool = true
 
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumControl(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
-        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
-        input_only, use_galgrid)
+    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
+        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+        force_termination, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0
@@ -84,88 +87,72 @@ A mutable struct containing control parameters for equilibrium reconstruction.
         elseif jac_type != "other"
             error("Cannot recognize jac_type = $(jac_type)")
         end
-        return new(eq_type, eq_filename, jac_type, power_bp, power_b, power_r,
-            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol, use_classic_splines,
-            input_only, use_galgrid)
+        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
+            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+            force_termination, use_galgrid)
     end
 end
 
 """
-    EquilibriumOutput
-
-A mutable struct containing flags for equilibrium output options.
-
-## Fields
-
-  - `gse_flag::Bool` - Output GSE (Grad-Shafranov Equation) data
-  - `out_eq_1d::Bool` - Output 1D equilibrium profiles in text format
-  - `bin_eq_1d::Bool` - Output 1D equilibrium profiles in binary format
-  - `out_eq_2d::Bool` - Output 2D equilibrium data in text format
-  - `bin_eq_2d::Bool` - Output 2D equilibrium data in binary format
-  - `out_2d::Bool` - Output 2D flux surface data in text format
-  - `bin_2d::Bool` - Output 2D flux surface data in binary format
-  - `dump_flag::Bool` - Output diagnostic dump files
+Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 """
-@kwdef mutable struct EquilibriumOutput
-    gse_flag::Bool = false
-    out_eq_1d::Bool = false
-    bin_eq_1d::Bool = false
-    out_eq_2d::Bool = false
-    bin_eq_2d::Bool = true
-    out_2d::Bool = false
-    bin_2d::Bool = false
-    dump_flag::Bool = false
-end
+function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
+    # Check for required fields
+    required_keys = ("eq_filename", "eq_type")
+    missingkeys = filter(k -> !haskey(equil_dict, k), required_keys)
 
-"""
-    EquilibriumConfig(...)
+    if !isempty(missingkeys)
+        error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
+    end
 
-A container struct that bundles all necessary configuration settings originally specified in the equil
-fortran namelists.
-"""
-@kwdef mutable struct EquilibriumConfig
-    control::EquilibriumControl = EquilibriumControl()
-    output::EquilibriumOutput = EquilibriumOutput()
-end
+    # Filter to only known parameters
+    config_fields = Set(String.(fieldnames(EquilibriumConfig)))
+    config_data = Dict{String,Any}()
 
-"""
-Constructor that allows users to form a EquilibriumConfig struct from dictionaries
-for convenience when most of the defaults are fine.
-"""
-function EquilibriumConfig(control::Dict, output::Dict)
-    construct = EquilibriumControl(; control...)
-    outstruct = EquilibriumOutput(; output...)
-    return EquilibriumConfig(; control=construct, output=outstruct)
+    for (k, v) in equil_dict
+        if k in config_fields
+            config_data[k] = v
+        else
+            @warn "Unknown equilibrium parameter: $k"
+        end
+    end
+
+    # Construct validated struct
+    config = EquilibriumConfig(; symbolize_keys(config_data)...)
+    if !isabspath(config.eq_filename)
+        config.eq_filename = normpath(joinpath(base_path, config.eq_filename))
+    end
+
+    return config
 end
 
 """
 Outer constructor for EquilibriumConfig that enables a toml file
     interface for specifying the configuration settings
+
+DEPRECATED: Use [Equilibrium] section in jpec.toml instead
 """
-# if this also have default, then conflicts with @kwdef mutable struct EquilibriumConfig.
 function EquilibriumConfig(path::String)
     raw = TOML.parsefile(path)
 
     # Extract EQUIL_CONTROL with default fallback
-    control_data = get(raw, "EQUIL_CONTROL", Dict())
-    output_data = get(raw, "EQUIL_OUTPUT", Dict())
+    config_data = get(raw, "EQUIL_CONTROL", Dict())
 
-    # Check for required fields in control_data
+    # Check for required fields
     required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(control_data, k), required_keys)
+    missingkeys = filter(k -> !haskey(config_data, k), required_keys)
 
     if !isempty(missingkeys)
-        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missing, ", "))")
+        error("Missing required key(s) in [EQUIL_CONTROL]: $(join(missingkeys, ", "))")
     end
 
-    # Construct validated structs
-    control = EquilibriumControl(; symbolize_keys(control_data)...)
-    if !isabspath(control.eq_filename)
-        control.eq_filename = normpath(joinpath(dirname(path), control.eq_filename))
+    # Construct validated struct
+    config = EquilibriumConfig(; symbolize_keys(config_data)...)
+    if !isabspath(config.eq_filename)
+        config.eq_filename = normpath(joinpath(dirname(path), config.eq_filename))
     end
-    output = EquilibriumOutput(; symbolize_keys(output_data)...)
 
-    return EquilibriumConfig(; control=control, output=output)
+    return config
 end
 
 """
@@ -271,26 +258,30 @@ raw equilibrium data and preparing the initial splines.
      3. `q` — safety factor profile
      4. `√ψ_norm` — square root of normalized flux
   - `psi_in`
-    2D spline data on the (R, Z) grid [m].
-    The z-values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
+    2D cubic interpolant on the (R, Z) grid [m].
+    The values correspond to the **poloidal flux** adjusted to be zero at the boundary [Wb/rad].
     Definitions:
 
      1. `ψ(R, Z) = ψ_boundary - ψ(R, Z)`
 
      2. `ψ = ψ * sign(ψ(centerR, centerZ))`
 
-          * 1D profiles are represented by `CubicSpline`
-          * 2D flux surfaces by `BicubicSpline`
+          * 1D profiles are represented by `CubicInterpolant` or `CubicSeriesInterpolant`
+          * 2D flux surfaces by `CubicInterpolantND`
+  - `psi_in_xs::Vector{Float64}` — R coordinate grid for psi_in [m]
+  - `psi_in_ys::Vector{Float64}` — Z coordinate grid for psi_in [m]
   - `rmin::Float64` — Minimum R-coordinate of the computational grid [m]
   - `rmax::Float64` — Maximum R-coordinate of the computational grid [m]
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
 """
-mutable struct DirectRunInput
+mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
-    sq_in::Spl.CubicSpline{Float64}       # 1D profile spline (CubicSpline)
-    psi_in::Spl.BicubicSpline      # 2D flux spline (BicubicSpline)
+    sq_in::S       # 1D profile spline for F, P, q
+    psi_in::I2D    # 2D flux interpolant (CubicInterpolantND)
+    psi_in_xs::Vector{Float64}  # R coordinates
+    psi_in_ys::Vector{Float64}  # Z coordinates
     rmin::Float64    # Minimum R-coordinate of the computational grid [m].
     rmax::Float64    # Maximum R-coordinate of the computational grid [m].
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
@@ -306,19 +297,25 @@ A container struct for inputs to the `inverse_run` function.
 ## Fields
 
   - `config::EquilibriumConfig` - The equilibrium configuration object
-  - `sq_in::Spl.CubicSpline{Float64}` - 1D spline input profile (F*Bt, Pressure, q)
-  - `rz_in::Spl.BicubicSpline` - 2D bicubic spline for (R,Z) geometry
+  - `sq_in::CubicSeriesInterpolant` - 1D profile spline for F, P, q
+  - `rz_in_xs::Vector{Float64}` - ψ coordinate grid for rz_in
+  - `rz_in_ys::Vector{Float64}` - θ coordinate grid for rz_in
+  - `rz_in_R::CubicInterpolantND` - R coordinate interpolant [m]
+  - `rz_in_Z::CubicInterpolantND` - Z coordinate interpolant [m]
   - `ro::Float64` - R-coordinate of magnetic axis [m]
   - `zo::Float64` - Z-coordinate of magnetic axis [m]
   - `psio::Float64` - Total flux difference |ψ_axis - ψ_boundary| [Wb/rad]
 """
-mutable struct InverseRunInput
+mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
-    sq_in::Spl.CubicSpline{Float64}   # 1D spline input profile (e.g. F*Bt, Pressure, q)
-    rz_in::Spl.BicubicSpline # 2D bicubic spline input for (R,Z) geometry
-    ro::Float64          # R axis location
-    zo::Float64          # Z axis location
-    psio::Float64        # Total flux difference |psi_axis - psi_boundary|
+    sq_in::S   # 1D profile spline for F, P, q
+    rz_in_xs::Vector{Float64}   # ψ coordinates
+    rz_in_ys::Vector{Float64}   # θ coordinates
+    rz_in_R::I2D                # R coordinate interpolant
+    rz_in_Z::I2D                # Z coordinate interpolant
+    ro::Float64                 # R axis location
+    zo::Float64                 # Z axis location
+    psio::Float64               # Total flux difference |psi_axis - psi_boundary|
 end
 
 """
@@ -433,6 +430,84 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
 end
 
 """
+    ProfileSplines
+
+Named 1D cubic spline interpolants for equilibrium profiles.
+Each profile is stored as a separate spline for code clarity.
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared x-axis (normalized psi)
+  - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
+  - `P_spline`: μ₀*P (plasma pressure × μ₀)
+  - `dVdpsi_spline`: dV/dψ (volume derivative)
+  - `q_spline`: q (safety factor)
+
+# Derivative Interpolants (for continuous derivative evaluation)
+
+  - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
+
+# Notes
+
+  - Node values at grid points: Access via `spline.y[i]`
+  - Derivative at any point: Call `deriv(x)` (derivative views are callable)
+  - Grid: Access via `xs` field or `spline.cache.x`
+"""
+struct ProfileSplines{S,D}
+    xs::Vector{Float64}
+    npts::Int          # length(xs), avoids redundant length() calls
+    npts_minus_1::Int  # npts - 1, for hint at last interval
+    # Value interpolants
+    F_spline::S
+    P_spline::S
+    dVdpsi_spline::S
+    q_spline::S
+    # Derivative views (callable, share data with value interpolants)
+    F_deriv::D
+    P_deriv::D
+    dVdpsi_deriv::D
+    q_deriv::D
+end
+
+"""
+    ProfileSplines(xs, F_vals, P_vals, dVdpsi_vals, q_vals; extrap=ExtendExtrap())
+
+Create ProfileSplines from arrays of profile values.
+Uses CubicFit boundary conditions with extension extrapolation.
+"""
+function ProfileSplines(xs::Vector{Float64},
+    F_vals::Vector{Float64},
+    P_vals::Vector{Float64},
+    dVdpsi_vals::Vector{Float64},
+    q_vals::Vector{Float64};
+    extrap::AbstractExtrap=ExtendExtrap())
+    npts = length(xs)
+    npts_minus_1 = npts - 1
+    @assert length(F_vals) == npts
+    @assert length(P_vals) == npts
+    @assert length(dVdpsi_vals) == npts
+    @assert length(q_vals) == npts
+
+    # Create value interpolants with CubicFit BC and LinearBinary search for sequential psi access
+    F_spline = cubic_interp(xs, F_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    P_spline = cubic_interp(xs, P_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    q_spline = cubic_interp(xs, q_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+
+    # Create derivative views (these share data with value interpolants, no extra storage)
+    F_deriv = deriv1(F_spline)
+    P_deriv = deriv1(P_spline)
+    dVdpsi_deriv = deriv1(dVdpsi_spline)
+    q_deriv = deriv1(q_spline)
+
+    ProfileSplines{typeof(F_spline),typeof(F_deriv)}(
+        xs, npts, npts_minus_1,
+        F_spline, P_spline, dVdpsi_spline, q_spline,
+        F_deriv, P_deriv, dVdpsi_deriv, q_deriv
+    )
+end
+
+"""
     PlasmaEquilibrium(...)
 
 The final, self-contained result of the equilibrium reconstruction.
@@ -445,42 +520,56 @@ This object provides a complete representation of the processed plasma equilibri
 
   - `params::EquilibriumParameters`:
     Computed equilibrium parameters and diagnostics.
-  - `sq::CubicSpline{Float64}`:
-    Final 1D profile spline.
+  - `profiles::ProfileSplines`:
+    Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
+    Access values at grid points via `profiles.F_spline.y[i]`, etc.
+    Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
 
-      + **x value:** normalized ψ
-      + **Quantity 1:** Toroidal field function × 2π, `F * 2π` (where `F = R * B_toroidal`)
-      + **Quantity 2:** Pressure × μ₀, `P * μ₀`
-      + **Quantity 3:** dV/dψ
-      + **Quantity 4:** q
-  - `rzphi::BicubicSpline`:
-    Final 2D flux-coordinate mapping spline.
+  - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
+      + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
+      + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
 
+  - **Geometric quantities (rzphi, 4 interpolants):**
+    2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
-      + **Quantity 1:** r_coord² = (R - ro)² + (Z - zo)²
-      + **Quantity 2:** Offset between the geometric poloidal angle (η) and the new angle (θₙₑw), η / (2π) - θₙₑw
-      + **Quantity 3:** ν in ϕ = 2πζ + ν(ψ, θ)
-      + **Quantity 4:** Jacobian
-  - `eqfun::BicubicSpline`:
-    2D spline storing local physics and geometric quantities that vary across flux surfaces.
-    These are precomputed for efficient use in subsequent stability and transport codes.
+      + `rzphi_rsquared::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
+      + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
+      + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
+      + `rzphi_jac::CubicInterpolantND`: Jacobian
 
-      + **x value:** normalized ψ ∈ [0, 1]
-      + **y value:** SFL poloidal angle θₙₑw ∈ [0, 1]
-      + **Quantity 1:** Total magnetic field strength, B [T]
-      + **Quantity 2:** (e₁⋅e₂ + q⋅e₃⋅e₁) / (J⋅B²)
-      + **Quantity 3:** (e₂⋅e₃ + q⋅e₃⋅e₃) / (J⋅B²)
+  - **Physics quantities (eqfun, 3 interpolants):**
+    2D cubic interpolants storing local physics and geometric quantities.
+      + **x value:** normalized ψ
+      + **y value:** SFL poloidal angle θₙₑw
+      + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
+      + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
+      + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
+
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     params::EquilibriumParameters
-    sq::Spl.CubicSpline{Float64}
-    rzphi::Spl.BicubicSpline
-    eqfun::Spl.BicubicSpline
+    profiles::P
+
+    # Grid coordinates (shared by all 2D interpolants)
+    rzphi_xs::Vector{Float64}
+    rzphi_ys::Vector{Float64}
+
+    # Geometric quantities (4 interpolants)
+    rzphi_rsquared::I2D
+    rzphi_offset::I2D
+    rzphi_nu::I2D
+    rzphi_jac::I2D
+
+    # Physics quantities (3 interpolants)
+    eqfun_B::I2D
+    eqfun_metric1::I2D
+    eqfun_metric2::I2D
+
     ro::Float64
     zo::Float64
     psio::Float64

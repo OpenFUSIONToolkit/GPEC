@@ -7,14 +7,14 @@ This directory contains the documentation source files for JPEC.jl.
 To build the documentation locally:
 
 ```bash
-julia build_docs_local.jl
+julia --project=. build_docs_local.jl
 ```
 
 Or step by step:
 
 ```bash
 # From the root directory
-julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.build()'
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=docs -e 'using Pkg; Pkg.instantiate(); Pkg.develop(PackageSpec(path="."))'
 julia --project=docs docs/make.jl
 ```

@@ -23,7 +23,7 @@ function _read_1d_gfile_format(lines_block::Vector{String}, num_values::Int)
     safe_len = (length(data_str) ÷ field_width) * field_width
     for i in 1:field_width:safe_len
         num_read >= num_values && break
-        val_str = strip(data_str[i:i+field_width-1])
+        val_str = strip(@view(data_str[i:(i+field_width-1)]))
         if !isempty(val_str)
             try
                 push!(parsed_values, parse(Float64, val_str))
@@ -55,14 +55,14 @@ them into a `DirectRunInput` object.
   - A `DirectRunInput` object ready for the direct solver.
 """
 function read_efit(config::EquilibriumConfig)
-    println("--> Processing EFIT g-file: $(config.control.eq_filename)")
-    lines = readlines(config.control.eq_filename)
+    @info "Processing EFIT g-file: $(config.eq_filename)"
+    lines = readlines(config.eq_filename)
 
     # --- Parse Header ---
     header1_parts = split(lines[1])
     nw = parse(Int, header1_parts[end-1])
     nh = parse(Int, header1_parts[end])
-    println("--> Parsed from header: nw=$nw, nh=$nh")
+    @info "Parsed from header: nw=$nw, nh=$nh"
 
     header_vals = _read_1d_gfile_format(lines[2:5], 20)
     rdim, zdim, rcentr, rleft, zmid = header_vals[1:5]
@@ -72,7 +72,7 @@ function read_efit(config::EquilibriumConfig)
     current_line_idx = 6
     function parse_block(num_pts)
         num_lines = ceil(Int, num_pts / 5)
-        block = lines[current_line_idx:current_line_idx+num_lines-1]
+        block = lines[current_line_idx:(current_line_idx+num_lines-1)]
         data = _read_1d_gfile_format(block, num_pts)
         current_line_idx += num_lines
         return data
@@ -95,7 +95,8 @@ function read_efit(config::EquilibriumConfig)
         qprof_data,
         sqrt.(psi_norm_grid)
     )
-    sq_in = Spl.CubicSpline(collect(psi_norm_grid), sq_fs_nodes; bctype="extrap")
+    sq_xs = collect(psi_norm_grid)
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -106,36 +107,139 @@ function read_efit(config::EquilibriumConfig)
         psi_proc .*= -1.0
     end
 
-    # --- Create 2D Psi Spline (psi_in) ---
+    # --- Create 2D Psi interpolant (psi_in) ---
     r_grid = range(rleft, rleft + rdim; length=nw)
     z_grid = range(zmid - zdim / 2, zmid + zdim / 2; length=nh)
     rmin, rmax = extrema(r_grid)
     zmin, zmax = extrema(z_grid)
 
-    psi_proc_3d = reshape(psi_proc, (nw, nh, 1))
-    psi_in = Spl.BicubicSpline(collect(r_grid), collect(z_grid), psi_proc_3d; bctypex="extrap", bctypey="extrap")
+    psi_in_xs = collect(r_grid)
+    psi_in_ys = collect(z_grid)
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinary(),
+        bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Bundle everything for the solver ---
-    return DirectRunInput(config, sq_in, psi_in, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end
 
-"""
-    _read_chease2(equil_in)
 
-Parses a chease2 file, creates initial 1D and 2D splines, finds magnetic axis, and bundles
+"""
+    read_chease_binary(equil_config)
+
+Parses a binary CHEASE file, creates initial 1D and 2D splines with proper
+normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object.
+"""
+function read_chease_binary(config::EquilibriumConfig)
+    @info "Reading CHEASE file (Binary): $(config.eq_filename)"
+
+    R0EXP = config.r0exp
+    B0EXP = config.b0exp
+
+    open(config.eq_filename, "r") do io
+        seekstart(io)
+        read(io, UInt32)
+        ntnova = read(io, Int32)
+        npsi1 = read(io, Int32)
+        nsym = read(io, Int32)
+        read(io, UInt32)
+
+        read(io, UInt32)
+        axx = [read(io, Float64) for _ in 1:5]
+        read(io, UInt32)
+
+        # 1D array allocation
+        zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim =
+            [zeros(i == 1 || i == 10 ? npsi1-1 : npsi1) for i in 1:10]
+
+        for arr in (zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim)
+            read(io, UInt32)
+            read!(io, arr)
+            read(io, UInt32)
+        end
+
+        # --- Normalization (1D) ---
+        ztmf .*= (R0EXP * B0EXP)
+        zcppr .*= (B0EXP / R0EXP^2)
+        psio_norm = zpsi[npsi1] - zpsi[1]
+        psio = psio_norm * R0EXP^2 * B0EXP
+
+        ma = npsi1 - 1
+        xs = (zpsi .- zpsi[1]) ./ psio_norm
+
+        fs = zeros(npsi1, 4)
+        fs[:, 1] .= ztmf
+        fs[:, 2] .= zcppr
+        fs[:, 3] .= zq
+
+        # Compute cumulative integral of pressure column for normalization using FastInterpolations
+        itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
+        fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
+        # Make a writable copy and normalize pressure integral
+        fs_copy = copy(fs)
+        fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
+        # Create final spline with modified data
+        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
+
+        # --- 2D Geometry ---
+        mtau = ntnova + 1  # Same with ASCII
+        poloidal_start = 3 # This 3 is to skip ghost datas, which are used for derivatives
+        poloidal_stop = ntnova + 3
+
+        fs_2d = zeros(npsi1, mtau, 2)
+        buffer = zeros(Float64, ntnova + 3, npsi1) # CHEASE binary record size
+
+        # Reading R data
+        read(io, UInt32)
+        read!(io, buffer)
+        read(io, UInt32)
+        buffer .*= R0EXP
+
+        # sart reading with ASCII
+        ro = buffer[poloidal_start, 1]
+        fs_2d[:, :, 1] .= transpose(buffer[poloidal_start:poloidal_stop, :])
+
+        # Reading Z data
+        read(io, UInt32)
+        read!(io, buffer)
+        read(io, UInt32)
+        buffer .*= R0EXP
+
+        zo = buffer[poloidal_start, 1]
+        fs_2d[:, :, 2] .= transpose(buffer[poloidal_start:poloidal_stop, :])
+
+        # Create separate interpolants for R and Z coordinates
+        rz_in_xs = xs
+        rz_in_ys = range(0, 2π; length=mtau) |> collect
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
+            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
+            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+        @info "Finished reading CHEASE equilibrium (Binary)"
+        return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
+    end
+end
+
+
+"""
+    read_chease_ascii(config)
+
+Parses a ascii CHEASE file, creates initial 1D and 2D splines, finds magnetic axis, and bundles
 them into a `InverseRunInput` object.
 
 ## Arguments:
 
-  - `equil_in`: The `EquilInput` object containing the filename and parameters.
+  - `config`: The `EquilibriumConfig` object containing the filename and parameters.
 
 ## Returns:
 
   - A `InverseRunInput` object ready for the inverse solver.
 """
-function read_chease2(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.control.eq_filename)")
-    lines = readlines(config.control.eq_filename)
+function read_chease_ascii(config::EquilibriumConfig)
+    @info "Reading CHEASE file (ASCII): $(config.eq_filename)"
+    lines = readlines(config.eq_filename)
+    R0EXP = config.r0exp
+    B0EXP = config.b0exp
 
     # --- Parse Header (FORMAT 10: 3I5) ---
     header_parts = split(lines[1])
@@ -144,31 +248,30 @@ function read_chease2(config::EquilibriumConfig)
     nsym = parse(Int, header_parts[3])
 
     # --- Parse axx (FORMAT 20: 1E22.15) ---
-    axx = parse(Float64, split(lines[2])[1])
-
+    axx = parse(Float64, split(lines[2])[1])   # RBOXLEN - compuational box lenth
     # --- Pre-allocate Arrays ---
-    zcpr = zeros(npsi1 - 1)
-    zcppr = zeros(npsi1)
-    zq = zeros(npsi1)
-    zdq = zeros(npsi1)
-    ztmf = zeros(npsi1)
-    ztp = zeros(npsi1)
-    zfb = zeros(npsi1)
-    zfbp = zeros(npsi1)
-    zpsi = zeros(npsi1)
-    zpsim = zeros(npsi1 - 1)
+    zcpr = zeros(npsi1 - 1) # normalized P(ψ)
+    zcppr = zeros(npsi1) # normalized dP/dψ
+    zq = zeros(npsi1) # q(ψ)
+    zdq = zeros(npsi1) # dq/dψ
+    ztmf = zeros(npsi1) # normalized F(ψ)
+    ztp = zeros(npsi1) # normalized dF/dψ
+    zfb = zeros(npsi1) # normazlied F(ψ)/q(ψ)
+    zfbp = zeros(npsi1) # d/dψ [F(ψ)/q(ψ) ]
+    zpsi = zeros(npsi1) # ψ Poloidal flux
+    zpsim = zeros(npsi1 - 1) # ψ mid
 
-    zrcp = zeros(ntnova + 3, npsi1)
-    zzcp = zeros(ntnova + 3, npsi1)
-    zjacm = zeros(ntnova + 3, npsi1)
-    zjac = zeros(ntnova + 3, npsi1)
+    zrcp = zeros(ntnova + 3, npsi1) # normalized R
+    zzcp = zeros(ntnova + 3, npsi1) # normalized Z
+    zjacm = zeros(ntnova + 3, npsi1) # 𝒥(Jacobian)
+    zjac = zeros(ntnova + 3, npsi1) # 𝒥(Jacobian
 
     # --- Helper to parse 5E22.15 data per line ---
     function parse_floats(lines_range)
         data = Float64[]
         for line in lines[lines_range]
             for i in 0:4
-                s = strip(line[22*i+1:min(end, 22 * (i + 1))])
+                s = strip(line[(22*i+1):min(end, 22*(i+1))])
                 if !isempty(s)
                     push!(data, parse(Float64, s))
                 end
@@ -183,14 +286,14 @@ function read_chease2(config::EquilibriumConfig)
     function load_vector!(vec)
         count = length(vec)
         lines_needed = cld(count, 5)
-        vec .= parse_floats(line_idx:line_idx+lines_needed-1)
+        vec .= parse_floats(line_idx:(line_idx+lines_needed-1))
         return line_idx += lines_needed
     end
 
     function load_matrix!(mat)
         count = size(mat, 1) * size(mat, 2)
         lines_needed = cld(count, 5)
-        data = parse_floats(line_idx:line_idx+lines_needed-1)
+        data = parse_floats(line_idx:(line_idx+lines_needed-1))
         line_idx += lines_needed
         # Fill column-major (Fortran-style)
         for j in 1:size(mat, 2)
@@ -217,194 +320,64 @@ function read_chease2(config::EquilibriumConfig)
     load_matrix!(zzcp)
     load_matrix!(zjacm)
     load_matrix!(zjac)
+    @info "Parsed from header: ntnova = $ntnova, npsi1 = $npsi1, nsym = $nsym"
 
-    println("--> Parsed from header:  ntnova = $ntnova, npsi1 = $npsi1, nsym = $nsym")
+    # --- Apply Normalization ---
+    # Scale geometry
+    zrcp .*= R0EXP
+    zzcp .*= R0EXP
+
+    # Scale flux
+    # Psi_phys = Psi_norm * R0^2 * B0
+    psio_norm = zpsi[end] - zpsi[1]
+    psio = psio_norm * R0EXP^2 * B0EXP
+
+    # Scale Toroidal Field Function F
+    # zfb .*= (R0EXP * B0EXP)
+    ztmf .*= (R0EXP * B0EXP)
+
+    # Scale Pressure Gradient P'
+    zcppr .*= (B0EXP / R0EXP^2)
 
     # Number of spline intervals
     ma = npsi1 - 1
-    # Total ψ range for normalization
-    psio = zpsi[end] - zpsi[1]
+
     # Normalize ψ to [0, 1]
-    xs = (zpsi .- zpsi[1]) ./ psio
-    # Construct fs matrix: (npsi1 rows, 4 columns)
+    xs = (zpsi .- zpsi[1]) ./ psio_norm # Use normalized range for x axis [0,1]
+
     fs = zeros(npsi1, 4)
-    fs[:, 1] .= zq .* zfb
-    fs[:, 2] .= zcppr
-    fs[:, 3] .= zq
+    # Both zq * zfb and ztmf are the same ! But I don't know why current GPEC follows zq .*zfb - JB.Cho
+    # fs[:, 1] .= zq .* zfb
+    fs[:, 1] .= ztmf
+    fs[:, 2] .= zcppr # normalized Pressure
+    fs[:, 3] .= zq # q profile
     # Fit spline with extrapolation boundary condition (bctype = 3)
-    sq_in = Spl.CubicSpline(xs, fs; bctype="extrap")
-    # --- Integrate pressure ---
-    Spl.spline_integrate!(sq_in)  # Integrate in-place, sq_in.fsi filled
-    # Make a writable copy of the fs array
-    fs_copy = copy(sq_in.fs)
-    # Normalize pressure integral column (2nd column)
-    fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-    # Refit spline using the modified fs_copy
-    sq_in = Spl.CubicSpline(sq_in._xs, fs_copy; bctype="extrap")
+    # Compute cumulative integral of pressure column for normalization using FastInterpolations
+    itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
+    fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
+    # Make a writable copy and normalize pressure integral
+    fs_copy = copy(fs)
+    fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
+    # Create final spline with modified data
+    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
-    ro = zrcp[1, 1]
-    zo = zzcp[1, 1]
-    ys = range(0, 2π; length=mtau) |> collect
-    # Allocate and fill fs array (radial × poloidal × 2 quantities)
-    fs = zeros(length(xs), length(ys), 2)
-    fs[:, :, 1] .= transpose(zrcp[1:ntnova+1, :])
-    fs[:, :, 2] .= transpose(zzcp[1:ntnova+1, :])
+    poloidal_start = 3
+    poloidal_stop = ntnova + 3
+    ro = zrcp[poloidal_start, 1] # Already scaled
+    zo = zzcp[poloidal_start, 1] # Already scaled
+    rz_in_ys = range(0, 2π; length=mtau) |> collect
+    # CHEASE includes 2 ghost points at the start (wrap-around); drop them.
+    R_data = transpose(zrcp[poloidal_start:poloidal_stop, :])
+    Z_data = transpose(zzcp[poloidal_start:poloidal_stop, :])
 
-
-    # Setup bicubic spline with periodic boundary conditions
-    rz_in = Spl.BicubicSpline(xs, ys, fs; bctypex="extrap", bctypey="periodic")
-    println("--> Finished reading CHEASE equilibrium.")
-    println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
-    return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
-end
-
-"""
-    _read_chease(equil_config)
-
-Parses a binary CHEASE file, creates initial 1D and 2D splines, and bundles
-them into a `InverseRunInput` object.
-
-## Arguments:
-
-  - `equil_config`: The `EquilConfig` object containing the filename and parameters.
-
-## Returns:
-
-  - A `InverseRunInput` object ready for the inverse solver.
-"""
-function read_chease(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.control.eq_filename)")
-    diagnostics = false # Set to true to enable detailed print output
-    open(config.control.eq_filename, "r") do io
-        # Read first 3 integers
-        seekstart(io)
-        read(io, UInt32)  # skip record length at start
-        ntnova = read(io, Int32)
-        npsi1 = read(io, Int32)
-        nsym = read(io, Int32)
-        read(io, UInt32)  # skip record length at end
-
-        if diagnostics
-            println("Header:")
-            println("  ntnova = $ntnova   Type=$(typeof(ntnova))  Bytes=$(sizeof(ntnova))")
-            println("  npsi1  = $npsi1   Type=$(typeof(npsi1))  Bytes=$(sizeof(npsi1))")
-            println("  nsym   = $nsym   Type=$(typeof(nsym))  Bytes=$(sizeof(nsym))")
-        end
-
-        # Read next 5 Float64 values (axx)
-        read(io, UInt32)  # skip record length at start
-        axx = [read(io, Float64) for _ in 1:5]
-        if diagnostics
-            println("\naxx array (expected 5 Float64 values):")
-            for (i, val) in enumerate(axx)
-                println("  axx[$i] = $val   Type=$(typeof(val))  Bytes=$(sizeof(val))")
-            end
-        end
-        read(io, UInt32)  # skip record length at end
-
-        # --- Helper function ---
-        function print_summary(name, arr)
-            n = length(arr)
-            first5 = arr[1:min(5, n)]
-            last5 = arr[max(1, n - 4):end]
-            println("$name first 5: ", first5)
-            return println("$name last 5:  ", last5)
-        end
-
-        # --- Pre-allocate Arrays ---
-        zcpr = zeros(npsi1 - 1)
-        zcppr = zeros(npsi1)
-        zq = zeros(npsi1)
-        zdq = zeros(npsi1)
-        ztmf = zeros(npsi1)
-        ztp = zeros(npsi1)
-        zfb = zeros(npsi1)
-        zfbp = zeros(npsi1)
-        zpsi = zeros(npsi1)
-        zpsim = zeros(npsi1 - 1)
-
-        # --- Read 1D arrays from file ---
-        for (name, arr) in zip(
-            ("zcpr", "zcppr", "zq", "zdq", "ztmf", "ztp", "zfb", "zfbp", "zpsi", "zpsim"),
-            (zcpr, zcppr, zq, zdq, ztmf, ztp, zfb, zfbp, zpsi, zpsim)
-        )
-            read(io, UInt32)  # skip record length at start
-            read!(io, arr)
-            read(io, UInt32)  # skip record length at end
-            if diagnostics
-                print_summary(name, arr)
-            end
-        end
-
-        # --- Prepare spline & geometry ---
-        ma = npsi1 - 1
-        psio = zpsi[npsi1] - zpsi[1]
-        xs = (zpsi .- zpsi[1]) ./ psio
-
-        fs = zeros(npsi1, 4)
-        fs[:, 1] .= ztmf
-        fs[:, 2] .= zcppr
-        fs[:, 3] .= zq
-
-        sq_in = Spl.spline_setup(xs, fs; bctype="extrap")
-        Spl.spline_integrate!(sq_in)
-        fs_copy = copy(sq_in.fs)
-        fs_copy[:, 2] .= (sq_in.fsi[:, 2] .- sq_in.fsi[ma, 2]) .* psio
-        sq_in = Spl.spline_setup(sq_in._xs, fs_copy; bctype="extrap")
-
-        # --- Setup parameters ---
-        mtau = ntnova
-
-        # Allocate fs array (radial × poloidal × 2)
-        fs = zeros(npsi1, mtau, 2)
-
-        # Allocate buffer (Fortran: ALLOCATE(buffer(ntnova+3, npsi1)))
-        buffer = zeros(Float64, ntnova + 3, npsi1)
-
-        # --- First read (R data) ---
-        read(io, UInt32)  # skip record length at start
-        read!(io, buffer)                         # READ(in_unit) buffer
-        read(io, UInt32)  # skip record length at end
-        ro = buffer[1, 1]                         # ro = buffer(1,1)
-        if diagnostics
-            println("ro = $ro")
-        end
-
-        # Fill with r-coordinates
-        fs[:, :, 1] .= transpose(buffer[1:ntnova, :])
-
-        # --- Second read (Z data) ---
-        read(io, UInt32)  # skip record length at start
-        read!(io, buffer)                         # READ(in_unit) buffer
-        read(io, UInt32)  # skip record length at end
-        zo = buffer[1, 1]                         # zo = buffer(1,1)
-        if diagnostics
-            println("zo = $zo")
-        end
-
-        # Fill with z-coordinates
-        fs[:, :, 2] .= transpose(buffer[1:ntnova, :])
-
-        # Construct ys grid (0..2π, length = mtau)
-        ys = range(0, 2π; length=mtau) |> collect
-
-        # Setup bicubic spline with periodic boundary conditions
-        rz_in = Spl.bicube_setup(xs, ys, fs; bctypex="extrap", bctypey="periodic")
-
-        if diagnostics
-            # --- Print first 5 and last 5 entries of each slice ---
-            for k in 1:2
-                flat = vec(fs[:, :, k])  # flatten to 1D
-                n = length(flat)
-                println("Slice $k:")
-                println("  First 5 entries: ", flat[1:5])
-                println("  Last  5 entries: ", flat[n-4:n])
-            end
-        end
-        println("--> Finished reading CHEASE equilibrium.")
-        println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
-        return InverseRunInput(config, sq_in, rz_in, ro, zo, psio)
-    end
+    # Create separate interpolants for R and Z coordinates
+    rz_in_xs = xs
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
+        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
+    return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
 end
