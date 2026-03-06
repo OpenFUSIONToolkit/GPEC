@@ -207,6 +207,7 @@ function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     r2 < 1e-30 && return 0.0
     return inv(sqrt(r2))
 end
+
 """
     laplace_double_layer(x_obs, x_src, n_src) -> Float64
 
