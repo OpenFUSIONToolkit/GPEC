@@ -11,7 +11,7 @@ The Utilities module currently provides:
 ## API Reference
 
 ```@autodocs
-Modules = [GeneralizedPerturbedEquilibrium.UtilitiesMod]
+Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms]
 ```
 
 ## Example Usage
@@ -31,13 +31,13 @@ for i in 1:100, j in 1:64
 end
 
 # Compute Fourier coefficients, keeping 10 modes
-fc = GeneralizedPerturbedEquilibrium.UtilitiesMod.FourierCoefficients(xs, ys, fs, 10)
+fc = GeneralizedPerturbedEquilibrium.Utilities.FourierCoefficients(xs, ys, fs, 10)
 
 # Access individual coefficient
 # Get mode 3 at radial index 50 for quantity 1
-c = GeneralizedPerturbedEquilibrium.UtilitiesMod.get_complex_coeff(fc, 50, 3, 1)
+c = GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeff(fc, 50, 3, 1)
 
 # Get all coefficients for a given radial index and quantity
 coeffs = Vector{ComplexF64}(undef, fc.mband + 1)
-GeneralizedPerturbedEquilibrium.UtilitiesMod.get_complex_coeffs!(coeffs, fc, 50, 1)
+GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeffs!(coeffs, fc, 50, 1)
 ```
