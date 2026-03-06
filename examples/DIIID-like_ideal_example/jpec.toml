@@ -1,6 +1,6 @@
 [Equilibrium]
 eq_type = "efit"                        # Type of the input 2D equilibrium file
-eq_filename = "TKMKR_D3Dlike_default_Hmode.geqdsk" # Path to equilibrium file
+eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 jac_type = "hamada"                     # Coordinate system (hamada, pest, boozer, equal_arc)
 power_bp = 0                            # Poloidal field power exponent for Jacobian
 power_b = 0                             # Toroidal field power exponent for Jacobian
