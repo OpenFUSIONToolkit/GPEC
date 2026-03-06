@@ -25,6 +25,10 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
+include("Analysis/Analysis.jl")
+import .Analysis as Analysis
+export Analysis
+
 # Additional imports for main function
 using TOML
 using Printf
@@ -416,7 +420,7 @@ function write_outputs_to_HDF5(
             out_h5["locstab/dr"] = Float64[]
         end
         out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
-            [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
+                                 [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
         out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
 
         # Write integration data
@@ -440,15 +444,15 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_right"] = odet.ca_r
 
         # Write vacuum data; always write all entries, using empty arrays when not computed
-        out_h5["vacuum/wt"]       = ctrl.vac_flag ? vac.wt        : ComplexF64[]
-        out_h5["vacuum/wt0"]      = ctrl.vac_flag ? vac.wt0       : ComplexF64[]
-        out_h5["vacuum/ep"]       = ctrl.vac_flag ? vac.ep        : ComplexF64[]
-        out_h5["vacuum/ev"]       = ctrl.vac_flag ? vac.ev        : ComplexF64[]
-        out_h5["vacuum/et"]       = ctrl.vac_flag ? vac.et        : ComplexF64[]
+        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac.wt : ComplexF64[]
+        out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac.wt0 : ComplexF64[]
+        out_h5["vacuum/ep"] = ctrl.vac_flag ? vac.ep : ComplexF64[]
+        out_h5["vacuum/ev"] = ctrl.vac_flag ? vac.ev : ComplexF64[]
+        out_h5["vacuum/et"] = ctrl.vac_flag ? vac.et : ComplexF64[]
         out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac.xzpts[:, 1] : Float64[]
         out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac.xzpts[:, 2] : Float64[]
-        out_h5["vacuum/x_wall"]   = ctrl.vac_flag ? vac.xzpts[:, 3] : Float64[]
-        out_h5["vacuum/z_wall"]   = ctrl.vac_flag ? vac.xzpts[:, 4] : Float64[]
+        out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac.xzpts[:, 3] : Float64[]
+        out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac.xzpts[:, 4] : Float64[]
     end
 end
 
