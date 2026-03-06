@@ -51,15 +51,13 @@ Implements GPEC algorithm from gpout.f:
 
 Populates the following fields in `state`:
 
-  - `resonant_flux[msing, numpert_total]`: Normalized resonant flux Φ_r/A
-  - `resonant_current[msing, numpert_total]`: Resonant current density
-  - `island_width_sq[msing, numpert_total]`: Square of island half-width (w/2)²
-  - `penetrated_field[msing, numpert_total]`: Normal field at resonant surface
-  - `delta_prime[msing, numpert_total]`: Tearing stability parameter Δ'
-  - `island_half_width[msing]`: Dimensional island half-width
+  - `resonant_flux[npert, msing]`: Normalized resonant flux Φ_r/A, indexed by (n-index, surface)
+  - `resonant_current[npert, msing]`: Resonant current density
+  - `island_width_sq[npert, msing]`: Square of island half-width (w/2)²
+  - `penetrated_field[npert, msing]`: Normal field at resonant surface
+  - `delta_prime[npert, msing]`: Tearing stability parameter Δ'
+  - `island_half_width[msing]`: Dimensional island half-width (maximum over all n)
   - `chirikov_parameter[msing]`: Island overlap metric
-
-Note: numpert_total = mpert × npert handles all (m,n) mode combinations
 """
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
@@ -154,7 +152,7 @@ function compute_singular_coupling_metrics!(
             end
 
             # Compute Green's functions at this surface for this n
-            # TODO: this interface needs work for multi-n, just runs through for now
+            # TODO: This assumes an initial 2D equilibrum, getting 2D Green's functions for independent n
             vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
             _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
 
