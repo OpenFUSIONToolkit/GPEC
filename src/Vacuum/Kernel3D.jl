@@ -424,7 +424,7 @@ function compute_3D_kernel_matrices!(
     # Initialize quadrature data
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
     if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
-        @warn "PATCH_RAD is greater than the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(source.mtheta, source.nzeta) - 1) ÷ 2). Be wary of outputs being converged."
+        @warn "PATCH_RAD is greater than the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(source.mtheta, source.nzeta) - 1) ÷ 2). Be sure to check if outputs are converged."
         PATCH_RAD = (min(source.mtheta, source.nzeta) - 1) ÷ 2
     end
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
