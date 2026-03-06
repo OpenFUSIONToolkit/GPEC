@@ -49,7 +49,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Print initial integration condition
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
     # Iterate through each integration chunk
@@ -93,7 +93,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if ctrl.verbose
-        println("Evaluating fixed-boundary stability criterion")
+        @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
@@ -142,16 +142,11 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
-        # Refine psifac using Newton iteration
-        converged = false
-        for _ in 1:itmax
-            dpsi = (ctrl.qlow - profiles.q_spline(odet.psifac)) / profiles.q_deriv(odet.psifac)
-            odet.psifac += dpsi
-            abs(dpsi) < eps * abs(odet.psifac) && (converged=true; break)
-        end
-        if !converged
-            error("Newton iteration for psifac did not converge after $itmax iterations.")
-        end
+        odet.psifac = find_zero(
+            (psi -> profiles.q_spline(psi) - ctrl.qlow,
+             psi -> profiles.q_deriv(psi)),
+            odet.psifac, Roots.Newton()
+        )
     end
 
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))

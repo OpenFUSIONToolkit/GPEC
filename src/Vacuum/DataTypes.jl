@@ -79,13 +79,6 @@ function VacuumInput(
     # Extract plasma surface geometry at this psi
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
 
-    # TODO: this was in Free.jl - is this general for GPEC too?
-    # Invert values for n < 0
-    if n < 0
-        ν .= -ν
-        n = -n
-    end
-
     return VacuumInput(;
         r=reverse(r),
         z=reverse(z),
@@ -237,7 +230,6 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     z_wall = zeros(mtheta)
 
     if wall_settings.shape == "nowall"
-        @info "Using no wall"
         return WallGeometry(
             true,
             x_wall,
