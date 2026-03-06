@@ -15,12 +15,8 @@ Struct holding plasma boundary and mode data as provided from ForceFreeStates na
   - `mtheta::Int`: Number of vacuum calculation poloidal grid points
   - `nzeta::Int`: Number of vacuum calculation toroidal grid points
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
-
-# Notes
-
-  - This is a mutable struct because we need to be able to modify the ν vector in n<0 cases.
 """
-@kwdef mutable struct VacuumInput
+@kwdef struct VacuumInput
     r::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
     ν::Vector{Float64} = Float64[]
