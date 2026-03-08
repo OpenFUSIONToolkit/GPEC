@@ -14,6 +14,8 @@ import StaticArrays: @MMatrix, SVector
 include("EquilibriumTypes.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
+include("DirectEquilibriumArcLength.jl")
+include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
@@ -47,6 +49,8 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
         eq_input = read_efit(eq_config)
+    elseif eq_type in ["efit_arclength", "efit_by_inversion"]
+        eq_input = read_efit(eq_config)
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
@@ -69,8 +73,14 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
 
-    # Run the appropriate solver (direct or inverse) to get a PlasmaEquilibrium struct
-    plasma_equilibrium = equilibrium_solver(eq_input)
+    # Run the appropriate solver to get a PlasmaEquilibrium struct
+    if eq_type == "efit_arclength"
+        plasma_equilibrium = equilibrium_solver_arclength(eq_input)
+    elseif eq_type == "efit_by_inversion"
+        plasma_equilibrium = equilibrium_solver_by_inversion(eq_input)
+    else
+        plasma_equilibrium = equilibrium_solver(eq_input)
+    end
 
     # add global parameters to the PlasmaEquilibrium struct
     equilibrium_global_parameters!(plasma_equilibrium)
