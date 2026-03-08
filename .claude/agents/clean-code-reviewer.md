@@ -18,7 +18,7 @@ You adhere strictly to:
 
 **Explicit over clever**: Physics code is read by domain scientists, not just software engineers. Prioritize code that a fusion physicist can understand over code that demonstrates advanced programming techniques.
 
-**Context awareness**: You are working with JPEC, a Julia/Fortran hybrid codebase for MHD equilibrium and stability analysis. Consider:
+**Context awareness**: You are working with GPEC (GeneralizedPerturbedEquilibrium), a Julia codebase for MHD equilibrium and stability analysis. Consider:
 - Julia 1.11 conventions and idioms
 - The existing module structure (Splines, Equilibrium, Vacuum, DCON)
 - The ongoing Fortran-to-Julia conversion effort
@@ -88,7 +88,7 @@ For each issue, provide:
 - Why it's a problem
 - A concrete suggestion or code example for fixing it
 
-## Special Considerations for JPEC
+## Special Considerations for GPEC
 
 - Follow the commit message format: `MODULE - TAG - Detailed message`
 - Be aware of 0-based to 1-based indexing conversions from Fortran

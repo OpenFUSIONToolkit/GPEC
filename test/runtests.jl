@@ -1,17 +1,17 @@
 using Test
 using Pkg
-using JPEC.Vacuum
-using JPEC.Equilibrium
-using JPEC.ForceFreeStates
-using JPEC.ForcingTerms
-using JPEC.PerturbedEquilibrium
-using JPEC.Utilities
+using GeneralizedPerturbedEquilibrium.Vacuum
+using GeneralizedPerturbedEquilibrium.Equilibrium
+using GeneralizedPerturbedEquilibrium.ForceFreeStates
+using GeneralizedPerturbedEquilibrium.ForcingTerms
+using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Utilities
 using FastInterpolations
 using LinearAlgebra
 
 # Activate the project environment one level up
 Pkg.activate(joinpath(@__DIR__, ".."))
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
 # Check if specific test files are requested via ARGS
 if !isempty(ARGS)

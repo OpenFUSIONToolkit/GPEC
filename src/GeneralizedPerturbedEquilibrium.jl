@@ -1,5 +1,5 @@
-# JPEC.jl
-module JPEC
+# GeneralizedPerturbedEquilibrium.jl
+module GeneralizedPerturbedEquilibrium
 
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
@@ -56,7 +56,7 @@ function main(args::Vector{String}=String[])
         "unknown"
     end
 
-    @info "\n$_BANNER\n  JPEC - Julia Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
+    @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
     total_start = time()
 
     # ----------------------------------------------------------------
@@ -67,25 +67,25 @@ function main(args::Vector{String}=String[])
 
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
-    inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
+    inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from jpec.toml or fallback to equil.toml if it exists
+    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
         equil = Equilibrium.setup_equilibrium(eq_config)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in jpec.toml"
+        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     else
-        error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
+        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
     end
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
-        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
 
@@ -271,7 +271,7 @@ function main(args::Vector{String}=String[])
 
     # Early exit if user only requested force-free states
     if ctrl.force_termination
-        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
 
@@ -318,7 +318,7 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
@@ -456,4 +456,4 @@ end
 
 export main
 
-end # module JPEC
+end # module GeneralizedPerturbedEquilibrium

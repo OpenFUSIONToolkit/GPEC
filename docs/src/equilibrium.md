@@ -19,13 +19,13 @@ Key responsibilities of the module:
 	(global parameters, q-profile finding, separatrix finding, GSE checks).
 
 The module exposes a small public API that covers setup, configuration,
-and common analyses used by other JPEC components (e.g. `ForceFreeStates`, vacuum
+and common analyses used by other GPEC components (e.g. `ForceFreeStates`, vacuum
 interfaces).
 
 ## API Reference
 
 ```@autodocs
-Modules = [JPEC.Equilibrium]
+Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 ```
 
 ## Important types
@@ -61,27 +61,27 @@ Modules = [JPEC.Equilibrium]
 Basic example: read a TOML config and build an equilibrium
 
 ```julia
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
 # Build from a TOML file (searches relative paths if needed)
-pe = JPEC.Equilibrium.setup_equilibrium("docs/examples/ForceFreeStates.toml")
+pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium("docs/examples/ForceFreeStates.toml")
 
 println("Magnetic axis: ", pe.params.r0, ", ", pe.params.z0)
 println("q(0) = ", pe.params.q0)
 
 # Find separatrix (in-place) and inspect results
-JPEC.Equilibrium.equilibrium_separatrix_find!(pe)
+GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_separatrix_find!(pe)
 println("rsep = ", pe.params.rsep)
 ```
 
 Analytic / testing example: construct a large-aspect-ratio model
 
 ```julia
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
 # Create a LAR config from a small TOML fragment or file
-larcfg = JPEC.Equilibrium.LargeAspectRatioConfig(lar_r0=10.0, lar_a=1.0, beta0=1e-3)
-pe = JPEC.Equilibrium.setup_equilibrium(JPEC.Equilibrium.EquilibriumConfig(control=Dict("eq_filename"=>"unused","eq_type"=>"lar")), larcfg)
+larcfg = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(lar_r0=10.0, lar_a=1.0, beta0=1e-3)
+pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(control=Dict("eq_filename"=>"unused","eq_type"=>"lar")), larcfg)
 
 println("Built LAR equilibrium with a = ", lorcfg.lar_a)
 ```

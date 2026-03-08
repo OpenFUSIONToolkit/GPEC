@@ -1,4 +1,4 @@
-name = "JPEC"
+name = "GeneralizedPerturbedEquilibrium"
 uuid = "462872dd-e066-4d2e-b993-6468b5239634"
 license = "MIT"
 authors = ["Matthew Pharr <matthewcpharr@gmail.com>", "Rithik Banerjee <rb3736@columbia.edu>", "Jaebeom Cho <aspire1019@snu.ac.kr>", "Jacob Halpern <jmh2363@columbia.edu>"]

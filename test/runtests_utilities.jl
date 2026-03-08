@@ -13,7 +13,7 @@
             fs[ix, iy, 1] = x * cos(2 * 2π * y)
         end
 
-        fc = JPEC.Utilities.FourierCoefficients(xs, ys, fs, 4)
+        fc = GeneralizedPerturbedEquilibrium.Utilities.FourierCoefficients(xs, ys, fs, 4)
 
         # Check structure
         @test fc.mband == 4
@@ -21,18 +21,18 @@
         @test length(fc.xs) == npsi
 
         # Mode 2 should have significant content at ipsi=10 (x=0.5)
-        c2 = JPEC.Utilities.get_complex_coeff(fc, 10, 2, 1)
+        c2 = GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeff(fc, 10, 2, 1)
         @test abs(real(c2)) > 0.1  # Should have cosine content
 
         # Get all coefficients
         out = zeros(ComplexF64, 5)
-        JPEC.Utilities.get_complex_coeffs!(out, fc, 10, 1)
+        GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeffs!(out, fc, 10, 1)
         @test out[3] == c2  # Mode 2 is at index 3 (0-indexed mode)
     end
 
     @testset "FourierTransforms" begin
         @info "Testing fourier_transform! and fourier_inverse_transform! from Utilities module"
-        using JPEC.Utilities: fourier_transform!, fourier_inverse_transform!
+        using GeneralizedPerturbedEquilibrium.Utilities: fourier_transform!, fourier_inverse_transform!
 
         @testset "fourier_transform!" begin
             mtheta, mpert = 4, 2

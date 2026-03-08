@@ -1,7 +1,0 @@
-#!/usr/bin/env julia --project=@.
-# JPEC executable script
-# Usage: ./jpec [path/to/directory]
-# If no path is provided, uses current directory
-
-using JPEC
-JPEC.main(ARGS)

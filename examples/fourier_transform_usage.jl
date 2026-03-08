@@ -8,8 +8,8 @@ to create pre-computed Fourier transform objects for different grids:
 2. Vacuum: Basis with toroidal phase coupling (n*qa*delta)
 """
 
-using JPEC
-using JPEC.Utilities.FourierTransforms
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
 
 # ==============================================================================
 # Example 1: PerturbedEquilibrium Case (No Phase Shift)

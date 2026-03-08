@@ -1,6 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
-JPEC = "462872dd-e066-4d2e-b993-6468b5239634"
+GeneralizedPerturbedEquilibrium = "462872dd-e066-4d2e-b993-6468b5239634"
 
 [compat]
 Documenter = "1.0"
