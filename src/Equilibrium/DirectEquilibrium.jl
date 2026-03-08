@@ -459,7 +459,7 @@ robustness.
     ff_val = zeros!(pool, Float64, 4)
     ff_deriv_val = zeros!(pool, Float64, 4)
 
-    for ipsi in (mpsi+1):-1:1
+    Threads.@threads for ipsi in (mpsi+1):-1:1
         # Integrate along the field line for this surface
         y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
@@ -560,7 +560,7 @@ robustness.
     # for use in stability and transport codes
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
-    for ipsi in 1:(mpsi+1)
+    Threads.@threads for ipsi in 1:(mpsi+1)
         q = profiles.q_spline.y[ipsi]
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
