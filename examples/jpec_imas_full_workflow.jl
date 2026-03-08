@@ -10,6 +10,21 @@ This script demonstrates a complete end-to-end JPEC workflow using IMAS:
 This proves that JPEC can fully integrate with IMAS-based workflows.
 """
 
+# JPEC.main( DIII example, ...)
+
+#output 
+
+#convert g file (make sure the same) to IMAS (did this)
+
+#JPEC.main(DIII exmaple, dd)
+
+# make sure the input are the same except for the efit and imas 
+
+# output the same ?
+# is et[1] the same just looking at it says it s the same 
+# the dd are equivalent to the hdf5 file 
+
+#
 println("="^70)
 println("Full JPEC IMAS Integration Workflow")
 println("="^70)
@@ -65,6 +80,8 @@ imas_config = JPEC.Equilibrium.EquilibriumConfig(;
     psilow = 0.01,
     psihigh = 0.994,
 )
+
+
 
 # Load equilibrium through JPEC using IMAS path
 equil = JPEC.Equilibrium.setup_equilibrium(imas_config, dd)
