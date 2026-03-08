@@ -424,6 +424,7 @@ robustness.
 """
 @with_pool pool function equilibrium_solver(raw_profile::DirectRunInput)
 
+    t0 = time()
     # Shorthand
     equil_params = raw_profile.config
     psio = raw_profile.psio
@@ -622,6 +623,9 @@ robustness.
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
+
+    elapsed = time() - t0
+    println("equilibrium_solver completed in ", round(elapsed; digits=4), " s")
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
