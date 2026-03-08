@@ -91,6 +91,14 @@ function resample_contour_to_theta_grid(
 )::Tuple{Vector{Float64},Vector{Float64}}
 
     R_pts, Z_pts = Ctr.coordinates(curve)
+
+    # Contour.jl closed curves repeat first==last vertex — drop the duplicate to
+    # avoid a zero-length interval in the cubic spline (which produces NaN).
+    if length(R_pts) > 1 && abs(R_pts[end] - R_pts[1]) < 1e-8 && abs(Z_pts[end] - Z_pts[1]) < 1e-8
+        R_pts = R_pts[1:end-1]
+        Z_pts = Z_pts[1:end-1]
+    end
+
     # Geometric angle for each contour point, mapped to [0, 2π)
     η = mod.(atan.(Z_pts .- zo, R_pts .- ro), 2π)
 
@@ -108,8 +116,9 @@ function resample_contour_to_theta_grid(
     R_spl = cubic_interp(η_ext, R_ext; bc=CubicFit(), extrap=WrapExtrap())
     Z_spl = cubic_interp(η_ext, Z_ext; bc=CubicFit(), extrap=WrapExtrap())
 
-    R_out = [R_spl(θ) for θ in theta_grid]
-    Z_out = [Z_spl(θ) for θ in theta_grid]
+    # theta_grid is in turns [0, 1]; sample the geometric-angle spline at 2π*θ radians
+    R_out = [R_spl(2π * θ) for θ in theta_grid]
+    Z_out = [Z_spl(2π * θ) for θ in theta_grid]
 
     return R_out, Z_out
 end
@@ -166,8 +175,10 @@ function equilibrium_solver_by_inversion(
     @info "efit_by_inversion: Evaluating ψ on $(nr_fine)×$(nz_fine) fine grid ($(refine)× refinement)"
     ψ_fine = [raw_profile.psi_in((r, z)) for r in r_fine, z in z_fine]
 
-    # Theta grid for InverseRunInput: geometric angle in [0, 2π]
-    theta_grid = collect(range(0.0, 2π; length=mtheta + 1))
+    # Theta grid for InverseRunInput: fractional turns in [0, 1].
+    # InverseEquilibrium uses theta ∈ [0,1] and formula cos(2π*(theta + deta)),
+    # so rz_in_ys must be in turns, not radians.
+    theta_grid = collect(range(0.0, 1.0; length=mtheta + 1))
 
     # Build R(ψ, θ) and Z(ψ, θ) tables
     R_table = Matrix{Float64}(undef, mpsi + 1, mtheta + 1)
@@ -180,23 +191,25 @@ function equilibrium_solver_by_inversion(
         psifac = psi_nodes[ipsi]
         ψ_target = psio * (1.0 - psifac)
 
-        # Near-axis fallback: circular approximation when psifac < threshold
-        if psifac < psilow_contour_threshold
-            rfac = sqrt(psifac) * (rs2 - ro)
-            for j in 1:(mtheta+1)
-                θ = theta_grid[j]
-                R_table[ipsi, j] = ro + rfac * cos(θ)
-                Z_table[ipsi, j] = zo + rfac * sin(θ)
-            end
-            n_contour_fallback += 1
-            continue
-        end
-
         # Trace level set at ψ_target with Contour.jl (marching squares)
         cl = Ctr.contour(collect(r_fine), collect(z_fine), ψ_fine, ψ_target)
         curve = select_plasma_contour(Ctr.lines(cl), ro, zo)
 
         if curve === nothing
+            # Near-axis fallback: circular approximation if Contour.jl can't resolve the surface.
+            # This only occurs for extremely small psifac where the contour is smaller than the
+            # fine-grid spacing. The accuracy is limited; psilow should be kept > 1e-3 for
+            # best near-axis q accuracy with this method.
+            if psifac < psilow_contour_threshold
+                rfac = sqrt(psifac) * (rs2 - ro)
+                for j in 1:(mtheta+1)
+                    θ = theta_grid[j]  # turns ∈ [0, 1]
+                    R_table[ipsi, j] = ro + rfac * cos(2π * θ)
+                    Z_table[ipsi, j] = zo + rfac * sin(2π * θ)
+                end
+                n_contour_fallback += 1
+                continue
+            end
             error("efit_by_inversion: No closed flux surface found at psifac = $(@sprintf("%.4f", psifac)) " *
                 "— psihigh likely exceeds the separatrix or is outside the EFIT domain.")
         end

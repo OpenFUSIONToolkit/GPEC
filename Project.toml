@@ -6,7 +6,9 @@ version = "0.1.0"
 
 [deps]
 AdaptiveArrayPools = "4f381ef7-9af0-4cbe-99d4-cf36d7b0f233"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 Contour = "d38c429a-6771-53c6-b99e-75d170b6e991"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
@@ -30,7 +32,9 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 AdaptiveArrayPools = "0.2.0"
+CSV = "0.10.16"
 Contour = "0.6.3"
+DataFrames = "1.8.1"
 DelimitedFiles = "1.9.1"
 DiffEqCallbacks = "4.9.0"
 Documenter = "1.14.1"

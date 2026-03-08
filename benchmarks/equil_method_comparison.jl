@@ -18,7 +18,7 @@ Usage:
 
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.Equilibrium
-using TOML, Printf, Statistics, HDF5
+using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
 config_path  = joinpath(example_path, "gpec.toml")
@@ -91,33 +91,13 @@ for (i, m1) in enumerate(methods), m2 in methods[(i+1):end]
         m1, m2, maximum(Δq), maximum(Δq[mask_edge]))
 end
 
-# EFIT input q-profile for ψ < 0.95 only
+# EFIT input q-profile for ψ < 0.95 only.
+# The sq_in spline from read_efit already holds the parsed q-profile in column 3:
+# sq_in columns = [|F|, mu0*P, q, sqrt(psi_norm)].
 println("\nComparison to EFIT input q-profile (valid for ψ < 0.95 only):")
-raw = TOML.parsefile(config_path)
-eq_file = joinpath(dirname(config_path), raw["Equilibrium"]["eq_filename"])
-# Read EFIT q-profile directly
-efit_lines = readlines(eq_file)
-header_parts = split(efit_lines[1])
-nw = parse(Int, header_parts[end-1])
-# Parse qprof_data (5th 1D block, starting at line 6 + 4*ceil(nw/5))
-lines_per_block = cld(nw, 5)
-q_line_start = 6 + 4 * lines_per_block  # after fpol, pres, ffprime, pprime
-efit_q_raw = Float64[]
-for line in efit_lines[q_line_start:(q_line_start + lines_per_block - 1)]
-    for i in 0:4
-        i*16+1 > length(line) && break
-        s = strip(line[(i*16+1):min(end, (i+1)*16)])
-        isempty(s) || push!(efit_q_raw, parse(Float64, s))
-        length(efit_q_raw) >= nw && break
-    end
-end
-efit_psi_norm = range(0.0, 1.0; length=nw) |> collect
-efit_q_interp = x -> begin
-    idx = searchsortedfirst(efit_psi_norm, x)
-    idx = clamp(idx, 2, nw)
-    t = (x - efit_psi_norm[idx-1]) / (efit_psi_norm[idx] - efit_psi_norm[idx-1])
-    efit_q_raw[idx-1] * (1 - t) + efit_q_raw[idx] * t
-end
+ref_raw = Equilibrium.read_efit(results[ref_method]["config"])
+f_sq_buf = zeros(4)
+efit_q_interp = ψ -> (ref_raw.sq_in(f_sq_buf, ψ); f_sq_buf[3])
 mask_mid = psi_nodes .< 0.95
 for method in methods
     results[method]["success"] || continue
@@ -155,9 +135,9 @@ for method in methods
             η = 2π * (θ + off)
             R = pe.ro + rfac * cos(η)
             Z = pe.zo + rfac * sin(η)
-            # Evaluate psi at (R, Z) using the raw EFIT spline (re-read each time is expensive;
-            # use the reconstructed pe.psio and the original psi_in via raw_profile)
-            ψ_reconstructed = raw_profile.psi_in((R, Z)) / psio
+            # Evaluate psi at (R, Z): psi_in returns (sibry - ψ_raw), so
+            # psi_norm = 1 - psi_in/psio (0 at axis, 1 at boundary).
+            ψ_reconstructed = 1.0 - raw_profile.psi_in((R, Z)) / psio
             push!(errors, abs(ψ_reconstructed - ψ_target))
         end
     end

@@ -19,3 +19,4 @@ docs/build/
 anaconda_projects/
 modovmc
 pestotv
+examples/DIIID-like_ideal_example/*.csv

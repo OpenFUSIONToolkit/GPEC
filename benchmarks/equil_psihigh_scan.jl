@@ -91,7 +91,7 @@ for method in methods
                     η = 2π * (θ + off)
                     R = pe.ro + rfac * cos(η)
                     Z = pe.zo + rfac * sin(η)
-                    ψ_recon = raw_profile.psi_in((R, Z)) / psio
+                    ψ_recon = 1.0 - raw_profile.psi_in((R, Z)) / psio
                     push!(errors, abs(ψ_recon - ψ))
                 end
             end
