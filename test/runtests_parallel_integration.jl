@@ -126,11 +126,9 @@ using TOML
         # Run standard and parallel FM integrations on the Solovev regression test.
         # The energy eigenvalue et[1] should match to within 2%.
         #
-        # Note: this test uses the Solovev example (N=8 modes) where FM propagators
-        # are well-conditioned. For large-N problems (N ≳ 20, e.g. DIIID with N=26),
-        # FM propagator ill-conditioning leads to ~10% energy error with no speedup
-        # over the serial Riccati path. See parallel_eulerlagrange_integration docstring
-        # for details and deferred fix approaches (bidirectional integration / continuous QR).
+        # Bidirectional FM integration (crossing chunks integrated backward) is the
+        # default for use_parallel=true. It keeps FM propagators well-conditioned for
+        # both small-N (Solovev N=8, tested here) and large-N (DIIID N=26, tested below).
         ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
 
         function run_solovev(use_parallel)

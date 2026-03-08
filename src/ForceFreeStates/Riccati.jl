@@ -77,6 +77,7 @@ Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks
 function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range)
     N = size(propagators[1].block_upper_ic, 1)
     Phi = Matrix{ComplexF64}(I, 2N, 2N)
+    isempty(idx_range) && return Phi
     for i in idx_range
         p = propagators[i]
         Phi_i = [p.block_upper_ic[:,:,1]  p.block_lower_ic[:,:,1];
@@ -140,6 +141,11 @@ function compute_delta_prime_matrix!(
     msing = intr.msing
     msing == 0 && return
     N = intr.numpert_total
+
+    # Single-resonance assumption: each surface has exactly one resonant mode.
+    # Multi-resonance surfaces would require coupling all resonant modes simultaneously;
+    # only the first (sp.m[1], sp.n[1]) is used below.
+    @assert all(j -> length(intr.sing[j].m) == 1, 1:msing) "compute_delta_prime_matrix! only supports single-resonance surfaces"
 
     # Find the index of the crossing chunk for each surface (direction=-1 in bidirectional mode)
     i_crossings = findall(c -> c.needs_crossing, chunks)
