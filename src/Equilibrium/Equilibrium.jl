@@ -91,13 +91,18 @@ Finds the separatrix locations in the plasma equilibrium (rsep, zsep, rext, zext
 Performs the same function as equil_out_sep_find in the Fortran code.
 """
 function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
-    mpsi = length(pe.rzphi_xs) - 1
     mtheta = length(pe.rzphi_ys) - 1
 
-    # Allocate vector to store eta offset from rzphi (direct array access at grid points)
-    vector = pe.rzphi_ys .+ @view pe.rzphi_offset.nodal_derivs.partials[1, end, :]
+    # Use the core field-line grid boundary (psihigh), not the far-edge extension end.
+    # For diverted plasmas, rzphi_xs is extended beyond psihigh via X-point asymptotic geometry;
+    # the separatrix / global parameters are defined at the core grid boundary.
+    psi_core = isnothing(pe.params.psi_core_end) ? pe.rzphi_xs[end] : pe.params.psi_core_end
+    edge_idx = searchsortedlast(pe.rzphi_xs, psi_core)
+    edge_idx = max(1, min(edge_idx, length(pe.rzphi_xs)))
 
-    edge_idx = mpsi + 1  # Edge flux surface index
+    # Allocate vector to store eta offset from rzphi (direct array access at grid points)
+    vector = pe.rzphi_ys .+ @view pe.rzphi_offset.nodal_derivs.partials[1, edge_idx, :]
+
     psi_edge = pe.rzphi_xs[edge_idx]
     eta0 = 0.0
     idx = findmin(abs.(vector .- eta0))[2]
@@ -199,8 +204,12 @@ the same function as equil_out_global in the Fortran code.
 """
 function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     profiles = pe.profiles
-    mpsi = length(pe.rzphi_xs) - 1
     mtheta = length(pe.rzphi_ys) - 1
+
+    # Use the core field-line grid boundary for global parameters, not the far-edge extension end.
+    psi_core = isnothing(pe.params.psi_core_end) ? pe.rzphi_xs[end] : pe.params.psi_core_end
+    edge_idx = searchsortedlast(pe.rzphi_xs, psi_core)
+    edge_idx = max(1, min(edge_idx, length(pe.rzphi_xs)))
 
     # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
@@ -211,7 +220,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
-    dpsi = 1.0 - pe.rzphi_xs[mpsi+1]
+    dpsi = 1.0 - pe.rzphi_xs[edge_idx]
     psi_edge = profiles.xs[end]
     bt0 = (profiles.F_spline.y[end] + profiles.F_deriv(psi_edge; hint=Ref(profiles.npts_minus_1)) * dpsi) / (2π * rmean)
 
@@ -230,12 +239,12 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     # Direct array access at edge flux surface grid points using nodal_derivs
     for itheta in 0:mtheta
         # Function values (partials[1,:,:])
-        r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, end, itheta+1]
-        offset = pe.rzphi_offset.nodal_derivs.partials[1, end, itheta+1]
-        jac = pe.rzphi_jac.nodal_derivs.partials[1, end, itheta+1]
+        r2 = pe.rzphi_rsquared.nodal_derivs.partials[1, edge_idx, itheta+1]
+        offset = pe.rzphi_offset.nodal_derivs.partials[1, edge_idx, itheta+1]
+        jac = pe.rzphi_jac.nodal_derivs.partials[1, edge_idx, itheta+1]
         # Theta derivatives (partials[3,:,:] = ∂f/∂y)
-        r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, end, itheta+1]
-        offset_y = pe.rzphi_offset.nodal_derivs.partials[3, end, itheta+1]
+        r2_y = pe.rzphi_rsquared.nodal_derivs.partials[3, edge_idx, itheta+1]
+        offset_y = pe.rzphi_offset.nodal_derivs.partials[3, edge_idx, itheta+1]
 
         chi1 = 2π * psio / jac
         jacfac = π / jac
@@ -433,7 +442,11 @@ Coverage: the original equilibrium grid only (psilow to psihigh); no far-edge ex
 function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     profiles = equil.profiles
-    mpsi = length(equil.rzphi_xs) - 1
+    # Use the core profile grid (profiles.xs) to determine loop bounds.
+    # For diverted plasmas, equil.rzphi_xs is extended beyond psihigh via X-point asymptotic
+    # geometry; GSE is only evaluated on the core field-line grid (psilow to psihigh).
+    psi_xs = profiles.xs   # core psi grid
+    mpsi = length(psi_xs) - 1
     mtheta = length(equil.rzphi_ys) - 1
     ro, zo = equil.ro, equil.zo
     psio = equil.psio
@@ -445,7 +458,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         @info "Diagnosing Grad-Shafranov solution"
     end
 
-    # Compute R, Z coordinates using nodal_derivs access
+    # Compute R, Z coordinates using nodal_derivs access (core grid only)
     r = zeros(Float64, mpsi + 1, mtheta + 1)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
@@ -479,16 +492,16 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             gs_div_term[ipsi, itheta, 2] *= 2π * psio / f4
         end
     end
-    # Create interpolants of the GS divergence terms for derivative evaluation
+    # Create interpolants of GS divergence terms on the core psi grid
     flux_opts = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), gs_div_term[:, :, 1]; flux_opts...)
-    flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), gs_div_term[:, :, 2]; flux_opts...)
+    flux1 = cubic_interp((psi_xs, equil.rzphi_ys), gs_div_term[:, :, 1]; flux_opts...)
+    flux2 = cubic_interp((psi_xs, equil.rzphi_ys), gs_div_term[:, :, 2]; flux_opts...)
 
-    # Compute ψ- and θ-derivatives of GS divergence terms at all grid points
+    # Compute ψ- and θ-derivatives of GS divergence terms at all core grid points
     hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
-            query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
+            query_point = (psi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
             gs_div_dpsi[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
             gs_div_dpsi[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
             gs_div_dtheta[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
@@ -500,7 +513,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     source = zeros(Float64, mpsi + 1, mtheta + 1)
     hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:(mpsi+1)
-        psi = profiles.xs[ipsi]
+        psi = psi_xs[ipsi]
         F_val  = profiles.F_spline.y[ipsi]   # F(ψ) = R*Bₜ
         dF_dpsi = profiles.F_deriv(psi; hint=hint)  # dF/dψ
         dP_dpsi = profiles.P_deriv(psi; hint=hint)  # d(μ₀P)/dψ
@@ -566,7 +579,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
             for ipsi in 0:mpsi
                 for itheta in 0:mtheta
                     gse_data[ipsi+1, itheta+1, 1] = Float32(equil.rzphi_ys[itheta+1])
-                    gse_data[ipsi+1, itheta+1, 2] = Float32(equil.rzphi_xs[ipsi+1])
+                    gse_data[ipsi+1, itheta+1, 2] = Float32(psi_xs[ipsi+1])
                     gse_data[ipsi+1, itheta+1, 3] = Float32(gs_div_term[ipsi+1, itheta+1, 1])
                     gse_data[ipsi+1, itheta+1, 4] = Float32(gs_div_term[ipsi+1, itheta+1, 2])
                     gse_data[ipsi+1, itheta+1, 5] = Float32(source[ipsi+1, itheta+1])
@@ -579,7 +592,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
         # Write integrated error criterion
         h5open(joinpath(dirname(equil.config.eq_filename), "gsei.h5"), "w") do file
-            file["xs"] = Float32.(equil.rzphi_xs)
+            file["xs"] = Float32.(psi_xs)
             file["term"] = Float32.(gse_terms_integrated)
             file["totali"] = Float32.(gse_total_integrated)
             file["errori"] = Float32.(gse_abs_error)

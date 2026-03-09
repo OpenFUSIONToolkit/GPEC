@@ -359,22 +359,14 @@ Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    # For integration chunks that START above psihigh in diverted plasmas, switch both
-    # the q_spline and F_spline pointers to their respective edge splines. This allows
-    # sing_der! (which evaluates equil.profiles.q_spline and profiles.F_spline at each ODE step)
-    # to use the well-behaved edge splines near the separatrix without per-call conditionals.
-    # NOTE: the condition is psi_START (not psi_end) above psihigh. Chunks that straddle psihigh
-    # (e.g., q=5→q=6 with psi 0.986→0.996) must use the direct splines throughout because
-    # F_spline_iota_matched is only built for psi > psihigh; extrapolating it below psihigh
-    # gives a wrong constant F value that corrupts U₁ and causes SingularException in free_compute_total.
+    # For integration chunks that START above psihigh in diverted plasmas, switch the
+    # q_spline pointer to the edge (iota inverse) spline. This allows sing_der! (which
+    # evaluates equil.profiles.q_spline at each ODE step) to use the well-behaved iota
+    # inverse spline near the separatrix without per-call conditionals.
     profiles = equil.profiles
     using_edge_spline = chunk.psi_start >= profiles.xs[end] && !isnothing(profiles.q_spline_iota_inverse)
     if using_edge_spline
         profiles.q_spline = profiles.q_spline_iota_inverse
-        if !isnothing(profiles.F_spline_iota_matched)
-            profiles.F_spline = profiles.F_spline_iota_matched
-            profiles.F_deriv  = profiles.F_deriv_iota_matched
-        end
     end
 
     # Reset per-chunk tracking fields used by integrator_callback!.
@@ -396,13 +388,9 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true, dense=false)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
-    # Restore the direct q_spline and F_spline after the edge chunk completes
+    # Restore the direct q_spline after the edge chunk completes
     if using_edge_spline
         profiles.q_spline = profiles.q_spline_direct
-        if profiles.F_spline !== profiles.F_spline_direct
-            profiles.F_spline = profiles.F_spline_direct
-            profiles.F_deriv  = profiles.F_deriv_direct
-        end
     end
 
     # Update u and psifac with the solution at the end of the interval

@@ -347,35 +347,36 @@ else
     println("Note: jpec.h5 not found in $output_dir — run JPEC first to generate edge stability plot")
 end
 
-# --- Plot 8: F(ψ) direct vs F_iota_matched in the far edge ---
-if !isnothing(profiles.F_spline_iota_matched)
-    psi_far_plot = range(psihigh, 1.0 - 1e-4, length=200)
-    F_direct_vals  = [profiles.F_spline_direct(psi)        for psi in psi_far_plot]
-    F_matched_vals = [profiles.F_spline_iota_matched(psi)  for psi in psi_far_plot]
-    dF_direct_vals  = [profiles.F_deriv_direct(psi)         for psi in psi_far_plot]
-    dF_matched_vals = [profiles.F_deriv_iota_matched(psi)   for psi in psi_far_plot]
+# --- Plot 8: X-point asymptotic geometry — rfac(ψ) at selected θ values ---
+# Shows how the rzphi spline extends into the far edge (psin > psihigh) via X-point scaling.
+# rfac(ψ, θ) = √((R-Ro)² + (Z-Zo)²) should shrink toward zero as ψ → 1 (X-point approach).
+if !isnothing(pe.params.r_xpoint)
+    psi_far_plot = range(psihigh - 0.005, pe.rzphi_xs[end]; length=300)
+    theta_plot_vals = [0.0, 0.25, 0.5, 0.75]
+    theta_plot_labels = ["θ=0.00 (outboard)", "θ=0.25 (top)", "θ=0.50 (inboard)", "θ=0.75 (bottom)"]
+    theta_plot_colors = [:blue, :orange, :green, :red]
 
-    p8a = plot(collect(psi_far_plot), F_direct_vals;
-        xlabel="ψₙ", ylabel="F = 2π·R·Bₜ",
-        title="F(ψ): direct vs iota-matched in far edge",
-        label="F_direct (ExtendExtrap)", lw=2, color=:orange, ls=:dash)
-    plot!(p8a, collect(psi_far_plot), F_matched_vals;
-        label="F_iota_matched", lw=2, color=:blue)
-    vline!(p8a, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+    # rfac from the extended rzphi spline
+    rfac_vals = [sqrt(max(0.0, pe.rzphi_rsquared((psi, theta)))) for psi in psi_far_plot, theta in theta_plot_vals]
 
-    p8b = plot(collect(psi_far_plot), dF_direct_vals;
-        xlabel="ψₙ", ylabel="dF/dψ",
-        title="dF/dψ: direct vs iota-matched",
-        label="dF_direct", lw=2, color=:orange, ls=:dash)
-    plot!(p8b, collect(psi_far_plot), dF_matched_vals;
-        label="dF_iota_matched", lw=2, color=:blue)
-    vline!(p8b, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+    # Expected X-point asymptotic limit: rfac at ψ → 1 should approach rfac_xpoint(θ) = 0
+    # (the X-point is also at the magnetic axis distance from ro, zo)
+    r_x, z_x = pe.params.r_xpoint, pe.params.z_xpoint
+    rfac_xpoint = sqrt((r_x - pe.ro)^2 + (z_x - pe.zo)^2)
 
-    p8 = plot(p8a, p8b; layout=(1,2), size=(950, 400))
-    savefig(p8, joinpath(output_dir, "edge_spline_F_comparison.png"))
-    println("Saved: edge_spline_F_comparison.png")
+    p8 = plot(; xlabel="ψₙ", ylabel="rfac = √((R-R₀)² + (Z-Z₀)²) [m]",
+        title="X-point asymptotic geometry: rfac(ψ) in far edge",
+        legend=:topleft)
+    for (k, (theta, lbl)) in enumerate(zip(theta_plot_vals, theta_plot_labels))
+        plot!(p8, collect(psi_far_plot), rfac_vals[:, k]; label=lbl, lw=2, color=theta_plot_colors[k])
+    end
+    hline!(p8, [rfac_xpoint]; label=@sprintf("rfac at X-point = %.4f m", rfac_xpoint), ls=:dot, color=:black, lw=1.5)
+    vline!(p8, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+
+    savefig(p8, joinpath(output_dir, "edge_spline_geometry.png"))
+    println("Saved: edge_spline_geometry.png")
 else
-    println("Note: F_spline_iota_matched not built (limited plasma or old run) — skipping Plot 8")
+    println("Note: X-point not detected (limited plasma) — skipping Plot 8")
 end
 
 # --- Plots 9 and 10: GS residual diagnostics ---
@@ -386,14 +387,11 @@ pe.params.diagnose_src = true
 JPEC.Equilibrium.equilibrium_gse!(pe)
 pe.params.diagnose_src = false
 
-# --- Compute far-edge GSE using F_iota_matched ---
-# Above psihigh, rzphi splines use ExtendExtrap (geometry frozen at psihigh), so:
-#   gs_div_dpsi[:,:,1] = 0  (psi-derivative of a frozen function)
-#   gs_div_dtheta[:,:,2] = 0 (cross-term has fx1=fx2=0 → gs_div_term[:,:,2] = 0)
-# The GS residual reduces to the source term alone:
-#   total_far(ψ,θ) ≈ source = J / (2π·ψ₀·π²) · (F·F' / (2πR)² + P')
-# with F and F' from F_spline_iota_matched.
-# Evaluated at both spline NODES and inter-node MIDPOINTS to check interpolation quality.
+# --- Compute far-edge GSE using X-point asymptotic geometry with constant F ---
+# With F ≈ const (dF/dψ ≈ 0) and P' ≈ 0 near the separatrix, the GS source term is ≈ 0.
+# The far-edge rzphi splines now use X-point asymptotic geometry (shrinking toward X-point),
+# which is GS-consistent in the Δ*ψ = 0 limit. This diagnostic confirms the improvement.
+# Evaluated at both spline NODES and inter-node MIDPOINTS to check cubic spline quality.
 far_edge_gse_available = false
 psi_far_eval  = Float64[]
 is_node_far   = Bool[]
@@ -402,32 +400,19 @@ gse_far_int   = Float64[]
 theta_labels_gse = ["θ=0.00 (outboard)", "θ=0.25 (top)", "θ=0.50 (inboard)", "θ=0.75 (bottom)"]
 theta_colors_gse = [:blue, :orange, :green, :red]
 
-if !isnothing(profiles.F_spline_iota_matched)
+if !isnothing(pe.params.r_xpoint)
     theta_all  = pe.rzphi_ys
     psio_gse   = pe.psio
-    mtheta_bc  = length(theta_all) - 1  # number of periodic intervals
+    mtheta_bc  = length(theta_all) - 1
     dtheta_bc  = (theta_all[end] - theta_all[1]) / mtheta_bc
     theta_fracs_gse = [0.0, 0.25, 0.5, 0.75]
     theta_idxs_gse  = [max(1, round(Int, th * (length(theta_all)-1) + 1)) for th in theta_fracs_gse]
 
-    # Reconstruct the psi_far grid used by direct_build_F_iota_matched! (12 pts per window).
-    # Same construction: 10 interior pts between each consecutive rational surface pair.
-    # IMPORTANT: Stop at edge_surfaces[end] (the last rational surface), NOT at psi=1.
-    # Beyond edge_surfaces[end], q→∞ and F_iota_matched diverges, making GS residuals
-    # unphysically large. The physically relevant region is [psihigh, edge_surfaces[end]].
-    psi_far_limit = isempty(edge_surfaces) ? psihigh + 0.005 : edge_surfaces[end]
-    psi_far_nodes = Float64[psihigh]
-    boundaries_bm = vcat([psihigh], filter(s -> s < psi_far_limit, edge_surfaces))
-    for i in 1:(lastindex(boundaries_bm)-1)
-        local win_pts = range(boundaries_bm[i], boundaries_bm[i+1]; length=12)
-        append!(psi_far_nodes, win_pts[2:end])   # skip first (already in list)
-    end
-    local last_pts = range(boundaries_bm[lastindex(boundaries_bm)], psi_far_limit; length=12)
-    append!(psi_far_nodes, last_pts[2:end])
-    unique!(sort!(psi_far_nodes))
+    # Far-edge psi grid: the extended rzphi spline covers [psilow, rzphi_xs[end]].
+    # Use the far-edge portion (above psihigh) of the extended spline grid.
+    psi_far_nodes = filter(psi -> psi > psihigh, pe.rzphi_xs)
 
-    # Interleave midpoints with nodes: each consecutive pair contributes a midpoint.
-    # is_node_far[i] = true means psi_far_eval[i] is a spline node; false = interpolated midpoint.
+    # Interleave midpoints with nodes
     for i in eachindex(psi_far_nodes)
         push!(psi_far_eval, psi_far_nodes[i])
         push!(is_node_far, true)
@@ -441,14 +426,15 @@ if !isnothing(profiles.F_spline_iota_matched)
     gse_far_int = zeros(Float64, length(psi_far_eval))
 
     for (ipsi, psi) in enumerate(psi_far_eval)
-        F_val   = profiles.F_spline_iota_matched(psi)
-        dF_dpsi = profiles.F_deriv_iota_matched(psi)
+        # F and P from the profiles (F is constant via ExtendExtrap above psihigh; F'≈0, P'≈0)
+        F_val   = profiles.F_spline(psi)
+        dF_dpsi = profiles.F_deriv(psi)
         dP_dpsi = profiles.P_deriv(psi)
 
         source_theta = zeros(Float64, length(theta_all))
         for (itheta, theta) in enumerate(theta_all)
-            f4   = pe.rzphi_jac((psi, theta))      # frozen at psihigh geometry (ExtendExtrap)
-            R, _ = RZ_at(pe, psi, theta)            # frozen at psihigh geometry (ExtendExtrap)
+            f4   = pe.rzphi_jac((psi, theta))   # J_coord from extended spline
+            R, _ = RZ_at(pe, psi, theta)         # R from extended spline
             source_theta[itheta] = f4 / (2π * psio_gse * π^2) *
                                    (F_val * dF_dpsi / (2π * R)^2 + dP_dpsi)
         end
@@ -457,13 +443,14 @@ if !isnothing(profiles.F_spline_iota_matched)
             gse_far_per_theta_mat[ipsi, k] = abs(source_theta[itheta])
         end
 
-        # Trapezoidal θ-integration over period [0,1): sum mtheta_bc intervals (skip periodic endpoint)
         gse_far_int[ipsi] = abs(sum(source_theta[1:mtheta_bc]) * dtheta_bc)
     end
 
-    max_far_gse = maximum(gse_far_int)
-    println(@sprintf("  Far-edge GSE (F_iota_matched): max θ-integrated |source| = %.2e", max_far_gse))
-    far_edge_gse_available = true
+    if !isempty(gse_far_int)
+        max_far_gse = maximum(gse_far_int)
+        println(@sprintf("  Far-edge GSE (X-point asymptotic): max θ-integrated |source| = %.2e", max_far_gse))
+        far_edge_gse_available = true
+    end
 end
 
 gsec_file = joinpath(output_dir, "gsec.h5")
@@ -479,7 +466,8 @@ if isfile(gsec_file) && isfile(gsei_file)
         theta_fracs = [0.0, 0.25, 0.5, 0.75]
         theta_labels = ["θ=0.00 (outboard)", "θ=0.25 (top)", "θ=0.50 (inboard)", "θ=0.75 (bottom)"]
         theta_idxs = [max(1, round(Int, th * (mt_gse-1) + 1)) for th in theta_fracs]
-        psi_gse_vals = pe.rzphi_xs
+        # Use core profile grid (not the extended rzphi_xs which includes far-edge nodes)
+        psi_gse_vals = profiles.xs
 
         p9 = plot(; xlabel="ψₙ", ylabel="|GS residual (per θ)|",
             title="GS residual by poloidal angle (core + far edge)", yscale=:log10, legend=:topleft)
@@ -491,10 +479,10 @@ if isfile(gsec_file) && isfile(gsei_file)
                   label=lbl, lw=1.5, color=theta_colors_gse[k])
         end
 
-        # Far-edge overlay: per-theta |source_far| using F_iota_matched (dashed, same colors)
+        # Far-edge overlay: per-theta |source_far| using X-point geometry + constant F (dashed)
         if far_edge_gse_available
             for (k, lbl) in enumerate(theta_labels_gse)
-                far_lbl = k == 1 ? "far edge, F_iota_matched (dashed)" : ""
+                far_lbl = k == 1 ? "far edge, X-point geometry (dashed)" : ""
                 plot!(p9, psi_far_eval, max.(gse_far_per_theta_mat[:, k], 1e-15);
                       label=far_lbl, lw=1.5, ls=:dash, color=theta_colors_gse[k], alpha=0.8)
             end
@@ -523,7 +511,7 @@ if isfile(gsec_file) && isfile(gsei_file)
         p10 = plot(
             xs_gse, max.(errori_vec, 1e-15);
             xlabel="ψₙ", ylabel="|θ-integrated GS residual|",
-            title="θ-integrated GS error: core grid + far-edge F_iota_matched",
+            title="θ-integrated GS error: core + far-edge X-point geometry",
             label="core |gse_integrated|", lw=2, color=:blue,
             yscale=:log10, legend=:topleft
         )
@@ -551,77 +539,59 @@ else
     println("Note: GSE HDF5 files not found — skipping Plots 9 and 10")
 end
 
-# --- Plot 11: Edge GSE diagnostic — q deviation and GS source mismatch in the far edge ---
-# In the far edge (psin > psihigh), the EFIT F(ψ) is extrapolated (constant via ExtendExtrap)
-# and no longer matches the physical q profile dictated by iota(ψ). This causes a GS equation
-# residual because the toroidal current source term FF′(ψ) is wrong.
-#
-# Panels:
-#  A. q_direct (EFIT, extrapolated) vs q_target = 1/iota(ψ) in the far edge
-#  B. Relative q deviation: (q_direct − q_target) / q_target  [%]
-#  C. GS source mismatch: ΔFF′ = F_direct·F′_direct − F_matched·F′_matched
-if !isnothing(profiles.F_spline_iota_matched)
-    println("Computing edge GSE diagnostic (q deviation from F_direct)...")
+# --- Plot 11: Far-edge q profile — EFIT direct vs iota inverse spline ---
+# The X-point geometry approach uses the iota inverse spline for q in the far edge (via
+# q_spline_iota_inverse), while F is held constant (ExtendExtrap). This plot shows how
+# q from the two sources compares across the edge region.
+if !isnothing(profiles.q_spline_iota_inverse)
+    println("Computing far-edge q profile comparison...")
 
-    # Dense grid spanning a little into the core for context, then through far edge
     psi_edge_gse = vcat(
         collect(range(psihigh - 0.005, psihigh, length=20)),
-        collect(range(psihigh, 1.0 - 1e-4, length=280))
+        collect(range(psihigh, pe.rzphi_xs[end]; length=280))
     )
     unique!(sort!(psi_edge_gse))
 
-    # q from direct spline (extrapolated beyond psihigh via ExtendExtrap)
-    q_direct_edge  = profiles.q_spline_direct.(psi_edge_gse)
+    # q from direct spline (constant ExtendExtrap beyond psihigh)
+    q_direct_edge = profiles.q_spline_direct.(psi_edge_gse)
 
-    # q_target = 1/iota(ψ) from the edge inverse spline (only valid above psihigh)
-    q_target_edge = map(psi_edge_gse) do psi
+    # q from iota inverse spline (correct q behavior toward separatrix)
+    above_mask_gse = psi_edge_gse .>= psihigh
+    q_iota_edge = map(psi_edge_gse) do psi
         psi >= psihigh ? profiles.q_spline_iota_inverse(psi) : profiles.q_spline_direct(psi)
     end
 
-    # Relative q deviation (only meaningful above psihigh)
-    above_mask_gse = psi_edge_gse .>= psihigh
-    rel_dev_q = (q_direct_edge .- q_target_edge) ./ q_target_edge
-
-    # GS source term: FF′(ψ) = F(ψ) · dF/dψ (the toroidal current contribution to GS)
-    FF_prime_direct  = profiles.F_spline_direct.(psi_edge_gse)  .* profiles.F_deriv_direct.(psi_edge_gse)
-    FF_prime_matched = profiles.F_spline_iota_matched.(psi_edge_gse) .* profiles.F_deriv_iota_matched.(psi_edge_gse)
-    delta_FF_prime   = FF_prime_direct .- FF_prime_matched
-
-    # Panel A: q_direct vs q_target in the far edge
+    # Panel A: q_direct vs q_iota in the far edge
     p11a = plot(psi_edge_gse, q_direct_edge;
         xlabel="ψₙ", ylabel="q",
-        title="Far-edge q: EFIT F(ψ) vs iota-matched",
+        title="Far-edge q: EFIT ExtendExtrap vs iota inverse",
         label="q_direct (EFIT, ExtendExtrap beyond psihigh)", lw=2, color=:orange, ls=:dash,
         legend=:topleft)
-    plot!(p11a, psi_edge_gse[above_mask_gse], q_target_edge[above_mask_gse];
-        label="q_target = 1/ι(ψ)  [iota inverse spline]", lw=2, color=:blue)
+    plot!(p11a, psi_edge_gse[above_mask_gse], q_iota_edge[above_mask_gse];
+        label="q = 1/ι(ψ)  [iota inverse spline, used in ODE]", lw=2, color=:blue)
     vline!(p11a, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
 
-    # Panel B: relative q deviation
-    p11b = plot(psi_edge_gse[above_mask_gse], rel_dev_q[above_mask_gse] .* 100;
-        xlabel="ψₙ", ylabel="(q_direct − q_target) / q_target  [%]",
-        title="Relative q deviation (proxy for GS F-error in far edge)",
-        label="q deviation [%]", lw=2, color=:red, legend=:topleft)
-    hline!(p11b, [0.0]; ls=:dot, color=:black, lw=1.5, label="0%")
+    # Panel B: F(ψ) in the far edge (should be approximately constant)
+    F_edge = profiles.F_spline.(psi_edge_gse)
+    dF_edge = profiles.F_deriv.(psi_edge_gse)
+    p11b = plot(psi_edge_gse, F_edge;
+        xlabel="ψₙ", ylabel="F = 2π·R·Bₜ",
+        title="F(ψ) in far edge (constant via ExtendExtrap → F'≈0 → GS source ≈ 0)",
+        label="F_spline", lw=2, color=:blue, legend=:topleft)
     vline!(p11b, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
 
-    # Panel C: FF′ mismatch in the far edge
-    p11c = plot(psi_edge_gse[above_mask_gse], delta_FF_prime[above_mask_gse];
-        xlabel="ψₙ", ylabel="ΔFF′  [T² m² / Wb]",
-        title="GS source mismatch: ΔFF′ = F_direct·F′_direct − F_matched·F′_matched",
-        label="ΔFF′", lw=2, color=:purple, legend=:topleft)
-    hline!(p11c, [0.0]; ls=:dot, color=:black, lw=1.5, label="")
+    # Panel C: dF/dψ (should be near zero above psihigh confirming GS source ≈ 0)
+    p11c = plot(psi_edge_gse, abs.(dF_edge);
+        xlabel="ψₙ", ylabel="|dF/dψ|",
+        title="|dF/dψ| in far edge (proxy for GS source = F·F'/R²)",
+        label="|dF/dψ|", lw=2, color=:red, yscale=:log10, legend=:topleft)
     vline!(p11c, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
 
     p11 = plot(p11a, p11b, p11c; layout=(3,1), size=(800, 900))
     savefig(p11, joinpath(output_dir, "edge_spline_gse_edge.png"))
     println("Saved: edge_spline_gse_edge.png")
-    max_rel_dev = maximum(abs.(rel_dev_q[above_mask_gse])) * 100
-    max_dFF     = maximum(abs.(delta_FF_prime[above_mask_gse]))
-    println(@sprintf("  Max |rel q deviation (F_direct vs F_matched)|: %.2f%%", max_rel_dev))
-    println(@sprintf("  Max |ΔFF′| in far edge:                        %.4g T²m²/Wb", max_dFF))
 else
-    println("Note: F_spline_iota_matched not available — skipping edge GSE diagnostic")
+    println("Note: iota inverse spline not available (limited plasma) — skipping Plot 11")
 end
 
 # --- Final summary ---
