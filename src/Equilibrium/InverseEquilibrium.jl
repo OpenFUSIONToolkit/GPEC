@@ -62,8 +62,6 @@ function equilibrium_solver(input::InverseRunInput)
     psihigh = config.psihigh
     newq0 = config.newq0
 
-    me = 3
-
     # c-----------------------------------------------------------------------
     # c     allocate and define local arrays.
     # c-----------------------------------------------------------------------
@@ -109,7 +107,14 @@ function equilibrium_solver(input::InverseRunInput)
         end
     end
 
-    deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
+    # Do NOT overwrite deta[1,:] with a Lagrange extrapolation to r²=0 (the magnetic axis).
+    # The Fortran inverse.f did this because its innermost surface was the axis itself (r²=0).
+    # Here rz_in_xs[1] = psilow > 0, so deta[1,:] is already the correctly computed angle
+    # offset at the innermost actual flux surface. Overwriting it with a polynomial
+    # extrapolated to a different point (the axis) is physically inconsistent and causes
+    # the cubic spline to spike near psilow when the extrapolated value differs from the
+    # true value — particularly harmful for efit_by_inversion where the Contour.jl inner
+    # surfaces are accurate but the Lagrange polynomial amplifies small vertex noise.
 
     # Ensure periodicity: copy first theta column to last
     # (The computation above may have broken periodicity due to subtracting rz_in_ys values)

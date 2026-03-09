@@ -95,12 +95,15 @@ function flux_surface_RZ(pe, psi_vals, theta_range)
     return R_all, Z_all
 end
 
-# Common psi evaluation grids
+# Common psi evaluation grids.
+# Use the same ldp distribution as the equilibrium knots but at 8× oversampling,
+# so that inter-knot ringing is visible in both the overplots and the diff plots.
+# A uniform grid over [psilow, psihigh] is 13× coarser than the finest knot spacing
+# in the deep core and would miss ringing entirely.
 psi_lo = pe_dir.rzphi_xs[1]
 psi_hi = pe_dir.rzphi_xs[end]
-psi_full = collect(range(psi_lo, psi_hi; length=500))
-psi_core = collect(range(psi_lo, min(0.10, 0.5 * psi_hi); length=100))
-psi_edge = collect(range(max(0.85, psi_lo + 0.5 * (psi_hi - psi_lo)), psi_hi; length=200))
+mpsi_eval = 8 * (length(pe_dir.rzphi_xs) - 1)   # 8× oversampling of mpsi
+psi_full = psi_lo .+ (psi_hi - psi_lo) .* sin.(range(0.0, 1.0; length=mpsi_eval+1) .* (π/2)).^2
 
 mask_core = psi_full .< 0.10
 mask_edge = psi_full .> 0.85
