@@ -22,21 +22,46 @@ Setting w = Q - K̄·S (shape N×N) and v = F̄⁻¹·w (Cholesky solve), this s
 
 ## Integration Strategy
 
-The explicit Riccati ODE (`riccati_der!`) is mathematically correct but numerically unstable
-for explicit solvers: the RHS is quadratic in S, so if S grows large (K̄·S >> Q), the
-quadratic term (K̄·S)²/F̄ causes finite-time blowup that the adaptive step-size controller
-cannot prevent (relative error control allows large absolute errors when |S| is large).
+### Why not integrate the Riccati ODE directly?
 
-Instead, the Riccati integration uses `sing_der!` (the standard EL ODE) with periodic
-renormalization. Starting each chunk with U₁ = S_prev, U₂ = I:
+`riccati_der!` evaluates the explicit Riccati RHS `dS/dψ = w†F̄⁻¹w − S·Ḡ·S` correctly,
+but this ODE is **quadratic** in S. Near a rational surface, S grows large, so the quadratic
+term `-SGS` dominates and the RHS grows as |S|². Explicit adaptive solvers (Tsit5) use
+*relative* error control: they accept a step when |Δu|/|u| < reltol. When |S| is large,
+the absolute error |ΔS| can be enormous while the relative error stays within tolerance.
+The solver takes large steps through what is effectively a near-blowup — no amount of
+step-size adaptation saves it because the problem is the error *metric*, not the step size.
+An implicit solver could handle this stiffness, but is deferred.
 
-  After a step Δψ: U₁_new ≈ S + (A·S + B)·Δψ,  U₂_new ≈ I + (C·S + D)·Δψ
-  Renorm: S_new = U₁_new · U₂_new⁻¹ ≈ S + (B + A·S - S·D - S·C·S)·Δψ  ✓
+### Actual implementation: EL ODE + renormalization
 
-This is numerically stable because U₁ and U₂ track each other — their ratio stays bounded
-even as each individually grows large. Renormalization is triggered by
-`renormalize_riccati_inplace!` in the callback when max(|U₁|) or max(|U₂|) exceeds ucrit,
-exactly analogous to Gaussian reduction in the standard ODE.
+Instead we integrate the standard EL ODE (`sing_der!`) in the (U₁, U₂) variables and
+recover S = U₁·U₂⁻¹ by renormalization. This achieves the same Riccati trajectory with
+**no accuracy loss**:
+
+- `sing_der!` evaluates the exact EL RHS — no approximation.
+- Tsit5 integrates (U₁, U₂) to **5th-order accuracy** with the adaptive step-size
+  controller enforcing the configured reltol at every accepted step.
+- Renormalization `S = U₁·U₂⁻¹` is **exact** (a change of variables, not an approximation).
+- The global error is the same as the standard EL path — controlled by the ODE solver
+  reltol, not by the renormalization frequency.
+
+This works because the EL ODE is **linear** in (U₁, U₂): the RHS does not grow with |S|,
+so relative error control is faithful even when S is large. Renormalization triggered by
+`renormalize_riccati_inplace!` in the callback (when max(|U₁|) or max(|U₂|) > ucrit) keeps
+both matrices bounded, preventing overflow and maintaining a well-conditioned state for the
+solver — exactly analogous to Gaussian reduction in the standard ODE.
+
+### Consistency with the Riccati ODE (local analysis)
+
+To verify the method is consistent with the Riccati ODE, consider a single step from (S, I):
+
+  After one step: U₁_new = S + (A·S + B)·Δψ + O(Δψ²),  U₂_new = I + (C·S + D)·Δψ + O(Δψ²)
+  Renorm:         S_new = U₁_new · U₂_new⁻¹ = S + (B + A·S − S·D − S·C·S)·Δψ + O(Δψ²) ✓
+
+The leading term matches the Riccati ODE exactly. This is a local consistency check only —
+it does not imply the integration is first-order. In practice Tsit5 captures all higher-order
+terms through its internal stages, achieving 5th-order global accuracy at the configured reltol.
 
 ## Storage Convention
 
