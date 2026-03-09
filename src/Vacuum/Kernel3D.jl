@@ -433,8 +433,8 @@ function compute_3D_kernel_matrices!(
     @assert observer.nzeta ≥ PATCH_DIM "Must have observer.nzeta ≥ PATCH_DIM, got observer.nzeta=$(observer.nzeta), PATCH_DIM=$PATCH_DIM"
 
     # Allocate thread-local workspaces (one per thread)
-    nthreads = Threads.nthreads()
-    workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:nthreads]
+    max_threadid = Threads.maxthreadid()
+    workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
     Threads.@threads for idx_obs in 1:num_points
