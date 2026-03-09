@@ -113,12 +113,15 @@ function resample_contour_to_theta_grid(
     R_ext = vcat(R_s, R_s[1])
     Z_ext = vcat(Z_s, Z_s[1])
 
-    R_spl = cubic_interp(η_ext, R_ext; bc=CubicFit(), extrap=WrapExtrap())
-    Z_spl = cubic_interp(η_ext, Z_ext; bc=CubicFit(), extrap=WrapExtrap())
+    R_spl = cubic_interp(η_ext, R_ext; bc=CubicFit(), extrap=WrapExtrap(), search=LinearBinary())
+    Z_spl = cubic_interp(η_ext, Z_ext; bc=CubicFit(), extrap=WrapExtrap(), search=LinearBinary())
 
-    # theta_grid is in turns [0, 1]; sample the geometric-angle spline at 2π*θ radians
-    R_out = [R_spl(2π * θ) for θ in theta_grid]
-    Z_out = [Z_spl(2π * θ) for θ in theta_grid]
+    # theta_grid is in turns [0, 1]; sample the geometric-angle spline at 2π*θ radians.
+    # theta_grid is monotonically increasing so a shared LinearBinary hint gives O(1) lookups.
+    hint = Ref(1)
+    R_out = [R_spl(2π * θ; hint=hint) for θ in theta_grid]
+    hint[] = 1
+    Z_out = [Z_spl(2π * θ; hint=hint) for θ in theta_grid]
 
     return R_out, Z_out
 end
@@ -173,7 +176,10 @@ function equilibrium_solver_by_inversion(
     z_fine = range(raw_profile.zmin, raw_profile.zmax; length=nz_fine)
 
     @info "efit_by_inversion: Evaluating ψ on $(nr_fine)×$(nz_fine) fine grid ($(refine)× refinement)"
-    ψ_fine = [raw_profile.psi_in((r, z)) for r in r_fine, z in z_fine]
+    # r_fine and z_fine are monotonic ranges; LinearBinary + a 2D hint gives O(1) searches
+    # after the first point in each row (R-hint stays fixed per row, Z-hint advances forward).
+    hint2d = (Ref(1), Ref(1))
+    ψ_fine = [raw_profile.psi_in((r, z); hint=hint2d) for r in r_fine, z in z_fine]
 
     # Theta grid for InverseRunInput: fractional turns in [0, 1].
     # InverseEquilibrium uses theta ∈ [0,1] and formula cos(2π*(theta + deta)),
