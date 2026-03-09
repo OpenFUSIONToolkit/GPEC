@@ -110,7 +110,6 @@ function equilibrium_solver(input::InverseRunInput)
     end
 
     deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
-    deta[1, :] = inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
 
     # Ensure periodicity: copy first theta column to last
     # (The computation above may have broken periodicity due to subtracting rz_in_ys values)
@@ -166,10 +165,12 @@ function equilibrium_solver(input::InverseRunInput)
     spl_xs = zeros(Float64, mtheta+1)
     spl_fs = zeros(Float64, mtheta+1, 5)
 
+    f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
+    sq_in_hint = Ref(1)
     hint2d = (Ref(1), Ref(1))
     for ipsi in 0:mpsi
         psifac = rzphi_xs[ipsi+1]
-        f_sq_in = sq_in(psifac)
+        sq_in(f_sq_in_buf, psifac; hint=sq_in_hint)
         spl_xs .= rzphi_ys
         for itheta in 0:mtheta
             theta = rzphi_ys[itheta+1]
@@ -182,8 +183,6 @@ function equilibrium_solver(input::InverseRunInput)
             fy_rsq = rz_rsq(query_point; deriv=Val((0, 1)), hint=hint2d)
             fy_deta = rz_deta(query_point; deriv=Val((0, 1)), hint=hint2d)
 
-            f_sq_in = sq_in(psifac)
-
             if f_rsq < 0
                 error("Invalid extrapolation near axis, rerun with larger value of psilow")
             end
@@ -194,7 +193,7 @@ function equilibrium_solver(input::InverseRunInput)
             w11 = (1 + fy_deta) * twopi ^ 2 * rfac / jacfac
             w12 = -fy_rsq * pi / (rfac * jacfac)
             bp = psio * sqrt(w11*w11 + w12*w12) / r
-            bt = f_sq_in[1] / r
+            bt = f_sq_in_buf[1] / r
             b = sqrt(bp*bp + bt*bt)
 
             spl_fs[itheta+1, 1] = f_rsq
@@ -215,40 +214,33 @@ function equilibrium_solver(input::InverseRunInput)
         spl = cubic_interp(spl_xs, spl_fs; bc=PeriodicBC())
         spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
-        @views spl_xs = spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
+        spl_xs .= spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
         @views spl_fs[:, 2] .+= rzphi_ys .- spl_xs
-        @views spl_fs[:, 4] = (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) * spl_fsi[mtheta+1, 3] * twopi * pi
-        @views spl_fs[:, 3] = f_sq_in[1] * pi / psio * (spl_fsi[:, 4] - spl_fsi[mtheta+1, 4] .* spl_xs)
+        @views spl_fs[:, 4] .= (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) .* (spl_fsi[mtheta+1, 3] * twopi * pi)
+        @views spl_fs[:, 3] .= (f_sq_in_buf[1] * pi / psio) .* (spl_fsi[:, 4] .- spl_fsi[mtheta+1, 4] .* spl_xs)
 
-        for itheta in 0:mtheta
-            theta = rzphi_ys[itheta+1]
-            fs = spl(theta)
-            @views rzphi_fs[ipsi+1, itheta+1, :] .= fs[1:4]
-        end
+        rzphi_fs[ipsi+1, :, :] .= spl.y[:, 1:4]
 
-        sq_fs[ipsi+1, 1] = f_sq_in[1] * twopi
-        sq_fs[ipsi+1, 2] = f_sq_in[2]
+        sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
+        sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
         sq_fs[ipsi+1, 4] = spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
     end
 
     sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
 
-    # Evaluate sq and its derivative at all grid points
-    f_sq = zeros(Float64, mpsi+1, 4)
-    f1_sq = zeros(Float64, mpsi+1, 4)
+    # Access sq nodal values directly (evaluating at own knots returns stored data)
+    f_sq = sq.y
     sq_deriv = deriv1(sq)
-    for i in 1:(mpsi+1)
-        f_sq[i, :] = sq(sq_xs[i])
-        f1_sq[i, :] = sq_deriv(sq_xs[i])
-    end
-    q0 = f_sq[1, 4] - f1_sq[1, 4] * sq_xs[1]
+    f1_sq_lo = sq_deriv(sq_xs[1])
+    f1_sq_hi = sq_deriv(sq_xs[end])
+    q0 = f_sq[1, 4] - f1_sq_lo[4] * sq_xs[1]
     if newq0 == -1
         newq0 = -q0
     end
 
     if newq0 != 0
-        f0 = f_sq[1, 2] - f1_sq[1, 2] * sq_xs[1]
+        f0 = f_sq[1, 2] - f1_sq_lo[2] * sq_xs[1]
         f0fac = f0^2 * ((newq0 / q0)^2 - 1)
         q0 = newq0
         for ipsi in 0:mpsi
@@ -258,8 +250,11 @@ function equilibrium_solver(input::InverseRunInput)
             rzphi_fs[ipsi+1, :, 3] *= ffac
         end
         sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
+        f_sq = sq.y
+        sq_deriv = deriv1(sq)
+        f1_sq_hi = sq_deriv(sq_xs[end])
     end
-    qa = f_sq[mpsi+1, 4] + f1_sq[mpsi+1, 4] * (1 - sq_xs[mpsi+1])
+    qa = f_sq[mpsi+1, 4] + f1_sq_hi[4] * (1 - sq_xs[mpsi+1])
     # Create 2D interpolants for geometric quantities (rzphi)
     rzphi_grid2d = (rzphi_xs, theta_range)
 
@@ -270,8 +265,7 @@ function equilibrium_solver(input::InverseRunInput)
 
     v = zeros(Float64, 3, 3)
     for ipsi in 0:mpsi
-        f_sq = sq(sq_xs[ipsi+1])
-        q = f_sq[4]
+        f_sq_vec = @view sq.y[ipsi+1, :]
         for itheta in 0:mtheta
             # Evaluate rzphi interpolants at grid points using nodal_derivs
             f_rzphi = (
@@ -310,9 +304,9 @@ function equilibrium_solver(input::InverseRunInput)
             w12 = -fy_rzphi[1] * pi * r / (rfac * jacfac)
 
             delpsi = sqrt(w11^2 + w12^2)
-            eqfun_fs[ipsi+1, itheta+1, 1] = sqrt(((twopi * psio * delpsi)^2 + f_sq[1]^2) / (twopi * r)^2)
-            eqfun_fs[ipsi+1, itheta+1, 2] = (sum(v[1, :] .* v[2, :]) + f_sq[4] * v[3, 3] * v[1, 3]) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
-            eqfun_fs[ipsi+1, itheta+1, 3] = (v[2, 3] * v[3, 3] + f_sq[4] * v[3, 3]^2) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
+            eqfun_fs[ipsi+1, itheta+1, 1] = sqrt(((twopi * psio * delpsi)^2 + f_sq_vec[1]^2) / (twopi * r)^2)
+            eqfun_fs[ipsi+1, itheta+1, 2] = (sum(v[1, :] .* v[2, :]) + f_sq_vec[4] * v[3, 3] * v[1, 3]) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
+            eqfun_fs[ipsi+1, itheta+1, 3] = (v[2, 3] * v[3, 3] + f_sq_vec[4] * v[3, 3]^2) / (jacfac * eqfun_fs[ipsi+1, itheta+1, 1]^2)
         end
     end
     # Create 2D interpolants for physics quantities (eqfun)
