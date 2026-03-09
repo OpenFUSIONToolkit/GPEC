@@ -61,13 +61,17 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    mpsi = length(equil.rzphi_xs)
+    # Use the core psi grid (profiles.xs) rather than the full rzphi_xs, which may include
+    # far-edge nodes added by the X-point asymptotic geometry extension for diverted plasmas.
+    # The FGK matrices only need to cover the core equilibrium region.
+    profiles = equil.profiles
+    mpsi = length(profiles.xs)
     mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
     # The equil.rzphi_ys is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= equil.rzphi_xs
+    metric.xs .= profiles.xs
     metric.ys .= equil.rzphi_ys .* 2π
 
     # Temporary array for contravariant basis vectors
