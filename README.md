@@ -4,7 +4,7 @@ This is a work in progress juliafication of the Generalized Perturbed Equilibriu
 
 ## Documentation Pages
 
-The WIP documentation can be found [here](https://openfusiontoolkit.github.io/JPEC/dev/).
+The WIP documentation can be found [here](https://openfusiontoolkit.github.io/GPEC/dev/).
 
 
 ## Developer Notes

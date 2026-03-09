@@ -1,9 +1,17 @@
 using Test
 using Pkg
+using GeneralizedPerturbedEquilibrium.Vacuum
+using GeneralizedPerturbedEquilibrium.Equilibrium
+using GeneralizedPerturbedEquilibrium.ForceFreeStates
+using GeneralizedPerturbedEquilibrium.ForcingTerms
+using GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Utilities
+using FastInterpolations
+using LinearAlgebra
 
 # Activate the project environment one level up
 Pkg.activate(joinpath(@__DIR__, ".."))
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
 # Check if specific test files are requested via ARGS
 if !isempty(ARGS)
@@ -12,10 +20,9 @@ if !isempty(ARGS)
         include(testfile)
     end
 else
-    include("./runtests_fastinterp.jl")
-    include("./runtests_vacuum_julia.jl")
+    include("./runtests_utilities.jl")
+    include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
-    include("./runtests_solovev.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_riccati.jl")
     include("./runtests_parallel_integration.jl")

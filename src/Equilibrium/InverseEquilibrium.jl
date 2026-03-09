@@ -42,7 +42,7 @@ end
 
 
 function equilibrium_solver(input::InverseRunInput)
-    println("--- Starting Inverse Equilibrium Processing ---")
+    @info "Starting Inverse Equilibrium Processing"
     # Extract input parameters
 
     config = input.config

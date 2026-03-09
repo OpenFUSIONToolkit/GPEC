@@ -1,54 +1,3 @@
-"""
-    distribute_to_equal_arc_grid(xin, zin)
-
-Given a set of points (xin, zin) that define a closed curve in 2D, redistribute these points to be equally spaced
-in terms of arc length along the curve. This is useful for ensuring that points on a wall or plasma surface are
-uniformly distributed in space rather than in the parameter θ. This performs the same function as eqarcw in the
-Fortran code. We now use FastInterpolations instead of a manual Lagrange interpolation.
-
-# Arguments
-
-  - `xin::Vector{Float64}`: x-coordinates of the original points defining the curve (endpoint not included)
-  - `zin::Vector{Float64}`: z-coordinates of the original points defining the curve (endpoint not included)
-
-# Returns
-
-  - `xout::Vector{Float64}`: x-coordinates of the redistributed points, equally spaced in arc length
-  - `zout::Vector{Float64}`: z-coordinates of the redistributed points, equally spaced in arc length
-"""
-function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64})
-
-    mtheta = length(xin)
-    dθ = 2π / mtheta
-    θ_grid = range(; start=0, length=mtheta, step=dθ)
-
-    # Build periodic splines for derivatives on the closed loop
-    spline_x = cubic_interp(θ_grid, xin; bc=PeriodicBC(; endpoint=:exclusive))
-    spline_z = cubic_interp(θ_grid, zin; bc=PeriodicBC(; endpoint=:exclusive))
-
-    # Calculate cumulative arc length using numerical integration
-    arc_length = zeros(mtheta + 1)
-    for i in 1:mtheta
-        # Use a mid-point derivative approximation
-        theta_mid = θ_grid[i] + dθ / 2.0
-        d_xin = spline_x(theta_mid; deriv=1)
-        d_zin = spline_z(theta_mid; deriv=1)
-        # Accumulate length: ds = (ds/dt) * dt
-        ds_dθ = sqrt(d_xin^2 + d_zin^2)
-        arc_length[i+1] = arc_length[i] + ds_dθ * dθ
-    end
-
-    # Re-parameterize based on equal arc-length segments by interpolate the original (x,z) data at the equal arc length points
-    arc_length_targets = range(; start=0, length=mtheta, step=arc_length[end]/mtheta)
-    # arc_length is an uneven grid so we have to specify the period explicitly
-    periodic_bc = PeriodicBC(; endpoint=:exclusive, period=arc_length[end])
-
-    # Use One-Shot API
-    xout = cubic_interp(arc_length[1:(end-1)], xin, arc_length_targets; bc=periodic_bc)
-    zout = cubic_interp(arc_length[1:(end-1)], zin, arc_length_targets; bc=periodic_bc)
-    return xout, zout
-end
-
 # Helper functions for compute_vacuum_field
 
 """
@@ -245,6 +194,10 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
     n = inputs.n
     dtheta = 2pi / mtheta
 
+    # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
+    # This is constant for all source points within this loop.
+    gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
+
     # Pre-calculate Green's function for the observation point
     g_real = zeros(mtheta, mpert)
     g_imag = zeros(mtheta, mpert)
@@ -258,7 +211,7 @@ function _calculate_potential_chi(R_obs::Float64, Z_obs::Float64,
         # Call the low-level Green's function calculator.
         # The `green` function returns the Green's function value itself (G_n) and
         # the coupling terms for mode n and mode 0.
-        G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n)
+        G_n, coupling_n, coupling_0 = green(R_obs, Z_obs, R_src, Z_src, plasma_surf.dx_dtheta[i_theta], plasma_surf.dz_dtheta[i_theta], n; gamma_prefactor)
 
         # The term `aval` in the original Fortran CHI routine corresponds to the coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ,
         # which is directly returned as `coupling_n` by the Julia `green` function.

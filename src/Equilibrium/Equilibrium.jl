@@ -43,8 +43,6 @@ function setup_equilibrium(path::String="equil.toml")
 end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
-    @printf "Equilibrium file: %s\n" eq_config.eq_filename
-
     eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
     if eq_type == "efit"
@@ -409,7 +407,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     diagnose_maxima = equil.params.diagnose_maxima
 
     if verbose
-        println("Diagnosing Grad-Shafranov solution...")
+        @info "Diagnosing Grad-Shafranov solution"
     end
 
     # Compute R, Z coordinates using nodal_derivs access
@@ -487,8 +485,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         emax = maximum(abs.(error))
         lmax = maximum(errlog)
         jmax = ind2sub(size(errlog), argmax(errlog))
-        println(" fxmax = $fxmax, fymax = $fymax, smax = $smax")
-        println(" emax = $emax, lmax = $lmax, maxloc = ", jmax .- 1)
+        @info "GS residuals: fxmax = $(@sprintf("%.3e", fxmax)), fymax = $(@sprintf("%.3e", fymax)), smax = $(@sprintf("%.3e", smax)), emax = $(@sprintf("%.3e", emax)), lmax = $(@sprintf("%.3f", lmax)), maxloc = $(jmax .- 1)"
     end
 
     # Integrated error criterion
@@ -509,7 +506,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
 
     if diagnose_src
         if verbose
-            println("Writing diagnostics to HDF5 files...")
+            @info "Writing diagnostics to HDF5 files"
         end
 
         # Write contour data

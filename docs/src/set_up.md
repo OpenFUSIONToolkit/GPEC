@@ -1,6 +1,6 @@
-# Setting up JPEC
+# Setting up GPEC
 
-- [Setting up JPEC](#setting-up-jpec)
+- [Setting up GPEC](#setting-up-gpec)
   - [On Windows via WSL (Ubuntu)](#on-windows-via-wsl-ubuntu)
   - [On macOS](#on-macos)
   - [Pre-commit Hooks (Optional Developer Tools)](#pre-commit-hooks-optional-developer-tools)
@@ -82,15 +82,15 @@
         jupyter --version
         ```
 
-5. Clone JPEC into your WSL home folder.
+5. Clone GPEC into your WSL home folder.
 Clone it from GitHub directly to your virtual machine.
 
     ```shell
-    git clone https://github.com/OpenFUSIONToolkit/JPEC.git
-    cd JPEC
+    git clone https://github.com/OpenFUSIONToolkit/GeneralizedPerturbedEquilibrium.git
+    cd GeneralizedPerturbedEquilibrium
     ```
 
-6. Install the Julia packages for JPEC
+6. Install the Julia packages for GPEC
     1. Launch Julia:
         ```shell
         julia
@@ -117,7 +117,7 @@ Clone it from GitHub directly to your virtual machine.
     2. (Optionally) Integrate WSL with VS Code
         1. Install **Remote - WSL** extension in VS Code.
         2. Open VS Code → Connect To → Connect to WSL.
-        3. Click Open Folder and then navigate to the JPEC folder on your VM. Open your JPEC folder from WSL: ~/JPEC.
+        3. Click Open Folder and then navigate to the GPEC folder on your VM. Open your GPEC folder from WSL: ~/GeneralizedPerturbedEquilibrium.
 
         If this is not working, you can launch vscode from the WSL shell you have using the command `code .`
 
@@ -129,39 +129,39 @@ Clone it from GitHub directly to your virtual machine.
             ```
 
         6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the "Select Kernel" button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL. All dependencies are accessible.
-    3.  Run JPEC
+    3.  Run GPEC
         1. Launch Julia and run your scripts as usual:
             ```shell
-            include("path/to/jpec_script.jl")
+            include("path/to/script.jl")
             ```
 
 ## On macOS
 
 (To be completed)
 
-## Running JPEC
+## Running GPEC
 
-Once JPEC is installed and built, you can run it in two ways:
+Once GPEC is installed and built, you can run it in two ways:
 
 ### As a Command-Line Script
 
-JPEC includes an executable script (`jpec`) in the project root directory. To run JPEC on a directory containing a `jpec.toml` configuration file:
+GPEC includes an executable script (`gpec`) in the project root directory. To run GPEC on a directory containing a `gpec.toml` configuration file:
 
 ```bash
-./jpec path/to/directory
+./gpec path/to/directory
 ```
 
 **Example:**
 ```bash
-# Run JPEC on one of the included examples
-./jpec examples/DIIID-like_ideal_example
+# Run GPEC on one of the included examples
+./gpec examples/DIIID-like_ideal_example
 
-# Run in the current directory (must contain jpec.toml)
-./jpec
+# Run in the current directory (must contain gpec.toml)
+./gpec
 ```
 
 The script will:
-1. Read configuration from `jpec.toml` in the specified directory
+1. Read configuration from `gpec.toml` in the specified directory
 2. Load or generate the equilibrium based on the `[Equilibrium]` section
 3. Compute force-free states (stability analysis) based on the `[ForceFreeStates]` section
 4. If a `[PerturbedEquilibrium]` section exists, compute the plasma response to external perturbations
@@ -173,21 +173,21 @@ The script will:
 
 ### As a Julia Library
 
-You can also use JPEC programmatically in your own Julia scripts or notebooks:
+You can also use GPEC programmatically in your own Julia scripts or notebooks:
 
 ```julia
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
-# Run the full JPEC analysis pipeline
-JPEC.main(["path/to/directory"])
+# Run the full GPEC analysis pipeline
+GeneralizedPerturbedEquilibrium.main(["path/to/directory"])
 
 # Or access individual modules
-using JPEC.Equilibrium
-using JPEC.Vacuum
-using JPEC.ForceFreeStates
+using GeneralizedPerturbedEquilibrium.Equilibrium
+using GeneralizedPerturbedEquilibrium.Vacuum
+using GeneralizedPerturbedEquilibrium.ForceFreeStates
 
 # Set up equilibrium only
-equil = Equilibrium.setup_equilibrium("path/to/jpec.toml")
+equil = Equilibrium.setup_equilibrium("path/to/gpec.toml")
 
 # Access equilibrium data
 println("q at axis: ", equil.params.q0)
@@ -196,7 +196,7 @@ println("Beta-N: ", equil.params.betan)
 
 ### Configuration Files
 
-JPEC uses TOML configuration files (`jpec.toml`) with the following main sections:
+GPEC uses TOML configuration files (`gpec.toml`) with the following main sections:
 
 - **`[Equilibrium]`**: Equilibrium solver settings (input file, grid resolution, coordinate system, etc.)
 - **`[Wall]`**: Wall geometry for vacuum calculations (shape, size, position)
@@ -230,7 +230,7 @@ pip install pre-commit
 julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
 
 # Install the git hooks in your local repository
-cd /path/to/JPEC
+cd /path/to/GPEC
 pre-commit install
 ```
 
@@ -265,7 +265,7 @@ For additional protection beyond pre-commit, you can install nbstripout as a git
 pip install nbstripout
 
 # Install filter for this repository
-cd /path/to/JPEC
+cd /path/to/GPEC
 nbstripout --install
 ```
 

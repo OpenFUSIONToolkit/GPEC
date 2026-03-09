@@ -55,14 +55,14 @@ them into a `DirectRunInput` object.
   - A `DirectRunInput` object ready for the direct solver.
 """
 function read_efit(config::EquilibriumConfig)
-    println("--> Processing EFIT g-file: $(config.eq_filename)")
+    @info "Processing EFIT g-file: $(config.eq_filename)"
     lines = readlines(config.eq_filename)
 
     # --- Parse Header ---
     header1_parts = split(lines[1])
     nw = parse(Int, header1_parts[end-1])
     nh = parse(Int, header1_parts[end])
-    println("--> Parsed from header: nw=$nw, nh=$nh")
+    @info "Parsed from header: nw=$nw, nh=$nh"
 
     header_vals = _read_1d_gfile_format(lines[2:5], 20)
     rdim, zdim, rcentr, rleft, zmid = header_vals[1:5]
@@ -130,7 +130,7 @@ Parses a binary CHEASE file, creates initial 1D and 2D splines with proper
 normalization (R0, B0 scaling), and bundles them into a `InverseRunInput` object.
 """
 function read_chease_binary(config::EquilibriumConfig)
-    println("--> Reading CHEASE file (Binary): $(config.eq_filename)")
+    @info "Reading CHEASE file (Binary): $(config.eq_filename)"
 
     R0EXP = config.r0exp
     B0EXP = config.b0exp
@@ -215,7 +215,7 @@ function read_chease_binary(config::EquilibriumConfig)
         rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
             bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
-        println("--> Finished reading CHEASE equilibrium (Binary).")
+        @info "Finished reading CHEASE equilibrium (Binary)"
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
     end
 end
@@ -236,7 +236,7 @@ them into a `InverseRunInput` object.
   - A `InverseRunInput` object ready for the inverse solver.
 """
 function read_chease_ascii(config::EquilibriumConfig)
-    println("--> Reading CHEASE file: $(config.eq_filename)")
+    @info "Reading CHEASE file (ASCII): $(config.eq_filename)"
     lines = readlines(config.eq_filename)
     R0EXP = config.r0exp
     B0EXP = config.b0exp
@@ -320,7 +320,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     load_matrix!(zzcp)
     load_matrix!(zjacm)
     load_matrix!(zjac)
-    println("--> Parsed from header:  ntnova = $ntnova, npsi1 = $npsi1, nsym = $nsym")
+    @info "Parsed from header: ntnova = $ntnova, npsi1 = $npsi1, nsym = $nsym"
 
     # --- Apply Normalization ---
     # Scale geometry
@@ -378,7 +378,6 @@ function read_chease_ascii(config::EquilibriumConfig)
         bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
         bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    println("--> Finished reading CHEASE equilibrium.")
-    println("    Magnetic axis at (ro=$ro, zo=$zo), psio=$psio")
+    @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
     return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
 end

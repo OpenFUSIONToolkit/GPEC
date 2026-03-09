@@ -175,7 +175,7 @@ function direct_position!(raw_profile::DirectRunInput)
         r += dr
         z += dz
         if abs(dr) <= 1e-12 * abs(r) && abs(dz) <= 1e-12 * abs(r)
-            @printf("   Magnetic axis found at R = %.5f, Z = %.5f\n", r, z)
+            @info "Magnetic axis found at R = $(@sprintf("%.3f", r)), Z = $(@sprintf("%.3f", z))"
             break
         end
     end
@@ -205,7 +205,7 @@ function direct_position!(raw_profile::DirectRunInput)
             r -> (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi),
             (start_r, end_r), Roots.Brent()
         )
-        println("   $label separatrix found at R = $(r_sol).")
+        @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
         return r_sol
     end
 
@@ -490,7 +490,7 @@ robustness.
         equil_params.newq0 = -q0
     end
     if equil_params.newq0 != 0.0
-        println("Revising q-profile for newq0 = $(equil_params.newq0)...")
+        @info "Revising q-profile for newq0 = $(@sprintf("%.3f", equil_params.newq0))"
         f0 = profiles.F_spline.y[1] - profiles.F_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
         f0fac = f0^2 * ((equil_params.newq0 / q0)^2 - 1.0)
         for i in 1:(mpsi+1)

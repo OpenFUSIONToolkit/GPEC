@@ -199,7 +199,7 @@ end
 """
     ForceFreeStatesControl
 
-A mutable struct containing control parameters for stability analysis, set by the user in jpec.toml.
+A mutable struct containing control parameters for stability analysis, set by the user in gpec.toml.
 
 ## Fields
 
@@ -211,6 +211,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `mer_flag::Bool` - Enable Mercier stability criterion
   - `fft_flag::Bool` - Enable Fourier transform analysis
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
@@ -266,6 +267,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     mer_flag::Bool = false
     fft_flag::Bool = false
     mthvac::Int = 480
+    nzvac::Int = 1
     sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
@@ -305,7 +307,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
-    HDF5_filename::String = "jpec.h5"
+    HDF5_filename::String = "gpec.h5"
     force_wv_symmetry::Bool = true
     save_interval::Int = 10
     force_termination::Bool = false
@@ -313,7 +315,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     use_parallel::Bool = false
 end
 
-@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}
+@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
     mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
@@ -368,23 +370,24 @@ Populated in `Free.jl`.
 
 ## Fields
 
-  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
-  - `mpert::Int` - Number of poloidal modes
+  - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
+  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
   - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
   - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
   - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
-  - `grri::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-  - `grre::Array{Float64, 2}` - Green's function radial integrals (2×mthvac × 2×mpert)
-  - `xzpts::Array{Float64, 2}` - Coordinate points [R_plasma, Z_plasma, R_wall, Z_wall] (mthvac × 4)
+  - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
+  - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
+  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points [x, y, z] (mthvac * nzvac × 3)
+  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points [x, y, z] (mthvac * nzvac × 3)
 """
 @kwdef mutable struct VacuumData
-    mthvac::Int
-    mpert::Int
+    numpoints::Int
     numpert_total::Int
+    mthvac::Int # this is only needed to not break GPEC functionality currently
 
     wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wt0::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
@@ -392,15 +395,13 @@ Populated in `Free.jl`.
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-
-    # VACUUM can't handle 3D yet, so these are temporary mpert arrays
-    # TODO: Matt separated grri into a few arrays for IPEC, will need to do that later
-    grri::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
-    grre::Array{Float64,2} = Array{Float64}(undef, 2 * mthvac, 2 * mpert)
-    xzpts::Array{Float64,2} = Array{Float64}(undef, mthvac, 4)
+    grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
+    grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
+    plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
+    wall_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
 end
 
-VacuumData(mthvac::Int, mpert::Int, numpert_total::Int) = VacuumData(; mthvac, mpert, numpert_total)
+VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpoints, numpert_total, mthvac)
 
 """
 OdeState
@@ -459,6 +460,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
+    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
