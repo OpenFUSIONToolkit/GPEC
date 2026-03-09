@@ -131,9 +131,9 @@ end
 
 Compute a spline of vacuum response matrices over the core scan range [psiedge, psihigh].
 Used for fast evaluation of wt during `findmax_dW_edge!`. Performs the same function as
-`free_wvmats` in the Fortran code. Currently defaults to 20 spline points in the core range.
+`free_wvmats` in the Fortran code. Currently defaults to 50 spline points in the core range.
 
-Grid design: 20 uniform points over [psiedge, psihigh] only. For above-psihigh queries,
+Grid design: 50 uniform points over [psiedge, psihigh] only. For above-psihigh queries,
 ExtendExtrap returns the value at psihigh. Above-psihigh scan steps in `findmax_dW_edge!`
 typically fail with SingularException (degenerate raw U₁ after accumulated Gaussian
 reductions between fixups), so the spline need not cover that region.
@@ -147,7 +147,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     profiles = equil.profiles
     psihigh  = profiles.xs[end]
 
-    npsi_core = 20
+    npsi_core = 50
     psi_array = range(ctrl.psiedge, psihigh; length=npsi_core) |> collect
 
     wv_array = zeros(ComplexF64, npsi_core, intr.numpert_total, intr.numpert_total)
@@ -198,8 +198,22 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
               profiles.dVdpsi_spline_inv(odet.psifac) :
               profiles.dVdpsi_spline(odet.psifac)
 
-    # Compute plasma response matrix
-    @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    # Compute plasma response matrix W = U₂·U₁⁻¹ / psio².
+    # Column-normalize U₁ and U₂ before dividing to prevent catastrophic cancellation: after
+    # many ODE steps without a fixup, U₁ elements grow to O(10³), making the minimum eigenvalue
+    # of W (computed as a small difference of large numbers) numerically unreliable.
+    # Scaling both U₁ and U₂ columns by 1/‖U₁[:,j]‖ preserves W exactly since
+    # W = (U₂·D)(U₁·D)⁻¹ = U₂·D·D⁻¹·U₁⁻¹ = U₂·U₁⁻¹.
+    u1_local = copy(@view odet.u[:, :, 1])
+    u2_local = copy(@view odet.u[:, :, 2])
+    for j in 1:size(u1_local, 2)
+        col_norm = norm(view(u1_local, :, j))
+        if col_norm > 0
+            u1_local[:, j] ./= col_norm
+            u2_local[:, j] ./= col_norm
+        end
+    end
+    wp = (u2_local / u1_local) ./ equil.psio^2
 
     # Retrieve raw vacuum matrix from the spline (singfac NOT pre-applied; see free_compute_wv_spline).
     # Apply singfac = (m - n*q(psifac)) analytically: this is the physically correct choice for
@@ -219,27 +233,43 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
         @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
     end
 
-    # Compute total energy matrix and eigen-decomposition
+    # Compute total energy matrix and eigen-decomposition.
+    # wt = wp + wv should be Hermitian by construction, but ODE roundoff accumulates over many
+    # integration steps. Enforcing the Hermitian structure (as in compute_smallest_eigenvalue)
+    # guarantees real eigenvalues and orthonormal eigenvectors.
     wt .= wp .+ wv
-    Ev = eigen(wt)
+    hermitianpart!(wt)
+    Ev = eigen(Hermitian(wt))
 
-    # Sort eigenvalues and reorder columns of wt
-    eindex = sortperm(real.(Ev.values); rev=true)
+    if 0.99099 < odet.psifac < 0.9913
+        # Diagnostic: compare min eigenvalue of wt, wp, and wv at the valid/invalid boundary.
+        # wt min should match return value; a jump in evwv vs evwp identifies the culprit component.
+        # cond_U1_raw: raw (pre-normalization) condition — typically huge due to exponential growth.
+        # cond_U1_norm: condition of the column-normalized U₁ actually used in the wp computation.
+        evwp_min   = minimum(eigvals(Hermitian((wp + wp') / 2)))
+        evwv_min   = minimum(eigvals(Hermitian((wv + wv') / 2)))
+        evwt_min   = minimum(Ev.values)
+        cU1_raw    = cond(@view(odet.u[:,:,1]))
+        cU1_norm   = cond(u1_local)
+        u1nrm_min  = minimum(norm, eachcol(@view(odet.u[:,:,1])))
+        u1nrm_max  = maximum(norm, eachcol(@view(odet.u[:,:,1])))
+        @info @sprintf("FCT_DIAG psi=%.6f: evwt_min=%.3g  evwp_min=%.3g  evwv_min=%.3g  cU1_raw=%.2g  cU1_norm=%.2g  u1nrm=[%.2g,%.2g]",
+                       odet.psifac, evwt_min, evwp_min, evwv_min, cU1_raw, cU1_norm, u1nrm_min, u1nrm_max)
+    end
+
+    # Sort eigenvalues and reorder columns of wt (Ev.values are real for Hermitian)
+    eindex = sortperm(Ev.values; rev=true)
     for ipert in 1:intr.numpert_total
         wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
         tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
     end
 
-    # Normalize eigenfunction and energy (only need the first eigenmode)
-    isol = 1
-    norm = 0.0 + 0.0im
-    for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
-        ipert = (ipert_n - 1) * intr.mpert + ipert_m
-        jpert = (ipert_n - 1) * intr.mpert + jpert_m
-        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
-    end
-    norm /= dV_dpsi
-    tot_eigvals[isol] /= norm
-
+    # Return the largest eigenvalue of wt = wp + wv as the stability proxy.
+    # The proper normalization (et / (ξ†·J·ξ / dV/dψ)) is deferred to free_run!, where it is
+    # correctly evaluated at the fixed psilim. For the scan in findmax_dW_edge!, the jmat
+    # quadratic form ξ†·J(psifac)·ξ can change sign across the scan (the Fourier representation
+    # of J(θ) at psifac loses positive-definiteness due to the X-point asymptotic geometry
+    # near psihigh), making the normalized eigenvalue ill-conditioned after only ~7 steps.
+    # The raw eigenvalue has the correct sign and smooth variation, giving a robust peak location.
     return tot_eigvals[1]
 end

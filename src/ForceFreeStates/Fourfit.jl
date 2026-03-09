@@ -180,6 +180,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    jmat_flat  = zeros(ComplexF64, mpsi, 2 * intr.mband + 1)  # jmat vs psi spline data
     g11 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
     g22 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
     g33 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
@@ -242,6 +243,9 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             jmat[mid+k] = conj(jmat[mid-k])
             jmat1[mid+k] = conj(jmat1[mid-k])
         end
+
+        # Save jmat at this psi for the jmat_spline
+        jmat_flat[ipsi, :] .= jmat
 
         # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
         for n in intr.nlow:intr.nhigh
@@ -329,11 +333,12 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     ffit.fmats_lower = cubic_interp(metric.xs, fmats_lower_flat; ffit.itp_opts...)
     ffit.gmats = cubic_interp(metric.xs, gmats_flat; ffit.itp_opts...)
     ffit.kmats = cubic_interp(metric.xs, kmats_flat; ffit.itp_opts...)
+    ffit.jmat_spline = cubic_interp(metric.xs, jmat_flat; ffit.itp_opts...)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
 
-    # This is used in free_run
+    # jmat at the final psi: used in free_run! where psilim is fixed
     ffit.jmat = jmat
 
     return ffit

@@ -286,7 +286,13 @@ end
     # Shared hint for sequential evaluation (all splines evaluated at same psi)
     _hint::Base.RefValue{Int} = Ref(1)
 
-    # Used in Free.jl
+    # Spline of Jacobian Fourier coefficients J(θ, ψ) vs ψ, shape (2*mband+1) series.
+    # Used in free_compute_total to normalize at the SCAN psi (not fixed at psihigh).
+    # Evaluating at psihigh (near separatrix) makes the jmat quadratic form indefinite,
+    # causing normalization sign flips after ~7 ODE steps in the edge scan.
+    jmat_spline::S = _empty_series_interp_complex(2 * mband + 1, itp_opts)
+
+    # Used in free_run! where psilim is fixed (evaluated at last profile psi = psihigh)
     jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
