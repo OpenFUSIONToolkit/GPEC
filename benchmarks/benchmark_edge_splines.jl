@@ -280,11 +280,12 @@ vline!(p6, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, c
 savefig(p6, joinpath(output_dir, "edge_spline_rational_surfaces.png"))
 println("Saved: edge_spline_rational_surfaces.png")
 
-# --- Plot 7: et[1] vs q — edge stability diagnostic (from jpec.h5) ---
+# --- Plot 7: et[1] vs q — full edge stability scan ---
 # x-axis is q (safety factor), converted from psi via the iota inverse spline.
-# Only the CORE scan region [psiedge, psihigh] is plotted: above psihigh, ExtendExtrap
-# pins the wv matrix to the psihigh plasma boundary geometry, making the et values
-# physically unreliable there. A second panel shows the full scan for completeness.
+# Core region (psi ≤ psihigh): vacuum response correctly interpolated → reliable.
+# Above psihigh: wv is frozen at psihigh (ExtendExtrap); resonant spikes appear near
+# each rational surface where singfac = m − n·q ≈ 0. Points with |et| > threshold
+# are filtered out, showing the inter-resonance envelope.
 h5file = joinpath(output_dir, "jpec.h5")
 if isfile(h5file)
     h5open(h5file, "r") do f
@@ -304,41 +305,54 @@ if isfile(h5file)
             end
 
             q_at_psihigh = profiles.q_spline_direct(psihigh)
+            q_max_scan   = maximum(q_es)
 
             # Split into core (physically reliable) and above-psihigh (extrapolated wv)
             core_mask  = psi_es .<= psihigh
             above_mask = psi_es .>  psihigh
 
-            et_peak_idx  = argmax(et_real)
-            q_peak       = q_es[et_peak_idx]
+            # Filter above-psihigh: skip resonant spikes where |et| blows up near
+            # rational surfaces (singfac → 0). Subsample for rendering performance.
+            et_display_lim = 10.0
+            valid_above = findall(above_mask .& (abs.(et_real) .<= et_display_lim))
+            stride = max(1, length(valid_above) ÷ 2000)  # keep ≤ ~2000 points
+            above_ss = valid_above[1:stride:end]
 
-            # --- Plot 7a: core scan only (main stability figure) ---
+            et_peak_idx = argmax(et_real)
+            q_peak      = q_es[et_peak_idx]
+            et_peak     = et_real[et_peak_idx]
+
             p7 = plot(
                 q_es[core_mask], et_real[core_mask];
                 xlabel = "q (safety factor)",
                 ylabel = "Re(et[1])",
-                title  = "Edge stability: Re(et[1]) vs q  [core scan, psiedge→psihigh]",
-                label  = "Re(et[1])  [core scan, wv interpolated]",
-                lw = 2, color = :blue, legend = :bottomleft,
-                xlims = (4.0, q_at_psihigh * 1.02)
+                title  = @sprintf("Edge stability: Re(et[1]) vs q  [ψ = %.3f → %.3f]",
+                                  psi_es[1], psi_es[end]),
+                label  = "Re(et[1])  [ψ ≤ psihigh, reliable]",
+                lw = 2, color = :blue, legend = :topright,
+                xlims  = (4.0, q_max_scan * 1.02),
+                ylims  = (-et_display_lim, max(3.0, et_peak * 1.2)),
+                size   = (900, 500)
             )
-            if any(above_mask)
-                # Show that the scan continues beyond psihigh but is extrapolated
-                plot!(p7, q_es[above_mask], clamp.(et_real[above_mask], -10.0, 10.0);
-                      label = "above psihigh (wv extrapolated — not reliable)",
+            if !isempty(above_ss)
+                plot!(p7, q_es[above_ss], et_real[above_ss];
+                      label = @sprintf("ψ > psihigh (wv frozen; |et| ≤ %.0f shown)", et_display_lim),
                       lw = 1, color = :orange, ls = :dash, alpha = 0.6)
             end
             hline!(p7, [0.0]; label = "stability boundary (et = 0)",
                    ls = :dot, color = :black, lw = 1.5)
-            vline!(p7, [q_at_psihigh]; label = @sprintf("q(psihigh) = %.3f", q_at_psihigh),
+            vline!(p7, [q_at_psihigh]; label = @sprintf("psihigh: q = %.3f", q_at_psihigh),
                    ls = :dash, color = :gray)
-            hline!(p7, [1.707]; label = "develop branch ref: q≈5.2, et=+1.707",
+            hline!(p7, [1.707]; label = "develop branch ref: et = +1.707",
                    ls = :dash, color = :green, lw = 1.5)
-            scatter!(p7, [q_peak], [et_real[et_peak_idx]];
-                     label = @sprintf("peak (q=%.4f, et=%+.3f)", q_peak, et_real[et_peak_idx]),
+            scatter!(p7, [q_peak], [clamp(et_peak, -et_display_lim, et_display_lim)];
+                     label = @sprintf("peak (q = %.3f, et = %+.3f)", q_peak, et_peak),
                      marker = :star5, ms = 10, color = :red)
             savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
             println("Saved: edge_spline_stability.png")
+            println(@sprintf("  Scan: q = %.3f → %.3f  (ψ = %.4f → %.4f)",
+                             q_es[1], q_max_scan, psi_es[1], psi_es[end]))
+            println(@sprintf("  Peak: q = %.3f, et = %+.3f", q_peak, et_peak))
         else
             println("Note: integration/psi_edge_scan not found in jpec.h5 — run JPEC with psiedge < psilim first")
         end
