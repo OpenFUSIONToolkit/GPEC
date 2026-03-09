@@ -164,6 +164,7 @@ function equilibrium_solver(input::InverseRunInput)
     # Preallocate arrays for periodic spline fitting in the loop
     spl_xs = zeros(Float64, mtheta+1)
     spl_fs = zeros(Float64, mtheta+1, 5)
+    spl_post_buf = Vector{Float64}(undef, 5)   # scratch for post-SFL spline evaluation
 
     f_sq_in_buf = Vector{Float64}(undef, size(sq_in.y, 2))
     sq_in_hint = Ref(1)
@@ -219,7 +220,16 @@ function equilibrium_solver(input::InverseRunInput)
         @views spl_fs[:, 4] .= (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) .* (spl_fsi[mtheta+1, 3] * twopi * pi)
         @views spl_fs[:, 3] .= (f_sq_in_buf[1] * pi / psio) .* (spl_fsi[:, 4] .- spl_fsi[mtheta+1, 4] .* spl_xs)
 
-        rzphi_fs[ipsi+1, :, :] .= spl.y[:, 1:4]
+        # Build spline on the post-SFL theta grid (spl_xs) from the modified spl_fs,
+        # then evaluate at the uniform SFL theta grid (rzphi_ys). This correctly
+        # propagates the SFL coordinate transformation into the rzphi splines.
+        # (Using spl.y directly would give pre-transformation values — wrong for eqfun.)
+        spl_post = cubic_interp(spl_xs, spl_fs; bc=PeriodicBC())
+        hint_post = Ref(1)
+        for itheta in 0:mtheta
+            spl_post(spl_post_buf, rzphi_ys[itheta+1]; hint=hint_post)
+            @views rzphi_fs[ipsi+1, itheta+1, :] .= spl_post_buf[1:4]
+        end
 
         sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
@@ -289,7 +299,7 @@ function equilibrium_solver(input::InverseRunInput)
             rfac = sqrt(f_rzphi[1])
             eta = twopi * (itheta / mtheta + f_rzphi[2])
             r = ro + rfac * cos(eta)
-            jacfac = fx_rzphi[4]
+            jacfac = f_rzphi[4]
 
             fill!(v, 0.0)
             v[1, 1] = fx_rzphi[1] / (2 * rfac)
