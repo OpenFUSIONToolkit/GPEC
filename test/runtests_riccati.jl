@@ -1,13 +1,13 @@
 using LinearAlgebra, Random, TOML
 
-const FFS = JPEC.ForceFreeStates
+const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
 # Configure a fresh ForceFreeStatesInternal from an already-built equilibrium.
 # Cheap (sing_lim! + sing_find! + field assignment). Separate from equil/ffit
 # setup because intr is mutated by each integration (sing[s].delta_prime etc.).
 function make_solovev_intr(inputs, ctrl, equil, ex)
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
-    intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     FFS.sing_lim!(intr, ctrl, equil)
     intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
@@ -95,13 +95,13 @@ end
     #   intr_std / odet_std — Standard path (energy comparison only)
 
     ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-    inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
 
     ctrl  = FFS.ForceFreeStatesControl(;
                 (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    equil = JPEC.Equilibrium.setup_equilibrium(
-                JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
+    equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(
+                GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
     metric   = FFS.make_metric(equil; mband=intr_tmp.mband, fft_flag=ctrl.fft_flag)

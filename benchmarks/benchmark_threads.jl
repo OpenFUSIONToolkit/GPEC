@@ -5,33 +5,33 @@
 # Usage (from JPEC_main root):
 #   for t in 1 2 4 8; do julia -t $t --project=. benchmarks/benchmark_threads.jl; done
 
-using JPEC, TOML, Printf, Statistics
+using GeneralizedPerturbedEquilibrium, TOML, Printf, Statistics
 
 function run_ffs(ex; use_parallel, use_riccati=false)
-    inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
     inputs["ForceFreeStates"]["use_parallel"] = use_parallel
     inputs["ForceFreeStates"]["use_riccati"] = use_riccati
     inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-    intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-    ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
+    intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+    ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-    equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
-    intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+    eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+    equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-    JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+    GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
     intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
-    JPEC.ForceFreeStates.sing_find!(intr, equil)
+    GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
     intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     intr.mpert = intr.mhigh - intr.mlow + 1
     intr.mband = intr.mpert - 1
     intr.numpert_total = intr.mpert * intr.npert
-    metric = JPEC.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
-    ffit = JPEC.ForceFreeStates.make_matrix(equil, intr, metric)
-    odet = JPEC.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-    vac = JPEC.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+    metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+    ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+    odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+    vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
     return real(vac.et[1]), intr.numpert_total
 end
 

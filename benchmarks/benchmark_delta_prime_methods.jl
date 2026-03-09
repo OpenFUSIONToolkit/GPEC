@@ -15,21 +15,21 @@
 #   julia --project=. benchmarks/benchmark_delta_prime_methods.jl
 
 using LinearAlgebra, Printf, TOML
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
-const FFS = JPEC.ForceFreeStates
+const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 
 function setup_and_run_solovev()
     ex = joinpath(@__DIR__, "..", "test", "test_data", "regression_solovev_ideal_example")
-    inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+    inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
     inputs["ForceFreeStates"]["verbose"] = false
     inputs["ForceFreeStates"]["use_riccati"] = true
     intr = FFS.ForceFreeStatesInternal(; dir_path=ex)
     ctrl = FFS.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-    eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-    equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
-    intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+    eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+    equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+    intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     FFS.sing_lim!(intr, ctrl, equil)
     intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
