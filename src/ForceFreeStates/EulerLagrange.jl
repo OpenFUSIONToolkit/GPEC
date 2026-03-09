@@ -341,22 +341,22 @@ Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    integrator = init(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, save_everystep=false, save_end=false)
+    # Use a closure to track steps within this segment for the near_start heuristic.
+    # (length(integrator.sol.t) is unreliable with save_everystep=false)
+    steps_in_segment = Ref(0)
 
-    psi_range = abs(chunk.psi_end - chunk.psi_start)
-    steps_in_segment = 0
+    function segment_callback!(integrator)
+        ctrl, _, _, intr, odet, chunk = integrator.p
 
-    while integrator.t < chunk.psi_end
-        step!(integrator)
         odet.total_steps += 1
-        steps_in_segment += 1
+        steps_in_segment[] += 1
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
-        psi_remaining = abs(chunk.psi_end - integrator.t)
+        psi_range = abs(integrator.sol.prob.tspan[2] - integrator.sol.prob.tspan[1])
+        psi_remaining = abs(integrator.sol.prob.tspan[2] - integrator.t)
         near_end = psi_remaining < 0.05 * psi_range || psi_remaining < 1e-4
-        near_start = steps_in_segment <= 2
+        near_start = steps_in_segment[] <= 2
 
         if near_start || near_end || (odet.step % ctrl.save_interval == 0)
             if odet.step >= size(odet.u_store, 4)
@@ -370,8 +370,12 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
         end
     end
 
-    odet.u .= integrator.u
-    odet.psifac = integrator.t
+    cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
+    prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
+    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+
+    odet.u .= sol.u[end]
+    odet.psifac = sol.t[end]
 end
 
 """
