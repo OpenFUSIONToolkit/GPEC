@@ -253,7 +253,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "jpec.h5"
     force_wv_symmetry::Bool = true
-    save_interval::Int = 10
+    save_interval::Int = 3
     force_termination::Bool = false
 end
 
