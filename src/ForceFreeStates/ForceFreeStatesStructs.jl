@@ -381,8 +381,8 @@ Populated in `Free.jl`.
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
   - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
-  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points [x, y, z] (mthvac * nzvac × 3)
-  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points [x, y, z] (mthvac * nzvac × 3)
+  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
+  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points, shape (mthvac * nzvac) × 3 for (x, y, z)
 """
 @kwdef mutable struct VacuumData
     numpoints::Int

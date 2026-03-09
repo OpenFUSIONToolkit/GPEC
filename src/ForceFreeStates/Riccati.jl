@@ -96,8 +96,10 @@ in order for indices `idx_range`. Returns Φ_end * ... * Φ_start, so that the r
 maps the IC at the start of `idx_range[1]` to the state at the end of `idx_range[end]`.
 
 Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks:
-  block_upper_ic[:,:,1:2] ↔ Φ[:,1:N]   (result from IC=(I,0))
+```
+  block_upper_ic[:,:,1:2] ↔ Φ[:,1:N]     (result from IC=(I,0))
   block_lower_ic[:,:,1:2] ↔ Φ[:,N+1:2N]  (result from IC=(0,I))
+```
 """
 function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range)
     N = size(propagators[1].block_upper_ic, 1)
@@ -119,11 +121,13 @@ Compute the inter-surface tearing stability matrix (2·msing × 2·msing) using 
 STRIDE global BVP formulation [Glasser 2018 Phys. Plasmas 25, 032501, Sec. III.B].
 
 The BVP encodes the full plasma response with unknowns at each surface boundary:
-  x_axis   (N):    free IC parameters at the axis  (U₁ = 0 regular solutions)
-  x_left[j]  (2N): state at left inner-layer boundary of surface j
-  x_right[j] (2N): state at right inner-layer boundary of surface j
-  x_edge   (N):    free IC parameters at the edge  (conducting wall, U₁ = 0)
-Total unknowns: nMat = (2 + 4·msing)·N.
+```
+  x_axis      (N):  free IC parameters at the axis  (U₁ = 0 regular solutions)
+  x_left[j]  (2N):  state at left inner-layer boundary of surface j
+  x_right[j] (2N):  state at right inner-layer boundary of surface j
+  x_edge      (N):  free IC parameters at the edge  (conducting wall, U₁ = 0)
+  Total unknowns: nMat = (2 + 4·msing)·N
+```
 
 The BVP matrix M is assembled from segment propagators, inner-layer continuity
 equations (non-resonant modes are continuous through each surface), and driving
@@ -132,18 +136,18 @@ driving configurations is solved independently by LU back-substitution.
 
 ## Well-conditioned BVP via bidirectional propagators
 
-For each inter-surface segment j (from singR[j-1] to singL[j]), the crossing chunk
+For each inter-surface segment j (from `singR[j-1]` to `singL[j]`), the crossing chunk
 (direction=-1) was integrated backward, giving a well-conditioned backward FM:
+```
   Phi_L[j] = propagators[i_crossings[j]]: maps state at singL[j] → state at psi_m[j]
-
-The forward chunks (direction=+1) between singR[j-1] and psi_m[j] give:
   Phi_R[j] = product of forward propagators: maps state at singR[j-1] → state at psi_m[j]
-
-Continuity at the junction psi_m[j]:
+```
+Continuity at the junction `psi_m[j]`:
+```
   Phi_R[j] · x_right[j-1] = Phi_L[j] · x_left[j]
   → Phi_R[j] · x_right[j-1] - Phi_L[j] · x_left[j] = 0
-
-This replaces the ill-conditioned monolithic Phi_segs[j] = Phi_L[j]⁻¹ · Phi_R[j]
+```
+This replaces the ill-conditioned monolithic `Phi_segs[j] = Phi_L[j]⁻¹ · Phi_R[j]`
 with a split formulation where each factor is well-conditioned.
 
 Element delta_prime_matrix[dRow, 2k-1] = U₂[ipert_k] component at the left side
