@@ -3,7 +3,7 @@
 
     # --- Directory Configuration ---
     # Define the data directory for easy maintenance
-    data_dir = joinpath(@__DIR__, "test_data", "regression_equilibrium_example")
+    data_dir = joinpath(@__DIR__, "test_data", "CHEASE_test_data")
 
     # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
