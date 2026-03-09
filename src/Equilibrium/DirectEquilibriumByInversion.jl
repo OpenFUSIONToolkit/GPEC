@@ -10,6 +10,11 @@ singularity. Robustness near the separatrix comes from Contour.jl naturally hand
 the topological change as ψ → 1: the plasma interior curve remains closed and
 well-traced, while open curves (touching the domain boundary) are discarded.
 
+Near x-points the outermost flux surfaces have sharply curved arms that can exceed
+the resolution of a uniform fine grid. A sinh-stretched Z coordinate concentrates
+grid points near the x-point(s).
+Contour.jl accepts non-uniform coordinate vectors natively and returns physical (R,Z).
+
 Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 
@@ -147,20 +152,108 @@ function resample_contour_to_theta_grid!(
 end
 
 """
-    equilibrium_solver_by_inversion(raw_profile; refine=4, psilow_contour_threshold=5e-3)
+    classify_topology(raw_profile, psio; xpt_threshold=0.05) → Symbol
+
+Classify the plasma topology as `:limited`, `:sn_lower`, `:sn_upper`, or `:double_null`
+by scanning the EFIT nodal ψ values in the lower and upper halves of the domain.
+
+An x-point is detected when the minimum ψ in a half-domain falls below
+`xpt_threshold * psio` (i.e., within 5% of the separatrix by default).
+The EFIT nodal values are read directly from the bicubic spline's stored partials
+array — no additional spline evaluations are needed.
+"""
+function classify_topology(raw_profile::DirectRunInput, psio::Float64;
+                           xpt_threshold::Float64=0.05)
+    ψ_nodes = raw_profile.psi_in.nodal_derivs.partials[1, :, :]   # (nw, nh) array
+    nh = size(ψ_nodes, 2)
+    mid_idx = nh ÷ 2
+    min_ψ_lower = minimum(@view ψ_nodes[:, 1:mid_idx])
+    min_ψ_upper = minimum(@view ψ_nodes[:, (mid_idx+1):end])
+    has_lower = min_ψ_lower / psio < xpt_threshold
+    has_upper = min_ψ_upper / psio < xpt_threshold
+    if has_lower && has_upper
+        return :double_null
+    elseif has_lower
+        return :sn_lower
+    elseif has_upper
+        return :sn_upper
+    else
+        return :limited
+    end
+end
+
+"""
+    make_stretched_z_grid(z_lo, z_hi, nz, topology, β_z) → Vector{Float64}
+
+Build a Z coordinate vector of length `nz` spanning `[z_lo, z_hi]` with sinh-stretching
+that concentrates grid points near the x-point end(s) of the domain.
+
+For `:sn_lower`, points are packed toward `z_lo` (lower x-point). For `:sn_upper`,
+toward `z_hi`. For `:double_null`, both ends are packed symmetrically. For `:limited`
+or `β_z ≤ 0`, a uniform grid is returned.
+
+The transformation is Z(v) = z_lo + Δz·sinh(β·v)/sinh(β) for v ∈ [0,1], which maps
+the uniform parameter `v` to a non-uniform Z that clusters near the small-v end.
+At β=2.0 the first cell is ~3.8× smaller than the last; at β=3.0 it is ~10× smaller.
+Contour.jl accepts non-uniform coordinate vectors natively, so no back-conversion is
+needed — the returned Z values are physical coordinates.
+"""
+function make_stretched_z_grid(z_lo::Float64, z_hi::Float64, nz::Int,
+                               topology::Symbol, β_z::Float64)
+    if topology == :limited || β_z ≤ 0.0
+        return collect(range(z_lo, z_hi; length=nz))
+    end
+    Δz = z_hi - z_lo
+    sinh_β = sinh(β_z)
+    z_grid = Vector{Float64}(undef, nz)
+    if topology == :sn_lower
+        # Pack toward z_lo (lower x-point)
+        @inbounds for k in 1:nz
+            v = (k - 1) / (nz - 1)
+            z_grid[k] = z_lo + Δz * sinh(β_z * v) / sinh_β
+        end
+    elseif topology == :sn_upper
+        # Pack toward z_hi (upper x-point); mirror of sn_lower
+        @inbounds for k in 1:nz
+            v = (k - 1) / (nz - 1)
+            z_grid[k] = z_hi - Δz * sinh(β_z * (1.0 - v)) / sinh_β
+        end
+    else  # :double_null — pack both ends symmetrically
+        z_half = 0.5 * Δz
+        @inbounds for k in 1:nz
+            v = (k - 1) / (nz - 1)
+            if v <= 0.5
+                z_grid[k] = z_lo + z_half * sinh(β_z * 2v) / sinh_β
+            else
+                z_grid[k] = z_hi - z_half * sinh(β_z * 2(1.0 - v)) / sinh_β
+            end
+        end
+    end
+    return z_grid
+end
+
+"""
+    equilibrium_solver_by_inversion(raw_profile; refine=4, β_z=2.0, psilow_contour_threshold=5e-3)
 
 Driver for contour-tracing equilibrium reconstruction.
 
 ## Procedure:
 1. Find magnetic axis via `direct_position!`
-2. Evaluate ψ(R,Z) bicubic spline on a `refine×` fine Cartesian grid (parallelized)
-3. For each target ψ_norm surface: trace the closed level-set curve with Contour.jl,
+2. Detect plasma topology (limited / SN-lower / SN-upper / double-null) from EFIT nodal ψ
+3. Evaluate ψ(R,Z) bicubic spline on a `refine×` fine Cartesian grid (parallelized).
+   The Z grid is sinh-stretched toward x-point(s) to concentrate marching-squares resolution
+   where outermost flux surface arms are most curved.
+4. For each target ψ_norm surface: trace the closed level-set curve with Contour.jl,
    resample to uniform geometric-angle (R, Z) grid (parallelized)
-4. Build an `InverseRunInput` from the R(ψ,θ), Z(ψ,θ) tables
-5. Delegate to `equilibrium_solver(::InverseRunInput)` for SFL coordinate construction
+5. Build an `InverseRunInput` from the R(ψ,θ), Z(ψ,θ) tables
+6. Delegate to `equilibrium_solver(::InverseRunInput)` for SFL coordinate construction
+7. Validate round-trip accuracy; warn if edge error exceeds 2e-3
 
 ## Keyword arguments:
 - `refine`: grid refinement factor relative to EFIT resolution (default 4)
+- `β_z`: sinh-stretching strength for the Z grid toward x-point(s) (default 2.0).
+  `β_z=0` disables stretching (uniform grid). Higher values give stronger compression
+  near x-points at the cost of coarser sampling away from them.
 - `psilow_contour_threshold`: below this psifac, use circular near-axis fallback
   if Contour.jl cannot resolve the surface (only relevant for psilow < ~1e-4)
 
@@ -169,6 +262,7 @@ Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
     refine::Int=4,
+    β_z::Float64=2.0,
     psilow_contour_threshold::Float64=5e-3
 )
     equil_params = raw_profile.config
@@ -187,6 +281,10 @@ function equilibrium_solver_by_inversion(
 
     # Find magnetic axis and separatrix
     ro, zo, _rs1, rs2 = direct_position!(raw_profile)
+
+    # Detect plasma topology for sinh-stretching direction
+    topology = classify_topology(raw_profile, psio)
+    @info "efit_by_inversion: topology = $topology, β_z = $β_z"
 
     # Clip fine grid to separatrix bounding box.
     # The EFIT nodal ψ values are free (already stored in the spline); a single coarse
@@ -215,11 +313,13 @@ function equilibrium_solver_by_inversion(
 
     # Build fine Cartesian grid for Contour.jl, clipped to the plasma bounding box.
     # Maintain the same grid spacing as the full-domain grid (nr/nz scale with clipped extent).
-    # Ranges are passed directly so Contour.jl uses its optimised range path.
+    # The R grid is a uniform range (Contour.jl fast path); the Z grid is sinh-stretched
+    # toward x-point(s) to concentrate marching-squares resolution where outermost surface
+    # arms are most curved. Contour.jl accepts non-uniform Z vectors natively.
     nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
     nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
     r_fine = range(r_lo, r_hi; length=nr_fine)
-    z_fine = range(z_lo, z_hi; length=nz_fine)
+    z_grid = make_stretched_z_grid(z_lo, z_hi, nz_fine, topology, β_z)
 
     @info "efit_by_inversion: Evaluating ψ on $(nr_fine)×$(nz_fine) fine grid ($(refine)× refinement, clipped to plasma bbox)"
 
@@ -227,10 +327,11 @@ function equilibrium_solver_by_inversion(
     # One hint pair per thread (allocated once), reset at the start of each column.
     # Resetting R-hint is required (R starts over at rmin each column); resetting Z-hint
     # lets it settle on the first lookup (Z is fixed per column, so O(log n) once then O(1)).
+    # Z-hint cannot be shared across threads for a non-uniform z_grid — each thread resets it.
     ψ_fine = Matrix{Float64}(undef, nr_fine, nz_fine)
     thread_hints = [(Ref(1), Ref(1)) for _ in 1:Threads.nthreads()]
     Threads.@threads for j in 1:nz_fine
-        z = z_fine[j]
+        z = z_grid[j]
         h = thread_hints[Threads.threadid()]
         h[1][] = 1
         h[2][] = 1
@@ -258,8 +359,8 @@ function equilibrium_solver_by_inversion(
         ψ_target = psio * (1.0 - psifac)
 
         # Trace level set at ψ_target with Contour.jl (marching squares).
-        # r_fine and z_fine are passed as ranges — Contour.jl has an optimised range path.
-        cl = Ctr.contour(r_fine, z_fine, ψ_fine, ψ_target)
+        # r_fine is a range (Contour.jl fast path); z_grid is a non-uniform vector.
+        cl = Ctr.contour(r_fine, z_grid, ψ_fine, ψ_target)
         curve = select_plasma_contour(Ctr.lines(cl), ro, zo)
 
         if curve === nothing
@@ -310,5 +411,30 @@ function equilibrium_solver_by_inversion(
     inv_input = InverseRunInput(raw_profile.config, raw_profile.sq_in,
         rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
 
-    return equilibrium_solver(inv_input)
+    pe = equilibrium_solver(inv_input)
+
+    # Round-trip validation: (ψ,θ) → (R,Z) → ψ_spline − ψ_target.
+    # Checks 4 angles at the outermost surface and at 75% of the radial grid.
+    # A large error indicates that Contour.jl resolution was insufficient near the
+    # x-point and the traced surface positions are inaccurate.
+    max_rt_err = 0.0
+    for ψ_check in (pe.rzphi_xs[end], pe.rzphi_xs[max(1, length(pe.rzphi_xs) * 3 ÷ 4)])
+        for θ_check in (0.0, 0.25, 0.5, 0.75)
+            r2  = pe.rzphi_rsquared((ψ_check, θ_check))
+            off = pe.rzphi_offset((ψ_check, θ_check))
+            rfac = sqrt(max(r2, 0.0))
+            η    = 2π * (θ_check + off)
+            R    = pe.ro + rfac * cos(η)
+            Z    = pe.zo + rfac * sin(η)
+            ψ_rt = 1.0 - raw_profile.psi_in((R, Z)) / psio
+            max_rt_err = max(max_rt_err, abs(ψ_rt - ψ_check))
+        end
+    end
+    if max_rt_err > 2e-3
+        @warn "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) > 2e-3; accuracy near psihigh may be limited. Consider reducing psihigh or increasing β_z."
+    else
+        @info "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err))"
+    end
+
+    return pe
 end

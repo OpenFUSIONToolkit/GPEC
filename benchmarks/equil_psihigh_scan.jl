@@ -61,9 +61,9 @@ function run_ffs_et1(config_path::String, eq_type::String, psihigh::Float64)::Fl
         open(joinpath(tmpdir, "gpec.toml"), "w") do io
             TOML.print(io, raw)
         end
-        # Symlink all non-TOML files from the example directory
+        # Symlink all non-TOML files from the example directory.
         for f in readdir(example_dir)
-            src = joinpath(example_dir, f)
+            src = abspath(joinpath(example_dir, f))
             isfile(src) && !endswith(f, ".toml") && symlink(src, joinpath(tmpdir, f))
         end
         try
