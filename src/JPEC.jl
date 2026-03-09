@@ -55,7 +55,7 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
-function main(args::Vector{String}=String[])
+function main(args::Vector{String}=String[], dd=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
@@ -81,12 +81,13 @@ function main(args::Vector{String}=String[])
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
     # Set up equilibrium from jpec.toml or fallback to equil.toml if it exists
+    # If dd is provided, pass it to setup_equilibrium for IMAS input
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        equil = Equilibrium.setup_equilibrium(eq_config)
+        equil = Equilibrium.setup_equilibrium(eq_config, dd)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
         @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in jpec.toml"
-        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
+        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"), dd)
     else
         error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
     end
