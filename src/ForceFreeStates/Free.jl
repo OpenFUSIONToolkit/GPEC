@@ -129,61 +129,47 @@ end
 """
     free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute a spline of vacuum response matrices over the range of psi from 'ctrl.psi_edge' to
-`intr.qlim`. This is used for fast evaluation of wt during `ode_record_edge`. Performs the
-same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
-q-window minimum.
+Compute a spline of vacuum response matrices over the core scan range [psiedge, psihigh].
+Used for fast evaluation of wt during `findmax_dW_edge!`. Performs the same function as
+`free_wvmats` in the Fortran code. Currently defaults to 20 spline points in the core range.
+
+Grid design: 20 uniform points over [psiedge, psihigh] only. For above-psihigh queries,
+ExtendExtrap returns the value at psihigh. Above-psihigh scan steps in `findmax_dW_edge!`
+typically fail with SingularException (degenerate raw U₁ after accumulated Gaussian
+reductions between fixups), so the spline need not cover that region.
+
+The spline stores RAW vacuum response without singfac scaling. Singfac = (m - n*q) is
+applied analytically in free_compute_total at each scan psi, keeping the spline
+well-conditioned despite q divergence near the separatrix.
 """
 function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
     profiles = equil.profiles
-    psihigh = profiles.xs[end]  # upper boundary of the equilibrium rzphi spline domain
+    psihigh  = profiles.xs[end]
 
-    # Build psi grid over the CORE region only [psiedge, psihigh], where the vacuum
-    # geometry actually varies with psi. For above-psihigh queries, ExtendExtrap returns
-    # the value at the last knot (psihigh), which is the correct physics: the equilibrium
-    # rzphi spline ends at psihigh, so the plasma boundary geometry is pinned there for
-    # all psi > psihigh.
-    #
-    # NOTE: Including above-psihigh grid points with constant wv values (all capped at psihigh)
-    # causes a cubic spline derivative discontinuity at psihigh that corrupts interpolated
-    # values in the last core interval [psi[-2], psihigh], shifting the scan peak away from
-    # the true maximum. Using only core knots + ExtendExtrap avoids this completely.
-    #
-    # IMPORTANT: the spline stores RAW vacuum response without singfac scaling.
-    # Singfac = (m - n*q) diverges as q → ∞ near the separatrix; baking it into the spline
-    # causes the wv values to vary by ~10^6 across [psiedge, psilim], which destroys cubic
-    # spline accuracy at the left endpoint (psiedge). free_compute_total applies the correct
-    # singfac analytically at each scan psi, keeping the spline well-conditioned throughout.
-    npsi_core = max(4, 20)
-    psi_array = zeros(Float64, npsi_core)
-
-    for i in 1:npsi_core
-        psi_array[i] = ctrl.psiedge + (psihigh - ctrl.psiedge) * (i - 1) / (npsi_core - 1)
-    end
+    npsi_core = 20
+    psi_array = range(ctrl.psiedge, psihigh; length=npsi_core) |> collect
 
     wv_array = zeros(ComplexF64, npsi_core, intr.numpert_total, intr.numpert_total)
 
-    for i in 1:npsi_core
+    for (i, psi_val) in enumerate(psi_array)
         for ipert_n in 1:intr.npert
-            # Compute vacuum matrix at the core scan psi (psi_array[i]) as the plasma boundary.
-            # All grid points are within [psiedge, psihigh] so no capping is needed.
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
-            wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+            vac_inputs = Vacuum.VacuumInput(equil, psi_val, ctrl.mthvac, intr.mpert, intr.mlow, n;
+                                            force_wv_symmetry=ctrl.force_wv_symmetry)
+            wv_block, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
-            # Store raw block WITHOUT singfac scaling. Singfac is applied in free_compute_total
-            # using the q value at the actual scan psi, not the spline grid psi.
-            @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
+            block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
+            @views wv_array[i, block, block] .= wv_block
         end
     end
 
-    # Flatten 3D array to (npsi_core × numpert_total^2) for series interpolant
     wv_flat = reshape(wv_array, npsi_core, intr.numpert_total^2)
-
-    # FastInterpolations native complex series interpolant.
-    # ExtendExtrap returns the psihigh boundary value for all psi > psihigh (correct physics).
-    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    # ExtendExtrap: above-psihigh queries return the psihigh value (constant extrapolation).
+    # Above-psihigh scan steps use the frozen wv_raw(psihigh) combined with singfac(psi) applied
+    # analytically; those steps typically fail (SingularException from degenerate raw U₁ above
+    # psihigh) and are excluded from the peak search.
+    wvmat   = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
 
     return wvmat
 end

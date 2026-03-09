@@ -76,7 +76,11 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Deallocate unused storage of integration data
     if ctrl.psiedge < intr.psilim
-        # Find the peak dW in the edge region and truncate integration data there
+        # Find the peak dW in the edge region and truncate integration data there.
+        # Scan uses raw (pre-transform) u_store: U₁_raw is kept non-singular by the ODE fixups,
+        # so free_compute_total(W = U₂·U₁⁻¹) succeeds in the core region. Above-psihigh steps
+        # where U₁_raw has degenerated (accumulated Gaussian reductions between fixups) will
+        # throw SingularException and are skipped in the scan.
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
@@ -95,14 +99,14 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         trim_storage!(odet)
     end
 
-    # Evaluate stability criterion (critical determinant) of saved solutions
+    # Form the true solution vectors (undo the Gaussian reductions from fixups).
+    transform_u!(odet, intr)
+
+    # Evaluate stability criterion (critical determinant) of saved solutions.
     if ctrl.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
-
-    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
-    transform_u!(odet, intr)
 
     return odet
 end
