@@ -188,16 +188,40 @@ function equilibrium_solver_by_inversion(
     # Find magnetic axis and separatrix
     ro, zo, _rs1, rs2 = direct_position!(raw_profile)
 
-    # Build fine Cartesian grid for Contour.jl.
-    # Ranges are passed directly (not collected) so Contour.jl uses its optimised range path.
+    # Clip fine grid to separatrix bounding box.
+    # The EFIT nodal ψ values are free (already stored in the spline); a single coarse
+    # Contour.jl call at ψ ≈ psihigh gives the plasma bounding box with no extra spline work.
+    # A 5% margin on each side ensures small arc curvature outside the box is covered.
     nw = length(raw_profile.psi_in_xs)
     nh = length(raw_profile.psi_in_ys)
-    nr_fine = refine * nw
-    nz_fine = refine * nh
-    r_fine = range(raw_profile.rmin, raw_profile.rmax; length=nr_fine)
-    z_fine = range(raw_profile.zmin, raw_profile.zmax; length=nz_fine)
+    ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
+    ψ_bbox_target = psio * max(1.0 - psihigh, 1e-3)   # outermost needed surface, ≥ 0.001·psio
+    cl_bbox = Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys, ψ_coarse, ψ_bbox_target)
+    bbox_curve = select_plasma_contour(Ctr.lines(cl_bbox), ro, zo)
+    if bbox_curve !== nothing
+        bv = Ctr.vertices(bbox_curve)
+        r_bbox_lo, r_bbox_hi = extrema(v[1] for v in bv)
+        z_bbox_lo, z_bbox_hi = extrema(v[2] for v in bv)
+        r_margin = (r_bbox_hi - r_bbox_lo) * 0.05
+        z_margin = (z_bbox_hi - z_bbox_lo) * 0.05
+        r_lo = max(raw_profile.rmin, r_bbox_lo - r_margin)
+        r_hi = min(raw_profile.rmax, r_bbox_hi + r_margin)
+        z_lo = max(raw_profile.zmin, z_bbox_lo - z_margin)
+        z_hi = min(raw_profile.zmax, z_bbox_hi + z_margin)
+    else
+        r_lo, r_hi = raw_profile.rmin, raw_profile.rmax
+        z_lo, z_hi = raw_profile.zmin, raw_profile.zmax
+    end
 
-    @info "efit_by_inversion: Evaluating ψ on $(nr_fine)×$(nz_fine) fine grid ($(refine)× refinement)"
+    # Build fine Cartesian grid for Contour.jl, clipped to the plasma bounding box.
+    # Maintain the same grid spacing as the full-domain grid (nr/nz scale with clipped extent).
+    # Ranges are passed directly so Contour.jl uses its optimised range path.
+    nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
+    nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
+    r_fine = range(r_lo, r_hi; length=nr_fine)
+    z_fine = range(z_lo, z_hi; length=nz_fine)
+
+    @info "efit_by_inversion: Evaluating ψ on $(nr_fine)×$(nz_fine) fine grid ($(refine)× refinement, clipped to plasma bbox)"
 
     # Parallel grid evaluation: each column (fixed z) is independent.
     # One hint pair per thread (allocated once), reset at the start of each column.
