@@ -341,8 +341,17 @@ Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    # Use a closure to track steps within this segment for the near_start heuristic.
-    # (length(integrator.sol.t) is unreliable with save_everystep=false)
+    # Fraction of the q-range defining "near boundary" dense-save zones at each end of
+    # a segment. TODO: expose as a ctrl field when a good default is validated.
+    near_q_frac = 0.05
+
+    # q at segment boundaries — used for symmetric near-boundary heuristic.
+    # odet.q is updated at every step inside sing_der!, so we compare against these
+    # fixed endpoints in the callback rather than using psi-based distances.
+    q_start = equil.profiles.q_spline(chunk.psi_start)
+    q_end   = equil.profiles.q_spline(chunk.psi_end)
+    q_range = abs(q_end - q_start)
+
     steps_in_segment = Ref(0)
 
     function segment_callback!(integrator)
@@ -353,10 +362,11 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
-        psi_range = abs(integrator.sol.prob.tspan[2] - integrator.sol.prob.tspan[1])
-        psi_remaining = abs(integrator.sol.prob.tspan[2] - integrator.t)
-        near_end = psi_remaining < 0.05 * psi_range || psi_remaining < 1e-4
-        near_start = steps_in_segment[] <= 2
+        # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
+        # The step-count fallback (== 1) guarantees the first step is always saved
+        # even for near-degenerate segments where q_range ≈ 0.
+        near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
+        near_end   = abs(odet.q - q_end)   < near_q_frac * q_range
 
         if near_start || near_end || (odet.step % ctrl.save_interval == 0)
             if odet.step >= size(odet.u_store, 4)
@@ -373,6 +383,20 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
     sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+
+    # Unconditionally save the final step if the callback did not already capture it.
+    # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
+    # regardless of where the last accepted step landed relative to the near_end band.
+    if odet.step == 1 || odet.psi_store[odet.step - 1] != sol.t[end]
+        if odet.step >= size(odet.u_store, 4)
+            resize_storage!(odet)
+        end
+        odet.psi_store[odet.step] = sol.t[end]
+        @views odet.u_store[:, :, :, odet.step] .= sol.u[end]
+        odet.q_store[odet.step] = odet.q
+        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+        odet.step += 1
+    end
 
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
