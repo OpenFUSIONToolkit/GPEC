@@ -97,6 +97,11 @@ but grad_greenfunction is not since it fills a different block of the
     mtheta = length(observer.x)
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
+    theta_grid_periodic = range(; start=0, length=mtheta+1, step=dtheta)
+
+    # Make source data periodic by appending first point to end
+    source_x_periodic = [source.x; source.x[1]]
+    source_z_periodic = [source.z; source.z[1]]
 
     # Take a view of the corresponding block of the grad_greenfunction
     col_index = (source isa PlasmaGeometry ? 1 : 2)
@@ -119,8 +124,8 @@ but grad_greenfunction is not since it fills a different block of the
     log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
 
     # Set up periodic splines used for off-grid Gaussian quadrature points
-    spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
-    spline_z = cubic_interp(theta_grid, source.z; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    spline_x = cubic_interp(theta_grid_periodic, source_x_periodic; bc=PeriodicBC())
+    spline_z = cubic_interp(theta_grid_periodic, source_z_periodic; bc=PeriodicBC())
     d1_spline_x = deriv1(spline_x)
     d1_spline_z = deriv1(spline_z)
 

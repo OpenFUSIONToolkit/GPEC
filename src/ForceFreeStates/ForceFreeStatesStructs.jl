@@ -270,7 +270,7 @@ end
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
     # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
-    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
 
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)

@@ -41,7 +41,8 @@ using Printf
 using HDF5
 
 # Import FastInterpolations functions and types needed in main
-import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
+import FastInterpolations
+import FastInterpolations: cubic_interp, CubicFit
 
 import AdaptiveArrayPools: @with_pool
 
@@ -153,7 +154,7 @@ function main(args::Vector{String}=String[], dd=nothing)
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=ExtendExtrap())
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=:extension)
 
     # Determine toroidal mode numbers
     if ctrl.nn_low == 0 && ctrl.nn_high == 0

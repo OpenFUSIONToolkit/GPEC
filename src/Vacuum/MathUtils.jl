@@ -20,11 +20,15 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
 
     mtheta = length(xin)
     dθ = 2π / mtheta
-    θ_grid = range(; start=0, length=mtheta, step=dθ)
+   θ_grid = range(; start=0, length=mtheta+1, step=dθ)
+
+    # Make data explicitly periodic by appending first point to end
+    xin_periodic = [xin; xin[1]]
+    zin_periodic = [zin; zin[1]]
 
     # Build periodic splines for derivatives on the closed loop
-    spline_x = cubic_interp(θ_grid, xin; bc=PeriodicBC(; endpoint=:exclusive))
-    spline_z = cubic_interp(θ_grid, zin; bc=PeriodicBC(; endpoint=:exclusive))
+    spline_x = cubic_interp(θ_grid, xin_periodic; bc=PeriodicBC())
+    spline_z = cubic_interp(θ_grid, zin_periodic; bc=PeriodicBC())
 
     # Calculate cumulative arc length using numerical integration
     arc_length = zeros(mtheta + 1)
@@ -40,12 +44,15 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
 
     # Re-parameterize based on equal arc-length segments by interpolate the original (x,z) data at the equal arc length points
     arc_length_targets = range(; start=0, length=mtheta, step=arc_length[end]/mtheta)
-    # arc_length is an uneven grid so we have to specify the period explicitly
-    periodic_bc = PeriodicBC(; endpoint=:exclusive, period=arc_length[end])
 
-    # Use One-Shot API
-    xout = cubic_interp(arc_length[1:(end-1)], xin, arc_length_targets; bc=periodic_bc)
-    zout = cubic_interp(arc_length[1:(end-1)], zin, arc_length_targets; bc=periodic_bc)
+    # Make arc_length data periodic by appending first point to end
+    arc_length_periodic = [arc_length[1:(end-1)]; arc_length[end]]
+    xin_periodic2 = [xin; xin[1]]
+    zin_periodic2 = [zin; zin[1]]
+
+    # Use One-Shot API with periodic BC
+    xout = cubic_interp(arc_length_periodic, xin_periodic2, arc_length_targets; bc=PeriodicBC())
+    zout = cubic_interp(arc_length_periodic, zin_periodic2, arc_length_targets; bc=PeriodicBC())
     return xout, zout
 end
 
