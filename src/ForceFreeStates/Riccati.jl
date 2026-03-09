@@ -650,14 +650,14 @@ function riccati_eulerlagrange_integration(
     fill!(odet.unorm0, 1.0)
 
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
     for chunk in chunks
         # Integrate this chunk using the Riccati ODE (Riccati callback skips Gaussian reduction)
         riccati_integrate_chunk!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)")
+            @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)"
         end
 
         # Cross rational surface (Riccati crossing skips GR, uses ipert_res directly)
@@ -676,7 +676,7 @@ function riccati_eulerlagrange_integration(
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
         end
         intr.psilim = odet.psi_store[end]
         intr.qlim = odet.q_store[end]
@@ -688,7 +688,7 @@ function riccati_eulerlagrange_integration(
 
     # Evaluate fixed-boundary stability criterion
     if ctrl.verbose
-        println("Evaluating fixed-boundary stability criterion")
+        @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
@@ -893,12 +893,16 @@ function parallel_eulerlagrange_integration(
     odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:nthreads]
 
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
-        println("   Parallel FM: $(length(chunks)) chunks, $nthreads threads")
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
+        @info "   Parallel FM: $(length(chunks)) chunks, $nthreads threads"
     end
 
-    # PARALLEL phase: integrate all chunks independently from identity IC
-    Threads.@threads for i in eachindex(chunks)
+    # PARALLEL phase: integrate all chunks independently from identity IC.
+    # :static scheduler pins each task to one OS thread for its lifetime, so
+    # Threads.threadid() returns a stable index into odet_proxies.
+    # Without :static, Julia's task scheduler can migrate tasks between threads,
+    # making threadid() unreliable (Julia 1.7+).
+    Threads.@threads :static for i in eachindex(chunks)
         integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                     odet_proxies[Threads.threadid()])
     end
@@ -932,7 +936,7 @@ function parallel_eulerlagrange_integration(
         odet.q = equil.profiles.q_spline(odet.psifac)
 
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)")
+            @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(S) = $((@sprintf "%.2e" maximum(abs, odet.u[:,:,1]))),  steps = $(odet.step-1)"
         end
 
         if chunk.needs_crossing
@@ -977,7 +981,7 @@ function parallel_eulerlagrange_integration(
     odet.q = odet.q_store[last_crossing_step]
     odet.step = last_crossing_step + 1
     renormalize_riccati_inplace!(odet.u, N)
-    outer_chunk = IntegrationChunk(; psi_start=odet.psifac, psi_end=intr.psilim,
+    outer_chunk = IntegrationChunk(; psi_start=odet.psifac, psi_end=intr.psilim * (1 - eps),
                                      needs_crossing=false, ising=0)
     riccati_integrate_chunk!(odet, ctrl, equil, ffit, intr, outer_chunk)
     # After riccati_integrate_chunk! with needs_crossing=false:
@@ -989,7 +993,7 @@ function parallel_eulerlagrange_integration(
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
         end
         intr.psilim = odet.psi_store[end]
         intr.qlim = odet.q_store[end]
@@ -1011,7 +1015,7 @@ function parallel_eulerlagrange_integration(
 
     # Evaluate fixed-boundary stability criterion
     if ctrl.verbose
-        println("Evaluating fixed-boundary stability criterion")
+        @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
