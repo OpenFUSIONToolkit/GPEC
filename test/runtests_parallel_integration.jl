@@ -69,6 +69,41 @@ using TOML
         @test odet.u[:, :, 2] ≈ u2_expected  rtol=1e-12
     end
 
+    @testset "apply_propagator_inverse! is inverse of apply_propagator!" begin
+        # Verify that apply_propagator_inverse! is the algebraic inverse of apply_propagator!:
+        # applying inverse then forward should recover the original state exactly.
+        # This checks the LU-solve path: Φ \ (Φ * u) = u for an arbitrary invertible Φ.
+        N = 3
+        prop = JPEC.ForceFreeStates.ChunkPropagator(N)
+
+        # Near-identity blocks guarantee the 2N×2N matrix [A B; C D] is invertible
+        A = I(N) .+ 0.15 * [1.0+0.2im  0.1im   0.05; 0.0im  0.9+0.3im  0.1; 0.2+0.1im  0.0  1.0+0.1im]
+        B = 0.1  * [0.8+0.1im  0.1im   0.0;    0.0im  1.2+0.2im  0.1; 0.0im  0.1  0.9+0.1im]
+        C = 0.1  * [0.5+0.1im  0.0im   0.1;    0.1im  0.8+0.2im  0.0; 0.0im  0.0  0.7+0.1im]
+        D = I(N) .+ 0.15 * [0.9+0.1im  0.0im   0.05; 0.0im  1.0+0.2im  0.0; 0.1+0.1im  0.0  0.95+0.1im]
+
+        prop.block_upper_ic[:, :, 1] .= A
+        prop.block_lower_ic[:, :, 1] .= B
+        prop.block_upper_ic[:, :, 2] .= C
+        prop.block_lower_ic[:, :, 2] .= D
+
+        u1_in = [1.0+0.5im  0.2im   0.0;
+                 0.1+0.1im  1.2+0.1im 0.0;
+                 0.0im      0.0      0.9+0.3im]
+        u2_in = I(N) .+ 0.1im * ones(N, N)
+
+        odet = JPEC.ForceFreeStates.OdeState(N, 10, 5, 0)
+        odet.u[:, :, 1] .= u1_in
+        odet.u[:, :, 2] .= u2_in
+
+        # Round-trip: inverse then forward = identity
+        JPEC.ForceFreeStates.apply_propagator_inverse!(odet, prop)
+        JPEC.ForceFreeStates.apply_propagator!(odet, prop)
+
+        @test odet.u[:, :, 1] ≈ u1_in  rtol=1e-12
+        @test odet.u[:, :, 2] ≈ u2_in  rtol=1e-12
+    end
+
     @testset "balance_integration_chunks produces target count" begin
         # Verify that balance_integration_chunks creates at least
         # max(2*msing+3, 4*nthreads) chunks from a small set of base chunks.
@@ -120,6 +155,57 @@ using TOML
         n_crossings_base = count(c -> c.needs_crossing, base_chunks)
         n_crossings_bal = count(c -> c.needs_crossing, balanced)
         @test n_crossings_bal == n_crossings_base
+    end
+
+    @testset "chunk_el_integration_bounds direction field — bidirectional mode" begin
+        # Verify that bidirectional=true sets direction=-1 on crossing chunks and direction=+1
+        # on non-crossing chunks, and that balance_integration_chunks propagates these correctly:
+        # the right sub-chunk inherits direction from the parent, the left sub-chunk is always +1.
+        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
+        JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        JPEC.ForceFreeStates.sing_find!(intr, equil)
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.mband = intr.mpert - 1
+        intr.numpert_total = intr.mpert * intr.npert
+
+        odet = JPEC.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        JPEC.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+
+        # Default (bidirectional=false): all chunks should have direction=+1
+        chunks_fwd = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        @test all(c -> c.direction == 1, chunks_fwd)
+
+        # bidirectional=true: crossing chunks direction=-1, non-crossing direction=+1
+        chunks_bidi = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr; bidirectional=true)
+        @test count(c -> c.needs_crossing, chunks_bidi) > 0  # at least one crossing chunk
+        for chunk in chunks_bidi
+            if chunk.needs_crossing
+                @test chunk.direction == -1
+            else
+                @test chunk.direction == 1
+            end
+        end
+
+        # balance_integration_chunks preserves direction: right sub-chunk inherits parent direction,
+        # left sub-chunk is always +1 regardless of parent
+        balanced_bidi = JPEC.ForceFreeStates.balance_integration_chunks(chunks_bidi, ctrl, intr)
+        for chunk in balanced_bidi
+            if chunk.needs_crossing
+                @test chunk.direction == -1
+            else
+                @test chunk.direction == 1
+            end
+        end
     end
 
     @testset "Parallel FM integration matches standard ODE — Solovev example" begin
@@ -275,6 +361,52 @@ using TOML
         inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
         inputs["ForceFreeStates"]["verbose"] = false
         inputs["ForceFreeStates"]["use_parallel"] = true
+        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
+        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+        eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
+        equil = JPEC.Equilibrium.setup_equilibrium(eq_config)
+        intr.wall_settings = JPEC.Vacuum.WallShapeSettings(;
+            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+        JPEC.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+        JPEC.ForceFreeStates.sing_find!(intr, equil)
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.mband = intr.mpert - 1
+        intr.numpert_total = intr.mpert * intr.npert
+        metric = JPEC.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit = JPEC.ForceFreeStates.make_matrix(equil, intr, metric)
+        JPEC.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+
+        msing = intr.msing
+        dpm = intr.delta_prime_matrix
+
+        # Matrix is populated with correct shape (2·msing × 2·msing)
+        @test !isempty(dpm)
+        @test size(dpm) == (2 * msing, 2 * msing)
+
+        # All elements are finite
+        @test all(isfinite, dpm)
+
+        # Diagonal (self-response) elements are non-zero for each surface side
+        for j in 1:msing
+            @test abs(dpm[2j-1, 2j-1]) > 1e-10
+            @test abs(dpm[2j,   2j  ]) > 1e-10
+        end
+    end
+
+    @testset "delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)" begin
+        # Verify that the parallel FM path computes a well-formed inter-surface Δ' matrix
+        # for the DIIID-like case (N≈26 modes, multiple rational surfaces). This complements
+        # the Solovev test above by exercising the BVP assembly with more surfaces and larger
+        # mode space, where ill-conditioned (non-bidirectional) FM propagators would fail.
+        ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+        inputs = TOML.parsefile(joinpath(ex, "jpec.toml"))
+        inputs["ForceFreeStates"]["verbose"] = false
+        inputs["ForceFreeStates"]["use_parallel"] = true
+        inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
         intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
         ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl(;
             (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
