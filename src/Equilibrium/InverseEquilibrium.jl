@@ -107,14 +107,16 @@ function equilibrium_solver(input::InverseRunInput)
         end
     end
 
-    # Do NOT overwrite deta[1,:] with a Lagrange extrapolation to r²=0 (the magnetic axis).
-    # The Fortran inverse.f did this because its innermost surface was the axis itself (r²=0).
-    # Here rz_in_xs[1] = psilow > 0, so deta[1,:] is already the correctly computed angle
-    # offset at the innermost actual flux surface. Overwriting it with a polynomial
-    # extrapolated to a different point (the axis) is physically inconsistent and causes
-    # the cubic spline to spike near psilow when the extrapolated value differs from the
-    # true value — particularly harmful for efit_by_inversion where the Contour.jl inner
-    # surfaces are accurate but the Lagrange polynomial amplifies small vertex noise.
+    # Replicate Fortran inverse.f: extrapolate deta at the magnetic axis (r²=0) from the
+    # 3 innermost surfaces, but only when the grid actually starts at the axis (rz_in_xs[1]=0).
+    # For CHEASE, the psi grid runs from 0 (axis) to 1 (separatrix), so this applies.
+    # For efit_by_inversion and LAR, rz_in_xs[1] = psilow > 0 — the axis is not in the grid
+    # and overwriting deta[1,:] with an axis-extrapolated value would corrupt the innermost
+    # flux surface, causing spline spikes near psilow.
+    me = 3
+    if rz_in_xs[1] == 0.0
+        deta[1, :] .= inverse_extrap(r2[2:me+1, :], deta[2:me+1, :], 0.0)
+    end
 
     # Ensure periodicity: copy first theta column to last
     # (The computation above may have broken periodicity due to subtracting rz_in_ys values)
