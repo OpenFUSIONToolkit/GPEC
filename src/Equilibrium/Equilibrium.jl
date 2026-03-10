@@ -21,7 +21,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutput, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
+export setup_equilibrium, EquilibriumConfig, EquilibriumControl, EquilibriumOutput, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines, jpec_geqdsk_to_imas!
 
 # --- Constants ---
 const mu0 = 4π * 1e-7

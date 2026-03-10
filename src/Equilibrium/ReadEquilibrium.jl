@@ -435,8 +435,39 @@ function read_imas(config::EquilibriumConfig,dd) #new function in similar to efi
    
    
    
-    psi_axis     = eqt.global_quantities.psi_axis     * cocos11_to_internal  # psi_axis:     ψ at the magnetic axis (O-point) [Wb, JPEC internal]
-    psi_boundary = eqt.global_quantities.psi_boundary * cocos11_to_internal  # psi_boundary: ψ at the last closed flux surface (LCFS) [Wb, JPEC internal]
+    # Auto-detect COCOS format by comparing psi values
+    # If psi_axis is already in COCOS 2 (from jpec_geqdsk_to_imas!), use directly
+    # If psi_axis is in COCOS 11 (from EFIT.geqdsk2imas! or real IMAS), convert
+    psi_axis_raw = eqt.global_quantities.psi_axis
+    psi_boundary_raw = eqt.global_quantities.psi_boundary
+    psi_1d_first = eqt.profiles_1d.psi[1]
+
+    # Check if profiles_1d.psi is consistent with global_quantities
+    # If psi_1d[1] ≈ psi_axis, both are in same COCOS (no conversion yet)
+    # If psi_1d[1] ≈ psi_axis * 2π, they're in COCOS 11 and need conversion
+    ratio = abs(psi_1d_first / psi_axis_raw)
+
+    if isapprox(ratio, 1.0, rtol=0.1)
+        # Data is in COCOS 2 (from jpec_geqdsk_to_imas! or similar)
+        # Use directly without conversion
+        psi_axis = psi_axis_raw
+        psi_boundary = psi_boundary_raw
+        cocos_conversion_needed = false
+        println("--> IMAS data detected as COCOS 2 (no conversion needed)")
+    elseif isapprox(ratio, 2π, rtol=0.1)
+        # Data is in COCOS 11 (from EFIT.geqdsk2imas! or real IMAS)
+        # Convert to COCOS 2 (JPEC internal)
+        psi_axis = psi_axis_raw * cocos11_to_internal
+        psi_boundary = psi_boundary_raw * cocos11_to_internal
+        cocos_conversion_needed = true
+        println("--> IMAS data detected as COCOS 11 (converting to COCOS 2)")
+    else
+        @warn "Unable to auto-detect COCOS format (ratio=$ratio). Assuming COCOS 11."
+        psi_axis = psi_axis_raw * cocos11_to_internal
+        psi_boundary = psi_boundary_raw * cocos11_to_internal
+        cocos_conversion_needed = true
+    end
+
     psio = abs(psi_boundary - psi_axis) # psio: total flux swing = |ψ_axis - ψ_boundary| [Wb]
 
   
@@ -447,16 +478,21 @@ function read_imas(config::EquilibriumConfig,dd) #new function in similar to efi
     end
 
     
-    # IMAS profiles_1d stores quantities as 1D arrays indexed by ψ,
-    psi_1d = eqt.profiles_1d.psi .* cocos11_to_internal   # ψ [Wb, JPEC internal]
+    # IMAS profiles_1d stores quantities as 1D arrays indexed by ψ
+    # Convert based on auto-detected COCOS format
+    if cocos_conversion_needed
+        psi_1d = eqt.profiles_1d.psi .* cocos11_to_internal   # ψ [Wb, JPEC internal] - COCOS 11 → 2
+    else
+        psi_1d = eqt.profiles_1d.psi                          # ψ [Wb, JPEC internal] - already COCOS 2
+    end
     f_1d   = eqt.profiles_1d.f                            # F(ψ) = R·Bt [T·m], COCOS-independent
     p_1d   = eqt.profiles_1d.pressure                     # plasma pressure P(ψ) [Pa], COCOS-independent
-    q_1d   = eqt.profiles_1d.q ./ cocos11_to_internal     # q [JPEC internal] = q_IMAS × 2π
+    q_1d   = eqt.profiles_1d.q                            # q - COCOS-independent (same in COCOS 2 and 11)
 
     nw = length(psi_1d) #number of 1D grids
-    psi_norm_grid = (psi_1d .- psi_axis) ./ (psi_boundary - psi_axis)
-    # clamp protects against tiny floating-point overshoot past [0, 1]
-    psi_norm_grid = clamp.(psi_norm_grid, 0.0, 1.0)
+    # Use range() for psi_norm_grid (same as read_efit) to avoid floating-point errors
+    # This ensures EXACT grid points, eliminating numerical differences with EFIT path
+    psi_norm_grid = range(0.0, 1.0; length=nw)
 
   #4column table 
   
@@ -466,7 +502,8 @@ function read_imas(config::EquilibriumConfig,dd) #new function in similar to efi
         q_1d, #safety factor
         sqrt.(psi_norm_grid) # the square root of flux
     )
-    sq_in = cubic_interp(psi_norm_grid, sq_fs_nodes; bc=CubicFit(), extrap=:extension) # can tell the 4 quantities at any pso point
+    sq_xs = collect(psi_norm_grid)  # Convert range to vector for interpolant
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=:extension) # can tell the 4 quantities at any pso point
 
    
     if isempty(eqt.profiles_2d)
@@ -476,7 +513,13 @@ function read_imas(config::EquilibriumConfig,dd) #new function in similar to efi
     prof2d = eqt.profiles_2d[1]
     r_grid = prof2d.grid.dim1   # R coordinates [m], 1D array, length nR
     z_grid = prof2d.grid.dim2   # Z coordinates [m], 1D array, length nZ
-    psi_rz = prof2d.psi .* cocos11_to_internal  # ψ(R,Z) [Wb, JPEC internal]
+
+    # Convert 2D psi based on auto-detected COCOS format
+    if cocos_conversion_needed
+        psi_rz = prof2d.psi .* cocos11_to_internal  # ψ(R,Z) [Wb, JPEC internal] - COCOS 11 → 2
+    else
+        psi_rz = prof2d.psi                          # ψ(R,Z) [Wb, JPEC internal] - already COCOS 2
+    end
 
    
     #   psi_in(R,Z) = ψ_boundary - ψ(R,Z)
@@ -512,3 +555,74 @@ function read_imas(config::EquilibriumConfig,dd) #new function in similar to efi
 
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end #Since both EFIT and IMAS reurn DirectRunInput DCON solver doesnt care where data came from
+
+"""
+    jpec_geqdsk_to_imas!(g, eqt; wall=nothing)
+
+Populates an IMAS equilibrium time slice from a g-file (EFIT.GEQDSKFile) while
+**preserving COCOS 2 convention** (no conversion to COCOS 11).
+
+This function is designed for testing and validation scenarios where a g-file
+needs to be converted to IMAS format while maintaining numerical precision.
+By keeping values in COCOS 2 (the same convention as the g-file), it avoids
+floating-point round-off errors that would occur from converting to COCOS 11
+and back to COCOS 2.
+
+## Arguments
+- `g::EFIT.GEQDSKFile`: The parsed g-file data
+- `eqt`: IMAS equilibrium time slice (dd.equilibrium.time_slice[1])
+- `wall`: Optional wall data (not used, for compatibility)
+
+## COCOS Convention
+Unlike EFIT.geqdsk2imas!() which converts to COCOS 11 (×2π for psi values),
+this function keeps all values in COCOS 2 format:
+- psi values are NOT multiplied by 2π
+- q values remain unchanged (already in COCOS 2)
+- F and P are COCOS-independent
+
+## Usage
+```julia
+using JPEC
+import EFIT, EFIT.IMASdd
+
+g = EFIT.readg("myfile.geqdsk"; set_time=0.0)
+dd = IMASdd.dd()
+dd.global_time = g.time
+dd.equilibrium.time = [g.time]
+resize!(dd.equilibrium.time_slice, 1)
+dd.equilibrium.time_slice[1].time = g.time
+
+# Use JPEC's function instead of EFIT.geqdsk2imas!()
+JPEC.Equilibrium.jpec_geqdsk_to_imas!(g, dd.equilibrium.time_slice[1])
+
+# Now read with JPEC - will auto-detect COCOS 2 and use directly
+equil = JPEC.Equilibrium.setup_equilibrium(config, dd)
+```
+"""
+function jpec_geqdsk_to_imas!(g, eqt; wall=nothing)
+    # Populate global quantities (COCOS 2 - no conversion)
+    eqt.global_quantities.psi_axis = g.simag
+    eqt.global_quantities.psi_boundary = g.sibry
+    eqt.global_quantities.magnetic_axis.r = g.rmaxis
+    eqt.global_quantities.magnetic_axis.z = g.zmaxis
+
+    # Populate 1D profiles (COCOS 2 - no conversion)
+    eqt.profiles_1d.psi = g.psi
+    eqt.profiles_1d.f = g.fpol
+    eqt.profiles_1d.pressure = g.pres
+    eqt.profiles_1d.q = g.qpsi  # COCOS 2 - no conversion needed
+
+    # Populate 2D grid (COCOS 2 - no conversion)
+    resize!(eqt.profiles_2d, 1)
+    eqt.profiles_2d[1].grid.dim1 = g.r
+    eqt.profiles_2d[1].grid.dim2 = g.z
+    eqt.profiles_2d[1].psi = g.psirz  # COCOS 2 - no multiplication by 2π
+
+    # Optional: populate boundary if available
+    if g.nbbbs > 0
+        eqt.boundary.outline.r = g.rbbbs
+        eqt.boundary.outline.z = g.zbbbs
+    end
+
+    return nothing
+end
