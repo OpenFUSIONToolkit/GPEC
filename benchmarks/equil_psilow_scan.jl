@@ -16,7 +16,7 @@ Usage:
 
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.Equilibrium
-using TOML, Printf, Statistics, CSV, DataFrames
+using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
 config_path  = joinpath(example_path, "gpec.toml")
@@ -122,8 +122,12 @@ for method in methods
     end
 end
 
-df = DataFrame(rows)
 output_csv = joinpath(example_path, "equil_psilow_scan.csv")
-CSV.write(output_csv, df)
+open(output_csv, "w") do io
+    println(io, join(string.(keys(rows[1])), ","))
+    for row in rows
+        println(io, join(map(v -> v isa AbstractString ? "\"$v\"" : string(v), values(row)), ","))
+    end
+end
 println("\nResults saved to: $output_csv")
 println()
