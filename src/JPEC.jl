@@ -17,6 +17,11 @@ include("DCON/DCON.jl")
 import .DCON as DCON
 export DCON
 
+
+include("PENTRC/PENTRC.jl")
+import .PENTRC as PENTRC
+export PENTRC
+
 include(joinpath(@__DIR__, "..", "deps", "build_helpers.jl"))
 export build_fortran, build_spline_fortran, build_vacuum_fortran
 
