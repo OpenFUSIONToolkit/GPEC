@@ -19,9 +19,10 @@ call_spline_c_eval(::Type{Float64}, spline, x, f, f1, f2, f3) =
 call_spline_c_eval(::Type{ComplexF64}, spline, x, f, f1, f2, f3) =
     ccall((:cspline_c_eval_deriv3, libspline), Cvoid, (Ptr{Cvoid}, Float64, Ptr{ComplexF64}, Ptr{ComplexF64}, Ptr{ComplexF64}, Ptr{ComplexF64}), spline.handle, x, f, f1, f2, f3)
 call_spline_c_int(::Type{Float64}, spline) = ccall((:spline_c_int, libspline), Cvoid, (Ptr{Cvoid}, Ptr{Float64}), spline.handle, spline._fsi)
-call_spline_c_int(::Type{ComplexF64}, spline) = ccall((:cspline_c_int, libspline), Cvoid, (Ptr{Cvoid}, Ptr{ComplexF64}), spline.handle, spline._fsi)
+call_spline_c_int(::Type{ComplexF64}, spline) = ccall((:spline_c_int, libspline), Cvoid, (Ptr{Cvoid}, Ptr{ComplexF64}), spline.handle, spline._fsi)
 call_spline_c_destroy(::Type{Float64}, spline) = ccall((:spline_c_destroy, libspline), Cvoid, (Ptr{Cvoid},), spline.handle)
 call_spline_c_destroy(::Type{ComplexF64}, spline) = ccall((:cspline_c_destroy, libspline), Cvoid, (Ptr{Cvoid},), spline.handle)
+call_spline_c_roots(::Type{Float64}, spline, iqty, nroots, roots) = ccall((:spline_c_roots, libspline), Cvoid, (Ptr{Cvoid}, Int32, Ref{Int32}, Ptr{Float64}, Bool, Float64), spline.handle, Int32(iqty), nroots, roots, true, 1e-6)
 
 mutable struct CubicSpline{T<:Union{Float64,ComplexF64}}
     handle::Ptr{Cvoid}
@@ -312,3 +313,109 @@ end
     `spline._fsi[i, :]` equals `∫_{xs[1]}^{xs[i]} f(x) dx` for each component.
 """
 spline_integrate!(spline::CubicSpline{T}) where {T<:Union{Float64,ComplexF64}} = call_spline_c_int(T, spline)
+
+"""
+    spline_fit!(spline::CubicSpline, bctype::String="periodic")
+
+Fit cubic spline through data points with specified boundary condition.
+
+Must call `spline_c_setup` (or use constructor) first to populate xs and fs.
+Results stored in `spline._fs1` (first derivatives at grid points).
+
+## Arguments:
+  - `spline::CubicSpline` - spline with data already set
+  - `bctype::String` - boundary condition: "periodic", "natural", "notaknot", "extrap"
+"""
+function spline_fit!(spline::CubicSpline{Float64}, bctype::String="periodic")
+    bctype_int = parse_bctype(bctype)
+    call_spline_c_fit(Float64, spline)
+    return nothing
+end
+
+"""
+    spline_fit!(spline::SplineType, bctype::String="periodic")
+
+Fit cubic spline through data (SplineType version).
+
+Populate `spline.xs` and `spline.fs` before calling.
+Results stored in `spline.fs1`.
+
+## Arguments:
+  - `spline::SplineType` - spline with data
+  - `bctype::String` - boundary condition
+"""
+function spline_fit!(spline::SplineType, bctype::String="periodic")
+    bctype_int = parse_bctype(bctype)
+    spline.bctype = bctype_int
+    
+    # Setup the data through the C API
+    ccall((:spline_c_setup, libspline), Cvoid,
+        (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}),
+        spline.handle, spline._xs, spline._fs)
+    
+    # Fit the spline
+    ccall((:spline_c_fit, libspline), Cvoid,
+        (Ptr{Cvoid}, Int32, Ptr{Float64}),
+        spline.handle, spline.bctype, spline._fs1)
+    
+    return nothing
+end
+
+"""
+    spline_roots(spline::CubicSpline{Float64}, iqty::Int; 
+                 extrap::Bool=true, eps::Float64=1e-6)::Vector{Float64}
+
+Find roots (zeros) of a fitted spline quantity.
+
+## Arguments:
+  - `spline::CubicSpline{Float64}` - fitted spline object
+  - `iqty::Int` - which quantity (1 to nqty) to find roots of
+  - `extrap::Bool` - allow extrapolation beyond domain (optional)
+  - `eps::Float64` - clustering tolerance for near-duplicate roots (optional)
+
+## Returns:
+  - `Vector{Float64}` - x-coordinates of roots in ascending order
+"""
+function spline_roots(spline::CubicSpline{Float64}, iqty::Int; 
+                      extrap::Bool=true, eps::Float64=1e-6)::Vector{Float64}
+    mx = spline.mx
+    max_roots = max(10, 3 * mx + 10)
+    roots_buffer = zeros(Float64, max_roots)
+    nroots = Ref{Int32}(0)
+    
+    ccall((:spline_c_roots, libspline), Cvoid, 
+        (Ptr{Cvoid}, Int32, Ref{Int32}, Ptr{Float64}, Bool, Float64),
+        spline.handle, Int32(iqty), nroots, roots_buffer, extrap, eps)
+    
+    return roots_buffer[1:nroots[]]
+end
+
+"""
+    spline_roots(spline::SplineType, iqty::Int; 
+                 extrap::Bool=true, eps::Float64=1e-6)::Vector{Float64}
+
+Find roots (zeros) of a fitted spline quantity (SplineType version).
+
+## Arguments:
+  - `spline::SplineType` - fitted spline
+  - `iqty::Int` - which quantity to find roots of
+  - `extrap::Bool` - extrapolation flag (optional)
+  - `eps::Float64` - tolerance (optional)
+
+## Returns:
+  - `Vector{Float64}` - x-coordinates of roots
+"""
+function spline_roots(spline::SplineType, iqty::Int; 
+                      extrap::Bool=true, eps::Float64=1e-6)::Vector{Float64}
+    mx = spline.mx
+    max_roots = max(10, 3 * mx + 10)
+    roots_buffer = zeros(Float64, max_roots)
+    nroots = Ref{Int32}(0)
+    
+    ccall((:spline_c_roots, libspline), Cvoid,
+        (Ptr{Cvoid}, Int32, Ref{Int32}, Ptr{Float64}, Bool, Float64),
+        spline.handle, Int32(iqty), nroots, roots_buffer, extrap, eps)
+    
+    return roots_buffer[1:nroots[]]
+end
+

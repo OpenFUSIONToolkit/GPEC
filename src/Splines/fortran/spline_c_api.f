@@ -1320,4 +1320,58 @@ c-----------------------------------------------------------------------
       return
       end subroutine fspline_c_get_cspline_fs
 c-----------------------------------------------------------------------
+c     subprogram spline_c_roots
+c     finds roots of a spline quantity
+c-----------------------------------------------------------------------
+      subroutine spline_c_roots(handle, iqty, nroots, roots, 
+     $  op_extrap, op_eps) bind(C)
+c-----------------------------------------------------------------------
+c     declarations.
+c-----------------------------------------------------------------------
+      type(spline_handle), value :: handle
+      integer(c_int), value :: iqty
+      integer(c_int), intent(out) :: nroots
+      type(c_ptr), value :: roots
+      logical(c_bool), value :: op_extrap
+      real(c_double), value :: op_eps
+
+      type(spline_type), pointer :: spl
+      real(c_double), pointer :: roots_fort(:)
+      integer :: mx, max_roots
+      logical :: extrap
+c-----------------------------------------------------------------------
+c     work.
+c-----------------------------------------------------------------------
+      call c_f_pointer(handle%obj, spl)
+      if (.not. associated(spl)) then
+         print *, "spline_c_roots: handle is not associated "
+     $       // "with a valid spline object."
+         nroots = 0
+         return
+      end if
+
+      mx = spl%mx
+      max_roots = max(10, 3 * mx + 10)
+
+      call c_f_pointer(roots, roots_fort, [max_roots])
+
+      ! Convert logical(c_bool) to logical
+      extrap = op_extrap
+
+      ! Call Fortran spline_roots with optional arguments
+      call spline_roots(spl, iqty, nroots, roots_fort, 
+     $  op_extrap=extrap, op_eps=op_eps)
+
+      if (debug) then
+         print *, "spline_c_roots: found ", nroots, " roots"
+         if (nroots > 0) then
+            print *, "  roots = ", roots_fort(1:nroots)
+         end if
+      end if
+c-----------------------------------------------------------------------
+c     terminate.
+c-----------------------------------------------------------------------
+      return
+      end subroutine spline_c_roots
+c-----------------------------------------------------------------------
       end module spline_c_api_mod
