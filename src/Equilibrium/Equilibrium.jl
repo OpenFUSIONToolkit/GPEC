@@ -47,9 +47,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
-    if eq_type == "efit"
-        eq_input = read_efit(eq_config)
-    elseif eq_type in ["efit_arclength", "efit_by_inversion"]
+    if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
         eq_input = read_efit(eq_config)
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
