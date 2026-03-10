@@ -181,7 +181,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sq_xs = zeros(ma + 1)
     sq_fs = zeros(ma + 1, 3)
     r_nodes = zeros(ma + 1)
-    rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
+    rzphi_y_nodes = range(0.0, 1.0; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
 
     hint = Ref(1)

@@ -76,6 +76,83 @@
         @test isapprox(plasma_eq_efit.zo, plasma_eq_ascii.zo, atol=1e-3)
     end
 
+    # These tests are specifically designed to catch the theta radians/turns unit bug:
+    # if rz_in_ys is passed in radians instead of turns, deta is corrupted (subtracting
+    # values up to 2π from values in [0,0.5]), causing physically impossible B fields
+    # and wildly non-constant r² on what should be closed flux surfaces.
+    @testset "CHEASE Physical Validation" begin
+        b0exp = 7.4  # CHEASE normalization field [T]
+
+        B_nodes_binary = plasma_eq_binary.eqfun_B.nodal_derivs.partials[1, :, :]
+        B_nodes_ascii  = plasma_eq_ascii.eqfun_B.nodal_derivs.partials[1, :, :]
+
+        # B field must be finite and positive everywhere
+        @test all(isfinite, B_nodes_binary)
+        @test all(isfinite, B_nodes_ascii)
+        @test all(>(0), B_nodes_binary)
+        @test all(>(0), B_nodes_ascii)
+
+        # B field must be within a factor of 3 of the normalization field
+        @test all(B_nodes_binary .> b0exp / 3)
+        @test all(B_nodes_binary .< b0exp * 3)
+        @test all(B_nodes_ascii .> b0exp / 3)
+        @test all(B_nodes_ascii .< b0exp * 3)
+
+        # q must be finite, positive, and in a physically reasonable range
+        q_binary = plasma_eq_binary.profiles.q_spline.y
+        q_ascii  = plasma_eq_ascii.profiles.q_spline.y
+        @test all(isfinite, q_binary)
+        @test all(isfinite, q_ascii)
+        @test all(>(0), q_binary)
+        @test all(>(0), q_ascii)
+        @test all(q_binary .< 20)
+        @test all(q_ascii .< 20)
+    end
+
+    @testset "LAR Equilibrium" begin
+        # Build a zeroth-order (no Shafranov shift) LAR equilibrium. With zeroth=true,
+        # surfaces are exactly circular: (R - R0)² + Z² = r² for each flux surface.
+        lar_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_type="lar",
+            jac_type="boozer",
+            grid_type="ldp",
+            psilow=0.01,
+            psihigh=0.99
+        )
+        lar_input = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(;
+            lar_r0=10.0, lar_a=1.0, q0=1.5, beta0=1e-4,
+            mtau=64, ma=64, zeroth=true
+        )
+        plasma_eq_lar = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(lar_config, lar_input)
+
+        @test plasma_eq_lar isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
+
+        # B field must be finite, positive, and near F/R ≈ 1 T (LAR default b0fac=1, R0=10)
+        B_nodes = plasma_eq_lar.eqfun_B.nodal_derivs.partials[1, :, :]
+        @test all(isfinite, B_nodes)
+        @test all(>(0), B_nodes)
+        @test all(B_nodes .> 0.3)   # at least 0.3 T everywhere
+        @test all(B_nodes .< 5.0)   # no more than 5 T (far from axis, F/R grows modestly)
+
+        # For zeroth-order LAR, flux surfaces are exactly circular, so rzphi_rsquared
+        # must be nearly constant over theta on each surface. The radians/turns bug
+        # causes O(1) fractional errors here since deta is corrupted by subtracting
+        # values up to 2π from values in [0,0.5].
+        r2_nodes = plasma_eq_lar.rzphi_rsquared.nodal_derivs.partials[1, :, :]
+        for ipsi in axes(r2_nodes, 1)
+            r2_row = r2_nodes[ipsi, :]
+            r2_mean = sum(r2_row) / length(r2_row)
+            r2_mean > 0 || continue  # skip axis region
+            relative_variation = (maximum(r2_row) - minimum(r2_row)) / r2_mean
+            @test relative_variation < 1e-3
+        end
+
+        # q-profile must be positive and monotone
+        q_lar = plasma_eq_lar.profiles.q_spline.y
+        @test all(>(0), q_lar)
+        @test issorted(q_lar)
+    end
+
     @testset "Solovev Equilibrium" begin
         # --- Helper constructors ---
         # Minimal valid inputs

@@ -209,7 +209,7 @@ function read_chease_binary(config::EquilibriumConfig)
 
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
-        rz_in_ys = range(0, 2π; length=mtau) |> collect
+        rz_in_ys = range(0, 1; length=mtau) |> collect
         rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
             bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
         rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
@@ -367,7 +367,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     poloidal_stop = ntnova + 3
     ro = zrcp[poloidal_start, 1] # Already scaled
     zo = zzcp[poloidal_start, 1] # Already scaled
-    rz_in_ys = range(0, 2π; length=mtau) |> collect
+    rz_in_ys = range(0, 1; length=mtau) |> collect
     # CHEASE includes 2 ghost points at the start (wrap-around); drop them.
     R_data = transpose(zrcp[poloidal_start:poloidal_stop, :])
     Z_data = transpose(zzcp[poloidal_start:poloidal_stop, :])
