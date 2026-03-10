@@ -221,6 +221,9 @@ function equilibrium_solver(input::InverseRunInput)
         spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
         spl_xs .= spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
+        if any(diff(spl_xs) .<= 0)
+            @warn "InverseEquilibrium: SFL theta grid non-monotone at ipsi=$ipsi (psifac=$(round(psifac, sigdigits=4))). The SFL weight function (Jacobian × poloidal element) has a near-zero or negative segment; this surface's geometry may be corrupted."
+        end
         @views spl_fs[:, 2] .+= rzphi_ys .- spl_xs
         @views spl_fs[:, 4] .= (spl_fs[:, 3] ./ spl_fsi[mtheta+1, 3]) ./ (spl_fs[:, 5] ./ spl_fsi[mtheta+1, 5]) .* (spl_fsi[mtheta+1, 3] * twopi * pi)
         @views spl_fs[:, 3] .= (f_sq_in_buf[1] * pi / psio) .* (spl_fsi[:, 4] .- spl_fsi[mtheta+1, 4] .* spl_xs)
