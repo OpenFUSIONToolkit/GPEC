@@ -1,5 +1,59 @@
 module PENTRC 
 
+"""
+PENTRC - Perturbed Equilibrium Nonambipolar Transport Code
+
+A Julia implementation of the PENTRC code for calculating kinetic effects
+on equilibrium stability through torque and energy deposition calculations.
+
+Can operate in two modes:
+1. Standalone: Calculate kinetic torque/energy for a given equilibrium
+2. Library: Provide kinetic contributions to DCON's stability analysis (kinetic_flag=true)
+
+## Module Structure
+
+### [Tier 1] Core Library Functions (Low-level)
+These functions are designed to be called from both PENTRC and DCON:
+- `Torque.jl`: tpsi!() - Core torque calculation (low-level API)
+- `Energy.jl`: Kinetic energy calculations
+- `Pitch.jl`: Pitch angle dependent calculations
+
+### [Tier 2] High-level Computation Functions
+Orchestrates Tier 1 functions for specific use cases:
+- `Compute.jl`: Main computational routines
+  - compute_torque_all_methods!()
+  - compute_matrix_calculation!()
+  - compute_kinetic_contribution() ← Called by DCON when kinetic_flag=true
+
+### [Tier 3] Standalone Program
+Only used for independent PENTRC execution:
+- `Main.jl`: Entry point Main(path::String)
+
+### [Tier 4] Supporting Functions
+- `PentrcStructs.jl`: Data structures (PentrcControl, PentrcInternal, PentrcOutput)
+- `Input.jl`: Configuration reading and parsing
+- `Output.jl`: File I/O and formatting
+- `Grid.jl`: Grid management and manipulation
+- `Utils.jl`: Common utilities
+
+## Public API
+
+### For PENTRC standalone:
+```julia
+PENTRC.Main("/path/to/config")
+```
+
+### For DCON kinetic_flag=true:
+```julia
+kinetic_results = PENTRC.compute_kinetic_contribution(ctrl, equil, ffit)
+```
+
+### For direct torque calculation:
+```julia
+tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method)
+```
+"""
+
 using LinearAlgebra
 using LinearAlgebra.LAPACK
 using TOML
@@ -13,61 +67,45 @@ import ..Spl
 import ..DCON
 import ..Equilibrium
 
+# ============================================================================
+# [TIER 4] Supporting data structures and utilities
+# ============================================================================
+include("PentrcStructs.jl")
+include("Input.jl")
+include("Output.jl")
+include("Grid.jl")
+include("Utils.jl")
+
+# ============================================================================
+# [TIER 1] Core library functions (low-level, can be called from DCON)
+# ============================================================================
 include("Torque.jl")
 include("Energy.jl")
-include("grid_mod.jl")
 include("Pitch.jl")
-include("Utils.jl")
+
+# ============================================================================
+# [TIER 2] High-level computation functions
+# ============================================================================
+include("Compute.jl")
+
+# ============================================================================
+# [TIER 3] Standalone program entry point
+# ============================================================================
 include("Main.jl")
 
-global mp = 1.672_614e-27      # proton mass (kg)
-global me = 9.109_1e-31        # electron mass (kg)
-global e  = 1.602_191_7e-19    # elementary charge (C)
-global eV = e                  # joules per electron-volt
+# ============================================================================
+# Global constants
+# ============================================================================
+const mp = 1.672_614e-27      # proton mass (kg)
+const me = 9.109_1e-31        # electron mass (kg)
+const e  = 1.602_191_7e-19    # elementary charge (C)
+const eV = e                  # joules per electron-volt
 
-global π     = 3.141_592_653_589_793
-global twopi = 2π
-global μ₀    = 4e-7 * π
-global rad2deg = 180 / π
-global deg2rad = π / 180
-global iunit = 1im               # equivalent to Fortran's (0,1)
+const π     = 3.141_592_653_589_793
+const twopi = 2π
+const μ₀    = 4e-7 * π
+const rad2deg = 180 / π
+const deg2rad = π / 180
+const iunit = 1im               # equivalent to Fortran's (0,1)
 
-
-# # Method labels
-# const METHODS = [
-#     "fgar","tgar","pgar","rlar","clar","fcgl",
-#     "fwmm","twmm","pwmm","ftmm","ttmm","ptmm",
-#     "fkmm","tkmm","pkmm","frmm","trmm","prmm",
-# ]
-
-# # Grid types
-# const GRIDS = [
-#     "lsode",
-#     "equil",
-#     "input",
-# ]
-
-# # Human-readable descriptions
-# const DOCS = [
-#     "Full general-aspect-ratio calculation",
-#     "Trapped particle general-aspect-ratio calculation",
-#     "Passing particle general-aspect-ratio calculation",
-#     "Trapped particle large-aspect-ratio calculation",
-#     "Trapped particle cylindrical large-aspect-ratio calculation",
-#     "Fluid Chew–Goldberger–Low calculation",
-#     "Full energy calculation using MXM Euler–Lagrange matrix",
-#     "Trapped energy calculation using MXM Euler–Lagrange matrix",
-#     "Passing energy calculation using MXM Euler–Lagrange matrix",
-#     "Full torque calculation using MXM Euler–Lagrange matrix",
-#     "Trapped torque calculation using MXM Euler–Lagrange matrix",
-#     "Passing torque calculation using MXM Euler–Lagrange matrix",
-#     "Full MXM Euler–Lagrange energy matrix norm calculation",
-#     "Trapped MXM Euler–Lagrange energy matrix norm calculation",
-#     "Passing MXM Euler–Lagrange energy matrix norm calculation",
-#     "Full MXM Euler–Lagrange torque matrix norm calculation",
-#     "Trapped MXM Euler–Lagrange torque matrix norm calculation",
-#     "Passing MXM Euler–Lagrange torque matrix norm calculation",
-# ]
-
-
-end
+end  # module PENTRC
