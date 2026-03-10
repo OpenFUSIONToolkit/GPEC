@@ -136,8 +136,8 @@ function resample_contour_to_theta_grid!(
     R_ext[n_ext] = R_ext[1]
     Z_ext[n_ext] = Z_ext[1]
 
-    R_spl = cubic_interp(η_ext, R_ext; bc=CubicFit(), extrap=WrapExtrap(), search=LinearBinary())
-    Z_spl = cubic_interp(η_ext, Z_ext; bc=CubicFit(), extrap=WrapExtrap(), search=LinearBinary())
+    R_spl = cubic_interp(η_ext, R_ext; bc=PeriodicBC(), extrap=WrapExtrap(), search=LinearBinary())
+    Z_spl = cubic_interp(η_ext, Z_ext; bc=PeriodicBC(), extrap=WrapExtrap(), search=LinearBinary())
 
     # theta_grid is in turns [0, 1]; sample the geometric-angle spline at 2π*θ radians.
     # Monotonically increasing → shared hint gives O(1) lookups per pass.
@@ -155,20 +155,43 @@ end
     classify_topology(raw_profile, psio; xpt_threshold=0.05) → Symbol
 
 Classify the plasma topology as `:limited`, `:sn_lower`, `:sn_upper`, or `:double_null`
-by scanning the EFIT nodal ψ values in the lower and upper halves of the domain.
+by evaluating ψ on the (R, Z) grid and finding the minimum in each Z half-domain.
 
 An x-point is detected when the minimum ψ in a half-domain falls below
 `xpt_threshold * psio` (i.e., within 5% of the separatrix by default).
-The EFIT nodal values are read directly from the bicubic spline's stored partials
-array — no additional spline evaluations are needed.
+
+Uses the public `psi_in` interpolant interface with `LinearBinary` hints: within each
+Z row, the R hint carries forward (R is monotone), and the Z hint advances naturally
+across rows. This avoids coupling to internal spline layout while remaining efficient.
 """
 function classify_topology(raw_profile::DirectRunInput, psio::Float64;
                            xpt_threshold::Float64=0.05)
-    ψ_nodes = raw_profile.psi_in.nodal_derivs.partials[1, :, :]   # (nw, nh) array
-    nh = size(ψ_nodes, 2)
-    mid_idx = nh ÷ 2
-    min_ψ_lower = minimum(@view ψ_nodes[:, 1:mid_idx])
-    min_ψ_upper = minimum(@view ψ_nodes[:, (mid_idx+1):end])
+    R_grid = raw_profile.psi_in_xs
+    Z_grid = raw_profile.psi_in_ys
+    nZ = length(Z_grid)
+    mid_Z = nZ ÷ 2
+    hint = (Ref(1), Ref(1))
+
+    min_ψ_lower = Inf
+    for jZ in 1:mid_Z
+        hint[1][] = 1  # reset R hint at start of each row; Z hint advances naturally
+        z = Z_grid[jZ]
+        for R in R_grid
+            ψ = raw_profile.psi_in((R, z); hint=hint)
+            min_ψ_lower = min(min_ψ_lower, ψ)
+        end
+    end
+
+    min_ψ_upper = Inf
+    for jZ in (mid_Z+1):nZ
+        hint[1][] = 1
+        z = Z_grid[jZ]
+        for R in R_grid
+            ψ = raw_profile.psi_in((R, z); hint=hint)
+            min_ψ_upper = min(min_ψ_upper, ψ)
+        end
+    end
+
     has_lower = min_ψ_lower / psio < xpt_threshold
     has_upper = min_ψ_upper / psio < xpt_threshold
     if has_lower && has_upper
