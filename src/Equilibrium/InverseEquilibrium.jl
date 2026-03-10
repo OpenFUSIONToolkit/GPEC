@@ -107,12 +107,8 @@ function equilibrium_solver(input::InverseRunInput)
         end
     end
 
-    # Replicate Fortran inverse.f: extrapolate deta at the magnetic axis (r²=0) from the
-    # 3 innermost surfaces, but only when the grid actually starts at the axis (rz_in_xs[1]=0).
-    # For CHEASE, the psi grid runs from 0 (axis) to 1 (separatrix), so this applies.
-    # For efit_by_inversion and LAR, rz_in_xs[1] = psilow > 0 — the axis is not in the grid
-    # and overwriting deta[1,:] with an axis-extrapolated value would corrupt the innermost
-    # flux surface, causing spline spikes near psilow.
+    # Replicate Fortran inverse.f: overwrite deta at the axis (r²=0) by extrapolating from
+    # the innermost non-zero surfaces. Only applies when the grid includes the axis (rz_in_xs[1]=0).
     me = 3
     if rz_in_xs[1] == 0.0
         deta[1, :] .= inverse_extrap(r2[2:me+1, :], deta[2:me+1, :], 0.0)
