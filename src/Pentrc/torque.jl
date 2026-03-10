@@ -125,8 +125,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         end
     end
 
-    Spl.spline_dealloc!(dbdtspl)
-    
     # Get flux function variables
     sq_s_f = Spl.spline_eval!(sq, psi)
     kin_f, kin_f1 = Spl.spline_deriv1!(kin, psi)
@@ -198,8 +196,6 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         println("torque - end function, psi = ", psi)
     end
 
-    Spl.spline_dealloc!(tspl)
-    
     return nothing
 end
 
