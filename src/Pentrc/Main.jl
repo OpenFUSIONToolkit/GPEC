@@ -1,298 +1,102 @@
-# PERTURBED EQUILIBRIUM NONAMBIPOLAR TRANSPORT CODE
-
 """
-Main program. Interfaces with input file, sets corresponding
-global variables, and runs requested subprocess.
+    Main(path::String)
 
-REVISION HISTORY:
-    2014.03.06 -Logan- initial writing.
-    2025.11.25 -Fairborn- converted to Julia
-    Converted using Claude AI for first pass
+PENTRC main entry point for standalone execution.
+Reads configuration, sets up equilibrium, and runs calculations.
 
-AUTHOR: Logan
-EMAIL: nikolas.logan@columbia.edu
+# Arguments
+- `path::String`: Path to directory containing pentrc.toml and equilibrium files
+
+# Usage
+```julia
+PENTRC.Main("/path/to/config/directory")
+```
 """
-
-using Printf
-
-# Include required modules (equivalents to Fortran modules)
-include("pentrc_interface.jl")
-include("Utils.jl")  # For append_1d, append_2d, progressbar
-
-
-function main()
-    # Local variables
-    local i, j, k, l, m, nvalid
-    local psi_out_valid = Float64[]
+function Main(path::String)
     
-    # Harvest variables
-    local ierr::Int
-    local hlog::String = " "^65507
+    # [1] Read configuration
+    config_path = joinpath(path, "pentrc.toml")
+    ctrl = read_pentrc_config(config_path)
     
-    if verbose
+    if ctrl.verbose
         println()
-        println("PENTRC START => $version")
-        println("_____________________________________________")
+        println("PENTRC START => v3.00")
+        println("_" ^ 50)
     end
     
-    initialize_pentrc()
+    # [2] Setup execution environment
+    start_time = time()
     
-    if moment == "heat"
-        global qt = true
-        if verbose
-            println("---------------------------------------------")
-            println("Calculating heat transport")
-            println("---------------------------------------------")
+    # Clear output directory if requested
+    if ctrl.clean && ispath(path)
+        try
+            run(`bash -c "rm -f pentrc_*.out"`)
+        catch
+            # Silent fail if directory cleanup isn't possible
         end
-    elseif moment == "pressure"
-        global qt = false
-        if verbose
-            println("---------------------------------------------")
-            println("Calculating particle transport and torque")
-            println("---------------------------------------------")
+    end
+    
+    # Set threading
+    if ctrl.pentrc_threads > 0
+        if ctrl.pentrc_threads > Threads.nthreads()
+            @warn "Requested $(ctrl.pentrc_threads) threads but only $(Threads.nthreads()) available"
         end
-    else
-        error("ERROR: Input moment must be 'pressure' or 'heat'")
     end
     
-    # Start timer
-    timer(mode=0)
+    # [3] Setup output
+    outp = PentrcOutput(; output_dir=path)
+    init_output(outp, path)
     
-        # Clear working directory
-    if clean
-        if verbose
-            println("clearing working directory")
-        end
-        # Use an explicit shell invocation to avoid parse-time errors from
-        # unquoted glob characters inside a command literal (e.g. "*").
-        run(`bash`, "-c", "rm -f pentrc_*.out")
-    end
+    # [4] Initialize internal state
+    intr = PentrcInternal(; dir_path=path)
+    intr.flags = get_method_flags(ctrl)
     
-    # Administrative setup/diagnostics/debugging
-    if fnml_flag
-        set_fymnl()
+    # [5] Administrative setup
+    if ctrl.fnml_flag
+        # TODO: set_fymnl()
     end
-    if ellip_flag
-        set_ellip()
+    if ctrl.ellip_flag
+        # TODO: set_ellip()
     end
-    
-    if diag_flag
+    if ctrl.diag_flag
         diagnose_all()
-    else
-        # Set the number of threads for multithreading
-        if pentrc_threads > 0
-            # Julia uses JULIA_NUM_THREADS environment variable
-            # or Threads.nthreads() to check available threads
-            if pentrc_threads > Threads.nthreads()
-                @warn "Requested $pentrc_threads threads but only $(Threads.nthreads()) available"
-            end
+    end
+    
+    # [6] Print moment type
+    if ctrl.verbose
+        println("-----" ^ 10)
+        if ctrl.qt
+            println("Calculating HEAT transport")
         else
-            pentrc_threads = 1
+            println("Calculating PARTICLE transport and TORQUE")
         end
-        
-        # Explicit matrix calculations
-        if wxyz_flag && output_ascii
-            if verbose
-                println("PENTRC - euler-lagrange matrix calculation")
-            end
-            
-            # HACK - this should have its own flag
-            wtw = Array{ComplexF64}(undef, mpert, mpert, 6)
-            nstring = @sprintf("%4d", nn)
-            
-            open("pentrc_tgar_elmat_n$(strip(nstring)).out", "w") do f
-                println(f, "PERTURBED EQUILIBRIUM NONAMBIPOLAR TRANSPORT CODE:")
-                println(f, "Kinetic additions to the ideal Euler-Lagrange matrices")
-                println(f)
-                @printf(f, "    n = %4d l = %4d\n\n", nn, 0)
-                
-                for i in 1:npsi_out
-                    if verbose
-                        println(" psi = ", psi_out[i])
-                    end
-                    println(f)
-                    @printf(f, " psi = %16.8e\n\n", psi_out[i])
-                    @printf(f, " %4s%4s", "m_1", "m_2")
-                    for label in ["real(A_k)", "imag(A_k)", "real(B_k)", "imag(B_k)", 
-                                  "real(C_k)", "imag(C_k)", "real(D_k)", "imag(D_k)", 
-                                  "real(E_k)", "imag(E_k)", "real(H_k)", "imag(H_k)"]
-                        @printf(f, " %16s", label)
-                    end
-                    println(f)
-                    
-                    for l in 0:0  # Should be all
-                        if 0 < psi_out[i] <= 1
-                            tpsi(tsurf, psi_out[i], nn, l, zi, mi, wdfac, divxfac, 
-                                 electron, "twmm"; op_wmats=wtw)
-                            for j in 1:mpert
-                                for k in 1:mpert
-                                    @printf(f, " %4d%4d", mfac[k], mfac[j])
-                                    for val in wtw[k, j, :]
-                                        @printf(f, " %16.8e", val)
-                                    end
-                                    println(f)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        
-        flags = [
-            fgar_flag, tgar_flag, pgar_flag, rlar_flag, clar_flag, fcgl_flag,
-            fwmm_flag, twmm_flag, pwmm_flag, ftmm_flag, ttmm_flag, ptmm_flag,
-            fkmm_flag, tkmm_flag, pkmm_flag, frmm_flag, trmm_flag, prmm_flag
-        ]
-        
-        for m in 1:nmethods
-            if flags[m]
-                method = methods[m]
-                if verbose
-                    println("---------------------------------------------")
-                    println("$method - $(docs[m])")
-                end
-                
-                if method in ["clar", "rlar"]
-                    if isempty(data_dir) || data_dir == "default"
-                        data_dir = get(ENV, "GPECHOME", "")
-                        if isempty(data_dir)
-                            error("ERROR: Use of default data directory requires GPECHOME environment variable")
-                        end
-                        data_dir = joinpath(data_dir, "pentrc")
-                    end
-                    read_fnml(joinpath(data_dir, "fkmnl.dat"))
-                end
-                
-                if dynamic_grid
-                    if verbose
-                        println("$method - Calculating using dynamic integration")
-                    end
-                    tphi = tintgrl_lsode(psilims, nn, nl, zi, mi, wdfac, divxfac, 
-                                         electron, methods[m])
-                    if verbose
-                        @printf("%-24s%11.3e\n", "Total torque = ", real(tphi))
-                        @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(tphi)/(2*nn))
-                        @printf("%-24s%11.3e\n", "alpha/s  = ", real(tphi)/(-1*imag(tphi)))
-                    end
-                end
-                
-                if equil_grid
-                    if verbose
-                        println("$method - Calculating on equilibrium grid")
-                    end
-                    teq = tintgrl_grid("equil", psilims, nn, nl, zi, mi, wdfac, 
-                                       divxfac, electron, methods[m])
-                    if verbose
-                        if dynamic_grid
-                            @printf("%-24s%11.3e%-12s%11.3e\n", "Total torque = ", real(teq),
-                                    ", % error = ", abs(real(teq)-real(tphi))/real(tphi))
-                            @printf("%-24s%11.3e%-12s%11.3e\n", "Total Kinetic Energy = ", 
-                                    imag(teq)/(2*nn), ", % error = ", 
-                                    abs(imag(teq)-imag(tphi))/imag(tphi))
-                            @printf("%-24s%11.3e\n", "alpha/s  = ", real(teq)/(-1*imag(teq)))
-                        else
-                            @printf("%-24s%11.3e\n", "Total torque = ", real(teq))
-                            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(teq)/(2*nn))
-                            @printf("%-24s%11.3e\n", "alpha/s  = ", real(teq)/(-1*imag(teq)))
-                        end
-                    end
-                end
-                
-                if input_grid
-                    if verbose
-                        println("$method - Calculating on input displacements' grid")
-                    end
-                    teq = tintgrl_grid("input", psilims, nn, nl, zi, mi, wdfac, 
-                                       divxfac, electron, methods[m])
-                    if verbose
-                        if dynamic_grid
-                            @printf("%-24s%11.3e%-12s%11.3e\n", "Total torque = ", real(teq),
-                                    ", % error = ", abs(real(teq)-real(tphi))/real(tphi))
-                            @printf("%-24s%11.3e%-12s%11.3e\n", "Total Kinetic Energy = ", 
-                                    imag(teq)/(2*nn), ", % error = ", 
-                                    abs(imag(teq)-imag(tphi))/imag(tphi))
-                            @printf("%-24s%11.3e\n", "alpha/s  = ", real(teq)/(-1*imag(teq)))
-                        else
-                            @printf("%-24s%11.3e\n", "Total torque = ", real(teq))
-                            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(teq)/(2*nn))
-                            @printf("%-24s%11.3e\n", "alpha/s  = ", real(teq)/(-1*imag(teq)))
-                        end
-                    end
-                end
-                
-                # Run select surfaces with detailed output
-                if theta_out || xlmda_out
-                    if verbose
-                        println("$method - Recalculating on psi_out grid for detailed outputs")
-                    end
-                    
-                    # Only use valid output surfaces
-                    psi_out_valid = Float64[]
-                    for i in 1:npsi_out
-                        if 0 < psi_out[i] < 1
-                            push!(psi_out_valid, psi_out[i])
-                        end
-                    end
-                    
-                    if !isempty(psi_out_valid)
-                        nvalid = length(psi_out_valid)
-                        for i in 1:nvalid
-                            if nvalid < 10
-                                @printf("  psi = %11.3e\n", psi_out_valid[i])
-                            end
-                            for l in -nl:max(1,nl):nl
-                                tpsi(tsurf, psi_out_valid[i], nn, l, zi, mi, wdfac, 
-                                     divxfac, electron, methods[m]; 
-                                     op_erecord=xlmda_out, op_orecord=theta_out)
-                            end
-                            if nvalid > 10
-                                progressbar(i, 1, nvalid; op_percent=20)
-                            end
-                        end
-                    end
-                end
-                
-                if verbose
-                    println("$method - Finished")
-                    println("---------------------------------------------")
-                end
-            end
-        end
-        
-        if output_ascii
-            if theta_out
-                output_orbit_ascii(nn)
-            end
-            if xlmda_out
-                output_pitch_ascii(nn)
-                output_energy_ascii(nn)
-            end
-        end
-        
-        if output_netcdf
-            output_torque_netcdf(nn, nl, zi, mi, electron, wdfac)
-            if theta_out
-                output_orbit_netcdf(nn)
-            end
-            if xlmda_out
-                output_pitch_netcdf(nn)
-                output_energy_netcdf(nn)
-            end
-        end
+        println("-----" ^ 10)
     end
     
-    # Send harvest record
-    ierr = harvest_send(hlog)
+    # [7] Run computations
+    compute_matrix_calculation!(intr, ctrl)
+    compute_torque_all_methods!(intr, ctrl)
     
-    # Display timer and stop
-    if verbose
-        timer(mode=1)
-        println(" PENTRC STOP => normal termination.")
+    # [8] Prepare output
+    prepare_output(intr, ctrl)
+    
+    # [9] Print summary
+    if ctrl.verbose
+        elapsed = time() - start_time
+        println()
+        println("PENTRC STOP => normal termination")
+        @printf("Elapsed time: %.2f seconds\n", elapsed)
+        println("=" ^ 50)
     end
+    
+    return intr
 end
 
-# Run main program
+# Allow standalone execution
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    if length(ARGS) < 1
+        error("Usage: julia Main.jl <path/to/config>")
+    end
+    config_path = ARGS[1]
+    Main(config_path)
 end
