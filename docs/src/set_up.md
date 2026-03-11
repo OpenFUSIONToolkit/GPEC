@@ -75,7 +75,7 @@ Clone it from GitHub directly to your virtual machine.
         julia
         ```
     2. In Julia REPL:
-        ``` julia
+        ```julia
         using Pkg
         Pkg.instantiate()       # install recorded dependencies
         Pkg.add("Preferences")  # install missing dependency if needed
