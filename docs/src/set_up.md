@@ -61,28 +61,7 @@
         julia --version
         ```
 
-4. Install Python/Jupyter in WSL
-
-   This step is only really required if you want to run the `.ipynb` test notebooks. You do not necessarily need Python3 installed, but Jupyter runs on a Python server.
-   If you do not want to install Python3 and Jupyter, you can install the "IJulia" package to your Julia environment instead and run the command 'notebook()' in the terminal.
-   1. To install Python3 and Jupyter notebooks, use these commands
-        ```shell
-        sudo apt install python3-pip python3-venv -y
-        python3 -m pip install --user jupyter jupyterlab notebook ipykernel
-        ```
-    ⚠ Important: Add local Python scripts to PATH:
-
-        ```shell
-        echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
-        source ~/.bashrc
-        ```
-    2. Verify it is properly installed
-
-        ```shell
-        jupyter --version
-        ```
-
-5. Clone GPEC into your WSL home folder.
+4. Clone GPEC into your WSL home folder.
 Clone it from GitHub directly to your virtual machine.
 
     ```shell
@@ -90,7 +69,7 @@ Clone it from GitHub directly to your virtual machine.
     cd GeneralizedPerturbedEquilibrium
     ```
 
-6. Install the Julia packages for GPEC
+5. Install the Julia packages for GPEC
     1. Launch Julia:
         ```shell
         julia
@@ -100,21 +79,11 @@ Clone it from GitHub directly to your virtual machine.
         using Pkg
         Pkg.instantiate()       # install recorded dependencies
         Pkg.add("Preferences")  # install missing dependency if needed
-        Pkg.build("IJulia")     # rebuild kernel
         Pkg.precompile()        # precompile all packages - probably unnecessary
         ```
 
-7. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
-    1. To open a .ipynb notebook
-        1. Launch Jupyter from WSL, make sure you have exited Julia using the `exit()` command and then type in the shell
-        ```shell
-        jupyter notebook --no-browser
-        ```
-        It will print a URL with a token.
-
-        2. Copy the URL into your Windows browser **OR** open the notebook in VS Code using the **Remote - WSL** extension.
-
-    2. (Optionally) Integrate WSL with VS Code
+6. At this point, you should be able to run the code or connect VS Code to your WSL session.
+    1. (Optionally) Integrate WSL with VS Code
         1. Install **Remote - WSL** extension in VS Code.
         2. Open VS Code → Connect To → Connect to WSL.
         3. Click Open Folder and then navigate to the GPEC folder on your VM. Open your GPEC folder from WSL: ~/GeneralizedPerturbedEquilibrium.
@@ -122,14 +91,8 @@ Clone it from GitHub directly to your virtual machine.
         If this is not working, you can launch vscode from the WSL shell you have using the command `code .`
 
         4. Open a terminal inside VS Code — it will automatically use WSL/Ubuntu.
-        5. You can now run:
-            ```shell
-            julia       # run scripts
-            jupyter notebook --no-browser
-            ```
-
-        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the "Select Kernel" button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL. All dependencies are accessible.
-    3.  Run GPEC
+        5. You can now run Julia scripts directly from the terminal.
+    2. Run GPEC
         1. Launch Julia and run your scripts as usual:
             ```shell
             include("path/to/script.jl")
@@ -147,7 +110,7 @@ Keep this Terminal window open throughout the installation process.
 
 ### 1. Install Xcode Command Line Tools
 
-These tools provide the compilers needed to build Fortran code.
+These tools provide the compilers and build utilities needed by GPEC's dependencies.
 
 1. Open Terminal and run:
    ```bash
@@ -185,24 +148,9 @@ Homebrew makes it easy to install software on macOS. If you already have Homebre
    brew --version
    ```
 
-### 3. Install Fortran Compiler
+### 3. Install Julia
 
-The Fortran compiler is needed to build JPEC's Fortran components.
-
-1. Install GCC (which includes gfortran):
-   ```bash
-   brew install gcc
-   ```
-   This may take several minutes to complete.
-
-2. Verify gfortran is installed:
-   ```bash
-   gfortran --version
-   ```
-
-### 4. Install Julia
-
-Julia is the programming language JPEC is written in.
+Julia is the programming language GPEC is written in.
 
 **Option A: Install via Homebrew (Recommended for beginners)**
 
@@ -237,30 +185,11 @@ Julia is the programming language JPEC is written in.
    julia --version
    ```
 
-### 5. Install Python and Jupyter (For Running Notebooks)
+### 4. Clone the GPEC Repository
 
-Jupyter notebooks (`.ipynb` files) require Python. If you only want to run Julia scripts and not notebooks, you can skip this step.
+Now we'll download the GPEC code from GitHub.
 
-1. Install Python via Homebrew:
-   ```bash
-   brew install python
-   ```
-
-2. Install Jupyter:
-   ```bash
-   pip3 install jupyter jupyterlab notebook ipykernel
-   ```
-
-3. Verify Jupyter is installed:
-   ```bash
-   jupyter --version
-   ```
-
-### 6. Clone the JPEC Repository
-
-Now we'll download the JPEC code from GitHub.
-
-1. Choose where you want to put JPEC. For example, your home directory:
+1. Choose where you want to put GPEC. For example, your home directory:
    ```bash
    cd ~
    ```
@@ -270,70 +199,26 @@ Now we'll download the JPEC code from GitHub.
    cd ~/Code
    ```
 
-2. Clone JPEC from GitHub:
+2. Clone GPEC from GitHub:
    ```bash
-   git clone https://github.com/OpenFUSIONToolkit/JPEC.git
+   git clone https://github.com/OpenFUSIONToolkit/GeneralizedPerturbedEquilibrium.git
    ```
    If you don't have `git` installed, macOS will prompt you to install it.
 
-3. Enter the JPEC directory:
+3. Enter the GPEC directory:
    ```bash
-   cd JPEC
+   cd GeneralizedPerturbedEquilibrium
    ```
 
-### 7. Build Fortran Dependencies
+### 5. Install Julia Packages
 
-JPEC includes Fortran code that needs to be compiled into libraries.
+Now we'll install all the Julia packages that GPEC depends on.
 
-1. Navigate to the Splines Fortran source folder:
-   ```bash
-   cd ~/Code/JPEC/src/Splines/fortran
-   ```
-   **Note:** Adjust the path if you cloned JPEC to a different location (e.g., `~/JPEC` instead of `~/Code/JPEC`).
-
-2. Clean any previous builds:
-   ```bash
-   make clean
-   ```
-
-3. Build the Fortran library:
-   ```bash
-   make
-   ```
-   You should see compilation messages and eventually "Build complete!"
-
-4. Verify the spline library was created:
-   ```bash
-   ls -l ../../../deps/libspline.dylib
-   ```
-   You should see the file listed.
-
-5. Build the Vacuum Fortran library:
-   ```bash
-   cd ~/Code/JPEC/src/Vacuum/fortran
-   make clean
-   make
-   ```
-
-6. Verify the vacuum library was created:
-   ```bash
-   ls -l ../../../deps/libvac.dylib
-   ```
-
-7. Return to the JPEC root directory:
-   ```bash
-   cd ~/Code/JPEC
-   ```
-
-### 8. Install Julia Packages
-
-Now we'll install all the Julia packages that JPEC depends on.
-
-1. Launch Julia from the JPEC directory:
+1. Launch Julia from the GPEC directory:
    ```bash
    julia --project=.
    ```
-   The `--project=.` flag tells Julia to use the JPEC project environment.
+   The `--project=.` flag tells Julia to use the GPEC project environment.
 
 2. You should now see the Julia prompt: `julia>`
 
@@ -344,92 +229,55 @@ Now we'll install all the Julia packages that JPEC depends on.
    ```
    This will download and install all required packages. It may take several minutes the first time.
 
-4. Build the Julia kernel for Jupyter (if you installed Jupyter):
-   ```julia
-   Pkg.add("IJulia")
-   Pkg.build("IJulia")
-   ```
-
-5. Precompile all packages (optional, but speeds up first use):
+4. Precompile all packages (optional, but speeds up first use):
    ```julia
    Pkg.precompile()
    ```
 
-6. Test that JPEC loads correctly:
+5. Test that GPEC loads correctly:
    ```julia
-   using JPEC
+   using GeneralizedPerturbedEquilibrium
    ```
    If you see no errors, everything is working!
 
-7. Exit Julia:
+6. Exit Julia:
    ```julia
    exit()
    ```
 
-### 9. Run the Example Notebook
+### 6. Run an Example
 
-Now you're ready to run the example!
+Now you're ready to run GPEC! See the [Running GPEC](#running-gpec) section below for full details. As a quick test:
 
-1. Make sure you're in the JPEC directory:
+1. Make sure you're in the GPEC directory:
    ```bash
-   cd ~/Code/JPEC
+   cd ~/Code/GeneralizedPerturbedEquilibrium
    ```
 
-2. Start Jupyter:
+2. Run GPEC on one of the included examples:
    ```bash
-   jupyter notebook
+   ./gpec examples/DIIID-like_ideal_example
    ```
-   This will open Jupyter in your web browser.
 
-3. In the Jupyter interface, navigate to:
-   ```
-   examples/DIIID-like_ideal_example/run_and_analyze.ipynb
-   ```
-   Click on the notebook to open it.
+   The first time you run GPEC, it will take a few minutes to compile. Subsequent runs will be faster.
 
-4. Select the Julia kernel:
-   - If prompted to select a kernel, choose "Julia 1.11" (or whatever version you installed)
-   - If the kernel is already selected, you're ready to go!
-
-5. Run the notebook:
-   - Click "Cell" → "Run All" from the menu, or
-   - Press `Shift + Enter` to run each cell one at a time
-
-   The first time you run the notebook, it will take a few minutes to compile. Subsequent runs will be faster.
-
-### 10. Troubleshooting
-
-**If you get an error about missing libraries:**
-
-Make sure the Fortran libraries are built. Run from the JPEC directory:
-```bash
-ls deps/
-```
-You should see `libspline.dylib` and `libvac.dylib`. If not, repeat step 7.
+### 7. Troubleshooting
 
 **If Julia can't find packages:**
 
 Make sure you're running Julia with the project environment:
 ```bash
-cd ~/Code/JPEC
+cd ~/Code/GeneralizedPerturbedEquilibrium
 julia --project=.
 ```
 
-**If the Jupyter kernel isn't found:**
-
-Rebuild IJulia:
-```bash
-julia --project=. -e 'using Pkg; Pkg.build("IJulia")'
-```
-Then restart Jupyter.
-
 **If you get permission errors:**
 
-Make sure you have write permissions in the JPEC directory. You may need to use `sudo` for some Homebrew commands, but avoid using `sudo` with Julia commands.
+Make sure you have write permissions in the GPEC directory. You may need to use `sudo` for some Homebrew commands, but avoid using `sudo` with Julia commands.
 
 ### Alternative: Using VS Code (Optional)
 
-If you prefer using VS Code instead of Jupyter in the browser:
+VS Code provides a convenient IDE for developing with GPEC:
 
 1. Install VS Code from [https://code.visualstudio.com/](https://code.visualstudio.com/)
 
@@ -437,17 +285,15 @@ If you prefer using VS Code instead of Jupyter in the browser:
    - Open VS Code
    - Click the Extensions icon (or press `Cmd + Shift + X`)
    - Search for "Julia" and install the official Julia extension
-   - Search for "Jupyter" and install the Jupyter extension
 
-3. Open the JPEC folder in VS Code:
+3. Open the GPEC folder in VS Code:
    - Click File → Open Folder
-   - Navigate to and select your JPEC directory
+   - Navigate to and select your GPEC directory
 
-4. Open the notebook `examples/DIIID-like_ideal_example/run_and_analyze.ipynb`
-
-5. Click "Select Kernel" in the top right and choose "Julia 1.11"
-
-6. Run the cells using `Shift + Enter`
+4. Open a terminal inside VS Code (`Ctrl + `` ` ``) and run scripts directly:
+   ```bash
+   julia --project=. path/to/script.jl
+   ```
 
 ## Running GPEC
 
@@ -483,7 +329,7 @@ The script will:
 
 ### As a Julia Library
 
-You can also use GPEC programmatically in your own Julia scripts or notebooks:
+You can also use GPEC programmatically in your own Julia scripts:
 
 ```julia
 using GeneralizedPerturbedEquilibrium
@@ -517,12 +363,11 @@ See the example directories for complete configuration file templates.
 
 ## Pre-commit Hooks (Optional Developer Tools)
 
-The repository uses pre-commit hooks to maintain code quality and prevent noisy commits from Jupyter notebook metadata and outputs.
+The repository uses pre-commit hooks to maintain code quality.
 
 ### Why Use Pre-commit Hooks?
 
 Pre-commit hooks automatically:
-- Strip Jupyter notebook outputs, execution counts, and metadata (prevents merge conflicts and noisy diffs)
 - Format Julia code according to `.JuliaFormatter.toml` settings
 - Remove trailing whitespace and fix line endings
 - Validate YAML/TOML syntax
@@ -562,19 +407,4 @@ In rare cases where you need to bypass the hooks:
 git commit --no-verify
 ```
 
-However, this is discouraged as it may introduce notebook clutter or formatting inconsistencies.
-
-### Optional: Standalone nbstripout Filter
-
-For additional protection beyond pre-commit, you can install nbstripout as a git filter:
-
-```bash
-# Install nbstripout globally
-pip install nbstripout
-
-# Install filter for this repository
-cd /path/to/GPEC
-nbstripout --install
-```
-
-This ensures notebooks are cleaned even if pre-commit is bypassed with `--no-verify`. However, this is **optional** and not required for normal development - the pre-commit hook is sufficient for most workflows.
+However, this is discouraged as it may introduce formatting inconsistencies.
