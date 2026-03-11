@@ -290,7 +290,7 @@ VS Code provides a convenient IDE for developing with GPEC:
    - Click File → Open Folder
    - Navigate to and select your GPEC directory
 
-4. Open a terminal inside VS Code (`Ctrl + `` ` ``) and run scripts directly:
+4. Open a terminal inside VS Code (Terminal → New Terminal) and run scripts directly:
    ```bash
    julia --project=. path/to/script.jl
    ```
