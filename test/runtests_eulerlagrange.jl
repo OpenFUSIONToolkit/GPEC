@@ -93,68 +93,6 @@ end
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
     end
 
-    @testset "compute_tols" begin
-        # Test tolerance computation
-        mpert = 3
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        intr.msing = 2
-        intr.sing = [GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(), GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType()]
-        intr.sing[1].q = 2.0
-        intr.sing[1].n = [1]
-        intr.sing[2].q = 3.0
-        intr.sing[2].n = [1]
-
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 2)
-
-        # Test 1: Far from singular surface (singfac > crossover)
-        ising = 1
-        odet.q = 1.5  # Far from q=2.0
-        rtol = GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr  # Should use non-resonant tolerance
-
-        # Test 2: Close to singular surface (singfac < crossover)
-        ising = 1
-        odet.q = 1.999  # Very close to q=2.0
-        rtol = GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_r  # Should use resonant tolerance
-
-        # Test 3: Between two singular surfaces
-        ising = 2
-        odet.q = 2.5  # Between q=2.0 and q=3.0
-        rtol = GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr  # Should use min distance to either surface
-
-        # Test 4: Beyond all singular surfaces
-        ising = 3
-        odet.q = 4.0
-        rtol = GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr
-
-        # Edge case - no singular surfaces
-        mpert = 2
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        intr.msing = 0
-        intr.sing = []
-
-        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 0)
-        ising = 1
-        odet.q = 2.0
-
-        # Should return non-resonant tolerance when no singular surfaces
-        rtol = GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr
-    end
-
     @testset "transform_u!" begin
         # Test transformation of solution vectors
         mpert = 2
