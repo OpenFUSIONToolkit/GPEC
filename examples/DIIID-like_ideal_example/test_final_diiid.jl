@@ -1,10 +1,10 @@
-# ADVISOR TEST - REAL DIIID EXAMPLE
+#REAL DIIID EXAMPLE
 
 using HDF5, TOML, JPEC
 import EFIT, EFIT.IMASdd
 
 println("="^70)
-println("ADVISOR TEST: REAL DIII-D TOKAMAK EXAMPLE")
+println("REAL DIII-D TOKAMAK EXAMPLE")
 println("Testing eigenvalue calculation: EFIT vs IMAS")
 println("="^70)
 println()
@@ -64,7 +64,7 @@ close(h5_imas)
 
 for i in 1:min(5, length(et_efit))
     match = (et_efit[i] == et_imas[i])
-    println("Mode $i: $(match ? "✅ EXACT MATCH" : "❌")")
+    println("Mode $i: $(match ? " EXACT MATCH" : "")")
     println("  EFIT: $(et_efit[i])")
     println("  IMAS: $(et_imas[i])")
     println()
@@ -74,17 +74,17 @@ all_match = (et_efit == et_imas)
 println("="^70)
 if all_match
     println()
-    println("    ✅ ✅ ✅  SUCCESS!  ✅ ✅ ✅")
+    println(" SUCCESS! ")
     println()
     println("  ALL $(length(et_efit)) EIGENVALUES MATCH EXACTLY!")
     println()
     println("  EFIT and IMAS produce IDENTICAL results")
     println("  on real-world DIII-D tokamak data!")
     println()
-    println("  ✓ ADVISOR'S REQUIREMENT SATISFIED")
+    println(" ")
     println()
 else
-    println("❌ Diff: $(maximum(abs.(et_efit .- et_imas)))")
+    println(" Diff: $(maximum(abs.(et_efit .- et_imas)))")
 end
 println("="^70)
 
