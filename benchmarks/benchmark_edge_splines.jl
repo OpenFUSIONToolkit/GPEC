@@ -2,7 +2,7 @@
 Benchmark and visualization script for edge inverse splines (near-separatrix extension).
 
 This script demonstrates the edge inverse spline construction introduced for diverted
-plasmas, allowing JPEC to integrate beyond psihigh toward the separatrix.
+plasmas, allowing GPEC to integrate beyond psihigh toward the separatrix.
 
 For a diverted plasma, it produces the following plots saved alongside the input toml:
   1. iota (= 1/q) vs psin: shows the iota inner spline descending smoothly to 0 at psin=1
@@ -11,19 +11,19 @@ For a diverted plasma, it produces the following plots saved alongside the input
   4. R(psin) and Z(psin) for fixed poloidal angles toward the edge
   5. Flux surface cross-section with x-point marked
   6. Rational surface density in the edge zone
-  7. et[1] vs psi in the edge zone (stability diagnostic, requires a prior jpec.h5 output)
+  7. et[1] vs psi in the edge zone (stability diagnostic, requires a prior gpec.h5 output)
 
 For a limited plasma (no x-point), the script prints a summary and exits since no
 edge inverse splines are built.
 
 Usage:
-    julia --project=. benchmarks/benchmark_edge_splines.jl [path/to/jpec.toml]
+    julia --project=. benchmarks/benchmark_edge_splines.jl [path/to/gpec.toml]
 
-If no path is given, defaults to examples/DIIID-like_ideal_example/jpec.toml.
+If no path is given, defaults to examples/DIIID-like_ideal_example/gpec.toml.
 """
 
-using JPEC
-using JPEC.Equilibrium: InverseCubicSpline
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium: InverseCubicSpline
 using FastInterpolations
 using HDF5
 using Roots
@@ -32,7 +32,7 @@ using TOML
 using Printf
 
 # --- Configuration ---
-toml_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "jpec.toml")
+toml_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example", "gpec.toml")
 toml_path = abspath(toml_path)
 output_dir = dirname(toml_path)
 
@@ -45,8 +45,8 @@ println()
 # --- Load equilibrium ---
 println("Loading equilibrium...")
 inputs = TOML.parsefile(toml_path)
-eq_config = JPEC.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], output_dir)
-pe = JPEC.Equilibrium.setup_equilibrium(eq_config)
+eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], output_dir)
+pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
 profiles = pe.profiles
 params = pe.params
 psihigh = pe.config.psihigh
@@ -345,7 +345,7 @@ println("Saved: edge_spline_rational_surfaces.png")
 #
 # Above psihigh: wv is frozen at psihigh (ExtendExtrap) and resonant spikes near
 # rational surfaces (singfac → 0) are subsampled for rendering performance.
-h5file = joinpath(output_dir, "jpec.h5")
+h5file = joinpath(output_dir, "gpec.h5")
 if isfile(h5file)
     h5open(h5file, "r") do f
         if haskey(f, "integration/psi_edge_scan") && haskey(f, "integration/et_edge_scan")
@@ -493,11 +493,11 @@ if isfile(h5file)
             savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
             println("Saved: edge_spline_stability.png")
         else
-            println("Note: integration/psi_edge_scan not found in jpec.h5 — run JPEC with psiedge < psilim first")
+            println("Note: integration/psi_edge_scan not found in gpec.h5 — run GPEC with psiedge < psilim first")
         end
     end
 else
-    println("Note: jpec.h5 not found in $output_dir — run JPEC first to generate edge stability plot")
+    println("Note: gpec.h5 not found in $output_dir — run GPEC first to generate edge stability plot")
 end
 
 # --- Plot 8: X-point asymptotic geometry — rfac(ψ) at selected θ values ---
@@ -537,7 +537,7 @@ end
 # then read and plot the θ-integrated GS error per flux surface.
 println("Running GSE diagnostics (diagnose_src=true)...")
 pe.params.diagnose_src = true
-JPEC.Equilibrium.equilibrium_gse!(pe)
+GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_gse!(pe)
 pe.params.diagnose_src = false
 
 # --- Compute far-edge GSE using X-point asymptotic geometry with constant F ---

@@ -559,7 +559,7 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
             R_n = r_xpoint + s * (R_high[itheta] - r_xpoint)
             Z_n = z_xpoint + s * (Z_high[itheta] - z_xpoint)
 
-            # rfac² and offset in JPEC pseudo-circular coordinates
+            # rfac² and offset in GPEC pseudo-circular coordinates
             rfac_sq_n = (R_n - ro)^2 + (Z_n - zo)^2
             eta_n_raw = atan(Z_n - zo, R_n - ro)
 

@@ -114,9 +114,9 @@
     @testset "Edge inverse splines (diverted plasma)" begin
         # Load the DIIID-like diverted equilibrium
         diiid_dir = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-        diiid_config = JPEC.Equilibrium.EquilibriumConfig(;
+        diiid_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_type="efit",
-            eq_filename=joinpath(diiid_dir, "TKMKR_D3Dlike_default_Hmode.geqdsk"),
+            eq_filename=joinpath(diiid_dir, "TkMkr_D3Dlike_Hmode.geqdsk"),
             jac_type="hamada",
             grid_type="ldp",
             psilow=1e-4,
@@ -124,7 +124,7 @@
             mpsi=128,
             mtheta=256
         )
-        pe_diverted = JPEC.Equilibrium.setup_equilibrium(diiid_config)
+        pe_diverted = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(diiid_config)
 
         psihigh = pe_diverted.config.psihigh
         ics = pe_diverted.profiles.q_spline_iota_inverse

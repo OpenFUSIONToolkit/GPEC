@@ -32,7 +32,7 @@ vac_flag = true               # Compute plasma, vacuum, and total energies for f
 mer_flag = true               # Evaluate the Mercier criterian
 
 edge_layer_width = 1e-5       # psifac spacing below which edge rational surfaces are ignored (diverted only)
-psiedge = 0.800               # If less than psilim, scans dW(psi) from psiedge to psilim and truncates at peak
+psiedge = 0.970               # If less than psilim, scans dW(psi) from psiedge to psilim and truncates at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
