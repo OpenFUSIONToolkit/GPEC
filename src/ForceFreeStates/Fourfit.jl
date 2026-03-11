@@ -45,8 +45,9 @@ The metric coefficients stored in `metric.fs` include:
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
   - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
-  - `psilim::Float64`: Upper psi limit for the metric grid (default: Inf = full grid). Nodes
-    beyond psilim are excluded to avoid near-X-point metric divergence in diverted plasmas.
+  - `psilim::Float64`: Upper psi limit for the metric grid (default: Inf = full grid). Always
+    capped at psihigh internally to exclude far-edge nodes (X-point geometry gives diverging
+    metric near the separatrix). Useful for limited plasmas where psilim < psihigh.
 
 ### Returns
 
@@ -63,12 +64,17 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    # Use the rzphi_xs grid truncated at psilim. The far-edge X-point asymptotic extension
-    # (rzphi_xs beyond psihigh) gives a diverging metric near the separatrix, so we cap
-    # the grid at psilim (the outermost rational surface found by sing_find!/sing_lim!).
+    # Use the rzphi_xs grid truncated at psihigh (core grid only). Far-edge nodes beyond
+    # psihigh have diverging metric near the X-point (J→∞) which makes the ODE extremely
+    # stiff above psihigh. The EL integrator queries FGK splines above psihigh via
+    # ExtendExtrap (frozen at psihigh values), which is physically correct since F' ≈ 0,
+    # P' ≈ 0 near the separatrix. The psilim parameter is retained for future use but
+    # currently capped at psihigh to exclude far-edge geometry.
     profiles = equil.profiles
+    psihigh_cap = profiles.xs[end]  # last core psi = psihigh
+    psilim_capped = min(psilim, psihigh_cap)
     mpsi_full = length(equil.rzphi_xs)
-    mpsi = isfinite(psilim) ? searchsortedlast(equil.rzphi_xs, psilim) : mpsi_full
+    mpsi = isfinite(psilim_capped) ? searchsortedlast(equil.rzphi_xs, psilim_capped) : mpsi_full
     mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
