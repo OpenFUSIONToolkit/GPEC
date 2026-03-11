@@ -4,6 +4,7 @@ CurrentModule = GeneralizedPerturbedEquilibrium
 
 ```@eval
 using Markdown
+using GeneralizedPerturbedEquilibrium
 Markdown.parse(read(joinpath(pkgdir(GeneralizedPerturbedEquilibrium), "README.md"), String))
 ```
 
