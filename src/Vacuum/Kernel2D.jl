@@ -1,236 +1,247 @@
-# Gaussian quadrature weights and points for 8-point integration (used for kernel! function)
-const GAUSSIANWEIGHTS = [0.101228536290376, 0.222381034453374, 0.313706645877887, 0.362683783378362,
-    0.362683783378362, 0.313706645877887, 0.222381034453374, 0.101228536290376]
+"""
+    GaussLegendreRule{N,T}
 
-const GAUSSIANPOINTS = [-0.960289856497536, -0.796666477413627, -0.525532409916329, -0.183434642495650,
-    0.183434642495650, 0.525532409916329, 0.796666477413627, 0.960289856497536]
+Allocation-free Gauss–Legendre nodes/weights on the canonical interval [-1, 1].
+Stored as `SVector`s so tight loops can index them efficiently.
+"""
+struct GaussLegendreRule{N,T}
+    x::SVector{N,T}
+    w::SVector{N,T}
+end
 
-# 32-point Gaussian quadrature abscissae (used for Pn_minus_half_2007 function when nρ̂>0.1)
-const GAUSSIANWEIGHTS32 = [
-    0.007018610009470096600, 0.016274394730905670605,
-    0.025392065309262059456, 0.034273862913021433103,
-    0.042835898022226680657, 0.050998059262376176196,
-    0.058684093478535547145, 0.065822222776361846838,
-    0.072345794108848506225, 0.078193895787070306472,
-    0.083311924226946755222, 0.087652093004403811143,
-    0.091173878695763884713, 0.093844399080804565639,
-    0.095638720079274859419, 0.096540088514727800567,
-    0.096540088514727800567, 0.095638720079274859419,
-    0.093844399080804565639, 0.091173878695763884713,
-    0.087652093004403811143, 0.083311924226946755222,
-    0.078193895787070306472, 0.072345794108848506225,
-    0.065822222776361846838, 0.058684093478535547145,
-    0.050998059262376176196, 0.042835898022226680657,
-    0.034273862913021433103, 0.025392065309262059456,
-    0.016274394730905670605, 0.007018610009470096600
-]
+@inline function gausslegendre_rule(::Val{N}) where {N}
+    x, w = gausslegendre(N) # canonical [-1, 1]
+    return GaussLegendreRule{N,Float64}(
+        SVector{N,Float64}(ntuple(i -> Float64(x[i]), N)),
+        SVector{N,Float64}(ntuple(i -> Float64(w[i]), N))
+    )
+end
 
-const GAUSSIANPOINTS32 = [
-    -0.997263861849481563545, -0.985611511545268335400,
-    -0.964762255587506430774, -0.934906075937739689171,
-    -0.896321155766052123965, -0.849367613732569970134,
-    -0.794483795967942406963, -0.732182118740289680387,
-    -0.663044266930215200975, -0.587715757240762329041,
-    -0.506899908932229390024, -0.421351276130635345364,
-    -0.331868602282127649780, -0.239287362252137074545,
-    -0.144471961582796493485, -0.048307665687738316235,
-    0.048307665687738316235, 0.144471961582796493485,
-    0.239287362252137074545, 0.331868602282127649780,
-    0.421351276130635345364, 0.506899908932229390024,
-    0.587715757240762329041, 0.663044266930215200975,
-    0.732182118740289680387, 0.794483795967942406963,
-    0.849367613732569970134, 0.896321155766052123965,
-    0.934906075937739689171, 0.964762255587506430774,
-    0.985611511545268335400, 0.997263861849481563545
-]
+# Precomputed Gauss-Legendre rule used in the hot path (`kernel!`).
+const GL8 = gausslegendre_rule(Val(8))
 
 """
-    kernel!(grad_greenfunction_mat, greenfunction_mat, x_obspoints, z_obspoints, x_sourcepoints, z_sourcepoints, j1, j2, isgn, iops, inputs; xwall=nothing, zwall=nothing)
+    precompute_lagrange_stencils(gaussian_points)
+
+Precompute 5-point Lagrange interpolation stencils for Gaussian quadrature points.
+
+Returns a tuple `(left, right)` where each entry is a Vector of SVector{5,Float64}
+containing the stencil weights for points on the left/right panel.
+"""
+function precompute_lagrange_stencils(gaussian_points::AbstractVector{<:Real})
+    stencil_points = SVector(-2, -1, 0, 1, 2)
+    npts = length(gaussian_points)
+    left = Vector{SVector{5,Float64}}(undef, npts)
+    right = Vector{SVector{5,Float64}}(undef, npts)
+
+    for ig in 1:npts
+        p_left = -1.0 + gaussian_points[ig]
+        p_right = 1.0 + gaussian_points[ig]
+
+        left[ig] = ntuple(5) do i
+            xi = stencil_points[i]
+            prod(j -> j == i ? 1.0 : (p_left - stencil_points[j]) / (xi - stencil_points[j]), 1:5)
+        end |> SVector
+
+        right[ig] = ntuple(5) do i
+            xi = stencil_points[i]
+            prod(j -> j == i ? 1.0 : (p_right - stencil_points[j]) / (xi - stencil_points[j]), 1:5)
+        end |> SVector
+    end
+
+    return left, right
+end
+
+# Precomputed 5-point Lagrange stencils for the 8-point Gaussian nodes.
+const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
+
+# Pre-computed Gauss quadrature constants (_PN_TG02, _PN_WANUMR, _PN_AGAUS, _PN_BGAUS)
+# and per-n sinh/cosh cache are defined in PnQuadCache.jl.
+
+"""
+    kernel!(grad_greenfunction, greenfunction, observer, source, n)
 
 Compute kernels of integral equation for Laplace's equation in a torus.
-
 **WARNING: This kernel only supports closed toroidal walls currently.
 The residue calculation needs to be updated for open walls.**
 
 # Arguments
 
-  - `grad_greenfunction_mat`: Gradient Green's function matrix (output)
-  - `greenfunction_mat`: Green's function matrix (output)
-  - `x_obspoints`: Observer x coordinates (R coordinates)
-  - `z_obspoints`: Observer z coordinates (Z coordinates)
-  - `x_sourcepoints`: Source x coordinates (R coordinates)
-  - `z_sourcepoints`: Source z coordinates (Z coordinates)
-  - `j1/j2`: Block index for observer/source (1=plasma, 2=wall)
+  - `grad_greenfunction`: Gradient Green's function matrix (output)
+  - `greenfunction`: Green's function matrix (output)
+  - `observer`: Observer geometry struct (PlasmaGeometry or WallGeometry)
+  - `source`: Source geometry struct (PlasmaGeometry or WallGeometry)
   - `n`: Toroidal mode number
 
 # Returns
 
-Modifies `grad_greenfunction_mat` and `greenfunction_mat` in place.
-Note that greenfunction_mat is zeroed each time this function is called,
-but grad_greenfunction_mat is not since it fills a different block of the
+Modifies `grad_greenfunction` and `greenfunction` in place.
+Note that greenfunction is zeroed each time this function is called,
+but grad_greenfunction is not since it fills a different block of the
 (2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
 
   - Uses Simpson's rule for integration away from singular points
   - Uses Gaussian quadrature near singular points for improved accuracy
-  - Implements analytical singularity removal following Chance 1997
+  - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
-function kernel!(
-    grad_greenfunction_mat::Matrix{Float64},
-    greenfunction_mat::Matrix{Float64},
-    x_obspoints::Vector{Float64},
-    z_obspoints::Vector{Float64},
-    x_sourcepoints::Vector{Float64},
-    z_sourcepoints::Vector{Float64},
-    j1::Int,
-    j2::Int,
+@with_pool pool function compute_2D_kernel_matrices!(
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
+    observer::Union{PlasmaGeometry,WallGeometry},
+    source::Union{PlasmaGeometry,WallGeometry},
     n::Int
 )
 
-    # These used to be function arguments, but can just set inside here based on j1/j2
-    plasma_plasma_block = j1 == 1 && j2 == 1 # previously iops
-    plasma_is_source = j2 == 1 # previously iopw
-    isgn = plasma_is_source ? -1 : 1
-
-    mtheta = length(x_obspoints)
+    mtheta = length(observer.x)
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
-    # Zero out greenfunction_mat at start of each kernel call (matches Fortran behavior)
-    fill!(greenfunction_mat, 0.0)
+    # Take a view of the corresponding block of the grad_greenfunction
+    col_index = (source isa PlasmaGeometry ? 1 : 2)
+    row_index = (observer isa PlasmaGeometry ? 1 : 2)
+    grad_greenfunction_block = view(
+        grad_greenfunction,
+        ((row_index-1)*mtheta+1):(row_index*mtheta),
+        ((col_index-1)*mtheta+1):(col_index*mtheta)
+    )
 
-    if mtheta != length(z_obspoints) || mtheta != length(x_sourcepoints) || mtheta != length(z_sourcepoints)
-        error("Length of input arrays (xobs, zobs, xsource, zsce) are different. All length should be the same")
-    end
+    # Zero out greenfunction at start of each kernel call
+    fill!(greenfunction, 0.0)
+    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    populate_greenfunction = source isa PlasmaGeometry
 
-    # S₁ᵢ in Chance 1997, eq.(78)
+    # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
     log_correction_0=16.0*dtheta*(log(2*dtheta)-68.0/15.0)/15.0
     log_correction_1=128.0*dtheta*(log(2*dtheta)-8.0/15.0)/45.0
     log_correction_2=4.0*dtheta*(7.0*log(2*dtheta)-11.0/15.0)/45.0
+    log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
 
-    # Used for Z'_θ and X'_θ in eq.(51)
-    # Close the loop for periodic BC by appending first point at the end
-    theta_closed = vcat(collect(theta_grid), theta_grid[end] + dtheta)
-    x_closed = vcat(x_sourcepoints, x_sourcepoints[1])
-    z_closed = vcat(z_sourcepoints, z_sourcepoints[1])
-    spline_x = cubic_interp(theta_closed, x_closed; bc=PeriodicBC())
-    spline_z = cubic_interp(theta_closed, z_closed; bc=PeriodicBC())
-    # Create derivative views once, reuse for all evaluations (avoids allocation per call)
+    # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
+    # This is constant for all source/observer point pairs within this kernel call.
+    gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
+
+    # Set up periodic splines used for off-grid Gaussian quadrature points
+    spline_x = cubic_interp(theta_grid, source.x; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    spline_z = cubic_interp(theta_grid, source.z; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
     d1_spline_x = deriv1(spline_x)
     d1_spline_z = deriv1(spline_z)
-    theta_vec = collect(theta_grid)
-    dx_dtheta = d1_spline_x.(theta_vec)
-    dz_dtheta = d1_spline_z.(theta_vec)
+
+    # Precompute 5-point Lagrange stencils for the 8-point Gaussian nodes.
+    stencils_left, stencils_right = GL8_LAGRANGE_STENCILS
+    sing_idx = zeros!(pool, Int, 5)
+
+    # Precompute source derivatives on the theta grid once used in Simpson integration
+    # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
+
+    # Call in-place API to avoid allocations
+    d1_spline_x(dx_dtheta_grid, theta_grid)
+    d1_spline_z(dz_dtheta_grid, theta_grid)
 
     # Loop through observer points
     for j in 1:mtheta
-        # Initialize variables
-        x_obs=x_obspoints[j]
-        z_obs=z_obspoints[j]
-        theta_obs=theta_grid[j]
-        grad_green_0 = 0.0 # simpson integral for coupling_0 (𝒥 ∇'𝒢⁰∇'ℒ)
-        # Workspace = view of appropriate row of grad_greenfunction_mat for this observer point
-        grad_green_work = @view(grad_greenfunction_mat[(j1-1)*mtheta+j, (j2-1)*mtheta .+ (1:mtheta)])
-
-        # Obtain nonsingular region (endpoints at j+2 and j-2, so exclude j-1, j, and j+1)
-        nonsing_src_indices = mod1.((j+2):(j+mtheta-2), mtheta) # mod1 ensures isrc is in [1, mtheta]
-
-        # Compute composite Simpson's 1/3 rule weights (https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson's_1/3_rule)
-        # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-        nsrc = length(nonsing_src_indices)
-        simpson_weights = dtheta / 3 .* [(k == 1 || k == nsrc) ? 1 : (iseven(k) ? 4 : 2) for k in 1:nsrc]
+        # Get observer coordinates
+        x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
         # Perform Simpson integration for nonsingular source points
-        for (isrc, wsimpson) in zip(nonsing_src_indices, simpson_weights)
-            x_source=x_sourcepoints[isrc]
-            z_source=z_sourcepoints[isrc]
+        # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
+        @inbounds for k in 1:(mtheta-3)
+            isrc = mod1(j + 1 + k, mtheta)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor)
 
-            # G_n is 2pi𝒢ⁿ; coupling_n is 𝒥 ∇'𝒢ⁿ∇'ℒ; coupling_0 is 𝒥 ∇'𝒢ⁿ∇'ℒ for n=0
-            G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_source, z_source, dx_dtheta[isrc], dz_dtheta[isrc], n)
+            # Composite Simpson's 1/3 rule weights, excluding singular points
+            # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
+            wsimpson = dtheta / 3 * ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
 
             # Sum contributions to Green's function matrices using Simpson weight
-            grad_green_work[isrc] += isgn * coupling_n * wsimpson
-            greenfunction_mat[j, isrc] += G_n * wsimpson
-            grad_green_0 += coupling_0 * wsimpson
+            if populate_greenfunction
+                greenfunction[j, isrc] += G_n * wsimpson
+            end
+            grad_greenfunction_block[j, isrc] += gradG_n * wsimpson
+            # Subtract regular integral component of δⱼᵢK⁰ [Chance Phys. Plasmas 1997 2161 eq. 83]
+            grad_greenfunction_block[j, j] -= gradG_0 * wsimpson
         end
 
         # Perform Gaussian quadrature for singular points (source = obs point)
-        # Get indices of the singularity region, [j-2, j-1, j, j+1, j+2]
-        js = mod.(j .+ ((mtheta-3):(mtheta+1)), mtheta) .+ 1
+        # Indices of the singularity region, [j-2, j-1, j, j+1, j+2] (allocation-free)
+        for (offset_idx, offset) in enumerate(-2:2)
+            sing_idx[offset_idx] = mod1(j + offset + mtheta, mtheta)
+        end
         # Integrate region of length 2 * dtheta on left/right of singularity
-        for region in ["left", "right"]
-            gauss_xleft = theta_obs - (region == "left" ? 2 * dtheta : 0)
-            gauss_xright = gauss_xleft + 2 * dtheta
-            gauss_xavg = (gauss_xright + gauss_xleft)/2
-            theta_gauss = gauss_xavg .+ GAUSSIANPOINTS .* dtheta # tgaus is 8 point gauss points, since GAUSSIANPOINTS is for only [-1,1]
-            for ig in 1:8 # 8-point Gaussian quadrature
+        for leftpanel in (true, false)
+            gauss_mid = theta_obs + (leftpanel ? -dtheta : dtheta)
+            @inbounds for ig in 1:8 # 8-point Gaussian quadrature
                 # Compute green function for this Gaussian point
-                theta_gauss0 = mod(theta_gauss[ig], 2π)
+                theta_gauss = gauss_mid + GL8.x[ig] * dtheta
+                theta_gauss0 = mod(theta_gauss, 2π)
                 x_gauss = spline_x(theta_gauss0)
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, coupling_n, coupling_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor)
 
-                # Add logarithm to G_n to analytically isolate the singularity (first type), Chance eq.(75)
-                G_n_nonsingular = plasma_plasma_block ? G_n + log((theta_obs-theta_gauss[ig])^2)/x_obs : G_n
+                # Get stencil and weight for the Gaussian point
+                s = leftpanel ? stencils_left[ig] : stencils_right[ig]
+                wgauss = GL8.w[ig] * dtheta
 
-                # Redefine hardcoded Gaussian weights on the interval [-1, 1] to physical interval with length 2 * dtheta
-                wgauss = GAUSSIANWEIGHTS[ig] * dtheta
-                # Calculate p = θ/Δ = (θⱼ - θ')/Δ
-                pgauss=(theta_gauss[ig]-theta_obs)/dtheta
-                # Compute 5-point Lagrange basis polynomials at the Gauss point and multiply by quadrature weight
-                A0 = (pgauss^2-1)*(pgauss^2-4)/4.0 * wgauss
-                A1_plus = -(pgauss+1)*pgauss*(pgauss^2-4)/6.0 * wgauss
-                A1_minus = -(pgauss-1)*pgauss*(pgauss^2-4)/6.0 * wgauss
-                A2_plus = (pgauss^2-1)*pgauss*(pgauss+2)/24.0 * wgauss
-                A2_minus = (pgauss^2-1)*pgauss*(pgauss-2)/24.0 * wgauss
-
-                # First type of singularity: 𝒢ⁿ, occurs plasma as source only (see RHS of Chance eqs. 26/27)
-                if plasma_is_source
-                    greenfunction_mat[j, js[1]] += G_n_nonsingular * A2_minus
-                    greenfunction_mat[j, js[2]] += G_n_nonsingular * A1_minus
-                    greenfunction_mat[j, js[3]] += G_n_nonsingular * A0
-                    greenfunction_mat[j, js[4]] += G_n_nonsingular * A1_plus
-                    greenfunction_mat[j, js[5]] += G_n_nonsingular * A2_plus
+                # First type of singularity: 𝒢ⁿ [Chance Phys. Plasmas 1997 2161 eq. 75]
+                if populate_greenfunction
+                    if observer isa PlasmaGeometry
+                        # Remove singular behavior by adding on leading-order term
+                        G_n += log((theta_obs - theta_gauss)^2) / x_obs
+                    end
+                    @inbounds for stencil_idx in 1:5
+                        greenfunction[j, sing_idx[stencil_idx]] += G_n * s[stencil_idx] * wgauss
+                    end
                 end
 
-                # Second type of singularity: 𝒦ⁿ
-                # Eq. 86: 𝒦ⁿαᵢ - δⱼᵢK⁰
-                grad_green_work[js[1]] += isgn * coupling_n * A2_minus
-                grad_green_work[js[2]] += isgn * coupling_n * A1_minus
-                grad_green_work[js[3]] += isgn * coupling_n * A0
-                grad_green_work[js[4]] += isgn * coupling_n * A1_plus
-                grad_green_work[js[5]] += isgn * coupling_n * A2_plus
+                # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
+                @inbounds for stencil_idx in 1:5
+                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * s[stencil_idx] * wgauss
+                end
                 # Subtract off the diverging singular n=0 component
-                grad_green_work[j] -= isgn * coupling_0 * wgauss
+                grad_greenfunction_block[j, j] -= gradG_0 * wgauss
             end
         end
 
-        # Set residue based on logic similar to Table I of Chance 1997 + existing δⱼᵢ in eq. 69
-        # Would need to pass in wall geometry to generalize this to open walls
-        is_closed_toroidal = true
-        if is_closed_toroidal
-            residue = (j1 == 2.0) ? 0.0 : (j2 == 1 ? 2.0 : -2.0) # Chance eq. 89
-        else
-            # TODO: this line can be gotten rid of if we are never doing open walls
-            residue = (j1 == j2) ? 2.0 : 0.0 # Chance eq. 90
-        end
-        # Subtract regular integral component of δⱼᵢK⁰ in eq. 83 and add residue value in eq. 89/90
-        grad_green_work[j] = grad_green_work[j] - isgn * grad_green_0 + residue
-
-        # Subtract off analytic singular integral from Chance eq.(75) if plasma-plasma block
-        if plasma_plasma_block
-            greenfunction_mat[j, js[1]] -= log_correction_2 / x_obs
-            greenfunction_mat[j, js[2]] -= log_correction_1 / x_obs
-            greenfunction_mat[j, js[3]] -= log_correction_0 / x_obs
-            greenfunction_mat[j, js[4]] -= log_correction_1 / x_obs
-            greenfunction_mat[j, js[5]] -= log_correction_2 / x_obs
+        # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] if plasma-plasma block
+        if populate_greenfunction && observer isa PlasmaGeometry
+            @inbounds for stencil_idx in 1:5
+                greenfunction[j, sing_idx[stencil_idx]] -= log_correction_array[stencil_idx] / x_obs
+            end
         end
     end
+
+    # Normals need to point outward from vacuum region. In VACUUM clockwise θ convention, normal points
+    # out of vacuum for wall but inward for plasma, so we multiply by -1 for plasma sources
+    if source isa PlasmaGeometry
+        grad_greenfunction_block .*= -1
+    end
+
+    # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
+    residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
+    @inbounds for i in 1:mtheta
+        grad_greenfunction_block[i, i] += residue
+    end
+
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
-    greenfunction_mat ./= 2π
+    if populate_greenfunction
+        greenfunction ./= 2π
+    end
+end
+
+# Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
+function kernel!(
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
+    observer::Union{PlasmaGeometry,WallGeometry},
+    source::Union{PlasmaGeometry,WallGeometry},
+    params::KernelParams2D
+)
+    return compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, params.n)
 end
 
 #############################################################
@@ -337,9 +348,14 @@ has a typo where the exponent should be -1/4 instead of +1/2.
   - Base cases computed from eqs. (48)-(50) using elliptic integrals
 """
 function Pn_minus_half_1997(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_1997!(P, s, n)
+end
+
+function Pn_minus_half_1997!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     #initialize
-    P = zeros(n + 2)
+    P .= 0.0
 
     # n = 0
     P[1] = P0_minus_half(s)
@@ -496,14 +512,17 @@ This implementation uses:
   - Reference: JCP 221 (2007) 330-348    # Constants
 """
 function Pn_minus_half_2007(s::Real, n::Int)
+    P = Vector{Float64}(undef, n + 2)
+    return Pn_minus_half_2007!(P, s, n)
+end
+
+function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 
     # Constants
-    sqpi = sqrt(π)
     pii = 2.0 / π
-    sqtwo = sqrt(2.0)
 
     # Initialize output array
-    P = zeros(n + 2)
+    P .= 0.0
 
     # Preliminary computations
     xxq = s * s
@@ -535,58 +554,38 @@ function Pn_minus_half_2007(s::Real, n::Int)
     # Use Gaussian integration if n*rhohat >= 0.1
     if n * rhohat >= 0.1
 
-        # Integration limits
-        xl = 0.0
-        xu = 5.0
+        pn_cache = get_pn_quad_cache(n)
 
-        # Transform to integration interval
-        agaus = 0.5 * (xu + xl)
-        bgaus = 0.5 * (xu - xl)
-
-        # Calculate integrals for P^n and P^{n+1}
         gint = 0.0
         gintp = 0.0
 
-        for ig in 1:32
-            tg0 = agaus + GAUSSIANPOINTS32[ig] * bgaus
-            tg02 = tg0 * tg0
-            tg1 = tg02 / (2.0 * n)
-            tg1p = tg02 / (2.0 * n + 2.0)
-            sinhtg1 = sinh(tg1)
-            sinhtg1p = sinh(tg1p)
-            sinhtg12 = sinhtg1 * sinhtg1
-            sinhtg12p = sinhtg1p * sinhtg1p
-            dnom = s * sinhtg12 + sinhtg1 * sqrt(1.0 + sinhtg12)
-            dnomp = s * sinhtg12p + sinhtg1p * sqrt(1.0 + sinhtg12p)
-            dnom = sqrt(dnom)
-            dnomp = sqrt(dnomp)
-            anumr = tg0 * exp(-tg02)
-            gint += GAUSSIANWEIGHTS32[ig] * anumr / dnom
-            gintp += GAUSSIANWEIGHTS32[ig] * anumr / dnomp
+        @inbounds for ig in 1:32
+            # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
+            # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
+            sh = pn_cache.sinh[ig]
+            ch = pn_cache.cosh[ig]
+            dnom = sqrt(muladd(s, sh * sh, sh * ch))
+
+            shp = pn_cache.sinhp[ig]
+            chp = pn_cache.coshp[ig]
+            dnomp = sqrt(muladd(s, shp * shp, shp * chp))
+
+            wanumr = _PN_WANUMR[ig]
+            gint = muladd(wanumr, inv(dnom), gint)
+            gintp = muladd(wanumr, inv(dnomp), gintp)
         end
 
-        gint *= bgaus
-        gintp *= bgaus
+        gint *= _PN_BGAUS
+        gintp *= _PN_BGAUS
 
-        # Calculate coefficients
+        # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
+        # The Γ-function prefactors and normalization constants are pre-cached in
+        # pn_cache.gauss_norm_n / pn_cache.gauss_norm_np1 (see PnQuadCache.jl for derivation).
         pcoef = sqrt((s - 1.0) / (s + 1.0))
+        pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
-        # Gamma functions: Gamma[1/2 - n] and Gamma[1/2 - (n+1)]
-        gamn = sqpi
-        gamp = -2.0 * sqpi
-
-        if n != 0
-            # Compute Gamma[1/2 - n] = sqpi / product(-(i-1) - 0.5 for i in 1:n)
-            gamn = sqpi / prod(-(i - 1) - 0.5 for i in 1:n)
-            gamp = -gamn / (n + 0.5)
-        end
-
-        # Final Legendre function values
-        gint = sqtwo * pcoef^n * gint / (n * sqpi * gamn)
-        gintp = sqtwo * pcoef^(n + 1) * gintp / ((n + 1.0) * sqpi * gamp)
-
-        P[end-1] = gint   # P^n_{-1/2}
-        P[end] = gintp    # P^{n+1}_{-1/2}
+        P[end-1] = pcoef_n * gint * pn_cache.gauss_norm_n    # P^n_{-1/2}
+        P[end] = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
 
     else
         # Use upward recurrence for small n*rhohat < 0.1
@@ -609,7 +608,7 @@ function Pn_minus_half_2007(s::Real, n::Int)
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; uselegacygreenfunction=false)
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
@@ -623,6 +622,9 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - `dx_dtheta`: Derivative ∂R'/∂θ at source point (Float64)
   - `dz_dtheta`: Derivative ∂Z'/∂θ at source point (Float64)
   - `n`: Toroidal mode number (Int)
+  - `gamma_prefactor`: Precomputed value of `2√π · Γ(1/2 - n)` [Chance Phys. Plasmas 1997 eq. 40].
+    Constant for a given `n`; callers in tight loops should compute this once and pass it in.
+    Defaults to `2 * sqrt(π) * gamma(0.5 - n)` if omitted.
   - `uselegacygreenfunction::Bool`: Flag to use the 1997 version of the Legendre function (default false, uses 2007 version)
 
 # Returns
@@ -638,7 +640,17 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - The coupling terms include the Jacobian factor from the coordinate transformation
   - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int; uselegacygreenfunction::Bool=false)
+@with_pool pool function green(
+    x_obs::Float64,
+    z_obs::Float64,
+    x_source::Float64,
+    z_source::Float64,
+    dx_dtheta::Float64,
+    dz_dtheta::Float64,
+    n::Int;
+    gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
+    uselegacygreenfunction::Bool=false
+)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2
@@ -649,21 +661,22 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
 
     ρ2 = x_minus2 + ζ2
 
-    # Chance 1997 eq.(41) ℛ = R
+    # Distance parameter ℛ [Chance Phys. Plasmas 1997 2161 eq. 41]
     R4 = ρ2 * (ρ2 + 4 * x_multiple)
     R2 = sqrt(R4)
     R = sqrt(R2)
     R5 = R4 * R
 
-    # Chance 1997 eq.(42) 𝘴 = s
+    # Argument of Legendre function 𝘴 [Chance Phys. Plasmas 1997 2161 eq. 42]
     s = (x_obs2 + x_source2 + ζ2) / R2
 
     # Legendre functions for
     # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
+    legendre = acquire!(pool, Float64, n + 2)
     if uselegacygreenfunction
-        legendre = Pn_minus_half_1997(s, n)
+        Pn_minus_half_1997!(legendre, s, n)
     else
-        legendre = Pn_minus_half_2007(s, n)
+        Pn_minus_half_2007!(legendre, s, n)
     end
 
     p0 = legendre[1]
@@ -671,29 +684,30 @@ function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Floa
     pnp1 = legendre[end]
     pn = legendre[end-1]
 
-    # Chance 1997 eq.(40) 2π𝒢ⁿ = G_n
-    gg = 2 * sqrt(π) * gamma(0.5 - n) / R
+    # Green's function 2π𝒢ⁿ = G_n [Chance Phys. Plasmas 1997 2161 eq. 40]
+    gg = gamma_prefactor / R
     G_n = gg * pn
 
-    # Chance 1997 eq.(44) (Note this equation in the paper has an erroneous extra factor of 2π)
+    # Gradient factor [Chance Phys. Plasmas 1997 2161 eq. 44]
+    # NOTE: Paper has erroneous extra factor of 2π
     grad_gg = gg / R4 / 2π
 
-    # ∂Gⁿ/∂X' = dG_dX
+    # Derivatives of Green's function [Chance Phys. Plasmas 1997 2161 eq. 36-38]
+    # ∂Gⁿ/∂X' using chain rule: ∂Gⁿ/∂X' = (∂Gⁿ/∂R)(∂R/∂X') + (∂Gⁿ/∂s)(∂s/∂X')
     xterm1 = (n * (x_obs2 + x_source2 + ζ2) * (x_obs2 - x_source2 + ζ2) - x_source2*(x_source2-x_obs2+ζ2)) * pn
     xterm2 = (2.0 * x_source * x_obs * (x_obs2-x_source2+ζ2)) * pnp1
     dG_dX = grad_gg * (xterm1 + xterm2) / x_source
 
-    # ∂Gⁿ/∂Z' = dG_dZ
+    # ∂Gⁿ/∂Z' using chain rule
     zterm1 = (2.0 * n + 1.0) * (x_obs2 + x_source2 + ζ2) * pn
     zterm2 = 4.0 * x_multiple * pnp1
     dG_dZ = grad_gg * (zterm1 + zterm2) * ζ
 
-    # Chance 1997 eq.(51)
-    # 𝒥 ∇'𝒢ⁿ∇'ℒ = aval
-    # ∂X'/∂θ = xtp, ∂Z'/∂θ = ztp
+    # Coupling term 𝒥 ∇'𝒢ⁿ∇'ℒ [Chance Phys. Plasmas 1997 2161 eq. 51]
+    # Jacobian factor from coordinate transformation
     coupling_n = -x_source * (dz_dtheta * dG_dX - dx_dtheta * dG_dZ)
 
-    # for 𝓃⩵0,  aval0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
+    # Special case for n=0: coupling_0 = 1/(2π) 𝒥 ∇'𝒢⁰∇'ℒ
     dG_dX0_R5 = ((2.0 * x_obs * (x_obs2-x_source2+ζ2)) * p1 - x_source * (x_source2-x_obs2+ζ2) * p0)
     dG_dZ0_R5 = ζ * ((x_obs2 + x_source2 + ζ2) * p0 + 4.0 * x_multiple * p1)
     coupling_0 = -x_source * (dz_dtheta * dG_dX0_R5 - dx_dtheta * dG_dZ0_R5) / R5

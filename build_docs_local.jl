@@ -5,14 +5,11 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 
-# Build the package
-Pkg.build()
-
 # Activate the docs environment
 Pkg.activate("docs")
 
 # Add the local package to docs environment first
-Pkg.develop(PackageSpec(path="."))
+Pkg.develop(PackageSpec(; path="."))
 
 # Now instantiate to get other dependencies
 Pkg.instantiate()

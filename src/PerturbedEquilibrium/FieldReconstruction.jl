@@ -3,6 +3,7 @@ Field reconstruction from eigenmode response.
 
 Converts eigenmode response coefficients to physical displacement and magnetic
 field perturbations in mode space, following the GPEC gpeq module approach.
+[Park Phys. Plasmas 2007 052110]
 
 This module mimics the GPEC Fortran subroutines:
 - gpeq_sol: Get equilibrium solution at each radial point
@@ -18,7 +19,9 @@ Fields are computed using ideal MHD relations in flux coordinates:
 
 where χ₁ = 2π * Ψ₀ (total poloidal flux normalization).
 
-Reference: GPEC gpeq.f lines 100-102
+References:
+- [Park Phys. Plasmas 2007 052110] - 3D equilibrium perturbations
+- GPEC gpeq.f lines 100-102
 """
 
 """
@@ -33,8 +36,8 @@ Reference: GPEC gpeq.f lines 100-102
 Reconstruct displacement and magnetic field from eigenmode response in mode space.
 
 This function mimics GPEC's gpeq module, computing fields using ideal MHD
-algebraic relations in flux coordinates. All fields are returned in mode space
-[npsi, mpert] rather than real space.
+algebraic relations in flux coordinates [Park Phys. Plasmas 2007 052110].
+All fields are returned in mode space [npsi, mpert] rather than real space.
 
 # Process (following GPEC)
 
@@ -86,6 +89,7 @@ function reconstruct_physical_fields(
     )
 
     # Step 2: Compute perturbed field in mode space using ideal MHD relations
+    # [Park Phys. Plasmas 2007 052110 eq. 8-10]
     # This mimics GPEC's gpeq_sol and gpeq_contra
     b_psi_modes, b_theta_modes, b_zeta_modes = compute_perturbed_field_modes(
         xi_psi_modes,
@@ -196,9 +200,9 @@ Compute perturbed magnetic field from displacement using ideal MHD relations in 
 
 This function mimics GPEC's gpeq_sol subroutine (gpeq.f lines 100-102), computing
 contravariant field components from covariant displacement using the algebraic
-ideal MHD relations in flux coordinates.
+ideal MHD relations in flux coordinates [Park Phys. Plasmas 2007 052110 eq. 8-10].
 
-# Ideal MHD Relations (from GPEC gpeq.f)
+# Ideal MHD Relations [Park Phys. Plasmas 2007 052110 eq. 8-10]
 
 ```fortran
 bwp_mn = (chi1*singfac*twopi*ifac*xsp_mn)                              ! b^ψ
@@ -298,14 +302,14 @@ function compute_perturbed_field_modes(
             xsp1 = xi_psi1_modes[ipsi, ipert]   # ∂ξ_ψ/∂ψ
             xss = 0.0 + 0.0im                    # ξ_ζ = 0 (not computed from ForceFreeStates)
 
-            # GPEC gpeq.f line 100-102: Compute contravariant field
-            # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ
+            # Contravariant field from ideal MHD [Park Phys. Plasmas 2007 052110 eq. 8-10]
+            # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ  [eq. 8]
             b_psi_modes[ipsi, ipert] = chi1 * singfac * twopi * ifac * xsp
 
-            # b^θ = -i * (χ₁ * ∂ξ_ψ/∂ψ + n * ξ_ζ)
+            # b^θ = -i * (χ₁ * ∂ξ_ψ/∂ψ + n * ξ_ζ)  [eq. 9]
             b_theta_modes[ipsi, ipert] = -(chi1 * xsp1 + twopi * ifac * nn * xss)
 
-            # b^ζ = -i * (χ₁ * (q'*ξ_ψ + q*∂ξ_ψ/∂ψ) + m * ξ_ζ)
+            # b^ζ = -i * (χ₁ * (q'*ξ_ψ + q*∂ξ_ψ/∂ψ) + m * ξ_ζ)  [eq. 10]
             b_zeta_modes[ipsi, ipert] = -(chi1 * (q1 * xsp + q * xsp1) + twopi * ifac * m * xss)
         end
     end

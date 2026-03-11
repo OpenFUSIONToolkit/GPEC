@@ -1,9 +1,9 @@
 """
     mercier_scan!(locstab_fs::Array{Float64,5}, plasma_eq::PlasmaEquilibrium)
 
-Evaluates Mercier criterion for local stability and modifies results in place
-within the local stability array. Performs the same function as `mercier_scan`
-in the Fortran code.
+Evaluates Mercier criterion for local stability [Glasser Phys. Plasmas 2016 112506]
+and modifies results in place within the local stability array.
+Performs the same function as `mercier_scan` in the Fortran code.
 """
 function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.PlasmaEquilibrium)
 
@@ -60,8 +60,9 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
             @views ff_fs[itheta, :] .*= jac / v1
         end
 
-        # Integrate quantities with respect to theta using exact spline integral
-        avg = Spl.total_integral(plasma_eq.rzphi_ys, ff_fs; bc=Spl.PeriodicBC())
+        # Integrate quantities with respect to theta using FastInterpolations
+        itp = cubic_interp(plasma_eq.rzphi_ys, ff_fs; bc=PeriodicBC())
+        avg = FastInterpolations.integrate(itp)
 
         # Evaluate Mercier criterion and related quantities
         term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]

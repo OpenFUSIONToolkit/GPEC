@@ -8,7 +8,10 @@ Implements GPEC's singular surface analysis (gpout.f lines 585-665, 1700-1810):
 - Chirikov parameters (island overlap)
 - Coupling matrices
 
-Reference: ~/Code/gpec/gpec/gpout.f
+References:
+- [Park Phys. Plasmas 2009 056115] - Plasma response calculation
+- [Park Phys. Rev. Lett. 2007 195003] - RMP control
+- [Glasser Phys. Plasmas 2016 072505] - Resistive Δ' calculation
 """
 
 """
@@ -26,32 +29,35 @@ Compute singular layer coupling metrics and island diagnostics.
 
 Calculates the coupling between forcing modes and resonant surfaces, which determines
 the effectiveness of external perturbations at rational surfaces where q = m/n.
+[Park Phys. Plasmas 2009 056115]
 
 Implements GPEC algorithm from gpout.f:
-1. For each forcing mode, apply unit field and compute plasma response
-2. For each singular surface, evaluate field jump and compute coupling quantities
-3. Calculate diagnostic island widths and overlap parameters
+
+ 1. For each forcing mode, apply unit field and compute plasma response
+ 2. For each singular surface, evaluate field jump and compute coupling quantities
+ 3. Calculate diagnostic island widths and overlap parameters
 
 ## Arguments
-- `state`: Output state structure to store results
-- `equil`: Equilibrium solution with q-profile and flux surfaces
-- `ForceFreeStates_results`: ForceFreeStates stability calculation results
-- `vac_data`: Vacuum response data including Green's functions
-- `ffs_intr`: ForceFreeStates internal state with singular surface data
-- `intr`: PerturbedEquilibrium internal state with permeability matrix
-- `ctrl`: Control parameters
+
+  - `state`: Output state structure to store results
+  - `equil`: Equilibrium solution with q-profile and flux surfaces
+  - `ForceFreeStates_results`: ForceFreeStates stability calculation results
+  - `vac_data`: Vacuum response data including Green's functions
+  - `ffs_intr`: ForceFreeStates internal state with singular surface data
+  - `intr`: PerturbedEquilibrium internal state with permeability matrix
+  - `ctrl`: Control parameters
 
 ## Modifies
-Populates the following fields in `state`:
-- `resonant_flux[msing, numpert_total]`: Normalized resonant flux Φ_r/A
-- `resonant_current[msing, numpert_total]`: Resonant current density
-- `island_width_sq[msing, numpert_total]`: Square of island half-width (w/2)²
-- `penetrated_field[msing, numpert_total]`: Normal field at resonant surface
-- `delta_prime[msing, numpert_total]`: Tearing stability parameter Δ'
-- `island_half_width[msing]`: Dimensional island half-width
-- `chirikov_parameter[msing]`: Island overlap metric
 
-Note: numpert_total = mpert × npert handles all (m,n) mode combinations
+Populates the following fields in `state`:
+
+  - `resonant_flux[npert, msing]`: Normalized resonant flux Φ_r/A, indexed by (n-index, surface)
+  - `resonant_current[npert, msing]`: Resonant current density
+  - `island_width_sq[npert, msing]`: Square of island half-width (w/2)²
+  - `penetrated_field[npert, msing]`: Normal field at resonant surface
+  - `delta_prime[npert, msing]`: Tearing stability parameter Δ'
+  - `island_half_width[msing]`: Dimensional island half-width (maximum over all n)
+  - `chirikov_parameter[msing]`: Island overlap metric
 """
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
@@ -63,7 +69,7 @@ function compute_singular_coupling_metrics!(
     ctrl::PerturbedEquilibriumControl
 )
     if ctrl.verbose
-        println("Computing singular coupling metrics (GPEC method)")
+        @info "Computing singular coupling metrics (GPEC method)"
     end
 
     # Extract dimensions
@@ -74,7 +80,7 @@ function compute_singular_coupling_metrics!(
 
     if msing == 0
         if ctrl.verbose
-            println("  No singular surfaces found. Skipping singular coupling calculation.")
+            @info "No singular surfaces found. Skipping singular coupling calculation."
         end
         return
     end
@@ -102,36 +108,26 @@ function compute_singular_coupling_metrics!(
         return
     end
 
-    if ctrl.verbose
-        println("  Number of singular surfaces: $msing")
-        println("  Number of toroidal modes (n): $npert")
-        if npert > 1
-            println("  Metric arrays: [$npert × $msing]")
-        else
-            println("  Metric arrays: [$msing] (single n)")
-        end
-    end
-
     # Get vacuum calculation parameters
-    mtheta_eq = length(equil.rzphi_ys)  # Equilibrium poloidal grid size
     mtheta = vac_data.mthvac  # Vacuum poloidal grid size
     mlow = ffs_intr.mlow
     nlow = ffs_intr.nlow
     nhigh = ffs_intr.nhigh
 
     # Perturbed equilibrium calculations always use nowall
-    wall_settings = Vacuum.WallShapeSettings(shape="nowall")
+    wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
     if ctrl.verbose
-        println("  Processing toroidal modes n = $nlow:$nhigh")
+        nstr = nlow == nhigh ? "$nlow" : "$nlow:$nhigh"
+        @info "Computing surface Green's functions at $msing resonant surfaces (n = $nstr, no wall)"
     end
 
     # Main loop: Process each toroidal mode number separately
     for nn in nlow:nhigh
         n_idx = nn - nlow + 1  # Index for storing in [npert, msing] arrays
 
-        if ctrl.verbose
-            println("  Computing metrics for n = $nn...")
+        if ctrl.verbose && npert > 1
+            @info "Computing metrics for n = $nn"
         end
 
         # For each singular surface, compute Green's functions for this n
@@ -156,16 +152,9 @@ function compute_singular_coupling_metrics!(
             end
 
             # Compute Green's functions at this surface for this n
-            vac_input = Vacuum.create_vacuum_input_at_psi(
-                equil,
-                sing_surf.psifac,
-                mtheta_eq,
-                mtheta,
-                mpert,
-                mlow,
-                nn
-            )
-            grri, grre = Vacuum.compute_greens_functions_only(vac_input, wall_settings)
+            # TODO: This assumes an initial 2D equilibrum, getting 2D Green's functions for independent n
+            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
+            _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
 
             # Store in singular surface struct (overwrites for each n)
             ffs_intr.sing[s].grri = grri
@@ -232,9 +221,7 @@ function compute_singular_coupling_metrics!(
             state.resonant_flux[n_idx, s] = singflx_mn / area
 
             if ctrl.verbose && n_idx == 1 && s == 1
-                println("    Surface 1: q = $(sing_surf.q), ψ = $(sing_surf.psifac)")
-                println("      Resonant mode: m = $m_res, n = $nn")
-                println("      Delta': $(real(delta_prime_val))")
+                @info "Surface 1: q = $(@sprintf("%.3f", sing_surf.q)), ψ = $(@sprintf("%.3f", sing_surf.psifac)), m = $m_res, n = $nn, Δ' = $(@sprintf("%.3e", real(delta_prime_val)))"
             end
         end
     end
@@ -243,11 +230,9 @@ function compute_singular_coupling_metrics!(
     compute_island_diagnostics!(state, ffs_intr, equil, chi1, twopi)
 
     if ctrl.verbose
-        println("  Singular coupling calculation complete")
         max_island_width = maximum(abs.(state.island_half_width))
         max_delta_prime = maximum(abs.(real.(state.delta_prime)))
-        println("    Max island half-width: $(@sprintf("%.3e", max_island_width))")
-        println("    Max Delta': $(@sprintf("%.3e", max_delta_prime))")
+        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island_width)), max Δ' = $(@sprintf("%.3e", max_delta_prime))"
     end
 end
 
@@ -311,7 +296,7 @@ Interpolate magnetic field at arbitrary flux surface.
 
 Interpolates displacement from ForceFreeStates solution and converts to field using
 ideal MHD relation from flux coordinates:
-    b^ψ = i * χ₁ * (m - n*q) * ξ_ψ
+b^ψ = i * χ₁ * (m - n*q) * ξ_ψ
 
 This matches the field reconstruction in FieldReconstruction.jl.
 """
@@ -367,10 +352,10 @@ end
 Compute effective current density coefficient at given flux surface.
 
 Implements GPEC's j_c calculation (gpout.f line 560-578):
-    j_c = χ₁² * q / (μ₀ * integral)
+j_c = χ₁² * q / (μ₀ * integral)
 
 where the integral is computed via flux surface integration:
-    integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ
+integral = ∫ (jac * |∇ψ| * sqreqb / |∇ψ|³) dθ
 
 ## GPEC Formula
 
@@ -394,9 +379,10 @@ j_c(ising)=1.0/j_c(ising)*chi1**2*sq%f(4)/mu0
 
 Uses trapezoidal rule integration around the flux surface with metric quantities
 from the equilibrium bicubic spline (rzphi). The integrand includes:
-- jac: Jacobian of flux coordinates
-- |∇ψ|: Flux gradient magnitude (delpsi)
-- sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)²
+
+  - jac: Jacobian of flux coordinates
+  - |∇ψ|: Flux gradient magnitude (delpsi)
+  - sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)²
 """
 function compute_current_density(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -427,17 +413,18 @@ function compute_current_density(
     last_delpsi = 0.0
     last_jcfun = 0.0
 
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 0:mthsurf
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
         # Evaluate bicubic splines with derivatives at (psi, theta)
         # New API uses separate interpolants for each component
-        r2 = equil.rzphi_rsquared((psi, theta))           # rfac²
-        deta = equil.rzphi_offset((psi, theta))           # angle offset
-        jac = equil.rzphi_jac((psi, theta))               # Jacobian
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0,1))  # ∂(rfac²)/∂theta
-        deta_y = equil.rzphi_offset((psi, theta); deriv=(0,1))  # ∂(deta)/∂theta
+        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)           # rfac²
+        deta = equil.rzphi_offset((psi, theta); hint=hint2d)           # angle offset
+        jac = equil.rzphi_jac((psi, theta); hint=hint2d)               # Jacobian
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=Val((0, 1)), hint=hint2d)  # ∂(rfac²)/∂theta
+        deta_y = equil.rzphi_offset((psi, theta); deriv=Val((0, 1)), hint=hint2d)  # ∂(deta)/∂theta
 
         rfac = sqrt(abs(r2))
         fy_rfac2 = r2_y
@@ -493,11 +480,13 @@ Apply Green's function to Fourier mode coefficients.
 Simplified version that extracts only plasma surface rows (first mtheta rows).
 
 ## Arguments
-- `green`: Green's function matrix [2*mtheta, 2*mpert]
-- `mode_coeffs`: Complex Fourier coefficients [mpert]
+
+  - `green`: Green's function matrix [2*mtheta, 2*mpert]
+  - `mode_coeffs`: Complex Fourier coefficients [mpert]
 
 ## Returns
-- Potential at plasma surface theta points [mtheta]
+
+  - Potential at plasma surface theta points [mtheta]
 """
 function apply_green_function_simple(
     green::Matrix{Float64},
@@ -509,7 +498,7 @@ function apply_green_function_simple(
     # Pack complex to real/imag format
     packed = zeros(Float64, 2 * mpert)
     for i in 1:mpert
-        packed[2*i - 1] = real(mode_coeffs[i])
+        packed[2*i-1] = real(mode_coeffs[i])
         packed[2*i] = imag(mode_coeffs[i])
     end
 
@@ -530,21 +519,25 @@ end
 Compute surface inductance matrix from Green's functions at flux surface.
 
 This implements the full GPEC gpvacuum_flxsurf algorithm (gpvacuum.f line 299-331):
-1. For each mode, apply Green's functions to unit flux
-2. Compute surface current from potential jump: kax = (chi - che) / μ₀
-3. Fourier transform to mode space
-4. Return inductance: L_surf = flux * inv(current)
+
+ 1. For each mode, apply Green's functions to unit flux
+ 2. Compute surface current from potential jump: kax = (chi - che) / μ₀
+ 3. Fourier transform to mode space
+ 4. Return inductance: L_surf = flux * inv(current)
 
 ## Arguments
-- `grri`: Interior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
-- `grre`: Exterior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
-- `ffs_intr`: ForceFreeStates internal state
-- `intr`: PerturbedEquilibrium internal state with mode arrays
+
+  - `grri`: Interior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
+  - `grre`: Exterior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
+  - `ffs_intr`: ForceFreeStates internal state
+  - `intr`: PerturbedEquilibrium internal state with mode arrays
 
 ## Returns
+
 Surface inductance matrix [numpert_total, numpert_total]
 
 ## GPEC Reference
+
 ```fortran
 DO i=1,mpert
    vbwp_mn=0; vbwp_mn(i)=1.0
@@ -556,7 +549,7 @@ ENDDO
 fsurf_indmats = fflxmats * inv(fkaxmats)
 ```
 """
-function compute_surface_inductance_from_greens(
+@with_pool pool function compute_surface_inductance_from_greens(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
     ffs_intr::ForceFreeStatesInternal,
@@ -573,21 +566,27 @@ function compute_surface_inductance_from_greens(
 
     # Initialize matrices (mpert x mpert for single toroidal mode number)
     # Green's functions are computed for a specific n, so inductance is only over poloidal modes
-    flux_matrix = zeros(ComplexF64, mpert, mpert)
-    current_matrix = zeros(ComplexF64, mpert, mpert)
+    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+    current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+
+    # Pre-allocate loop buffers from pool
+    vbwp_mn = zeros!(pool, ComplexF64, mpert)
+    chi_theta = zeros!(pool, Float64, mtheta)
+    che_theta = zeros!(pool, Float64, mtheta)
+    kax_theta = zeros!(pool, Float64, mtheta)
 
     # For each poloidal mode, compute surface current from Green's functions
     for i in 1:mpert
         # Unit flux for mode i
-        vbwp_mn = zeros(ComplexF64, mpert)
+        vbwp_mn .= 0.0
         vbwp_mn[i] = 1.0
 
         # Apply Green's functions using same approach as ResponseMatrices.jl
-        chi_theta = apply_green_function(grri, vbwp_mn)
-        che_theta = apply_green_function(grre, vbwp_mn)
+        apply_green_function!(chi_theta, grri, vbwp_mn)
+        apply_green_function!(che_theta, grre, vbwp_mn)
 
         # Surface current from potential jump
-        kax_theta = (chi_theta .- che_theta) ./ μ₀
+        @. kax_theta = (chi_theta - che_theta) / μ₀
 
         # Transform back to Fourier mode space
         kax_modes = ft(kax_theta)
@@ -650,7 +649,7 @@ end
 Compute singular flux from resonant current using surface inductance.
 
 Uses surface inductance matrix at the singular surface:
-    Φ = L_surf * I
+Φ = L_surf * I
 
 where L_surf is computed from Green's functions stored in sing_surf.
 
@@ -718,7 +717,7 @@ end
 Compute flux surface area at given ψ.
 
 Implements GPEC's area calculation (gpout.f line 568):
-    area = ∫ jac * |∇ψ| dθ
+area = ∫ jac * |∇ψ| dθ
 
 where the integral is computed around the flux surface.
 
@@ -740,8 +739,9 @@ area(ising)=area(ising)-jac*delpsi(mthsurf)/mthsurf  ! trapezoidal rule
 ## Implementation
 
 Uses trapezoidal rule integration around the flux surface with:
-- jac: Jacobian of flux coordinates from rzphi
-- |∇ψ|: Flux gradient magnitude (delpsi) from metric tensor
+
+  - jac: Jacobian of flux coordinates from rzphi
+  - |∇ψ|: Flux gradient magnitude (delpsi) from metric tensor
 """
 function compute_surface_area(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -764,16 +764,17 @@ function compute_surface_area(
     last_jac = 0.0
     last_delpsi = 0.0
 
+    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
     for itheta in 0:mthsurf
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
         # Evaluate bicubic splines with derivatives at (psi, theta)
-        r2 = equil.rzphi_rsquared((psi, theta))
-        jac = equil.rzphi_jac((psi, theta))
-        deta = equil.rzphi_offset((psi, theta))
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0,1))
-        deta_y = equil.rzphi_offset((psi, theta); deriv=(0,1))
+        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
+        jac = equil.rzphi_jac((psi, theta); hint=hint2d)
+        deta = equil.rzphi_offset((psi, theta); hint=hint2d)
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=Val((0, 1)), hint=hint2d)
+        deta_y = equil.rzphi_offset((psi, theta); deriv=Val((0, 1)), hint=hint2d)
 
         # Compute rfac
         rfac = sqrt(abs(r2))

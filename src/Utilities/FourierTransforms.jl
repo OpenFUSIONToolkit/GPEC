@@ -17,7 +17,7 @@ transforms (cos(m*θ + n*qa*δ), sin(m*θ + n*qa*δ)) used in vacuum field calcu
 # Example
 
 ```julia
-using JPEC.Utilities.FourierTransforms
+using GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
 
 # For PerturbedEquilibrium (no phase shift)
 ft = FourierTransform(mtheta, mpert, mlow)
@@ -43,81 +43,92 @@ export transform!, inverse_transform!
 export fourier_transform!, fourier_inverse_transform!
 
 """
-    compute_fourier_coefficients(mtheta, mpert, mlow; n=0, qa=0.0, delta=zeros(mtheta))
+    compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; n=nothing, ν=zeros(mtheta))
 
-Compute Fourier basis function coefficients for transforms between theta-space and mode-space.
+Compute Fourier basis function coefficients for transforms between physical-space and mode-space.
+Supports both 2D and 3D geometries. In 2D, we only use one toroidal mode at a time, so we can
+just use the n argument. In 3D, we need to compute the basis for all modes and grid points.
 
 # Arguments
 
 - `mtheta::Int`: Number of poloidal grid points (theta resolution)
 - `mpert::Int`: Number of Fourier modes (spectral resolution)
 - `mlow::Int`: Lowest mode number (mode numbering starts here)
+- `nzeta::Int`: Number of toroidal grid points
+- `npert::Int`: Number of toroidal modes
+- `nlow::Int`: Lowest toroidal mode number
 
 # Keyword Arguments
 
-- `n::Int=0`: Toroidal mode number (default: 0, no toroidal coupling)
-- `qa::Float64=0.0`: Safety factor at boundary (default: 0.0)
-- `delta::Vector{Float64}=zeros(mtheta)`: Toroidal phase shift array (default: no shift)
+- `n_2D::Union{Nothing, Int}=nothing`: Toroidal mode number for 2D (default: nothing)
+- `ν::Vector{Float64}=zeros(mtheta)`: Toroidal angle offset array (default: no offset, n*ν = 0)
 
 # Returns
 
-- `cslth::Matrix{Float64}`: Cosine coefficients [mtheta, mpert] where `cslth[i,l] = cos(m*θᵢ + n*qa*δᵢ)`
-- `snlth::Matrix{Float64}`: Sine coefficients [mtheta, mpert] where `snlth[i,l] = sin(m*θᵢ + n*qa*δᵢ)`
+- 2D
+  - `cos_mn_basis::Matrix{Float64}`: Cosine coefficients `cos(m*θ - n*ν)` [mtheta, mpert]
+  - `sin_mn_basis::Matrix{Float64}`: Sine coefficients `sin(m*θ - n*ν)` [mtheta, mpert]
+- 3D
+  - `cos_mn_basis::Matrix{Float64}`: Cosine coefficients `cos(m*θ - n*ν - n*ϕ)` [mtheta * nzeta, mpert * npert]
+  - `sin_mn_basis::Matrix{Float64}`: Sine coefficients `sin(m*θ - n*ν - n*ϕ)` [mtheta * nzeta, mpert * npert]
 
 # Notes
 
-The theta grid is uniform: `θᵢ = 2π*(i-1)/mtheta` for `i = 1:mtheta`
+The theta and phi grids are uniform: `θᵢ = 2π*i/mtheta` for `i = 0:mtheta-1` and `ϕⱼ = 2π*j/nzeta` for `j = 0:nzeta-1`
 
-Mode numbers are: `m = mlow, mlow+1, ..., mlow+mpert-1`
-
-When `n=0, qa=0, delta=0` (default), this reduces to simple harmonic basis:
-- `cslth[i,l] = cos(m*θᵢ)`
-- `snlth[i,l] = sin(m*θᵢ)`
-
-For vacuum calculations with toroidal coupling, the phase includes `n*qa*delta`:
-- `cslth[i,l] = cos(m*θᵢ + n*qa*δᵢ)`
-- `snlth[i,l] = sin(m*θᵢ + n*qa*δᵢ)`
+When `n=0, ν=0` (default), this reduces to simple harmonic basis:
+- `cos_mn_basis[i,l] = cos(m*θᵢ)`
+- `sin_mn_basis[i,l] = sin(m*θᵢ)`
 """
 function compute_fourier_coefficients(
     mtheta::Int,
     mpert::Int,
-    mlow::Int;
-    n::Int=0,
-    qa::Float64=0.0,
-    delta::Vector{Float64}=zeros(Float64, mtheta)
+    mlow::Int,
+    nzeta::Int,
+    npert::Int,
+    nlow::Int;
+    n_2D::Union{Nothing, Int}=nothing,
+    ν::Vector{Float64}=zeros(Float64, mtheta)
 )
     # Validate inputs
-    @assert mtheta > 0 "mtheta must be positive"
-    @assert mpert >= 0 "mpert must be non-negative"
-    @assert length(delta) == mtheta "delta must have length mtheta"
-
-    # Handle edge case: mpert = 0 returns empty arrays
-    if mpert == 0
-        return zeros(Float64, mtheta, 0), zeros(Float64, mtheta, 0)
-    end
+    @assert length(ν) == mtheta "ν must have length mtheta"
+    @assert !(nzeta > 1 && n_2D !== nothing) "If nzeta > 1, don't set n_2D since we use the full nlow - nhigh range for the toroidal modes"
+    @assert !(n_2D === nothing && nzeta == 1) "If nzeta == 1 (2D), set n_2D to the toroidal mode number"
 
     # Uniform theta grid: [0, 2π)
-    theta_grid = range(0, 2π, length=mtheta+1)[1:end-1]
+    θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
 
-    # Compute toroidal phase shift (zero if n=0 or qa=0)
-    nqdelta = n * qa .* delta
-
-    # Allocate coefficient matrices
-    cslth = zeros(Float64, mtheta, mpert)
-    snlth = zeros(Float64, mtheta, mpert)
-
-    # Compute basis functions for each mode and theta point
-    for l in 1:mpert
-        m = mlow + l - 1  # Mode number
-        for i in 1:mtheta
-            # Total argument: m*θ + n*qa*δ
-            arg = theta_grid[i] * m + nqdelta[i]
-            cslth[i, l] = cos(arg)
-            snlth[i, l] = sin(arg)
+    if !isnothing(n_2D)
+        # In 2D, we only use one toroidal mode at a time
+        # Compute sin(mθ - nν) and cos(mθ - nν)
+        sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
+        cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
+    else # nzeta > 1
+        # In 3D, we need to compute the basis for all modes and grid points
+        # Compute sin(mθ - nν - nϕ) and cos(mθ - nν - nϕ)
+        ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+        sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+        cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+        for idx_n in 1:npert
+            n = nlow + idx_n - 1
+            n_col_offset = (idx_n - 1) * mpert
+            # Precompute n*(ν + ϕ) for all (theta, phi) pairs once per n — (mtheta, nzeta)
+            nν_nϕ = n .* (ν .+ ϕ_grid')
+            for idx_m in 1:mpert
+                m = mlow + idx_m - 1
+                col = idx_m + n_col_offset
+                # Broadcast m*θ over all phi; sincos halves trig evaluations
+                arg = m .* θ_grid .- nν_nϕ  # (mtheta, nzeta)
+                for k in eachindex(arg)
+                    s, c = sincos(arg[k])
+                    cos_mn_basis[k, col] = c
+                    sin_mn_basis[k, col] = s
+                end
+            end
         end
     end
 
-    return cslth, snlth
+    return cos_mn_basis, sin_mn_basis
 end
 
 """
@@ -186,7 +197,7 @@ Construct a FourierTransform object with pre-computed basis functions.
 ft = FourierTransform(480, 40, -20)
 
 # With toroidal phase (for Vacuum calculations)
-ft_vac = FourierTransform(480, 40, -20; n=1, qa=2.5, delta=delta_array)
+ft_vac = FourierTransform(480, 40, -20; n=1, ν=ν_array)
 ```
 """
 function FourierTransform(
@@ -194,11 +205,10 @@ function FourierTransform(
     mpert::Int,
     mlow::Int;
     n::Int=0,
-    qa::Float64=0.0,
-    delta::Vector{Float64}=zeros(Float64, mtheta)
+    ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cslth, snlth = compute_fourier_coefficients(mtheta, mpert, mlow; n, qa, delta)
-    return FourierTransform(mtheta, mpert, mlow, cslth, snlth)
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
+    return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
 end
 
 """
@@ -676,7 +686,7 @@ end
 # ==============================================================================
 
 """
-    fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
+    fourier_transform!(gil::AbstractMatrix{Float64}, gij::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
 
 Low-level Fourier transform with offset support for Vacuum module.
 
@@ -688,22 +698,19 @@ have specific block structure (e.g., plasma and wall contributions packed togeth
 
 # Arguments
 
-- `gil::Matrix{Float64}`: Output matrix, updated in-place at offset block
-- `gij::Matrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
-- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert), either `cslth` or `snlth`
-- `m00::Int`: Row offset in `gil` matrix (0-based indexing convention)
-- `l00::Int`: Column offset in `gil` matrix (0-based indexing convention)
+- `gil::AbstractMatrix{Float64}`: Output matrix, updated in-place at offset block
+- `gij::AbstractMatrix{Float64}`: Input matrix (mtheta × mtheta) containing theta-space data
+- `cs::Matrix{Float64}`: Fourier coefficient matrix (mtheta × mpert)
+- `row_offset::Int`: Row offset in `gil` matrix
+- `col_offset::Int`: Column offset in `gil` matrix
 
 # Operation
 
-Computes: `gil[m00+i, l00+l] = Σⱼ gij[i, j] * cs[j, l]` for i ∈ 1:mtheta, l ∈ 1:mpert
-
-The block `gil[m00+1:m00+mtheta, l00+1:l00+mpert]` is zeroed and then filled.
+Computes: `gil[row_offset+i, col_offset+l] = Σⱼ gij[i, j] * cs[j, l]` for i ∈ 1:size(cs, 1), l ∈ 1:size(cs, 2)
 
 # Notes
 
 - This function uses 0-based offset convention (add 1 for Julia indexing)
-- The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
 - Used for packing real and imaginary parts in separate blocks of `gil`
 
 # Example
@@ -714,19 +721,14 @@ gil = zeros(2*mtheta, 2*mpert)  # Packed real/imag structure
 gij = ... # Some theta-space data
 
 # Transform using cosine coefficients, real part block (offset 0, 0)
-fourier_transform!(gil, gij, ft.cslth, 0, 0)
+fourier_transform!(gil, gij, ft.cslth; row_offset=0, col_offset=0)
 
 # Transform using sine coefficients, imaginary part block (offset 0, mpert)
-fourier_transform!(gil, gij, ft.snlth, 0, mpert)
+fourier_transform!(gil, gij, ft.snlth; row_offset=0, col_offset=mpert)
 ```
 """
-function fourier_transform!(gil::Matrix{Float64}, gij::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-    # Zero out relevant gil block
-    mtheta, mpert = size(cs)
-    fill!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 0.0)
-
-    # Fourier transform via matrix multiply: gil[i, l] = Σ_j gij[i, j] * cs[j, l]
-    mul!(view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), gij, cs)
+function fourier_transform!(gil::AbstractMatrix{Float64}, gij::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+    mul!(view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), gij, cs)
 end
 
 """
@@ -750,15 +752,13 @@ back to mode space from theta space.
 
 # Operation
 
-Computes: `gll[l2, l1] = (2π/mtheta) * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
+Computes: `gll[l2, l1] = dθdζ * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
 
 # Notes
 
-- The normalization factor `2π/mtheta` ensures proper Fourier series reconstruction
+- The normalization factor `4π^2 / size(cs, 1)` is 2π / mtheta * 2π / nzeta (nzeta = 1 for 2D)
 - This function uses 0-based offset convention (add 1 for Julia indexing)
 - The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
-- Output `gll` is completely zeroed before computation
-
 # Example
 
 ```julia
@@ -767,18 +767,11 @@ gil = ... # Transformed Green's function data
 arr = zeros(mpert, mpert)
 
 # Inverse transform from real part block using cosine coefficients
-fourier_inverse_transform!(arr, gil, ft.cslth, 0, 0)
+fourier_inverse_transform!(arr, gil, ft.cslth)
 ```
 """
-function fourier_inverse_transform!(gll::Matrix{Float64}, gil::Matrix{Float64}, cs::Matrix{Float64}, m00::Int, l00::Int)
-    # Zero out gll block
-    mtheta, mpert = size(cs)
-    fill!(view(gll, 1:mpert, 1:mpert), 0.0)
-
-    # Inverse Fourier transform via matrix multiply: gll = cs^T * gil * (2π * dth)
-    # This computes: gll[l2, l1] = (2π * dth) * Σ_i cs[i, l2] * gil[i, l1]
-    dth = 2π / mtheta
-    mul!(gll, cs', view(gil, m00+1:m00+mtheta, l00+1:l00+mpert), 2π * dth, 0.0)
+function fourier_inverse_transform!(gll::AbstractMatrix{Float64}, gil::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
+    mul!(gll, cs', view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), 4π^2 / size(cs, 1), 0.0)
 end
 
 end # module FourierTransforms

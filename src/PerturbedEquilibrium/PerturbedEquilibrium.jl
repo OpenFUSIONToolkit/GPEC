@@ -5,9 +5,9 @@ using HDF5
 using Printf
 using LinearAlgebra
 using Statistics
+using AdaptiveArrayPools
 
 # Import parent modules
-import ..Spl
 import ..Equilibrium
 import ..ForceFreeStates
 import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
@@ -53,6 +53,7 @@ Computes plasma response to external forcing and calculates singular layer
 coupling metrics.
 
 ## Arguments
+
   - `equil`: Equilibrium solution from Equilibrium module
   - `ForceFreeStates_results`: Stability calculation results from ForceFreeStates module
   - `vac_data`: Vacuum response data from ForceFreeStates free boundary calculation
@@ -62,29 +63,25 @@ coupling metrics.
   - `intr`: Internal state variables
 
 ## Returns
+
   - `PerturbedEquilibriumState`: Calculation results
 
 ## Workflow
-1. Load forcing data from file
-2. Compute plasma response (if enabled)
-3. Calculate singular coupling metrics (if enabled)
-4. Output eigenmode fields (if enabled)
+
+ 1. Load forcing data from file
+ 2. Compute plasma response (if enabled)
+ 3. Calculate singular coupling metrics (if enabled)
+ 4. Output eigenmode fields (if enabled)
 """
 function compute_perturbed_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
     ForceFreeStates_results::OdeState,
-    vac_data::Union{VacuumData, Nothing},
+    vac_data::Union{VacuumData,Nothing},
     ffs_intr::ForceFreeStates.ForceFreeStatesInternal,
     ft_ctrl::ForcingTerms.ForcingTermsControl,
     ctrl::PerturbedEquilibriumControl,
     intr::PerturbedEquilibriumInternal
 )::PerturbedEquilibriumState
-
-    if ctrl.verbose
-        println("\nPERTURBED EQUILIBRIUM START")
-        println("----------------------------------")
-    end
-    start_time = time()
 
     state = PerturbedEquilibriumState()
 
@@ -114,13 +111,6 @@ function compute_perturbed_equilibrium(
 
     # Step 4: Output eigenmode fields (integrated into HDF5 output)
     # This is handled by write_outputs_to_HDF5 in main()
-
-    end_time = time() - start_time
-    if ctrl.verbose
-        println("----------------------------------")
-        println("Run time: $(@sprintf("%.3e", end_time)) seconds")
-        println("PERTURBED EQUILIBRIUM COMPLETE")
-    end
 
     return state
 end

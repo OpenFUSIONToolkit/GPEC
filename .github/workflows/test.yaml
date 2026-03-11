@@ -11,8 +11,18 @@ on:
       - develop
 
 jobs:
-  runtests:
-    runs-on: ubuntu-latest
+  test:
+    name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 'lts' # long-term support (currently 1.10)
+          - '1.11'
+          - '1.x'  # latest (currently 1.12)
+        os:
+          - ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -21,13 +31,10 @@ jobs:
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
         with:
-          version: '1.11'
+          version: ${{ matrix.version }}
 
       - name: Cache Julia packages
         uses: julia-actions/cache@v2
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
 
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1

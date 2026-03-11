@@ -130,7 +130,7 @@ end
     make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
 
 Constructs main ForceFreeStates matrices for a given toroidal mode number and returns
-them as a new `FourFitVars` object. See the appendix of the 2016 Glasser
+them as a new `FourFitVars` object. See the appendix of the Glasser Phys. Plasmas 2016 112506
 DCON paper for details on the matrix definitions. Performs the same function
 as `fourfit_make_matrix` in the Fortran code, except F, G, and K are now
 stored as dense matrices. The matrix F is stored in factorized form with
@@ -281,9 +281,9 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             end
         end
 
-        # Factorize and build composites
-        # Note: we store the nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ (eq. 29 in Glasser 2016)
-        # We multiply by Q (singfac) later when performing computations later
+        # Factorize and build composite matrices [Glasser Phys. Plasmas 2016 112506 Appendix A]
+        # Nonsingular forms F̄ and K̄ with F = QF̄Qᴴ, K = QK̄ [Glasser Phys. Plasmas 2016 112506 eq. 29]
+        # We multiply by Q (singfac = m - n*q) later when performing computations
         amat = reshape(amats_flatview, intr.numpert_total, intr.numpert_total)
         cmat = reshape(cmats_flatview, intr.numpert_total, intr.numpert_total)
         dmat = reshape(dmats_flatview, intr.numpert_total, intr.numpert_total)
@@ -294,12 +294,14 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         gmat = reshape(gmats_flatview, intr.numpert_total, intr.numpert_total)
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
+
+        # Schur complement reduction [Glasser Phys. Plasmas 2016 112506 eq. A5-A7]
         amat_fact = cholesky(Hermitian(amat, :L))
-        ldiv!(a_inv_dmat_temp, amat_fact, dmat)
-        ldiv!(a_inv_cmat_temp, amat_fact, cmat)
-        fmat .-= adjoint(dmat) * a_inv_dmat_temp
-        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)
-        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)
+        ldiv!(a_inv_dmat_temp, amat_fact, dmat)         # A⁻¹D
+        ldiv!(a_inv_cmat_temp, amat_fact, cmat)         # A⁻¹C
+        fmat .-= adjoint(dmat) * a_inv_dmat_temp        # F̃ = F - D†A⁻¹D
+        kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)  # K̃ = E - K†A⁻¹C
+        gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)  # G̃ = H - C†A⁻¹C
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
@@ -313,21 +315,16 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     ffit = FourFitVars(; mpert=intr.mpert, mband=intr.mband, numpert_total=intr.numpert_total)
 
     # FastInterpolations now natively supports complex values - no need to split real/imag
-    # Helper to create complex interpolant directly using CubicFit() for native endpoint handling
-    @inline function make_complex_interp(xs, z_flat)
-        return cubic_interp(xs, z_flat; bc=CubicFit(), extrap=:extension, search=LinearBinary())
-    end
-
     # Create complex series interpolants with per-column extrap BC
-    ffit.amats = make_complex_interp(metric.xs, amats_flat)
-    ffit.bmats = make_complex_interp(metric.xs, bmats_flat)
-    ffit.cmats = make_complex_interp(metric.xs, cmats_flat)
-    ffit.dmats = make_complex_interp(metric.xs, dmats_flat)
-    ffit.emats = make_complex_interp(metric.xs, emats_flat)
-    ffit.hmats = make_complex_interp(metric.xs, hmats_flat)
-    ffit.fmats_lower = make_complex_interp(metric.xs, fmats_lower_flat)
-    ffit.gmats = make_complex_interp(metric.xs, gmats_flat)
-    ffit.kmats = make_complex_interp(metric.xs, kmats_flat)
+    ffit.amats = cubic_interp(metric.xs, amats_flat; ffit.itp_opts...)
+    ffit.bmats = cubic_interp(metric.xs, bmats_flat; ffit.itp_opts...)
+    ffit.cmats = cubic_interp(metric.xs, cmats_flat; ffit.itp_opts...)
+    ffit.dmats = cubic_interp(metric.xs, dmats_flat; ffit.itp_opts...)
+    ffit.emats = cubic_interp(metric.xs, emats_flat; ffit.itp_opts...)
+    ffit.hmats = cubic_interp(metric.xs, hmats_flat; ffit.itp_opts...)
+    ffit.fmats_lower = cubic_interp(metric.xs, fmats_lower_flat; ffit.itp_opts...)
+    ffit.gmats = cubic_interp(metric.xs, gmats_flat; ffit.itp_opts...)
+    ffit.kmats = cubic_interp(metric.xs, kmats_flat; ffit.itp_opts...)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

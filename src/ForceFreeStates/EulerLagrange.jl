@@ -38,7 +38,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Print initial integration condition
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
     # Iterate through each integration chunk
@@ -46,7 +46,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+            @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
         # Cross a rational surface after integration if this chunk requires it
@@ -65,7 +65,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
         end
 
         # Update u, psilim, and qlim for usage in determining wp and wt
@@ -79,7 +79,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if ctrl.verbose
-        println("Evaluating fixed-boundary stability criterion")
+        @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
@@ -112,16 +112,11 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
-        # Refine psifac using Newton iteration
-        converged = false
-        for _ in 1:itmax
-            dpsi = (ctrl.qlow - profiles.q_spline(odet.psifac)) / profiles.q_deriv(odet.psifac)
-            odet.psifac += dpsi
-            abs(dpsi) < eps * abs(odet.psifac) && (converged=true; break)
-        end
-        if !converged
-            error("Newton iteration for psifac did not converge after $itmax iterations.")
-        end
+        odet.psifac = find_zero(
+            (psi -> profiles.q_spline(psi) - ctrl.qlow,
+             psi -> profiles.q_deriv(psi)),
+            odet.psifac, Roots.Newton()
+        )
     end
 
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
@@ -138,7 +133,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    # Initialize solutions with the identity matrix for U_22 as described in [Glasser PoP 2016] Section VI
+    # Initialize solutions with the identity matrix for U_22 [Glasser Phys. Plasmas 2016 112506 Section VI]
     for ipert in 1:intr.numpert_total
         odet.u[ipert, ipert, 2] = 1
     end
@@ -352,7 +347,7 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     # Advance differential equation from psi_start to psi_end
     rtol = compute_tols(ctrl, intr, odet, chunk.ising) # initial tolerances
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=rtol, callback=cb)
+    sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
     # Update u and psifac with the solution at the end of the interval
@@ -376,6 +371,9 @@ function integrator_callback!(integrator)
 
     # unpack parameters. Note the 2 unused items are needed to match the signature in the integrand sing_der!
     ctrl, _, _, intr, odet, chunk = integrator.p
+
+    # Count every ODE step taken (not just saved ones)
+    odet.total_steps += 1
 
     # Update integration tolerances
     integrator.opts.reltol = compute_tols(ctrl, intr, odet, chunk.ising)

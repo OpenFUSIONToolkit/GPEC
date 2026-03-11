@@ -3,6 +3,8 @@ Response matrix construction for perturbed equilibrium calculations.
 
 Based on gpresp.f from GPEC, implementing resp_index=0 (energy-based inductance).
 Uses ForceFreeStates eigenmode solutions and vacuum response data.
+
+Reference: [Park Phys. Plasmas 2009 056115]
 """
 
 # Use FourierTransform utility instead of FFTW for theta ↔ mode transforms
@@ -91,15 +93,17 @@ end
 Compute normal magnetic field at plasma boundary from eigenmode displacements.
 
 This is the key step that converts eigenmode displacements to magnetic field perturbations
-at the plasma surface. Formula from GPEC:
+at the plasma surface. From the ideal MHD constraint [Park Phys. Plasmas 2009 056115 eq. 4]:
 
-    bwp_mn[i,j] = i * (dΨ/dρ) * (m[i] - n*q_boundary) * ξ_ψ[i,j]
+    B_n = i * (dΨ/dρ) * (m - n*q) * ξ_ψ
 
-## Physical Interpretation:
+where ξ_ψ is the radial displacement eigenfunction.
+
+## Physical Interpretation [Park Phys. Plasmas 2007 052110 Section II]:
 - ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
-- singfac[i] = m[i] - n*q: Measures distance from rational surface
-- dΨ/dρ: Converts displacement to flux perturbation
-- Factor of i: Phase relationship for oscillating fields
+- singfac[i] = m[i] - n*q: Singular factor measuring distance from rational surface
+- dΨ/dρ: Converts displacement to flux perturbation (poloidal flux gradient)
+- Factor of i: Phase relationship for oscillating fields in complex representation
 
 ## Arguments
 - `boundary_data`: Output from extract_boundary_displacements()
@@ -126,7 +130,8 @@ function compute_normal_magnetic_field(
     dPsi_drho = boundary_data.dPsi_drho
     q_boundary = boundary_data.q_boundary
 
-    # Compute singular factor for each Fourier mode: singfac[i] = m[i] - n*q_boundary
+    # Compute singular factor for each Fourier mode [Park Phys. Plasmas 2009 056115 eq. 4]
+    # singfac[i] = m[i] - n*q_boundary measures distance from rational surface
     # Mode indexing: modes are ordered as (m, n) pairs
     # Linear index i corresponds to: m = (i-1) % mpert + mlow, n = (i-1) ÷ mpert + nlow
     singfac = zeros(Float64, numpert_total)
@@ -136,7 +141,8 @@ function compute_normal_magnetic_field(
         singfac[i] = m_mode - n_mode * q_boundary
     end
 
-    # Compute normal magnetic field: bwp_mn[i,j] = i * (dΨ/dρ) * singfac[i] * ξ_ψ[i,j]
+    # Compute normal magnetic field [Park Phys. Plasmas 2009 056115 eq. 4]
+    # bwp_mn[i,j] = i * (dΨ/dρ) * singfac[i] * ξ_ψ[i,j]
     for i in 1:numpert_total
         for j in 1:numpert_total
             bwp_mn[i, j] = 1im * dPsi_drho * singfac[i] * ξ_psi[i, j]
@@ -235,7 +241,7 @@ function calc_plasma_inductance(
 end
 
 """
-    pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+    pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
 
 Pack complex mode coefficients into real/imaginary pairs for Green's function application.
 
@@ -247,9 +253,14 @@ Converts [a+bi, c+di, ...] to [a, b, c, d, ...]
 ## Returns
 - Packed real/imaginary array [2*mpert]
 """
-function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+function pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
     mpert = length(modes)
     packed = zeros(Float64, 2 * mpert)
+    return pack_complex_to_realimag!(packed, modes)
+end
+
+function pack_complex_to_realimag!(packed::AbstractVector{Float64}, modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
+    mpert = length(modes)
     for i in 1:mpert
         packed[2*i - 1] = real(modes[i])
         packed[2*i] = imag(modes[i])
@@ -258,7 +269,7 @@ function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
 end
 
 """
-    unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+    unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
 
 Unpack real/imaginary pairs back to complex coefficients.
 
@@ -270,7 +281,7 @@ Converts [a, b, c, d, ...] to [a+bi, c+di, ...]
 ## Returns
 - Complex mode coefficients [mpert]
 """
-function unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+function unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
     mpert = length(packed) ÷ 2
     modes = zeros(ComplexF64, mpert)
     for i in 1:mpert
@@ -308,16 +319,27 @@ function apply_green_function(
     green::Matrix{Float64},
     mode_coeffs::Vector{ComplexF64}
 )::Vector{Float64}
+    mtheta = size(green, 1) ÷ 2
+    chi_theta = Vector{Float64}(undef, mtheta)
+    return apply_green_function!(chi_theta, green, mode_coeffs)
+end
+
+@with_pool pool function apply_green_function!(
+    chi_theta::AbstractVector{Float64},
+    green::Matrix{Float64},
+    mode_coeffs::AbstractVector{ComplexF64}
+)
     # Pack complex coefficients to real/imag format for Green's function
     # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
-    packed_coeffs = pack_complex_to_realimag(mode_coeffs)
+    mpert = length(mode_coeffs)
+    packed_coeffs = zeros!(pool, Float64, 2 * mpert) 
+    pack_complex_to_realimag!(packed_coeffs, mode_coeffs)
 
     # Apply Green's function: chi_theta = green * b_fourier
     # Extract only plasma surface rows (first mtheta rows)
     # Result is real-valued potential at theta points
-    mtheta = size(green, 1) ÷ 2
-    chi_theta = green[1:mtheta, :] * packed_coeffs
-
+    mtheta = length(chi_theta)
+    mul!(chi_theta, @view(green[1:mtheta, :]), packed_coeffs)
     return chi_theta
 end
 
