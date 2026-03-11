@@ -8,7 +8,7 @@ power_r = 0                             # Major radius power exponent for Jacobi
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
 psihigh = 0.99999                       # Upper limit of normalized flux coordinate
-mpsi = 16                               # Number of radial grid points
+mpsi = 128                              # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
@@ -37,12 +37,12 @@ qlow = 1.02                   # Integration initiated at q determined by min(q0,
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1                    # Smallest toroidal mode number to include
-nn_high = 1                   # Largest toroidal mode number to include
-delta_mlow = 0                # Expands lower bound of Fourier harmonics
-delta_mhigh = 0               # Expands upper bound of Fourier harmonics
+nn_low = 1                    # Lower toroidal mode number
+nn_high = 2                   # Upper toroidal mode number
+delta_mlow = 8                # Expands lower bound of Fourier harmonics
+delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 64                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kin_flag = false              # Kinetic EL equation (default: false)
@@ -57,10 +57,6 @@ ktw = 50.0                    # Parameter for ktanh_flag (default: 50.0)
 ion_flag = true               # Include ion dW_k when kin_flag is true
 electron_flag = false         # Include electron dW_k when kin_flag is true
 
-tol_nr = 1e-6                 # Relative tolerance of dynamic integration steps away from rationals
-tol_r = 1e-7                  # Relative tolerance of dynamic integration steps near rationals
-crossover = 1e-2              # Fractional distance from rational q at which tol switches
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-write_outputs_to_HDF5 = false
-verbose = false

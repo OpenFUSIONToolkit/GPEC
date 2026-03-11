@@ -1,5 +1,5 @@
-# JPEC.jl
-module JPEC
+# GeneralizedPerturbedEquilibrium.jl
+module GeneralizedPerturbedEquilibrium
 
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
@@ -60,7 +60,7 @@ function main(args::Vector{String}=String[])
         "unknown"
     end
 
-    @info "\n$_BANNER\n  JPEC - Julia Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
+    @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
     total_start = time()
 
     # ----------------------------------------------------------------
@@ -71,25 +71,25 @@ function main(args::Vector{String}=String[])
 
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
-    inputs = TOML.parsefile(joinpath(intr.dir_path, "jpec.toml"))
+    inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from jpec.toml or fallback to equil.toml if it exists
+    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
         equil = Equilibrium.setup_equilibrium(eq_config)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in jpec.toml"
+        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
     else
-        error("No equilibrium configuration found. Add [Equilibrium] section to jpec.toml")
+        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
     end
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
     # Early exit if user only requested equilibrium setup
     if equil.config.force_termination
-        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
 
@@ -275,7 +275,7 @@ function main(args::Vector{String}=String[])
 
     # Early exit if user only requested force-free states
     if ctrl.force_termination
-        @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+        @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
         return
     end
 
@@ -322,7 +322,7 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
-    @info "\n$_BANNER\n  JPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
+    @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
@@ -348,7 +348,7 @@ function write_outputs_to_HDF5(
     equil::Equilibrium.PlasmaEquilibrium,
     intr::ForceFreeStatesInternal,
     odet::OdeState,
-    vac::Union{VacuumData,Nothing},
+    vac_data::Union{VacuumData,Nothing},
     git_version::String="unknown"
 )
 
@@ -444,18 +444,20 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_right"] = odet.ca_r
 
         # Write vacuum data; always write all entries, using empty arrays when not computed
-        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac.wt : ComplexF64[]
-        out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac.wt0 : ComplexF64[]
-        out_h5["vacuum/ep"] = ctrl.vac_flag ? vac.ep : ComplexF64[]
-        out_h5["vacuum/ev"] = ctrl.vac_flag ? vac.ev : ComplexF64[]
-        out_h5["vacuum/et"] = ctrl.vac_flag ? vac.et : ComplexF64[]
-        out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac.xzpts[:, 1] : Float64[]
-        out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac.xzpts[:, 2] : Float64[]
-        out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac.xzpts[:, 3] : Float64[]
-        out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac.xzpts[:, 4] : Float64[]
+        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
+        out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
+        out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+        out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
+        out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
+        out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
+        out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
+        out_h5["vacuum/y_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
+        out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
     end
 end
 
 export main
 
-end # module JPEC
+end # module GeneralizedPerturbedEquilibrium

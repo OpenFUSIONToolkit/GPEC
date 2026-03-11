@@ -1,11 +1,11 @@
 using Documenter
 
-# Try to load JPEC package
+# Try to load GeneralizedPerturbedEquilibrium package
 try
-    using JPEC
-    @info "Successfully loaded JPEC package"
+    using GeneralizedPerturbedEquilibrium
+    @info "Successfully loaded GeneralizedPerturbedEquilibrium package"
 catch e
-    @error "Failed to load JPEC package" exception = e
+    @error "Failed to load GeneralizedPerturbedEquilibrium package" exception = e
     # Try to provide helpful debugging info
     using Pkg
     @info "Current project:" Pkg.project().path
@@ -14,29 +14,31 @@ catch e
 end
 
 makedocs(;
-    sitename="JPEC.jl",
+    sitename="GPEC.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", nothing) == "true",
-        canonical="https://OpenFUSIONToolkit.github.io/JPEC/"
+        canonical="https://OpenFUSIONToolkit.github.io/GPEC/"
     ),
-    modules=[JPEC],
+    modules=[GeneralizedPerturbedEquilibrium],
     pages=[
         "Home" => "index.md",
         "Setup" => "set_up.md",
+        "Workflow" => "workflow.md",
         "API Reference" => [
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
             "Utilities" => "utilities.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md"
-        ]
+        ],
+        "Citations" => "citations.md",
     ],
     checkdocs=:exports
 )
 
 deploydocs(;
-    repo="github.com/OpenFUSIONToolkit/JPEC.git",
+    repo="github.com/OpenFUSIONToolkit/GPEC.git",
     branch="gh-pages",
-    devbranch="main",
+    devbranch="develop",
     push_preview=true
 )
