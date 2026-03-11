@@ -3,7 +3,7 @@
 - [Setting up GPEC](#setting-up-gpec)
   - [On Windows via WSL (Ubuntu)](#on-windows-via-wsl-ubuntu)
   - [On macOS](#on-macos)
-  - [Pre-commit Hooks (Optional Developer Tools)](#pre-commit-hooks-optional-developer-tools)
+  - [Developer Tips](#developer-tips)
 
 ## On Windows via WSL (Ubuntu)
 1. Install WSL and Ubuntu
@@ -359,55 +359,7 @@ GPEC uses TOML configuration files (`gpec.toml`) with the following main section
 
 See the example directories for complete configuration file templates.
 
-## Pre-commit Hooks (Optional Developer Tools)
-
-The repository uses pre-commit hooks to maintain code quality.
-
-### Why Use Pre-commit Hooks?
-
-Pre-commit hooks automatically:
-- Format Julia code according to `.JuliaFormatter.toml` settings
-- Remove trailing whitespace and fix line endings
-- Validate YAML/TOML syntax
-- Prevent accidentally committing large files (>5MB)
-
-### Installation
-
-```bash
-# Install pre-commit (requires Python/pip)
-pip install pre-commit
-
-# Install JuliaFormatter globally (required for Julia code formatting hook)
-julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
-
-# Install the git hooks in your local repository
-cd /path/to/GPEC
-pre-commit install
-```
-
-### Usage
-
-Once installed, the hooks run automatically on `git commit`. You can also run them manually:
-
-```bash
-# Run on all files in the repository
-pre-commit run --all-files
-
-# Run only on currently staged files
-pre-commit run
-```
-
-### Bypassing Hooks (Not Recommended)
-
-In rare cases where you need to bypass the hooks:
-
-```bash
-git commit --no-verify
-```
-
-However, this is discouraged as it may introduce formatting inconsistencies.
-
-## Development Tips
+## Developer Tips
 
 ### Revise.jl
 
@@ -438,3 +390,40 @@ catch e
     @warn "Could not load Revise" exception=e
 end
 ```
+
+### Pre-commit Hooks
+
+The repository uses pre-commit hooks to maintain code quality. They run automatically on `git commit` and:
+- Format Julia code according to `.JuliaFormatter.toml` settings
+- Remove trailing whitespace and fix line endings
+- Validate YAML/TOML syntax
+- Prevent accidentally committing large files (>5MB)
+
+**Installation:**
+
+```bash
+# Install pre-commit (requires Python/pip)
+pip install pre-commit
+
+# Install JuliaFormatter globally (required for Julia code formatting hook)
+julia -e 'using Pkg; Pkg.add("JuliaFormatter")'
+
+# Install the git hooks in your local repository
+cd /path/to/GPEC
+pre-commit install
+```
+
+You can also run the hooks manually without committing:
+
+```bash
+pre-commit run --all-files   # run on all files
+pre-commit run               # run on staged files only
+```
+
+In rare cases where you need to bypass the hooks:
+
+```bash
+git commit --no-verify
+```
+
+This is discouraged as it may introduce formatting inconsistencies.
