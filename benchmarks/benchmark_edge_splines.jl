@@ -108,7 +108,7 @@ println(@sprintf("  dV/dψ: direct = %.5f,  edge = %.5f,  |Δ| = %.2e",
     dV_at_psihigh_direct, dV_at_psihigh_edge, abs(dV_at_psihigh_direct - dV_at_psihigh_edge)))
 println()
 
-# --- Plot 1: iota vs psin ---
+# --- Plot 1: iota vs psin (built into edge_spline_profiles.png later; kept as p1 for reuse) ---
 p1 = plot(
     collect(psi_plot_edge), iota_edge_plot;
     xlabel = "ψₙ",
@@ -120,8 +120,6 @@ p1 = plot(
 )
 vline!(p1, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
 hline!(p1, [0.0]; label = "ι = 0 (separatrix)", ls = :dot, color = :red, lw = 1.5)
-savefig(p1, joinpath(output_dir, "edge_spline_iota.png"))
-println("Saved: edge_spline_iota.png")
 
 # --- Plot 2: q vs psin ---
 # Cap display range so the diverging ExtendExtrap doesn't crush the interesting region
@@ -129,19 +127,58 @@ q_cap = 2.5 * q_at_psihigh_direct
 q_direct_plot = min.(q_direct, q_cap)
 q_edge_plot   = min.(q_edge_vals, q_cap)
 
-p2 = plot(
-    psi_plot_all, q_direct_plot;
-    xlabel = "ψₙ",
-    ylabel = "q (safety factor)",
-    title  = "Safety factor q: direct vs edge inverse spline",
-    label  = "Direct spline (ExtendExtrap beyond psihigh)",
-    lw = 2, color = :orange, ls = :dash,
-    xlims = (0.8, 1.0),
-    ylims = (q_at_psihigh_direct * 0.5, q_cap * 1.05)
-)
-plot!(p2, collect(psi_plot_edge), q_edge_plot;
-    label = "Edge inverse spline (1/ι)", lw = 2, color = :blue)
-vline!(p2, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
+# Compute q derivatives for the junction check.
+# Focus on a window around psihigh to show continuity (or lack thereof).
+psi_junc = range(psihigh - 0.02, min(0.9999, psihigh + (1.0 - psihigh) * 0.7); length=300)
+
+# Direct spline: q, q', q'', q''' (only valid up to psihigh; ExtendExtrap beyond)
+q_d0_dir = profiles.q_spline_direct.(psi_junc)
+q_d1_dir = profiles.q_deriv.(psi_junc)
+_deriv2_q = deriv2(profiles.q_spline_direct)
+_deriv3_q = deriv3(profiles.q_spline_direct)
+q_d2_dir = _deriv2_q.(psi_junc)
+q_d3_dir = _deriv3_q.(psi_junc)
+
+# Edge inverse spline: compute via chain rule from iota inner spline
+# q = 1/iota, q' = -iota'/iota², q'' = (2iota'²-iota·iota'')/iota³, etc.
+_iota_inner  = profiles.q_spline_iota_inverse.inner
+_d1_iota = deriv1(_iota_inner)
+_d2_iota = deriv2(_iota_inner)
+_d3_iota = deriv3(_iota_inner)
+q_d0_edge = [1.0 / _iota_inner(p)   for p in psi_junc]
+q_d1_edge = map(psi_junc) do p
+    ι = _iota_inner(p); ι1 = _d1_iota(p)
+    -ι1 / ι^2
+end
+q_d2_edge = map(psi_junc) do p
+    ι = _iota_inner(p); ι1 = _d1_iota(p); ι2 = _d2_iota(p)
+    (2*ι1^2 - ι*ι2) / ι^3
+end
+q_d3_edge = map(psi_junc) do p
+    ι = _iota_inner(p); ι1 = _d1_iota(p); ι2 = _d2_iota(p); ι3 = _d3_iota(p)
+    (-6*ι1^3 + 6*ι*ι1*ι2 - ι^2*ι3) / ι^4
+end
+
+# Cap large values so plots are readable (derivatives blow up near separatrix)
+d1_cap = abs(profiles.q_deriv(psihigh)) * 5
+d2_cap = abs(_deriv2_q(psihigh)) * 10
+d3_cap = abs(_deriv3_q(psihigh)) * 20
+
+function make_deriv_panel(ylabel_str, title_str, dir_vals, edge_vals, cap_val)
+    p = plot(; xlabel="ψₙ", ylabel=ylabel_str, title=title_str, legend=:topleft)
+    plot!(p, collect(psi_junc), clamp.(dir_vals, -cap_val, cap_val);
+          label="Direct", lw=2, color=:orange, ls=:dash)
+    plot!(p, collect(psi_junc), clamp.(edge_vals, -cap_val, cap_val);
+          label="Edge inverse", lw=2, color=:blue)
+    vline!(p, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray, lw=1)
+    return p
+end
+
+p2a = make_deriv_panel("q",      "q: direct vs edge inverse",        q_d0_dir, q_d0_edge, q_cap)
+p2b = make_deriv_panel("dq/dψ",  "q' (1st deriv): junction match",   q_d1_dir, q_d1_edge, d1_cap)
+p2c = make_deriv_panel("d²q/dψ²","q'' (2nd deriv): junction match",  q_d2_dir, q_d2_edge, d2_cap)
+p2d = make_deriv_panel("d³q/dψ³","q''' (3rd deriv): junction match", q_d3_dir, q_d3_edge, d3_cap)
+p2 = plot(p2a, p2b, p2c, p2d; layout=(4,1), size=(900, 1100), bottom_margin=4Plots.mm)
 savefig(p2, joinpath(output_dir, "edge_spline_q.png"))
 println("Saved: edge_spline_q.png")
 
@@ -263,6 +300,21 @@ end
 println(@sprintf("  Found %d rational surfaces (n=%d) in edge zone before density cutoff",
     length(edge_surfaces), nn))
 
+# psilim for this run = last edge rational surface + edge_layer_width (default 1e-4) buffer.
+# qlim is used to cap q-axis plots so far-edge data near the separatrix (q→∞) doesn't compress
+# the interesting region.
+psilim_bench = isempty(edge_surfaces) ? psihigh : edge_surfaces[end]
+qlim_bench   = (!isnothing(profiles.q_spline_iota_inverse) && psilim_bench > psihigh) ?
+               profiles.q_spline_iota_inverse(psilim_bench) :
+               profiles.q_spline_direct(psilim_bench)
+
+# Helper: psi → q using iota inverse above psihigh (available to all subsequent plots)
+psi_to_q_outer = psi_arr -> map(psi_arr) do psi
+    (!isnothing(profiles.q_spline_iota_inverse) && psi > psihigh) ?
+        profiles.q_spline_iota_inverse(psi) :
+        profiles.q_spline_direct(psi)
+end
+
 p6 = plot(
     collect(psi_plot_edge), q_edge_vals;
     xlabel = "ψₙ",
@@ -276,16 +328,23 @@ for (i, psi_s) in enumerate(edge_surfaces)
     lbl = i == 1 ? "Edge rational surfaces" : ""
     vline!(p6, [psi_s]; label = lbl, color = :red, alpha = 0.5, lw = 0.8)
 end
-vline!(p6, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
+vline!(p6, [psihigh];      label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
+vline!(p6, [psilim_bench]; label = @sprintf("psilim = %.4f  (q = %.1f)", psilim_bench, qlim_bench),
+       ls = :dashdot, color = :purple, lw = 1.5)
 savefig(p6, joinpath(output_dir, "edge_spline_rational_surfaces.png"))
 println("Saved: edge_spline_rational_surfaces.png")
 
-# --- Plot 7: et[1] vs q — full edge stability scan ---
-# x-axis is q (safety factor), converted from psi via the iota inverse spline.
-# Core region (psi ≤ psihigh): vacuum response correctly interpolated → reliable.
-# Above psihigh: wv is frozen at psihigh (ExtendExtrap); resonant spikes appear near
-# each rational surface where singfac = m − n·q ≈ 0. Points with |et| > threshold
-# are filtered out, showing the inter-resonance envelope.
+# --- Plot 7: edge stability scan — total, plasma, vacuum energy components vs q ---
+#
+# Top panel: et, ep, ev on a linear scale clipped to ±display_lim. The "physically reliable"
+# window (where wp = U₂·U₁⁻¹ is well-conditioned) is narrow: only the first ~6 steps after
+# psiedge, before the accumulated Gaussian reductions make U₁ ill-conditioned. Outside that
+# window all three curves blow up (|et|, |ep| >> 1000) and are clipped by ylims.
+# ev (vacuum, computed from the wv spline rather than U₁) stays bounded at ~O(1000) for most
+# of the scan and is shown separately on the log-scale bottom panel to reveal its full range.
+#
+# Above psihigh: wv is frozen at psihigh (ExtendExtrap) and resonant spikes near
+# rational surfaces (singfac → 0) are subsampled for rendering performance.
 h5file = joinpath(output_dir, "jpec.h5")
 if isfile(h5file)
     h5open(h5file, "r") do f
@@ -294,7 +353,7 @@ if isfile(h5file)
             et_es   = read(f["integration/et_edge_scan"])
             et_real = real.(et_es)
 
-            # Convert psi → q using iota inverse spline (above psihigh) or direct spline (below)
+            # Convert psi → q
             hint_q7 = Ref(1)
             q_es = map(psi_es) do psi
                 if psi > psihigh && !isnothing(profiles.q_spline_iota_inverse)
@@ -306,53 +365,133 @@ if isfile(h5file)
 
             q_at_psihigh = profiles.q_spline_direct(psihigh)
             q_max_scan   = maximum(q_es)
-
-            # Split into core (physically reliable) and above-psihigh (extrapolated wv)
-            core_mask  = psi_es .<= psihigh
-            above_mask = psi_es .>  psihigh
-
-            # Filter above-psihigh: skip resonant spikes where |et| blows up near
-            # rational surfaces (singfac → 0). Subsample for rendering performance.
-            et_display_lim = 10.0
-            valid_above = findall(above_mask .& (abs.(et_real) .<= et_display_lim))
-            stride = max(1, length(valid_above) ÷ 2000)  # keep ≤ ~2000 points
-            above_ss = valid_above[1:stride:end]
+            core_mask    = psi_es .<= psihigh
+            above_mask   = psi_es .>  psihigh
 
             et_peak_idx = argmax(et_real)
             q_peak      = q_es[et_peak_idx]
             et_peak     = et_real[et_peak_idx]
 
-            p7 = plot(
-                q_es[core_mask], et_real[core_mask];
-                xlabel = "q (safety factor)",
-                ylabel = "Re(et[1])",
-                title  = @sprintf("Edge stability: Re(et[1]) vs q  [ψ = %.3f → %.3f]",
-                                  psi_es[1], psi_es[end]),
-                label  = "Re(et[1])  [ψ ≤ psihigh, reliable]",
-                lw = 2, color = :blue, legend = :topright,
-                xlims  = (4.0, q_max_scan * 1.02),
-                ylims  = (-et_display_lim, max(3.0, et_peak * 1.2)),
-                size   = (900, 500)
-            )
-            if !isempty(above_ss)
-                plot!(p7, q_es[above_ss], et_real[above_ss];
-                      label = @sprintf("ψ > psihigh (wv frozen; |et| ≤ %.0f shown)", et_display_lim),
-                      lw = 1, color = :orange, ls = :dash, alpha = 0.6)
-            end
-            hline!(p7, [0.0]; label = "stability boundary (et = 0)",
-                   ls = :dot, color = :black, lw = 1.5)
-            vline!(p7, [q_at_psihigh]; label = @sprintf("psihigh: q = %.3f", q_at_psihigh),
-                   ls = :dash, color = :gray)
-            hline!(p7, [1.707]; label = "develop branch ref: et = +1.707",
-                   ls = :dash, color = :green, lw = 1.5)
-            scatter!(p7, [q_peak], [clamp(et_peak, -et_display_lim, et_display_lim)];
-                     label = @sprintf("peak (q = %.3f, et = %+.3f)", q_peak, et_peak),
-                     marker = :star5, ms = 10, color = :red)
-            savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
-            println("Saved: edge_spline_stability.png")
             println(@sprintf("  Scan: q = %.3f → %.3f  (ψ = %.4f → %.4f)",
                              q_es[1], q_max_scan, psi_es[1], psi_es[end]))
             println(@sprintf("  Peak: q = %.3f, et = %+.3f", q_peak, et_peak))
+
+            # Load ep/ev/evonly if available
+            has_pv     = haskey(f, "integration/ep_edge_scan") && haskey(f, "integration/ev_edge_scan")
+            has_evonly = haskey(f, "integration/evonly_edge_scan")
+            ep_real    = has_pv     ? real.(read(f["integration/ep_edge_scan"]))      : nothing
+            ev_real    = has_pv     ? real.(read(f["integration/ev_edge_scan"]))      : nothing
+            evonly_real = has_evonly ? read(f["integration/evonly_edge_scan"])         : nothing
+
+            # --- Panel A: linear-scale clip showing valid window + full et range ---
+            # Clip at ±display_lim so the well-conditioned window is visible.
+            display_lim = 10.0
+            # Subsample above-psihigh for rendering; separate filters for et vs ev
+            valid_above_et = findall(above_mask .& (abs.(et_real) .<= display_lim))
+            stride_et = max(1, length(valid_above_et) ÷ 2000)
+            above_ss_et = valid_above_et[1:stride_et:end]
+
+            pA = plot(;
+                xlabel = "q (safety factor)",
+                ylabel = "Energy (raw eigenvalue)",
+                title  = @sprintf("Edge stability: energy components vs q  [ψ = %.3f → %.3f]",
+                                  psi_es[1], psi_es[end]),
+                legend = :topright,
+                xlims  = (4.0, q_max_scan * 1.02),
+                ylims  = (-display_lim, max(3.0, et_peak * 1.2)),
+                size   = (900, 400)
+            )
+            # et: core (solid) + above-psihigh filtered (dashed)
+            plot!(pA, q_es[core_mask], et_real[core_mask];
+                  label = "Total et  [ψ ≤ psihigh]", lw = 2, color = :black)
+            if !isempty(above_ss_et)
+                plot!(pA, q_es[above_ss_et], et_real[above_ss_et];
+                      label = @sprintf("Total et  [ψ > psihigh, |et|≤%.0f]", display_lim),
+                      lw = 1, color = :black, ls = :dash, alpha = 0.6)
+            end
+            if has_pv
+                plot!(pA, q_es[core_mask], ep_real[core_mask];
+                      label = "Plasma ep  [ψ ≤ psihigh]", lw = 2, color = :blue)
+                plot!(pA, q_es[core_mask], ev_real[core_mask];
+                      label = "Vacuum ev  [ψ ≤ psihigh]", lw = 2, color = :red)
+                valid_above_pv = findall(above_mask .& (abs.(ep_real) .<= display_lim) .& (abs.(ev_real) .<= display_lim))
+                stride_pv = max(1, length(valid_above_pv) ÷ 2000)
+                above_ss_pv = valid_above_pv[1:stride_pv:end]
+                if !isempty(above_ss_pv)
+                    plot!(pA, q_es[above_ss_pv], ep_real[above_ss_pv];
+                          label = "", lw = 1, color = :blue, ls = :dash, alpha = 0.5)
+                    plot!(pA, q_es[above_ss_pv], ev_real[above_ss_pv];
+                          label = "", lw = 1, color = :red, ls = :dash, alpha = 0.5)
+                end
+            end
+            hline!(pA, [0.0]; label = "et = 0", ls = :dot, color = :gray, lw = 1.5)
+            vline!(pA, [q_at_psihigh]; label = @sprintf("psihigh: q = %.3f", q_at_psihigh),
+                   ls = :dash, color = :gray)
+            hline!(pA, [1.707]; label = "develop ref: et = +1.707",
+                   ls = :dash, color = :green, lw = 1.5)
+            scatter!(pA, [q_peak], [clamp(et_peak, -display_lim, display_lim)];
+                     label = @sprintf("peak (q=%.3f, et=%+.3f)", q_peak, et_peak),
+                     marker = :star5, ms = 10, color = :red)
+
+            # --- Panel B: log-scale |ev| showing vacuum energy over full scan range ---
+            # ev = v'·wv·v comes from the wv spline (not from U₁ inversion), so it remains
+            # O(1)–O(10³) even where et and ep blow up. This panel reveals its full behaviour.
+            pB = nothing
+            if has_pv
+                # Subsample above-psihigh to keep rendering manageable
+                stride_all = max(1, length(psi_es) ÷ 4000)
+                ss_all = 1:stride_all:length(psi_es)
+
+                pB = plot(;
+                    xlabel = "q (safety factor)",
+                    ylabel = "|ev|  (log scale)",
+                    title  = "Vacuum energy |ev| — full scan (wv from spline, not U₁)",
+                    legend = :topright,
+                    yscale = :log10,
+                    xlims  = (4.0, q_max_scan * 1.02),
+                    size   = (900, 300)
+                )
+                plot!(pB, q_es[ss_all], max.(abs.(ev_real[ss_all]), 1e-6);
+                      label = "|ev|", lw = 1, color = :red, alpha = 0.7)
+                vline!(pB, [q_at_psihigh]; label = @sprintf("psihigh: q=%.3f", q_at_psihigh),
+                       ls = :dash, color = :gray)
+                scatter!(pB, [q_peak], [abs(ev_real[et_peak_idx])];
+                         label = @sprintf("|ev| at peak (%.4f)", ev_real[et_peak_idx]),
+                         marker = :star5, ms = 8, color = :red)
+            end
+
+            # --- Panel C: evonly — min eigenvalue of wv alone (EL-independent wv quality check) ---
+            # If the wv spline is correct, evonly should be O(1) between rational surfaces
+            # (where singfac ≈ 1) and approach 0 at rational surfaces (singfac → 0).
+            # Divergence between surfaces indicates a buggy wv matrix.
+            pC = nothing
+            if has_evonly
+                stride_all = max(1, length(psi_es) ÷ 4000)
+                ss_all = 1:stride_all:length(psi_es)
+
+                pC = plot(;
+                    xlabel = "q (safety factor)",
+                    ylabel = "evonly  (min eigval of wv)",
+                    title  = "wv quality: min eigenvalue of vacuum matrix alone (EL-independent)",
+                    legend = :topright,
+                    xlims  = (minimum(q_es) * 0.98, q_max_scan * 1.02),
+                    size   = (900, 300)
+                )
+                plot!(pC, q_es[ss_all], evonly_real[ss_all];
+                      label = "evonly (min eigval wv)", lw = 1, color = :purple, alpha = 0.8)
+                hline!(pC, [0.0]; label = "evonly = 0", ls = :dot, color = :gray, lw = 1.5)
+                vline!(pC, [q_at_psihigh]; label = @sprintf("psihigh: q=%.3f", q_at_psihigh),
+                       ls = :dash, color = :gray)
+                scatter!(pC, [q_peak], [evonly_real[et_peak_idx]];
+                         label = @sprintf("evonly at peak (%.4f)", evonly_real[et_peak_idx]),
+                         marker = :star5, ms = 8, color = :purple)
+            end
+
+            panels = filter(!isnothing, [pA, pB, pC])
+            p7 = length(panels) == 1 ? panels[1] :
+                 plot(panels...; layout=(length(panels), 1), size=(900, 350 * length(panels)))
+            savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
+            println("Saved: edge_spline_stability.png")
         else
             println("Note: integration/psi_edge_scan not found in jpec.h5 — run JPEC with psiedge < psilim first")
         end
@@ -482,28 +621,41 @@ if isfile(gsec_file) && isfile(gsei_file)
         theta_idxs = [max(1, round(Int, th * (mt_gse-1) + 1)) for th in theta_fracs]
         # Use core profile grid (not the extended rzphi_xs which includes far-edge nodes)
         psi_gse_vals = profiles.xs
+        q_gse_vals   = psi_to_q_outer(psi_gse_vals)
 
-        p9 = plot(; xlabel="ψₙ", ylabel="|GS residual (per θ)|",
-            title="GS residual by poloidal angle (core + far edge)", yscale=:log10, legend=:topleft)
+        # Build residual curves once for reuse in both panels
+        res_curves = [(abs.(flux_fsx_data[:, idx] .+ source_data[:, idx]), lbl, theta_colors_gse[k])
+                      for (k, (idx, lbl)) in enumerate(zip(theta_idxs, theta_labels))]
 
-        # Core region: per-theta |flux_fsx + source| from equilibrium_gse!
-        for (k, (idx, lbl)) in enumerate(zip(theta_idxs, theta_labels))
-            res_col = abs.(flux_fsx_data[:, idx] .+ source_data[:, idx])
-            plot!(p9, psi_gse_vals, max.(res_col, 1e-15);
-                  label=lbl, lw=1.5, color=theta_colors_gse[k])
-        end
-
-        # Far-edge overlay: per-theta |source_far| using X-point geometry + constant F (dashed)
-        if far_edge_gse_available
-            for (k, lbl) in enumerate(theta_labels_gse)
-                far_lbl = k == 1 ? "far edge, X-point geometry (dashed)" : ""
-                plot!(p9, psi_far_eval, max.(gse_far_per_theta_mat[:, k], 1e-15);
-                      label=far_lbl, lw=1.5, ls=:dash, color=theta_colors_gse[k], alpha=0.8)
+        function make_p9_panel(xvals_core, xfar, xlabel_str, vline_val; xlims_val=nothing)
+            p = plot(; xlabel=xlabel_str, ylabel="|GS residual (per θ)|",
+                title="GS residual by poloidal angle (core + far edge)", yscale=:log10, legend=:topleft)
+            for (res_col, lbl, col) in res_curves
+                plot!(p, xvals_core, max.(res_col, 1e-15); label=lbl, lw=1.5, color=col)
             end
+            if far_edge_gse_available
+                for (k, _) in enumerate(theta_labels_gse)
+                    far_lbl = k == 1 ? "far edge, X-point geometry (dashed)" : ""
+                    plot!(p, xfar, max.(gse_far_per_theta_mat[:, k], 1e-15);
+                          label=far_lbl, lw=1.5, ls=:dash, color=theta_colors_gse[k], alpha=0.8)
+                end
+            end
+            hline!(p, [1e-2]; label="warning threshold", ls=:dot, color=:black, lw=1.5)
+            vline!(p, [vline_val]; label=@sprintf("psihigh: %s=%.3f", xlabel_str, vline_val),
+                   ls=:dash, color=:gray)
+            if !isnothing(xlims_val)
+                xlims!(p, xlims_val)
+                vline!(p, [qlim_bench]; label=@sprintf("psilim: q=%.1f", qlim_bench),
+                       ls=:dashdot, color=:purple, lw=1.5)
+            end
+            return p
         end
 
-        hline!(p9, [1e-2]; label="warning threshold", ls=:dot, color=:black, lw=1.5)
-        vline!(p9, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+        q_far_eval = far_edge_gse_available ? psi_to_q_outer(psi_far_eval) : Float64[]
+        p9a = make_p9_panel(psi_gse_vals, psi_far_eval, "ψₙ", psihigh)
+        p9b = make_p9_panel(q_gse_vals,   q_far_eval,   "q",  q_at_psihigh_direct;
+                            xlims_val=(q_at_psihigh_direct * 0.9, qlim_bench * 1.05))
+        p9 = plot(p9a, p9b; layout=(1,2), size=(1400, 500), bottom_margin=8Plots.mm)
         savefig(p9, joinpath(output_dir, "edge_spline_gse_by_theta.png"))
         println("Saved: edge_spline_gse_by_theta.png")
     end
@@ -521,31 +673,41 @@ if isfile(gsec_file) && isfile(gsei_file)
         else
             println(@sprintf("  GS residual OK: max |gse_integrated| = %.2e", max_err))
         end
+        q_xs_gse = psi_to_q_outer(xs_gse)
 
-        p10 = plot(
-            xs_gse, max.(errori_vec, 1e-15);
-            xlabel="ψₙ", ylabel="|θ-integrated GS residual|",
-            title="θ-integrated GS error: core + far-edge X-point geometry",
-            label="core |gse_integrated|", lw=2, color=:blue,
-            yscale=:log10, legend=:topleft
-        )
-
-        # Far-edge overlay: θ-integrated |source| with node vs midpoint distinction
-        if far_edge_gse_available
-            node_mask_far = is_node_far
-            mid_mask_far  = .!is_node_far
-            scatter!(p10, psi_far_eval[node_mask_far],
-                     max.(gse_far_int[node_mask_far], 1e-15);
-                     label="far edge nodes (spline knots)", marker=:circle, ms=5,
-                     color=:red, markerstrokewidth=0)
-            scatter!(p10, psi_far_eval[mid_mask_far],
-                     max.(gse_far_int[mid_mask_far], 1e-15);
-                     label="far edge midpoints (interpolated between knots)", marker=:diamond, ms=4,
-                     color=:orange, alpha=0.8, markerstrokewidth=0)
+        function make_p10_panel(xvals_core, xfar, xlabel_str, vline_val; xlims_val=nothing)
+            leg_pos = isnothing(xlims_val) ? :topleft : :bottomright
+            p = plot(xvals_core, max.(errori_vec, 1e-15);
+                xlabel=xlabel_str, ylabel="|θ-integrated GS residual|",
+                title="θ-integrated GS error: core + far-edge X-point geometry",
+                label="core |gse_integrated|", lw=2, color=:blue,
+                yscale=:log10, legend=leg_pos)
+            if far_edge_gse_available
+                node_mask_far = is_node_far
+                mid_mask_far  = .!is_node_far
+                scatter!(p, xfar[node_mask_far], max.(gse_far_int[node_mask_far], 1e-15);
+                         label="far edge nodes (spline knots)", marker=:circle, ms=5,
+                         color=:red, markerstrokewidth=0)
+                scatter!(p, xfar[mid_mask_far], max.(gse_far_int[mid_mask_far], 1e-15);
+                         label="far edge midpoints (interpolated)", marker=:diamond, ms=4,
+                         color=:orange, alpha=0.8, markerstrokewidth=0)
+            end
+            hline!(p, [1e-2]; label="warning threshold (1e-2)", ls=:dot, color=:black, lw=1.5)
+            vline!(p, [vline_val]; label=@sprintf("psihigh: %s=%.3f", xlabel_str, vline_val),
+                   ls=:dash, color=:gray)
+            if !isnothing(xlims_val)
+                xlims!(p, xlims_val)
+                vline!(p, [qlim_bench]; label=@sprintf("psilim: q=%.1f", qlim_bench),
+                       ls=:dashdot, color=:purple, lw=1.5)
+            end
+            return p
         end
 
-        hline!(p10, [1e-2]; label="warning threshold (1e-2)", ls=:dot, color=:black, lw=1.5)
-        vline!(p10, [psihigh]; label=@sprintf("psihigh=%.3f", psihigh), ls=:dash, color=:gray)
+        q_far_eval = far_edge_gse_available ? psi_to_q_outer(psi_far_eval) : Float64[]
+        p10a = make_p10_panel(xs_gse,   psi_far_eval, "ψₙ", psihigh)
+        p10b = make_p10_panel(q_xs_gse, q_far_eval,   "q",  q_at_psihigh_direct;
+                              xlims_val=(q_at_psihigh_direct * 0.9, qlim_bench * 1.05))
+        p10 = plot(p10a, p10b; layout=(1,2), size=(1400, 500), bottom_margin=8Plots.mm)
         savefig(p10, joinpath(output_dir, "edge_spline_gse_integrated.png"))
         println("Saved: edge_spline_gse_integrated.png")
     end
@@ -580,7 +742,7 @@ if !isnothing(profiles.q_spline_iota_inverse)
         xlabel="ψₙ", ylabel="q",
         title="Far-edge q: EFIT ExtendExtrap vs iota inverse",
         label="q_direct (EFIT, ExtendExtrap beyond psihigh)", lw=2, color=:orange, ls=:dash,
-        legend=:topleft)
+        legend=:topleft, ylims=(0.0, qlim_bench))
     plot!(p11a, psi_edge_gse[above_mask_gse], q_iota_edge[above_mask_gse];
         label="q = 1/ι(ψ)  [iota inverse spline, used in ODE]", lw=2, color=:blue)
     vline!(p11a, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
@@ -601,9 +763,10 @@ if !isnothing(profiles.q_spline_iota_inverse)
         label="|dF/dψ|", lw=2, color=:red, yscale=:log10, legend=:topleft)
     vline!(p11c, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
 
-    p11 = plot(p11a, p11b, p11c; layout=(3,1), size=(800, 900))
-    savefig(p11, joinpath(output_dir, "edge_spline_gse_edge.png"))
-    println("Saved: edge_spline_gse_edge.png")
+    # p1 (iota) is included here so all spline quality plots are in one file
+    p11 = plot(p11a, p11b, p11c, p1; layout=(4,1), size=(800, 1100))
+    savefig(p11, joinpath(output_dir, "edge_spline_profiles.png"))
+    println("Saved: edge_spline_profiles.png")
 else
     println("Note: iota inverse spline not available (limited plasma) — skipping Plot 11")
 end

@@ -143,9 +143,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     if is_diverted
         edge_surfs = filter(s -> s.psifac > equil.config.psihigh, intr.sing)
         if !isempty(edge_surfs)
-            # Set psilim half an edge_layer_width beyond the last surface so the final
-            # ODE chunk (from just past the crossed surface to psilim) is well-formed.
-            intr.psilim = edge_surfs[end].psifac + ctrl.edge_layer_width / 2
+            # Set psilim just before the last surface using the same singfac_min buffer
+            # as EulerLagrange (with a 1.1 safety margin so floating-point rounding cannot
+            # accidentally push psilim past the trigger threshold and cause the EL integrator
+            # to attempt a crossing that would step far beyond psilim).
+            n_last  = minimum(edge_surfs[end].n)
+            q1_last = edge_surfs[end].q1
+            intr.psilim = edge_surfs[end].psifac - ctrl.singfac_min * 1.1 / abs(n_last * q1_last)
         else
             intr.psilim = equil.config.psihigh
         end
@@ -315,13 +319,22 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 """
 @with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Use q_spline_direct for deriv2/deriv3 — these are only defined on the direct CubicInterpolant,
-    # not on InverseCubicSpline. Singular surface analysis is always in the core (psi ≤ psihigh)
-    # so the direct spline is always the right one to use here.
-    q_spline = profiles.q_spline_direct
-    q_d1 = profiles.q_deriv
-    q_d2 = deriv2(q_spline)
-    q_d3 = deriv3(q_spline)
+    # For core rational surfaces (psi ≤ psihigh): use direct spline with its deriv2/deriv3.
+    # For edge rational surfaces (psi > psihigh, diverted only): use chain rule from iota inner spline.
+    # InverseCubicSpline does not support deriv2/deriv3, so we must use the inner iota spline directly.
+    psihigh = profiles.xs[end]   # last core psi = psihigh
+    has_edge_q = !isnothing(profiles.q_spline_iota_inverse) && singp.psifac > psihigh
+    if has_edge_q
+        _iota_inner = profiles.q_spline_iota_inverse.inner
+        _d1_iota = deriv1(_iota_inner)
+        _d2_iota = deriv2(_iota_inner)
+        _d3_iota = deriv3(_iota_inner)
+    else
+        q_spline = profiles.q_spline_direct
+        q_d1 = profiles.q_deriv
+        q_d2 = deriv2(q_spline)
+        q_d3 = deriv3(q_spline)
+    end
 
     # Initial allocations
     Npert = intr.numpert_total
@@ -339,11 +352,23 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, ctrl.sing_order + 1)
     tmp_vec = acquire!(pool, ComplexF64, Npert)
 
-    # Evaluate q spline and its derivatives
-    q = (q_spline(singp.psifac),
-        q_d1(singp.psifac),
-        q_d2(singp.psifac),
-        q_d3(singp.psifac))
+    # Evaluate q and its first three derivatives at the singular surface.
+    # For edge rationals, apply chain rule: q = 1/ι, q' = -ι'/ι², q'' = (2ι'²-ι·ι'')/ι³, etc.
+    if has_edge_q
+        ι  = _iota_inner(singp.psifac)
+        ι1 = _d1_iota(singp.psifac)
+        ι2 = _d2_iota(singp.psifac)
+        ι3 = _d3_iota(singp.psifac)
+        q = (1.0/ι,
+             -ι1/ι^2,
+             (2*ι1^2 - ι*ι2)/ι^3,
+             (-6*ι1^3 + 6*ι*ι1*ι2 - ι^2*ι3)/ι^4)
+    else
+        q = (q_spline(singp.psifac),
+             q_d1(singp.psifac),
+             q_d2(singp.psifac),
+             q_d3(singp.psifac))
+    end
 
     # Evaluate fmats_lower and derivatives using series interpolants
     ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
@@ -837,8 +862,14 @@ Implement kin_flag functionality
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
-    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
+    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration.
+    # For diverted plasmas, use the iota inverse spline for psi > psihigh even if we are in a core chunk
+    # (core chunks may extend past psihigh; the direct spline's ExtendExtrap gives wrong q near separatrix).
+    if psieval > equil.config.psihigh && !isnothing(equil.profiles.q_spline_iota_inverse)
+        odet.q = equil.profiles.q_spline_iota_inverse(psieval)
+    else
+        odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
+    end
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
     # kinetic stuff - skip for now

@@ -77,10 +77,11 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Deallocate unused storage of integration data
     if ctrl.psiedge < intr.psilim
         # Find the peak dW in the edge region and truncate integration data there.
-        # Scan uses raw (pre-transform) u_store: U₁_raw is kept non-singular by the ODE fixups,
-        # so free_compute_total(W = U₂·U₁⁻¹) succeeds in the core region. Above-psihigh steps
-        # where U₁_raw has degenerated (accumulated Gaussian reductions between fixups) will
-        # throw SingularException and are skipped in the scan.
+        # Uses raw (pre-transform) u_store: after transform_u!, edge-zone steps can acquire
+        # large positive garbage et values from ill-conditioned transform products, pushing the
+        # detected peak to the wrong location. Raw U₁ produces garbage as large negative values
+        # (safely excluded from the max search), so the few well-conditioned steps near psiedge
+        # cleanly dominate the peak.
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
@@ -660,37 +661,60 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
+    # After integration, odet.step is one-past-the-last-valid index: each save stores at
+    # psi_store[step] then increments step. So valid indices are 1:(odet.step-1).
+    nsteps = odet.step - 1
+
     # Since we search for the maximum dW, initialize to -Infinity.
-    # Resize to match current step count (integration may have grown beyond numsteps_init).
-    resize!(odet.dW_edge, odet.step)
+    # Resize to match valid step count (integration may have grown beyond numsteps_init).
+    resize!(odet.dW_edge, nsteps)
     fill!(odet.dW_edge, -Inf * (1 + im))
+    ep_edge     = fill(-Inf * (1 + im), nsteps)
+    ev_edge     = fill(-Inf * (1 + im), nsteps)
+    evonly_edge = fill(-Inf, nsteps)
 
-    # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
-    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
+    # Create a spline for wv matrix covering the actual stored integration range.
+    # Use odet.step - 1 (last valid index) to avoid reading uninitialized over-allocated slots.
+    psi_scan_end = odet.psi_store[nsteps]
+    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr, psi_scan_end)
 
-    # Loop through all stored steps in [psiedge, psilim] and compute dW at each.
-    # Steps in [psiedge, psihigh] are densely sampled; steps above psihigh are sparsely saved
-    # (see integrator_callback!). We scan the full range so the peak is not artificially capped.
-    for istep in 1:odet.step
+    # For diverted plasmas, limit the upper bound of the scan to psihigh + 0.5*(1-psihigh).
+    # Above this cutoff, singfac²=(m-nq)² grows unboundedly while wv is held constant
+    # (ExtendExtrap from psihigh), producing artificially large et values.
+    psihigh_inner = equil.profiles.xs[end]
+    is_diverted   = !isnothing(equil.profiles.q_spline_iota_inverse)
+    scan_psi_max  = is_diverted ? psihigh_inner + 0.5 * (1.0 - psihigh_inner) : Inf
+
+    # Loop through all stored steps in [psiedge, scan_psi_max] and compute dW at each.
+    # free_compute_total normalizes by ξ†J(psihigh)ξ / dV_dψ(psifac), matching free_run!,
+    # so the scan correctly ranks steps from different regions of the integration.
+    for istep in 1:nsteps
         odet.psifac = odet.psi_store[istep]
+        odet.psifac > scan_psi_max && break  # steps are in increasing psi order
         if ctrl.psiedge <= odet.psifac
             odet.u .= odet.u_store[:, :, :, istep]
             try
-                odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
+                result = free_compute_total(equil, ffit, intr, odet)
+                odet.dW_edge[istep] = result.et
+                ep_edge[istep]      = result.ep
+                ev_edge[istep]      = result.ev
+                evonly_edge[istep]  = result.evonly
             catch e
                 e isa LinearAlgebra.SingularException || rethrow(e)
-                # U₁ is singular at this step (degenerate near-surface solution) — skip it.
+                # U₁ is singular or kinetic norm is non-positive at this step; skip it.
                 # dW_edge remains -Inf so this step is ignored in the max search.
             end
         end
     end
 
     # Extract psi and et[1] for all edge-zone steps (where dW_edge was computed)
-    # before storage is trimmed to the peak-dW step.  psi_store may be over-allocated
-    # (doubled by grow_storage!), so index only the valid [1:odet.step] range.
+    # before storage is trimmed to the peak-dW step.
     edge_mask = .!isinf.(real.(odet.dW_edge))
-    odet.psi_edge_scan = odet.psi_store[1:odet.step][edge_mask]
-    odet.et_edge_scan  = odet.dW_edge[edge_mask]
+    odet.psi_edge_scan    = odet.psi_store[1:nsteps][edge_mask]
+    odet.et_edge_scan     = odet.dW_edge[edge_mask]
+    odet.ep_edge_scan     = ep_edge[edge_mask]
+    odet.ev_edge_scan     = ev_edge[edge_mask]
+    odet.evonly_edge_scan = evonly_edge[edge_mask]
 
     # Return the index that maximizes dW_edge to identify truncation point
     return findmax(real.(odet.dW_edge))[2]

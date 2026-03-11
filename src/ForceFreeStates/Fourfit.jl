@@ -45,6 +45,8 @@ The metric coefficients stored in `metric.fs` include:
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
   - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
+  - `psilim::Float64`: Upper psi limit for the metric grid (default: Inf = full grid). Nodes
+    beyond psilim are excluded to avoid near-X-point metric divergence in diverted plasmas.
 
 ### Returns
 
@@ -56,22 +58,23 @@ The metric coefficients stored in `metric.fs` include:
 Add kinetic metric tensor components for kin_flag = true
 Remove mband if we decide to fully deprecate banded matrices
 """
-function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
+function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool, psilim::Float64=Inf)
 
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    # Use the core psi grid (profiles.xs) rather than the full rzphi_xs, which may include
-    # far-edge nodes added by the X-point asymptotic geometry extension for diverted plasmas.
-    # The FGK matrices only need to cover the core equilibrium region.
+    # Use the rzphi_xs grid truncated at psilim. The far-edge X-point asymptotic extension
+    # (rzphi_xs beyond psihigh) gives a diverging metric near the separatrix, so we cap
+    # the grid at psilim (the outermost rational surface found by sing_find!/sing_lim!).
     profiles = equil.profiles
-    mpsi = length(profiles.xs)
+    mpsi_full = length(equil.rzphi_xs)
+    mpsi = isfinite(psilim) ? searchsortedlast(equil.rzphi_xs, psilim) : mpsi_full
     mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
     # The equil.rzphi_ys is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= profiles.xs
+    metric.xs .= @view equil.rzphi_xs[1:mpsi]
     metric.ys .= equil.rzphi_ys .* 2π
 
     # Temporary array for contravariant basis vectors
@@ -198,7 +201,20 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     imat = zeros(ComplexF64, 2 * intr.mband + 1)
     imat[mid] = 1 + 0im
 
-    hint = Ref(1)  # Linear search hint for sequential psi access
+    # For diverted plasmas: precompute chain-rule derivative of iota = 1/q, used above psihigh.
+    # q_full(psi)  = 1/iota(psi) via iota inverse spline above psihigh, direct spline below.
+    # q1_full(psi) = -iota'(psi)/iota(psi)^2 via deriv1 of inner iota spline above psihigh.
+    psihigh = equil.config.psihigh
+    has_edge_q = !isnothing(profiles.q_spline_iota_inverse)
+    iota_inner = has_edge_q ? profiles.q_spline_iota_inverse.inner : nothing
+    _d1_iota = has_edge_q ? deriv1(iota_inner) : nothing
+
+    # Index of the last core node (psi ≤ psihigh) in the extended metric grid — used to capture
+    # jmat at psihigh for free_run! normalization (jmat at the far-edge would be near-singular).
+    core_end_idx = searchsortedlast(metric.xs, psihigh)
+    jmat_at_core_end = similar(jmat)
+
+    hint = Ref(1)  # Linear search hint for sequential psi access (core region only)
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
         amats_flatview = @view amats_flat[ipsi, :]
@@ -211,11 +227,20 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         gmats_flatview = @view gmats_flat[ipsi, :]
         kmats_flatview = @view kmats_flat[ipsi, :]
         # --- Profiles ---
-        psi = profiles.xs[ipsi]
+        psi = metric.xs[ipsi]
         p1 = profiles.P_deriv(psi; hint=hint)
-        q = profiles.q_spline.y[ipsi]
-        q1 = profiles.q_deriv(psi; hint=hint)
+        # F' and P' use ExtendExtrap above psihigh — physically correct since F' ≈ 0, P' ≈ 0 near separatrix.
         jtheta = -profiles.F_deriv(psi; hint=hint)
+        # q and q' use the iota inverse spline (chain rule) above psihigh for diverted plasmas.
+        if psi > psihigh && has_edge_q
+            ι = iota_inner(psi)
+            ι1 = _d1_iota(psi)
+            q  = 1.0 / ι
+            q1 = -ι1 / ι^2
+        else
+            q  = profiles.q_spline_direct(psi; hint=hint)
+            q1 = profiles.q_deriv(psi; hint=hint)
+        end
         chi1 = 2π * equil.psio
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)
@@ -244,8 +269,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             jmat1[mid+k] = conj(jmat1[mid-k])
         end
 
-        # Save jmat at this psi for the jmat_spline
+        # Save jmat at this psi for the jmat_spline; snapshot at psihigh for free_run!
         jmat_flat[ipsi, :] .= jmat
+        if ipsi == core_end_idx
+            jmat_at_core_end .= jmat
+        end
 
         # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
         for n in intr.nlow:intr.nhigh
@@ -338,8 +366,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
 
-    # jmat at the final psi: used in free_run! where psilim is fixed
-    ffit.jmat = jmat
+    # jmat at the last core node (psihigh): used in free_run! for normalization at psilim.
+    # Use core_end_idx so this is the physically meaningful J value at the plasma-vacuum interface,
+    # not the far-edge far-from-core value (which has very different metric near the X-point).
+    ffit.jmat = jmat_at_core_end
 
     return ffit
 end

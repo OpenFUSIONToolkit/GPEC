@@ -383,6 +383,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
   - `psi_edge_scan::Vector{Float64}` - ψ values from the edge dW scan (psiedge → psilim), populated by `findmax_dW_edge!` before storage is trimmed.
   - `et_edge_scan::Vector{ComplexF64}` - Corresponding total energy eigenvalue et[1] at each edge-scan ψ, for diagnostic output to HDF5.
+  - `ep_edge_scan::Vector{ComplexF64}` - Corresponding plasma energy component at each edge-scan ψ.
+  - `ev_edge_scan::Vector{ComplexF64}` - Corresponding vacuum energy component at each edge-scan ψ.
+  - `evonly_edge_scan::Vector{Float64}` - Least stable eigenvalue of the wv matrix alone (EL-independent), for diagnosing wv spline quality.
   - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
@@ -431,6 +434,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # saved to HDF5 before the storage is trimmed to the peak-dW step.
     psi_edge_scan::Vector{Float64} = Float64[]
     et_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    ep_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    ev_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    evonly_edge_scan::Vector{Float64} = Float64[]
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 

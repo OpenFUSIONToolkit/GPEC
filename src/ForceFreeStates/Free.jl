@@ -129,33 +129,63 @@ end
 """
     free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute a spline of vacuum response matrices over the core scan range [psiedge, psihigh].
+Compute a spline of vacuum response matrices over [psiedge, psilim], evenly spaced in q.
 Used for fast evaluation of wt during `findmax_dW_edge!`. Performs the same function as
-`free_wvmats` in the Fortran code. Currently defaults to 50 spline points in the core range.
+`free_wvmats` in the Fortran code. Defaults to 9 spline points per rational window.
 
-Grid design: 50 uniform points over [psiedge, psihigh] only. For above-psihigh queries,
-ExtendExtrap returns the value at psihigh. Above-psihigh scan steps in `findmax_dW_edge!`
-typically fail with SingularException (degenerate raw U₁ after accumulated Gaussian
-reductions between fixups), so the spline need not cover that region.
+Grid design: points are spaced evenly in q from qedge+ε to qlim+ε (i/npsi offset reproduces
+the develop-branch qi logic). This concentrates nodes near rational surfaces where the vacuum
+response varies most rapidly, giving accurate wv interpolation across the full scan range.
+For diverted plasmas where psilim > psihigh, the iota inverse spline is used to invert q(psi)
+above psihigh.
 
 The spline stores RAW vacuum response without singfac scaling. Singfac = (m - n*q) is
 applied analytically in free_compute_total at each scan psi, keeping the spline
 well-conditioned despite q divergence near the separatrix.
 """
-function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, _psi_scan_end::Float64)
 
     profiles = equil.profiles
     psihigh  = profiles.xs[end]
 
-    npsi_core = 50
-    psi_array = range(ctrl.psiedge, psihigh; length=npsi_core) |> collect
+    # Limit the wv spline to the core grid [psiedge, psihigh] only.
+    # For psi > psihigh, the rzphi geometry uses the X-point asymptotic approximation which
+    # gives degenerate vacuum responses near the separatrix (plasma boundary shrinks to a
+    # point). The ExtendExtrap BC returns the psihigh value for all psi > psihigh, which is
+    # the correct physics: the vacuum response at the plasma-vacuum interface psihigh is
+    # well-defined and represents the physical plasma boundary.
+    qedge = profiles.q_spline_direct(ctrl.psiedge)
+    q_at_psihigh = profiles.q_spline_direct(psihigh)
 
-    wv_array = zeros(ComplexF64, npsi_core, intr.numpert_total, intr.numpert_total)
+    # Number of grid points: 9 per rational window over [qedge, q_at_psihigh]
+    npsi = max(9, ceil(Int, (q_at_psihigh - qedge) * intr.nhigh * 9))
+    psi_array = zeros(Float64, npsi + 1)
+    wv_array  = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
-    for (i, psi_val) in enumerate(psi_array)
+    for i in 1:(npsi + 1)
+        # qi runs from qedge to q_at_psihigh (core only)
+        qi   = qedge + (q_at_psihigh - qedge) * ((i-1) / npsi)
+        psii = ctrl.psiedge + (psihigh - ctrl.psiedge) * ((i - 1) / npsi)  # linear psi initial guess
+
+        # Invert q(psi) = qi using the direct spline (all points in [psiedge, psihigh])
+        jpsi = max(1, searchsortedlast(profiles.q_spline_direct.y, qi))
+        hint = Ref(min(jpsi, profiles.npts_minus_1))
+        psi_array[i] = find_zero(
+            (psi -> profiles.q_spline_direct(psi; hint=hint) - qi,
+             psi -> profiles.q_deriv(psi; hint=hint)),
+            psii, Roots.Newton()
+        )
+
         for ipert_n in 1:intr.npert
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, psi_val, ctrl.mthvac, intr.mpert, intr.mlow, n;
+            # Use psi_array[i] as the plasma boundary for each scan point.
+            # This makes the scan vacuum energy physically consistent with the plasma
+            # region actually bounded by psifac = psi_array[i]. Without this, wv is
+            # computed for the psihigh boundary at every scan step, which overestimates
+            # et for core steps (psi << psihigh) relative to edge steps, producing a
+            # spurious scan maximum in the core (e.g. at q≈3) instead of at the physical
+            # edge instability (q≈5).
+            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, intr.mpert, intr.mlow, n;
                                             force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
@@ -164,11 +194,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         end
     end
 
-    wv_flat = reshape(wv_array, npsi_core, intr.numpert_total^2)
-    # ExtendExtrap: above-psihigh queries return the psihigh value (constant extrapolation).
-    # Above-psihigh scan steps use the frozen wv_raw(psihigh) combined with singfac(psi) applied
-    # analytically; those steps typically fail (SingularException from degenerate raw U₁ above
-    # psihigh) and are excluded from the peak search.
+    wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
     wvmat   = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
 
     return wvmat
@@ -191,29 +217,15 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
     profiles = equil.profiles
-    # Evaluate dV/dpsi at the current scan psi (odet.psifac), not at the fixed psilim.
-    # In findmax_dW_edge!, odet.psifac is updated at each step; using psilim here would
-    # give a ~100x wrong normalization near the separatrix where dV/dpsi diverges.
-    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && odet.psifac > profiles.xs[end]) ?
-              profiles.dVdpsi_spline_inv(odet.psifac) :
-              profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix W = U₂·U₁⁻¹ / psio².
-    # Column-normalize U₁ and U₂ before dividing to prevent catastrophic cancellation: after
-    # many ODE steps without a fixup, U₁ elements grow to O(10³), making the minimum eigenvalue
-    # of W (computed as a small difference of large numbers) numerically unreliable.
-    # Scaling both U₁ and U₂ columns by 1/‖U₁[:,j]‖ preserves W exactly since
-    # W = (U₂·D)(U₁·D)⁻¹ = U₂·D·D⁻¹·U₁⁻¹ = U₂·U₁⁻¹.
-    u1_local = copy(@view odet.u[:, :, 1])
-    u2_local = copy(@view odet.u[:, :, 2])
-    for j in 1:size(u1_local, 2)
-        col_norm = norm(view(u1_local, :, j))
-        if col_norm > 0
-            u1_local[:, j] ./= col_norm
-            u2_local[:, j] ./= col_norm
-        end
-    end
-    wp = (u2_local / u1_local) ./ equil.psio^2
+    # Direct matrix division without column normalization, matching the develop-branch approach.
+    # Column normalization was found to over-correct well-conditioned steps near core rational
+    # surfaces (e.g. just after a q=3 fixup), giving them artificially large et values that
+    # dominate the peak search. Without column normalization, those steps give garbage or
+    # negative eigenvalues (naturally excluded from findmax), and only physically meaningful
+    # steps (well away from fixup boundaries near the edge) give large positive et.
+    wp = (@view(odet.u[:, :, 2]) / @view(odet.u[:, :, 1])) ./ equil.psio^2
 
     # Retrieve raw vacuum matrix from the spline (singfac NOT pre-applied; see free_compute_wv_spline).
     # Apply singfac = (m - n*q(psifac)) analytically: this is the physically correct choice for
@@ -241,22 +253,6 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     hermitianpart!(wt)
     Ev = eigen(Hermitian(wt))
 
-    if 0.99099 < odet.psifac < 0.9913
-        # Diagnostic: compare min eigenvalue of wt, wp, and wv at the valid/invalid boundary.
-        # wt min should match return value; a jump in evwv vs evwp identifies the culprit component.
-        # cond_U1_raw: raw (pre-normalization) condition — typically huge due to exponential growth.
-        # cond_U1_norm: condition of the column-normalized U₁ actually used in the wp computation.
-        evwp_min   = minimum(eigvals(Hermitian((wp + wp') / 2)))
-        evwv_min   = minimum(eigvals(Hermitian((wv + wv') / 2)))
-        evwt_min   = minimum(Ev.values)
-        cU1_raw    = cond(@view(odet.u[:,:,1]))
-        cU1_norm   = cond(u1_local)
-        u1nrm_min  = minimum(norm, eachcol(@view(odet.u[:,:,1])))
-        u1nrm_max  = maximum(norm, eachcol(@view(odet.u[:,:,1])))
-        @info @sprintf("FCT_DIAG psi=%.6f: evwt_min=%.3g  evwp_min=%.3g  evwv_min=%.3g  cU1_raw=%.2g  cU1_norm=%.2g  u1nrm=[%.2g,%.2g]",
-                       odet.psifac, evwt_min, evwp_min, evwv_min, cU1_raw, cU1_norm, u1nrm_min, u1nrm_max)
-    end
-
     # Sort eigenvalues and reorder columns of wt (Ev.values are real for Hermitian)
     eindex = sortperm(Ev.values; rev=true)
     for ipert in 1:intr.numpert_total
@@ -264,12 +260,36 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
         tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
     end
 
-    # Return the largest eigenvalue of wt = wp + wv as the stability proxy.
-    # The proper normalization (et / (ξ†·J·ξ / dV/dψ)) is deferred to free_run!, where it is
-    # correctly evaluated at the fixed psilim. For the scan in findmax_dW_edge!, the jmat
-    # quadratic form ξ†·J(psifac)·ξ can change sign across the scan (the Fourier representation
-    # of J(θ) at psifac loses positive-definiteness due to the X-point asymptotic geometry
-    # near psihigh), making the normalized eigenvalue ill-conditioned after only ~7 steps.
-    # The raw eigenvalue has the correct sign and smooth variation, giving a robust peak location.
-    return tot_eigvals[1]
+    # Compute plasma and vacuum energy components for the dominant (smallest eigenvalue) eigenvector.
+    # wt[:,1] now holds the eigenvector corresponding to tot_eigvals[1].
+    v = @view wt[:, 1]
+    ep1 = ComplexF64(dot(v, wp * v))
+    ev1 = ComplexF64(dot(v, wv * v))
+
+    # Least stable eigenvalue of the vacuum matrix alone (EL-solution-independent diagnostic).
+    evonly1 = minimum(real(eigvals(Hermitian((wv + wv') / 2))))
+
+    # Normalize eigenvalue by ξ†J(ψ_high)ξ / dV_dψ(psifac), matching free_run! normalization.
+    # free_run! uses ffit.jmat (computed at psihigh) for the quadratic form, and dV_dpsi at
+    # psilim for the denominator. Since jmat[m=0](psihigh) ≈ dV_dpsi(psihigh), this gives
+    # norm_kin ≈ dV_dpsi(psihigh) / dV_dpsi(psifac). For psifac < psihigh, dV_dpsi(psihigh)
+    # > dV_dpsi(psifac), so norm_kin > 1 and et_normalized < et_raw. Without this, core steps
+    # near q=3 (where dV_dpsi is smaller) appear more unstable than edge steps near q=5 because
+    # dV_dpsi(psihigh) / dV_dpsi(0.839) ≈ 1.44 while dV_dpsi(psihigh) / dV_dpsi(0.991) ≈ 1.01.
+    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && odet.psifac > profiles.xs[end]) ?
+              profiles.dVdpsi_spline_inv(odet.psifac) :
+              profiles.dVdpsi_spline(odet.psifac)
+    norm_kin = zero(ComplexF64)
+    for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
+        ipert = (ipert_n - 1) * intr.mpert + ipert_m
+        jpert = (ipert_n - 1) * intr.mpert + jpert_m
+        jidx  = jpert_m - ipert_m + intr.mband + 1
+        norm_kin += ffit.jmat[jidx] * v[ipert] * conj(v[jpert])
+    end
+    norm_kin /= dV_dpsi
+    # If norm_kin ≤ 0 (indefinite jmat near separatrix or degenerate eigenvector), throw to skip.
+    real(norm_kin) > 0 || throw(LinearAlgebra.SingularException(0))
+    et_normalized = tot_eigvals[1] / norm_kin
+
+    return (et=et_normalized, ep=ep1, ev=ev1, evonly=evonly1)
 end

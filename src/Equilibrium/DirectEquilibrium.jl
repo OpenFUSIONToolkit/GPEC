@@ -513,7 +513,33 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
         append!(psi_far, win_pts[2:end])
     end
     last_surf = isempty(edge_surfaces) ? psihigh : edge_surfaces[end]
-    last_pts = range(last_surf, 1.0 - 1e-6; length=12)
+
+    # Extend the dense per-window grid one full rational window beyond psilim
+    # (psilim = last_surf + edge_layer_width) so the spline covers the complete
+    # window that psilim sits in.  For n=1: m_dense_end = trunc(q(psilim)) + 1,
+    # i.e. round((n*q_psilim + 1)/n) from the user's formula.
+    psilim_local = min(last_surf, 1.0 - 1e-8)
+    iota_at_psilim = iota_inner(psilim_local)
+    m_dense_end = trunc(Int, 1.0 / max(iota_at_psilim, 1e-10)) + 1
+    iota_dense_end = 1.0 / m_dense_end
+    psi_dense_end = last_surf
+    if iota_dense_end > 1e-10 && iota_dense_end < iota_inner(psihigh)
+        try
+            psi_dense_end = find_zero(
+                psi -> iota_inner(psi) - iota_dense_end,
+                (psilim_local, 1.0 - 1e-8), Roots.Brent(); xatol=1e-8
+            )
+        catch
+        end
+    end
+    if psi_dense_end > last_surf + 1e-10
+        dense_ext = range(last_surf, psi_dense_end; length=12)
+        append!(psi_far, dense_ext[2:end])
+    end
+
+    # Sparse tail from the end of the dense grid to near the separatrix
+    tail_start = max(psi_dense_end, last_surf)
+    last_pts = range(tail_start, 1.0 - 1e-6; length=12)
     append!(psi_far, last_pts[2:end])
     unique!(sort!(psi_far))
 
@@ -715,16 +741,70 @@ robustness.
         psi_edge_start = psihigh * 0.9
         edge_mask = findall(psi -> psi >= psi_edge_start, psi_nodes)
 
-        edge_psi = vcat(psi_nodes[edge_mask], 1.0)
+        # Compute derivative-matching phantom knots just above psihigh.
+        # Without these, the single anchor at (1.0, 0) pulls the iota spline slope at psihigh
+        # away from -q'/q², causing a derivative discontinuity in q = 1/iota at the junction.
+        # Adding N phantom knots using the Taylor expansion from the direct spline forces the
+        # iota spline to reproduce the correct N-th order behaviour right at psihigh.
+        phantom_delta = 1e-4
+        q0   = sq_nodes[edge_mask[end], 4]
+        q1   = profiles.q_deriv(psihigh)
+        q2   = deriv2(profiles.q_spline_direct)(psihigh)
+        q3   = deriv3(profiles.q_spline_direct)(psihigh)
+        iota1_val  = -q1 / q0^2
+        iota2_val  = (2*q1^2 - q0*q2) / q0^3
+        iota3_val  = (-6*q1^3 + 6*q0*q1*q2 - q0^2*q3) / q0^4
+        phantom_psi_q = [psihigh + j * phantom_delta for j in 1:3]
+        phantom_iota  = [1/q0 + iota1_val*(j*phantom_delta) +
+                         0.5*iota2_val*(j*phantom_delta)^2 +
+                         (1/6)*iota3_val*(j*phantom_delta)^3 for j in 1:3]
+
+        V0   = sq_nodes[edge_mask[end], 3]
+        V1   = profiles.dVdpsi_deriv(psihigh)
+        V2   = deriv2(profiles.dVdpsi_spline)(psihigh)
+        Vinv1_val = -V1 / V0^2
+        Vinv2_val = (2*V1^2 - V0*V2) / V0^3
+        phantom_Vinv = [1/V0 + Vinv1_val*(j*phantom_delta) +
+                        0.5*Vinv2_val*(j*phantom_delta)^2 for j in 1:2]
+
+        # Intermediate points between phantom knots and the psi=1 anchor.
+        # CubicFit BC over a long empty interval creates a flat S-curve artifact in iota.
+        # Use iota(s) = A*√s + B*s + C*s^(3/2) with s = 1-psi, which enforces C² continuity
+        # (value, first, and second derivative) at psi=psihigh and vanishes at psi=1.
+        # Solving the 3×3 linear system at s=δ=1-psihigh gives:
+        #   A = (3ι₀ + 3ι₁δ + 2ι₂δ²)/√δ
+        #   B = -ι₁ - A/√δ - 2ι₂δ
+        #   C = (4ι₂√δ)/3 + A/(3δ)
+        n_mid = 8
+        iota0 = 1.0 / q0
+        Vinv0 = 1.0 / V0
+        δ = 1.0 - psihigh
+        A_iota = (3*iota0 + 3*iota1_val*δ + 2*iota2_val*δ^2) / sqrt(δ)
+        B_iota = -iota1_val - A_iota/sqrt(δ) - 2*iota2_val*δ
+        C_iota = (4*iota2_val*sqrt(δ))/3 + A_iota/(3*δ)
+        A_Vinv = (3*Vinv0 + 3*Vinv1_val*δ + 2*Vinv2_val*δ^2) / sqrt(δ)
+        B_Vinv = -Vinv1_val - A_Vinv/sqrt(δ) - 2*Vinv2_val*δ
+        C_Vinv = (4*Vinv2_val*sqrt(δ))/3 + A_Vinv/(3*δ)
+        psi_mid   = [psihigh + δ * i/(n_mid + 1) for i in 1:n_mid]
+        iota_mid  = [A_iota*sqrt(1.0-p) + B_iota*(1.0-p) + C_iota*(1.0-p)^1.5 for p in psi_mid]
+        Vinv_mid  = [A_Vinv*sqrt(1.0-p) + B_Vinv*(1.0-p) + C_Vinv*(1.0-p)^1.5 for p in psi_mid]
+
+        edge_psi = vcat(psi_nodes[edge_mask], phantom_psi_q, psi_mid, 1.0)
+        sort!(edge_psi)
 
         # Iota = 1/q; anchor iota(1.0) = 0 (q → ∞ at separatrix)
-        q_iota_vals = vcat([1.0 / sq_nodes[i, 4] for i in edge_mask], 0.0)
+        q_iota_vals = vcat([1.0 / sq_nodes[i, 4] for i in edge_mask], phantom_iota, iota_mid, 0.0)
+        q_iota_vals = q_iota_vals[sortperm(vcat(psi_nodes[edge_mask], phantom_psi_q, psi_mid, 1.0))]
         q_iota_inner = cubic_interp(edge_psi, q_iota_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
         profiles.q_spline_iota_inverse = InverseCubicSpline(q_iota_inner)
 
         # 1/(dV/dψ); anchor (dV/dψ)⁻¹(1.0) = 0 (dV/dψ → ∞ at separatrix)
-        dVdpsi_inv_vals = vcat([1.0 / sq_nodes[i, 3] for i in edge_mask], 0.0)
-        dVdpsi_inv_inner = cubic_interp(edge_psi, dVdpsi_inv_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+        # Uses 2 phantom knots (1st + 2nd derivative matching; 3rd not needed for dV/dψ)
+        edge_psi_dV = vcat(psi_nodes[edge_mask], phantom_psi_q[1:2], psi_mid, 1.0)
+        sort!(edge_psi_dV)
+        dVdpsi_inv_vals = vcat([1.0 / sq_nodes[i, 3] for i in edge_mask], phantom_Vinv, Vinv_mid, 0.0)
+        dVdpsi_inv_vals = dVdpsi_inv_vals[sortperm(vcat(psi_nodes[edge_mask], phantom_psi_q[1:2], psi_mid, 1.0))]
+        dVdpsi_inv_inner = cubic_interp(edge_psi_dV, dVdpsi_inv_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
         profiles.dVdpsi_spline_inv = InverseCubicSpline(dVdpsi_inv_inner)
 
         @printf("   Edge inverse splines built over psin ∈ [%.4f, 1.0] (%d nodes)\n",

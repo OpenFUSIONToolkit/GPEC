@@ -206,8 +206,9 @@ function main(args::Vector{String}=String[])
                   "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
-        # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        # Compute metric tensor, limiting the psi grid to psilim so far-edge nodes
+        # (near the X-point where the metric diverges) are excluded from matrix splines.
+        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag, psilim=intr.psilim)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -416,10 +417,13 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
 
-        # Edge stability diagnostic: et[1] from psiedge → psilim (before trimming)
+        # Edge stability diagnostic: et[1], ep[1], ev[1] from psiedge → psilim (before trimming)
         if !isempty(odet.psi_edge_scan)
-            out_h5["integration/psi_edge_scan"] = odet.psi_edge_scan
-            out_h5["integration/et_edge_scan"]  = odet.et_edge_scan
+            out_h5["integration/psi_edge_scan"]    = odet.psi_edge_scan
+            out_h5["integration/et_edge_scan"]     = odet.et_edge_scan
+            out_h5["integration/ep_edge_scan"]     = odet.ep_edge_scan
+            out_h5["integration/ev_edge_scan"]     = odet.ev_edge_scan
+            out_h5["integration/evonly_edge_scan"] = odet.evonly_edge_scan
         end
 
         # Write singular surface data
