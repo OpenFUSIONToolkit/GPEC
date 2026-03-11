@@ -61,9 +61,7 @@
         julia --version
         ```
 
-4. Clone GPEC into your WSL home folder.
-Clone it from GitHub directly to your virtual machine.
-
+4. Clone GPEC into your WSL home folder:
     ```shell
     git clone https://github.com/OpenFUSIONToolkit/GeneralizedPerturbedEquilibrium.git
     cd GeneralizedPerturbedEquilibrium
