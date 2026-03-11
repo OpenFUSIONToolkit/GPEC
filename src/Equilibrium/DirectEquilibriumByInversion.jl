@@ -206,87 +206,144 @@ function classify_topology(raw_profile::DirectRunInput, psio::Float64;
 end
 
 """
-    make_stretched_z_grid(z_lo, z_hi, nz, topology, β_z) → Vector{Float64}
+    make_multi_stretched_grid(lo, hi, centers, n, β) → Vector{Float64}
 
-Build a Z coordinate vector of length `nz` spanning `[z_lo, z_hi]` with sinh-stretching
-that concentrates grid points near the x-point end(s) of the domain.
+Build a 1D grid of length `n` on `[lo, hi]` with sinh-stretching toward each point in
+`centers`. The domain is split at each interior concentration point; each resulting
+sub-interval uses:
+- symmetric (double-ended) sinh when both endpoints are concentration points
+- one-sided sinh fine at the concentration-point end otherwise
 
-For `:sn_lower`, points are packed toward `z_lo` (lower x-point). For `:sn_upper`,
-toward `z_hi`. For `:double_null`, both ends are packed symmetrically. For `:limited`
-or `β_z ≤ 0`, a uniform grid is returned.
-
-The transformation is Z(v) = z_lo + Δz·sinh(β·v)/sinh(β) for v ∈ [0,1], which maps
-the uniform parameter `v` to a non-uniform Z that clusters near the small-v end.
-At β=2.0 the first cell is ~3.8× smaller than the last; at β=3.0 it is ~10× smaller.
-Contour.jl accepts non-uniform coordinate vectors natively, so no back-conversion is
-needed — the returned Z values are physical coordinates.
+Domain boundaries (`lo`, `hi`) are treated as concentration points only if they appear in
+`centers`. This produces a grid that is simultaneously fine near the magnetic axis (an
+interior concentration point) and near x-points (which lie at domain boundaries for
+the clipped plasma bounding box). Returns a uniform grid if `β ≤ 0`.
 """
-function make_stretched_z_grid(z_lo::Float64, z_hi::Float64, nz::Int,
-                               topology::Symbol, β_z::Float64)
-    if topology == :limited || β_z ≤ 0.0
-        return collect(range(z_lo, z_hi; length=nz))
+function make_multi_stretched_grid(lo::Float64, hi::Float64,
+                                    centers::Vector{Float64}, n::Int, β::Float64)
+    β ≤ 0.0 && return collect(range(lo, hi; length=n))
+    lo_is_conc = any(c -> abs(c - lo) < 1e-12, centers)
+    hi_is_conc = any(c -> abs(c - hi) < 1e-12, centers)
+    interior   = sort!(unique!(filter(c -> lo < c < hi, copy(centers))))
+    nodes      = [lo; interior; hi]
+    n_segs     = length(nodes) - 1
+    n_segs == 0 && return collect(range(lo, hi; length=n))
+
+    total_len = hi - lo
+    # Distribute n points across segments proportionally; last segment takes the remainder
+    # so concatenation (dropping n_segs-1 shared endpoints) gives exactly n total points.
+    n_segi = Vector{Int}(undef, n_segs)
+    allocated = 0
+    for k in 1:(n_segs - 1)
+        n_segi[k] = max(2, round(Int, n * (nodes[k+1] - nodes[k]) / total_len))
+        allocated += n_segi[k]
     end
-    Δz = z_hi - z_lo
-    sinh_β = sinh(β_z)
-    z_grid = Vector{Float64}(undef, nz)
-    if topology == :sn_lower
-        # Pack toward z_lo (lower x-point)
-        @inbounds for k in 1:nz
-            v = (k - 1) / (nz - 1)
-            z_grid[k] = z_lo + Δz * sinh(β_z * v) / sinh_β
+    n_segi[n_segs] = max(2, n + (n_segs - 1) - allocated)
+
+    result = Float64[]
+    for k in 1:n_segs
+        a, b = nodes[k], nodes[k+1]
+        left_fine  = k > 1 || lo_is_conc
+        right_fine = k < n_segs || hi_is_conc
+        sub = if left_fine && right_fine
+            _sinh_both_ends(a, b, n_segi[k], β)
+        elseif left_fine
+            _sinh_left(a, b, n_segi[k], β)
+        elseif right_fine
+            _sinh_right(a, b, n_segi[k], β)
+        else
+            collect(range(a, b; length=n_segi[k]))
         end
-    elseif topology == :sn_upper
-        # Pack toward z_hi (upper x-point); mirror of sn_lower
-        @inbounds for k in 1:nz
-            v = (k - 1) / (nz - 1)
-            z_grid[k] = z_hi - Δz * sinh(β_z * (1.0 - v)) / sinh_β
-        end
-    else  # :double_null — pack both ends symmetrically
-        z_half = 0.5 * Δz
-        @inbounds for k in 1:nz
-            v = (k - 1) / (nz - 1)
-            if v <= 0.5
-                z_grid[k] = z_lo + z_half * sinh(β_z * 2v) / sinh_β
-            else
-                z_grid[k] = z_hi - z_half * sinh(β_z * 2(1.0 - v)) / sinh_β
-            end
-        end
+        isempty(result) ? append!(result, sub) : append!(result, sub[2:end])
     end
-    return z_grid
+    return result
+end
+
+# sinh grid fine at left end a: x(v) = a + Δ·sinh(β·v)/sinh(β)
+function _sinh_left(a::Float64, b::Float64, n::Int, β::Float64)
+    Δ = b - a; s = sinh(β)
+    [a + Δ * sinh(β * (k - 1) / (n - 1)) / s for k in 1:n]
+end
+
+# sinh grid fine at right end b: x(v) = b − Δ·sinh(β·(1−v))/sinh(β)
+function _sinh_right(a::Float64, b::Float64, n::Int, β::Float64)
+    Δ = b - a; s = sinh(β)
+    [b - Δ * sinh(β * (1.0 - (k - 1) / (n - 1))) / s for k in 1:n]
+end
+
+# symmetric sinh fine at both ends a and b
+function _sinh_both_ends(a::Float64, b::Float64, n::Int, β::Float64)
+    Δ = b - a; s = sinh(β)
+    grid = Vector{Float64}(undef, n)
+    @inbounds for k in 1:n
+        v = (k - 1) / (n - 1)
+        grid[k] = v ≤ 0.5 ? (a + 0.5Δ * sinh(β * 2v) / s) :
+                             (b - 0.5Δ * sinh(β * 2(1.0 - v)) / s)
+    end
+    return grid
 end
 
 """
-    equilibrium_solver_by_inversion(raw_profile; refine=4, β_z=2.0, psilow_contour_threshold=5e-3)
+    make_stretched_r_grid(r_lo, r_hi, ro, nr, β_r) → Vector{Float64}
+
+Grid of `nr` points on `[r_lo, r_hi]` concentrated near `ro` (magnetic axis).
+Thin wrapper around `make_multi_stretched_grid`.
+"""
+function make_stretched_r_grid(r_lo::Float64, r_hi::Float64, ro::Float64, nr::Int, β_r::Float64)
+    return make_multi_stretched_grid(r_lo, r_hi, [ro], nr, β_r)
+end
+
+"""
+    make_stretched_z_grid(z_lo, z_hi, zo, nz, topology, β_z) → Vector{Float64}
+
+Grid of `nz` points on `[z_lo, z_hi]` concentrated near `zo` (magnetic axis) **and**
+near each x-point boundary (at `z_lo` for `:sn_lower`/`:double_null`, at `z_hi` for
+`:sn_upper`/`:double_null`). Thin wrapper around `make_multi_stretched_grid`.
+"""
+function make_stretched_z_grid(z_lo::Float64, z_hi::Float64, zo::Float64, nz::Int,
+                                topology::Symbol, β_z::Float64)
+    centers = Float64[zo]
+    topology ∈ (:sn_lower, :double_null) && push!(centers, z_lo)
+    topology ∈ (:sn_upper, :double_null) && push!(centers, z_hi)
+    return make_multi_stretched_grid(z_lo, z_hi, centers, nz, β_z)
+end
+
+"""
+    equilibrium_solver_by_inversion(raw_profile; refine=4, β_z=2.0, β_r=2.0)
 
 Driver for contour-tracing equilibrium reconstruction.
 
 ## Procedure:
 1. Find magnetic axis via `direct_position!`
 2. Detect plasma topology (limited / SN-lower / SN-upper / double-null) from EFIT nodal ψ
-3. Evaluate ψ(R,Z) bicubic spline on a `refine×` fine Cartesian grid (parallelized).
-   The Z grid is sinh-stretched toward x-point(s) to concentrate marching-squares resolution
-   where outermost flux surface arms are most curved.
-4. For each target ψ_norm surface: trace the closed level-set curve with Contour.jl,
-   resample to uniform geometric-angle (R, Z) grid (parallelized)
-5. Build an `InverseRunInput` from the R(ψ,θ), Z(ψ,θ) tables
-6. Delegate to `equilibrium_solver(::InverseRunInput)` for SFL coordinate construction
-7. Validate round-trip accuracy; warn if edge error exceeds 2e-3
+3. Compute the minor radius at psilow from the quadratic ψ expansion at the axis.
+4. Evaluate ψ(R,Z) on the global Cartesian grid (parallelized).
+   Both R and Z grids use `make_multi_stretched_grid`: R concentrates at `ro`, Z at `zo`
+   and at any x-point domain boundaries.
+5. For each target ψ surface above the near-axis threshold: trace with Contour.jl
+   and resample to the uniform geometric-angle (R, Z) grid (parallelized).
+6. (Zoomed core pass) For surfaces below the near-axis threshold (too small for the global
+   grid to resolve with n_min=10 cells per semi-axis), build a dedicated fine grid
+   axis-centered on (ro, zo), sized to achieve n_min=10 at (ro,zo). Re-trace those
+   surfaces from this zoomed grid and overwrite R_table/Z_table.
+7. Build an `InverseRunInput` from the R(ψ,θ), Z(ψ,θ) tables
+8. Delegate to `equilibrium_solver(::InverseRunInput)` for SFL coordinate construction
+9. Validate round-trip accuracy; warn if edge error exceeds 2e-3
 
 ## Keyword arguments:
 - `refine`: grid refinement factor relative to EFIT resolution (default 4)
 - `β_z`: sinh-stretching strength for the Z grid toward x-point(s) (default 2.0).
-  `β_z=0` disables stretching (uniform grid). Higher values give stronger compression
-  near x-points at the cost of coarser sampling away from them.
-- `psilow_contour_threshold`: below this psifac, use circular near-axis fallback
-  if Contour.jl cannot resolve the surface (only relevant for psilow < ~1e-4)
+  `β_z=0` disables stretching (uniform grid).
+- `β_r`: sinh-stretching strength for the R grid toward the magnetic axis (default 2.0).
+  `β_r=0` disables stretching (uniform grid).
 
 Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
-    refine::Int=4,
+    refine::Int=5,
     β_z::Float64=2.0,
-    psilow_contour_threshold::Float64=5e-3
+    β_r::Float64=2.0
 )
     equil_params = raw_profile.config
     psio = raw_profile.psio
@@ -303,7 +360,7 @@ function equilibrium_solver_by_inversion(
     psi_nodes = [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
 
     # Find magnetic axis and separatrix
-    ro, zo, _rs1, rs2 = direct_position!(raw_profile)
+    ro, zo, _rs1, _rs2 = direct_position!(raw_profile)
 
     # Detect plasma topology for sinh-stretching direction
     topology = classify_topology(raw_profile, psio)
@@ -334,17 +391,52 @@ function equilibrium_solver_by_inversion(
         z_lo, z_hi = raw_profile.zmin, raw_profile.zmax
     end
 
-    # Build fine Cartesian grid for Contour.jl, clipped to the plasma bounding box.
-    # Maintain the same grid spacing as the full-domain grid (nr/nz scale with clipped extent).
-    # The R grid is a uniform range (Contour.jl fast path); the Z grid is sinh-stretched
-    # toward x-point(s) to concentrate marching-squares resolution where outermost surface
-    # arms are most curved. Contour.jl accepts non-uniform Z vectors natively.
+    # Compute the minor radius of the innermost flux surface (at psilow) from the quadratic
+    # ψ expansion at the axis: ψ ≈ ½|ψ_RR|(R−Rₒ)² + ½|ψ_ZZ|(Z−Zₒ)², giving semi-axes
+    # a_R = sqrt(2·psilow·psio/|ψ_RR|), a_Z similarly. a_low = min(a_R, a_Z).
+    ψ_RR_abs = abs(raw_profile.psi_in((ro, zo); deriv=Val((2, 0))))
+    ψ_ZZ_abs = abs(raw_profile.psi_in((ro, zo); deriv=Val((0, 2))))
+    a_low = min(sqrt(2 * psilow * psio / ψ_RR_abs), sqrt(2 * psilow * psio / ψ_ZZ_abs))
+
+    # Build fine Cartesian grid at base resolution (refine× EFIT, clipped to plasma bbox).
+    # R is sinh-stretched toward ro; Z is sinh-stretched toward zo (axis) and x-point(s).
     nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
     nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
-    r_fine = range(r_lo, r_hi; length=nr_fine)
-    z_grid = make_stretched_z_grid(z_lo, z_hi, nz_fine, topology, β_z)
+    r_fine  = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r)
+    z_grid  = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z)
 
-    @info "efit_by_inversion: Evaluating ψ on $(nr_fine)×$(nz_fine) fine grid ($(refine)× refinement, clipped to plasma bbox)"
+    # Adaptive global grid condensation: require dR, dZ < target_cell_frac·a_low at (ro, zo)
+    # so the global grid resolves near-axis surfaces with at least 1/target_cell_frac cells
+    # per semi-axis. Surfaces that still fall below the n_min_cells=10 threshold are then
+    # re-traced by the zoomed core grid (see below).
+    iro = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
+    izo = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
+    dR_axis = r_fine[iro] - r_fine[iro - 1]
+    dZ_axis = z_grid[izo] - z_grid[izo - 1]
+    target_cell_frac = 0.2
+    scale_r = max(1, ceil(Int, dR_axis / (target_cell_frac * a_low)))
+    scale_z = max(1, ceil(Int, dZ_axis / (target_cell_frac * a_low)))
+    if scale_r > 1
+        nr_fine = (nr_fine - 1) * scale_r + 1
+        r_fine  = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r)
+        iro     = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
+        dR_axis = r_fine[iro] - r_fine[iro - 1]
+    end
+    if scale_z > 1
+        nz_fine = (nz_fine - 1) * scale_z + 1
+        z_grid  = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z)
+        nz_fine = length(z_grid)
+        izo     = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
+        dZ_axis = z_grid[izo] - z_grid[izo - 1]
+    end
+
+    # Near-axis threshold: surfaces spanning fewer than n_min_cells global-grid cells per
+    # semi-axis after condensation are re-traced by the zoomed core grid.
+    d_max = max(dR_axis, dZ_axis)
+    n_min_cells = 10
+    near_axis_threshold = (n_min_cells * d_max)^2 * max(ψ_RR_abs, ψ_ZZ_abs) / (2 * psio)
+
+    @info "efit_by_inversion: a_low = $(@sprintf("%.1f", a_low * 1000)) mm at psilow=$psilow; global grid=$(nr_fine)×$(nz_fine) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm, dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm, target=$(@sprintf("%.2f", target_cell_frac*a_low*1000)) mm); zoom threshold ψ < $(@sprintf("%.4f", near_axis_threshold))"
 
     # Parallel grid evaluation: each column (fixed z) is independent.
     # One hint pair per thread (allocated once), reset at the start of each column.
@@ -374,33 +466,32 @@ function equilibrium_solver_by_inversion(
 
     # Parallel contour tracing: each surface is independent.
     # Ctr.contour has no global state (confirmed from source inspection) → thread-safe.
-    # surface_status: 0=success, 1=fallback, -1=error (checked serially after the loop).
+    # surface_status: 0=global Contour.jl success, 1=below threshold (zoomed pass), -1=error.
     surface_status = Vector{Int8}(undef, mpsi + 1)
 
     Threads.@threads for ipsi in 1:(mpsi+1)
         psifac = psi_nodes[ipsi]
-        ψ_target = psio * (1.0 - psifac)
 
-        # Trace level set at ψ_target with Contour.jl (marching squares).
-        # r_fine is a range (Contour.jl fast path); z_grid is a non-uniform vector.
+        # Surface too small for the global grid to resolve with n_min=10: defer to zoomed pass.
+        # Elliptic fill (quadratic ψ expansion — kept for reference):
+        # a_R = sqrt(2 * psifac * psio / ψ_RR_abs)
+        # a_Z = sqrt(2 * psifac * psio / ψ_ZZ_abs)
+        # @inbounds for j in 1:(mtheta+1)
+        #     θ = theta_grid[j]
+        #     R_table[ipsi, j] = ro + a_R * cos(2π * θ)
+        #     Z_table[ipsi, j] = zo + a_Z * sin(2π * θ)
+        # end
+        if psifac <= near_axis_threshold
+            surface_status[ipsi] = 1
+            continue
+        end
+
+        ψ_target = psio * (1.0 - psifac)
         cl = Ctr.contour(r_fine, z_grid, ψ_fine, ψ_target)
         curve = select_plasma_contour(Ctr.lines(cl), ro, zo)
 
         if curve === nothing
-            # Near-axis fallback: circular approximation if Contour.jl can't resolve the
-            # surface (only expected for psifac < grid spacing², i.e., very small psilow).
-            # Accuracy is limited in this regime; psilow > 1e-3 is recommended.
-            if psifac < psilow_contour_threshold
-                rfac = sqrt(psifac) * (rs2 - ro)
-                @inbounds for j in 1:(mtheta+1)
-                    θ = theta_grid[j]  # turns ∈ [0, 1]
-                    R_table[ipsi, j] = ro + rfac * cos(2π * θ)
-                    Z_table[ipsi, j] = zo + rfac * sin(2π * θ)
-                end
-                surface_status[ipsi] = 1
-            else
-                surface_status[ipsi] = -1
-            end
+            surface_status[ipsi] = -1
             continue
         end
 
@@ -420,8 +511,82 @@ function equilibrium_solver_by_inversion(
         end
     end
     n_contour_success = count(==(0), surface_status)
-    n_contour_fallback = count(==(1), surface_status)
-    @info "efit_by_inversion: $n_contour_success surfaces traced by Contour.jl, $n_contour_fallback by near-axis fallback"
+    n_near_axis_fill  = count(==(1), surface_status)
+
+    # Zoomed core pass: re-trace surfaces below the near-axis threshold on a dedicated
+    # axis-centered grid. Both R and Z are sinh-stretched toward (ro, zo) — no x-point
+    # stretching is needed inside this small box. The grid is sized so the cell at (ro, zo)
+    # is ≤ a_low / n_min_cells, guaranteeing n_min_cells cells per semi-axis at psilow.
+    #
+    # To avoid cubic-spline transition artifacts at the zoom/global boundary, the zoomed
+    # pass is extended to zoom_extend_factor × near_axis_threshold. At that higher ψ the
+    # global grid has ~sqrt(zoom_extend_factor) × n_min_cells cells per semi-axis and agrees
+    # well with the zoomed grid, so the spline sees no discontinuity at the handoff.
+    if n_near_axis_fill > 0
+        zoom_extend_factor = 9
+        psi_zoom_max = zoom_extend_factor * near_axis_threshold
+        n_zoom_surfaces = count(<=(psi_zoom_max), psi_nodes)
+
+        # Zoomed bbox: semi-axes sized for psi_zoom_max (not just the threshold), +20%.
+        a_zoom_r = sqrt(2 * psi_zoom_max * psio / ψ_RR_abs) * 1.2
+        a_zoom_z = sqrt(2 * psi_zoom_max * psio / ψ_ZZ_abs) * 1.2
+        r_zoom_lo = max(r_lo, ro - a_zoom_r)
+        r_zoom_hi = min(r_hi, ro + a_zoom_r)
+        z_zoom_lo = max(z_lo, zo - a_zoom_z)
+        z_zoom_hi = min(z_hi, zo + a_zoom_z)
+
+        # Grid sizing: n_min_cells at (ro, zo) required for the SMALLEST surface (psilow).
+        # sinh-center cell ≈ (4β/sinh(β)) · a_zoom / (n/2) → n ≥ 8β·a_zoom·n_min / (sinh(β)·a_low)
+        sinh_β = sinh(β_r)
+        nr_zoom = max(200, ceil(Int, 8 * β_r * a_zoom_r * n_min_cells / (sinh_β * a_low)))
+        nz_zoom = max(200, ceil(Int, 8 * β_r * a_zoom_z * n_min_cells / (sinh_β * a_low)))
+        r_zoom_grid = make_stretched_r_grid(r_zoom_lo, r_zoom_hi, ro, nr_zoom, β_r)
+        z_zoom_grid = make_stretched_r_grid(z_zoom_lo, z_zoom_hi, zo, nz_zoom, β_r)
+
+        iro_z = clamp(searchsortedfirst(r_zoom_grid, ro), 2, length(r_zoom_grid))
+        izo_z = clamp(searchsortedfirst(z_zoom_grid, zo), 2, length(z_zoom_grid))
+        dR_zoom = r_zoom_grid[iro_z] - r_zoom_grid[iro_z - 1]
+        dZ_zoom = z_zoom_grid[izo_z] - z_zoom_grid[izo_z - 1]
+        @info "efit_by_inversion: zoomed core grid $(nr_zoom)×$(nz_zoom) covering [ro±$(@sprintf("%.0f", a_zoom_r*1000)) mm, zo±$(@sprintf("%.0f", a_zoom_z*1000)) mm]; dR=$(@sprintf("%.2f", dR_zoom*1000)) mm, dZ=$(@sprintf("%.2f", dZ_zoom*1000)) mm (target ≤ $(@sprintf("%.2f", a_low/n_min_cells*1000)) mm); tracing $n_zoom_surfaces surfaces (threshold=$n_near_axis_fill + $zoom_extend_factor× overlap)"
+
+        ψ_zoom = Matrix{Float64}(undef, nr_zoom, nz_zoom)
+        Threads.@threads for j in 1:nz_zoom
+            z = z_zoom_grid[j]
+            h = thread_hints[Threads.threadid()]
+            h[1][] = 1
+            h[2][] = 1
+            @inbounds for i in 1:nr_zoom
+                ψ_zoom[i, j] = raw_profile.psi_in((r_zoom_grid[i], z); hint=h)
+            end
+        end
+
+        Threads.@threads for ipsi in 1:n_zoom_surfaces
+            psifac = psi_nodes[ipsi]
+            ψ_target = psio * (1.0 - psifac)
+            cl_z = Ctr.contour(r_zoom_grid, z_zoom_grid, ψ_zoom, ψ_target)
+            curve_z = select_plasma_contour(Ctr.lines(cl_z), ro, zo)
+            if curve_z === nothing
+                surface_status[ipsi] = -1
+                continue
+            end
+            resample_contour_to_theta_grid!(
+                @view(R_table[ipsi, :]), @view(Z_table[ipsi, :]),
+                curve_z, ro, zo, theta_grid
+            )
+            surface_status[ipsi] = 0
+        end
+
+        for ipsi in 1:n_zoom_surfaces
+            if surface_status[ipsi] == -1
+                psifac = psi_nodes[ipsi]
+                error("efit_by_inversion: Zoomed core grid failed to find flux surface at ψ = $(@sprintf("%.4f", psifac)). " *
+                    "Try increasing psilow or reducing the zoom bbox margin.")
+            end
+        end
+        @info "efit_by_inversion: $(mpsi + 1 - n_zoom_surfaces) surfaces traced by global grid, $n_zoom_surfaces by zoomed core grid ($n_near_axis_fill below threshold + $(n_zoom_surfaces - n_near_axis_fill) overlap)"
+    else
+        @info "efit_by_inversion: $n_contour_success surfaces traced by global grid"
+    end
 
     # Build InverseRunInput — same type consumed by equilibrium_solver(::InverseRunInput)
     rz_in_xs = psi_nodes
