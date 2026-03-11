@@ -408,3 +408,35 @@ git commit --no-verify
 ```
 
 However, this is discouraged as it may introduce formatting inconsistencies.
+
+## Development Tips
+
+### Revise.jl
+
+When iterating on code, use [Revise.jl](https://timholy.github.io/Revise.jl/stable/) to avoid full recompilation on every change. It tracks source file modifications and recompiles only the affected code.
+
+Install Revise in your **global** Julia environment (not in this project's `Project.toml`):
+
+```julia
+# In the Julia REPL (no --project flag)
+using Pkg
+Pkg.add("Revise")
+```
+
+Then load it before `GeneralizedPerturbedEquilibrium` in any session:
+
+```julia
+using Revise
+using GeneralizedPerturbedEquilibrium
+```
+
+For it to load automatically, add `using Revise` to your [Julia startup file](https://timholy.github.io/Revise.jl/stable/config/#Using-Revise-by-default):
+
+```julia
+# ~/.julia/config/startup.jl
+try
+    using Revise
+catch e
+    @warn "Could not load Revise" exception=e
+end
+```
