@@ -3,7 +3,7 @@
 
     # --- Directory Configuration ---
     # Define the data directory for easy maintenance
-    data_dir = joinpath(@__DIR__, "test_data", "regression_equilibrium_example")
+    data_dir = joinpath(@__DIR__, "test_data", "CHEASE_test_data")
 
     # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
@@ -60,12 +60,40 @@
     # ----------------------------------------------------------------------
 
     @testset "CHEASE Consistency (ASCII vs Binary)" begin
-        # Tolerance set to 1e-12 as these come from the same physical source
-        tol = 1e-12
+        # Both formats encode the same physical data; differences arise only from
+        # floating-point text serialization in the ASCII format vs exact binary storage.
+        # We use rtol=1e-6 throughout as a conservative lower bound on ASCII precision.
+        rtol = 1e-6
 
-        @testset "Magnetic Axis" begin
-            @test isapprox(plasma_eq_ascii.ro, plasma_eq_binary.ro, atol=tol)
-            @test isapprox(plasma_eq_ascii.zo, plasma_eq_binary.zo, atol=tol)
+        @testset "Magnetic axis" begin
+            @test isapprox(plasma_eq_ascii.ro, plasma_eq_binary.ro; rtol)
+            @test isapprox(plasma_eq_ascii.zo, plasma_eq_binary.zo; rtol)
+            @test isapprox(plasma_eq_ascii.psio, plasma_eq_binary.psio; rtol)
+        end
+
+        @testset "Global parameters" begin
+            @test isapprox(plasma_eq_ascii.params.q0, plasma_eq_binary.params.q0; rtol)
+            @test isapprox(plasma_eq_ascii.params.qmin, plasma_eq_binary.params.qmin; rtol)
+            @test isapprox(plasma_eq_ascii.params.qmax, plasma_eq_binary.params.qmax; rtol)
+            @test isapprox(plasma_eq_ascii.params.qa, plasma_eq_binary.params.qa; rtol)
+            @test isapprox(plasma_eq_ascii.params.bt0, plasma_eq_binary.params.bt0; rtol)
+            @test isapprox(plasma_eq_ascii.params.crnt, plasma_eq_binary.params.crnt; rtol)
+        end
+
+        @testset "1D profiles" begin
+            @test isapprox(plasma_eq_ascii.profiles.q_spline.y, plasma_eq_binary.profiles.q_spline.y; rtol)
+            @test isapprox(plasma_eq_ascii.profiles.F_spline.y, plasma_eq_binary.profiles.F_spline.y; rtol)
+            @test isapprox(plasma_eq_ascii.profiles.P_spline.y, plasma_eq_binary.profiles.P_spline.y; rtol)
+            @test isapprox(plasma_eq_ascii.profiles.dVdpsi_spline.y, plasma_eq_binary.profiles.dVdpsi_spline.y; rtol)
+        end
+
+        @testset "Flux surface geometry" begin
+            ascii_rfac2 = plasma_eq_ascii.rzphi_rsquared.nodal_derivs.partials[1, :, :]
+            binary_rfac2 = plasma_eq_binary.rzphi_rsquared.nodal_derivs.partials[1, :, :]
+            ascii_offset = plasma_eq_ascii.rzphi_offset.nodal_derivs.partials[1, :, :]
+            binary_offset = plasma_eq_binary.rzphi_offset.nodal_derivs.partials[1, :, :]
+            @test isapprox(ascii_rfac2, binary_rfac2; rtol)
+            @test isapprox(ascii_offset, binary_offset; rtol)
         end
     end
 

@@ -25,6 +25,10 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
+include("Analysis/Analysis.jl")
+import .Analysis as Analysis
+export Analysis
+
 # Additional imports for main function
 using TOML
 using Printf

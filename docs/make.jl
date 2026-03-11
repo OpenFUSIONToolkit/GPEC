@@ -29,7 +29,8 @@ makedocs(;
             "Equilibrium" => "equilibrium.md",
             "Utilities" => "utilities.md",
             "Forcing Terms" => "forcing_terms.md",
-            "Perturbed Equilibrium" => "perturbed_equilibrium.md"
+            "Perturbed Equilibrium" => "perturbed_equilibrium.md",
+            "Analysis" => "analysis.md"
         ],
         "Citations" => "citations.md",
     ],
