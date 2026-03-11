@@ -37,6 +37,6 @@ makedocs(;
 deploydocs(;
     repo="github.com/OpenFUSIONToolkit/GPEC.git",
     branch="gh-pages",
-    devbranch="main",
+    devbranch="develop",
     push_preview=true
 )
