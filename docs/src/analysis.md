@@ -9,8 +9,6 @@ The Analysis module provides post-processing and visualization utilities for GPE
 
 ```@docs
 GeneralizedPerturbedEquilibrium.Analysis
-GeneralizedPerturbedEquilibrium.Analysis.ForceFreeStates
-GeneralizedPerturbedEquilibrium.Analysis.Equilibrium
 ```
 
 ## ForceFreeStates
