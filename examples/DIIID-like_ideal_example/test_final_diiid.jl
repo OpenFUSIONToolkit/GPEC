@@ -13,7 +13,7 @@ dir_efit = mktempdir(prefix="diiid_efit_")
 dir_imas = mktempdir(prefix="diiid_imas_")
 
 geqdsk_path = joinpath(@__DIR__, "TKMKR_D3Dlike_default_Hmode.geqdsk")
-config = TOML.parsefile("jpec.toml")
+config = TOML.parsefile(joinpath(@__DIR__, "jpec.toml"))
 
 # Disable problematic modules, keep core stability calculation
 config["ForceFreeStates"]["mer_flag"] = false
