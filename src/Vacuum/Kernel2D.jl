@@ -86,7 +86,7 @@ but grad_greenfunction is not since it fills a different block of the
   - Uses Gaussian quadrature near singular points for improved accuracy
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
-@with_pool pool function kernel!(
+@with_pool pool function compute_2D_kernel_matrices!(
     grad_greenfunction::AbstractMatrix{Float64},
     greenfunction::AbstractMatrix{Float64},
     observer::Union{PlasmaGeometry,WallGeometry},
@@ -150,7 +150,7 @@ but grad_greenfunction is not since it fills a different block of the
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
         @inbounds for k in 1:(mtheta-3)
             isrc = mod1(j + 1 + k, mtheta)
-            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, gamma_prefactor)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
@@ -181,7 +181,7 @@ but grad_greenfunction is not since it fills a different block of the
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n, gamma_prefactor)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor)
 
                 # Get stencil and weight for the Gaussian point
                 s = leftpanel ? stencils_left[ig] : stencils_right[ig]
@@ -231,6 +231,17 @@ but grad_greenfunction is not since it fills a different block of the
     if populate_greenfunction
         greenfunction ./= 2π
     end
+end
+
+# Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
+function kernel!(
+    grad_greenfunction::AbstractMatrix{Float64},
+    greenfunction::AbstractMatrix{Float64},
+    observer::Union{PlasmaGeometry,WallGeometry},
+    source::Union{PlasmaGeometry,WallGeometry},
+    params::KernelParams2D
+)
+    return compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, params.n)
 end
 
 #############################################################
@@ -551,8 +562,8 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
         @inbounds for ig in 1:32
             # dnom² = s·sinh²(x) + sinh(x)·cosh(x), x = tg0²/(2n)
             # Half the denominator of [Chance JCP 2007 eq. A.18]; factor √2 absorbed in sqtwo prefactor
-            sh  = pn_cache.sinh[ig]
-            ch  = pn_cache.cosh[ig]
+            sh = pn_cache.sinh[ig]
+            ch = pn_cache.cosh[ig]
             dnom = sqrt(muladd(s, sh * sh, sh * ch))
 
             shp = pn_cache.sinhp[ig]
@@ -560,21 +571,21 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
             dnomp = sqrt(muladd(s, shp * shp, shp * chp))
 
             wanumr = _PN_WANUMR[ig]
-            gint   = muladd(wanumr, inv(dnom),  gint)
-            gintp  = muladd(wanumr, inv(dnomp), gintp)
+            gint = muladd(wanumr, inv(dnom), gint)
+            gintp = muladd(wanumr, inv(dnomp), gintp)
         end
 
-        gint  *= _PN_BGAUS
+        gint *= _PN_BGAUS
         gintp *= _PN_BGAUS
 
         # pcoef = √((s-1)/(s+1)) is the only s-dependent factor in the final assembly.
         # The Γ-function prefactors and normalization constants are pre-cached in
         # pn_cache.gauss_norm_n / pn_cache.gauss_norm_np1 (see PnQuadCache.jl for derivation).
-        pcoef   = sqrt((s - 1.0) / (s + 1.0))
+        pcoef = sqrt((s - 1.0) / (s + 1.0))
         pcoef_n = pcoef^n  # pcoef^(n+1) = pcoef_n · pcoef; reuse to avoid a second pow call
 
-        P[end-1] = pcoef_n * gint  * pn_cache.gauss_norm_n    # P^n_{-1/2}
-        P[end]   = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
+        P[end-1] = pcoef_n * gint * pn_cache.gauss_norm_n    # P^n_{-1/2}
+        P[end] = pcoef_n * pcoef * gintp * pn_cache.gauss_norm_np1  # P^{n+1}_{-1/2}
 
     else
         # Use upward recurrence for small n*rhohat < 0.1
@@ -597,7 +608,7 @@ function Pn_minus_half_2007!(P::AbstractVector{Float64}, s::Real, n::Int)
 end
 
 """
-    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n, gamma_prefactor; uselegacygreenfunction=false)
+    green(x_obs, z_obs, x_source, z_source, dx_dtheta, dz_dtheta, n; gamma_prefactor, uselegacygreenfunction=false)
 
 Compute the Green's function and related quantities for axisymmetric geometry
 according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran code.
@@ -629,7 +640,17 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - The coupling terms include the Jacobian factor from the coordinate transformation
   - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
 """
-@with_pool pool function green(x_obs::Float64, z_obs::Float64, x_source::Float64, z_source::Float64, dx_dtheta::Float64, dz_dtheta::Float64, n::Int, gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n); uselegacygreenfunction::Bool=false)
+@with_pool pool function green(
+    x_obs::Float64,
+    z_obs::Float64,
+    x_source::Float64,
+    z_source::Float64,
+    dx_dtheta::Float64,
+    dz_dtheta::Float64,
+    n::Int;
+    gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
+    uselegacygreenfunction::Bool=false
+)
 
     x_obs2 = x_obs^2
     x_source2 = x_source^2

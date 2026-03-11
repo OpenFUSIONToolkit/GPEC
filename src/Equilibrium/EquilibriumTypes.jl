@@ -130,7 +130,7 @@ end
 Outer constructor for EquilibriumConfig that enables a toml file
     interface for specifying the configuration settings
 
-DEPRECATED: Use [Equilibrium] section in jpec.toml instead
+DEPRECATED: Use [Equilibrium] section in gpec.toml instead
 """
 function EquilibriumConfig(path::String)
     raw = TOML.parsefile(path)

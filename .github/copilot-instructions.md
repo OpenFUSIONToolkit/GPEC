@@ -1,19 +1,21 @@
-# Copilot instructions for JPEC
+# Copilot instructions for GPEC
 
 ## Project overview
-- JPEC is a Julia port of GPEC-style MHD equilibrium and stability analysis. Core modules live in [src](src): Utilities, Equilibrium, Vacuum, ForceFreeStates, ForcingTerms, PerturbedEquilibrium (see [CLAUDE.md](CLAUDE.md)).
+- GPEC is a Julia port of GPEC-style MHD equilibrium and stability analysis. Core modules live in [src](src): Utilities, Equilibrium, Vacuum, ForceFreeStates, ForcingTerms, PerturbedEquilibrium (see [CLAUDE.md](CLAUDE.md)).
 - Data flow: equilibrium setup → vacuum response → stability analysis (documented in [CLAUDE.md](CLAUDE.md)).
 
 ## Architecture and entry points
+- Main entry point: `JPEC.main()` in [src/JPEC.jl](src/JPEC.jl).
 - Equilibrium: `setup_equilibrium(path|config)`; types in [src/Equilibrium](src/Equilibrium).
 - Vacuum: `compute_vacuum_response()`; code in [src/Vacuum](src/Vacuum).
-- DCON stability: entry points in [src/DCON/Main.jl](src/DCON/Main.jl).
+- ForceFreeStates (ideal MHD stability): types and functions in [src/ForceFreeStates](src/ForceFreeStates).
+- PerturbedEquilibrium (plasma response): entry point in [src/PerturbedEquilibrium](src/PerturbedEquilibrium).
 
 ## Data flow and key structures
 - Equilibrium: TOML config → read equilibrium → solve → diagnostics (gse*.h5) when relevant.
 - Vacuum: initialize plasma/wall surfaces → compute response matrix → return wv, grri, xzpts.
 - Stability: equilibrium + vacuum response → integrate ODEs → compute energies.
-- Core types: `PlasmaEquilibrium` and `EquilibriumConfig` in [src/Equilibrium/EquilibriumTypes.jl](src/Equilibrium/EquilibriumTypes.jl); `DconControl` in [src/DCON/DconStructs.jl](src/DCON/DconStructs.jl).
+- Core types: `PlasmaEquilibrium` and `EquilibriumConfig` in [src/Equilibrium/EquilibriumTypes.jl](src/Equilibrium/EquilibriumTypes.jl); `ForceFreeStatesControl` and `ForceFreeStatesInternal` in [src/ForceFreeStates/ForceFreeStatesStructs.jl](src/ForceFreeStates/ForceFreeStatesStructs.jl).
 
 ## Tests and docs
 - Run all tests:
@@ -37,7 +39,8 @@
 - Many routines use 0-based indexing for historical consistency with the original GPEC Fortran code before converting to 1-based Julia indexing (see [CLAUDE.md](CLAUDE.md)).
 
 ## Configuration examples
-- TOML configs: `equil.toml` uses `[EQUIL_CONTROL]` and `[EQUIL_OUTPUT]`; `dcon.toml` uses `[DCON_CONTROL]` and `[WALL]`.
+- Unified configuration: `jpec.toml` uses `[Equilibrium]`, `[Wall]`, `[ForceFreeStates]`, `[PerturbedEquilibrium]`, and `[ForcingTerms]` sections.
+- Legacy configs (`equil.toml`, `dcon.toml`, `vac.in`) are deprecated.
 - Example configs in [examples/DIIID-like_ideal_example](examples/DIIID-like_ideal_example) and [examples/Solovev_ideal_example](examples/Solovev_ideal_example).
 
 ## Development tips

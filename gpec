@@ -1,0 +1,7 @@
+#!/usr/bin/env julia --project=@.
+# GPEC executable script
+# Usage: ./gpec [path/to/directory]
+# If no path is provided, uses current directory
+
+using GeneralizedPerturbedEquilibrium
+GeneralizedPerturbedEquilibrium.main(ARGS)

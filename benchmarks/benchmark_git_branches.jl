@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 """
-benchmark_git_branches.jl - Generic Git branch benchmarking tool for JPEC
+benchmark_git_branches.jl - Generic Git branch benchmarking tool for GPEC
 
 Compares performance between two Git branches or commits by running a specified
 example multiple times to warm up Julia's JIT compiler, then measuring runtime.
@@ -34,14 +34,14 @@ julia benchmarks/benchmark_git_branches.jl --example examples/DIIID-like_ideal_e
 
 # Requirements
 
-- Example directory must contain jpec.jl file that can be run via: `using JPEC; JPEC.main(["path"])`
+- Example directory must contain a `gpec.toml` config file runnable via: `using GeneralizedPerturbedEquilibrium; GeneralizedPerturbedEquilibrium.main(["path"])`
 - Working directory must be clean or changes will be stashed during branch switching
 
 # Output Metrics
 
 For each branch/commit, reports:
-- Eigenmode energy (et[1]) from jpec.h5
-- Integration steps from jpec.h5
+- Eigenmode energy (et[1]) from gpec.h5
+- Integration steps from gpec.h5
 - Runtime (averaged over warm runs)
 - Git commit hash
 
@@ -49,7 +49,7 @@ For each branch/commit, reports:
 
 ```
 ============================================================
-JPEC Branch Benchmark Comparison
+GPEC Branch Benchmark Comparison
 ============================================================
 Example: examples/DIIID-like_ideal_example
 
@@ -163,10 +163,10 @@ function run_example_benchmark(example_path, num_runs)
     println("\nRunning example: $abs_example_path")
     println("Warming up with $(num_runs + 1) runs...")
 
-    # Write a temp script so `using JPEC` is at top-level in each subprocess.
+    # Write a temp script so `using GeneralizedPerturbedEquilibrium` is at top-level in each subprocess.
     # Pkg.instantiate() handles branches whose environments haven't been resolved yet.
     tmpscript = tempname() * ".jl"
-    write(tmpscript, "using Pkg; Pkg.instantiate(); using JPEC; JPEC.main([ARGS[1]])\n")
+    write(tmpscript, "using Pkg; Pkg.instantiate(); using GeneralizedPerturbedEquilibrium; GeneralizedPerturbedEquilibrium.main([ARGS[1]])\n")
 
     try
         # First run for JIT compilation
@@ -184,13 +184,13 @@ function run_example_benchmark(example_path, num_runs)
             println("  Runtime: $(round(runtime, digits=2)) s")
         end
 
-        # Extract metrics from jpec.h5
-        jpec_path = joinpath(abs_example_path, "jpec.h5")
-        if !isfile(jpec_path)
-            error("jpec.h5 not found at $jpec_path")
+        # Extract metrics from gpec.h5
+        gpec_path = joinpath(abs_example_path, "gpec.h5")
+        if !isfile(gpec_path)
+            error("gpec.h5 not found at $gpec_path")
         end
 
-        h5 = h5open(jpec_path, "r")
+        h5 = h5open(gpec_path, "r")
         et = read(h5["vacuum/et"])
         nsteps = read(h5["integration/nstep"])
         close(h5)
@@ -210,7 +210,7 @@ end
 # Main benchmarking function
 function benchmark_branches(options)
     println("="^60)
-    println("JPEC Branch Benchmark Comparison")
+    println("GPEC Branch Benchmark Comparison")
     println("="^60)
     println("Example: $(options["example"])")
     println()
@@ -295,7 +295,7 @@ function benchmark_branches(options)
     # Write to output file if requested
     if options["output"] !== nothing
         open(options["output"], "w") do f
-            write(f, "# JPEC Benchmark Comparison\n")
+            write(f, "# GPEC Benchmark Comparison\n")
             write(f, "Example: $(options["example"])\n\n")
             write(f, "## Branch 1: $(r1.name) @ $(r1.commit)\n")
             write(f, @sprintf("- Eigenmode energy: %.4f\n", r1.metrics.eigenvalue))

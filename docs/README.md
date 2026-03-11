@@ -1,6 +1,6 @@
-# JPEC.jl Documentation
+# GPEC.jl Documentation
 
-This directory contains the documentation source files for JPEC.jl.
+This directory contains the documentation source files for GPEC.jl.
 
 ## Building Documentation Locally
 
@@ -38,4 +38,4 @@ The documentation is automatically built and deployed to GitHub Pages via GitHub
 
 - Julia 1.11+
 - Documenter.jl
-- All JPEC.jl dependencies (see main Project.toml)
+- All GPEC.jl dependencies (see main Project.toml)
