@@ -93,6 +93,6 @@ For each issue, provide:
 - Follow the commit message format: `MODULE - TAG - Detailed message`
 - Be aware of 0-based to 1-based indexing conversions from Fortran
 - Ensure compatibility with the existing test structure in `test/`
-- Consider whether changes affect diagnostic outputs (jpec.h5, and legacy files gsec.h5, gse.h5, gsei.h5)
+- Consider whether changes affect diagnostic outputs or user-facing APIs
 
 Your goal is to help create code that a fusion physicist with moderate Julia experience can read, understand, and maintain confidently.

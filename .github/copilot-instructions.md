@@ -5,7 +5,7 @@
 - Data flow: equilibrium setup → vacuum response → stability analysis (documented in [CLAUDE.md](CLAUDE.md)).
 
 ## Architecture and entry points
-- Main entry point: `JPEC.main()` in [src/JPEC.jl](src/JPEC.jl).
+- Main entry point: `GeneralizedPerturbedEquilibrium.main()` in [src/GeneralizedPerturbedEquilibrium.jl](src/GeneralizedPerturbedEquilibrium.jl).
 - Equilibrium: `setup_equilibrium(path|config)`; types in [src/Equilibrium](src/Equilibrium).
 - Vacuum: `compute_vacuum_response()`; code in [src/Vacuum](src/Vacuum).
 - ForceFreeStates (ideal MHD stability): types and functions in [src/ForceFreeStates](src/ForceFreeStates).
@@ -39,7 +39,7 @@
 - Many routines use 0-based indexing for historical consistency with the original GPEC Fortran code before converting to 1-based Julia indexing (see [CLAUDE.md](CLAUDE.md)).
 
 ## Configuration examples
-- Unified configuration: `jpec.toml` uses `[Equilibrium]`, `[Wall]`, `[ForceFreeStates]`, `[PerturbedEquilibrium]`, and `[ForcingTerms]` sections.
+- Unified configuration: `gpec.toml` uses `[Equilibrium]`, `[Wall]`, `[ForceFreeStates]`, `[PerturbedEquilibrium]`, and `[ForcingTerms]` sections.
 - Legacy configs (`equil.toml`, `dcon.toml`, `vac.in`) are deprecated.
 - Example configs in [examples/DIIID-like_ideal_example](examples/DIIID-like_ideal_example) and [examples/Solovev_ideal_example](examples/Solovev_ideal_example).
 

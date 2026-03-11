@@ -2,7 +2,7 @@
     ForceFreeStates
 
 Post-processing and visualization functions for ForceFreeStates (DCON-style ideal MHD stability)
-results stored in JPEC HDF5 output files.
+results stored in GPEC HDF5 output files.
 """
 module ForceFreeStates
 
@@ -17,7 +17,7 @@ poloidal mode number m.
 
 ### Arguments
 
-  - `h5path`: Path to a JPEC HDF5 output file (e.g. `"jpec.h5"`)
+  - `h5path`: Path to a GPEC HDF5 output file (e.g. `"gpec.h5"`)
 
 ### Keyword arguments
 
@@ -66,7 +66,7 @@ Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC convention
 
 ### Arguments
 
-  - `h5path`: Path to a JPEC HDF5 output file with vacuum data (`vac_flag = true`)
+  - `h5path`: Path to a GPEC HDF5 output file with vacuum data (`vac_flag = true`)
 
 ### Keyword arguments
 
@@ -129,7 +129,7 @@ A sign change in `crit` during integration indicates an ideal fixed-boundary ins
 
 ### Arguments
 
-  - `h5path`: Path to a JPEC HDF5 output file
+  - `h5path`: Path to a GPEC HDF5 output file
 
 ### Keyword arguments
 

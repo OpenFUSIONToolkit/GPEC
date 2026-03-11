@@ -1,7 +1,7 @@
 """
     Equilibrium
 
-Post-processing and visualization functions for JPEC equilibrium objects.
+Post-processing and visualization functions for GPEC equilibrium objects.
 """
 module Equilibrium
 
@@ -15,7 +15,7 @@ in physical (R, Z) space.
 
 ### Arguments
 
-  - `plasma_eq`: A `JPEC.Equilibrium.PlasmaEquilibrium` object
+  - `plasma_eq`: A `GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium` object
 
 ### Keyword arguments
 
