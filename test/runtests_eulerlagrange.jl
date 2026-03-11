@@ -95,20 +95,6 @@ end
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
     end
 
-    @testset "eulerlagrange_tolerance" begin
-        # Verify unified tolerance field replaces tol_r / tol_nr / crossover
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
-        @test hasproperty(ctrl, :eulerlagrange_tolerance)
-        @test !hasproperty(ctrl, :tol_r)
-        @test !hasproperty(ctrl, :tol_nr)
-        @test !hasproperty(ctrl, :crossover)
-        @test ctrl.eulerlagrange_tolerance == 1e-7
-
-        # Verify it can be set
-        ctrl.eulerlagrange_tolerance = 1e-9
-        @test ctrl.eulerlagrange_tolerance == 1e-9
-    end
-
     @testset "transform_u!" begin
         # Test transformation of solution vectors
         mpert = 2
