@@ -441,13 +441,15 @@ function write_outputs_to_HDF5(
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
 
-        # Edge stability diagnostic: et[1], ep[1], ev[1] from psiedge → psilim (before trimming)
+        # Edge stability scan: full [psiedge, psilim] picture before u_store is trimmed.
+        # NaN entries mark steps where U₁ was singular (SingularException in free_compute_total).
+        # Stored in a dedicated top-level group so users can inspect the full scan independently.
         if !isempty(odet.psi_edge_scan)
-            out_h5["integration/psi_edge_scan"]    = odet.psi_edge_scan
-            out_h5["integration/et_edge_scan"]     = odet.et_edge_scan
-            out_h5["integration/ep_edge_scan"]     = odet.ep_edge_scan
-            out_h5["integration/ev_edge_scan"]     = odet.ev_edge_scan
-            out_h5["integration/evonly_edge_scan"] = odet.evonly_edge_scan
+            out_h5["edge_scan/psi"]               = odet.psi_edge_scan
+            out_h5["edge_scan/total_energy"]      = odet.et_edge_scan     # plasma + vacuum eigenmode energy
+            out_h5["edge_scan/plasma_energy"]     = odet.ep_edge_scan     # plasma contribution
+            out_h5["edge_scan/vacuum_energy"]     = odet.ev_edge_scan     # vacuum contribution (projected onto eigenmode)
+            out_h5["edge_scan/vacuum_eigenvalue"] = odet.evonly_edge_scan # least stable eigenvalue of vacuum matrix alone
         end
 
         # Write singular surface data

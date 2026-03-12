@@ -285,13 +285,8 @@ end
     _hint::Base.RefValue{Int} = Ref(1)
 
     # Spline of Jacobian Fourier coefficients J(θ, ψ) vs ψ, shape (2*mband+1) series.
-    # Used in free_compute_total to normalize at the SCAN psi (not fixed at psihigh).
-    # Evaluating at psihigh (near separatrix) makes the jmat quadratic form indefinite,
-    # causing normalization sign flips after ~7 ODE steps in the edge scan.
+    # Evaluate at the local psi (psilim in free_run!, odet.psifac in free_compute_total).
     jmat_spline::S = _empty_series_interp_complex(2 * mband + 1, itp_opts)
-
-    # Used in free_run! where psilim is fixed (evaluated at last profile psi = psihigh)
-    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
 end
 
 # Helper to create empty complex series interpolant for default initialization

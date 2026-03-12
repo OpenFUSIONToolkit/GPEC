@@ -55,13 +55,14 @@ and data dumping.
         vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
     end
 
-    # Normalize eigenfunction and energy.
+    # Normalize eigenfunction and energy using J(ψ) evaluated at the plasma boundary psilim.
+    jmat_at_psilim = ffit.jmat_spline(psilim)
     for isol in 1:numpert_total
         norm = 0.0 + 0.0im
         for ipert_n in 1:npert, ipert_m in 1:mpert, jpert_m in 1:mpert
             ipert = (ipert_n - 1) * mpert + ipert_m
             jpert = (ipert_n - 1) * mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+mband+1] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
+            norm += jmat_at_psilim[jpert_m-ipert_m+mband+1] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
         end
         norm /= dV_dpsi
         vac_data.wt[:, isol] ./= sqrt(norm)
@@ -250,25 +251,20 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Least stable eigenvalue of the vacuum matrix alone (EL-solution-independent diagnostic).
     evonly1 = minimum(real(eigvals(Hermitian((wv + wv') / 2))))
 
-    # Normalize eigenvalue by ξ†J(ψ_high)ξ / dV_dψ(psifac), matching free_run! normalization.
-    # free_run! uses ffit.jmat (computed at psihigh) for the quadratic form, and dV_dpsi at
-    # psilim for the denominator. Since jmat[m=0](psihigh) ≈ dV_dpsi(psihigh), this gives
-    # norm_kin ≈ dV_dpsi(psihigh) / dV_dpsi(psifac). For psifac < psihigh, dV_dpsi(psihigh)
-    # > dV_dpsi(psifac), so norm_kin > 1 and et_normalized < et_raw. Without this, core steps
-    # near q=3 (where dV_dpsi is smaller) appear more unstable than edge steps near q=5 because
-    # dV_dpsi(psihigh) / dV_dpsi(0.839) ≈ 1.44 while dV_dpsi(psihigh) / dV_dpsi(0.991) ≈ 1.01.
+    # Normalize eigenvalue by ξ†J(psifac)ξ / dV_dψ(psifac), where J is evaluated at the local
+    # scan psi so the normalization is physically consistent at each point of the edge scan.
     dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && odet.psifac > profiles.xs[end]) ?
               profiles.dVdpsi_spline_inv(odet.psifac) :
               profiles.dVdpsi_spline(odet.psifac)
+    jmat_local = ffit.jmat_spline(odet.psifac)
     norm_kin = zero(ComplexF64)
     for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
         ipert = (ipert_n - 1) * intr.mpert + ipert_m
         jpert = (ipert_n - 1) * intr.mpert + jpert_m
         jidx  = jpert_m - ipert_m + intr.mband + 1
-        norm_kin += ffit.jmat[jidx] * v[ipert] * conj(v[jpert])
+        norm_kin += jmat_local[jidx] * v[ipert] * conj(v[jpert])
     end
     norm_kin /= dV_dpsi
-    # If norm_kin ≤ 0 (indefinite jmat near separatrix or degenerate eigenvector), throw to skip.
     real(norm_kin) > 0 || throw(LinearAlgebra.SingularException(0))
     et_normalized = tot_eigvals[1] / norm_kin
 

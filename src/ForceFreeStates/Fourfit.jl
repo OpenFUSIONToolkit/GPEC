@@ -45,9 +45,11 @@ The metric coefficients stored in `metric.fs` include:
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
   - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
-  - `psilim::Float64`: Upper psi limit for the metric grid (default: Inf = full grid). Always
-    capped at psihigh internally to exclude far-edge nodes (X-point geometry gives diverging
-    metric near the separatrix). Useful for limited plasmas where psilim < psihigh.
+  - `psilim::Float64`: Upper psi limit for the metric grid (default: Inf = full grid). For
+    diverted plasmas the caller passes `intr.psilim` (set by `sing_lim!` from edge rational
+    surfaces), which extends above `psihigh` to include the near-separatrix edge region while
+    remaining well-behaved (psilim << 1). Nodes all the way to psin=1 are excluded because
+    the X-point geometry gives J→∞ there.
 
 ### Returns
 
@@ -64,17 +66,13 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    # Use the rzphi_xs grid truncated at psihigh (core grid only). Far-edge nodes beyond
-    # psihigh have diverging metric near the X-point (J→∞) which makes the ODE extremely
-    # stiff above psihigh. The EL integrator queries FGK splines above psihigh via
-    # ExtendExtrap (frozen at psihigh values), which is physically correct since F' ≈ 0,
-    # P' ≈ 0 near the separatrix. The psilim parameter is retained for future use but
-    # currently capped at psihigh to exclude far-edge geometry.
+    # Truncate the rzphi_xs grid at psilim. For diverted plasmas psilim is set by sing_lim!
+    # from the edge rational surfaces, extending above psihigh but well below psin=1 where
+    # J→∞ at the X-point. Including these well-behaved near-separatrix nodes gives accurate
+    # FGK splines for the above-psihigh ODE chunks instead of ExtendExtrap frozen at psihigh.
     profiles = equil.profiles
-    psihigh_cap = profiles.xs[end]  # last core psi = psihigh
-    psilim_capped = min(psilim, psihigh_cap)
     mpsi_full = length(equil.rzphi_xs)
-    mpsi = isfinite(psilim_capped) ? searchsortedlast(equil.rzphi_xs, psilim_capped) : mpsi_full
+    mpsi = isfinite(psilim) ? searchsortedlast(equil.rzphi_xs, psilim) : mpsi_full
     mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
@@ -215,11 +213,6 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     iota_inner = has_edge_q ? profiles.q_spline_iota_inverse.inner : nothing
     _d1_iota = has_edge_q ? deriv1(iota_inner) : nothing
 
-    # Index of the last core node (psi ≤ psihigh) in the extended metric grid — used to capture
-    # jmat at psihigh for free_run! normalization (jmat at the far-edge would be near-singular).
-    core_end_idx = searchsortedlast(metric.xs, psihigh)
-    jmat_at_core_end = similar(jmat)
-
     hint = Ref(1)  # Linear search hint for sequential psi access (core region only)
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
@@ -275,11 +268,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             jmat1[mid+k] = conj(jmat1[mid-k])
         end
 
-        # Save jmat at this psi for the jmat_spline; snapshot at psihigh for free_run!
         jmat_flat[ipsi, :] .= jmat
-        if ipsi == core_end_idx
-            jmat_at_core_end .= jmat
-        end
 
         # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
         for n in intr.nlow:intr.nhigh
@@ -371,11 +360,6 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
-
-    # jmat at the last core node (psihigh): used in free_run! for normalization at psilim.
-    # Use core_end_idx so this is the physically meaningful J value at the plasma-vacuum interface,
-    # not the far-edge far-from-core value (which has very different metric near the X-point).
-    ffit.jmat = jmat_at_core_end
 
     return ffit
 end

@@ -512,35 +512,9 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
         win_pts = range(boundaries[i], boundaries[i+1]; length=12)  # 12 pts = 10 interior + 2 endpoints
         append!(psi_far, win_pts[2:end])
     end
-    last_surf = isempty(edge_surfaces) ? psihigh : edge_surfaces[end]
-
-    # Extend the dense per-window grid one full rational window beyond psilim
-    # (psilim = last_surf + edge_layer_width) so the spline covers the complete
-    # window that psilim sits in.  For n=1: m_dense_end = trunc(q(psilim)) + 1,
-    # i.e. round((n*q_psilim + 1)/n) from the user's formula.
-    psilim_local = min(last_surf, 1.0 - 1e-8)
-    iota_at_psilim = iota_inner(psilim_local)
-    m_dense_end = trunc(Int, 1.0 / max(iota_at_psilim, 1e-10)) + 1
-    iota_dense_end = 1.0 / m_dense_end
-    psi_dense_end = last_surf
-    if iota_dense_end > 1e-10 && iota_dense_end < iota_inner(psihigh)
-        try
-            psi_dense_end = find_zero(
-                psi -> iota_inner(psi) - iota_dense_end,
-                (psilim_local, 1.0 - 1e-8), Roots.Brent(); xatol=1e-8
-            )
-        catch
-        end
-    end
-    if psi_dense_end > last_surf + 1e-10
-        dense_ext = range(last_surf, psi_dense_end; length=12)
-        append!(psi_far, dense_ext[2:end])
-    end
-
-    # Sparse tail from the end of the dense grid to near the separatrix
-    tail_start = max(psi_dense_end, last_surf)
-    last_pts = range(tail_start, 1.0 - 1e-6; length=12)
-    append!(psi_far, last_pts[2:end])
+    # psi_far ends at edge_surfaces[end] = psilim (set by sing_lim! from the same surface
+    # search). Nodes beyond psilim are not needed: make_metric truncates at psilim anyway, and
+    # extending toward psin=1 introduces J→∞ singularities that make the ODE extremely stiff.
     unique!(sort!(psi_far))
 
     npsi_far = length(psi_far)

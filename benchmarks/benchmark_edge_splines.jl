@@ -348,9 +348,9 @@ println("Saved: edge_spline_rational_surfaces.png")
 h5file = joinpath(output_dir, "gpec.h5")
 if isfile(h5file)
     h5open(h5file, "r") do f
-        if haskey(f, "integration/psi_edge_scan") && haskey(f, "integration/et_edge_scan")
-            psi_es  = read(f["integration/psi_edge_scan"])
-            et_es   = read(f["integration/et_edge_scan"])
+        if haskey(f, "edge_scan/psi") && haskey(f, "edge_scan/total_energy")
+            psi_es  = read(f["edge_scan/psi"])
+            et_es   = read(f["edge_scan/total_energy"])
             et_real = real.(et_es)
 
             # Convert psi → q
@@ -368,26 +368,29 @@ if isfile(h5file)
             core_mask    = psi_es .<= psihigh
             above_mask   = psi_es .>  psihigh
 
-            et_peak_idx = argmax(et_real)
+            # Peak: ignore NaN steps (where U₁ was singular)
+            et_for_peak = replace(et_real, NaN => -Inf)
+            et_peak_idx = argmax(et_for_peak)
             q_peak      = q_es[et_peak_idx]
             et_peak     = et_real[et_peak_idx]
 
-            println(@sprintf("  Scan: q = %.3f → %.3f  (ψ = %.4f → %.4f)",
-                             q_es[1], q_max_scan, psi_es[1], psi_es[end]))
+            n_valid = count(!isnan, et_real)
+            println(@sprintf("  Scan: q = %.3f → %.3f  (ψ = %.4f → %.4f, %d/%d valid steps)",
+                             q_es[1], q_max_scan, psi_es[1], psi_es[end], n_valid, length(psi_es)))
             println(@sprintf("  Peak: q = %.3f, et = %+.3f", q_peak, et_peak))
 
-            # Load ep/ev/evonly if available
-            has_pv     = haskey(f, "integration/ep_edge_scan") && haskey(f, "integration/ev_edge_scan")
-            has_evonly = haskey(f, "integration/evonly_edge_scan")
-            ep_real    = has_pv     ? real.(read(f["integration/ep_edge_scan"]))      : nothing
-            ev_real    = has_pv     ? real.(read(f["integration/ev_edge_scan"]))      : nothing
-            evonly_real = has_evonly ? read(f["integration/evonly_edge_scan"])         : nothing
+            # Load ep/ev/vacuum_eigenvalue if available
+            has_pv     = haskey(f, "edge_scan/plasma_energy") && haskey(f, "edge_scan/vacuum_energy")
+            has_evonly = haskey(f, "edge_scan/vacuum_eigenvalue")
+            ep_real    = has_pv     ? real.(read(f["edge_scan/plasma_energy"]))    : nothing
+            ev_real    = has_pv     ? real.(read(f["edge_scan/vacuum_energy"]))    : nothing
+            evonly_real = has_evonly ? read(f["edge_scan/vacuum_eigenvalue"])       : nothing
 
             # --- Panel A: linear-scale clip showing valid window + full et range ---
             # Clip at ±display_lim so the well-conditioned window is visible.
             display_lim = 10.0
-            # Subsample above-psihigh for rendering; separate filters for et vs ev
-            valid_above_et = findall(above_mask .& (abs.(et_real) .<= display_lim))
+            # Subsample above-psihigh for rendering; separate filters for et vs ev; exclude NaN
+            valid_above_et = findall(above_mask .& .!isnan.(et_real) .& (abs.(et_real) .<= display_lim))
             stride_et = max(1, length(valid_above_et) ÷ 2000)
             above_ss_et = valid_above_et[1:stride_et:end]
 
@@ -414,7 +417,7 @@ if isfile(h5file)
                       label = "Plasma ep  [ψ ≤ psihigh]", lw = 2, color = :blue)
                 plot!(pA, q_es[core_mask], ev_real[core_mask];
                       label = "Vacuum ev  [ψ ≤ psihigh]", lw = 2, color = :red)
-                valid_above_pv = findall(above_mask .& (abs.(ep_real) .<= display_lim) .& (abs.(ev_real) .<= display_lim))
+                valid_above_pv = findall(above_mask .& .!isnan.(ep_real) .& .!isnan.(ev_real) .& (abs.(ep_real) .<= display_lim) .& (abs.(ev_real) .<= display_lim))
                 stride_pv = max(1, length(valid_above_pv) ÷ 2000)
                 above_ss_pv = valid_above_pv[1:stride_pv:end]
                 if !isempty(above_ss_pv)
@@ -439,8 +442,9 @@ if isfile(h5file)
             pB = nothing
             if has_pv
                 # Subsample above-psihigh to keep rendering manageable
-                stride_all = max(1, length(psi_es) ÷ 4000)
-                ss_all = 1:stride_all:length(psi_es)
+                valid_ev = findall(.!isnan.(ev_real))
+                stride_all = max(1, length(valid_ev) ÷ 4000)
+                ss_all = valid_ev[1:stride_all:end]
 
                 pB = plot(;
                     xlabel = "q (safety factor)",
@@ -466,8 +470,9 @@ if isfile(h5file)
             # Divergence between surfaces indicates a buggy wv matrix.
             pC = nothing
             if has_evonly
-                stride_all = max(1, length(psi_es) ÷ 4000)
-                ss_all = 1:stride_all:length(psi_es)
+                valid_evonly = findall(.!isnan.(evonly_real))
+                stride_all = max(1, length(valid_evonly) ÷ 4000)
+                ss_all = valid_evonly[1:stride_all:end]
 
                 pC = plot(;
                     xlabel = "q (safety factor)",
@@ -493,7 +498,7 @@ if isfile(h5file)
             savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
             println("Saved: edge_spline_stability.png")
         else
-            println("Note: integration/psi_edge_scan not found in gpec.h5 — run GPEC with psiedge < psilim first")
+            println("Note: edge_scan/psi not found in gpec.h5 — run GPEC with psiedge < psilim first")
         end
     end
 else

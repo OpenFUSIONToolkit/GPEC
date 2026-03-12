@@ -427,7 +427,7 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
 
     # switch the spline used for q if we are beyond the constructed equilibrium (i.e. psihigh)
     if sol.t[end] >= equil.profiles.xs[end]
-        profiles.q_spline = profiles.q_spline_iota_inverse
+        equil.profiles.q_spline = equil.profiles.q_spline_iota_inverse
     end
 end
 
@@ -597,14 +597,17 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
         end
     end
 
-    # Extract psi and et[1] for all edge-zone steps (where dW_edge was computed)
-    # before storage is trimmed to the peak-dW step.
-    edge_mask = .!isinf.(real.(odet.dW_edge))
-    odet.psi_edge_scan    = odet.psi_store[1:nsteps][edge_mask]
-    odet.et_edge_scan     = odet.dW_edge[edge_mask]
-    odet.ep_edge_scan     = ep_edge[edge_mask]
-    odet.ev_edge_scan     = ev_edge[edge_mask]
-    odet.evonly_edge_scan = evonly_edge[edge_mask]
+    # Extract ALL psi values from psiedge to psilim, storing NaN for steps where
+    # free_compute_total failed (SingularException). This preserves the full edge stability
+    # picture for the user: NaN clusters reveal where the splines become ill-conditioned,
+    # and the full range allows verifying that the peak is not a boundary artifact.
+    # The u_store is separately trimmed to the peak step after this function returns.
+    psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:nsteps)
+    odet.psi_edge_scan    = odet.psi_store[psiedge_idxs]
+    odet.et_edge_scan     = ComplexF64[isfinite(real(odet.dW_edge[i])) ? odet.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
+    odet.ep_edge_scan     = ComplexF64[isfinite(real(ep_edge[i]))      ? ep_edge[i]       : complex(NaN) for i in psiedge_idxs]
+    odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]
+    odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i])           ? evonly_edge[i]   : NaN          for i in psiedge_idxs]
 
     # Return the index that maximizes dW_edge to identify truncation point
     return findmax(real.(odet.dW_edge))[2]
