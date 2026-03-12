@@ -464,32 +464,39 @@ if isfile(h5file)
                          marker = :star5, ms = 8, color = :red)
             end
 
-            # --- Panel C: evonly — min eigenvalue of wv alone (EL-independent wv quality check) ---
-            # If the wv spline is correct, evonly should be O(1) between rational surfaces
-            # (where singfac ≈ 1) and approach 0 at rational surfaces (singfac → 0).
-            # Divergence between surfaces indicates a buggy wv matrix.
+            # --- Panel C: vacuum_eigenvalue — min eigenvalue of wv alone (EL-independent wv quality check) ---
+            # Between rational surfaces singfac ≈ 1 so vacuum_eigenvalue ≈ O(1);
+            # at rational surfaces singfac → 0 so vacuum_eigenvalue → 0.
+            # Clip extreme values (|vacuum_eigenvalue| > clip_ev) before plotting so the
+            # physically relevant O(1) region is visible; clipped steps are noted in the title.
             pC = nothing
             if has_evonly
-                valid_evonly = findall(.!isnan.(evonly_real))
-                stride_all = max(1, length(valid_evonly) ÷ 4000)
-                ss_all = valid_evonly[1:stride_all:end]
+                clip_ev   = 5.0
+                in_range  = map(x -> !isnan(x) && abs(x) <= clip_ev, evonly_real)
+                n_clipped = count(!isnan, evonly_real) - count(in_range)
+                valid_ev2 = findall(in_range)
+                stride_all = max(1, length(valid_ev2) ÷ 4000)
+                ss_all = valid_ev2[1:stride_all:end]
 
                 pC = plot(;
                     xlabel = "q (safety factor)",
-                    ylabel = "evonly  (min eigval of wv)",
-                    title  = "wv quality: min eigenvalue of vacuum matrix alone (EL-independent)",
+                    ylabel = "vacuum_eigenvalue  (min eigval of wv)",
+                    title  = @sprintf("wv quality: vacuum_eigenvalue (EL-independent)  [%d steps clipped at |val|>%.0f]",
+                                      n_clipped, clip_ev),
                     legend = :topright,
                     xlims  = (minimum(q_es) * 0.98, qlim_bench * 1.02),
                     size   = (900, 300)
                 )
                 plot!(pC, q_es[ss_all], evonly_real[ss_all];
-                      label = "evonly (min eigval wv)", lw = 1, color = :purple, alpha = 0.8)
-                hline!(pC, [0.0]; label = "evonly = 0", ls = :dot, color = :gray, lw = 1.5)
+                      label = "vacuum_eigenvalue (min eigval wv)", lw = 1, color = :purple, alpha = 0.8)
+                hline!(pC, [0.0]; label = "vacuum_eigenvalue = 0", ls = :dot, color = :gray, lw = 1.5)
                 vline!(pC, [q_at_psihigh]; label = @sprintf("psihigh: q=%.3f", q_at_psihigh),
                        ls = :dash, color = :gray)
-                scatter!(pC, [q_peak], [evonly_real[et_peak_idx]];
-                         label = @sprintf("evonly at peak (%.4f)", evonly_real[et_peak_idx]),
-                         marker = :star5, ms = 8, color = :purple)
+                if abs(evonly_real[et_peak_idx]) <= clip_ev
+                    scatter!(pC, [q_peak], [evonly_real[et_peak_idx]];
+                             label = @sprintf("vacuum_eigenvalue at peak (%.4f)", evonly_real[et_peak_idx]),
+                             marker = :star5, ms = 8, color = :purple)
+                end
             end
 
             panels = filter(!isnothing, [pA, pB, pC])

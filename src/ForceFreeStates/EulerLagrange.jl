@@ -606,28 +606,9 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]
     odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i])           ? evonly_edge[i]   : NaN          for i in psiedge_idxs]
 
-    # Find the first local maximum of dW_edge (physical instability peak).
-    #
-    # The edge scan produces et values that: (1) start negative near psiedge, (2) rise through
-    # a zero crossing to the physical instability peak, (3) decrease back through zero, then
-    # (4) may rise again spuriously in the far above-psihigh region where the ODE solution
-    # degrades (accumulated Gaussian reductions corrupt U₁).  Taking the global maximum would
-    # pick the artifact.  Instead, find the peak between the first ascending and first
-    # descending zero crossings — that is the physical peak.
+    # Return the index that maximizes dW_edge to identify the truncation point.
     et_clean = replace(real.(odet.dW_edge), NaN => -Inf)
-    first_pos = findfirst(>(0.0), et_clean)
-    if first_pos === nothing
-        # No instability found: return the least-negative index.
-        return findmax(et_clean)[2]
-    end
-    first_neg_after = findfirst(<(0.0), @view(et_clean[first_pos:end]))
-    if first_neg_after === nothing
-        # et never returns to negative after rising: use the global max.
-        return findmax(et_clean)[2]
-    end
-    first_neg_abs = first_pos + first_neg_after - 1   # absolute index of first negative
-    search_range  = first_pos : (first_neg_abs - 1)
-    return isempty(search_range) ? first_pos : search_range[argmax(et_clean[search_range])]
+    return findmax(et_clean)[2]
 end
 
 """
