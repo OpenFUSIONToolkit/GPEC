@@ -6,7 +6,6 @@ using FastGaussQuadrature: gausslegendre
 using StaticArrays: SVector
 using SparseArrays
 using AdaptiveArrayPools
-using WriteVTK
 
 # Import parent modules
 import ..Equilibrium
@@ -58,7 +57,9 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
       + 3D: `num_modes × num_modes` (full coupled)
 
   - `grri`: Interior Green's function matrix.
+
   - `grre`: Exterior Green's function matrix.
+
   - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
 """
 @with_pool pool function _compute_vacuum_response_single!(
@@ -154,10 +155,6 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         if inputs.nzeta > 1 # 3D
             plasma_pts .= plasma_surf.r
             wall_pts .= wall.r
-            # Export 3D surfaces to VTK files
-            println("Writing 3D surfaces to VTK files...")
-            write_surface_to_vtk(plasma_surf.r, inputs.mtheta, inputs.nzeta, "plasma_surface_mt_$(inputs.mtheta)_nz_$(inputs.nzeta)")
-            !wall.nowall && write_surface_to_vtk(wall.r, inputs.mtheta, inputs.nzeta, "wall_surface_3D")
         else # 2D
             @views begin
                 plasma_pts[:, 1] .= plasma_surf.x
