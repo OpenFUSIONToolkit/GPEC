@@ -255,28 +255,52 @@ struct PlasmaGeometry3D
 end
 
 """
-    PlasmaGeometry3D(plasma_2d::PlasmaGeometry, nzeta::Int)
+    PlasmaGeometry3D(inputs::VacuumInput)
 
-Construct a 3D axisymmetric toroidal surface from a 2D poloidal contour.
+Construct a 3D toroidal plasma surface from vacuum input data.
 
-# TODO: update this
+This constructor builds a `PlasmaGeometry3D` directly from the `VacuumInput`
+struct, handling both axisymmetric (2D boundary, `nzeta_in == 1`) and fully
+3D input boundaries (`nzeta_in > 1`).
 
-# Algorithm
+## Axisymmetric input (inputs.nzeta_in == 1)
 
- 0. Interpolate 2D arrays onto mtheta grid
- 1. Map 2D (R, Z, ν) to 3D Cartesian: X = R cos(ϕ+ν), Y = R sin(ϕ+ν), Z = Z
- 2. Fit periodic bicubic splines to (X, Y, Z) on (θ, ϕ) grid
- 3. Compute tangent vectors via spline gradients
- 4. Compute normals via cross product: n = ∂r/∂θ × ∂r/∂ζ
+ 1. Build a 2D poloidal contour on the vacuum `mtheta` grid using
+    `PlasmaGeometry(inputs)` to obtain R(theta), Z(theta), and nu(theta).
+ 2. Toroidally extrude this contour onto a uniform `nzeta` grid using the
+    SFL angle zeta = phi - nu(theta) and map to Cartesian coordinates:
+    X = R(theta) * cos(zeta - nu(theta)),
+    Y = R(theta) * sin(zeta - nu(theta)),
+    Z = Z(theta).
 
-# Arguments
+## Fully 3D input (inputs.nzeta_in > 1)
 
-  - `plasma_2d`: 2D poloidal plasma geometry
-  - `nzeta`: Number of toroidal grid points
+ 1. Interpolate the input (x, y, z) arrays from the original
+    mtheta_in × nzeta_in grid onto the vacuum mtheta × nzeta grid using
+    periodic bicubic interpolation in both angles.
 
-# Returns
+## Steps
 
-  - `PlasmaGeometry3D`: Complete 3D surface description
+ 1. Fit periodic bicubic splines to each Cartesian component on the
+    (theta, zeta) grid.
+ 2. Compute tangent vectors dr/dtheta and dr/dzeta from spline derivatives,
+    scaled by the grid spacings.
+ 3. Form oriented normals via the cross product
+    n = (dr/dtheta) × (dr/dzeta) and enforce a consistent orientation
+    (inward for the plasma surface).
+ 4. Compute average poloidal/toroidal grid spacings and report the
+    aspect ratio for diagnostics.
+
+## Arguments
+
+  - `inputs::VacuumInput`: Vacuum calculation inputs defining the boundary
+    geometry and the desired `mtheta, nzeta` resolution.
+
+## Returns
+
+  - `PlasmaGeometry3D`: Complete 3D surface description on the
+    `mtheta × nzeta` grid, including points, tangents, normals, and
+    orientation.
 """
 function PlasmaGeometry3D(inputs::VacuumInput)
 
@@ -294,7 +318,6 @@ function PlasmaGeometry3D(inputs::VacuumInput)
     dr_dζ = zeros(num_points, 3)
     normal = zeros(num_points, 3)
 
-    # Interpolate arrays from input onto mtheta grid (same as 2D)
     if inputs.nzeta_in == 1
         # Build 3D surface point-by-point from 2D contour
         surf_2D = PlasmaGeometry(inputs)
@@ -305,8 +328,7 @@ function PlasmaGeometry3D(inputs::VacuumInput)
             r[i+mtheta*(j-1), 3] = surf_2D.z[i]
         end
     else
-        # TODO: make this better
-        # Interpolate inputs onto vacuum grid (there's gotta be a better way to do this)
+        # Interpolate 3D inputs onto vacuum grid
         θ_in = range(0.0, 2π; length=inputs.mtheta_in)
         ζ_in = range(0.0, 2π; length=inputs.nzeta_in)
         θ_flat = repeat(collect(θ_grid), nzeta)
