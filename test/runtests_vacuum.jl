@@ -465,6 +465,43 @@
             mtheta=mtheta
         )
 
+        # Helper: simple nonaxisymmetric (3D) plasma boundary built from SFL-style (θ, ζ) coordinates.
+        _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2) = begin
+            θ_in = range(0, 2π, length=mtheta_in)
+            ζ_in = range(0, 2π, length=nzeta_in)
+
+            X = zeros(mtheta_in, nzeta_in)
+            Y = zeros(mtheta_in, nzeta_in)
+            Z = zeros(mtheta_in, nzeta_in)
+
+            R0 = 1.7
+            a = 0.3
+            ε = 0.05
+
+            for (i, θ) in enumerate(θ_in), (j, ζ) in enumerate(ζ_in)
+                # Base circular cross‑section with a small toroidal corrugation
+                R = R0 + a * cos(θ) + ε * cos(2ζ) * cos(θ)
+                Z_ij = 0.3 * sin(θ) + ε * sin(2ζ) * sin(θ)
+                X[i, j] = R * cos(ζ)
+                Y[i, j] = R * sin(ζ)
+                Z[i, j] = Z_ij
+            end
+
+            VacuumInput(
+                x=vec(X),
+                y=vec(Y),
+                z=vec(Z),
+                mtheta_in=mtheta_in,
+                nzeta_in=nzeta_in,
+                mlow=1,
+                mpert=mpert,
+                nlow=nlow,
+                npert=npert,
+                mtheta=mtheta,
+                nzeta=nzeta
+            )
+        end
+
         @testset "VacuumInput nzeta > 1" begin
             vac = VacuumInput(mtheta=32, nzeta=24, mpert=2, npert=2)
             @test vac.nzeta == 24
@@ -494,6 +531,22 @@
             # Toroidal extrusion: first and (1+mtheta)th points differ only in (X,Y); Z same
             @test isapprox(surf.r[1, 3], surf.r[1+32, 3])
             @test !isapprox(surf.r[1, 1], surf.r[1+32, 1]) || !isapprox(surf.r[1, 2], surf.r[1+32, 2])
+        end
+
+        @testset "PlasmaGeometry3D nonaxisymmetric input" begin
+            inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
+            surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
+            num_points = inputs.mtheta * inputs.nzeta
+
+            @test surf.mtheta == 24
+            @test surf.nzeta == 24
+            @test size(surf.r) == (num_points, 3)
+            @test size(surf.normal) == (num_points, 3)
+            @test surf.normal_orient in (1, -1)
+            @test all(isfinite, surf.r)
+            @test all(isfinite, surf.normal)
+            # Nonaxisymmetric boundary should have genuine 3D structure (non‑trivial Y variation)
+            @test maximum(abs, surf.r[:, 2]) > 0
         end
 
         @testset "WallGeometry3D nowall" begin
@@ -538,6 +591,27 @@
             # 3D plasma_pts are (X,Y,Z) Cartesian
             @test isapprox(plasma_pts[1, 1]^2 + plasma_pts[1, 2]^2, (1.7 + 0.3)^2, rtol=0.1)
             @test isapprox(plasma_pts[1, 3], 0.0, atol=0.1)
+            @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        @testset "compute_vacuum_response 3D nonaxisymmetric boundary" begin
+            inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2)
+            wall_settings = WallShapeSettings(shape="nowall")
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+
+            @test size(wv) == (num_modes, num_modes)
+            @test eltype(wv) == ComplexF64
+            @test all(isfinite, wv)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test all(isfinite, grri)
+            @test all(isfinite, grre)
+            @test size(plasma_pts) == (numpoints, 3)
+            @test all(isfinite, plasma_pts)
+            @test size(wall_pts) == (numpoints, 3)
             @test isapprox(wv, wv', rtol=1e-12)
         end
 
