@@ -53,8 +53,8 @@ end
 # ─── Load all three equilibria ─────────────────────────────────────────────────
 # efit is the reference; efit_arclength and efit_by_inversion are compared to it.
 ref_method     = "efit"
-compare_methods = ["efit_arclength", "efit_by_inversion"]
-all_methods    = vcat(ref_method, compare_methods)
+compare_methods  = ["efit_arclength", "efit_by_inversion"]
+all_methods      = vcat(ref_method, compare_methods)
 
 method_color = Dict(
     "efit"             => :blue,
@@ -80,11 +80,21 @@ pes = Dict{String, Any}()
 for m in all_methods
     println("--- Running: $m ---")
     cfg = make_config(config_path, m, psihigh_arg)
-    pes[m] = setup_equilibrium(cfg)
-    println("  Done.\n")
+    try
+        pes[m] = setup_equilibrium(cfg)
+        println("  Done.\n")
+    catch e
+        println("  FAILED: $e\n")
+    end
 end
 
+failed = setdiff(all_methods, keys(pes))
+isempty(failed) || println("Skipping failed methods in comparisons: $(join(failed, ", "))")
+
+haskey(pes, ref_method) || error("Reference method '$ref_method' failed — cannot continue.")
 pe_ref = pes[ref_method]
+all_methods            = filter(m -> haskey(pes, m), all_methods)
+compare_methods_active = filter(m -> haskey(pes, m), compare_methods)
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 "Convert (ψ, θ) straight-field-line coordinates → (R, Z) physical coordinates."
@@ -122,7 +132,7 @@ mpsi_eval = 8 * (length(pe_ref.rzphi_xs) - 1)
 psi_full = psi_lo .+ (psi_hi - psi_lo) .* sin.(range(0.0, 1.0; length=mpsi_eval+1) .* (π/2)).^2
 
 mask_core = psi_full .< 0.10
-mask_edge = psi_full .> 0.85
+mask_edge = psi_full .> 0.98
 
 theta_select = [0.0, 0.25, 0.5, 0.75]
 theta_colors = [:blue, :green, :darkorange, :purple]
@@ -140,6 +150,7 @@ profile_specs = [
     ("dV/dψ",         pe -> pe.profiles.dVdpsi_spline),
     ("q",             pe -> pe.profiles.q_spline),
 ]
+profile_fnames = ["profile_F", "profile_P", "profile_dVdpsi", "profile_q"]
 
 for (idx, (pname, spl_getter)) in enumerate(profile_specs)
     spl_ref = spl_getter(pe_ref)
@@ -154,11 +165,11 @@ for (idx, (pname, spl_getter)) in enumerate(profile_specs)
         label=method_label[ref_method], xlabel="ψ", ylabel=pname, title="Deep core  (ψ < 0.10)")
     p_edge = plot(psi_full[mask_edge], y_ref[mask_edge]; lw=2,
         color=method_color[ref_method], ls=method_style[ref_method],
-        label=method_label[ref_method], xlabel="ψ", ylabel=pname, title="Far edge  (ψ > 0.85)")
+        label=method_label[ref_method], xlabel="ψ", ylabel=pname, title="Far edge  (ψ > 0.98)")
     p_diff = plot(; xlabel="ψ", ylabel="Δ$pname", title="Difference (vs efit)")
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
-    for m in compare_methods
+    for m in compare_methods_active
         spl_m = spl_getter(pes[m])
         y_m   = [spl_m(ψ) for ψ in psi_full]
         Δy    = y_ref .- y_m
@@ -176,9 +187,9 @@ for (idx, (pname, spl_getter)) in enumerate(profile_specs)
             any(mask_edge) ? maximum(abs.(Δy[mask_edge])) : NaN)
     end
 
-    p_combo = plot(p_full, p_core, p_edge, p_diff; layout=(2, 2), size=(1400, 900))
-    tag = replace(pname, r"[^A-Za-z0-9_]" => "_")
-    savefig(p_combo, joinpath(outdir, "1d_profile_$(idx)_$(tag).png"))
+    p_combo = plot(p_full, p_core, p_edge, p_diff; layout=(2, 2), size=(1400, 900),
+        left_margin=8Plots.mm, bottom_margin=6Plots.mm)
+    savefig(p_combo, joinpath(outdir, "$(profile_fnames[idx]).png"))
 end
 
 # ─── Reconstruct efit_by_inversion grids for grid-overplot visualization ───────
@@ -329,8 +340,9 @@ xpt_idx = argmin(all_Z_e)
 xlims!(p_ctr_xpt, all_R_e[xpt_idx] - 0.20, all_R_e[xpt_idx] + 0.20)
 ylims!(p_ctr_xpt, all_Z_e[xpt_idx] - 0.05, all_Z_e[xpt_idx] + 0.40)
 
-p_ctr_combo = plot(p_ctr_full, p_ctr_core, p_ctr_xpt; layout=(1, 3), size=(2100, 800))
-savefig(p_ctr_combo, joinpath(outdir, "flux_contours_combined.png"))
+p_ctr_combo = plot(p_ctr_full, p_ctr_core, p_ctr_xpt; layout=(1, 3), size=(2100, 800),
+    left_margin=8Plots.mm, bottom_margin=6Plots.mm)
+savefig(p_ctr_combo, joinpath(outdir, "flux_contours.png"))
 println("  Saved flux contour figures.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -346,6 +358,7 @@ rzphi_specs = [
     ("ν  (toroidal shift)",  pe -> ((ψ, θ) -> pe.rzphi_nu((ψ, θ)))),
     ("Jacobian",             pe -> ((ψ, θ) -> pe.rzphi_jac((ψ, θ)))),
 ]
+rzphi_fnames = ["rzphi_rsquared", "rzphi_angle_offset", "rzphi_nu", "rzphi_jacobian"]
 
 for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
     fn_ref  = fn_getter(pe_ref)
@@ -354,7 +367,7 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
     p_full = plot(; xlabel="ψ", ylabel=sname,
         title="$sname — full domain  (psihigh=$psihigh_arg)")
     p_core = plot(; xlabel="ψ", ylabel=sname, title="Deep core  (ψ < 0.10)")
-    p_edge = plot(; xlabel="ψ", ylabel=sname, title="Far edge  (ψ > 0.85)")
+    p_edge = plot(; xlabel="ψ", ylabel=sname, title="Far edge  (ψ > 0.98)")
     p_diff = plot(; xlabel="ψ", ylabel="Δ$sname", title="efit − other")
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
@@ -367,7 +380,7 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
     end
 
     println("  $sname:")
-    for m in compare_methods
+    for m in compare_methods_active
         fn_m   = fn_getter(pes[m])
         yi_all = [[fn_m(ψ, θ) for ψ in psi_full] for θ in theta_select]
         for (tidx, θ) in enumerate(theta_select)
@@ -390,9 +403,9 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
         end
     end
 
-    p_combo = plot(p_full, p_core, p_edge, p_diff; layout=(2, 2), size=(1400, 900))
-    tag = replace(sname, r"[^A-Za-z0-9_]" => "_")[1:min(30, end)]
-    savefig(p_combo, joinpath(outdir, "rzphi_spline_$(sidx)_$(tag).png"))
+    p_combo = plot(p_full, p_core, p_edge, p_diff; layout=(2, 2), size=(1400, 900),
+        left_margin=8Plots.mm, bottom_margin=6Plots.mm)
+    savefig(p_combo, joinpath(outdir, "$(rzphi_fnames[sidx]).png"))
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -407,6 +420,7 @@ eqfun_specs = [
     ("metric1  (e₁·e₂+q·e₃·e₁)/JB²", pe -> ((ψ, θ) -> pe.eqfun_metric1((ψ, θ)))),
     ("metric2  (e₂·e₃+q·e₃²)/JB²",   pe -> ((ψ, θ) -> pe.eqfun_metric2((ψ, θ)))),
 ]
+eqfun_fnames = ["eqfun_Bmag", "eqfun_metric1", "eqfun_metric2"]
 
 for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
     fn_ref  = fn_getter(pe_ref)
@@ -415,7 +429,7 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
     p_full = plot(; xlabel="ψ", ylabel=ename,
         title="$ename — full domain  (psihigh=$psihigh_arg)")
     p_core = plot(; xlabel="ψ", ylabel=ename, title="Deep core  (ψ < 0.10)")
-    p_edge = plot(; xlabel="ψ", ylabel=ename, title="Far edge  (ψ > 0.85)")
+    p_edge = plot(; xlabel="ψ", ylabel=ename, title="Far edge  (ψ > 0.98)")
     p_diff = plot(; xlabel="ψ", ylabel="Δ$ename", title="efit − other")
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
@@ -428,7 +442,7 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
     end
 
     println("  $ename:")
-    for m in compare_methods
+    for m in compare_methods_active
         fn_m   = fn_getter(pes[m])
         yi_all = [[fn_m(ψ, θ) for ψ in psi_full] for θ in theta_select]
         for (tidx, θ) in enumerate(theta_select)
@@ -451,9 +465,9 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
         end
     end
 
-    p_combo = plot(p_full, p_core, p_edge, p_diff; layout=(2, 2), size=(1400, 900))
-    tag = replace(ename, r"[^A-Za-z0-9_]" => "_")[1:min(30, end)]
-    savefig(p_combo, joinpath(outdir, "eqfun_$(eidx)_$(tag).png"))
+    p_combo = plot(p_full, p_core, p_edge, p_diff; layout=(2, 2), size=(1400, 900),
+        left_margin=8Plots.mm, bottom_margin=6Plots.mm)
+    savefig(p_combo, joinpath(outdir, "$(eqfun_fnames[eidx]).png"))
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
