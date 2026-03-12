@@ -436,40 +436,12 @@ if isfile(h5file)
                      label = @sprintf("peak (q=%.3f, et=%+.3f)", q_peak, et_peak),
                      marker = :star5, ms = 10, color = :red)
 
-            # --- Panel B: log-scale |ev| showing vacuum energy over full scan range ---
-            # ev = v'·wv·v comes from the wv spline (not from U₁ inversion), so it remains
-            # O(1)–O(10³) even where et and ep blow up. This panel reveals its full behaviour.
-            pB = nothing
-            if has_pv
-                # Subsample above-psihigh to keep rendering manageable
-                valid_ev = findall(.!isnan.(ev_real))
-                stride_all = max(1, length(valid_ev) ÷ 4000)
-                ss_all = valid_ev[1:stride_all:end]
-
-                pB = plot(;
-                    xlabel = "q (safety factor)",
-                    ylabel = "|ev|  (log scale)",
-                    title  = "Vacuum energy |ev| — full scan (wv from spline, not U₁)",
-                    legend = :topright,
-                    yscale = :log10,
-                    xlims  = (4.0, qlim_bench * 1.02),
-                    size   = (900, 300)
-                )
-                plot!(pB, q_es[ss_all], max.(abs.(ev_real[ss_all]), 1e-6);
-                      label = "|ev|", lw = 1, color = :red, alpha = 0.7)
-                vline!(pB, [q_at_psihigh]; label = @sprintf("psihigh: q=%.3f", q_at_psihigh),
-                       ls = :dash, color = :gray)
-                scatter!(pB, [q_peak], [abs(ev_real[et_peak_idx])];
-                         label = @sprintf("|ev| at peak (%.4f)", ev_real[et_peak_idx]),
-                         marker = :star5, ms = 8, color = :red)
-            end
-
-            # --- Panel C: vacuum_eigenvalue — min eigenvalue of wv alone (EL-independent wv quality check) ---
+            # --- Panel B: vacuum_eigenvalue — min eigenvalue of wv alone (EL-independent wv quality check) ---
             # Between rational surfaces singfac ≈ 1 so vacuum_eigenvalue ≈ O(1);
             # at rational surfaces singfac → 0 so vacuum_eigenvalue → 0.
             # Physically vacuum_eigenvalue >= 0; negative values are artifacts from beyond
             # rzphi geometry (wv computed via ExtendExtrap).  Filter to [0, clip_ev].
-            pC = nothing
+            pB = nothing
             if has_evonly
                 clip_ev   = 5.0
                 in_range  = map(x -> !isnan(x) && x >= 0.0 && x <= clip_ev, evonly_real)
@@ -479,7 +451,7 @@ if isfile(h5file)
                 ss_all = valid_ev2[1:stride_all:end]
                 ev_max = isempty(valid_ev2) ? 1.0 : maximum(evonly_real[valid_ev2])
 
-                pC = plot(;
+                pB = plot(;
                     xlabel = "q (safety factor)",
                     ylabel = "vacuum_eigenvalue  (min eigval of wv)",
                     title  = @sprintf("wv quality: vacuum_eigenvalue (EL-independent)  [%d steps outside [0,%.0f]]",
@@ -489,18 +461,18 @@ if isfile(h5file)
                     ylims  = (0.0, ev_max * 1.15 + 0.01),
                     size   = (900, 300)
                 )
-                plot!(pC, q_es[ss_all], evonly_real[ss_all];
+                plot!(pB, q_es[ss_all], evonly_real[ss_all];
                       label = "vacuum_eigenvalue (min eigval wv)", lw = 1, color = :purple, alpha = 0.8)
-                vline!(pC, [q_at_psihigh]; label = @sprintf("psihigh: q=%.3f", q_at_psihigh),
+                vline!(pB, [q_at_psihigh]; label = @sprintf("psihigh: q=%.3f", q_at_psihigh),
                        ls = :dash, color = :gray)
                 if in_range[et_peak_idx]
-                    scatter!(pC, [q_peak], [evonly_real[et_peak_idx]];
+                    scatter!(pB, [q_peak], [evonly_real[et_peak_idx]];
                              label = @sprintf("vacuum_eigenvalue at peak (%.4f)", evonly_real[et_peak_idx]),
                              marker = :star5, ms = 8, color = :purple)
                 end
             end
 
-            panels = filter(!isnothing, [pA, pB, pC])
+            panels = filter(!isnothing, [pA, pB])
             p7 = length(panels) == 1 ? panels[1] :
                  plot(panels...; layout=(length(panels), 1), size=(900, 350 * length(panels)))
             savefig(p7, joinpath(output_dir, "edge_spline_stability.png"))
