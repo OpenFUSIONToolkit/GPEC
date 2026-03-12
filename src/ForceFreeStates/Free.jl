@@ -131,36 +131,51 @@ well-conditioned despite q divergence near the separatrix.
 """
 function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, _psi_scan_end::Float64)
 
-    profiles = equil.profiles
-    psihigh  = profiles.xs[end]
+    profiles   = equil.profiles
+    psihigh    = profiles.xs[end]
+    has_edge_q = !isnothing(profiles.q_spline_iota_inverse)
 
-    # Limit the wv spline to the core grid [psiedge, psihigh] only.
-    # For psi > psihigh, the rzphi geometry uses the X-point asymptotic approximation which
-    # gives degenerate vacuum responses near the separatrix (plasma boundary shrinks to a
-    # point). The ExtendExtrap BC returns the psihigh value for all psi > psihigh, which is
-    # the correct physics: the vacuum response at the plasma-vacuum interface psihigh is
-    # well-defined and represents the physical plasma boundary.
-    qedge = profiles.q_spline_direct(ctrl.psiedge)
+    qedge        = profiles.q_spline_direct(ctrl.psiedge)
     q_at_psihigh = profiles.q_spline_direct(psihigh)
 
-    # Number of grid points: 9 per rational window over [qedge, q_at_psihigh]
-    npsi = max(9, ceil(Int, (q_at_psihigh - qedge) * intr.nhigh * 9))
+    # For diverted plasmas, extend the spline above psihigh using the X-point asymptotic
+    # geometry — the same geometry used by the FGK splines and jmat_spline. The upper limit
+    # is the end of the iota inner spline grid (last edge rational surface), capped at the
+    # last stored ODE step to avoid computing vacuum responses past the scan range.
+    iota_inner = has_edge_q ? profiles.q_spline_iota_inverse.inner : nothing
+    _d1_iota   = has_edge_q ? deriv1(iota_inner) : nothing
+    psi_upper  = has_edge_q ? min(_psi_scan_end, equil.rzphi_xs[end]) : psihigh
+    q_at_upper = (has_edge_q && psi_upper > psihigh) ?
+                 profiles.q_spline_iota_inverse(psi_upper) : q_at_psihigh
+
+    # Number of grid points: 9 per rational window over [qedge, q_at_upper]
+    npsi = max(9, ceil(Int, (q_at_upper - qedge) * intr.nhigh * 9))
     psi_array = zeros(Float64, npsi + 1)
     wv_array  = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:(npsi + 1)
-        # qi runs from qedge to q_at_psihigh (core only)
-        qi   = qedge + (q_at_psihigh - qedge) * ((i-1) / npsi)
-        psii = ctrl.psiedge + (psihigh - ctrl.psiedge) * ((i - 1) / npsi)  # linear psi initial guess
+        qi = qedge + (q_at_upper - qedge) * ((i-1) / npsi)
 
-        # Invert q(psi) = qi using the direct spline (all points in [psiedge, psihigh])
-        jpsi = max(1, searchsortedlast(profiles.q_spline_direct.y, qi))
-        hint = Ref(min(jpsi, profiles.npts_minus_1))
-        psi_array[i] = find_zero(
-            (psi -> profiles.q_spline_direct(psi; hint=hint) - qi,
-             psi -> profiles.q_deriv(psi; hint=hint)),
-            psii, Roots.Newton()
-        )
+        if qi <= q_at_psihigh || !has_edge_q
+            # Core region [psiedge, psihigh]: invert q(psi) = qi using the direct spline
+            psii = ctrl.psiedge + (psihigh - ctrl.psiedge) * ((qi - qedge) / (q_at_psihigh - qedge))
+            jpsi = max(1, searchsortedlast(profiles.q_spline_direct.y, qi))
+            hint = Ref(min(jpsi, profiles.npts_minus_1))
+            psi_array[i] = find_zero(
+                (psi -> profiles.q_spline_direct(psi; hint=hint) - qi,
+                 psi -> profiles.q_deriv(psi; hint=hint)),
+                psii, Roots.Newton()
+            )
+        else
+            # Edge region (psihigh, psi_upper]: invert iota(psi) = 1/qi using iota inner spline
+            iota_target = 1.0 / qi
+            psii = psihigh + (psi_upper - psihigh) * ((qi - q_at_psihigh) / (q_at_upper - q_at_psihigh))
+            psi_array[i] = find_zero(
+                (psi -> iota_inner(psi) - iota_target,
+                 psi -> _d1_iota(psi)),
+                psii, Roots.Newton()
+            )
+        end
 
         # Compute vacuum response matrix at this psi (2D single-n, 2D multi-n block-diagonal, or 3D)
         vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)

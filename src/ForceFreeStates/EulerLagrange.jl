@@ -568,16 +568,17 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     psi_scan_end = odet.psi_store[nsteps]
     odet.wvmat = free_compute_wv_spline(ctrl, equil, intr, psi_scan_end)
 
-    # For diverted plasmas, limit the upper bound of the scan to psihigh + 0.5*(1-psihigh).
-    # Above this cutoff, singfac²=(m-nq)² grows unboundedly while wv is held constant
-    # (ExtendExtrap from psihigh), producing artificially large et values.
+    # For diverted plasmas, limit the scan to psihigh + 0.5*(1-psihigh). Above this boundary,
+    # ODE fixup artifacts at edge rational surfaces (q=6, 7, ...) give unreliable et values:
+    # the u matrices grow exponentially before each fixup, producing spuriously large eigenvalues
+    # that would be incorrectly selected as the stability peak. The wv spline now covers the
+    # full [psiedge, rzphi_xs[end]] range with real vacuum computations, so this cap is purely
+    # to exclude ODE fixup noise — not the old ExtendExtrap wv limitation.
     psihigh_inner = equil.profiles.xs[end]
     is_diverted   = !isnothing(equil.profiles.q_spline_iota_inverse)
     scan_psi_max  = is_diverted ? psihigh_inner + 0.5 * (1.0 - psihigh_inner) : Inf
 
     # Loop through all stored steps in [psiedge, scan_psi_max] and compute dW at each.
-    # free_compute_total normalizes by ξ†J(psihigh)ξ / dV_dψ(psifac), matching free_run!,
-    # so the scan correctly ranks steps from different regions of the integration.
     for istep in 1:nsteps
         odet.psifac = odet.psi_store[istep]
         odet.psifac > scan_psi_max && break  # steps are in increasing psi order
