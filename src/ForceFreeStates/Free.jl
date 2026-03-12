@@ -192,7 +192,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     end
 
     wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
-    wvmat   = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    wvmat   = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=NoExtrap(), search=LinearBinary())
 
     return wvmat
 end

@@ -18,7 +18,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines, InverseCubicSpline
+export setup_equilibrium, equilibrium_extend_rzphi!, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines, InverseCubicSpline
 
 # --- Constants ---
 const mu0 = 4π * 1e-7

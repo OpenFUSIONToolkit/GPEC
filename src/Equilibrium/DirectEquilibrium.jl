@@ -459,12 +459,14 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
     zo::Float64,
     theta_nodes,
     r_xpoint::Float64,
-    z_xpoint::Float64;
-    edge_layer_width::Float64=1e-4)
+    z_xpoint::Float64,
+    edge_surface_psis::AbstractVector{Float64})
 
+    # edge_surface_psis must come from sing_find! — the canonical source of edge rational
+    # surfaces.  Passing an empty vector returns the inputs unchanged (no extension).
     isnothing(profiles.q_spline_iota_inverse) && return psi_nodes, rzphi_nodes
+    isempty(edge_surface_psis) && return psi_nodes, rzphi_nodes
 
-    iota_inner = profiles.q_spline_iota_inverse.inner
     psihigh = psi_nodes[end]
     ipsi_high = length(psi_nodes)
     mtheta_pts = size(rzphi_nodes, 2)  # mtheta+1 points (0..1 inclusive)
@@ -481,40 +483,15 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
         Z_high[itheta] = zo + rfac * sin(eta)
     end
 
-    # Scan for n=1 rational surfaces in the far edge to build a grid with ~10 pts per window.
-    # Same algorithm as sing_find! so resolution concentrates near the densely-packed surfaces.
-    iota_at_psihigh = iota_inner(psihigh)
-    edge_surfaces = Float64[]
-    hint_scan = Ref(1)
-    m_start = trunc(Int, 1.0 / max(iota_at_psihigh, 1e-10)) + 1
-    m_end   = min(m_start + 500, 100_000)
-    for m in m_start:m_end
-        iota_target = 1.0 / m
-        iota_target < 1e-10 && break
-        iota_target >= iota_at_psihigh && continue
-        try
-            psi_surf = find_zero(
-                psi -> iota_inner(psi; hint=hint_scan) - iota_target,
-                (psihigh, 1.0 - 1e-8), Roots.Brent(); xatol=1e-8
-            )
-            push!(edge_surfaces, psi_surf)
-            if length(edge_surfaces) >= 2 && edge_surfaces[end] - edge_surfaces[end-1] < edge_layer_width
-                break
-            end
-        catch
-        end
-    end
-
     # Build far-edge ψ grid: 10 interior points per window between consecutive rational surfaces.
+    # Nodes beyond psilim are not needed: make_metric truncates at psilim anyway, and
+    # extending toward psin=1 introduces J→∞ singularities that make the ODE extremely stiff.
     psi_far = Float64[psihigh]
-    boundaries = vcat([psihigh], edge_surfaces)
+    boundaries = vcat([psihigh], edge_surface_psis)
     for i in 1:(length(boundaries)-1)
         win_pts = range(boundaries[i], boundaries[i+1]; length=12)  # 12 pts = 10 interior + 2 endpoints
         append!(psi_far, win_pts[2:end])
     end
-    # psi_far ends at edge_surfaces[end] = psilim (set by sing_lim! from the same surface
-    # search). Nodes beyond psilim are not needed: make_metric truncates at psilim anyway, and
-    # extending toward psin=1 introduces J→∞ singularities that make the ODE extremely stiff.
     unique!(sort!(psi_far))
 
     npsi_far = length(psi_far)
@@ -556,9 +533,67 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
     rzphi_extended = cat(rzphi_nodes, rzphi_far[2:end, :, :]; dims=1)
 
     @printf("   X-point asymptotic geometry built over psin ∈ [%.4f, %.6f] (%d far-edge nodes, %d edge rational surfaces)\n",
-        psihigh, psi_far[end], npsi_far - 1, length(edge_surfaces))
+        psihigh, psi_far[end], npsi_far - 1, length(edge_surface_psis))
 
     return psi_extended, rzphi_extended
+end
+
+"""
+    equilibrium_extend_rzphi!(equil, edge_surface_psis)
+
+Extend the rzphi coordinate splines into the far edge (above psihigh) using the X-point
+asymptotic geometry, then rebuild the four bicubic splines in-place on `equil`.
+
+`edge_surface_psis` must be the psifac values of the edge rational surfaces found by
+`sing_find!` — the canonical source.  No-op for limited plasmas or empty surface list.
+
+Called from ForceFreeStates setup after `sing_find!` and `sing_lim!` have run, so that the
+rzphi grid covers exactly [psilow, psilim] with no gap or over-extension.
+"""
+function equilibrium_extend_rzphi!(equil::PlasmaEquilibrium, edge_surface_psis::AbstractVector{Float64})
+
+    isnothing(equil.profiles.q_spline_iota_inverse) && return
+    isempty(edge_surface_psis) && return
+
+    psihigh = equil.rzphi_xs[end]
+
+    # Only extend if the provided surfaces reach beyond the current grid end.
+    maximum(edge_surface_psis) <= psihigh && return
+
+    npsi_current = length(equil.rzphi_xs)
+    mtheta_pts   = length(equil.rzphi_ys)
+
+    # Recover current rzphi node values from the stored bicubic splines.
+    # nodal_derivs.partials[1, ipsi, itheta] holds the function value at each grid point.
+    rzphi_nodes = zeros(Float64, npsi_current, mtheta_pts, 4)
+    for itheta in 1:mtheta_pts
+        for ipsi in 1:npsi_current
+            rzphi_nodes[ipsi, itheta, 1] = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
+            rzphi_nodes[ipsi, itheta, 2] = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+            rzphi_nodes[ipsi, itheta, 3] = equil.rzphi_nu.nodal_derivs.partials[1, ipsi, itheta]
+            rzphi_nodes[ipsi, itheta, 4] = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+        end
+    end
+
+    # Extend psi_nodes and rzphi_nodes using the X-point asymptotic formula.
+    theta_nodes = range(equil.rzphi_ys[1], equil.rzphi_ys[end]; length=mtheta_pts)
+    psi_extended, rzphi_extended = direct_build_xpoint_asymptotic!(
+        equil.profiles, equil.rzphi_xs, rzphi_nodes,
+        equil.ro, equil.zo, theta_nodes,
+        equil.params.r_xpoint, equil.params.z_xpoint,
+        edge_surface_psis)
+
+    # Rebuild the four bicubic splines on the extended grid.
+    grid2d = (psi_extended, theta_nodes)
+    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    equil.rzphi_rsquared = cubic_interp(grid2d, rzphi_extended[:, :, 1]; opts2d...)
+    equil.rzphi_offset   = cubic_interp(grid2d, rzphi_extended[:, :, 2]; opts2d...)
+    equil.rzphi_nu       = cubic_interp(grid2d, rzphi_extended[:, :, 3]; opts2d...)
+    equil.rzphi_jac      = cubic_interp(grid2d, rzphi_extended[:, :, 4]; opts2d...)
+
+    equil.rzphi_xs = psi_extended
+    # rzphi_ys (theta grid) is unchanged
 end
 
 """
@@ -784,11 +819,9 @@ robustness.
         @printf("   Edge inverse splines built over psin ∈ [%.4f, 1.0] (%d nodes)\n",
             psi_edge_start, length(edge_psi))
 
-        # Extend rzphi nodes into the far edge using X-point asymptotic geometry.
-        # This replaces the constant ExtendExtrap behaviour above psihigh with a geometry
-        # that shrinks flux surfaces toward the X-point (preserving GS consistency with F'≈0).
-        psi_nodes, rzphi_nodes = direct_build_xpoint_asymptotic!(
-            profiles, psi_nodes, rzphi_nodes, ro, zo, theta_nodes, r_xpoint, z_xpoint)
+        # rzphi nodes will be extended into the far edge by equilibrium_extend_rzphi! in
+        # ForceFreeStates, using the edge rational surfaces from sing_find! as the canonical
+        # grid source.  No extension is done here; the spline is built on the core grid only.
     end
 
     # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.

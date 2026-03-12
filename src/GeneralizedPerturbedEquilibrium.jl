@@ -174,6 +174,15 @@ function main(args::Vector{String}=String[])
     # Runs after sing_find! so that edge surfaces above psihigh are available for diverted plasmas.
     sing_lim!(intr, ctrl, equil)
 
+    # Extend the rzphi coordinate splines to psilim using the edge rational surfaces from sing_find!.
+    # This is the single canonical source for the far-edge grid — sing_find! applies the
+    # edge_layer_width stopping criterion (check-before-push), so psilim = last surface before
+    # surfaces pack closer than edge_layer_width.  The rzphi grid now covers exactly [psilow, psilim].
+    if !isnothing(equil.profiles.q_spline_iota_inverse)
+        edge_surf_psis = Float64[s.psifac for s in intr.sing if s.psifac > equil.config.psihigh]
+        Equilibrium.equilibrium_extend_rzphi!(equil, edge_surf_psis)
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
