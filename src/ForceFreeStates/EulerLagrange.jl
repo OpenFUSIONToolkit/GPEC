@@ -384,7 +384,8 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
         odet.total_steps += 1
         steps_in_segment[] += 1
 
-        compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+        is_above_psihigh = integrator.t > equil.profiles.xs[end] && !isnothing(equil.profiles.q_spline_iota_inverse)
+        compute_solution_norms!(integrator.u, odet, ctrl, intr, false, is_above_psihigh)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
@@ -456,7 +457,7 @@ operate on `u` directly without extra copies.
 
 Add resizing logic for unorm arrays when ifix exceeds allocated size
 """
-function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
+function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool, is_above_psihigh::Bool=false)
 
     # Compute norms of first solution vectors, abort if any are zero
     odet.unorm .= norm.(eachcol(u[:, :, 1]))
@@ -465,14 +466,18 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
-    # Normalize unorm and perform Gaussian reduction if required
+    # Normalize unorm and perform Gaussian reduction if required.
+    # Above psihigh, use ucrit/10 to trigger more frequent fixups: the ODE is stiffer
+    # (q→∞ near separatrix), so u grows faster between fixups and pre-fixup steps have
+    # large wp = U₂/U₁ eigenvalues that would otherwise dominate the edge dW scan.
+    effective_ucrit = is_above_psihigh ? ctrl.ucrit / 10 : ctrl.ucrit
     if odet.new
         odet.new = false
         odet.unorm0 .= odet.unorm
     else
         odet.unorm ./= odet.unorm0
         uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if uratio > ctrl.ucrit || sing_flag
+        if uratio > effective_ucrit || sing_flag
             # TODO: add resizing logic here as well
             if odet.ifix < ctrl.numunorms_init
                 odet.ifix += 1
@@ -568,20 +573,11 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     psi_scan_end = odet.psi_store[nsteps]
     odet.wvmat = free_compute_wv_spline(ctrl, equil, intr, psi_scan_end)
 
-    # For diverted plasmas, limit the scan to psihigh + 0.5*(1-psihigh). Above this boundary,
-    # ODE fixup artifacts at edge rational surfaces (q=6, 7, ...) give unreliable et values:
-    # the u matrices grow exponentially before each fixup, producing spuriously large eigenvalues
-    # that would be incorrectly selected as the stability peak. The wv spline now covers the
-    # full [psiedge, rzphi_xs[end]] range with real vacuum computations, so this cap is purely
-    # to exclude ODE fixup noise — not the old ExtendExtrap wv limitation.
-    psihigh_inner = equil.profiles.xs[end]
-    is_diverted   = !isnothing(equil.profiles.q_spline_iota_inverse)
-    scan_psi_max  = is_diverted ? psihigh_inner + 0.5 * (1.0 - psihigh_inner) : Inf
-
-    # Loop through all stored steps in [psiedge, scan_psi_max] and compute dW at each.
+    # Loop through all stored steps in [psiedge, psilim] and compute dW at each.
+    # The ucrit/10 reduction above psihigh suppresses ODE fixup artifacts at edge rational
+    # surfaces so that the physical stability peak dominates the scan.
     for istep in 1:nsteps
         odet.psifac = odet.psi_store[istep]
-        odet.psifac > scan_psi_max && break  # steps are in increasing psi order
         if ctrl.psiedge <= odet.psifac
             odet.u .= odet.u_store[:, :, :, istep]
             try
@@ -610,8 +606,28 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]
     odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i])           ? evonly_edge[i]   : NaN          for i in psiedge_idxs]
 
-    # Return the index that maximizes dW_edge to identify truncation point
-    return findmax(real.(odet.dW_edge))[2]
+    # Find the first local maximum of dW_edge (physical instability peak).
+    #
+    # The edge scan produces et values that: (1) start negative near psiedge, (2) rise through
+    # a zero crossing to the physical instability peak, (3) decrease back through zero, then
+    # (4) may rise again spuriously in the far above-psihigh region where the ODE solution
+    # degrades (accumulated Gaussian reductions corrupt U₁).  Taking the global maximum would
+    # pick the artifact.  Instead, find the peak between the first ascending and first
+    # descending zero crossings — that is the physical peak.
+    et_clean = replace(real.(odet.dW_edge), NaN => -Inf)
+    first_pos = findfirst(>(0.0), et_clean)
+    if first_pos === nothing
+        # No instability found: return the least-negative index.
+        return findmax(et_clean)[2]
+    end
+    first_neg_after = findfirst(<(0.0), @view(et_clean[first_pos:end]))
+    if first_neg_after === nothing
+        # et never returns to negative after rising: use the global max.
+        return findmax(et_clean)[2]
+    end
+    first_neg_abs = first_pos + first_neg_after - 1   # absolute index of first negative
+    search_range  = first_pos : (first_neg_abs - 1)
+    return isempty(search_range) ? first_pos : search_range[argmax(et_clean[search_range])]
 end
 
 """

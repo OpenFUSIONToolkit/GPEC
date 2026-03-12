@@ -400,7 +400,7 @@ if isfile(h5file)
                 title  = @sprintf("Edge stability: energy components vs q  [ψ = %.3f → %.3f]",
                                   psi_es[1], psi_es[end]),
                 legend = :topright,
-                xlims  = (4.0, q_max_scan * 1.02),
+                xlims  = (4.0, qlim_bench * 1.02),
                 ylims  = (-display_lim, max(3.0, et_peak * 1.2)),
                 size   = (900, 400)
             )
@@ -452,7 +452,7 @@ if isfile(h5file)
                     title  = "Vacuum energy |ev| — full scan (wv from spline, not U₁)",
                     legend = :topright,
                     yscale = :log10,
-                    xlims  = (4.0, q_max_scan * 1.02),
+                    xlims  = (4.0, qlim_bench * 1.02),
                     size   = (900, 300)
                 )
                 plot!(pB, q_es[ss_all], max.(abs.(ev_real[ss_all]), 1e-6);
@@ -479,7 +479,7 @@ if isfile(h5file)
                     ylabel = "evonly  (min eigval of wv)",
                     title  = "wv quality: min eigenvalue of vacuum matrix alone (EL-independent)",
                     legend = :topright,
-                    xlims  = (minimum(q_es) * 0.98, q_max_scan * 1.02),
+                    xlims  = (minimum(q_es) * 0.98, qlim_bench * 1.02),
                     size   = (900, 300)
                 )
                 plot!(pC, q_es[ss_all], evonly_real[ss_all];
