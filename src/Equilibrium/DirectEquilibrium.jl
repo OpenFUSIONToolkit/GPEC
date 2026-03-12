@@ -40,6 +40,7 @@ struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastIn
     power_b::Int
     power_r::Int
     bfield::DirectBField
+    Bp_floor::Float64  # minimum Bp for integral terms (0 = disabled; arclength sets this to prevent 1/Bp overflow near x-points)
 end
 
 """
@@ -269,7 +270,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     equil_config = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield, 0.0)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -280,7 +281,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
+    sol = solve(prob, BS5(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
@@ -400,11 +401,6 @@ robustness.
     mpsi = equil_params.mpsi
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
-
-    # Warn if psihigh is too close to 1.0
-    if psihigh >= 1 - 1e-6
-        @warn "Warning: direct equilibrium with psihigh = $(psihigh) could hang on separatrix."
-    end
 
     # TODO: there's some fortran logic for grid_type = original that should be added when needed.
 

@@ -141,7 +141,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000, dense=false)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=1e-8, maxiters=10000, dense=false)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'

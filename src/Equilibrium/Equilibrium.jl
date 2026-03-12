@@ -48,7 +48,14 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     eq_type = eq_config.eq_type
     # Parse file and prepare initial data structures and splines
     if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
+        eq_config.psihigh = min(eq_config.psihigh, 1.0)
         eq_input = read_efit(eq_config)
+        psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
+        if adjusted
+            @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
+                  "clamped to $(round(psihigh_safe; sigdigits=7))"
+            eq_input.config.psihigh = psihigh_safe
+        end
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
@@ -151,8 +158,8 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
             η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            rfac_local = sqrt(r2)
-            rfac1 = r2y / (2 * rfac_local)
+            rfac_local = sqrt(max(0.0, r2))
+            rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
             phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
             sin_phase = sin(2π * (theta_inner + η))
             cos_phase_local = cos(2π * (theta_inner + η))
@@ -172,9 +179,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
             η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
             η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
-            rfac_local = sqrt(r2)
-            rfac1 = r2y / (2 * rfac_local)
-            rfac2 = (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local)
+            rfac_local = sqrt(max(0.0, r2))
+            rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
+            rfac2 = (rfac_local > 0) ? (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local) : 0.0
             phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
             phase2 = 2π * η2          # d²[2π(θ+η)]/dθ²
             cos_phase_local = cos(2π * (theta_inner + η))

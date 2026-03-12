@@ -51,10 +51,14 @@ which vanishes near the top/bottom of elongated plasmas approaching the separatr
     B  = sqrt(Bp^2 + Bt^2)
     jac = Bp^params.power_bp * B^params.power_b / R^params.power_r
 
-    # Surface integrals (dl = ds since s is arc length)
-    dy[3] = 1.0 / Bp           # d/ds [∫dl/Bp]
-    dy[4] = 1.0 / (R^2 * Bp)  # d/ds [∫dl/(R²Bp)]
-    dy[5] = jac / Bp           # d/ds [∫jac·dl/Bp]
+    # Surface integrals (dl = ds since s is arc length).
+    # Near x-points Bp → 0 and 1/Bp diverges. Use smooth floor sqrt(Bp²+Bp_floor²)
+    # for integral terms only (position dy[1:2] unaffected). This prevents true Inf
+    # at exact grad_norm zeros while avoiding the C⁰ kink of max(Bp, floor).
+    Bp_eff = sqrt(Bp^2 + params.Bp_floor^2)
+    dy[3] = 1.0 / Bp_eff           # d/ds [∫dl/Bp]
+    dy[4] = 1.0 / (R^2 * Bp_eff)  # d/ds [∫dl/(R²Bp)]
+    dy[5] = jac / Bp_eff           # d/ds [∫jac·dl/Bp]
 end
 
 """
@@ -63,7 +67,7 @@ end
 Arc-length-parameterized flux surface integration. Drop-in replacement for
 `direct_fieldline_int` with identical return format:
 
-- `y_out[:, 1]`: geometric angle η ∈ [0, 2π] (CCW from outboard midplane)
+- `y_out[:, 1]`: geometric angle η ∈ 0 to 2π (CCW from outboard midplane)
 - `y_out[:, 2]`: accumulated ∫dl/Bp
 - `y_out[:, 3]`: rfac = √((R−ro)² + (Z−zo)²)
 - `y_out[:, 4]`: accumulated ∫dl/(R²Bp)
@@ -96,8 +100,13 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 
     equil_config = raw_profile.config
     bfield_ode = DirectBField()
+    # Smooth Bp floor: prevents 1/Bp → Inf at exact-zero grad_norm. Using sqrt form
+    # (Bp_eff = sqrt(Bp² + Bp_floor²)) avoids the C⁰ kink of max(Bp, Bp_floor) that
+    # would create artificial discontinuities in the RHS.
+    Bp0 = sqrt(bfield.psir^2 + bfield.psiz^2) / r
+    Bp_floor = 1e-4 * Bp0  # 0.01% of outboard-midplane Bp
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield_ode)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield_ode, Bp_floor)
 
     # Guard: don't terminate until we've traversed at least half the circumference.
     # t_min is a conservative lower bound on the half-arc-length.
@@ -115,7 +124,13 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     callback = ContinuousCallback(condition, affect_upward!, nothing; save_positions=(true, false))
 
     prob = ODEProblem{true}(arclength_fieldline_der!, u0, (0.0, 1.0e4), params)
-    sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8,
+    # Position components (y[1:2]) need tight tolerances; integral components (y[3:5])
+    # have a 1/Bp integrand that spikes near x-points. Loose integral tolerances prevent
+    # the adaptive stepper from taking millions of tiny steps through the near-x-point
+    # region while keeping position accuracy for the flux surface geometry.
+    reltol_vec = [equil_config.etol, equil_config.etol, 1e20, 1e20, 1e20]
+    abstol_vec = [1e-8, 1e-8, 1e20, 1e20, 1e20]
+    sol = solve(prob, BS5(); callback=callback, reltol=reltol_vec, abstol=abstol_vec,
         dt=2π / 200, adaptive=true, dense=false)
 
     # Reconstruct y_out from the ODE solution in the same 5-column format as
@@ -166,10 +181,6 @@ Select via `eq_type = "efit_arclength"` in `gpec.toml`.
     mpsi = equil_params.mpsi
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
-
-    if psihigh >= 1 - 1e-6
-        @warn "efit_arclength: psihigh = $(psihigh) is very close to 1 — may approach separatrix."
-    end
 
     psi_nodes = Array{Float64}(undef, mpsi + 1)
     if equil_params.grid_type == "ldp"

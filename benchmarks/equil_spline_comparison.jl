@@ -85,6 +85,8 @@ for m in all_methods
         println("  Done.\n")
     catch e
         println("  FAILED: $e\n")
+        Base.show_backtrace(stderr, catch_backtrace())
+        println(stderr)
     end
 end
 
@@ -195,6 +197,11 @@ end
 # ─── Reconstruct efit_by_inversion grids for grid-overplot visualization ───────
 # Mirrors the grid construction in equilibrium_solver_by_inversion so we can
 # scatter the actual grid points onto the flux-surface plots.
+r_global_grid = Float64[]
+z_global_grid = Float64[]
+r_zoom_grid_vis = Float64[]
+z_zoom_grid_vis = Float64[]
+if haskey(pes, "efit_by_inversion")
 let
     global r_global_grid, z_global_grid, r_zoom_grid_vis, z_zoom_grid_vis
     cfg_inv   = make_config(config_path, "efit_by_inversion", psihigh_arg)
@@ -255,6 +262,7 @@ let
         zo_g, nz_z, β_r_g)
     println("  Grid vis: global $(nr_g)×$(nz_g), zoom $(nr_z)×$(nz_z)")
 end
+end  # haskey(pes, "efit_by_inversion")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2.  FLUX SURFACE CONTOUR OVERLAYS
@@ -296,8 +304,9 @@ for m in all_methods
     end
 end
 
-# Grid overplots: scatter subsampled grid points on each panel.
+# Grid overplots: scatter subsampled grid points on each panel (only if efit_by_inversion ran).
 # Global grid: every 20th R × 12th Z (grey).  Zoom grid: every 3rd R × 3rd Z (darkgrey).
+if !isempty(r_global_grid)
 let
     step_rg, step_zg = 20, 12
     Rg = [r_global_grid[ir] for ir in 1:step_rg:length(r_global_grid)
@@ -325,6 +334,7 @@ let
     scatter!(p_ctr_xpt, Rg, Zg; ms=1.2, color=:grey, alpha=0.3,
         markerstrokewidth=0, label="global grid")
 end
+end  # !isempty(r_global_grid)
 
 # Set zoom limits for core and x-point panels using the reference method
 Rc, Zc = R_fs[ref_method]

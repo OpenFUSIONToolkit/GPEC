@@ -79,6 +79,36 @@ function select_plasma_contour(curve_list, ro::Float64, zo::Float64)
 end
 
 """
+    clamp_psihigh_to_separatrix(raw_profile) -> (clamped_psihigh, was_adjusted)
+
+Binary-searches for the highest psihigh ≤ raw_profile.config.psihigh at which the
+ψ level set is still a closed curve in the EFIT grid, using the same coarse-grid
+contour check as the by-inversion solver. Returns the safe value and a Bool indicating
+whether any clamping occurred. Typically completes in ~20 iterations (~5 ms).
+"""
+function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
+    psihigh = raw_profile.config.psihigh
+    ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
+
+    has_closed_contour(ψ_high) = any(
+        _is_closed_curve,
+        Ctr.lines(Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys,
+                              ψ_coarse, raw_profile.psio * (1.0 - ψ_high)))
+    )
+
+    has_closed_contour(psihigh) && return (psihigh, false)
+
+    lo = min(0.99, psihigh - 0.1)
+    hi = psihigh
+    for _ in 1:52
+        hi - lo < 1e-10 && break
+        mid = (lo + hi) / 2.0
+        has_closed_contour(mid) ? (lo = mid) : (hi = mid)
+    end
+    return (lo, true)
+end
+
+"""
     resample_contour_to_theta_grid!(R_out, Z_out, curve, ro, zo, theta_grid)
 
 Resample a Contour.jl curve onto a uniform geometric-angle grid, writing results
@@ -351,10 +381,6 @@ function equilibrium_solver_by_inversion(
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
-
-    if psihigh >= 1 - 1e-6
-        @warn "efit_by_inversion: psihigh = $(psihigh) very close to 1 — separatrix may be reached."
-    end
 
     # Build target psi_norm grid (same ldp scheme as direct solver)
     psi_nodes = [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]

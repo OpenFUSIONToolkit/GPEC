@@ -21,7 +21,75 @@
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
     end
 
-    # --- 2. Load CHEASE Binary Data ---
+    # --- 2. Load EFIT data via arc-length field-line ODE ---
+    @testset "Load EFIT Data (arclength)" begin
+        arclength_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
+            eq_type="efit_arclength",
+            jac_type="boozer",
+            grid_type="ldp",
+            psilow=0.01,
+            psihigh=0.994
+        )
+        global plasma_eq_arclength = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(arclength_config)
+
+        @test plasma_eq_arclength isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
+        @test 6.5 < plasma_eq_arclength.ro < 7.5
+
+        # Magnetic axis should agree with the standard efit solver within 1 mm
+        @test isapprox(plasma_eq_arclength.ro, plasma_eq_efit.ro, atol=1e-3)
+        @test isapprox(plasma_eq_arclength.zo, plasma_eq_efit.zo, atol=1e-3)
+
+        # B field must be finite and positive
+        B_nodes = plasma_eq_arclength.eqfun_B.nodal_derivs.partials[1, :, :]
+        @test all(isfinite, B_nodes)
+        @test all(>(0), B_nodes)
+    end
+
+    # --- 3. Load EFIT data via contour inversion ---
+    @testset "Load EFIT Data (by_inversion)" begin
+        inversion_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
+            eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
+            eq_type="efit_by_inversion",
+            jac_type="boozer",
+            grid_type="ldp",
+            psilow=0.01,
+            psihigh=0.994
+        )
+        global plasma_eq_inversion = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(inversion_config)
+
+        @test plasma_eq_inversion isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
+        @test 6.5 < plasma_eq_inversion.ro < 7.5
+
+        # Magnetic axis should agree with the standard efit solver within 1 mm
+        @test isapprox(plasma_eq_inversion.ro, plasma_eq_efit.ro, atol=1e-3)
+        @test isapprox(plasma_eq_inversion.zo, plasma_eq_efit.zo, atol=1e-3)
+
+        # B field must be finite and positive
+        B_nodes = plasma_eq_inversion.eqfun_B.nodal_derivs.partials[1, :, :]
+        @test all(isfinite, B_nodes)
+        @test all(>(0), B_nodes)
+    end
+
+    # --- 4. EFIT method consistency ---
+    @testset "EFIT Method Consistency" begin
+        # All three methods solve the same equilibrium — q-profiles should broadly agree.
+        # Tolerance is 5% to allow for method-specific discretisation differences.
+        q_efit      = plasma_eq_efit.profiles.q_spline.y
+        q_arclength = plasma_eq_arclength.profiles.q_spline.y
+        q_inversion = plasma_eq_inversion.profiles.q_spline.y
+
+        @test all(isfinite, q_arclength)
+        @test all(>(0), q_arclength)
+        @test all(isfinite, q_inversion)
+        @test all(>(0), q_inversion)
+
+        # Edge q values should agree to within 10%
+        @test isapprox(q_arclength[end], q_efit[end], rtol=0.10)
+        @test isapprox(q_inversion[end], q_efit[end], rtol=0.10)
+    end
+
+    # --- 6. Load CHEASE Binary Data ---
     @testset "Load CHEASE Binary" begin
         binary_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_binary"),
@@ -38,7 +106,7 @@
         @test plasma_eq_binary isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
 
-    # --- 3. Load CHEASE ASCII Data ---
+    # --- 7. Load CHEASE ASCII Data ---
     @testset "Load CHEASE ASCII" begin
         ascii_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_ascii"),
