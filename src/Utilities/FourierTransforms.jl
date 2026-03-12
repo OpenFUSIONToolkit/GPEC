@@ -125,7 +125,6 @@ function compute_fourier_coefficients(
                     sin_mn_basis[idx, col] = s
                 end
             end
-            end
         end
     end
 

@@ -6,13 +6,16 @@
         @testset "VacuumInput" begin
             @testset "default constructor" begin
                 vac = VacuumInput()
-                @test vac.r == Float64[]
+                @test vac.x == Float64[]
+                @test vac.y == Float64[]
                 @test vac.z == Float64[]
                 @test vac.ν == Float64[]
-                @test vac.mlow == 0
-                @test vac.mpert == 0
-                @test vac.nlow == 0
-                @test vac.npert == 0
+                @test vac.mtheta_in == 0
+                @test vac.nzeta_in == 1
+                @test vac.mlow == 1
+                @test vac.mpert == 1
+                @test vac.nlow == 1
+                @test vac.npert == 1
                 @test vac.mtheta == 1
                 @test vac.nzeta == 1
                 @test vac.force_wv_symmetry == true
@@ -50,7 +53,9 @@
         @testset "PlasmaGeometry" begin
             @testset "from VacuumInput" begin
                 inputs = VacuumInput(
-                    r=[1.0, 1.1, 1.2, 1.1, 1.0],
+                    mtheta_in=5,
+                    nzeta_in=1,
+                    x=[1.0, 1.1, 1.2, 1.1, 1.0],
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
                     ν=zeros(5),
                     mtheta=5,
@@ -72,8 +77,10 @@
             @testset "edge: mtheta larger than input length" begin
                 # Periodic spline requires at least 4 points
                 inputs = VacuumInput(
-                    r=[1.0, 1.1, 1.2, 1.1, 1.0],
+                    x=[1.0, 1.1, 1.2, 1.1, 1.0],
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
+                    mtheta_in=5,
+                    nzeta_in=1,
                     ν=zeros(5),
                     mtheta=8,
                     mpert=1,
@@ -92,7 +99,9 @@
         # -------------------------------------------------------------------------
         @testset "WallGeometry" begin
             _circle_inputs(mtheta) = VacuumInput(
-                r=1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta)),
+                mtheta_in=mtheta,
+                nzeta_in=1,
+                x=1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta)),
                 z=0.3 .* sin.(range(0, 2π, length=mtheta)),
                 ν=zeros(mtheta),
                 mtheta=mtheta,
@@ -149,7 +158,9 @@
                 inputs = _circle_inputs(16)
                 plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
                     VacuumInput(
-                        r=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
+                        mtheta_in=16,
+                        nzeta_in=1,
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
                         z=0.03 .* sin.(range(0, 2π, length=16)),
                         ν=zeros(16),
                         mtheta=16,
@@ -170,7 +181,9 @@
                 inputs = _circle_inputs(16)
                 plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
                     VacuumInput(
-                        r=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
+                        mtheta_in=16,
+                        nzeta_in=1,
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
                         z=0.03 .* sin.(range(0, 2π, length=16)),
                         ν=zeros(16),
                         mtheta=16,
@@ -360,7 +373,9 @@
         # -------------------------------------------------------------------------
         @testset "compute_vacuum_response" begin
             _make_inputs(; mtheta=128, mtheta_eq=17, mpert=2, nlow=1, npert=1) = VacuumInput(
-                r=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
+                mtheta_in=mtheta_eq,
+                nzeta_in=1,
+                x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
                 z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
                 ν=zeros(mtheta_eq),
                 mlow=1,
@@ -437,7 +452,9 @@
     # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
     @testset "Vacuum.jl (3D)" begin
         _make_3d_inputs(; mtheta=32, mtheta_eq=17, mpert=2, nlow=0, npert=2, nzeta=32) = VacuumInput(
-            r=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
+            mtheta_in=mtheta_eq,
+            nzeta_in=1,
+            x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
             z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
             ν=zeros(mtheta_eq),
             mlow=1,
@@ -471,8 +488,6 @@
             @test size(surf.dr_dθ) == (num_points, 3)
             @test size(surf.dr_dζ) == (num_points, 3)
             @test size(surf.normal) == (num_points, 3)
-            # ν is from 2D contour: one value per poloidal point (length mtheta)
-            @test length(surf.ν) == inputs.mtheta
             @test surf.normal_orient in (1, -1)
             @test all(isfinite, surf.r)
             @test all(isfinite, surf.normal)
