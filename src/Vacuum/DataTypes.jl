@@ -113,11 +113,19 @@ Struct containing input settings for vacuum wall geometry.
         + `"filepath"`: Custom wall shape from the file you specify
 
   - `a::Float64`: Distance of wall from plasma in units of major radius (conformal), or shape parameter (others)
+
   - `aw::Float64`: Half-thickness parameter for Dee-shaped walls
+
   - `bw::Float64`: Elongation parameter for wall shapes
+
   - `cw::Float64`: Offset of the center of the wall from the major radius
+
   - `dw::Float64`: Triangularity parameter for wall shapes
+
   - `tw::Float64`: Sharpness of the corners of the wall (try 0.05 as initial value)
+
+    # Core shape selection
+
   - `equal_arc_wall::Bool`: Flag to enforce equal arc length distribution of nodes on the wall
     (recommended unless wall is very close to plasma)
 """
@@ -277,7 +285,8 @@ struct, handling both axisymmetric (2D boundary, `nzeta_in == 1`) and fully
 
  1. Interpolate the input (x, y, z) arrays from the original
     mtheta_in × nzeta_in grid onto the vacuum mtheta × nzeta grid using
-    periodic bicubic interpolation in both angles.
+    periodic bicubic interpolation in both angles. The inputs are assumed
+    to already be equally spaced on the SFL angle grid.
 
 ## Steps
 
@@ -329,6 +338,8 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         end
     else
         # Interpolate 3D inputs onto vacuum grid
+        @assert !isempty(inputs.y) "y must be provided for 3D (nzeta_in > 1) inputs"
+        @assert length(inputs.x) == length(inputs.y) == length(inputs.z) == inputs.mtheta_in * inputs.nzeta_in "x, y, z must have length mtheta_in * nzeta_in"
         θ_in = range(0.0, 2π; length=inputs.mtheta_in)
         ζ_in = range(0.0, 2π; length=inputs.nzeta_in)
         θ_flat = repeat(collect(θ_grid), nzeta)
@@ -603,6 +614,8 @@ function WallGeometry3D(inputs::VacuumInput, wall_settings::WallShapeSettings)
             normal_orient
         )
     end
+
+    inputs.nzeta_in > 1 && error("3D wall geometry not yet implemented for non-axisymmetric inputs")
 
     # Plasma surface coordinates (2D)
     surf_2D = PlasmaGeometry(inputs)
