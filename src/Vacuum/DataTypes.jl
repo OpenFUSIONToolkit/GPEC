@@ -22,12 +22,8 @@ nzeta > 1 for 3D vacuum calculation.
   - `mtheta::Int`: Number of vacuum calculation poloidal grid points
   - `nzeta::Int`: Number of vacuum calculation toroidal grid points (1 for 2D vacuum calculation, > 1 for 3D vacuum calculation)
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
-
-# Notes
-
-  - This is a mutable struct because we need to be able to modify the ν vector in n<0 cases.
 """
-@kwdef mutable struct VacuumInput
+@kwdef struct VacuumInput
     x::Vector{Float64} = Float64[]
     y::Vector{Float64} = Float64[]
     z::Vector{Float64} = Float64[]
@@ -389,7 +385,6 @@ function WallGeometry(inputs::VacuumInput, plasma_surf::PlasmaGeometry, wall_set
     z_wall = zeros(mtheta)
 
     if wall_settings.shape == "nowall"
-        @info "Using no wall"
         return WallGeometry(
             true,
             x_wall,

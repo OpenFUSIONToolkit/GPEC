@@ -27,18 +27,9 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
 
-                # Bisection method to find singular surface
-                converged = false
-                for _ in 1:itmax
-                    psifac = (psi0 + psi1) / 2
-                    singfac = (m - n * profiles.q_spline(psifac; hint=hint)) * dm
-                    abs(singfac) < 1e-8 && (converged=true; break)
-                    singfac > 0 ? (psi0 = psifac) : (psi1 = psifac)
-                end
+                psifac = find_zero(psi -> m - n * profiles.q_spline(psi; hint=hint), (psi0, psi1), Roots.Brent())
 
-                if !converged
-                    error("Bisection did not converge for m = $m after $itmax iterations.")
-                elseif any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
+                if any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
                     # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
                     # Technically only need m or n, but simplifies some later code and cheap to store both
                     push!(intr.sing[findfirst(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)].m, m)
@@ -95,7 +86,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         if ctrl.nn_low != ctrl.nn_high
             error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
         end
-        @info "Setting psilim via dmlim: initial qlim = $(intr.qlim), dmlim = $(ctrl.dmlim)"
+        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)
         intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
@@ -112,21 +103,13 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
         jpsi = min(jpsi, equil.config.mpsi - 1)
 
-        intr.psilim = profiles.xs[jpsi]
-        converged = false
         hint = Ref(jpsi)
-        for _ in 1:itmax
-            dpsi = (intr.qlim - profiles.q_spline(intr.psilim; hint=hint)) / profiles.q_deriv(intr.psilim; hint=hint)
-            intr.psilim += dpsi
-            if abs(dpsi) < eps * abs(intr.psilim)
-                converged = true
-                intr.q1lim = profiles.q_deriv(intr.psilim)
-                break
-            end
-        end
-        if !converged
-            error("Can't find psilim after $itmax iterations.")
-        end
+        intr.psilim = find_zero(
+            (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
+             psi -> profiles.q_deriv(psi; hint=hint)),
+            profiles.xs[jpsi], Roots.Newton()
+        )
+        intr.q1lim = profiles.q_deriv(intr.psilim)
     end
 end
 
@@ -743,7 +726,7 @@ Implement kin_flag functionality
     psieval::Float64)
 
     # Unpack structs and initialize
-    # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
+    # note the two items not used here are needed in the integrator params tuple
     _, equil, ffit, intr, odet, _ = params
 
     # Allocate temporary arrays from the pool

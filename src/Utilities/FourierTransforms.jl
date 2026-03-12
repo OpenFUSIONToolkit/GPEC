@@ -17,7 +17,7 @@ transforms (cos(m*θ + n*qa*δ), sin(m*θ + n*qa*δ)) used in vacuum field calcu
 # Example
 
 ```julia
-using JPEC.Utilities.FourierTransforms
+using GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
 
 # For PerturbedEquilibrium (no phase shift)
 ft = FourierTransform(mtheta, mpert, mlow)
@@ -111,12 +111,20 @@ function compute_fourier_coefficients(
         ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
         sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
         cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
-        for idx_n in 1:npert, idx_m in 1:mpert
+        for idx_n in 1:npert
             n = nlow + idx_n - 1
-            m = mlow + idx_m - 1
-            for (j, ζ) in enumerate(ζ_grid), (i, θ) in enumerate(θ_grid)
-                cos_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = cos(m * θ - n * ζ)
-                sin_mn_basis[i+(j-1)*mtheta, idx_m+(idx_n-1)*mpert] = sin(m * θ - n * ζ)
+            n_col_offset = (idx_n - 1) * mpert
+            for idx_m in 1:mpert
+                m = mlow + idx_m - 1
+                col = idx_m + n_col_offset
+                for (j, ζ) in enumerate(ζ_grid), (i, θ) in enumerate(θ_grid)
+                    idx = i + (j-1)*mtheta
+                    arg = m * θ - n * ζ
+                    s, c = sincos(arg)
+                    cos_mn_basis[idx, col] = c
+                    sin_mn_basis[idx, col] = s
+                end
+            end
             end
         end
     end

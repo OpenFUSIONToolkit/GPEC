@@ -38,7 +38,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Print initial integration condition
     if ctrl.verbose
-        println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))")
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
     # Iterate through each integration chunk
@@ -46,7 +46,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
-            println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
+            @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
         # Cross a rational surface after integration if this chunk requires it
@@ -65,7 +65,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
-            println("Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))")
+            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
         end
 
         # Update u, psilim, and qlim for usage in determining wp and wt
@@ -79,7 +79,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Evaluate stability criterion (critical determinant) of saved solutions
     if ctrl.verbose
-        println("Evaluating fixed-boundary stability criterion")
+        @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
@@ -112,16 +112,11 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
-        # Refine psifac using Newton iteration
-        converged = false
-        for _ in 1:itmax
-            dpsi = (ctrl.qlow - profiles.q_spline(odet.psifac)) / profiles.q_deriv(odet.psifac)
-            odet.psifac += dpsi
-            abs(dpsi) < eps * abs(odet.psifac) && (converged=true; break)
-        end
-        if !converged
-            error("Newton iteration for psifac did not converge after $itmax iterations.")
-        end
+        odet.psifac = find_zero(
+            (psi -> profiles.q_spline(psi) - ctrl.qlow,
+             psi -> profiles.q_deriv(psi)),
+            odet.psifac, Roots.Newton()
+        )
     end
 
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
@@ -346,125 +341,65 @@ Check absolute tolerances, currently only relative tolerances are updated
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
 
-    # Callback to be run at every step, handles fixups, tolerances, and data storage
-    cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
+    # Fraction of the q-range defining "near boundary" dense-save zones at each end of
+    # a segment. TODO: expose as a ctrl field when a good default is validated.
+    near_q_frac = 0.05
 
-    # Advance differential equation from psi_start to psi_end
-    rtol = compute_tols(ctrl, intr, odet, chunk.ising) # initial tolerances
+    # q at segment boundaries — used for symmetric near-boundary heuristic.
+    # odet.q is updated at every step inside sing_der!, so we compare against these
+    # fixed endpoints in the callback rather than using psi-based distances.
+    q_start = equil.profiles.q_spline(chunk.psi_start)
+    q_end   = equil.profiles.q_spline(chunk.psi_end)
+    q_range = abs(q_end - q_start)
+
+    steps_in_segment = Ref(0)
+
+    function segment_callback!(integrator)
+        ctrl, _, _, intr, odet, chunk = integrator.p
+
+        odet.total_steps += 1
+        steps_in_segment[] += 1
+
+        compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+
+        # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
+        # The step-count fallback (== 1) guarantees the first step is always saved
+        # even for near-degenerate segments where q_range ≈ 0.
+        near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
+        near_end   = abs(odet.q - q_end)   < near_q_frac * q_range
+
+        if near_start || near_end || (odet.step % ctrl.save_interval == 0)
+            if odet.step >= size(odet.u_store, 4)
+                resize_storage!(odet)
+            end
+            odet.psi_store[odet.step] = integrator.t
+            @views odet.u_store[:, :, :, odet.step] .= integrator.u
+            odet.q_store[odet.step] = odet.q
+            @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+            odet.step += 1
+        end
+    end
+
+    cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
-    # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
+    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
 
-    # Update u and psifac with the solution at the end of the interval
-    odet.u .= sol.u[end]
-    odet.psifac = sol.t[end]
-end
-
-"""
-    integrator_callback!(integrator)
-
-Callback function for ODE integrator to handle normalization, output, and storage
-at each step. This handles the solution normalization logic that was previously
-in a DO loop within eulerlagrange_integration and called every step by running LSODE in one step mode
-in the Fortran code. However, we now perform the equivalent of `ode_output_step`
-and `ode_record_edge` post-integration using the saved data.
-
-With save_interval > 1, this only saves every Nth step to reduce array copying overhead,
-but always saves steps near rational surfaces (beginning and end of each integration segment).
-"""
-function integrator_callback!(integrator)
-
-    # unpack parameters. Note the 2 unused items are needed to match the signature in the integrand sing_der!
-    ctrl, _, _, intr, odet, chunk = integrator.p
-
-    # Update integration tolerances
-    integrator.opts.reltol = compute_tols(ctrl, intr, odet, chunk.ising)
-
-    # Check if the solution norms are above a threshold, if so apply Gaussian reduction
-    compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
-
-    # Determine if we should save this step
-    # Always save if:
-    # 1. First few steps of integration (ensures we capture point right after rational/axis)
-    # 2. Every Nth step (save_interval)
-    # 3. Near the end of integration segment (ensures we capture point right before next rational)
-
-    # Check if we're near the end of this integration segment
-    psi_range = abs(integrator.sol.prob.tspan[2] - integrator.sol.prob.tspan[1])
-    psi_remaining = abs(integrator.sol.prob.tspan[2] - integrator.t)
-    near_end = psi_remaining < 0.05 * psi_range || psi_remaining < 1e-4
-
-    # Check if we're at the beginning (first 2 steps capture the point right after rational)
-    # Count steps within this segment (not global step count)
-    steps_in_segment = length(integrator.sol.t)
-    near_start = steps_in_segment <= 2
-
-    # Save if interval condition met, or near start/end
-    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
-
-    if should_save
-        # Grow arrays if out of storage space
+    # Unconditionally save the final step if the callback did not already capture it.
+    # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,
+    # regardless of where the last accepted step landed relative to the near_end band.
+    if odet.step == 1 || odet.psi_store[odet.step - 1] != sol.t[end]
         if odet.step >= size(odet.u_store, 4)
             resize_storage!(odet)
         end
-        odet.psi_store[odet.step] = integrator.t
-        @views odet.u_store[:, :, :, odet.step] .= integrator.u
-        odet.q_store[odet.step] = odet.q # these two were set in sing_der!
+        odet.psi_store[odet.step] = sol.t[end]
+        @views odet.u_store[:, :, :, odet.step] .= sol.u[end]
+        odet.q_store[odet.step] = odet.q
         @views odet.ud_store[:, :, :, odet.step] .= odet.ud
-
-        # Advance stepper (just like in Fortran, a "step" starts with integration, does callback functions, then stores)
         odet.step += 1
     end
-end
 
-"""
-    compute_tols(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState)
-
-Compute relative and absolute tolerances for the ODE solver based on proximity
-to singular surfaces and magnitude of the solution vectors. In Fortran, this was
-previously a part of ode_step, and called every integration step due to LSODE's
-one-step mode. Here, we call it within the integrator callback to achieve the same
-functionality.
-
-### Arguments
-
-  - ising: Int index of the singular surface to process
-
-### TODOs
-
-Support for `kin_flag`
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Add back absolute tolerance calculation if needed
-
-### Returns
-
-  - rtol: Relative tolerance
-"""
-function compute_tols(ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, odet::OdeState, ising::Int)
-    singfac_local = Inf
-    # Relative tolerance
-    if false  # kin_flag (not implemented)
-    # Insert kin_flag branch if needed
-    else
-        # singfac = m - nq = n(m/n - q) = n (q_res - q), use smallest n to be conservative
-        # Note: odet.q is updated within the derivative calculation
-        if ising > 0 && ising <= intr.msing
-            singfac_local = abs(minimum(intr.sing[ising].n) * (intr.sing[ising].q - odet.q))
-        end
-        # If in between singular surfaces, check distance to both
-        if ising > 1
-            singfac_local = min(singfac_local, abs(minimum(intr.sing[ising-1].n) * (intr.sing[ising-1].q - odet.q)))
-        end
-    end
-    rtol = tol = singfac_local < ctrl.crossover ? ctrl.tol_r : ctrl.tol_nr
-    # Absolute tolerances (not used for now, if so, will need to pass in integrator.u)
-    # atol = similar(odet.u, Float64)
-    # for ieq in 1:size(odet.u, 3), isol in 1:size(odet.u, 2)
-    #     @views atol0 = maximum(abs, odet.u[:, isol, ieq]) * tol
-    #     atol0 == 0 && (atol0 = Inf)
-    #     atol[:, isol, ieq] .= atol0
-    # end
-    return rtol
+    odet.u .= sol.u[end]
+    odet.psifac = sol.t[end]
 end
 
 """

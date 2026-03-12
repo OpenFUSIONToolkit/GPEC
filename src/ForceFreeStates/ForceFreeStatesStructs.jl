@@ -149,7 +149,7 @@ end
 """
     ForceFreeStatesControl
 
-A mutable struct containing control parameters for stability analysis, set by the user in jpec.toml.
+A mutable struct containing control parameters for stability analysis, set by the user in gpec.toml.
 
 ## Fields
 
@@ -171,9 +171,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
-  - `tol_nr::Float64` - Relative tolerance of dynamic integration steps away from rationals
-  - `tol_r::Float64` - Relative tolerance of dynamic integration steps near rationals
-  - `crossover::Float64` - Fractional distance from rational q at which tolerance is switched to tol_r
+  - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
   - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
@@ -226,9 +224,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
-    tol_nr::Float64 = 1e-5
-    tol_r::Float64 = 1e-5
-    crossover::Float64 = 1e-2
+    eulerlagrange_tolerance::Float64 = 1e-7
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
@@ -257,9 +253,9 @@ A mutable struct containing control parameters for stability analysis, set by th
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
-    HDF5_filename::String = "jpec.h5"
+    HDF5_filename::String = "gpec.h5"
     force_wv_symmetry::Bool = true
-    save_interval::Int = 10
+    save_interval::Int = 3
     force_termination::Bool = false
 end
 
@@ -408,6 +404,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
+    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)

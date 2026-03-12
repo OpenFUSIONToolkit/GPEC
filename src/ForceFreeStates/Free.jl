@@ -98,10 +98,10 @@ and data dumping.
 
     # Write energies to screen
     if ctrl.verbose
-        println("Least Stable Eigenmode Energies:")
-        println("  Plasma = ", (@sprintf "%+.3e %+.3ei" real(vac_data.ep[1]) imag(vac_data.ep[1])))
-        println("  Vacuum = ", (@sprintf "%+.3e %+.3ei" real(vac_data.ev[1]) imag(vac_data.ev[1])))
-        println("  Total  = ", (@sprintf "%+.3e %+.3ei" real(vac_data.et[1]) imag(vac_data.et[1])))
+        @info "Least Stable Eigenmode Energies:\n" *
+              "  Plasma = $((@sprintf "%+.3e %+.3ei" real(vac_data.ep[1]) imag(vac_data.ep[1])))\n" *
+              "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(vac_data.ev[1]) imag(vac_data.ev[1])))\n" *
+              "  Total  = $((@sprintf "%+.3e %+.3ei" real(vac_data.et[1]) imag(vac_data.et[1])))"
     end
 
     return vac_data
@@ -130,21 +130,12 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         # Space points evenly in q
         qi = qedge + (intr.qlim - qedge) * (i / npsi)
 
-        # Newton iteration to find psi at qi
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
-        converged = false
-        for _ in 1:itmax
-            dpsi = (qi - profiles.q_spline(psii)) / profiles.q_deriv(psii)
-            psii += dpsi
-            if abs(dpsi) < eps * abs(psii)
-                converged = true
-                psi_array[i] = psii
-                break
-            end
-        end
-        if !converged
-            error("Newton iteration for psilim did not converge after $itmax iterations.")
-        end
+        psi_array[i] = find_zero(
+            (psi -> profiles.q_spline(psi) - qi,
+                psi -> profiles.q_deriv(psi)),
+            psii, Roots.Newton()
+        )
 
         # Compute vacuum response matrix at this psi (2D single-n, 2D multi-n block-diagonal, or 3D)
         vac_inputs = Vacuum.VacuumInput(equil, psii, ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)

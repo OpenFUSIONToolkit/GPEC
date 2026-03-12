@@ -60,7 +60,7 @@
                     npert=1,
                     nzeta=1
                 )
-                surf = JPEC.Vacuum.PlasmaGeometry(inputs)
+                surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
                 @test length(surf.x) == 5
                 @test length(surf.z) == 5
                 @test length(surf.ν) == 5
@@ -82,7 +82,7 @@
                     npert=1,
                     nzeta=1
                 )
-                surf = JPEC.Vacuum.PlasmaGeometry(inputs)
+                surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
                 @test length(surf.x) == 8
                 @test all(isfinite, surf.x)
                 @test all(isfinite, surf.z)
@@ -101,9 +101,9 @@
 
             @testset "nowall" begin
                 inputs = _circle_inputs(16)
-                plasma_surf = JPEC.Vacuum.PlasmaGeometry(inputs)
+                plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
                 wall_settings = WallShapeSettings(shape="nowall")
-                wall = JPEC.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == true
                 @test length(wall.x) == 16
                 @test length(wall.z) == 16
@@ -111,9 +111,9 @@
 
             @testset "conformal" begin
                 inputs = _circle_inputs(16)
-                plasma_surf = JPEC.Vacuum.PlasmaGeometry(inputs)
+                plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
                 wall_settings = WallShapeSettings(shape="conformal", a=0.2)
-                wall = JPEC.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == false
                 @test length(wall.x) == 16
                 @test length(wall.z) == 16
@@ -126,9 +126,9 @@
 
             @testset "elliptical" begin
                 inputs = _circle_inputs(16)
-                plasma_surf = JPEC.Vacuum.PlasmaGeometry(inputs)
+                plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
                 wall_settings = WallShapeSettings(shape="elliptical", a=0.5)
-                wall = JPEC.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == false
                 @test length(wall.x) == 16
                 @test all(isfinite, wall.x)
@@ -137,9 +137,9 @@
 
             @testset "dee" begin
                 inputs = _circle_inputs(16)
-                plasma_surf = JPEC.Vacuum.PlasmaGeometry(inputs)
+                plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
                 wall_settings = WallShapeSettings(shape="dee", a=0.1, cw=0.0)
-                wall = JPEC.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf, wall_settings)
                 @test wall.nowall == false
                 @test length(wall.x) == 16
                 @test all(wall.x .> 0)
@@ -147,7 +147,7 @@
 
             @testset "edge: R <= 0 throws" begin
                 inputs = _circle_inputs(16)
-                plasma_surf_near_zero = JPEC.Vacuum.PlasmaGeometry(
+                plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
                     VacuumInput(
                         r=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
                         z=0.03 .* sin.(range(0, 2π, length=16)),
@@ -160,7 +160,7 @@
                 # Use a "dee" wall shape with parameters that will produce R < 0
                 # Setting cw (offset) to a large negative value will shift the wall left past R=0
                 wall_settings = WallShapeSettings(shape="dee", cw=-1.5, a=0.1)
-                @test_throws ErrorException JPEC.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings)
+                @test_throws ErrorException GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings)
             end
 
             # Test that conformal wall R-coordinates are clamped by centerstack_min
@@ -168,7 +168,7 @@
             # but it should be clamped to centerstack_min = min(0.1, 0.1 * minimum(x_plasma))
             @testset "edge: conformal centerstack clamp" begin
                 inputs = _circle_inputs(16)
-                plasma_surf_near_zero = JPEC.Vacuum.PlasmaGeometry(
+                plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
                     VacuumInput(
                         r=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
                         z=0.03 .* sin.(range(0, 2π, length=16)),
@@ -178,7 +178,7 @@
                     )
                 )
                 wall_settings = WallShapeSettings(shape="conformal", a=10.0, equal_arc_wall=false)
-                wall = JPEC.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings)
+                wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry(inputs, plasma_surf_near_zero, wall_settings)
                 expected_min = min(0.1, 0.1 * minimum(plasma_surf_near_zero.x))
                 @test all(wall.x .>= expected_min)
                 @test any(wall.x .<= expected_min + 1e-10)
@@ -191,7 +191,7 @@
                 theta = range(0, step=2π/10, length=10)
                 xin = cos.(theta)
                 zin = sin.(theta)
-                xout, zout = JPEC.Vacuum.distribute_to_equal_arc_grid(xin, zin)
+                xout, zout = GeneralizedPerturbedEquilibrium.Vacuum.distribute_to_equal_arc_grid(xin, zin)
                 @test length(xout) == length(xin)
                 @test length(zout) == length(zin)
                 r = sqrt.(xout .^ 2 .+ zout .^ 2)
@@ -202,7 +202,7 @@
                 theta = range(0, 2π, length=32)
                 xin = 2.0 .* cos.(theta)
                 zin = 1.0 .* sin.(theta)
-                xout, zout = JPEC.Vacuum.distribute_to_equal_arc_grid(xin, zin)
+                xout, zout = GeneralizedPerturbedEquilibrium.Vacuum.distribute_to_equal_arc_grid(xin, zin)
                 @test length(xout) == 32
                 @test all(isfinite, xout)
                 @test all(isfinite, zout)
@@ -215,13 +215,13 @@
         # -------------------------------------------------------------------------
         @testset "elliptic_integral_k" begin
             @testset "domain errors" begin
-                @test_throws DomainError JPEC.Vacuum.elliptic_integral_k(-0.1)
-                @test_throws DomainError JPEC.Vacuum.elliptic_integral_k(1.1)
+                @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_k(-0.1)
+                @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_k(1.1)
             end
 
             @testset "known value" begin
                 # K(1-m1): for m1=0.5 returns K(0.5) ≈ 1.85407
-                K_half = JPEC.Vacuum.elliptic_integral_k(0.5)
+                K_half = GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_k(0.5)
                 @test isapprox(K_half, 1.8540746773013719, rtol=1e-8)
                 @test isfinite(K_half)
             end
@@ -230,13 +230,13 @@
         # -------------------------------------------------------------------------
         @testset "elliptic_integral_e" begin
             @testset "domain errors" begin
-                @test_throws DomainError JPEC.Vacuum.elliptic_integral_e(-0.1)
-                @test_throws DomainError JPEC.Vacuum.elliptic_integral_e(1.1)
+                @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_e(-0.1)
+                @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_e(1.1)
             end
 
             @testset "known value" begin
                 # E(1-m1): for m1=0.5 returns E(0.5) ≈ 1.35064
-                E_half = JPEC.Vacuum.elliptic_integral_e(0.5)
+                E_half = GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_e(0.5)
                 @test isapprox(E_half, 1.3506438810476755, rtol=1e-8)
                 @test isfinite(E_half)
             end
@@ -246,7 +246,7 @@
         @testset "Pn_minus_half_1997" begin
             @testset "length and finite" begin
                 # Returns P^0 through P^{n+1}, so length n+2
-                P = JPEC.Vacuum.Pn_minus_half_1997(1.5, 3)
+                P = GeneralizedPerturbedEquilibrium.Vacuum.Pn_minus_half_1997(1.5, 3)
                 @test length(P) == 5
                 @test !any(isnan, P)
                 @test all(isfinite, P)
@@ -254,8 +254,8 @@
 
             @testset "agreement with Pn_minus_half_2007" begin
                 s, n = 1.5, 3
-                P_1997 = JPEC.Vacuum.Pn_minus_half_1997(s, n)
-                P_2007 = JPEC.Vacuum.Pn_minus_half_2007(s, n)
+                P_1997 = GeneralizedPerturbedEquilibrium.Vacuum.Pn_minus_half_1997(s, n)
+                P_2007 = GeneralizedPerturbedEquilibrium.Vacuum.Pn_minus_half_2007(s, n)
                 @test length(P_1997) == length(P_2007)
                 @test isapprox(P_1997[1], P_2007[1], rtol=1e-7)
                 @test isapprox(P_1997[2], P_2007[2], rtol=1e-7)
@@ -266,7 +266,7 @@
         @testset "Pn_minus_half_2007" begin
             @testset "length and finite" begin
                 # Returns P^0 through P^{n+1}, so length n+2
-                P = JPEC.Vacuum.Pn_minus_half_2007(2.0, 2)
+                P = GeneralizedPerturbedEquilibrium.Vacuum.Pn_minus_half_2007(2.0, 2)
                 @test length(P) == 4
                 @test !any(isnan, P)
             end
@@ -306,7 +306,7 @@
                 (2.0, 50, 2.26828572321442199e+50, -6.54892185301014281e+51)
             ]
             for (s, n, Pn_ref, Pnp1_ref) in ref
-                P = JPEC.Vacuum.Pn_minus_half_2007(s, n)
+                P = GeneralizedPerturbedEquilibrium.Vacuum.Pn_minus_half_2007(s, n)
                 @test isapprox(P[end-1], Pn_ref, rtol=1e-15)
                 @test isapprox(P[end], Pnp1_ref, rtol=1e-15)
             end
@@ -315,7 +315,7 @@
         # -------------------------------------------------------------------------
         @testset "elliptic_integrals_bulirsch" begin
             @testset "convergence and output" begin
-                K, E, conv, iters = JPEC.Vacuum.elliptic_integrals_bulirsch(0.5)
+                K, E, conv, iters = GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integrals_bulirsch(0.5)
                 @test K isa Float64
                 @test E isa Float64
                 @test isfinite(K)
@@ -325,15 +325,15 @@
             end
 
             @testset "domain errors" begin
-                @test_throws DomainError JPEC.Vacuum.elliptic_integrals_bulirsch(-0.1)
-                @test_throws DomainError JPEC.Vacuum.elliptic_integrals_bulirsch(1.5)
+                @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integrals_bulirsch(-0.1)
+                @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integrals_bulirsch(1.5)
             end
         end
 
         # -------------------------------------------------------------------------
         @testset "green" begin
             @testset "basic output structure" begin
-                G_n, coupling_n, coupling_0 = JPEC.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1)
+                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1)
                 @test G_n isa Float64
                 @test coupling_n isa Float64
                 @test coupling_0 isa Float64
@@ -343,15 +343,15 @@
             end
 
             @testset "uselegacygreenfunction" begin
-                G_leg, cpl_leg, c0_leg = JPEC.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=true)
-                G_new, cpl_new, c0_new = JPEC.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=false)
+                G_leg, cpl_leg, c0_leg = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=true)
+                G_new, cpl_new, c0_new = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=false)
                 @test isfinite(G_leg) && isfinite(G_new)
                 # Both implementations should give similar order of magnitude for this non-singular case
                 @test isapprox(G_leg, G_new, rtol=1e-5)
             end
 
             @testset "n=0" begin
-                G_n, coupling_n, coupling_0 = JPEC.Vacuum.green(1.5, 0.0, 1.0, 0.0, 0.0, 1.0, 0)
+                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(1.5, 0.0, 1.0, 0.0, 0.0, 1.0, 0)
                 @test isfinite(G_n)
                 @test isfinite(coupling_0)
             end
@@ -455,7 +455,7 @@
         end
 
         @testset "KernelParams3D" begin
-            params = JPEC.Vacuum.KernelParams3D(11, 20, 5)
+            params = GeneralizedPerturbedEquilibrium.Vacuum.KernelParams3D(11, 20, 5)
             @test params.PATCH_RAD == 11
             @test params.RAD_DIM == 20
             @test params.INTERP_ORDER == 5
@@ -463,7 +463,7 @@
 
         @testset "PlasmaGeometry3D" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            surf = JPEC.Vacuum.PlasmaGeometry3D(inputs)
+            surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
             num_points = inputs.mtheta * inputs.nzeta
             @test surf.mtheta == 32
             @test surf.nzeta == 32
@@ -483,7 +483,7 @@
 
         @testset "WallGeometry3D nowall" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall = JPEC.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="nowall"))
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="nowall"))
             @test wall.nowall == true
             @test wall.mtheta == 32
             @test wall.nzeta == 32
@@ -492,7 +492,7 @@
 
         @testset "WallGeometry3D conformal" begin
             inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall = JPEC.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="conformal", a=0.2))
+            wall = GeneralizedPerturbedEquilibrium.Vacuum.WallGeometry3D(inputs, WallShapeSettings(shape="conformal", a=0.2))
             @test wall.nowall == false
             @test wall.mtheta == 32
             @test wall.nzeta == 32
@@ -560,7 +560,7 @@
         @testset "Kernel3D laplace_single_layer" begin
             x_obs = [1.0, 0.0, 0.0]
             x_src = [2.0, 0.0, 0.0]
-            G = JPEC.Vacuum.laplace_single_layer(x_obs, x_src)
+            G = GeneralizedPerturbedEquilibrium.Vacuum.laplace_single_layer(x_obs, x_src)
             # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)
             dist = sqrt((2.0 - 1.0)^2 + 0 + 0)
             @test isapprox(G, 1.0 / dist)
@@ -571,19 +571,19 @@
             x_obs = [1.0, 0.0, 0.0]
             x_src = [2.0, 0.0, 0.0]
             n_src = [1.0, 0.0, 0.0]  # normal pointing away from source
-            K = JPEC.Vacuum.laplace_double_layer(x_obs, x_src, n_src)
+            K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_double_layer(x_obs, x_src, n_src)
             @test K isa Float64
             @test isfinite(K)
         end
 
         @testset "Kernel3D get_singular_quadrature" begin
-            quad = JPEC.Vacuum.get_singular_quadrature(3, 8, 5)
+            quad = GeneralizedPerturbedEquilibrium.Vacuum.get_singular_quadrature(3, 8, 5)
             @test quad.PATCH_RAD == 3
             @test quad.RAD_DIM == 8
             @test quad.INTERP_ORDER == 5
             @test quad.PATCH_DIM == 2 * 3 + 1
             # Cached: second call returns same object
-            quad2 = JPEC.Vacuum.get_singular_quadrature(3, 8, 5)
+            quad2 = GeneralizedPerturbedEquilibrium.Vacuum.get_singular_quadrature(3, 8, 5)
             @test quad === quad2
         end
 
@@ -594,7 +594,7 @@
             data[:, 2] .= 1.0
             data[:, 3] .= 0.0
             patch_out = zeros(3, 3, 3)
-            JPEC.Vacuum.extract_patch!(patch_out, data, 2, 2, 4, 4, 3)
+            GeneralizedPerturbedEquilibrium.Vacuum.extract_patch!(patch_out, data, 2, 2, 4, 4, 3)
             # Center of patch should be data at (2,2) = index 2+4*(2-1)=6
             @test isapprox(patch_out[2, 2, 1], 6.0)
             @test all(isfinite, patch_out)

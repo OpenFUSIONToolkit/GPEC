@@ -28,7 +28,7 @@ end
         # Test that resize_storage! doubles the size of storage arrays
         mpert = 3
         numsteps_init = 10
-        odet = JPEC.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
 
         # Fill some data
         odet.step = 8
@@ -40,7 +40,7 @@ end
         end
 
         # Resize storage
-        JPEC.ForceFreeStates.resize_storage!(odet)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.resize_storage!(odet)
 
         # Check new size is doubled
         @test length(odet.psi_store) == 2 * numsteps_init
@@ -57,7 +57,7 @@ end
         end
 
         # Check that you can resize again
-        JPEC.ForceFreeStates.resize_storage!(odet)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.resize_storage!(odet)
         @test length(odet.psi_store) == 4 * numsteps_init
         @test length(odet.q_store) == 4 * numsteps_init
         @test size(odet.u_store, 4) == 4 * numsteps_init
@@ -68,7 +68,7 @@ end
         # Test that trim_storage! resizes arrays to actual step count
         mpert = 3
         numsteps_init = 20
-        odet = JPEC.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, numsteps_init, 10, 5)
 
         # Set step to less than initial size
         odet.step = 12
@@ -80,7 +80,7 @@ end
         end
 
         # Trim storage
-        JPEC.ForceFreeStates.trim_storage!(odet)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.trim_storage!(odet)
 
         # Check sizes match step count
         @test length(odet.psi_store) == odet.step
@@ -93,73 +93,11 @@ end
         @test all(odet.q_store .== Float64.(2:2:(2*odet.step)))
     end
 
-    @testset "compute_tols" begin
-        # Test tolerance computation
-        mpert = 3
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        intr.msing = 2
-        intr.sing = [JPEC.ForceFreeStates.SingType(), JPEC.ForceFreeStates.SingType()]
-        intr.sing[1].q = 2.0
-        intr.sing[1].n = [1]
-        intr.sing[2].q = 3.0
-        intr.sing[2].n = [1]
-
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 2)
-
-        # Test 1: Far from singular surface (singfac > crossover)
-        ising = 1
-        odet.q = 1.5  # Far from q=2.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr  # Should use non-resonant tolerance
-
-        # Test 2: Close to singular surface (singfac < crossover)
-        ising = 1
-        odet.q = 1.999  # Very close to q=2.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_r  # Should use resonant tolerance
-
-        # Test 3: Between two singular surfaces
-        ising = 2
-        odet.q = 2.5  # Between q=2.0 and q=3.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr  # Should use min distance to either surface
-
-        # Test 4: Beyond all singular surfaces
-        ising = 3
-        odet.q = 4.0
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr
-
-        # Edge case - no singular surfaces
-        mpert = 2
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
-        ctrl.tol_r = 1e-6
-        ctrl.tol_nr = 1e-4
-        ctrl.crossover = 0.01
-
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        intr.msing = 0
-        intr.sing = []
-
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 0)
-        ising = 1
-        odet.q = 2.0
-
-        # Should return non-resonant tolerance when no singular surfaces
-        rtol = JPEC.ForceFreeStates.compute_tols(ctrl, intr, odet, ising)
-        @test rtol == ctrl.tol_nr
-    end
-
     @testset "transform_u!" begin
         # Test transformation of solution vectors
         mpert = 2
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 5, 2)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert, numpert_total=mpert)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 5, 2)
 
         # Set up a simple fixup scenario
         odet.ifix = 1
@@ -188,7 +126,7 @@ end
         u_orig = copy(odet.u_store)
 
         # Apply transformation
-        JPEC.ForceFreeStates.transform_u!(odet, intr)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.transform_u!(odet, intr)
 
         # Check that u_store was modified (transformation applied)
         @test !all(odet.u_store .== u_orig)
@@ -203,16 +141,16 @@ end
         # Initialize to random u
         mpert = 5
         ifix = 1
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         odet.u = randn(ComplexF64, mpert, mpert, 2)
         odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
         odet.ifix = ifix
         odet.fixfac = zeros(ComplexF64, mpert, mpert, ifix)
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
 
         # Save copy of original u and run
         u_orig = copy(odet.u)
-        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
 
         # Very simple tests
         @test !all(odet.u .== u_orig)  # u should have changed
@@ -222,7 +160,7 @@ end
 
         # --- Real Fortran data check ---
         mpert = 31
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         # We'll load in Fortran data for u pulled before and after a fixup
         # Note that this was generated by manually setting
         # unorm = [norm(odet.u[:,i,1]) for i in 1:msol] in the Fortran to avoid
@@ -231,9 +169,9 @@ end
         odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
         odet.ifix = ifix
         odet.fixfac = zeros(ComplexF64, mpert, mpert, ifix)
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
 
-        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
 
         u_fortran = load_u_matrix(joinpath(@__DIR__, "test_data", "u_postfixup.dat"))
         # test that the outputs are approximately equivalent (1e-3 seems ok to account for loading differences)
@@ -241,7 +179,7 @@ end
 
         # Test with a simple 2x2 case where we can predict the result
         mpert = 2
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
 
         # Set up a simple u matrix where first column has larger norm
         # u[:, 1, 1] = [3, 4] (norm = 5)
@@ -253,11 +191,11 @@ end
         odet.unorm = [norm(odet.u[:, i, 1]) for i in 1:mpert]
         odet.ifix = 1
         odet.fixfac = zeros(ComplexF64, mpert, mpert, 1)
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; numpert_total=mpert)
 
         u_before = copy(odet.u)
 
-        JPEC.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.apply_gaussian_reduction!(odet.u, odet, intr, false)
 
         # After fixup:
         # - index should sort by norm: [1, 2] (largest first)
@@ -275,9 +213,9 @@ end
 
     @testset "compute_solution_norms!" begin
         mpert = 2
-        odet = JPEC.ForceFreeStates.OdeState(mpert, 10, 10, 10)
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=mpert)
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
         ctrl.ucrit = 10.0
 
         # Case 1: Basic norm computation
@@ -285,7 +223,7 @@ end
         odet.u[:, 1, 1] .= [3, 4]          # norm = 5
         odet.u[:, 2, 1] .= [0, 2]          # norm = 2
 
-        JPEC.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         # After the first run with new=True (default), unorm0 should be set to unorm
         # and new should be false
         @test odet.unorm[1:intr.mpert] ≈ [5, 2]
@@ -295,27 +233,27 @@ end
         # Case 2: Error on zero norm
         odet.u[:, 1, 1] .= 0
         odet.new = true
-        @test_throws ErrorException JPEC.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        @test_throws ErrorException GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
 
         # Case 3: Normalization on second call
         odet.u[:, 1, 1] .= [3, 4]   # norm = 5
         odet.u[:, 2, 1] .= [0, 2]   # norm = 2
         odet.new = false
-        JPEC.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.unorm[1:intr.mpert] ≈ [1, 1]
 
         # Case 4: Trigger fixup via ucrit
         odet.unorm0 = ones(intr.mpert)
         odet.u[:, 1, 1] .= [1000, 0]   # large norm
         odet.u[:, 2, 1] .= [1, 0]      # small norm
-        JPEC.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, false)
         @test odet.new == true  # implies fixup ran
 
         # Case 5: Trigger fixup via sing_flag
         odet.new = false
         odet.u[:, 1, 1] .= [1, 0]
         odet.u[:, 2, 1] .= [1, 0]
-        JPEC.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_solution_norms!(odet.u, odet, ctrl, intr, true)
         @test odet.new == true  # fixup triggered
     end
 
@@ -326,7 +264,7 @@ end
         numunorms_init = 20
         msing = 10
 
-        odet = JPEC.ForceFreeStates.OdeState(numpert_total, numsteps_init, numunorms_init, msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(numpert_total, numsteps_init, numunorms_init, msing)
 
         # Check fields are initialized correctly
         @test odet.numpert_total == numpert_total
@@ -354,26 +292,26 @@ end
 
     @testset "chunk_el_integration_bounds tests" begin
         # Helper to build a minimal control and internal structs
-        ctrl = JPEC.ForceFreeStates.ForceFreeStatesControl()
+        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
         ctrl.numsteps_init = 10
         ctrl.numunorms_init = 5
 
         # Case 1: No singular surfaces -> single chunk to edge
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
         intr.msing = 0
         intr.psilim = 1.0
 
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
 
         ctrl.singfac_min = 1e-4
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
 
         # Case 2: One singular surface within limits -> crossing chunk then edge
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
-        s = JPEC.ForceFreeStates.SingType()
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        s = GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType()
         s.psifac = 0.5
         s.n = [1]
         s.m = [1]
@@ -384,11 +322,11 @@ end
         intr.mlow = 1
         intr.mhigh = 1
 
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
         ctrl.singfac_min = 1e-4
 
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 2
         @test chunks[1].needs_crossing == true
         @test chunks[2].needs_crossing == false
@@ -396,31 +334,31 @@ end
         @test chunks[1].psi_end < intr.sing[1].psifac
 
         # Case 3: Multiple singular surfaces -> multiple crossing chunks
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
-        s1 = JPEC.ForceFreeStates.SingType(; psifac=0.3, n=[1], m=[1], q1=1.5)
-        s2 = JPEC.ForceFreeStates.SingType(; psifac=0.6, n=[1], m=[1], q1=2.5)
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        s1 = GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.3, n=[1], m=[1], q1=1.5)
+        s2 = GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.6, n=[1], m=[1], q1=2.5)
         intr.sing = [s1, s2]
         intr.msing = 2
         intr.psilim = 1.0
         intr.mlow = 1
         intr.mhigh = 1
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
         ctrl.singfac_min = 1e-6
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 3
         @test all(c.needs_crossing == true for c in chunks[1:2])
         @test chunks[3].needs_crossing == false
 
         # Case 4: singfac_min == 0 should disable crossing logic -> single chunk
-        intr = JPEC.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
-        intr.sing = [JPEC.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
+        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; mpert=1, numpert_total=1)
+        intr.sing = [GeneralizedPerturbedEquilibrium.ForceFreeStates.SingType(; psifac=0.4, n=[1], m=[1], q1=2.0)]
         intr.msing = 1
         intr.psilim = 1.0
-        odet = JPEC.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(1, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
         odet.psifac = 0.0
         ctrl.singfac_min = 0.0
-        chunks = JPEC.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
+        chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
     end

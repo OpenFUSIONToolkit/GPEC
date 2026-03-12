@@ -1,6 +1,6 @@
 # ForcingTerms Module
 
-The ForcingTerms module handles external magnetic field perturbation specifications for JPEC.
+The ForcingTerms module handles external magnetic field perturbation specifications for GPEC.
 
 ## Overview
 
@@ -12,5 +12,5 @@ The ForcingTerms module provides:
 ## API Reference
 
 ```@autodocs
-Modules = [JPEC.ForcingTerms]
+Modules = [GeneralizedPerturbedEquilibrium.ForcingTerms]
 ```

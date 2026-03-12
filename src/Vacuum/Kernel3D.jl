@@ -207,6 +207,7 @@ function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
     r2 < 1e-30 && return 0.0
     return inv(sqrt(r2))
 end
+
 """
     laplace_double_layer(x_obs, x_src, n_src) -> Float64
 
@@ -422,11 +423,9 @@ function compute_3D_kernel_matrices!(
 
     # Initialize quadrature data
     # This allows the code to run at lower resolution without erroring out, but will warn the user.
-    if PATCH_RAD > (min(observer.nzeta, observer.mtheta) - 1) ÷ 2
-        @warn(
-            "PATCH_RAD is greater than the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(observer.nzeta, observer.mtheta) - 1) ÷ 2). Double check that you are converged."
-        )
-        PATCH_RAD = (min(observer.nzeta, observer.mtheta) - 1) ÷ 2
+    if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
+        @warn "PATCH_RAD is greater than the number of points in the toroidal or poloidal direction, which is not supported. Setting PATCH_RAD to $((min(source.mtheta, source.nzeta) - 1) ÷ 2). Be sure to check if outputs are converged."
+        PATCH_RAD = (min(source.mtheta, source.nzeta) - 1) ÷ 2
     end
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
@@ -434,8 +433,8 @@ function compute_3D_kernel_matrices!(
     @assert observer.nzeta ≥ PATCH_DIM "Must have observer.nzeta ≥ PATCH_DIM, got observer.nzeta=$(observer.nzeta), PATCH_DIM=$PATCH_DIM"
 
     # Allocate thread-local workspaces (one per thread)
-    nthreads = Threads.nthreads()
-    workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:nthreads]
+    max_threadid = Threads.maxthreadid()
+    workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
     Threads.@threads for idx_obs in 1:num_points

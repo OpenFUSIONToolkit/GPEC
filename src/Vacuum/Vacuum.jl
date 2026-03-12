@@ -257,15 +257,6 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
             grri_block = @view vac_data.grri[:, cols]
             grre_block = @view vac_data.grre[:, cols]
 
-            # TODO: this was in the Fortran, not sure if we still need it? Kinda ugly here but ok for now
-            # Invert values for n < 0
-            flip = false
-            if n < 0
-                inputs.ν .= -inputs.ν
-                n = -n
-                flip = true
-            end
-
             _compute_vacuum_response_single!(
                 wv_block,
                 grri_block,
@@ -277,10 +268,6 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
                 n_override=n,
                 green_only=green_only
             )
-
-            if flip
-                inputs.ν .= -inputs.ν
-            end
         end
     end
 end
