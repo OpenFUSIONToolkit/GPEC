@@ -25,6 +25,9 @@ nzeta > 1 for 3D vacuum calculation.
   - `use_galerkin::Bool`: Use Galerkin projection to solve in truncated Fourier space [O(P³)]
     instead of full collocation [O(M³)]. Only applies to the no-wall case; wall cases always
     use collocation. Defaults to `false`.
+  - `fuse_projection::Bool`: When combined with `use_galerkin`, fuse the kernel assembly with
+    the Fourier projection so that the full M×M kernel matrices are never materialized.
+    Reduces memory from O(M²) to O(MP). Requires `use_galerkin = true`. Defaults to `false`.
 """
 @kwdef struct VacuumInput
     x::Vector{Float64} = Float64[]
@@ -41,6 +44,7 @@ nzeta > 1 for 3D vacuum calculation.
     nzeta::Int = 1
     force_wv_symmetry::Bool = true
     use_galerkin::Bool = false
+    fuse_projection::Bool = false
 end
 
 """
@@ -81,7 +85,8 @@ function VacuumInput(
     npert::Int,
     nlow::Int;
     force_wv_symmetry::Bool=true,
-    use_galerkin::Bool=false
+    use_galerkin::Bool=false,
+    fuse_projection::Bool=false
 )
     # Extract plasma surface geometry at this psi
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
@@ -98,7 +103,8 @@ function VacuumInput(
         mtheta=mtheta,
         nzeta=nzeta,
         force_wv_symmetry=force_wv_symmetry,
-        use_galerkin=true
+        use_galerkin=true,
+        fuse_projection=true
     )
 end
 
