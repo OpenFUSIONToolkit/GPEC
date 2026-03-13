@@ -23,8 +23,7 @@ export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings;
-        green_only=false)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
 
@@ -46,7 +45,6 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
   - `inputs`: `VacuumInput` struct with mode numbers, grid resolution, and boundary info.
   - `wall_settings::WallShapeSettings`: Wall geometry configuration.
-  - `green_only`: If true, skip building the response matrix `wv` and return zeros for `wv` and `xzpts`.
 
 # Returns
 
@@ -70,8 +68,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     wall_pts::AbstractMatrix{Float64},
     inputs::VacuumInput,
     wall_settings::WallShapeSettings;
-    n_override::Union{Nothing,Int}=nothing,
-    green_only::Bool=false
+    n_override::Union{Nothing,Int}=nothing
 )
 
     # Initialize surface geometries
@@ -84,12 +81,11 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
-    if inputs.nzeta > 1
-        # Hardcode these values for now - can expose to the user in the future
-        kparams = KernelParams3D(11, 20, 5)
-    else
-        kparams = KernelParams2D(n_override)
-    end
+    # Hardcode these values for now - can expose to the user in the future
+    PATCH_RAD = 11
+    RAD_DIM = 20
+    INTERP_ORDER = 5
+    kparams = inputs.nzeta > 1 ? KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER) : KernelParams2D(n_override)
 
     # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
     num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
@@ -105,74 +101,138 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     # Plasma–Plasma block
     kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
 
-    # Fourier transform obs=plasma, src=plasma block
-    fourier_transform!(grre, green_temp, cos_mn_basis)
-    fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
+    if wall.nowall && inputs.use_galerkin
+        # ================================================================
+        # Galerkin projection: solve in Fourier space [2P × 2P] instead of
+        # the full collocation system [num_points_surf × num_points_surf].
+        #
+        # Instead of:  wv = F_inv * (K \ (G * F))       O(M³)
+        # We compute:  wv ~ (F'KF) \ (F'GF)             O(M²P + P³)
+        #
+        # where M = num_points_surf and P = num_modes and
+        # F = [cos_basis | sin_basis] is the [M × 2P] Fourier basis and
+        # K = grad_green is the [M × M] double-layer kernel matrix.
+        # ================================================================
+        temp = zeros!(pool, num_points_surf, num_modes)
 
-    if !wall.nowall
-        # Plasma–Wall block
-        kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
-        # Wall–Wall block
-        kernel!(grad_green, green_temp, wall, wall, kparams)
-        # Wall–Plasma block
-        kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
-        # Fourier transform obs=wall, src=plasma block
-        fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
-        fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
-    end
+        # K_proj = F' * grad_green * F  [2 * num_modes × 2 * num_modes]
+        K_proj = zeros(2 * num_modes, 2 * num_modes)
+        mul!(temp, grad_green, cos_mn_basis)
+        mul!(@view(K_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
+        mul!(@view(K_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
+        mul!(temp, grad_green, sin_mn_basis)
+        mul!(@view(K_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
+        mul!(@view(K_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
 
-    # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
-    grri .= grre # start from same as exterior
-    grad_green_interior = similar!(pool, grad_green)
-    grad_green_interior .= grad_green
+        # G_proj = F' * green_temp * F  [2 * num_modes × 2 * num_modes]
+        G_proj = zeros(2 * num_modes, 2 * num_modes)
+        mul!(temp, green_temp, cos_mn_basis)
+        mul!(@view(G_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
+        mul!(@view(G_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
+        mul!(temp, green_temp, sin_mn_basis)
+        mul!(@view(G_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
+        mul!(@view(G_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
 
-    # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
-    F_ext = lu!(grad_green)
-    ldiv!(F_ext, grre)
+        # Gram matrix F'F (needed for interior kernel and wv normalization)
+        FtF = zeros(2 * num_modes, 2 * num_modes)
+        mul!(@view(FtF[1:num_modes, 1:num_modes]), cos_mn_basis', cos_mn_basis)
+        mul!(@view(FtF[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', sin_mn_basis)
+        mul!(@view(FtF[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', cos_mn_basis)
+        mul!(@view(FtF[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', sin_mn_basis)
 
-    # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
-    grad_green_interior .*= -1
-    for i in 1:num_points_total
-        grad_green_interior[i, i] += 2.0
-    end
-    F_int = lu!(grad_green_interior)
-    ldiv!(F_int, grri)
+        # Solve projected systems via SVD-based pseudoinverse. The truncated Fourier
+        # basis with the SFL angle correction (ν) can make the projected operators
+        # rank-deficient — the interior BIE operator in particular has a physical
+        # null space (constant potential mode). The pseudoinverse finds the
+        # minimum-norm solution, correctly projecting out numerically null directions
+        # without affecting well-resolved modes.
+        Y_ext = pinv(K_proj) * G_proj
 
-    # Always initialise wv to zero so that green_only keeps it zeroed
-    if !green_only
-        # Perform inverse Fourier transforms to get response matrix components [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+        # Interior kernel in projected space: K_int = -K + 2I → K_proj_int = 2*F'F - K_proj
+        K_proj_int = 2 .* FtF .- K_proj
+        Y_int = pinv(K_proj_int) * G_proj
+
+        # Reconstruct physical-space Green's functions for backward compatibility
+        # grre = F * Y = cos * Y[1:P, :] + sin * Y[P+1:2P, :]
+        mul!(grre, cos_mn_basis, @view(Y_ext[1:num_modes, :]))
+        mul!(grre, sin_mn_basis, @view(Y_ext[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
+        mul!(grri, cos_mn_basis, @view(Y_int[1:num_modes, :]))
+        mul!(grri, sin_mn_basis, @view(Y_int[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
+
+        # Extract wv: the [arr air; ari aii] blocks equal (4π²/M) * F'F * Y_ext,
+        # then wv = complex(arr + aii, air - ari) [Chance 2007 eq. 114]
+        wv_blocks = (4π^2 / num_points_surf) .* (FtF * Y_ext)
+        wv .= complex.(
+            @view(wv_blocks[1:num_modes, 1:num_modes]) .+ @view(wv_blocks[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]),
+            @view(wv_blocks[1:num_modes, (num_modes+1):(2*num_modes)]) .- @view(wv_blocks[(num_modes+1):(2*num_modes), 1:num_modes])
+        )
+    else
+        # ================================================================
+        # Collocation approach: solve full physical-space system [M × M]
+        # Handles both no-wall and wall cases.
+        # ================================================================
+
+        # FT plasma→plasma Green's function (must precede kernel! calls that overwrite green_temp)
+        fourier_transform!(grre, green_temp, cos_mn_basis)
+        fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
+
+        if !wall.nowall
+            # Plasma–Wall block
+            kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
+            # Wall–Wall block
+            kernel!(grad_green, green_temp, wall, wall, kparams)
+            # Wall–Plasma block
+            kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
+            # Fourier transform obs=wall, src=plasma block
+            fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
+            fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
+        end
+
+        # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
+        grri .= grre # start from same as exterior
+        grad_green_interior = similar!(pool, grad_green)
+        grad_green_interior .= grad_green
+
+        # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
+        F_ext = lu!(grad_green)
+        ldiv!(F_ext, grre)
+
+        # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
+        grad_green_interior .*= -1
+        for i in 1:num_points_total
+            grad_green_interior[i, i] += 2.0
+        end
+        F_int = lu!(grad_green_interior)
+        ldiv!(F_int, grri)
+
+        # Inverse Fourier transform to extract wv [Chance Phys. Plasmas 2007 052506 eq. 115-118]
         arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
         fourier_inverse_transform!(arr, grre, cos_mn_basis)
         fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
         fourier_inverse_transform!(ari, grre, sin_mn_basis)
         fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
-
-        # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
         wv .= complex.(arr .+ aii, air .- ari)
-        inputs.force_wv_symmetry && hermitianpart!(wv)
+    end
 
-        # Fill coordinate arrays
-        if inputs.nzeta > 1 # 3D
-            plasma_pts .= plasma_surf.r
-            wall_pts .= wall.r
-        else # 2D
-            @views begin
-                plasma_pts[:, 1] .= plasma_surf.x
-                plasma_pts[:, 2] .= 0.0
-                plasma_pts[:, 3] .= plasma_surf.z
-                wall_pts[:, 1] .= wall.x
-                wall_pts[:, 2] .= 0.0
-                wall_pts[:, 3] .= wall.z
-            end
+    inputs.force_wv_symmetry && hermitianpart!(wv)
+
+    if inputs.nzeta > 1 # 3D
+        plasma_pts .= plasma_surf.r
+        wall_pts .= wall.r
+    else # 2D
+        @views begin
+            plasma_pts[:, 1] .= plasma_surf.x
+            plasma_pts[:, 2] .= 0.0
+            plasma_pts[:, 3] .= plasma_surf.z
+            wall_pts[:, 1] .= wall.x
+            wall_pts[:, 2] .= 0.0
+            wall_pts[:, 3] .= wall.z
         end
     end
 end
 
 """
-    compute_vacuum_response(
-        inputs::VacuumInput,
-        wall_settings::WallShapeSettings;
-        green_only=false)
+    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 Allocate and return the vacuum response matrix and Green's functions for the given
 vacuum inputs.
@@ -182,7 +242,7 @@ implementation. For performance‑critical paths that already own preallocated s
 (e.g. `ForceFreeStates.VacuumData`), prefer the in‑place method to avoid extra
 heap allocations.
 """
-@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+@with_pool pool function compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     # Allocate storage for the vacuum response matrix and Green's functions
     numpoints = inputs.mtheta * inputs.nzeta
@@ -195,17 +255,13 @@ heap allocations.
         wall_pts=zeros!(pool, numpoints, 3)
     )
 
-    compute_vacuum_response!(vac, inputs, wall_settings; green_only=green_only)
+    compute_vacuum_response!(vac, inputs, wall_settings)
 
     return vac.wv, vac.grri, vac.grre, vac.plasma_pts, vac.wall_pts
 end
 
 """
-    compute_vacuum_response!(
-        vac_data,
-        inputs::VacuumInput,
-        wall_settings::WallShapeSettings;
-        green_only=false)
+    compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
 In-place variant that computes the vacuum response and directly populates the arrays
 stored in `vac_data`.
@@ -222,7 +278,7 @@ compatible sizes:
 This is designed to work with `ForceFreeStates.VacuumData` but does not depend on
 its concrete type (duck-typed on field names only).
 """
-function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings; green_only::Bool=false)
+function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::WallShapeSettings)
 
     mpert = inputs.mpert
     npert = inputs.npert
@@ -237,8 +293,7 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
             vac_data.plasma_pts,
             vac_data.wall_pts,
             inputs,
-            wall_settings;
-            green_only=green_only
+            wall_settings
         )
     else
         # 2D vacuum: fill diagonal blocks of the response matrix
@@ -262,8 +317,7 @@ function compute_vacuum_response!(vac_data, inputs::VacuumInput, wall_settings::
                 vac_data.wall_pts,
                 inputs,
                 wall_settings;
-                n_override=n,
-                green_only=green_only
+                n_override=n
             )
         end
     end

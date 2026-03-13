@@ -154,7 +154,7 @@ function compute_singular_coupling_metrics!(
             # Compute Green's functions at this surface for this n
             # TODO: This assumes an initial 2D equilibrum, getting 2D Green's functions for independent n
             vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
-            _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
+            _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings)
 
             # Store in singular surface struct (overwrites for each n)
             ffs_intr.sing[s].grri = grri

@@ -631,21 +631,6 @@
             @test isapprox(wv, wv', rtol=1e-12)
         end
 
-        @testset "compute_vacuum_response 3D green_only" begin
-            inputs = _make_3d_inputs(mtheta=32, nzeta=32, mtheta_eq=17)
-            wall_settings = WallShapeSettings(shape="nowall")
-            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings; green_only=true)
-
-            numpoints = inputs.mtheta * inputs.nzeta
-            num_modes = inputs.mpert * inputs.npert
-            @test size(wv) == (num_modes, num_modes)
-            @test all(wv .== 0)
-            @test size(grri) == (2 * numpoints, 2 * num_modes)
-            @test size(grre) == (2 * numpoints, 2 * num_modes)
-            @test all(isfinite, grri)
-            @test all(isfinite, grre)
-        end
-
         @testset "Kernel3D laplace_single_layer" begin
             x_obs = [1.0, 0.0, 0.0]
             x_src = [2.0, 0.0, 0.0]

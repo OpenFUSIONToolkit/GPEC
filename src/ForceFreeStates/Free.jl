@@ -28,7 +28,7 @@ and data dumping.
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
     vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
-    Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
+    @time Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
