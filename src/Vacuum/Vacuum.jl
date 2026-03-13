@@ -57,7 +57,9 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
       + 3D: `num_modes × num_modes` (full coupled)
 
   - `grri`: Interior Green's function matrix.
+
   - `grre`: Exterior Green's function matrix.
+
   - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
 """
 @with_pool pool function _compute_vacuum_response_single!(
@@ -77,7 +79,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=plasma_surf.ν)
+    ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=ν)
     num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
