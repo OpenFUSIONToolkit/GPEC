@@ -625,3 +625,79 @@ function equilibrium_solver_by_inversion(
 
     return pe
 end
+
+"""
+    adaptive_xpt_bz(raw_profile, ro, zo, z_lo, z_hi, nz_fine, topology; n_min_xpt=5) → Float64
+
+Compute a physics-motivated β_z for `make_stretched_z_grid` from x-point geometry.
+
+Locates the x-point on the LCFS (lower or upper, depending on `topology`), evaluates
+ψ_ZZ there to estimate the flux-surface arm width δZ at the edge (psihigh), then
+solves for the sinh concentration strength β such that `n_min_xpt` cells span δZ
+in the segment between the x-point and the axis.
+
+Returns 0.0 for `:limited` topology (no x-point) or when a uniform grid already
+provides sufficient resolution.
+"""
+function adaptive_xpt_bz(
+    raw_profile::DirectRunInput,
+    ro::Float64, zo::Float64,
+    z_lo::Float64, z_hi::Float64,
+    nz_fine::Int, topology::Symbol;
+    n_min_xpt::Int = 5
+)::Float64
+    topology === :limited && return 0.0
+
+    psio    = raw_profile.psio
+    psihigh = raw_profile.config.psihigh
+    ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
+
+    # Find x-point(s): minimum-Z for lower x-pt, maximum-Z for upper x-pt.
+    # Use coarse LCFS contour to locate them cheaply.
+    ψ_lcfs = psio * max(1.0 - psihigh, 1e-4)
+    cl_lcfs = Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys, ψ_coarse, ψ_lcfs)
+    lcfs = select_plasma_contour(Ctr.lines(cl_lcfs), ro, zo)
+    lcfs === nothing && return 0.0
+
+    verts = Ctr.vertices(lcfs)
+
+    # Identify x-point(s) from LCFS vertex extrema; evaluate ψ_ZZ to estimate arm width δZ.
+    δZ_arms = Float64[]
+    if topology ∈ (:sn_lower, :double_null)
+        xpt_v = argmin(v[2] for v in verts)
+        Rx, Zx = verts[xpt_v]
+        ψ_ZZ = abs(raw_profile.psi_in((Rx, Zx); deriv=Val((0, 2))))
+        ψ_ZZ > 0 && push!(δZ_arms, sqrt(2 * (1 - psihigh) * psio / ψ_ZZ))
+    end
+    if topology ∈ (:sn_upper, :double_null)
+        xpt_v = argmax(v[2] for v in verts)
+        Rx, Zx = verts[xpt_v]
+        ψ_ZZ = abs(raw_profile.psi_in((Rx, Zx); deriv=Val((0, 2))))
+        ψ_ZZ > 0 && push!(δZ_arms, sqrt(2 * (1 - psihigh) * psio / ψ_ZZ))
+    end
+    isempty(δZ_arms) && return 0.0
+
+    δZ_arm = maximum(δZ_arms)   # use the largest arm (most demanding x-point)
+
+    # The z-segment from the x-point boundary to the axis has length L = zo - z_lo (lower x-pt)
+    # or z_hi - zo (upper x-pt). The sinh grid for that segment uses _sinh_right/_sinh_left;
+    # the first cell width is dz₁ ≈ L·β/((n_seg - 1)·sinh(β)).
+    # We want n_min_xpt cells to fit in δZ_arm: dz₁ ≤ δZ_arm / n_min_xpt.
+    # → β / sinh(β) ≤ n_min_xpt · δZ_arm / (L · (n_seg - 1))
+    # Each x-point creates one half-segment with roughly nz_fine/2 points (single-null);
+    # use nz_fine-1 as a conservative n_seg.
+    L = max(zo - z_lo, z_hi - zo)   # longest half-span
+    n_seg = max(2, nz_fine - 1)
+    c = Float64(n_min_xpt) * δZ_arm / (L * n_seg)
+
+    # If c ≥ 1 a uniform grid already satisfies the constraint.
+    c ≥ 1.0 && return 0.0
+
+    # Solve β/sinh(β) = c via bisection (function is monotonically decreasing in β > 0).
+    β_lo, β_hi = 1e-6, 50.0
+    for _ in 1:60
+        β_mid = 0.5 * (β_lo + β_hi)
+        β_mid / sinh(β_mid) > c ? (β_lo = β_mid) : (β_hi = β_mid)
+    end
+    return clamp(0.5 * (β_lo + β_hi), 0.0, 8.0)
+end
