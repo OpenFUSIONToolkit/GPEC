@@ -403,7 +403,8 @@ robustness.
 
     # TODO: there's some fortran logic for grid_type = original that should be added when needed.
 
-    # Set up radial and poloidal grid    psi_nodes = Array{Float64}(undef, mpsi + 1)
+    # Set up radial and poloidal grid
+    psi_nodes = Array{Float64}(undef, mpsi + 1)
     # TODO: add additional grid types
     if equil_params.grid_type == "ldp"
         psi_nodes .= [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]

@@ -633,11 +633,13 @@ Compute a physics-motivated β_z for `make_stretched_z_grid` from x-point geomet
 
 Locates the x-point on the LCFS (lower or upper, depending on `topology`), evaluates
 ψ_ZZ there to estimate the flux-surface arm width δZ at the edge (psihigh), then
-solves for the sinh concentration strength β such that `n_min_xpt` cells span δZ
-in the segment between the x-point and the axis.
+δZ is the Z-distance from the x-point to where the outermost closed surface
+(at `psihigh`) passes — the "arm width" of the outermost surface near the x-point.
 
-Returns 0.0 for `:limited` topology (no x-point) or when a uniform grid already
-provides sufficient resolution.
+Returns 0.0 when the uniform grid already provides `n_min_xpt` cells within δZ
+(i.e. no concentration needed), or for `:limited` topology. When concentration is
+needed, solves for the minimum β such that `n_min_xpt` cells span δZ. Capped at
+β=3 since higher values degrade intermediate-surface accuracy.
 """
 function adaptive_xpt_bz(
     raw_profile::DirectRunInput,
@@ -677,27 +679,27 @@ function adaptive_xpt_bz(
     end
     isempty(δZ_arms) && return 0.0
 
-    δZ_arm = maximum(δZ_arms)   # use the largest arm (most demanding x-point)
+    δZ_arm = maximum(δZ_arms)   # most demanding x-point (largest arm)
 
-    # The z-segment from the x-point boundary to the axis has length L = zo - z_lo (lower x-pt)
-    # or z_hi - zo (upper x-pt). The sinh grid for that segment uses _sinh_right/_sinh_left;
-    # the first cell width is dz₁ ≈ L·β/((n_seg - 1)·sinh(β)).
-    # We want n_min_xpt cells to fit in δZ_arm: dz₁ ≤ δZ_arm / n_min_xpt.
-    # → β / sinh(β) ≤ n_min_xpt · δZ_arm / (L · (n_seg - 1))
-    # Each x-point creates one half-segment with roughly nz_fine/2 points (single-null);
-    # use nz_fine-1 as a conservative n_seg.
-    L = max(zo - z_lo, z_hi - zo)   # longest half-span
+    # For _sinh_both_ends(z_lo, zo, n_seg, β), the first cell at the x-point end is:
+    #   dz₁ ≈ L · β / ((n_seg - 1) · sinh(β))
+    # We want n_min_xpt cells to span δZ_arm: dz₁ ≤ δZ_arm / n_min_xpt.
+    # This gives: β/sinh(β) ≤ δZ_arm · (n_seg - 1) / (L · n_min_xpt)  ← c_target
+    # If the uniform grid (β=0, dz₁ = L/(n_seg-1)) already has n_min_xpt cells in δZ_arm,
+    # no concentration is needed.
+    L = max(zo - z_lo, z_hi - zo)   # longest Z half-span
     n_seg = max(2, nz_fine - 1)
-    c = Float64(n_min_xpt) * δZ_arm / (L * n_seg)
+    n_cells_arm_uniform = δZ_arm * n_seg / L
+    n_cells_arm_uniform ≥ Float64(n_min_xpt) && return 0.0
 
-    # If c ≥ 1 a uniform grid already satisfies the constraint.
-    c ≥ 1.0 && return 0.0
-
-    # Solve β/sinh(β) = c via bisection (function is monotonically decreasing in β > 0).
+    # Uniform grid is too coarse near x-point: solve β/sinh(β) = c_target via bisection.
+    # β/sinh(β) is monotonically decreasing in β; larger c → smaller β (less concentration).
+    c = δZ_arm * n_seg / (L * Float64(n_min_xpt))
     β_lo, β_hi = 1e-6, 50.0
     for _ in 1:60
         β_mid = 0.5 * (β_lo + β_hi)
         β_mid / sinh(β_mid) > c ? (β_lo = β_mid) : (β_hi = β_mid)
     end
-    return clamp(0.5 * (β_lo + β_hi), 0.0, 8.0)
+    # Cap at 3.0: benchmark shows β_z > 3 degrades intermediate surface accuracy.
+    return clamp(0.5 * (β_lo + β_hi), 0.0, 3.0)
 end
