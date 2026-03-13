@@ -22,6 +22,7 @@ using TOML, Printf, Statistics
 
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
 config_path  = joinpath(example_path, "gpec.toml")
+psihigh_override = length(ARGS) > 1 ? parse(Float64, ARGS[2]) : nothing
 
 println("=" ^ 65)
 println("Equilibrium Method Comparison")
@@ -32,9 +33,10 @@ methods = ["efit", "efit_arclength", "efit_by_inversion"]
 results = Dict{String,Any}()
 
 # ─── Helper: load a named TOML, override eq_type, return EquilibriumConfig ───
-function make_config(path::String, eq_type::String)
+function make_config(path::String, eq_type::String; psihigh=nothing)
     raw = TOML.parsefile(path)
     raw["Equilibrium"]["eq_type"] = eq_type
+    psihigh !== nothing && (raw["Equilibrium"]["psihigh"] = psihigh)
     base = dirname(path)
     return Equilibrium.EquilibriumConfig(raw["Equilibrium"], base)
 end
@@ -42,7 +44,7 @@ end
 # ─── Run each method (3 warm runs, report average of last 2) ─────────────────
 for method in methods
     println("\n--- Running: $method ---")
-    cfg = make_config(config_path, method)
+    cfg = make_config(config_path, method; psihigh=psihigh_override)
     local pe = nothing
     local t1 = 0.0
     local t2 = 0.0

@@ -31,7 +31,7 @@ using TOML, Printf, Statistics, HDF5
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
 config_path  = joinpath(example_path, "gpec.toml")
 
-psihigh_values = [0.980, 0.985, 0.990, 0.993, 0.995, 0.996, 0.997, 0.998, 0.999, 0.9995, 0.9999]
+psihigh_values = [0.980, 0.985, 0.990, 0.993, 0.995, 0.996, 0.997, 0.998, 0.999, 0.9995, 0.9999, 1.0]
 methods = ["efit", "efit_arclength", "efit_by_inversion"]
 
 function make_config(path::String, eq_type::String, psihigh::Float64)
