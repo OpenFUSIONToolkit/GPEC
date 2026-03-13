@@ -205,15 +205,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     imat = zeros(ComplexF64, 2 * intr.mband + 1)
     imat[mid] = 1 + 0im
 
-    # For diverted plasmas: precompute chain-rule derivative of iota = 1/q, used above psihigh.
-    # q_full(psi)  = 1/iota(psi) via iota inverse spline above psihigh, direct spline below.
-    # q1_full(psi) = -iota'(psi)/iota(psi)^2 via deriv1 of inner iota spline above psihigh.
-    psihigh = equil.config.psihigh
-    has_edge_q = !isnothing(profiles.q_spline_iota_inverse)
-    iota_inner = has_edge_q ? profiles.q_spline_iota_inverse.inner : nothing
-    _d1_iota = has_edge_q ? deriv1(iota_inner) : nothing
-
-    hint = Ref(1)  # Linear search hint for sequential psi access (core region only)
+    hint = Ref(1)  # Linear search hint for sequential psi access
     for ipsi in 1:mpsi
         # --- Create views for this surface ---
         amats_flatview = @view amats_flat[ipsi, :]
@@ -230,16 +222,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         p1 = profiles.P_deriv(psi; hint=hint)
         # F' and P' use ExtendExtrap above psihigh — physically correct since F' ≈ 0, P' ≈ 0 near separatrix.
         jtheta = -profiles.F_deriv(psi; hint=hint)
-        # q and q' use the iota inverse spline (chain rule) above psihigh for diverted plasmas.
-        if psi > psihigh && has_edge_q
-            ι = iota_inner(psi)
-            ι1 = _d1_iota(psi)
-            q  = 1.0 / ι
-            q1 = -ι1 / ι^2
-        else
-            q  = profiles.q_spline_direct(psi; hint=hint)
-            q1 = profiles.q_deriv(psi; hint=hint)
-        end
+        q, q1 = eval_q(profiles, psi; deriv=1, output_lower_derivs=true, hint=hint)
         chi1 = 2π * equil.psio
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)

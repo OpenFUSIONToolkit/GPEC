@@ -339,6 +339,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
   - `qmax::Union{Nothing,Float64}` - Maximum safety factor in the plasma
   - `qa::Union{Nothing,Float64}` - Safety factor at the plasma edge
   - `q95::Union{Nothing,Float64}` - Safety factor at 95% flux surface
+  - `q99::Union{Nothing,Float64}` - Safety factor at 99% flux surface
   - `qextrema_psi::Union{Nothing,Vector{Float64}}` - Normalized flux values at q extrema
   - `qextrema_q::Union{Nothing,Vector{Float64}}` - Safety factor values at extrema
   - `mextrema::Union{Nothing,Int}` - Number of extrema in q-profile
@@ -391,6 +392,7 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     qmax::Union{Nothing,Float64} = nothing # Maximum safety factor in the plasma
     qa::Union{Nothing,Float64} = nothing # Safety factor at the plasma edge
     q95::Union{Nothing,Float64} = nothing # Safety factor at 95% flux surface
+    q99::Union{Nothing,Float64} = nothing # Safety factor at 99% flux surface
     qextrema_psi::Union{Nothing,Vector{Float64}} = nothing # Normalized poloidal flux values where q has extrema
     qextrema_q::Union{Nothing,Vector{Float64}} = nothing # Safety factor values at the extrema points
     mextrema::Union{Nothing,Int} = nothing # Number of extrema points in the q-profile
@@ -439,37 +441,6 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     # global quantities at the field-line grid boundary, not the far-edge extension end.
 end
 
-"""
-    InverseCubicSpline{S}
-
-Wraps a cubic interpolant that stores 1/f (e.g. iota = 1/q). Returns f = 1/stored when called.
-Used for quantities that diverge at the separatrix (q, dV/dψ), where the reciprocal (iota, 1/dVdpsi)
-is well-behaved and anchored to zero at psin=1.
-
-Uses a self-contained `_hint` field so that the caller's hint (which is keyed to the direct
-spline's grid) does not interfere with interval lookups on the edge grid.
-
-Defines a `.y` property that returns the physical values (1/inner.y) so that
-`profiles.q_spline.y[ipsi]` gives q even when the pointer is set to this type.
-"""
-struct InverseCubicSpline{S}
-    inner::S                       # Stores iota = 1/q (or 1/(dV/dψ), etc.)
-    _hint::Base.RefValue{Int}      # self-contained search hint for the edge grid
-end
-InverseCubicSpline(inner::S) where {S} = InverseCubicSpline{S}(inner, Ref(1))
-
-# Ignore caller's kwargs (particularly hint) — use the self-contained hint instead.
-# The caller's hint is keyed to the direct spline's grid and would be invalid here.
-(ics::InverseCubicSpline)(psi; kwargs...) = 1.0 / ics.inner(psi; hint=ics._hint)
-
-# .y property returns physical values (q = 1/iota) for backward compat with .y[ipsi] access
-function Base.getproperty(ics::InverseCubicSpline, sym::Symbol)
-    if sym === :y
-        return 1.0 ./ ics.inner.y
-    else
-        return getfield(ics, sym)
-    end
-end
 
 """
     ProfileSplines
@@ -482,49 +453,46 @@ Each profile is stored as a separate spline for code clarity.
   - `xs::Vector{Float64}`: Shared x-axis (normalized psi)
   - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
   - `P_spline`: μ₀*P (plasma pressure × μ₀)
-  - `dVdpsi_spline`: dV/dψ (volume derivative), always the direct spline
-  - `q_spline`: q (safety factor) pointer — initially points to q_spline_direct;
-    for integration chunks that extend beyond psihigh in diverted plasmas, this is
-    temporarily switched to q_spline_iota_inverse for type-stable evaluation
+  - `dVdpsi_spline`: dV/dψ (volume derivative), direct cubic spline
+  - `q_spline_direct`: q (safety factor) cubic spline over the core grid [psilow, psihigh]
 
 # Derivative Interpolants (for continuous derivative evaluation)
 
-  - `F_deriv`: Derivative of F_spline
-  - `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
-    (always the direct-spline derivatives; use q_spline_direct for deriv2/deriv3)
+  - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
+    (direct-spline derivatives; for higher-order q derivatives use `q_spline_direct(psi; deriv=k)`)
 
 # Edge Extension Fields (Nothing for limited plasmas)
 
-  - `q_spline_direct`: Original direct q spline (for restoring after pointer swap)
-  - `q_spline_iota_inverse`: Edge inverse spline for q in diverted plasmas (Nothing if limited)
-  - `dVdpsi_spline_inv`: Edge inverse spline for dV/dψ used in post-processing (Nothing if limited)
+  - `iota_spline`: Raw iota = 1/q spline over [psihigh, psilim] for diverted plasmas
+  - `_iota_hint`: Search hint for `iota_spline` grid (separate from core grid)
+  - `dVdpsi_inv_spline`: Raw 1/(dV/dψ) spline over edge zone for diverted plasmas
+  - `_dVdpsi_inv_hint`: Search hint for `dVdpsi_inv_spline` grid
 
 # Notes
 
   - Node values at grid points: Access via `spline.y[i]`
-  - Derivative at any point: Call `deriv(x)` (derivative views are callable)
+  - For edge-aware q evaluation (dispatching between core and edge zone), use `eval_q`
   - Grid: Access via `xs` field or `spline.cache.x`
-  - For deriv2/deriv3 of q, always use `profiles.q_spline_direct` to avoid Union dispatch issues
 """
-mutable struct ProfileSplines{S,I,D}
+mutable struct ProfileSplines{S,D}
     xs::Vector{Float64}
     npts::Int          # length(xs), avoids redundant length() calls
     npts_minus_1::Int  # npts - 1, for hint at last interval
-    # Value interpolants (dVdpsi always direct; q_spline is a switchable pointer)
+    # Value interpolants
     F_spline::S
     P_spline::S
     dVdpsi_spline::S
-    q_spline::Union{S,I}   # pointer: starts as q_spline_direct, optionally switched for edge chunks
+    q_spline_direct::S
     # Derivative views (callable, share data with value interpolants)
     F_deriv::D
     P_deriv::D
     dVdpsi_deriv::D
     q_deriv::D
-    # Stored direct splines for restoring after pointer swap and for deriv2/deriv3 access
-    q_spline_direct::S
-    # Edge inverse splines: Nothing for limited plasmas, set by equilibrium_solver for diverted
-    q_spline_iota_inverse::Union{Nothing,I}
-    dVdpsi_spline_inv::Union{Nothing,I}
+    # Edge splines for diverted plasmas (Nothing for limited)
+    iota_spline::Union{Nothing,S}          # stores iota = 1/q over [psihigh, psilim]
+    _iota_hint::Base.RefValue{Int}         # search hint for iota_spline grid
+    dVdpsi_inv_spline::Union{Nothing,S}    # stores 1/(dV/dψ) over edge zone
+    _dVdpsi_inv_hint::Base.RefValue{Int}   # search hint for dVdpsi_inv_spline grid
 end
 
 """
@@ -561,18 +529,61 @@ function ProfileSplines(xs::Vector{Float64},
     q_deriv = deriv1(q_spline)
 
     S = typeof(q_spline)
-    I = InverseCubicSpline{S}
     D = typeof(q_deriv)
 
-    ProfileSplines{S,I,D}(
+    ProfileSplines{S,D}(
         xs, npts, npts_minus_1,
-        F_spline, P_spline, dVdpsi_spline,
-        q_spline,          # q_spline pointer starts as direct
+        F_spline, P_spline, dVdpsi_spline, q_spline,
         F_deriv, P_deriv, dVdpsi_deriv, q_deriv,
-        q_spline,          # q_spline_direct = same object
-        nothing,           # q_spline_iota_inverse: set later for diverted
-        nothing            # dVdpsi_spline_inv: set later for diverted
+        nothing, Ref(1),   # iota_spline, _iota_hint: set later for diverted
+        nothing, Ref(1)    # dVdpsi_inv_spline, _dVdpsi_inv_hint: set later for diverted
     )
+end
+
+"""
+    eval_q(profiles::ProfileSplines, psi; deriv::Int=0, output_lower_derivs::Bool=false, hint=Ref(1))
+
+Evaluate q(ψ) or its derivatives at `psi`, dispatching between the direct spline (core,
+psi ≤ psihigh) and the iota spline (edge, psi > psihigh, diverted plasmas only).
+
+For `output_lower_derivs=false` (default): returns a scalar — the derivative of order `deriv`.
+For `output_lower_derivs=true`: returns a tuple `(q, q', …, q^(deriv))` computed in a
+single pass, sharing iota evaluations across derivative orders. Efficient for callers that
+need multiple orders simultaneously (e.g. singular surface Taylor expansion).
+
+The `hint` argument is for the core direct spline only. The edge iota spline uses
+`profiles._iota_hint` internally, which is keyed to the separate edge grid.
+
+# Chain rule for edge zone (iota = 1/q, so q = 1/iota):
+  - deriv=1: dq/dψ = -ι'/ι²
+  - deriv=2: d²q/dψ² = (2ι'² - ι·ι'')/ι³
+  - deriv=3: d³q/dψ³ = (-6ι'³ + 6ι·ι'·ι'' - ι²·ι''')/ι⁴
+"""
+function eval_q(profiles::ProfileSplines, psi; deriv::Int=0, output_lower_derivs::Bool=false, hint=Ref(1))
+    if psi > profiles.xs[end] && !isnothing(profiles.iota_spline)
+        h  = profiles._iota_hint
+        ι  = profiles.iota_spline(psi; hint=h)
+        d0 = 1.0 / ι
+        deriv == 0 && return output_lower_derivs ? (d0,) : d0
+        ι1 = profiles.iota_spline(psi; deriv=1, hint=h)
+        d1 = -ι1 / ι^2                              # dq/dψ = -ι'/ι²
+        deriv == 1 && return output_lower_derivs ? (d0, d1) : d1
+        ι2 = profiles.iota_spline(psi; deriv=2, hint=h)
+        d2 = (2ι1^2 - ι*ι2) / ι^3                  # d²q/dψ²
+        deriv == 2 && return output_lower_derivs ? (d0, d1, d2) : d2
+        ι3 = profiles.iota_spline(psi; deriv=3, hint=h)
+        d3 = (-6ι1^3 + 6ι*ι1*ι2 - ι^2*ι3) / ι^4   # d³q/dψ³
+        return output_lower_derivs ? (d0, d1, d2, d3) : d3
+    else
+        d0 = profiles.q_spline_direct(psi; hint=hint)
+        deriv == 0 && return output_lower_derivs ? (d0,) : d0
+        d1 = profiles.q_spline_direct(psi; deriv=1, hint=hint)
+        deriv == 1 && return output_lower_derivs ? (d0, d1) : d1
+        d2 = profiles.q_spline_direct(psi; deriv=2, hint=hint)
+        deriv == 2 && return output_lower_derivs ? (d0, d1, d2) : d2
+        d3 = profiles.q_spline_direct(psi; deriv=3, hint=hint)
+        return output_lower_derivs ? (d0, d1, d2, d3) : d3
+    end
 end
 
 """

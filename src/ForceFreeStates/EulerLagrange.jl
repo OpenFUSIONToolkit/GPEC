@@ -38,13 +38,13 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Print initial integration condition
     if ctrl.verbose
-        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" eval_q(equil.profiles, odet.psifac)))"
     end
 
     # Iterate through each integration chunk
     psihigh = equil.profiles.xs[end]
     for chunk in chunks
-        is_above_psihigh = ctrl.psiedge < intr.psilim && chunk.psi_start >= psihigh
+        is_above_psihigh = ctrl.psiedge < intr.psilim && chunk.psi_end > psihigh
 
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
@@ -52,14 +52,11 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
-        # Detect early termination: integrator_callback! called terminate!(integrator) when the
-        # per-chunk step budget was exceeded. In that case odet.psifac < chunk.psi_end, so we
-        # did not reach the rational surface — skip the crossing and stop the edge scan here.
-        # (ODE stiffness grows exponentially as q→∞: each above-psihigh chunk takes ~8× more steps;
-        # the 20k-step budget in the callback prevents any single chunk from hanging the run.)
+        # Detect early termination: if the solver did not reach chunk.psi_end 
+        # Stop the integration (ODE stiffness grows rapidly as q→∞ in the edge zone)
         if is_above_psihigh && odet.psifac < chunk.psi_end - 1e-6
             if ctrl.verbose
-                @info "Above-psihigh step limit reached at ψ = $((@sprintf "%.4f" odet.psifac)), stopping edge scan"
+                @warn "Above-psihigh solver terminated early at ψ = $((@sprintf "%.4f" odet.psifac)), Euler Lagrange integration"
             end
             break
         end
@@ -129,14 +126,14 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     odet.psifac = profiles.xs[1]
 
     # Use Newton iteration to find starting psi if qlow is above q0
-    if ctrl.qlow > profiles.q_spline.y[1]
+    if ctrl.qlow > profiles.q_spline_direct.y[1]
         # Find last index where q < qlow
-        idx = findlast(jpsi -> profiles.q_spline.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
+        idx = findlast(jpsi -> profiles.q_spline_direct.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
         odet.psifac = find_zero(
-            (psi -> profiles.q_spline(psi) - ctrl.qlow,
+            (psi -> profiles.q_spline_direct(psi) - ctrl.qlow,
              psi -> profiles.q_deriv(psi)),
             odet.psifac, Roots.Newton()
         )
@@ -361,7 +358,6 @@ making it clear what region is being integrated.
 
 Check sensitivity of results to tolerances
 Explore absolute tolerances to reduce the number of steps taken in the core
-Move the iota spline logic out of the callback to a per-chunk decision
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
     
@@ -372,8 +368,9 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     # q at segment boundaries — used for symmetric near-boundary heuristic.
     # odet.q is updated at every step inside sing_der!, so we compare against these
     # fixed endpoints in the callback rather than using psi-based distances.
-    q_start = equil.profiles.q_spline(chunk.psi_start)
-    q_end   = equil.profiles.q_spline(chunk.psi_end)
+    psihigh = equil.profiles.xs[end]
+    q_start = eval_q(equil.profiles, chunk.psi_start)
+    q_end   = eval_q(equil.profiles, chunk.psi_end)
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
@@ -384,7 +381,7 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
         odet.total_steps += 1
         steps_in_segment[] += 1
 
-        is_above_psihigh = integrator.t > equil.profiles.xs[end] && !isnothing(equil.profiles.q_spline_iota_inverse)
+        is_above_psihigh = integrator.t > equil.profiles.xs[end] && !isnothing(equil.profiles.iota_spline)
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false, is_above_psihigh)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
@@ -425,11 +422,6 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     end
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
-
-    # switch the spline used for q if we are beyond the constructed equilibrium (i.e. psihigh)
-    if sol.t[end] >= equil.profiles.xs[end]
-        equil.profiles.q_spline = equil.profiles.q_spline_iota_inverse
-    end
 end
 
 """

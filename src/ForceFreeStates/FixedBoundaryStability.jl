@@ -65,10 +65,10 @@ can do it post-integration rather than during and don't directly handle file out
     # spline domain (psi > psihigh). This arises in post-integration stability evaluation
     # when the ODE integrated beyond psihigh in a diverted plasma.
     function eval_dVdpsi(psi_eval)
-        if psi_eval <= profiles.xs[end] || isnothing(profiles.dVdpsi_spline_inv)
+        if psi_eval <= profiles.xs[end] || isnothing(profiles.dVdpsi_inv_spline)
             return profiles.dVdpsi_spline(psi_eval; hint=odet.spline_hint)
         else
-            return profiles.dVdpsi_spline_inv(psi_eval)
+            return 1.0 / profiles.dVdpsi_inv_spline(psi_eval; hint=profiles._dVdpsi_inv_hint)
         end
     end
 

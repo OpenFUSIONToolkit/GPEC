@@ -30,7 +30,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
 
-                psifac = find_zero(psi -> m - n * profiles.q_spline(psi; hint=hint), (psi0, psi1), Roots.Brent())
+                psifac = find_zero(psi -> m - n * profiles.q_spline_direct(psi; hint=hint), (psi0, psi1), Roots.Brent())
 
                 if any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
                     # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
@@ -58,7 +58,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
     # Extended rational surface search above psihigh for diverted plasmas.
     # Uses the iota = 1/q inverse spline which is well-behaved toward the separatrix.
     # Stops adding surfaces when spacing between consecutive surfaces < edge_layer_width.
-    if !isnothing(profiles.q_spline_iota_inverse)
+    if !isnothing(profiles.iota_spline)
         psihigh = equil.config.psihigh
         q_at_psihigh = profiles.q_spline_direct.y[end]  # q at last direct-spline node
 
@@ -71,7 +71,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 iota_target = n / m   # iota = 1/q at the target rational surface
 
                 # iota(psihigh) > iota_target > 0 = iota(1.0), so Brent finds the root
-                iota_at_psihigh = profiles.q_spline_iota_inverse.inner(psihigh; hint=hint)
+                iota_at_psihigh = profiles.iota_spline(psihigh; hint=hint)
                 if iota_target >= iota_at_psihigh
                     # Surface is below psihigh — already found in core search
                     m += 1
@@ -81,7 +81,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 # Find psi where iota(psi) = iota_target via Brent on [psihigh, 1.0)
                 psi_bracket_hi = 1.0 - 1e-8  # stay away from exact separatrix
                 psi_new = find_zero(
-                    psi -> profiles.q_spline_iota_inverse.inner(psi; hint=hint) - iota_target,
+                    psi -> profiles.iota_spline(psi; hint=hint) - iota_target,
                     (psihigh, psi_bracket_hi), Roots.Brent()
                 )
 
@@ -91,9 +91,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 end
 
                 q_val = m / n
-                q1_val = -profiles.q_spline_iota_inverse.inner(psi_new; hint=hint)^(-2) *
-                         (profiles.q_spline_iota_inverse.inner(psi_new + 1e-6; hint=hint) -
-                          profiles.q_spline_iota_inverse.inner(psi_new - 1e-6; hint=hint)) / 2e-6
+                q1_val = eval_q(profiles, psi_new; deriv=1)
 
                 if any(s -> isapprox(s.q, q_val; atol=1e-8), intr.sing)
                     push!(intr.sing[findfirst(s -> isapprox(s.q, q_val; atol=1e-8), intr.sing)].m, m)
@@ -128,22 +126,30 @@ end
 """
     sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute and set integration ψ, q, and q' limits. For diverted plasmas, `psilim` is set
-to the last edge rational surface found above psihigh (or psihigh if none). For limited
-plasmas, `psilim` is psihigh. If `ctrl.qhigh < equil.params.qmax`, a Newton iteration
-is performed to find the core `psilim` where q = qhigh.
+Compute and set integration ψ, q, and q' limits.
+
+`psilim` is first set to its natural upper bound from `sing_find!` results:
+- Diverted: just inside the last edge rational surface above psihigh (or psihigh if none found).
+- Limited: psihigh.
+
+`qlim = min(q(psilim), ctrl.qhigh)`. If `ctrl.qhigh` truncates the integration before
+`psilim`, a root-find adjusts `psilim` to where `q = qhigh`:
+- `qhigh ≤ q(psihigh)`: Newton iteration with the direct q spline.
+- `q(psihigh) < qhigh < q(psilim)`: Brent bracket on `[psihigh, psilim]` using the iota
+  inverse spline. This handles the case where a diverted plasma's edge layer extends beyond
+  psihigh but the user wants to cap the integration at an intermediate q value.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
-    profiles = equil.profiles
+    profiles    = equil.profiles
+    psihigh     = equil.config.psihigh
     is_diverted = !isnothing(equil.params.is_diverted) && equil.params.is_diverted
 
-    # For diverted plasmas, the effective psilim starts at the last edge surface found
-    # (or psihigh if no edge surfaces were found). For limited plasmas, start at psihigh.
+    # Set psilim to its natural upper bound from sing_find! results.
     if is_diverted
-        edge_surfs = filter(s -> s.psifac > equil.config.psihigh, intr.sing)
+        edge_surfs = filter(s -> s.psifac > psihigh, intr.sing)
         if !isempty(edge_surfs)
-            # Set psilim just before the last surface using the same singfac_min buffer
+            # Set psilim just inside the last edge surface using the same singfac_min buffer
             # as EulerLagrange (with a 1.1 safety margin so floating-point rounding cannot
             # accidentally push psilim past the trigger threshold and cause the EL integrator
             # to attempt a crossing that would step far beyond psilim).
@@ -151,42 +157,31 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
             q1_last = edge_surfs[end].q1
             intr.psilim = edge_surfs[end].psifac - ctrl.singfac_min * 1.1 / abs(n_last * q1_last)
         else
-            intr.psilim = equil.config.psihigh
+            intr.psilim = psihigh
         end
     else
-        intr.psilim = equil.config.psihigh
+        intr.psilim = psihigh
     end
 
-    # For diverted plasmas, qmax = Inf — cap qlim at ctrl.qhigh.
-    # For limited plasmas, cap at qmax as before.
-    if is_diverted
-        intr.qlim = ctrl.qhigh
-        intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
-    else
-        intr.qlim = min(equil.params.qmax, ctrl.qhigh)
-        intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
-    end
+    # q at the natural psilim — dispatches to iota spline in edge zone via eval_q.
+    q_at_psilim = eval_q(profiles, intr.psilim)
 
-    # If qlim is finite and in the core (psi ≤ psihigh), do Newton iteration with direct spline.
-    # For diverted plasmas, psilim is already set from edge surfaces; only adjust if
-    # ctrl.qhigh targets a q-value within the core region.
-    if intr.qlim < equil.params.qmax && !is_diverted
-        # Find nearest ψ index where q ≈ qlim (direct spline covers [psilow, psihigh])
-        _, jpsi = findmin(abs.(profiles.q_spline_direct.y .- intr.qlim))
-        jpsi = min(jpsi, equil.config.mpsi - 1)
+    intr.qlim  = min(q_at_psilim, ctrl.qhigh)
+    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
 
-        hint = Ref(jpsi)
-        intr.psilim = find_zero(
-            (psi -> profiles.q_spline_direct(psi; hint=hint) - intr.qlim,
-             psi -> profiles.q_deriv(psi; hint=hint)),
-            profiles.xs[jpsi], Roots.Newton()
-        )
-        intr.q1lim = profiles.q_deriv(intr.psilim)
-    elseif is_diverted && !isnothing(profiles.q_spline_iota_inverse)
-        # For diverted plasmas, if qlim is within the range of the direct spline, use Newton there.
-        # Otherwise, use the iota inverse spline to find psilim where iota(psilim) = 1/qlim.
+    # If qhigh truncates the integration before psilim, root-find for the exact psilim.
+    if intr.qlim < q_at_psilim
         q_at_psihigh = profiles.q_spline_direct.y[end]
-        if intr.qlim <= q_at_psihigh
+        if intr.qlim > q_at_psihigh && !isnothing(profiles.iota_spline)
+            # qlim is in the edge zone [psihigh, psilim]: Brent bracket with iota spline.
+            psilim_before = intr.psilim
+            intr.psilim = find_zero(
+                psi -> eval_q(profiles, psi) - intr.qlim,
+                (psihigh, psilim_before), Roots.Brent(); xatol=1e-8
+            )
+            intr.q1lim = eval_q(profiles, intr.psilim; deriv=1)
+        else
+            # qlim is in the core [psilow, psihigh]: Newton with direct spline + derivative.
             _, jpsi = findmin(abs.(profiles.q_spline_direct.y .- intr.qlim))
             jpsi = min(jpsi, equil.config.mpsi - 1)
             hint = Ref(jpsi)
@@ -197,7 +192,6 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
             )
             intr.q1lim = profiles.q_deriv(intr.psilim)
         end
-        # If qlim > q_at_psihigh: psilim is already set from the edge surface search above.
     end
 end
 
@@ -319,22 +313,6 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 """
 @with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # For core rational surfaces (psi ≤ psihigh): use direct spline with its deriv2/deriv3.
-    # For edge rational surfaces (psi > psihigh, diverted only): use chain rule from iota inner spline.
-    # InverseCubicSpline does not support deriv2/deriv3, so we must use the inner iota spline directly.
-    psihigh = profiles.xs[end]   # last core psi = psihigh
-    has_edge_q = !isnothing(profiles.q_spline_iota_inverse) && singp.psifac > psihigh
-    if has_edge_q
-        _iota_inner = profiles.q_spline_iota_inverse.inner
-        _d1_iota = deriv1(_iota_inner)
-        _d2_iota = deriv2(_iota_inner)
-        _d3_iota = deriv3(_iota_inner)
-    else
-        q_spline = profiles.q_spline_direct
-        q_d1 = profiles.q_deriv
-        q_d2 = deriv2(q_spline)
-        q_d3 = deriv3(q_spline)
-    end
 
     # Initial allocations
     Npert = intr.numpert_total
@@ -353,22 +331,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     tmp_vec = acquire!(pool, ComplexF64, Npert)
 
     # Evaluate q and its first three derivatives at the singular surface.
-    # For edge rationals, apply chain rule: q = 1/ι, q' = -ι'/ι², q'' = (2ι'²-ι·ι'')/ι³, etc.
-    if has_edge_q
-        ι  = _iota_inner(singp.psifac)
-        ι1 = _d1_iota(singp.psifac)
-        ι2 = _d2_iota(singp.psifac)
-        ι3 = _d3_iota(singp.psifac)
-        q = (1.0/ι,
-             -ι1/ι^2,
-             (2*ι1^2 - ι*ι2)/ι^3,
-             (-6*ι1^3 + 6*ι*ι1*ι2 - ι^2*ι3)/ι^4)
-    else
-        q = (q_spline(singp.psifac),
-             q_d1(singp.psifac),
-             q_d2(singp.psifac),
-             q_d3(singp.psifac))
-    end
+    q = eval_q(profiles, singp.psifac; deriv=3, output_lower_derivs=true)
 
     # Evaluate fmats_lower and derivatives using series interpolants
     ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
@@ -863,13 +826,8 @@ Implement kin_flag functionality
 
     # Compute singfac = 1 / (m - nq)
     # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration.
-    # For diverted plasmas, use the iota inverse spline for psi > psihigh even if we are in a core chunk
-    # (core chunks may extend past psihigh; the direct spline's ExtendExtrap gives wrong q near separatrix).
-    if psieval > equil.config.psihigh && !isnothing(equil.profiles.q_spline_iota_inverse)
-        odet.q = equil.profiles.q_spline_iota_inverse(psieval)
-    else
-        odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
-    end
+    # eval_q dispatches to iota spline above psihigh (diverted), direct spline otherwise.
+    odet.q = eval_q(equil.profiles, psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
     # kinetic stuff - skip for now

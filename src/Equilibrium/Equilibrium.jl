@@ -18,7 +18,7 @@ include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, equilibrium_extend_rzphi!, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines, InverseCubicSpline
+export setup_equilibrium, equilibrium_extend_rzphi!, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines, eval_q
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -335,9 +335,7 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     psiexl = Float64[]
     qexl = Float64[]
 
-    # Use the direct q spline for deriv2/deriv3 (works for both limited and diverted).
-    # profiles.q_spline is a Union type (direct or inverse pointer), but deriv2/deriv3
-    # are only defined for the direct spline; all extremum analysis uses core-region q.
+    # Use the direct q spline for deriv2/deriv3; extremum analysis is core-region only.
     q_spline = profiles.q_spline_direct
     q_d1 = deriv1(q_spline)
     q_d2 = deriv2(q_spline)
@@ -399,6 +397,7 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     end
 
     q95 = q_spline(0.95)
+    q99 = q_spline(0.99)
 
     # Store derived values
     equil.params.q0 = q0
@@ -406,6 +405,7 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     equil.params.qmax = qmax
     equil.params.qa = qa
     equil.params.q95 = q95
+    equil.params.q99 = q99
 end
 
 """

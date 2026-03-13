@@ -178,7 +178,7 @@ function main(args::Vector{String}=String[])
     # This is the single canonical source for the far-edge grid — sing_find! applies the
     # edge_layer_width stopping criterion (check-before-push), so psilim = last surface before
     # surfaces pack closer than edge_layer_width.  The rzphi grid now covers exactly [psilow, psilim].
-    if !isnothing(equil.profiles.q_spline_iota_inverse)
+    if !isnothing(equil.profiles.iota_spline)
         edge_surf_psis = Float64[s.psifac for s in intr.sing if s.psifac > equil.config.psihigh]
         Equilibrium.equilibrium_extend_rzphi!(equil, edge_surf_psis)
     end
@@ -187,10 +187,11 @@ function main(args::Vector{String}=String[])
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
-    # For diverted plasmas qmax = Inf; use the q of the outermost found rational surface
-    # (which is the last element of intr.sing after sing_find!) to compute the mode range.
-    # If no surfaces found, fall back to the direct-spline edge q or ctrl.qhigh.
-    q_for_mode_range = if isinf(equil.params.qmax)
+    # Use the q of the outermost found rational surface to set the mode range, falling back
+    # to the direct-spline edge q if no surfaces were found. For diverted plasmas qmax = Inf,
+    # so we rely on sing rather than equil.params.qmax.
+    is_diverted = !isnothing(equil.params.is_diverted) && equil.params.is_diverted
+    q_for_mode_range = if is_diverted
         isempty(intr.sing) ? equil.profiles.q_spline_direct.y[end] : intr.sing[end].q
     else
         equil.params.qmax
@@ -223,11 +224,12 @@ function main(args::Vector{String}=String[])
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             @info "Run parameters:\n" *
-                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
-                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
-                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
-                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+                  "   q0    = $(@sprintf("%.3f", equil.params.q0)), qmin   = $(@sprintf("%.3f", equil.params.qmin))\n" *
+                  "   q95   = $(@sprintf("%.3f", equil.params.q95)), q99    = $(@sprintf("%.3f", equil.params.q99)), qmax   = $(@sprintf("%.3f", equil.params.qmax))\n" *
+                  "   qlim  = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan  = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+                  "   mlow  = $(@sprintf("%5i", intr.mlow)), mhigh  = $(@sprintf("%5i", intr.mhigh)), mpert  = $(@sprintf("%5i", intr.mpert)), mband = $(@sprintf("%5i", intr.mband))\n" *
+                  "   nlow  = $(@sprintf("%5i", intr.nlow)), nhigh  = $(@sprintf("%5i", intr.nhigh)), npert  = $(@sprintf("%5i", intr.npert))"
         end
 
         # Compute metric tensor, limiting the psi grid to psilim so far-edge nodes
@@ -416,7 +418,7 @@ function write_outputs_to_HDF5(
         out_h5["splines/profiles/2piF"] = profiles.F_spline.y
         out_h5["splines/profiles/mu0p"] = profiles.P_spline.y
         out_h5["splines/profiles/dVdpsi"] = profiles.dVdpsi_spline.y
-        out_h5["splines/profiles/q"] = profiles.q_spline.y
+        out_h5["splines/profiles/q"] = profiles.q_spline_direct.y
         out_h5["splines/rzphi/xs"] = equil.rzphi_xs
         out_h5["splines/rzphi/ys"] = equil.rzphi_ys
         # Extract grid point values from interpolants for HDF5 output

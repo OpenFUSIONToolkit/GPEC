@@ -22,7 +22,7 @@ and data dumping.
     # so route to the edge inverse spline when available and psilim is beyond the core grid.
     profiles = equil.profiles
     dV_dpsi = intr.psilim > profiles.xs[end] ?
-              profiles.dVdpsi_spline_inv(intr.psilim) :
+              1.0 / profiles.dVdpsi_inv_spline(intr.psilim; hint=profiles._dVdpsi_inv_hint) :
               profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
@@ -133,20 +133,17 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
 
     profiles   = equil.profiles
     psihigh    = profiles.xs[end]
-    has_edge_q = !isnothing(profiles.q_spline_iota_inverse)
+    has_edge_q = !isnothing(profiles.iota_spline)
 
     qedge        = profiles.q_spline_direct(ctrl.psiedge)
     q_at_psihigh = profiles.q_spline_direct(psihigh)
 
     # For diverted plasmas, extend the spline above psihigh using the X-point asymptotic
     # geometry — the same geometry used by the FGK splines and jmat_spline. The upper limit
-    # is the end of the iota inner spline grid (last edge rational surface), capped at the
+    # is the end of the iota spline grid (last edge rational surface), capped at the
     # last stored ODE step to avoid computing vacuum responses past the scan range.
-    iota_inner = has_edge_q ? profiles.q_spline_iota_inverse.inner : nothing
-    _d1_iota   = has_edge_q ? deriv1(iota_inner) : nothing
     psi_upper  = has_edge_q ? min(_psi_scan_end, equil.rzphi_xs[end]) : psihigh
-    q_at_upper = (has_edge_q && psi_upper > psihigh) ?
-                 profiles.q_spline_iota_inverse(psi_upper) : q_at_psihigh
+    q_at_upper = (has_edge_q && psi_upper > psihigh) ? eval_q(profiles, psi_upper) : q_at_psihigh
 
     # Number of grid points: 9 per rational window over [qedge, q_at_upper]
     npsi = max(9, ceil(Int, (q_at_upper - qedge) * intr.nhigh * 9))
@@ -167,12 +164,12 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
                 psii, Roots.Newton()
             )
         else
-            # Edge region (psihigh, psi_upper]: invert iota(psi) = 1/qi using iota inner spline
+            # Edge region (psihigh, psi_upper]: invert iota(psi) = 1/qi using iota spline
             iota_target = 1.0 / qi
             psii = psihigh + (psi_upper - psihigh) * ((qi - q_at_psihigh) / (q_at_upper - q_at_psihigh))
             psi_array[i] = find_zero(
-                (psi -> iota_inner(psi) - iota_target,
-                 psi -> _d1_iota(psi)),
+                (psi -> profiles.iota_spline(psi; hint=profiles._iota_hint) - iota_target,
+                 psi -> profiles.iota_spline(psi; deriv=1, hint=profiles._iota_hint)),
                 psii, Roots.Newton()
             )
         end
@@ -231,9 +228,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # For psi > psihigh, use the iota inverse spline (if available) to get q.
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
     wv = copy(odet._wv_out)
-    q_at_psifac = (odet.psifac > profiles.xs[end] && !isnothing(profiles.q_spline_iota_inverse)) ?
-                  profiles.q_spline_iota_inverse(odet.psifac) :
-                  profiles.q_spline_direct(odet.psifac)
+    q_at_psifac = eval_q(profiles, odet.psifac)
     for ipert_n in 1:intr.npert
         n = ipert_n - 1 + intr.nlow
         singfac = collect(intr.mlow:intr.mhigh) .- (n * q_at_psifac)
@@ -268,8 +263,8 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     # Normalize eigenvalue by ξ†J(psifac)ξ / dV_dψ(psifac), where J is evaluated at the local
     # scan psi so the normalization is physically consistent at each point of the edge scan.
-    dV_dpsi = (!isnothing(profiles.dVdpsi_spline_inv) && odet.psifac > profiles.xs[end]) ?
-              profiles.dVdpsi_spline_inv(odet.psifac) :
+    dV_dpsi = (!isnothing(profiles.dVdpsi_inv_spline) && odet.psifac > profiles.xs[end]) ?
+              1.0 / profiles.dVdpsi_inv_spline(odet.psifac; hint=profiles._dVdpsi_inv_hint) :
               profiles.dVdpsi_spline(odet.psifac)
     jmat_local = ffit.jmat_spline(odet.psifac)
     norm_kin = zero(ComplexF64)

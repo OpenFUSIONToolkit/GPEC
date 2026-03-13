@@ -287,8 +287,7 @@ function compute_perturbed_field_modes(
         psi_norm = ForceFreeStates_results.psi_store[ipsi]
 
         # Get equilibrium quantities at this surface
-        q = equil.profiles.q_spline(psi_norm)       # Safety factor q(ψ)
-        q1 = equil.profiles.q_deriv(psi_norm)       # Derivative q'(ψ) = dq/dψ
+        q, q1 = Equilibrium.eval_q(equil.profiles, psi_norm; deriv=1, output_lower_derivs=true)  # q(ψ), q'(ψ)
 
         # Compute field for each poloidal mode
         for ipert in 1:mpert

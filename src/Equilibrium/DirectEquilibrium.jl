@@ -450,7 +450,7 @@ Using this geometry with the EFIT F (held constant by ExtendExtrap), the GS resi
 near zero (since F'≈0, P'≈0 near the separatrix), satisfying the requirement that the
 EL equation be evaluated on an approximate GS equilibrium.
 
-Only called for diverted plasmas (when `profiles.q_spline_iota_inverse !== nothing`).
+Only called for diverted plasmas (when `profiles.iota_spline` is set).
 """
 function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
     psi_nodes::AbstractVector{Float64},
@@ -464,7 +464,7 @@ function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
 
     # edge_surface_psis must come from sing_find! — the canonical source of edge rational
     # surfaces.  Passing an empty vector returns the inputs unchanged (no extension).
-    isnothing(profiles.q_spline_iota_inverse) && return psi_nodes, rzphi_nodes
+    isnothing(profiles.iota_spline) && return psi_nodes, rzphi_nodes
     isempty(edge_surface_psis) && return psi_nodes, rzphi_nodes
 
     psihigh = psi_nodes[end]
@@ -552,7 +552,7 @@ rzphi grid covers exactly [psilow, psilim] with no gap or over-extension.
 """
 function equilibrium_extend_rzphi!(equil::PlasmaEquilibrium, edge_surface_psis::AbstractVector{Float64})
 
-    isnothing(equil.profiles.q_spline_iota_inverse) && return
+    isnothing(equil.profiles.iota_spline) && return
     isempty(edge_surface_psis) && return
 
     psihigh = equil.rzphi_xs[end]
@@ -718,7 +718,7 @@ robustness.
         sq_nodes[:, 4]   # q
     )
     # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
-    q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
+    q0 = profiles.q_spline_direct.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
@@ -805,7 +805,7 @@ robustness.
         q_iota_vals = vcat([1.0 / sq_nodes[i, 4] for i in edge_mask], phantom_iota, iota_mid, 0.0)
         q_iota_vals = q_iota_vals[sortperm(vcat(psi_nodes[edge_mask], phantom_psi_q, psi_mid, 1.0))]
         q_iota_inner = cubic_interp(edge_psi, q_iota_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
-        profiles.q_spline_iota_inverse = InverseCubicSpline(q_iota_inner)
+        profiles.iota_spline = q_iota_inner
 
         # 1/(dV/dψ); anchor (dV/dψ)⁻¹(1.0) = 0 (dV/dψ → ∞ at separatrix)
         # Uses 2 phantom knots (1st + 2nd derivative matching; 3rd not needed for dV/dψ)
@@ -814,7 +814,7 @@ robustness.
         dVdpsi_inv_vals = vcat([1.0 / sq_nodes[i, 3] for i in edge_mask], phantom_Vinv, Vinv_mid, 0.0)
         dVdpsi_inv_vals = dVdpsi_inv_vals[sortperm(vcat(psi_nodes[edge_mask], phantom_psi_q[1:2], psi_mid, 1.0))]
         dVdpsi_inv_inner = cubic_interp(edge_psi_dV, dVdpsi_inv_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
-        profiles.dVdpsi_spline_inv = InverseCubicSpline(dVdpsi_inv_inner)
+        profiles.dVdpsi_inv_spline = dVdpsi_inv_inner
 
         @printf("   Edge inverse splines built over psin ∈ [%.4f, 1.0] (%d nodes)\n",
             psi_edge_start, length(edge_psi))
@@ -848,7 +848,7 @@ robustness.
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
-        q = profiles.q_spline.y[ipsi]
+        q = profiles.q_spline_direct.y[ipsi]
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
