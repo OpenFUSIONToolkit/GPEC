@@ -15,12 +15,12 @@ Metrics (evaluated in the outer 20% of the radial domain, ψ > 0.80):
   - max |Δr²|, |Δoffset|, |ΔJac| of 2D splines at θ = 0, 0.25, 0.5, 0.75
 
 Outputs:
-  conv_refine.png    — metric vs refine (3 rows × 2 cols)
-  conv_bz.png        — metric vs β_z    (3 rows × 2 cols)
-  conv_rf.png        — metric vs resolution_factor (adaptive, 3 rows × 2 cols)
-  pareto.png         — roundtrip error vs runtime (Pareto view, all sweeps)
-  surfaces_xpt.png   — R(θ), Z(θ) near x-point for each refine value
-  hreq_profile.png   — required cell widths dR_req(R), dZ_req(Z) along LCFS
+  convergence_with_refine.png              — metric vs refine (3 rows × 2 cols)
+  convergence_with_beta_z.png              — metric vs β_z    (3 rows × 2 cols)
+  convergence_with_resolution_factor.png   — metric vs resolution_factor (adaptive, 3 rows × 2 cols)
+  accuracy_vs_runtime_pareto.png           — roundtrip error vs runtime (Pareto view, all sweeps)
+  outer_surface_shape.png                  — R(θ), Z(θ) near x-point for each refine value
+  lcfs_required_cell_widths.png            — required cell widths dR_req, dZ_req along LCFS
 
 Usage:
   julia --project=. benchmarks/equil_inv_grid_sensitivity.jl [example_path]
@@ -308,155 +308,177 @@ try
     using Plots
     gr()
 
+    # Common subplot styling: enough bottom/left margin for axis labels, consistent size.
+    SP = (bottom_margin=8Plots.mm, left_margin=10Plots.mm, right_margin=4Plots.mm,
+          top_margin=4Plots.mm)
+
     θ_colors = [:royalblue, :crimson, :forestgreen, :darkorange]
     θ_labels = ["θ=0" "θ=0.25" "θ=0.5" "θ=0.75"]   # matrix row for Plots legend
 
-    # ── Figure 1: conv_refine.png ─────────────────────────────────────────────
+    # ── Figure 1: convergence_with_refine.png ────────────────────────────────
     xv = [r.refine for r in rows_A]
+    rt_A = [r.runtime for r in rows_A]
 
-    p1 = plot(xv, [r.q_efit for r in rows_A];  yscale=:log10, marker=:circle,
-              title="q vs efit", xlabel="refine", ylabel="|Δq| max (ψ>0.80)", legend=false)
-    p2 = plot(xv, [r.q_hires for r in rows_A]; yscale=:log10, marker=:circle,
-              title="q vs hi-res", xlabel="refine", ylabel="|Δq| max", legend=false)
-    p3 = plot(xv, [r.dv_efit for r in rows_A]; yscale=:log10, marker=:circle,
-              title="dV/dψ vs efit", xlabel="refine", ylabel="|ΔdV/dψ| max", legend=false)
-    p4 = plot(xv, [r.dv_hires for r in rows_A]; yscale=:log10, marker=:circle,
-              title="dV/dψ vs hi-res", xlabel="refine", ylabel="|ΔdV/dψ| max", legend=false)
-    p5 = plot(xv, [r.rt_err for r in rows_A];  yscale=:log10, marker=:circle,
-              title="roundtrip error (edge)", xlabel="refine", ylabel="max |Δψ|", legend=false)
-    p6 = plot(; yscale=:log10, title="r² vs hi-res per θ", xlabel="refine", ylabel="|Δr²| max")
-    for (iθ, θ) in enumerate(θ_vals)
-        plot!(p6, xv, [r.r2_hires_per_theta[θ] for r in rows_A];
-              marker=:circle, label=θ_labels[iθ], color=θ_colors[iθ])
-    end
+    # Compute y-axis floors to avoid log(0) issues when a value is exactly zero
+    yfloor(v) = max.(v, 1e-15)
 
-    savefig(plot(p1, p2, p3, p4, p5, p6; layout=(3,2), size=(900,800)),
-            joinpath(outdir, "conv_refine.png"))
-    println("Saved conv_refine.png")
+    p1 = plot(xv, yfloor([r.q_efit for r in rows_A]);  yscale=:log10, marker=:circle,
+              title="|Δq| vs efit (ψ>0.80)", xlabel="refine", ylabel="|Δq| max", SP...)
+    p2 = plot(xv, yfloor([r.q_hires for r in rows_A]); yscale=:log10, marker=:circle,
+              title="|Δq| vs hi-res", xlabel="refine", ylabel="|Δq| max", SP...)
+    p3 = plot(xv, yfloor([r.dv_efit for r in rows_A]); yscale=:log10, marker=:circle,
+              title="|ΔdV/dψ| vs efit", xlabel="refine", ylabel="|ΔdV/dψ| max", SP...)
+    p4 = plot(xv, yfloor([r.dv_hires for r in rows_A]); yscale=:log10, marker=:circle,
+              title="|ΔdV/dψ| vs hi-res", xlabel="refine", ylabel="|ΔdV/dψ| max", SP...)
+    p5 = plot(xv, [r.rt_err for r in rows_A]; yscale=:log10, marker=:circle,
+              title="roundtrip error (ψ>0.80)", xlabel="refine", ylabel="max |Δψ|", SP...)
+    p6 = plot(; yscale=:log10, title="runtime vs refine", xlabel="refine",
+              ylabel="runtime (s)", SP...)
+    plot!(p6, xv, rt_A; marker=:circle, color=:black, label=false)
 
-    # ── Figure 2: conv_bz.png ─────────────────────────────────────────────────
+    savefig(plot(p1, p2, p3, p4, p5, p6; layout=(3,2), size=(1000,900)),
+            joinpath(outdir, "convergence_with_refine.png"))
+    println("Saved convergence_with_refine.png")
+
+    # ── Figure 2: convergence_with_beta_z.png ────────────────────────────────
     xv2 = [r.β_z for r in rows_B]
 
-    q2a = plot(xv2, [r.q_efit for r in rows_B];  yscale=:log10, marker=:circle,
-               title="q vs efit", xlabel="β_z", legend=false)
-    q2b = plot(xv2, [r.q_hires for r in rows_B]; yscale=:log10, marker=:circle,
-               title="q vs hi-res", xlabel="β_z", legend=false)
-    d2a = plot(xv2, [r.dv_efit for r in rows_B];  yscale=:log10, marker=:circle,
-               title="dV/dψ vs efit", xlabel="β_z", legend=false)
-    d2b = plot(xv2, [r.dv_hires for r in rows_B]; yscale=:log10, marker=:circle,
-               title="dV/dψ vs hi-res", xlabel="β_z", legend=false)
+    q2a = plot(xv2, yfloor([r.q_efit for r in rows_B]);  yscale=:log10, marker=:circle,
+               title="|Δq| vs efit", xlabel="β_z", ylabel="|Δq| max", SP...)
+    q2b = plot(xv2, yfloor([r.q_hires for r in rows_B]); yscale=:log10, marker=:circle,
+               title="|Δq| vs hi-res", xlabel="β_z", ylabel="|Δq| max", SP...)
+    d2a = plot(xv2, yfloor([r.dv_efit for r in rows_B]);  yscale=:log10, marker=:circle,
+               title="|ΔdV/dψ| vs efit", xlabel="β_z", ylabel="|ΔdV/dψ| max", SP...)
+    d2b = plot(xv2, yfloor([r.dv_hires for r in rows_B]); yscale=:log10, marker=:circle,
+               title="|ΔdV/dψ| vs hi-res", xlabel="β_z", ylabel="|ΔdV/dψ| max", SP...)
     rt2 = plot(xv2, [r.rt_err for r in rows_B];   yscale=:log10, marker=:circle,
-               title="roundtrip error (edge)", xlabel="β_z", legend=false)
-    r2b = plot(; yscale=:log10, title="r² vs hi-res per θ", xlabel="β_z", ylabel="|Δr²| max")
+               title="roundtrip error (ψ>0.80)", xlabel="β_z", ylabel="max |Δψ|", SP...)
+    r2b = plot(; yscale=:log10, title="r² vs hi-res per θ", xlabel="β_z",
+               ylabel="|Δr²| max", SP...)
     for (iθ, θ) in enumerate(θ_vals)
         plot!(r2b, xv2, [r.r2_hires_per_theta[θ] for r in rows_B];
               marker=:circle, label=θ_labels[iθ], color=θ_colors[iθ])
     end
 
-    savefig(plot(q2a, q2b, d2a, d2b, rt2, r2b; layout=(3,2), size=(900,800)),
-            joinpath(outdir, "conv_bz.png"))
-    println("Saved conv_bz.png")
+    savefig(plot(q2a, q2b, d2a, d2b, rt2, r2b; layout=(3,2), size=(1000,900)),
+            joinpath(outdir, "convergence_with_beta_z.png"))
+    println("Saved convergence_with_beta_z.png")
 
-    # ── Figure 2b: conv_rf.png (adaptive Sweep C) ─────────────────────────────
+    # ── Figure 3: convergence_with_resolution_factor.png ─────────────────────
     xv3 = [r.resolution_factor for r in rows_C]
+    rt_C = [r.runtime for r in rows_C]
 
-    q3a = plot(xv3, [r.q_efit for r in rows_C];  yscale=:log10, marker=:circle,
-               title="q vs efit", xlabel="resolution_factor", legend=false)
-    vline!(q3a, [1.0]; color=:gray, ls=:dash)
-    q3b = plot(xv3, [r.q_hires for r in rows_C]; yscale=:log10, marker=:circle,
-               title="q vs hi-res", xlabel="resolution_factor", legend=false)
-    vline!(q3b, [1.0]; color=:gray, ls=:dash)
-    d3a = plot(xv3, [r.dv_efit for r in rows_C];  yscale=:log10, marker=:circle,
-               title="dV/dψ vs efit", xlabel="resolution_factor", legend=false)
-    d3b = plot(xv3, [r.dv_hires for r in rows_C]; yscale=:log10, marker=:circle,
-               title="dV/dψ vs hi-res", xlabel="resolution_factor", legend=false)
+    q3a = plot(xv3, yfloor([r.q_efit for r in rows_C]);  yscale=:log10, marker=:circle,
+               title="|Δq| vs efit", xlabel="resolution_factor", ylabel="|Δq| max", SP...)
+    vline!(q3a, [1.0]; color=:gray, ls=:dash, label=false)
+    q3b = plot(xv3, yfloor([r.q_hires for r in rows_C]); yscale=:log10, marker=:circle,
+               title="|Δq| vs hi-res", xlabel="resolution_factor", ylabel="|Δq| max", SP...)
+    vline!(q3b, [1.0]; color=:gray, ls=:dash, label=false)
+    d3a = plot(xv3, yfloor([r.dv_efit for r in rows_C]);  yscale=:log10, marker=:circle,
+               title="|ΔdV/dψ| vs efit", xlabel="resolution_factor", ylabel="|ΔdV/dψ| max", SP...)
+    vline!(d3a, [1.0]; color=:gray, ls=:dash, label=false)
+    d3b = plot(xv3, yfloor([r.dv_hires for r in rows_C]); yscale=:log10, marker=:circle,
+               title="|ΔdV/dψ| vs hi-res", xlabel="resolution_factor", ylabel="|ΔdV/dψ| max", SP...)
+    vline!(d3b, [1.0]; color=:gray, ls=:dash, label=false)
     rt3 = plot(xv3, [r.rt_err for r in rows_C];   yscale=:log10, marker=:circle,
-               title="roundtrip error (edge)", xlabel="resolution_factor", legend=false)
-    vline!(rt3, [1.0]; color=:gray, ls=:dash, label="default rf=1")
-    r3b = plot(; yscale=:log10, title="r² vs hi-res per θ", xlabel="resolution_factor", ylabel="|Δr²| max")
-    for (iθ, θ) in enumerate(θ_vals)
-        plot!(r3b, xv3, [r.r2_hires_per_theta[θ] for r in rows_C];
-              marker=:circle, label=θ_labels[iθ], color=θ_colors[iθ])
-    end
+               title="roundtrip error (ψ>0.80)", xlabel="resolution_factor", ylabel="max |Δψ|", SP...)
+    vline!(rt3, [1.0]; color=:gray, ls=:dash, label="rf=1 default")
+    p6c = plot(; title="runtime vs resolution_factor", xlabel="resolution_factor",
+               ylabel="runtime (s)", SP...)
+    plot!(p6c, xv3, rt_C; marker=:circle, color=:black, label=false)
+    vline!(p6c, [1.0]; color=:gray, ls=:dash, label=false)
 
-    savefig(plot(q3a, q3b, d3a, d3b, rt3, r3b; layout=(3,2), size=(900,800)),
-            joinpath(outdir, "conv_rf.png"))
-    println("Saved conv_rf.png")
+    savefig(plot(q3a, q3b, d3a, d3b, rt3, p6c; layout=(3,2), size=(1000,900)),
+            joinpath(outdir, "convergence_with_resolution_factor.png"))
+    println("Saved convergence_with_resolution_factor.png")
 
-    # ── Figure 3: pareto.png ──────────────────────────────────────────────────
-    par = plot(; title="Pareto: accuracy vs cost (ψ>0.80)",
-               xlabel="runtime (s)", ylabel="max roundtrip |Δψ|", yscale=:log10)
+    # ── Figure 4: accuracy_vs_runtime_pareto.png ─────────────────────────────
+    par = plot(; title="Accuracy vs runtime (ψ>0.80)",
+               xlabel="runtime (s)", ylabel="max roundtrip |Δψ|", yscale=:log10,
+               SP..., size=(700,500))
     scatter!(par, [r.runtime for r in rows_A], [r.rt_err for r in rows_A];
-             color=:royalblue, markershape=:circle, ms=8, label="refine sweep")
+             color=:royalblue, markershape=:circle, ms=8, label="refine sweep (β_z=2)")
     for r in rows_A
         annotate!(par, r.runtime, r.rt_err, text("r=$(r.refine)", 7, :left))
     end
     scatter!(par, [r.runtime for r in rows_B], [r.rt_err for r in rows_B];
-             color=:crimson, markershape=:diamond, ms=8, label="β_z sweep")
+             color=:crimson, markershape=:diamond, ms=8, label="β_z sweep (refine=5)")
     for r in rows_B
         annotate!(par, r.runtime, r.rt_err, text("β=$(r.β_z)", 7, :left))
     end
     scatter!(par, [r.runtime for r in rows_C], [r.rt_err for r in rows_C];
-             color=:forestgreen, markershape=:star5, ms=10, label="adaptive rf sweep")
+             color=:forestgreen, markershape=:star5, ms=10, label="adaptive (resolution_factor sweep)")
     for r in rows_C
         annotate!(par, r.runtime, r.rt_err, text("rf=$(r.resolution_factor)", 7, :left))
     end
-    savefig(par, joinpath(outdir, "pareto.png"))
-    println("Saved pareto.png")
+    savefig(par, joinpath(outdir, "accuracy_vs_runtime_pareto.png"))
+    println("Saved accuracy_vs_runtime_pareto.png")
 
-    # ── Figure 5: hreq_profile.png ────────────────────────────────────────────
-    # Show dR_req and dZ_req sampled around the LCFS to show what drives the adaptive grid.
+    # ── Figure 5: lcfs_required_cell_widths.png ───────────────────────────────
+    # Show dR_req and dZ_req around the LCFS to visualise what drives the adaptive grid.
     try
         import Contour as Ctr_bench
-        psio_b = raw_input.psio
+        psio_b    = raw_input.psio
         psihigh_b = cfg_base.psihigh
-        mpsi_b = cfg_base.mpsi
-        psilow_b = cfg_base.psilow
-        Δψ_b = psio_b * (psihigh_b - psilow_b) / mpsi_b
+        Δψ_b      = psio_b * (psihigh_b - cfg_base.psilow) / cfg_base.mpsi
         ψ_coarse_b = raw_input.psi_in.nodal_derivs.partials[1, :, :]
-        ψ_bbox_b = psio_b * max(1.0 - psihigh_b, 1e-3)
-        cl_b = Ctr_bench.contour(raw_input.psi_in_xs, raw_input.psi_in_ys, ψ_coarse_b, ψ_bbox_b)
+        ψ_bbox_b   = psio_b * max(1.0 - psihigh_b, 1e-3)
+        cl_b  = Ctr_bench.contour(raw_input.psi_in_xs, raw_input.psi_in_ys, ψ_coarse_b, ψ_bbox_b)
         lcfs_b = Equilibrium.select_plasma_contour(Ctr_bench.lines(cl_b), pe_efit.ro, pe_efit.zo)
         if lcfs_b !== nothing
             verts_b = Ctr_bench.vertices(lcfs_b)
-            Rs_b = [v[1] for v in verts_b]
-            Zs_b = [v[2] for v in verts_b]
+            ro_b, zo_b = pe_efit.ro, pe_efit.zo
+
+            # Sort vertices by geometric angle so the line plot follows the contour
+            # without a wrap-around artifact. Drop the duplicate closing vertex first.
+            nv_b = length(verts_b)
+            if nv_b > 1
+                r1, z1 = verts_b[1]; rn, zn = verts_b[nv_b]
+                if abs(r1-rn) < 1e-8 && abs(z1-zn) < 1e-8
+                    nv_b -= 1
+                end
+            end
+            angles_unsorted = [mod(atan(verts_b[i][2]-zo_b, verts_b[i][1]-ro_b), 2π) for i in 1:nv_b]
+            idx_sort = sortperm(angles_unsorted)
+            angles_b = angles_unsorted[idx_sort] .* (180/π)
+            verts_sorted = verts_b[idx_sort]
+
             dR_req_b = Float64[]
             dZ_req_b = Float64[]
-            for (R, Z) in verts_b
+            Rs_b = Float64[]; Zs_b = Float64[]
+            for (R, Z) in verts_sorted
+                push!(Rs_b, R); push!(Zs_b, Z)
                 ψ_RR = abs(raw_input.psi_in((R, Z); deriv=Val((2, 0))))
                 ψ_ZZ = abs(raw_input.psi_in((R, Z); deriv=Val((0, 2))))
                 push!(dR_req_b, ψ_RR > 0 ? sqrt(8 * Δψ_b / ψ_RR) * 1000 : NaN)
                 push!(dZ_req_b, ψ_ZZ > 0 ? sqrt(8 * Δψ_b / ψ_ZZ) * 1000 : NaN)
             end
-            # Angle along LCFS for x-axis
-            ro_b, zo_b = pe_efit.ro, pe_efit.zo
-            angles_b = [mod(atan(Z - zo_b, R - ro_b), 2π) * 180/π for (R, Z) in verts_b]
 
             hp1 = plot(angles_b, dR_req_b; marker=:none, lw=1.5, color=:royalblue,
-                       xlabel="geometric angle (°)", ylabel="dR_req (mm)",
-                       title="Required R cell width along LCFS", legend=false)
+                       xlabel="geometric angle (°)", ylabel="required dR (mm)",
+                       title="Required R cell width along LCFS", xlims=(0,360), SP...)
             hp2 = plot(angles_b, dZ_req_b; marker=:none, lw=1.5, color=:crimson,
-                       xlabel="geometric angle (°)", ylabel="dZ_req (mm)",
-                       title="Required Z cell width along LCFS", legend=false)
+                       xlabel="geometric angle (°)", ylabel="required dZ (mm)",
+                       title="Required Z cell width along LCFS", xlims=(0,360), SP...)
             hp3 = plot(Rs_b, Zs_b; marker=:none, lw=1.5, color=:black,
-                       xlabel="R (m)", ylabel="Z (m)", title="LCFS shape", aspect_ratio=:equal, legend=false)
-            savefig(plot(hp1, hp2, hp3; layout=(1,3), size=(1200,350)),
-                    joinpath(outdir, "hreq_profile.png"))
-            println("Saved hreq_profile.png")
+                       xlabel="R (m)", ylabel="Z (m)", title="LCFS",
+                       aspect_ratio=:equal, SP...)
+            savefig(plot(hp1, hp2, hp3; layout=(1,3), size=(1200,420)),
+                    joinpath(outdir, "lcfs_required_cell_widths.png"))
+            println("Saved lcfs_required_cell_widths.png")
         end
     catch e
-        @warn "hreq_profile.png skipped: $e"
+        @warn "lcfs_required_cell_widths.png skipped: $e"
     end
 
-    # ── Figure 4: surfaces_xpt.png ────────────────────────────────────────────
+    # ── Figure 6: outer_surface_shape.png ────────────────────────────────────
     function surface_RZ(pe, ψ_val, θ_dense)
         Rv = Float64[]; Zv = Float64[]
         for θ in θ_dense
-            r2  = pe.rzphi_rsquared((ψ_val, θ))
-            off = pe.rzphi_offset((ψ_val, θ))
+            r2   = pe.rzphi_rsquared((ψ_val, θ))
+            off  = pe.rzphi_offset((ψ_val, θ))
             rfac = sqrt(max(r2, 0.0))
-            η = 2π * (θ + off)
+            η    = 2π * (θ + off)
             push!(Rv, pe.ro + rfac * cos(η))
             push!(Zv, pe.zo + rfac * sin(η))
         end
@@ -471,9 +493,9 @@ try
     colors_B = palette(:plasma,  length(rows_B))
 
     sR_A = plot(collect(θ_dense), Rv_ref; color=:black, ls=:dash, lw=2,
-                title="R(θ) — refine sweep", xlabel="θ", ylabel="R (m)", label="efit ref")
+                title="R(θ) — refine sweep", xlabel="θ", ylabel="R (m)", label="efit ref", SP...)
     sZ_A = plot(collect(θ_dense), Zv_ref; color=:black, ls=:dash, lw=2,
-                title="Z(θ) — refine sweep", xlabel="θ", ylabel="Z (m)", label="efit ref")
+                title="Z(θ) — refine sweep", xlabel="θ", ylabel="Z (m)", label="efit ref", SP...)
     for (i, r) in enumerate(rows_A)
         pe_tmp, _ = run_inv(cfg_base, r.refine, r.β_z)
         Rv, Zv = surface_RZ(pe_tmp, ψ_show, θ_dense)
@@ -482,9 +504,9 @@ try
     end
 
     sR_B = plot(collect(θ_dense), Rv_ref; color=:black, ls=:dash, lw=2,
-                title="R(θ) — β_z sweep", xlabel="θ", ylabel="R (m)", label="efit ref")
+                title="R(θ) — β_z sweep", xlabel="θ", ylabel="R (m)", label="efit ref", SP...)
     sZ_B = plot(collect(θ_dense), Zv_ref; color=:black, ls=:dash, lw=2,
-                title="Z(θ) — β_z sweep", xlabel="θ", ylabel="Z (m)", label="efit ref")
+                title="Z(θ) — β_z sweep", xlabel="θ", ylabel="Z (m)", label="efit ref", SP...)
     for (i, r) in enumerate(rows_B)
         pe_tmp, _ = run_inv(cfg_base, r.refine, r.β_z)
         Rv, Zv = surface_RZ(pe_tmp, ψ_show, θ_dense)
@@ -492,9 +514,9 @@ try
         plot!(sZ_B, collect(θ_dense), Zv; color=colors_B[i], lw=1.5, label=false)
     end
 
-    savefig(plot(sR_A, sZ_A, sR_B, sZ_B; layout=(2,2), size=(900,600)),
-            joinpath(outdir, "surfaces_xpt.png"))
-    println("Saved surfaces_xpt.png")
+    savefig(plot(sR_A, sZ_A, sR_B, sZ_B; layout=(2,2), size=(1000,700)),
+            joinpath(outdir, "outer_surface_shape.png"))
+    println("Saved outer_surface_shape.png")
 
 catch e
     @warn "Plotting skipped (Plots not available or error): $e"
