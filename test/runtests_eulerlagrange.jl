@@ -220,7 +220,6 @@ end
         @test odet.fixstep[1] == odet.step - 1 # fixstep should be set
         @test odet.sing_flag[1] == false # sing_flag should match input
 
-        # --- Real Fortran data check ---
         mpert = 31
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(mpert, 10, 10, 10)
         # We'll load in Fortran data for u pulled before and after a fixup

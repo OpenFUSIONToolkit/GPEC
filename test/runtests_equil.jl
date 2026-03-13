@@ -1,11 +1,8 @@
 
 @testset "Equilibrium Unit Tests" begin
 
-    # --- Directory Configuration ---
-    # Define the data directory for easy maintenance
     data_dir = joinpath(@__DIR__, "test_data", "regression_equilibrium_example")
 
-    # --- 1. Load EFIT Data (G-EQDSK format) ---
     @testset "Load EFIT Data" begin
         efit_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
@@ -21,7 +18,6 @@
         @test 6.5 < plasma_eq_efit.ro < 7.5 # Physical sanity check
     end
 
-    # --- 2. Load EFIT data via arc-length field-line ODE ---
     @testset "Load EFIT Data (arclength)" begin
         arclength_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
@@ -46,7 +42,6 @@
         @test all(>(0), B_nodes)
     end
 
-    # --- 3. Load EFIT data via contour inversion ---
     @testset "Load EFIT Data (by_inversion)" begin
         inversion_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "EQDSK_COCOS_02"),
@@ -71,7 +66,6 @@
         @test all(>(0), B_nodes)
     end
 
-    # --- 4. EFIT method consistency ---
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
         # Tolerance is 5% to allow for method-specific discretisation differences.
@@ -89,7 +83,6 @@
         @test isapprox(q_inversion[end], q_efit[end], rtol=0.10)
     end
 
-    # --- 6. Load CHEASE Binary Data ---
     @testset "Load CHEASE Binary" begin
         binary_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_binary"),
@@ -106,7 +99,6 @@
         @test plasma_eq_binary isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
 
-    # --- 7. Load CHEASE ASCII Data ---
     @testset "Load CHEASE ASCII" begin
         ascii_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(;
             eq_filename=joinpath(data_dir, "INP1_ascii"),
@@ -122,10 +114,6 @@
 
         @test plasma_eq_ascii isa GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium
     end
-
-    # ----------------------------------------------------------------------
-    # Further Validation Tests using the loaded data
-    # ----------------------------------------------------------------------
 
     @testset "CHEASE Consistency (ASCII vs Binary)" begin
         # Tolerance set to 1e-12 as these come from the same physical source
@@ -222,8 +210,6 @@
     end
 
     @testset "Solovev Equilibrium" begin
-        # --- Helper constructors ---
-        # Minimal valid inputs
         function make_inputs(; mr=4, mz=4, ma=4, e=1.7, a=0.3, r0=1.7, q0=1.0,
             p0fac=1.2, b0fac=1.0, f0fac=1.0)
             equil_inputs = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig()  # or mock/minimal constructor
