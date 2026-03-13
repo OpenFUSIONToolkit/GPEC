@@ -30,6 +30,10 @@ using TOML, Printf, Statistics
 example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIIID-like_ideal_example")
 config_path  = joinpath(example_path, "gpec.toml")
 
+outdir = joinpath(@__DIR__, "equil_inv_grid_sensitivity")
+mkpath(outdir)
+println("Output   : $outdir\n")
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 function make_config(path, eq_type; mpsi=128, mtheta=256)
@@ -57,7 +61,7 @@ function profile_errors(pe, ref_q, ref_dvdpsi, psi_eval)
     dv_errs  = Float64[]
     for ψ in psi_eval
         push!(q_errs,  abs(pe.profiles.q_spline(ψ)      - ref_q(ψ)))
-        push!(dv_errs, abs(pe.profiles.dvdpsi_spline(ψ) - ref_dvdpsi(ψ)))
+        push!(dv_errs, abs(pe.profiles.dVdpsi_spline(ψ) - ref_dvdpsi(ψ)))
     end
     return maximum(q_errs), maximum(dv_errs)
 end
@@ -140,9 +144,9 @@ psi_eval = range(0.80, cfg_base.psihigh - 0.002, length=40) |> collect
 
 # Spline accessors for efit reference
 ref_q_efit     = pe_efit.profiles.q_spline
-ref_dvdpsi_efit = pe_efit.profiles.dvdpsi_spline
+ref_dvdpsi_efit = pe_efit.profiles.dVdpsi_spline
 ref_q_hires     = pe_hires.profiles.q_spline
-ref_dvdpsi_hires = pe_hires.profiles.dvdpsi_spline
+ref_dvdpsi_hires = pe_hires.profiles.dVdpsi_spline
 
 # JIT warmup
 println("  JIT warmup…")
@@ -243,8 +247,8 @@ function write_csv(rows, path)
     end
 end
 
-write_csv(rows_A, joinpath(example_path, "equil_inv_sweep_refine.csv"))
-write_csv(rows_B, joinpath(example_path, "equil_inv_sweep_bz.csv"))
+write_csv(rows_A, joinpath(outdir, "equil_inv_sweep_refine.csv"))
+write_csv(rows_B, joinpath(outdir, "equil_inv_sweep_bz.csv"))
 println("\nCSV results saved.")
 
 # ── Plots ─────────────────────────────────────────────────────────────────────
@@ -276,7 +280,7 @@ try
     end
 
     savefig(plot(p1, p2, p3, p4, p5, p6; layout=(3,2), size=(900,800)),
-            joinpath(example_path, "conv_refine.png"))
+            joinpath(outdir, "conv_refine.png"))
     println("Saved conv_refine.png")
 
     # ── Figure 2: conv_bz.png ─────────────────────────────────────────────────
@@ -303,7 +307,7 @@ try
     end
 
     savefig(plot(q2a, q2b, d2a, d2b, rt2, r2b; layout=(3,2), size=(900,800)),
-            joinpath(example_path, "conv_bz.png"))
+            joinpath(outdir, "conv_bz.png"))
     println("Saved conv_bz.png")
 
     # ── Figure 3: pareto.png ──────────────────────────────────────────────────
@@ -319,7 +323,7 @@ try
     for r in rows_B
         annotate!(par, r.runtime, r.rt_err, text("β=$(r.β_z)", 7, :left))
     end
-    savefig(par, joinpath(example_path, "pareto.png"))
+    savefig(par, joinpath(outdir, "pareto.png"))
     println("Saved pareto.png")
 
     # ── Figure 4: surfaces_xpt.png ────────────────────────────────────────────
@@ -366,11 +370,12 @@ try
     end
 
     savefig(plot(sR_A, sZ_A, sR_B, sZ_B; layout=(2,2), size=(900,600)),
-            joinpath(example_path, "surfaces_xpt.png"))
+            joinpath(outdir, "surfaces_xpt.png"))
     println("Saved surfaces_xpt.png")
 
 catch e
     @warn "Plotting skipped (Plots not available or error): $e"
 end
 
-println("\nDone.")
+println("\nAll figures saved to: $outdir")
+println("Done.")
