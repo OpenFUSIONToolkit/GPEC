@@ -87,6 +87,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         elseif jac_type != "other"
             error("Cannot recognize jac_type = $(jac_type)")
         end
+        psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
             grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
             force_termination, use_galgrid)

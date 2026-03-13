@@ -5,16 +5,6 @@ Traces level sets of ψ(R,Z) using marching squares (`Contour.jl`), resamples ea
 closed curve to a uniform geometric-angle grid, constructs an `InverseRunInput`,
 and delegates to the existing `equilibrium_solver(::InverseRunInput)`.
 
-This completely eliminates the field-line ODE, `direct_refine`, and the denominator
-singularity. Robustness near the separatrix comes from Contour.jl naturally handling
-the topological change as ψ → 1: the plasma interior curve remains closed and
-well-traced, while open curves (touching the domain boundary) are discarded.
-
-Near x-points the outermost flux surfaces have sharply curved arms that can exceed
-the resolution of a uniform fine grid. A sinh-stretched Z coordinate concentrates
-grid points near the x-point(s).
-Contour.jl accepts non-uniform coordinate vectors natively and returns physical (R,Z).
-
 Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 
@@ -36,9 +26,7 @@ end
 """
     _point_in_polygon_verts(verts, r_test, z_test)
 
-Ray-casting point-in-polygon test operating directly on the `vertices` vector
-returned by `Ctr.vertices`. Avoids allocating the separate R/Z vectors that
-`Ctr.coordinates` would produce.
+Ray-casting point-in-polygon test on a `Ctr.vertices` vector.
 """
 function _point_in_polygon_verts(verts, r_test::Float64, z_test::Float64)::Bool
     n = length(verts)
@@ -62,12 +50,9 @@ end
     select_plasma_contour(curve_list, ro, zo)
 
 From the list of Contour.jl curves at a given ψ level, return the closed curve
-whose interior contains the magnetic axis (ro, zo). This is the plasma flux surface.
+whose interior contains the magnetic axis (ro, zo).
 
-Returns `nothing` if no qualifying closed curve is found (psihigh has exceeded
-the separatrix, or the target ψ is outside the EFIT domain).
-
-Uses `Ctr.vertices` directly to avoid allocating coordinate vectors for rejected curves.
+Returns `nothing` if no qualifying closed curve is found.
 """
 function select_plasma_contour(curve_list, ro::Float64, zo::Float64)
     for curve in curve_list
@@ -82,9 +67,8 @@ end
     clamp_psihigh_to_separatrix(raw_profile) -> (clamped_psihigh, was_adjusted)
 
 Binary-searches for the highest psihigh ≤ raw_profile.config.psihigh at which the
-ψ level set is still a closed curve in the EFIT grid, using the same coarse-grid
-contour check as the by-inversion solver. Returns the safe value and a Bool indicating
-whether any clamping occurred. Typically completes in ~20 iterations (~5 ms).
+ψ level set is still a closed curve in the EFIT grid. Returns the safe value and a
+Bool indicating whether any clamping occurred.
 """
 function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
     psihigh = raw_profile.config.psihigh
@@ -113,14 +97,8 @@ end
 
 Resample a Contour.jl curve onto a uniform geometric-angle grid, writing results
 directly into the pre-allocated `R_out` and `Z_out` vectors (views into R_table/Z_table).
-
-## Steps:
-1. Extract vertices directly from `Ctr.vertices` (avoids `coordinates` allocation)
-2. Compute geometric angles: `η_k = mod(atan(Z_k−zo, R_k−ro), 2π)` in a single pass
-3. Sort by η (CCW ordering around the magnetic axis)
-4. Append first point at η + 2π to close the periodic spline
-5. Build cubic splines R(η), Z(η) with LinearBinary search
-6. Sample at each `theta_grid` point using shared hints (O(1) searches)
+Sorts vertices by geometric angle η, appends a periodic wrap point, fits cubic splines
+R(η) and Z(η), then samples at each `theta_grid` point.
 """
 function resample_contour_to_theta_grid!(
     R_out::AbstractVector{Float64}, Z_out::AbstractVector{Float64},
@@ -138,7 +116,7 @@ function resample_contour_to_theta_grid!(
         end
     end
 
-    # Compute angles and extract R/Z in a single pass (no broadcast temporaries)
+    # Compute angles and extract R/Z in a single pass
     η_buf = Vector{Float64}(undef, nv)
     R_buf = Vector{Float64}(undef, nv)
     Z_buf = Vector{Float64}(undef, nv)
@@ -187,12 +165,7 @@ end
 Classify the plasma topology as `:limited`, `:sn_lower`, `:sn_upper`, or `:double_null`
 by evaluating ψ on the (R, Z) grid and finding the minimum in each Z half-domain.
 
-An x-point is detected when the minimum ψ in a half-domain falls below
-`xpt_threshold * psio` (i.e., within 5% of the separatrix by default).
-
-Uses the public `psi_in` interpolant interface with `LinearBinary` hints: within each
-Z row, the R hint carries forward (R is monotone), and the Z hint advances naturally
-across rows. This avoids coupling to internal spline layout while remaining efficient.
+An x-point is detected when the minimum ψ in a half-domain falls below `xpt_threshold * psio`.
 """
 function classify_topology(raw_profile::DirectRunInput, psio::Float64;
                            xpt_threshold::Float64=0.05)

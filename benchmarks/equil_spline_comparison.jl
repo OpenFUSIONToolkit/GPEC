@@ -85,8 +85,6 @@ for m in all_methods
         println("  Done.\n")
     catch e
         println("  FAILED: $e\n")
-        Base.show_backtrace(stderr, catch_backtrace())
-        println(stderr)
     end
 end
 

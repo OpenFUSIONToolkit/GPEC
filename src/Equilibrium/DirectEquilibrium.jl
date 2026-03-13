@@ -392,9 +392,8 @@ robustness.
     including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
-@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput)
+@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int)
 
-    # Shorthand
     equil_params = raw_profile.config
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
@@ -402,22 +401,16 @@ robustness.
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # TODO: there's some fortran logic for grid_type = original that should be added when needed.
-
-    # Set up radial and poloidal grid
     psi_nodes = Array{Float64}(undef, mpsi + 1)
     if equil_params.grid_type == "ldp"
         psi_nodes .= [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     else
-        # TODO: add additional grid types
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
-    # Find radial position of magnetic axis and separatrix
     ro, zo, rs1, rs2 = direct_position!(raw_profile)
 
-    # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
     rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
 
@@ -425,13 +418,10 @@ robustness.
     ff_deriv_val = zeros!(pool, Float64, 4)
 
     for ipsi in (mpsi+1):-1:1
-        # Integrate along the field line for this surface
-        y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
+        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
 
-        # checkpoint pool for Float64 slot
         checkpoint!(pool, Float64)
 
-        # Fit data into temporary straight fieldline poloidal angle splines
         ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
         @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
 
@@ -441,18 +431,13 @@ robustness.
         @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
         @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
-        # Enforce exact endpoint matching for periodic data (removes floating-point noise)
-        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
-        # Create series interpolant for all columns
         ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
-        # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
-
-            # In-place operation to avoid allocations
             ff_interp(ff_val, theta)
             ff_deriv(ff_deriv_val, theta)
 
@@ -462,17 +447,14 @@ robustness.
             rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
         end
 
-        # Store surface-averaged quantities for the `sq` spline
         sq_nodes[ipsi, 1] = bfield.f * 2π
         sq_nodes[ipsi, 2] = bfield.p
         sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
 
-        # rewind pool for Float64 slot
         rewind!(pool, Float64)
     end
 
-    # Create temporary ProfileSplines for q-profile revision calculation
     profiles = ProfileSplines(
         psi_nodes,
         sq_nodes[:, 1],  # F * 2π
@@ -480,7 +462,7 @@ robustness.
         sq_nodes[:, 3],  # dV/dψ
         sq_nodes[:, 4]   # q
     )
-    # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
+    # q(0) by linear extrapolation from innermost surface
     q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
@@ -495,7 +477,6 @@ robustness.
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
         end
-        # Re-create profiles with the revised data
         profiles = ProfileSplines(
             psi_nodes,
             sq_nodes[:, 1],  # F * 2π
@@ -504,16 +485,12 @@ robustness.
             sq_nodes[:, 4]   # q
         )
     end
-    # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
-    # theta_nodes includes both 0 and 1 (closed periodic grid).
+
     rzphi_xs = psi_nodes
-    # rzphi_ys is the materialized Vector stored in PlasmaEquilibrium for indexing/diagnostics.
-    # The Range form (theta_nodes) is used for the interpolant: it skips index search during
-    # evaluation (O(1) vs binary search) and may differ at machine-precision level from Vector.
+    # rzphi_ys is a materialized Vector (not the Range) so PlasmaEquilibrium can index it directly
     rzphi_ys = collect(theta_nodes)
 
     grid2d = (rzphi_xs, theta_nodes)
-
     opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
@@ -521,8 +498,6 @@ robustness.
     rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
     rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
 
-    # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
-    # for use in stability and transport codes
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
@@ -530,8 +505,6 @@ robustness.
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            # Access nodal derivatives from the interpolants (grid points)
-            # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
             f = (
                 rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
@@ -550,32 +523,29 @@ robustness.
                 rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
             )
-            rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
+            rfac = sqrt(max(0.0, f[1]))  # guard against spline overshoot near separatrix
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
             jacfac = f[4]
 
-            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) * d(rfac)/d(psi_norm)
-            v[1, 2] = fx[2] * 2π * rfac                             # 2π*rfac * d(eta)/d(psi_norm)
-            v[1, 3] = fx[3] * r                                     # r * d(phi_s)/d(psi_norm)
-            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) d(rfac)/d(theta_new)
-            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                     # 2π*rfac * d(eta)/d(theta_new)
-            v[2, 3] = fy[3] * r                                     # r * d(phi_s)/d(theta_new)
+            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) * d(rfac)/d(psi_norm)
+            v[1, 2] = fx[2] * 2π * rfac                          # 2π*rfac * d(eta)/d(psi_norm)
+            v[1, 3] = fx[3] * r                                   # r * d(phi_s)/d(psi_norm)
+            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) d(rfac)/d(theta_new)
+            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                  # 2π*rfac * d(eta)/d(theta_new)
+            v[2, 3] = fy[3] * r                                   # r * d(phi_s)/d(theta_new)
             v33 = 2π * r
             w11 = (jacfac != 0) ? (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac : 0.0
             w12 = (jacfac * rfac != 0) ? -fy[1] * π * r / (rfac * jacfac) : 0.0
             delpsi_norm = sqrt(w11^2 + w12^2)
             modB = sqrt(((2π * psio * delpsi_norm)^2 + f_val^2) / (2π * r)^2)
 
-            # Fill in eqfun nodes
             eqfun_fs_nodes[ipsi, itheta, 1] = modB
             denom = jacfac * modB^2
             if abs(denom) > 1e-20
-                # Gyrokinetic coefficient C1
-                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]
+                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]  # gyrokinetic C1
                 eqfun_fs_nodes[ipsi, itheta, 2] = numerator_2 / denom
-                # Gyrokinetic coefficient C2
-                numerator_3 = v[2, 3] * v33 + q * v33^2
+                numerator_3 = v[2, 3] * v33 + q * v33^2                  # gyrokinetic C2
                 eqfun_fs_nodes[ipsi, itheta, 3] = numerator_3 / denom
             else
                 eqfun_fs_nodes[ipsi, itheta, 2] = 0.0
@@ -583,7 +553,7 @@ robustness.
             end
         end
     end
-    # Create 2D interpolants for physics quantities (eqfun)
+
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)

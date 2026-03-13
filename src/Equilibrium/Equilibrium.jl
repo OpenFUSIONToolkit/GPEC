@@ -28,17 +28,8 @@ const mu0 = 4π * 1e-7
 """
     setup_equilibrium(eq_config::EquilibriumConfig)
 
-The main public API for the `Equilibrium` module. It orchestrates the entire
-process of reading an equilibrium file, running the appropriate solver, and
-returning the final processed `PlasmaEquilibrium` object.
-
-## Arguments:
-
-  - `eq_config`: An `EquilibriumConfig` object containing all necessary setup parameters.
-
-## Returns:
-
-  - A `PlasmaEquilibrium` object containing the final result.
+Read an equilibrium file, run the appropriate solver, and return the processed
+`PlasmaEquilibrium` with global parameters, q-profile, and GSE diagnostics.
 """
 function setup_equilibrium(path::String="equil.toml")
     return setup_equilibrium(EquilibriumConfig(path))
@@ -46,9 +37,8 @@ end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
     eq_type = eq_config.eq_type
-    # Parse file and prepare initial data structures and splines
+
     if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
-        eq_config.psihigh = min(eq_config.psihigh, 1.0)
         eq_input = read_efit(eq_config)
         psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
         if adjusted
@@ -61,39 +51,29 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
     elseif eq_type == "lar"
-
         if additional_input === nothing
             additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
-
         eq_input = lar_run(eq_config, additional_input)
     elseif eq_type == "sol"
-
         if additional_input === nothing
             additional_input = SolovevConfig(eq_config.eq_filename)
         end
-
         eq_input = sol_run(eq_config, additional_input)
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
 
-    # Run the appropriate solver to get a PlasmaEquilibrium struct
-    if eq_type == "efit_arclength"
-        plasma_equilibrium = equilibrium_solver_arclength(eq_input)
-    elseif eq_type == "efit_by_inversion"
+    if eq_type == "efit_by_inversion"
         plasma_equilibrium = equilibrium_solver_by_inversion(eq_input)
+    elseif eq_type == "efit_arclength"
+        plasma_equilibrium = equilibrium_solver(eq_input, arclength_fieldline_int)
     else
         plasma_equilibrium = equilibrium_solver(eq_input)
     end
 
-    # add global parameters to the PlasmaEquilibrium struct
     equilibrium_global_parameters!(plasma_equilibrium)
-
-    # Find q information
     equilibrium_qfind!(plasma_equilibrium)
-
-    # Diagnoses grad-shafranov solution.
     equilibrium_gse!(plasma_equilibrium)
 
     return plasma_equilibrium
@@ -109,7 +89,6 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     mpsi = length(pe.rzphi_xs) - 1
     mtheta = length(pe.rzphi_ys) - 1
 
-    # Allocate vector to store eta offset from rzphi (direct array access at grid points)
     vector = pe.rzphi_ys .+ @view pe.rzphi_offset.nodal_derivs.partials[1, end, :]
 
     edge_idx = mpsi + 1  # Edge flux surface index
