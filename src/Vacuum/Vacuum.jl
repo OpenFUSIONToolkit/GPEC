@@ -72,12 +72,27 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 )
 
     # Initialize surface geometries
-    plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
-    wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
+    geom_timing = @timed begin
+        plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
+        wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
+    end
+    println(" Compute geometry  TIME=$(round(geom_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(geom_timing.bytes))")
 
     # Compute Fourier basis coefficients
-    ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(inputs.mtheta, inputs.mpert, inputs.mlow, inputs.nzeta, inputs.npert, inputs.nlow; n_2D=n_override, ν=ν)
+    basis_timing = @timed begin
+        ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
+        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(
+            inputs.mtheta,
+            inputs.mpert,
+            inputs.mlow,
+            inputs.nzeta,
+            inputs.npert,
+            inputs.nlow;
+            n_2D=n_override,
+            ν=ν
+        )
+    end
+    println(" Compute Fourier basis  TIME=$(round(basis_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(basis_timing.bytes))")
     num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
@@ -99,7 +114,10 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     grri = @view grri_in[1:num_points_total, :]
 
     # Plasma–Plasma block
-    kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
+    pp_kernel_timing = @timed begin
+        kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
+    end
+    println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
 
     if wall.nowall && inputs.use_galerkin
         # ================================================================
@@ -115,57 +133,60 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         # ================================================================
         temp = zeros!(pool, num_points_surf, num_modes)
 
-        # K_proj = F' * grad_green * F  [2 * num_modes × 2 * num_modes]
-        K_proj = zeros(2 * num_modes, 2 * num_modes)
-        mul!(temp, grad_green, cos_mn_basis)
-        mul!(@view(K_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
-        mul!(@view(K_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
-        mul!(temp, grad_green, sin_mn_basis)
-        mul!(@view(K_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
-        mul!(@view(K_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
+        proj_timing = @timed begin
+            # K_proj = F' * grad_green * F  [2 * num_modes × 2 * num_modes]
+            K_proj = zeros(2 * num_modes, 2 * num_modes)
+            mul!(temp, grad_green, cos_mn_basis)
+            mul!(@view(K_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
+            mul!(@view(K_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
+            mul!(temp, grad_green, sin_mn_basis)
+            mul!(@view(K_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
+            mul!(@view(K_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
 
-        # G_proj = F' * green_temp * F  [2 * num_modes × 2 * num_modes]
-        G_proj = zeros(2 * num_modes, 2 * num_modes)
-        mul!(temp, green_temp, cos_mn_basis)
-        mul!(@view(G_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
-        mul!(@view(G_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
-        mul!(temp, green_temp, sin_mn_basis)
-        mul!(@view(G_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
-        mul!(@view(G_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
+            # G_proj = F' * green_temp * F  [2 * num_modes × 2 * num_modes]
+            G_proj = zeros(2 * num_modes, 2 * num_modes)
+            mul!(temp, green_temp, cos_mn_basis)
+            mul!(@view(G_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
+            mul!(@view(G_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
+            mul!(temp, green_temp, sin_mn_basis)
+            mul!(@view(G_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
+            mul!(@view(G_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
 
-        # Gram matrix F'F (needed for interior kernel and wv normalization)
-        FtF = zeros(2 * num_modes, 2 * num_modes)
-        mul!(@view(FtF[1:num_modes, 1:num_modes]), cos_mn_basis', cos_mn_basis)
-        mul!(@view(FtF[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', sin_mn_basis)
-        mul!(@view(FtF[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', cos_mn_basis)
-        mul!(@view(FtF[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', sin_mn_basis)
+            # Gram matrix F'F (needed for interior kernel and wv normalization)
+            FtF = zeros(2 * num_modes, 2 * num_modes)
+            mul!(@view(FtF[1:num_modes, 1:num_modes]), cos_mn_basis', cos_mn_basis)
+            mul!(@view(FtF[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', sin_mn_basis)
+            mul!(@view(FtF[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', cos_mn_basis)
+            mul!(@view(FtF[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', sin_mn_basis)
 
-        # Solve projected systems via SVD-based pseudoinverse. The truncated Fourier
-        # basis with the SFL angle correction (ν) can make the projected operators
-        # rank-deficient — the interior BIE operator in particular has a physical
-        # null space (constant potential mode). The pseudoinverse finds the
-        # minimum-norm solution, correctly projecting out numerically null directions
-        # without affecting well-resolved modes.
-        Y_ext = pinv(K_proj) * G_proj
+            # Solve projected systems via SVD-based pseudoinverse. The truncated Fourier
+            # basis with the SFL angle correction (ν) can make the projected operators
+            # rank-deficient — the interior BIE operator in particular has a physical
+            # null space (constant potential mode). The pseudoinverse finds the
+            # minimum-norm solution, correctly projecting out numerically null directions
+            # without affecting well-resolved modes.
+            Y_ext = pinv(K_proj) * G_proj
 
-        # Interior kernel in projected space: K_int = -K + 2I → K_proj_int = 2*F'F - K_proj
-        K_proj_int = 2 .* FtF .- K_proj
-        Y_int = pinv(K_proj_int) * G_proj
+            # Interior kernel in projected space: K_int = -K + 2I → K_proj_int = 2*F'F - K_proj
+            K_proj_int = 2 .* FtF .- K_proj
+            Y_int = pinv(K_proj_int) * G_proj
 
-        # Reconstruct physical-space Green's functions for backward compatibility
-        # grre = F * Y = cos * Y[1:P, :] + sin * Y[P+1:2P, :]
-        mul!(grre, cos_mn_basis, @view(Y_ext[1:num_modes, :]))
-        mul!(grre, sin_mn_basis, @view(Y_ext[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
-        mul!(grri, cos_mn_basis, @view(Y_int[1:num_modes, :]))
-        mul!(grri, sin_mn_basis, @view(Y_int[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
+            # Reconstruct physical-space Green's functions for backward compatibility
+            # grre = F * Y = cos * Y[1:P, :] + sin * Y[P+1:2P, :]
+            mul!(grre, cos_mn_basis, @view(Y_ext[1:num_modes, :]))
+            mul!(grre, sin_mn_basis, @view(Y_ext[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
+            mul!(grri, cos_mn_basis, @view(Y_int[1:num_modes, :]))
+            mul!(grri, sin_mn_basis, @view(Y_int[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
 
-        # Extract wv: the [arr air; ari aii] blocks equal (4π²/M) * F'F * Y_ext,
-        # then wv = complex(arr + aii, air - ari) [Chance 2007 eq. 114]
-        wv_blocks = (4π^2 / num_points_surf) .* (FtF * Y_ext)
-        wv .= complex.(
-            @view(wv_blocks[1:num_modes, 1:num_modes]) .+ @view(wv_blocks[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]),
-            @view(wv_blocks[1:num_modes, (num_modes+1):(2*num_modes)]) .- @view(wv_blocks[(num_modes+1):(2*num_modes), 1:num_modes])
-        )
+            # Extract wv: the [arr air; ari aii] blocks equal (4π²/M) * F'F * Y_ext,
+            # then wv = complex(arr + aii, air - ari) [Chance 2007 eq. 114]
+            wv_blocks = (4π^2 / num_points_surf) .* (FtF * Y_ext)
+            wv .= complex.(
+                @view(wv_blocks[1:num_modes, 1:num_modes]) .+ @view(wv_blocks[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]),
+                @view(wv_blocks[1:num_modes, (num_modes+1):(2*num_modes)]) .- @view(wv_blocks[(num_modes+1):(2*num_modes), 1:num_modes])
+            )
+        end
+        println(" Galerkin Project and Solve  TIME=$(round(proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(proj_timing.bytes))")
     else
         # ================================================================
         # Collocation approach: solve full physical-space system [M × M]
@@ -173,45 +194,57 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         # ================================================================
 
         # FT plasma→plasma Green's function (must precede kernel! calls that overwrite green_temp)
-        fourier_transform!(grre, green_temp, cos_mn_basis)
-        fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
+        colloc_ft_timing = @timed begin
+            fourier_transform!(grre, green_temp, cos_mn_basis)
+            fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
+        end
+        println(" Plasma Fourier Transform  TIME=$(round(colloc_ft_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(colloc_ft_timing.bytes))")
 
         if !wall.nowall
-            # Plasma–Wall block
-            kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
-            # Wall–Wall block
-            kernel!(grad_green, green_temp, wall, wall, kparams)
-            # Wall–Plasma block
-            kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
-            # Fourier transform obs=wall, src=plasma block
-            fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
-            fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
+            wall_block_timing = @timed begin
+                # Plasma–Wall block
+                kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
+                # Wall–Wall block
+                kernel!(grad_green, green_temp, wall, wall, kparams)
+                # Wall–Plasma block
+                kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
+                # Fourier transform obs=wall, src=plasma block
+                fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
+                fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
+            end
+            println(" Wall Kernel and Fourier Transform  TIME=$(round(wall_block_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(wall_block_timing.bytes))")
         end
 
         # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
-        grri .= grre # start from same as exterior
-        grad_green_interior = similar!(pool, grad_green)
-        grad_green_interior .= grad_green
+        solve_timing = @timed begin
+            grri .= grre # start from same as exterior
+            grad_green_interior = similar!(pool, grad_green)
+            grad_green_interior .= grad_green
 
-        # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
-        F_ext = lu!(grad_green)
-        ldiv!(F_ext, grre)
+            # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
+            F_ext = lu!(grad_green)
+            ldiv!(F_ext, grre)
 
-        # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
-        grad_green_interior .*= -1
-        for i in 1:num_points_total
-            grad_green_interior[i, i] += 2.0
+            # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
+            grad_green_interior .*= -1
+            for i in 1:num_points_total
+                grad_green_interior[i, i] += 2.0
+            end
+            F_int = lu!(grad_green_interior)
+            ldiv!(F_int, grri)
         end
-        F_int = lu!(grad_green_interior)
-        ldiv!(F_int, grri)
+        println(" Invert and Solve  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
 
-        # Inverse Fourier transform to extract wv [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-        arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-        fourier_inverse_transform!(arr, grre, cos_mn_basis)
-        fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
-        fourier_inverse_transform!(ari, grre, sin_mn_basis)
-        fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
-        wv .= complex.(arr .+ aii, air .- ari)
+        invft_timing = @timed begin
+            # Inverse Fourier transform to extract wv [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+            arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
+            fourier_inverse_transform!(arr, grre, cos_mn_basis)
+            fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
+            fourier_inverse_transform!(ari, grre, sin_mn_basis)
+            fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
+            wv .= complex.(arr .+ aii, air .- ari)
+        end
+        println(" Compute Wv  TIME=$(round(invft_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(invft_timing.bytes))")
     end
 
     inputs.force_wv_symmetry && hermitianpart!(wv)
