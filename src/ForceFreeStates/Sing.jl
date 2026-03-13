@@ -30,7 +30,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
                 psi1 = equil.params.qextrema_psi[iex]
                 psifac = (psi0 + psi1) / 2 # initial guess for bisection
 
-                psifac = find_zero(psi -> m - n * profiles.q_spline_direct(psi; hint=hint), (psi0, psi1), Roots.Brent())
+                psifac = find_zero(psi -> m - n * profiles.q_spline(psi; hint=hint), (psi0, psi1), Roots.Brent())
 
                 if any(s -> isapprox(s.q, m / n; atol=1e-8), intr.sing)
                     # Rational surface with multiplicity > 1, add this m,n to the resonant mode numbers
@@ -60,7 +60,7 @@ function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl,
     # Stops adding surfaces when spacing between consecutive surfaces < edge_layer_width.
     if !isnothing(profiles.iota_spline)
         psihigh = equil.config.psihigh
-        q_at_psihigh = profiles.q_spline_direct.y[end]  # q at last direct-spline node
+        q_at_psihigh = profiles.q_spline.y[end]  # q at last direct-spline node
 
         for n in intr.nlow:intr.nhigh
             psi_last = psihigh
@@ -171,7 +171,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 
     # If qhigh truncates the integration before psilim, root-find for the exact psilim.
     if intr.qlim < q_at_psilim
-        q_at_psihigh = profiles.q_spline_direct.y[end]
+        q_at_psihigh = profiles.q_spline.y[end]
         if intr.qlim > q_at_psihigh && !isnothing(profiles.iota_spline)
             # qlim is in the edge zone [psihigh, psilim]: Brent bracket with iota spline.
             psilim_before = intr.psilim
@@ -182,11 +182,11 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
             intr.q1lim = eval_q(profiles, intr.psilim; deriv=1)
         else
             # qlim is in the core [psilow, psihigh]: Newton with direct spline + derivative.
-            _, jpsi = findmin(abs.(profiles.q_spline_direct.y .- intr.qlim))
+            _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
             jpsi = min(jpsi, equil.config.mpsi - 1)
             hint = Ref(jpsi)
             intr.psilim = find_zero(
-                (psi -> profiles.q_spline_direct(psi; hint=hint) - intr.qlim,
+                (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
                  psi -> profiles.q_deriv(psi; hint=hint)),
                 profiles.xs[jpsi], Roots.Newton()
             )

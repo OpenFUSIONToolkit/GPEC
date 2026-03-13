@@ -718,7 +718,7 @@ robustness.
         sq_nodes[:, 4]   # q
     )
     # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
-    q0 = profiles.q_spline_direct.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
+    q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
@@ -758,8 +758,8 @@ robustness.
         phantom_delta = 1e-4
         q0   = sq_nodes[edge_mask[end], 4]
         q1   = profiles.q_deriv(psihigh)
-        q2   = deriv2(profiles.q_spline_direct)(psihigh)
-        q3   = deriv3(profiles.q_spline_direct)(psihigh)
+        q2   = deriv2(profiles.q_spline)(psihigh)
+        q3   = deriv3(profiles.q_spline)(psihigh)
         iota1_val  = -q1 / q0^2
         iota2_val  = (2*q1^2 - q0*q2) / q0^3
         iota3_val  = (-6*q1^3 + 6*q0*q1*q2 - q0^2*q3) / q0^4
@@ -848,7 +848,7 @@ robustness.
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
-        q = profiles.q_spline_direct.y[ipsi]
+        q = profiles.q_spline.y[ipsi]
         f_val = profiles.F_spline.y[ipsi]
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]

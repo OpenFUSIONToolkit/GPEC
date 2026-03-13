@@ -454,12 +454,12 @@ Each profile is stored as a separate spline for code clarity.
   - `F_spline`: 2π*F (toroidal flux function, where F = R * B_toroidal)
   - `P_spline`: μ₀*P (plasma pressure × μ₀)
   - `dVdpsi_spline`: dV/dψ (volume derivative), direct cubic spline
-  - `q_spline_direct`: q (safety factor) cubic spline over the core grid [psilow, psihigh]
+  - `q_spline`: q (safety factor) cubic spline over the core grid [psilow, psihigh]
 
 # Derivative Interpolants (for continuous derivative evaluation)
 
   - `F_deriv`, `P_deriv`, `dVdpsi_deriv`, `q_deriv`: First derivative interpolants
-    (direct-spline derivatives; for higher-order q derivatives use `q_spline_direct(psi; deriv=k)`)
+    (direct-spline derivatives; for higher-order q derivatives use `q_spline(psi; deriv=k)`)
 
 # Edge Extension Fields (Nothing for limited plasmas)
 
@@ -482,7 +482,7 @@ mutable struct ProfileSplines{S,D}
     F_spline::S
     P_spline::S
     dVdpsi_spline::S
-    q_spline_direct::S
+    q_spline::S
     # Derivative views (callable, share data with value interpolants)
     F_deriv::D
     P_deriv::D
@@ -575,13 +575,13 @@ function eval_q(profiles::ProfileSplines, psi; deriv::Int=0, output_lower_derivs
         d3 = (-6ι1^3 + 6ι*ι1*ι2 - ι^2*ι3) / ι^4   # d³q/dψ³
         return output_lower_derivs ? (d0, d1, d2, d3) : d3
     else
-        d0 = profiles.q_spline_direct(psi; hint=hint)
+        d0 = profiles.q_spline(psi; hint=hint)
         deriv == 0 && return output_lower_derivs ? (d0,) : d0
-        d1 = profiles.q_spline_direct(psi; deriv=1, hint=hint)
+        d1 = profiles.q_spline(psi; deriv=1, hint=hint)
         deriv == 1 && return output_lower_derivs ? (d0, d1) : d1
-        d2 = profiles.q_spline_direct(psi; deriv=2, hint=hint)
+        d2 = profiles.q_spline(psi; deriv=2, hint=hint)
         deriv == 2 && return output_lower_derivs ? (d0, d1, d2) : d2
-        d3 = profiles.q_spline_direct(psi; deriv=3, hint=hint)
+        d3 = profiles.q_spline(psi; deriv=3, hint=hint)
         return output_lower_derivs ? (d0, d1, d2, d3) : d3
     end
 end

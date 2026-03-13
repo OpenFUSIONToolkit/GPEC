@@ -192,7 +192,7 @@ function main(args::Vector{String}=String[])
     # so we rely on sing rather than equil.params.qmax.
     is_diverted = !isnothing(equil.params.is_diverted) && equil.params.is_diverted
     q_for_mode_range = if is_diverted
-        isempty(intr.sing) ? equil.profiles.q_spline_direct.y[end] : intr.sing[end].q
+        isempty(intr.sing) ? equil.profiles.q_spline.y[end] : intr.sing[end].q
     else
         equil.params.qmax
     end
@@ -418,7 +418,7 @@ function write_outputs_to_HDF5(
         out_h5["splines/profiles/2piF"] = profiles.F_spline.y
         out_h5["splines/profiles/mu0p"] = profiles.P_spline.y
         out_h5["splines/profiles/dVdpsi"] = profiles.dVdpsi_spline.y
-        out_h5["splines/profiles/q"] = profiles.q_spline_direct.y
+        out_h5["splines/profiles/q"] = profiles.q_spline.y
         out_h5["splines/rzphi/xs"] = equil.rzphi_xs
         out_h5["splines/rzphi/ys"] = equil.rzphi_ys
         # Extract grid point values from interpolants for HDF5 output

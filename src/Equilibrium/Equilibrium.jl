@@ -305,7 +305,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.psi_boundary_sign = -1
     pe.params.psi_boundary_zero = false
 
-    pe.params.q0 = profiles.q_spline_direct.y[1]
+    pe.params.q0 = profiles.q_spline.y[1]
     pe.params.b0 = bt0
 
     pe.params.volume = volume
@@ -336,7 +336,7 @@ function equilibrium_qfind!(equil::PlasmaEquilibrium)
     qexl = Float64[]
 
     # Use the direct q spline for deriv2/deriv3; extremum analysis is core-region only.
-    q_spline = profiles.q_spline_direct
+    q_spline = profiles.q_spline
     q_d1 = deriv1(q_spline)
     q_d2 = deriv2(q_spline)
     q_d3 = deriv3(q_spline)

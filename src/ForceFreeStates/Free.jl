@@ -135,8 +135,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     psihigh    = profiles.xs[end]
     has_edge_q = !isnothing(profiles.iota_spline)
 
-    qedge        = profiles.q_spline_direct(ctrl.psiedge)
-    q_at_psihigh = profiles.q_spline_direct(psihigh)
+    qedge        = profiles.q_spline(ctrl.psiedge)
+    q_at_psihigh = profiles.q_spline(psihigh)
 
     # For diverted plasmas, extend the spline above psihigh using the X-point asymptotic
     # geometry — the same geometry used by the FGK splines and jmat_spline. The upper limit
@@ -156,10 +156,10 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         if qi <= q_at_psihigh || !has_edge_q
             # Core region [psiedge, psihigh]: invert q(psi) = qi using the direct spline
             psii = ctrl.psiedge + (psihigh - ctrl.psiedge) * ((qi - qedge) / (q_at_psihigh - qedge))
-            jpsi = max(1, searchsortedlast(profiles.q_spline_direct.y, qi))
+            jpsi = max(1, searchsortedlast(profiles.q_spline.y, qi))
             hint = Ref(min(jpsi, profiles.npts_minus_1))
             psi_array[i] = find_zero(
-                (psi -> profiles.q_spline_direct(psi; hint=hint) - qi,
+                (psi -> profiles.q_spline(psi; hint=hint) - qi,
                  psi -> profiles.q_deriv(psi; hint=hint)),
                 psii, Roots.Newton()
             )

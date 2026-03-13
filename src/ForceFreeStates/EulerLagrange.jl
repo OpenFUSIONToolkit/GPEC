@@ -126,14 +126,14 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     odet.psifac = profiles.xs[1]
 
     # Use Newton iteration to find starting psi if qlow is above q0
-    if ctrl.qlow > profiles.q_spline_direct.y[1]
+    if ctrl.qlow > profiles.q_spline.y[1]
         # Find last index where q < qlow
-        idx = findlast(jpsi -> profiles.q_spline_direct.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
+        idx = findlast(jpsi -> profiles.q_spline.y[jpsi-1] < ctrl.qlow, 2:profiles.npts)
         if idx !== nothing
             odet.psifac = profiles.xs[idx]
         end
         odet.psifac = find_zero(
-            (psi -> profiles.q_spline_direct(psi) - ctrl.qlow,
+            (psi -> profiles.q_spline(psi) - ctrl.qlow,
              psi -> profiles.q_deriv(psi)),
             odet.psifac, Roots.Newton()
         )
