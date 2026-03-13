@@ -390,7 +390,7 @@ Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
-    resolution_factor::Float64 = 1.0,
+    resolution_factor::Float64 = 4.0,
     refine::Union{Nothing,Int} = nothing,
     β_r::Union{Nothing,Float64} = nothing,
     β_z::Union{Nothing,Float64} = nothing
