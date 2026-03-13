@@ -360,9 +360,9 @@ function adaptive_grid_params(
         h_min = max(minimum(reqs), span / 4000)
         h_max = min(max(maximum(reqs), h_min), span / 4)
         β = h_max > h_min * (1.0 + 1e-10) ? acosh(h_max / h_min) : 0.0
-        # Cap at 2.0: higher β gives h_max/h_min > cosh(2)≈3.8, making interior cells
-        # too coarse for intermediate flux surfaces whose tips fall in the grid interior.
-        β = clamp(β, 0.0, 2.0)
+        # Cap at 3.0: allows aggressive concentration at x-points and axis while keeping
+        # h_max/h_min = cosh(3)≈10 reasonable for intermediate flux surfaces.
+        β = clamp(β, 0.0, 3.0)
         sinchβ = β < 1e-6 ? 1.0 : β / sinh(β)
         n = max(4, 1 + ceil(Int, span * sinchβ / h_min))
         return n, β
