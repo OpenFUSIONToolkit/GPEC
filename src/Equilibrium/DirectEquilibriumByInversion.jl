@@ -312,41 +312,88 @@ function make_stretched_z_grid(z_lo::Float64, z_hi::Float64, zo::Float64, nz::In
 end
 
 """
-    equilibrium_solver_by_inversion(raw_profile; refine=4, β_z=2.0, β_r=2.0)
+    adaptive_grid_params(raw_profile, ro, zo, r_lo, r_hi, z_lo, z_hi,
+                         psilow, Δψ, bbox_curve) → (nr, nz, β_r, β_z)
+
+Physics-based Cartesian grid sizing for contour-tracing equilibrium reconstruction.
+
+Computes required cell widths from the bilinear interpolation error bound
+  δψ ≈ (dR²·|ψ_RR| + dZ²·|ψ_ZZ|)/8 ≤ Δψ  →  dR_req = √(8Δψ/|ψ_RR|)
+sampled at each LCFS vertex (reusing `bbox_curve`), plus an axis constraint ensuring
+the innermost surface (psilow) has ≥ 5 cells per semi-axis on the global grid.
+
+β = acosh(h_max/h_min) from the ratio of coarsest to finest required cell widths.
+n = 1 + ⌈span·sinch(β)/h_min⌉ where sinch(β) = β/sinh(β).
+"""
+function adaptive_grid_params(
+    raw_profile::DirectRunInput,
+    ro::Float64, zo::Float64,
+    r_lo::Float64, r_hi::Float64,
+    z_lo::Float64, z_hi::Float64,
+    psilow::Float64, Δψ::Float64,
+    bbox_curve
+)
+    psio = raw_profile.psio
+    dR_reqs = Float64[]
+    dZ_reqs = Float64[]
+
+    # Required cell widths at each LCFS vertex from bilinear interpolation error formula
+    if bbox_curve !== nothing
+        for (R, Z) in Ctr.vertices(bbox_curve)
+            ψ_RR = abs(raw_profile.psi_in((R, Z); deriv=Val((2, 0))))
+            ψ_ZZ = abs(raw_profile.psi_in((R, Z); deriv=Val((0, 2))))
+            ψ_RR > 0 && push!(dR_reqs, sqrt(8 * Δψ / ψ_RR))
+            ψ_ZZ > 0 && push!(dZ_reqs, sqrt(8 * Δψ / ψ_ZZ))
+        end
+    end
+
+    # Axis constraint: global grid cell ≤ 0.2 × a_low (minimum semi-axis of innermost surface).
+    # Using min(a_R, a_Z) for both directions matches the old scale_r/scale_z target_cell_frac
+    # logic and ensures the constraint is the same in both directions.
+    ψ_RR_ax = abs(raw_profile.psi_in((ro, zo); deriv=Val((2, 0))))
+    ψ_ZZ_ax = abs(raw_profile.psi_in((ro, zo); deriv=Val((0, 2))))
+    a_low_ax = min(sqrt(2 * psilow * psio / ψ_RR_ax), sqrt(2 * psilow * psio / ψ_ZZ_ax))
+    push!(dR_reqs, 0.2 * a_low_ax)
+    push!(dZ_reqs, 0.2 * a_low_ax)
+
+    function _params_1d(reqs, span)
+        h_min = max(minimum(reqs), span / 4000)
+        h_max = min(max(maximum(reqs), h_min), span / 4)
+        β = h_max > h_min * (1.0 + 1e-10) ? acosh(h_max / h_min) : 0.0
+        # Cap at 2.0: higher β gives h_max/h_min > cosh(2)≈3.8, making interior cells
+        # too coarse for intermediate flux surfaces whose tips fall in the grid interior.
+        β = clamp(β, 0.0, 2.0)
+        sinchβ = β < 1e-6 ? 1.0 : β / sinh(β)
+        n = max(4, 1 + ceil(Int, span * sinchβ / h_min))
+        return n, β
+    end
+
+    nr_fine, β_r = _params_1d(dR_reqs, r_hi - r_lo)
+    nz_fine, β_z = _params_1d(dZ_reqs, z_hi - z_lo)
+    return nr_fine, nz_fine, β_r, β_z
+end
+
+"""
+    equilibrium_solver_by_inversion(raw_profile; resolution_factor=1.0,
+                                    refine=nothing, β_r=nothing, β_z=nothing)
 
 Driver for contour-tracing equilibrium reconstruction.
 
-## Procedure:
-1. Find magnetic axis via `direct_position!`
-2. Detect plasma topology (limited / SN-lower / SN-upper / double-null) from EFIT nodal ψ
-3. Compute the minor radius at psilow from the quadratic ψ expansion at the axis.
-4. Evaluate ψ(R,Z) on the global Cartesian grid (parallelized).
-   Both R and Z grids use `make_multi_stretched_grid`: R concentrates at `ro`, Z at `zo`
-   and at any x-point domain boundaries.
-5. For each target ψ surface above the near-axis threshold: trace with Contour.jl
-   and resample to the uniform geometric-angle (R, Z) grid (parallelized).
-6. (Zoomed core pass) For surfaces below the near-axis threshold (too small for the global
-   grid to resolve with n_min=10 cells per semi-axis), build a dedicated fine grid
-   axis-centered on (ro, zo), sized to achieve n_min=10 at (ro,zo). Re-trace those
-   surfaces from this zoomed grid and overwrite R_table/Z_table.
-7. Build an `InverseRunInput` from the R(ψ,θ), Z(ψ,θ) tables
-8. Delegate to `equilibrium_solver(::InverseRunInput)` for SFL coordinate construction
-9. Validate round-trip accuracy; warn if edge error exceeds 2e-3
+Grid parameters (n and β in each direction) are computed adaptively from the bilinear
+interpolation error bound along the LCFS and an axis constraint. `resolution_factor`
+scales both n values uniformly (higher → more points, same β).
 
-## Keyword arguments:
-- `refine`: grid refinement factor relative to EFIT resolution (default 4)
-- `β_z`: sinh-stretching strength for the Z grid toward x-point(s) (default 2.0).
-  `β_z=0` disables stretching (uniform grid).
-- `β_r`: sinh-stretching strength for the R grid toward the magnetic axis (default 2.0).
-  `β_r=0` disables stretching (uniform grid).
+Legacy keyword arguments `refine`, `β_r`, `β_z` override the adaptive values when
+provided (for benchmark sweeps and backward compatibility).
 
 Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
-    refine::Int=5,
-    β_z::Float64=2.0,
-    β_r::Float64=2.0
+    resolution_factor::Float64 = 1.0,
+    refine::Union{Nothing,Int} = nothing,
+    β_r::Union{Nothing,Float64} = nothing,
+    β_z::Union{Nothing,Float64} = nothing
 )
     equil_params = raw_profile.config
     psio = raw_profile.psio
@@ -359,11 +406,11 @@ function equilibrium_solver_by_inversion(
     psi_nodes = [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
 
     # Find magnetic axis and separatrix
-    ro, zo, _rs1, _rs2 = direct_position!(raw_profile)
+    ro, zo, _, _ = direct_position!(raw_profile)
 
     # Detect plasma topology for sinh-stretching direction
     topology = classify_topology(raw_profile, psio)
-    @info "efit_by_inversion: topology = $topology, β_z = $β_z"
+    @info "efit_by_inversion: topology = $topology"
 
     # Clip fine grid to separatrix bounding box.
     # The EFIT nodal ψ values are free (already stored in the spline); a single coarse
@@ -390,52 +437,41 @@ function equilibrium_solver_by_inversion(
         z_lo, z_hi = raw_profile.zmin, raw_profile.zmax
     end
 
-    # Compute the minor radius of the innermost flux surface (at psilow) from the quadratic
-    # ψ expansion at the axis: ψ ≈ ½|ψ_RR|(R−Rₒ)² + ½|ψ_ZZ|(Z−Zₒ)², giving semi-axes
-    # a_R = sqrt(2·psilow·psio/|ψ_RR|), a_Z similarly. a_low = min(a_R, a_Z).
+    # ψ curvature at axis: needed for near_axis_threshold and zoomed core grid sizing.
+    # a_low = min semi-axis of the innermost flux surface (at psilow) from ψ ≈ ½|ψ_RR|dR².
     ψ_RR_abs = abs(raw_profile.psi_in((ro, zo); deriv=Val((2, 0))))
     ψ_ZZ_abs = abs(raw_profile.psi_in((ro, zo); deriv=Val((0, 2))))
     a_low = min(sqrt(2 * psilow * psio / ψ_RR_abs), sqrt(2 * psilow * psio / ψ_ZZ_abs))
 
-    # Build fine Cartesian grid at base resolution (refine× EFIT, clipped to plasma bbox).
-    # R is sinh-stretched toward ro; Z is sinh-stretched toward zo (axis) and x-point(s).
-    nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
-    nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
-    r_fine  = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r)
-    z_grid  = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z)
+    # Compute physics-based (n, β) from LCFS curvature sampling and axis constraint.
+    # resolution_factor scales n; β is determined by h_max/h_min curvature ratio alone.
+    Δψ = psio * (psihigh - psilow) / mpsi
+    nr_adp, nz_adp, β_r_adp, β_z_adp = adaptive_grid_params(
+        raw_profile, ro, zo, r_lo, r_hi, z_lo, z_hi, psilow, Δψ, bbox_curve)
+    β_r_use = β_r !== nothing ? β_r : β_r_adp
+    β_z_use = β_z !== nothing ? β_z : β_z_adp
+    if refine !== nothing
+        nr_fine = max(4, round(Int, refine * nw * (r_hi - r_lo) / (raw_profile.rmax - raw_profile.rmin)))
+        nz_fine = max(4, round(Int, refine * nh * (z_hi - z_lo) / (raw_profile.zmax - raw_profile.zmin)))
+    else
+        nr_fine = max(4, round(Int, nr_adp * resolution_factor))
+        nz_fine = max(4, round(Int, nz_adp * resolution_factor))
+    end
+    r_fine = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r_use)
+    z_grid = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z_use)
 
-    # Adaptive global grid condensation: require dR, dZ < target_cell_frac·a_low at (ro, zo)
-    # so the global grid resolves near-axis surfaces with at least 1/target_cell_frac cells
-    # per semi-axis. Surfaces that still fall below the n_min_cells=10 threshold are then
-    # re-traced by the zoomed core grid (see below).
     iro = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
     izo = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
     dR_axis = r_fine[iro] - r_fine[iro - 1]
     dZ_axis = z_grid[izo] - z_grid[izo - 1]
-    target_cell_frac = 0.2
-    scale_r = max(1, ceil(Int, dR_axis / (target_cell_frac * a_low)))
-    scale_z = max(1, ceil(Int, dZ_axis / (target_cell_frac * a_low)))
-    if scale_r > 1
-        nr_fine = (nr_fine - 1) * scale_r + 1
-        r_fine  = make_stretched_r_grid(r_lo, r_hi, ro, nr_fine, β_r)
-        iro     = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
-        dR_axis = r_fine[iro] - r_fine[iro - 1]
-    end
-    if scale_z > 1
-        nz_fine = (nz_fine - 1) * scale_z + 1
-        z_grid  = make_stretched_z_grid(z_lo, z_hi, zo, nz_fine, topology, β_z)
-        nz_fine = length(z_grid)
-        izo     = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
-        dZ_axis = z_grid[izo] - z_grid[izo - 1]
-    end
 
     # Near-axis threshold: surfaces spanning fewer than n_min_cells global-grid cells per
-    # semi-axis after condensation are re-traced by the zoomed core grid.
+    # semi-axis are re-traced by the zoomed core grid.
     d_max = max(dR_axis, dZ_axis)
     n_min_cells = 10
     near_axis_threshold = (n_min_cells * d_max)^2 * max(ψ_RR_abs, ψ_ZZ_abs) / (2 * psio)
 
-    @info "efit_by_inversion: a_low = $(@sprintf("%.1f", a_low * 1000)) mm at psilow=$psilow; global grid=$(nr_fine)×$(nz_fine) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm, dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm, target=$(@sprintf("%.2f", target_cell_frac*a_low*1000)) mm); zoom threshold ψ < $(@sprintf("%.4f", near_axis_threshold))"
+    @info "efit_by_inversion: a_low=$(@sprintf("%.1f", a_low*1000)) mm; grid=$(nr_fine)×$(nz_fine) β_r=$(@sprintf("%.2f", β_r_use)) β_z=$(@sprintf("%.2f", β_z_use)) (dR=$(@sprintf("%.2f", dR_axis*1000)) mm dZ=$(@sprintf("%.2f", dZ_axis*1000)) mm); zoom threshold ψ<$(@sprintf("%.4f", near_axis_threshold))"
 
     # Parallel grid evaluation: each column (fixed z) is independent.
     # One hint pair per thread (allocated once), reset at the start of each column.
@@ -536,11 +572,11 @@ function equilibrium_solver_by_inversion(
 
         # Grid sizing: n_min_cells at (ro, zo) required for the SMALLEST surface (psilow).
         # sinh-center cell ≈ (4β/sinh(β)) · a_zoom / (n/2) → n ≥ 8β·a_zoom·n_min / (sinh(β)·a_low)
-        sinh_β = sinh(β_r)
-        nr_zoom = max(200, ceil(Int, 8 * β_r * a_zoom_r * n_min_cells / (sinh_β * a_low)))
-        nz_zoom = max(200, ceil(Int, 8 * β_r * a_zoom_z * n_min_cells / (sinh_β * a_low)))
-        r_zoom_grid = make_stretched_r_grid(r_zoom_lo, r_zoom_hi, ro, nr_zoom, β_r)
-        z_zoom_grid = make_stretched_r_grid(z_zoom_lo, z_zoom_hi, zo, nz_zoom, β_r)
+        sinh_β_r = β_r_use > 1e-6 ? sinh(β_r_use) : 1.0
+        nr_zoom = max(200, ceil(Int, 8 * β_r_use * a_zoom_r * n_min_cells / (sinh_β_r * a_low)))
+        nz_zoom = max(200, ceil(Int, 8 * β_r_use * a_zoom_z * n_min_cells / (sinh_β_r * a_low)))
+        r_zoom_grid = make_stretched_r_grid(r_zoom_lo, r_zoom_hi, ro, nr_zoom, β_r_use)
+        z_zoom_grid = make_stretched_r_grid(z_zoom_lo, z_zoom_hi, zo, nz_zoom, β_r_use)
 
         iro_z = clamp(searchsortedfirst(r_zoom_grid, ro), 2, length(r_zoom_grid))
         izo_z = clamp(searchsortedfirst(z_zoom_grid, zo), 2, length(z_zoom_grid))
@@ -618,7 +654,7 @@ function equilibrium_solver_by_inversion(
         end
     end
     if max_rt_err > 2e-3
-        @warn "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) > 2e-3; accuracy near psihigh may be limited. Consider reducing psihigh or increasing β_z."
+        @warn "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err)) > 2e-3; accuracy near psihigh may be limited. Consider reducing psihigh or increasing resolution_factor."
     else
         @info "efit_by_inversion: round-trip error at edge = $(@sprintf("%.2e", max_rt_err))"
     end
@@ -626,80 +662,3 @@ function equilibrium_solver_by_inversion(
     return pe
 end
 
-"""
-    adaptive_xpt_bz(raw_profile, ro, zo, z_lo, z_hi, nz_fine, topology; n_min_xpt=5) → Float64
-
-Compute a physics-motivated β_z for `make_stretched_z_grid` from x-point geometry.
-
-Locates the x-point on the LCFS (lower or upper, depending on `topology`), evaluates
-ψ_ZZ there to estimate the flux-surface arm width δZ at the edge (psihigh), then
-δZ is the Z-distance from the x-point to where the outermost closed surface
-(at `psihigh`) passes — the "arm width" of the outermost surface near the x-point.
-
-Returns 0.0 when the uniform grid already provides `n_min_xpt` cells within δZ
-(i.e. no concentration needed), or for `:limited` topology. When concentration is
-needed, solves for the minimum β such that `n_min_xpt` cells span δZ. Capped at
-β=3 since higher values degrade intermediate-surface accuracy.
-"""
-function adaptive_xpt_bz(
-    raw_profile::DirectRunInput,
-    ro::Float64, zo::Float64,
-    z_lo::Float64, z_hi::Float64,
-    nz_fine::Int, topology::Symbol;
-    n_min_xpt::Int = 5
-)::Float64
-    topology === :limited && return 0.0
-
-    psio    = raw_profile.psio
-    psihigh = raw_profile.config.psihigh
-    ψ_coarse = raw_profile.psi_in.nodal_derivs.partials[1, :, :]
-
-    # Find x-point(s): minimum-Z for lower x-pt, maximum-Z for upper x-pt.
-    # Use coarse LCFS contour to locate them cheaply.
-    ψ_lcfs = psio * max(1.0 - psihigh, 1e-4)
-    cl_lcfs = Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys, ψ_coarse, ψ_lcfs)
-    lcfs = select_plasma_contour(Ctr.lines(cl_lcfs), ro, zo)
-    lcfs === nothing && return 0.0
-
-    verts = Ctr.vertices(lcfs)
-
-    # Identify x-point(s) from LCFS vertex extrema; evaluate ψ_ZZ to estimate arm width δZ.
-    δZ_arms = Float64[]
-    if topology ∈ (:sn_lower, :double_null)
-        xpt_v = argmin(v[2] for v in verts)
-        Rx, Zx = verts[xpt_v]
-        ψ_ZZ = abs(raw_profile.psi_in((Rx, Zx); deriv=Val((0, 2))))
-        ψ_ZZ > 0 && push!(δZ_arms, sqrt(2 * (1 - psihigh) * psio / ψ_ZZ))
-    end
-    if topology ∈ (:sn_upper, :double_null)
-        xpt_v = argmax(v[2] for v in verts)
-        Rx, Zx = verts[xpt_v]
-        ψ_ZZ = abs(raw_profile.psi_in((Rx, Zx); deriv=Val((0, 2))))
-        ψ_ZZ > 0 && push!(δZ_arms, sqrt(2 * (1 - psihigh) * psio / ψ_ZZ))
-    end
-    isempty(δZ_arms) && return 0.0
-
-    δZ_arm = maximum(δZ_arms)   # most demanding x-point (largest arm)
-
-    # For _sinh_both_ends(z_lo, zo, n_seg, β), the first cell at the x-point end is:
-    #   dz₁ ≈ L · β / ((n_seg - 1) · sinh(β))
-    # We want n_min_xpt cells to span δZ_arm: dz₁ ≤ δZ_arm / n_min_xpt.
-    # This gives: β/sinh(β) ≤ δZ_arm · (n_seg - 1) / (L · n_min_xpt)  ← c_target
-    # If the uniform grid (β=0, dz₁ = L/(n_seg-1)) already has n_min_xpt cells in δZ_arm,
-    # no concentration is needed.
-    L = max(zo - z_lo, z_hi - zo)   # longest Z half-span
-    n_seg = max(2, nz_fine - 1)
-    n_cells_arm_uniform = δZ_arm * n_seg / L
-    n_cells_arm_uniform ≥ Float64(n_min_xpt) && return 0.0
-
-    # Uniform grid is too coarse near x-point: solve β/sinh(β) = c_target via bisection.
-    # β/sinh(β) is monotonically decreasing in β; larger c → smaller β (less concentration).
-    c = δZ_arm * n_seg / (L * Float64(n_min_xpt))
-    β_lo, β_hi = 1e-6, 50.0
-    for _ in 1:60
-        β_mid = 0.5 * (β_lo + β_hi)
-        β_mid / sinh(β_mid) > c ? (β_lo = β_mid) : (β_hi = β_mid)
-    end
-    # Cap at 3.0: benchmark shows β_z > 3 degrades intermediate surface accuracy.
-    return clamp(0.5 * (β_lo + β_hi), 0.0, 3.0)
-end
