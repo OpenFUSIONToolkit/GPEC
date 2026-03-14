@@ -490,9 +490,7 @@ function equilibrium_solver_by_inversion(
         end
     end
 
-    # Theta grid for InverseRunInput: fractional turns in [0, 1].
-    # InverseEquilibrium uses theta ∈ [0,1] and formula cos(2π*(theta + deta)),
-    # so rz_in_ys must be in turns, not radians.
+    # Theta grid in fractional turns [0, 1] as required by InverseEquilibrium.
     theta_grid = collect(range(0.0, 1.0; length=mtheta + 1))
 
     # Build R(ψ, θ) and Z(ψ, θ) tables
@@ -508,14 +506,6 @@ function equilibrium_solver_by_inversion(
         psifac = psi_nodes[ipsi]
 
         # Surface too small for the global grid to resolve with n_min=10: defer to zoomed pass.
-        # Elliptic fill (quadratic ψ expansion — kept for reference):
-        # a_R = sqrt(2 * psifac * psio / ψ_RR_abs)
-        # a_Z = sqrt(2 * psifac * psio / ψ_ZZ_abs)
-        # @inbounds for j in 1:(mtheta+1)
-        #     θ = theta_grid[j]
-        #     R_table[ipsi, j] = ro + a_R * cos(2π * θ)
-        #     Z_table[ipsi, j] = zo + a_Z * sin(2π * θ)
-        # end
         if psifac <= near_axis_threshold
             surface_status[ipsi] = 1
             continue
@@ -548,15 +538,8 @@ function equilibrium_solver_by_inversion(
     n_contour_success = count(==(0), surface_status)
     n_near_axis_fill  = count(==(1), surface_status)
 
-    # Zoomed core pass: re-trace surfaces below the near-axis threshold on a dedicated
-    # axis-centered grid. Both R and Z are sinh-stretched toward (ro, zo) — no x-point
-    # stretching is needed inside this small box. The grid is sized so the cell at (ro, zo)
-    # is ≤ a_low / n_min_cells, guaranteeing n_min_cells cells per semi-axis at psilow.
-    #
-    # To avoid cubic-spline transition artifacts at the zoom/global boundary, the zoomed
-    # pass is extended to zoom_extend_factor × near_axis_threshold. At that higher ψ the
-    # global grid has ~sqrt(zoom_extend_factor) × n_min_cells cells per semi-axis and agrees
-    # well with the zoomed grid, so the spline sees no discontinuity at the handoff.
+    # Zoomed core pass: re-trace near-axis surfaces on a dedicated axis-centered grid.
+    # Extended to zoom_extend_factor × threshold so global and zoomed grids overlap smoothly.
     if n_near_axis_fill > 0
         zoom_extend_factor = 9
         psi_zoom_max = zoom_extend_factor * near_axis_threshold
@@ -573,10 +556,11 @@ function equilibrium_solver_by_inversion(
         # Grid sizing: n_min_cells at (ro, zo) required for the SMALLEST surface (psilow).
         # sinh-center cell ≈ (4β/sinh(β)) · a_zoom / (n/2) → n ≥ 8β·a_zoom·n_min / (sinh(β)·a_low)
         sinh_β_r = β_r_use > 1e-6 ? sinh(β_r_use) : 1.0
+        sinh_β_z = β_z_use > 1e-6 ? sinh(β_z_use) : 1.0
         nr_zoom = max(200, ceil(Int, 8 * β_r_use * a_zoom_r * n_min_cells / (sinh_β_r * a_low)))
-        nz_zoom = max(200, ceil(Int, 8 * β_r_use * a_zoom_z * n_min_cells / (sinh_β_r * a_low)))
+        nz_zoom = max(200, ceil(Int, 8 * β_z_use * a_zoom_z * n_min_cells / (sinh_β_z * a_low)))
         r_zoom_grid = make_stretched_r_grid(r_zoom_lo, r_zoom_hi, ro, nr_zoom, β_r_use)
-        z_zoom_grid = make_stretched_r_grid(z_zoom_lo, z_zoom_hi, zo, nz_zoom, β_r_use)
+        z_zoom_grid = make_stretched_r_grid(z_zoom_lo, z_zoom_hi, zo, nz_zoom, β_z_use)
 
         iro_z = clamp(searchsortedfirst(r_zoom_grid, ro), 2, length(r_zoom_grid))
         izo_z = clamp(searchsortedfirst(z_zoom_grid, zo), 2, length(z_zoom_grid))

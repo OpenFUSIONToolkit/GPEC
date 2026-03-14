@@ -401,11 +401,8 @@ robustness.
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # TODO: there's some fortran logic for grid_type = original that should be added when needed.
-
-    # Set up radial and poloidal grid
+    # TODO: grid_type = "original" Fortran logic not yet ported.
     psi_nodes = Array{Float64}(undef, mpsi + 1)
-    # TODO: add additional grid types
     if equil_params.grid_type == "ldp"
         psi_nodes .= [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     else
@@ -413,20 +410,15 @@ robustness.
     end
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
-    # Find radial position of magnetic axis and separatrix
     ro, zo, rs1, rs2 = direct_position!(raw_profile)
 
-    # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
     rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
     ff_val = zeros!(pool, Float64, 4)
     ff_deriv_val = zeros!(pool, Float64, 4)
 
-    for ipsi in (mpsi+1):-1:1
-        # Integrate along the field line for this surface
+    for ipsi in (mpsi+1):-1:1  # outermost to innermost
         y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
-        
-        # checkpoint pool for Float64 slot
         checkpoint!(pool, Float64)
 
         # Fit data into temporary straight fieldline poloidal angle splines
@@ -444,7 +436,7 @@ robustness.
         ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
-        # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
+        # Resample ff onto uniform theta grid
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
             ff_interp(ff_val, theta)
@@ -456,17 +448,14 @@ robustness.
             rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
         end
 
-        # Store surface-averaged quantities for the `sq` spline
         sq_nodes[ipsi, 1] = bfield.f * 2π
         sq_nodes[ipsi, 2] = bfield.p
         sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
-
-        # rewind pool for Float64 slot
         rewind!(pool, Float64)
     end
 
-    # Create temporary ProfileSplines for q-profile revision calculation
+    # Temporary splines for q0 extrapolation and optional newq0 revision
     profiles = ProfileSplines(
         psi_nodes,
         sq_nodes[:, 1],  # F * 2π
