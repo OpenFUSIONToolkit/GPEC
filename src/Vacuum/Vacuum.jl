@@ -9,7 +9,7 @@ using AdaptiveArrayPools
 
 # Import parent modules
 import ..Equilibrium
-using ..Utilities.FourierTransforms: compute_fourier_coefficients, fourier_transform!, fourier_inverse_transform!
+using ..Utilities.FourierTransforms: compute_fourier_coefficients
 
 include("Utilities.jl")
 include("DataTypes.jl")
@@ -80,8 +80,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
     # Compute Fourier basis coefficients
     ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; n_2D=n_override, ν=ν)
-    num_points_surf, num_modes = size(cos_mn_basis)
+    exp_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; n_2D=n_override, ν=ν)
+    num_points_surf, num_modes = size(exp_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
     # Hardcode these values for now - can expose to the user in the future
@@ -97,10 +97,15 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     grre = @view grre_in[1:num_points_total, :]
     grri = @view grri_in[1:num_points_total, :]
 
+    # Complex buffer for projecting to mode space (G*Z) and back; grre/grri stay real for backwards compatibility
+    M = num_points_surf
+    P = num_modes
+    temp = zeros!(pool, ComplexF64, M, P)
+
     if wall.nowall && use_galerkin
         # ================================================================
-        # Galerkin: solve in P×P mode space. Uses complex basis Z = C + iS
-        # so projected matrices are P×P complex.
+        # Galerkin: solve system in P×P mode space. Uses complex basis
+        # Z = C + iS so projected matrices are P×P complex.
         #
         # Fused (fuse_projection=true): kernel assembly + Fourier projection
         # in one pass. The full M×M kernel matrices are never materialized —
@@ -113,24 +118,21 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         #
         # FLOPs (both):  O(M²P + P³)
         # ================================================================
-        P = num_modes
-        M = num_points_surf
-
-        # Temporary and projected kernel matrices [P × P complex]
-        exp_mn_basis = zeros!(pool, ComplexF64, M, P)
-        exp_mn_basis .= complex.(cos_mn_basis, sin_mn_basis)
-        Gram = zeros!(pool, ComplexF64, P, P)
+        # Projected kernel matrices [P × P complex]
         grad_green_fourier = zeros!(pool, ComplexF64, P, P)
         green_fourier = zeros!(pool, ComplexF64, P, P)
         grad_green_fourier_int = similar!(pool, grad_green_fourier)
         green_fourier_int = similar!(pool, green_fourier)
-        temp = zeros!(pool, ComplexF64, M, P)
+
+        # Gram matrix required by projected_kernel! for the diagonal residue and for interior solve
+        Gram = zeros!(pool, ComplexF64, P, P)
+        mul!(Gram, exp_mn_basis', exp_mn_basis)
 
         if fuse_projection
             # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
             fused_timing = @timed begin
                 projected_kernel!(grad_green_fourier, green_fourier, plasma_surf, plasma_surf, kparams,
-                    cos_mn_basis, sin_mn_basis, Gram)
+                    exp_mn_basis, Gram)
             end
             println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
         else
@@ -142,25 +144,27 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
             end
             println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
             # Project the kernels to mode space - Z^H * K * Z and Z^H * G * Z
-            mul!(temp, grad_green, exp_mn_basis)
-            mul!(grad_green_fourier, exp_mn_basis', temp)
-            mul!(temp, green_temp, exp_mn_basis)
-            mul!(green_fourier, exp_mn_basis', temp)
+            proj_timing = @timed begin
+                mul!(temp, grad_green, exp_mn_basis)
+                mul!(grad_green_fourier, exp_mn_basis', temp)
+                mul!(temp, green_temp, exp_mn_basis)
+                mul!(green_fourier, exp_mn_basis', temp)
+            end
+            println(" Project Kernel  TIME=$(round(proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(proj_timing.bytes))")
         end
 
         solve_timing = @timed begin
             # Interior kernel: K_int = -K + 2I → grad_green_fourier_int = 2·Gram - grad_green_fourier
-            mul!(Gram, exp_mn_basis', exp_mn_basis)
             grad_green_fourier_int .= 2 .* Gram .- grad_green_fourier
             green_fourier_int .= green_fourier
 
-            # Solve projected BIEs for exterior and interior.
+            # Solve projected BIEs for exterior and interior
             F = lu!(grad_green_fourier)
             ldiv!(F, green_fourier)
             F = lu!(grad_green_fourier_int)
             ldiv!(F, green_fourier_int)
 
-            # wv = (4π²/M) · Gram · green_fourier  [Chance 2007 eq. 114]
+            # wv = (4π²/M) · Gram · green_fourier
             wv .= (4π^2 / M) .* (Gram * green_fourier)
 
             # Backward-compatible reconstruction: grre/grri = real(Z·c), imag(Z·c) in M×2P real.
@@ -178,7 +182,6 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         # Collocation approach: solve full physical-space system [M × M]
         # Handles both no-wall and wall cases.
         # ================================================================
-
         # Full-size kernel matrices
         grad_green = zeros!(pool, num_points_total, num_points_total)
         green_temp = zeros!(pool, num_points_surf, num_points_surf)
@@ -188,12 +191,13 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         end
         println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
 
-        # FT plasma→plasma Green's function (must precede kernel! calls that overwrite green_temp)
-        colloc_ft_timing = @timed begin
-            fourier_transform!(grre, green_temp, cos_mn_basis)
-            fourier_transform!(grre, green_temp, sin_mn_basis; col_offset=num_modes)
+        # Project plasma→plasma Green's function to mode space: grre[1:M, 1:2P] = real/imag(G*Z)
+        colloc_proj_timing = @timed begin
+            mul!(temp, green_temp, exp_mn_basis)
+            @view(grre[1:M, 1:P]) .= real.(temp)
+            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
         end
-        println(" Plasma Fourier Transform  TIME=$(round(colloc_ft_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(colloc_ft_timing.bytes))")
+        println(" Plasma Project  TIME=$(round(colloc_proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(colloc_proj_timing.bytes))")
 
         if !wall.nowall
             wall_block_timing = @timed begin
@@ -203,11 +207,12 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
                 kernel!(grad_green, green_temp, wall, wall, kparams)
                 # Wall–Plasma block
                 kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
-                # Fourier transform obs=wall, src=plasma block
-                fourier_transform!(grre, green_temp, cos_mn_basis; row_offset=num_points_surf)
-                fourier_transform!(grre, green_temp, sin_mn_basis; row_offset=num_points_surf, col_offset=num_modes)
+                # Project obs=wall, src=plasma block to mode space
+                mul!(temp, green_temp, exp_mn_basis)
+                @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
+                @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
             end
-            println(" Wall Kernel and Fourier Transform  TIME=$(round(wall_block_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(wall_block_timing.bytes))")
+            println(" Wall Kernel and Project  TIME=$(round(wall_block_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(wall_block_timing.bytes))")
         end
 
         # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
@@ -230,16 +235,13 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         end
         println(" Invert and Solve  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
 
-        invft_timing = @timed begin
-            # Inverse Fourier transform to extract wv [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-            arr, aii, ari, air = ntuple(_ -> zeros(num_modes, num_modes), 4)
-            fourier_inverse_transform!(arr, grre, cos_mn_basis)
-            fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
-            fourier_inverse_transform!(ari, grre, sin_mn_basis)
-            fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
-            wv .= complex.(arr .+ aii, air .- ari)
+        wv_timing = @timed begin
+            # wv = (4π²/M) · Z^H · grre_complex  [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+            temp .= complex.(@view(grre[1:M, 1:P]), @view(grre[1:M, (P+1):(2*P)]))
+            mul!(wv, exp_mn_basis', temp)
+            wv .*= (4π^2 / M)
         end
-        println(" Compute Wv  TIME=$(round(invft_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(invft_timing.bytes))")
+        println(" Compute Wv  TIME=$(round(wv_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(wv_timing.bytes))")
     end
 
     inputs.force_wv_symmetry && hermitianpart!(wv)

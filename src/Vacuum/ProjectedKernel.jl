@@ -19,7 +19,7 @@
 # 2D fused projected kernel
 # ============================================================================
 """
-    projected_kernel!(K_c, G_c, observer, source, params, cos_basis, sin_basis, Gram)
+    projected_kernel!(K_c, G_c, observer, source, params, exp_mn_basis, Gram)
 
 Compute the Fourier-projected kernel matrices K_c = Z^H K Z and G_c = Z^H G Z
 directly, without materializing the full M×M kernel matrices.
@@ -33,8 +33,7 @@ Dispatches to the 2D or 3D implementation based on the geometry/params types.
   - `observer`: Observer geometry struct
   - `source`: Source geometry struct
   - `params`: Kernel parameters (KernelParams2D or KernelParams3D)
-  - `cos_basis::Matrix{Float64}`: [M × P] cosine Fourier basis
-  - `sin_basis::Matrix{Float64}`: [M × P] sine Fourier basis
+  - `exp_mn_basis::Matrix{ComplexF64}`: [M × P] complex Fourier basis Z = exp(i(mθ − nζ))
   - `Gram::Matrix{ComplexF64}`: [P × P] Gram matrix Z^H Z (needed for diagonal identity term)
 """
 function projected_kernel! end
@@ -45,11 +44,10 @@ function projected_kernel!(
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     params::KernelParams2D,
-    cos_basis::Matrix{Float64},
-    sin_basis::Matrix{Float64},
+    exp_mn_basis::AbstractMatrix{ComplexF64},
     Gram::AbstractMatrix{ComplexF64}
 )
-    _projected_kernel_2D!(K_c, G_c, observer, source, params.n, cos_basis, sin_basis, Gram)
+    _projected_kernel_2D!(K_c, G_c, observer, source, params.n, exp_mn_basis, Gram)
 end
 
 function projected_kernel!(
@@ -58,16 +56,15 @@ function projected_kernel!(
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     params::KernelParams3D,
-    cos_basis::Matrix{Float64},
-    sin_basis::Matrix{Float64},
+    exp_mn_basis::AbstractMatrix{ComplexF64},
     Gram::AbstractMatrix{ComplexF64}
 )
     _projected_kernel_3D!(K_c, G_c, observer, source,
         params.PATCH_RAD, params.RAD_DIM, params.INTERP_ORDER,
-        cos_basis, sin_basis, Gram)
+        exp_mn_basis, Gram)
 end
 """
-    _projected_kernel_2D!(K_c, G_c, observer, source, n, cos_basis, sin_basis, Gram)
+    _projected_kernel_2D!(K_c, G_c, observer, source, n, exp_mn_basis, Gram)
 
 Fused 2D kernel assembly + projection. Mirrors the loop structure of
 `compute_2D_kernel_matrices!` but accumulates rank-1 contributions into the
@@ -81,11 +78,11 @@ Memory: O(MP) instead of O(M²).
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int,
-    cos_basis::Matrix{Float64},
-    sin_basis::Matrix{Float64},
+    exp_mn_basis::AbstractMatrix{ComplexF64},
     Gram::AbstractMatrix{ComplexF64}
 )
-    M, P = size(cos_basis)
+    M, P = size(exp_mn_basis)
+    Z = exp_mn_basis
     mtheta = length(observer.x)
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
@@ -113,31 +110,19 @@ Memory: O(MP) instead of O(M²).
     d1_spline_x(dx_dtheta_grid, theta_grid)
     d1_spline_z(dz_dtheta_grid, theta_grid)
 
-    # Pre-transpose basis for contiguous column access: Ct[:, k] = C[k, :]
-    Ct = acquire!(pool, Float64, P, M)
-    St = acquire!(pool, Float64, P, M)
-    Ct .= cos_basis'
-    St .= sin_basis'
+    # Zero output matrices; we accumulate rank-1 updates (conj(Z[j,:]) ⊗ proj_z)
+    fill!(K_c, 0.0)
+    fill!(G_c, 0.0)
 
-    # Real/imaginary accumulators for P×P projected matrices
-    K_re = zeros(P, P)
-    K_im = zeros(P, P)
-    G_re = zeros(P, P)
-    G_im = zeros(P, P)
-
-    # Per-observer projection vectors (P-length)
-    proj_kc = zeros(P)
-    proj_ks = zeros(P)
-    proj_gc = zeros(P)
-    proj_gs = zeros(P)
+    # Per-observer projection vectors (P-length complex): proj_z = (kernel row) · Z
+    proj_kz = zeros(ComplexF64, P)
+    proj_gz = zeros(ComplexF64, P)
 
     for j in 1:mtheta
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
-        fill!(proj_kc, 0.0)
-        fill!(proj_ks, 0.0)
-        fill!(proj_gc, 0.0)
-        fill!(proj_gs, 0.0)
+        fill!(proj_kz, 0.0)
+        fill!(proj_gz, 0.0)
         diag_accum = 0.0
 
         # ── Simpson integration for nonsingular source points ──
@@ -152,12 +137,10 @@ Memory: O(MP) instead of O(M²).
 
             if populate_greenfunction
                 w_g = G_n * wsimpson
-                BLAS.axpy!(w_g, @view(Ct[:, isrc]), proj_gc)
-                BLAS.axpy!(w_g, @view(St[:, isrc]), proj_gs)
+                BLAS.axpy!(ComplexF64(w_g), @view(Z[isrc, :]), proj_gz)
             end
             w_k = gradG_n * wsimpson
-            BLAS.axpy!(w_k, @view(Ct[:, isrc]), proj_kc)
-            BLAS.axpy!(w_k, @view(St[:, isrc]), proj_ks)
+            BLAS.axpy!(ComplexF64(w_k), @view(Z[isrc, :]), proj_kz)
 
             diag_accum -= gradG_0 * wsimpson
         end
@@ -190,16 +173,14 @@ Memory: O(MP) instead of O(M²).
                     @inbounds for stencil_idx in 1:5
                         w_g = G_n * s[stencil_idx] * wgauss
                         isrc = sing_idx[stencil_idx]
-                        BLAS.axpy!(w_g, @view(Ct[:, isrc]), proj_gc)
-                        BLAS.axpy!(w_g, @view(St[:, isrc]), proj_gs)
+                        BLAS.axpy!(ComplexF64(w_g), @view(Z[isrc, :]), proj_gz)
                     end
                 end
 
                 @inbounds for stencil_idx in 1:5
                     w_k = gradG_n * s[stencil_idx] * wgauss
                     isrc = sing_idx[stencil_idx]
-                    BLAS.axpy!(w_k, @view(Ct[:, isrc]), proj_kc)
-                    BLAS.axpy!(w_k, @view(St[:, isrc]), proj_ks)
+                    BLAS.axpy!(ComplexF64(w_k), @view(Z[isrc, :]), proj_kz)
                 end
 
                 diag_accum -= gradG_0 * wgauss
@@ -211,28 +192,17 @@ Memory: O(MP) instead of O(M²).
             @inbounds for stencil_idx in 1:5
                 w_g = -log_correction_array[stencil_idx] / x_obs
                 isrc = sing_idx[stencil_idx]
-                BLAS.axpy!(w_g, @view(Ct[:, isrc]), proj_gc)
-                BLAS.axpy!(w_g, @view(St[:, isrc]), proj_gs)
+                BLAS.axpy!(ComplexF64(w_g), @view(Z[isrc, :]), proj_gz)
             end
         end
 
         # Fold diagonal accumulation into projection
-        BLAS.axpy!(diag_accum, @view(Ct[:, j]), proj_kc)
-        BLAS.axpy!(diag_accum, @view(St[:, j]), proj_ks)
+        BLAS.axpy!(ComplexF64(diag_accum), @view(Z[j, :]), proj_kz)
 
-        # ── Rank-1 accumulate into P×P projection matrices ──
-        # K_c_re += C[j,:] ⊗ proj_kc + S[j,:] ⊗ proj_ks
-        BLAS.ger!(1.0, @view(Ct[:, j]), proj_kc, K_re)
-        BLAS.ger!(1.0, @view(St[:, j]), proj_ks, K_re)
-        # K_c_im += C[j,:] ⊗ proj_ks − S[j,:] ⊗ proj_kc
-        BLAS.ger!(1.0, @view(Ct[:, j]), proj_ks, K_im)
-        BLAS.ger!(-1.0, @view(St[:, j]), proj_kc, K_im)
-
+        # ── Rank-1 accumulate: K_c += conj(Z[j,:]) ⊗ proj_kz ──
+        BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_kz, K_c)
         if populate_greenfunction
-            BLAS.ger!(1.0, @view(Ct[:, j]), proj_gc, G_re)
-            BLAS.ger!(1.0, @view(St[:, j]), proj_gs, G_re)
-            BLAS.ger!(1.0, @view(Ct[:, j]), proj_gs, G_im)
-            BLAS.ger!(-1.0, @view(St[:, j]), proj_gc, G_im)
+            BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_gz, G_c)
         end
     end
 
@@ -240,26 +210,20 @@ Memory: O(MP) instead of O(M²).
 
     # Normals point out of vacuum for wall but inward for plasma → flip sign for plasma source
     if source isa PlasmaGeometry
-        K_re .*= -1
-        K_im .*= -1
+        K_c .*= -1
     end
 
     # Diagonal residue: K += residue·I  →  K_c += residue·Gram
     # [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
     if residue != 0.0
-        K_re .+= residue .* real.(Gram)
-        K_im .+= residue .* imag.(Gram)
+        K_c .+= residue .* Gram
     end
 
     # 2π𝒢 → 𝒢
     if populate_greenfunction
-        G_re ./= 2π
-        G_im ./= 2π
+        G_c ./= 2π
     end
-
-    K_c .= complex.(K_re, K_im)
-    G_c .= complex.(G_re, G_im)
 end
 
 
@@ -268,7 +232,7 @@ end
 # ============================================================================
 
 """
-    _projected_kernel_3D!(K_c, G_c, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, cos_basis, sin_basis, Gram)
+    _projected_kernel_3D!(K_c, G_c, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, exp_mn_basis, Gram)
 
 Fused 3D kernel assembly + projection. Mirrors the loop structure of
 `compute_3D_kernel_matrices!` (including multi-threading and BIEST singular correction)
@@ -280,7 +244,7 @@ Each observer writes to its own row of the shared buffers, so there are no
 cross-thread accumulation races — the same write pattern as the original
 `compute_3D_kernel_matrices!`.
 
-Memory: O(4MP + P²) instead of O(M²).
+Memory: O(2MP + P²) instead of O(M²).
 """
 function _projected_kernel_3D!(
     K_c::AbstractMatrix{ComplexF64},
@@ -290,11 +254,11 @@ function _projected_kernel_3D!(
     PATCH_RAD::Int,
     RAD_DIM::Int,
     INTERP_ORDER::Int,
-    cos_basis::Matrix{Float64},
-    sin_basis::Matrix{Float64},
+    exp_mn_basis::AbstractMatrix{ComplexF64},
     Gram::AbstractMatrix{ComplexF64}
 )
-    M, P = size(cos_basis)
+    M, P = size(exp_mn_basis)
+    Z = exp_mn_basis
     num_points = observer.mtheta * observer.nzeta
     dθdζ = 4π^2 / num_points
 
@@ -307,25 +271,15 @@ function _projected_kernel_3D!(
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, ANG_DIM, Ppou, Gpou, P2G) = quad_data
 
-    # Pre-transpose basis for contiguous column access in the inner loop
-    Ct = Matrix(cos_basis')   # [P × M]
-    St = Matrix(sin_basis')   # [P × M]
-
-    # [M × P] buffers for projected kernel rows.
-    # Row idx_obs = Σ_k K[idx_obs, k] · basis[k, :] — each observer writes to
-    # its own row, so no cross-thread races.
-    KZ_c = zeros(M, P)
-    KZ_s = zeros(M, P)
-    GZ_c = zeros(M, P)
-    GZ_s = zeros(M, P)
+    # [M × P] buffers: row idx_obs holds (kernel row idx_obs) · Z
+    KZ = zeros(ComplexF64, M, P)
+    GZ = zeros(ComplexF64, M, P)
 
     # Per-thread workspace (kernel scratch arrays + P-length accumulation vectors)
     max_tid = Threads.maxthreadid()
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_tid]
-    proj_kc_all = [zeros(P) for _ in 1:max_tid]
-    proj_ks_all = [zeros(P) for _ in 1:max_tid]
-    proj_gc_all = [zeros(P) for _ in 1:max_tid]
-    proj_gs_all = [zeros(P) for _ in 1:max_tid]
+    proj_kz_all = [zeros(ComplexF64, P) for _ in 1:max_tid]
+    proj_gz_all = [zeros(ComplexF64, P) for _ in 1:max_tid]
 
     Threads.@threads :static for idx_obs in 1:num_points
         tid = Threads.threadid()
@@ -333,15 +287,11 @@ function _projected_kernel_3D!(
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
             n_polar, M_polar_single, M_polar_double, M_grid_single_flat, M_grid_double_flat) = ws
 
-        proj_kc = proj_kc_all[tid]
-        proj_ks = proj_ks_all[tid]
-        proj_gc = proj_gc_all[tid]
-        proj_gs = proj_gs_all[tid]
+        proj_kz = proj_kz_all[tid]
+        proj_gz = proj_gz_all[tid]
 
-        fill!(proj_kc, 0.0)
-        fill!(proj_ks, 0.0)
-        fill!(proj_gc, 0.0)
-        fill!(proj_gs, 0.0)
+        fill!(proj_kz, 0.0)
+        fill!(proj_gz, 0.0)
 
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
@@ -352,17 +302,11 @@ function _projected_kernel_3D!(
             r_src = @view source.r[idx_src, :]
             n_src = @view source.normal[idx_src, :]
             w_double = laplace_double_layer(r_obs, r_src, n_src) * dθdζ
-            @inbounds @simd for m in 1:P
-                proj_kc[m] += w_double * Ct[m, idx_src]
-                proj_ks[m] += w_double * St[m, idx_src]
-            end
+            BLAS.axpy!(ComplexF64(w_double), @view(Z[idx_src, :]), proj_kz)
 
             if populate_greenfunction
                 w_single = laplace_single_layer(r_obs, r_src) * dθdζ
-                @inbounds @simd for m in 1:P
-                    proj_gc[m] += w_single * Ct[m, idx_src]
-                    proj_gs[m] += w_single * St[m, idx_src]
-                end
+                BLAS.axpy!(ComplexF64(w_single), @view(Z[idx_src, :]), proj_gz)
             end
         end
 
@@ -398,64 +342,34 @@ function _projected_kernel_3D!(
             n_src = @view source.normal[idx_src, :]
             far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[ii, jj] * dθdζ
             w_double = M_grid_double[ii, jj] + far_double
-            @simd for m in 1:P
-                proj_kc[m] += w_double * Ct[m, idx_src]
-                proj_ks[m] += w_double * St[m, idx_src]
-            end
+            BLAS.axpy!(ComplexF64(w_double), @view(Z[idx_src, :]), proj_kz)
 
             if populate_greenfunction
                 far_single = laplace_single_layer(r_obs, r_src) * Gpou[ii, jj] * dθdζ
                 w_single = M_grid_single[ii, jj] + far_single
-                @simd for m in 1:P
-                    proj_gc[m] += w_single * Ct[m, idx_src]
-                    proj_gs[m] += w_single * St[m, idx_src]
-                end
+                BLAS.axpy!(ComplexF64(w_single), @view(Z[idx_src, :]), proj_gz)
             end
         end
 
         # ── Write projected row to buffer (each idx_obs owns its row) ──
-        @inbounds for m in 1:P
-            KZ_c[idx_obs, m] = proj_kc[m]
-            KZ_s[idx_obs, m] = proj_ks[m]
-        end
+        @inbounds KZ[idx_obs, :] .= proj_kz
         if populate_greenfunction
-            @inbounds for m in 1:P
-                GZ_c[idx_obs, m] = proj_gc[m]
-                GZ_s[idx_obs, m] = proj_gs[m]
-            end
+            @inbounds GZ[idx_obs, :] .= proj_gz
         end
     end
 
-    # ── Assemble P×P projected matrices via GEMM (sequential, after barrier) ──
-    # K_c = Z^H K Z = (C'·KZ_c + S'·KZ_s) + i(C'·KZ_s − S'·KZ_c)
-    K_re = zeros(P, P)
-    K_im = zeros(P, P)
-    mul!(K_re, cos_basis', KZ_c)
-    mul!(K_re, sin_basis', KZ_s, 1.0, 1.0)
-    mul!(K_im, cos_basis', KZ_s)
-    mul!(K_im, sin_basis', KZ_c, -1.0, 1.0)
-
-    G_re = zeros(P, P)
-    G_im = zeros(P, P)
+    # ── Assemble P×P projected matrices: K_c = Z^H K Z, G_c = Z^H G Z ──
+    mul!(K_c, Z', KZ)
+    K_c ./= 2π
     if populate_greenfunction
-        mul!(G_re, cos_basis', GZ_c)
-        mul!(G_re, sin_basis', GZ_s, 1.0, 1.0)
-        mul!(G_im, cos_basis', GZ_s)
-        mul!(G_im, sin_basis', GZ_c, -1.0, 1.0)
+        mul!(G_c, Z', GZ)
+        G_c ./= 2π
+    else
+        fill!(G_c, 0.0)
     end
-
-    # ── Post-processing (mirrors compute_3D_kernel_matrices!) ──
-    K_re ./= 2π
-    K_im ./= 2π
-    G_re ./= 2π
-    G_im ./= 2π
 
     # Diagonal: K += I → K_c += Gram [for same-type source/observer]
     if typeof(source) == typeof(observer)
-        K_re .+= real.(Gram)
-        K_im .+= imag.(Gram)
+        K_c .+= Gram
     end
-
-    K_c .= complex.(K_re, K_im)
-    G_c .= complex.(G_re, G_im)
 end

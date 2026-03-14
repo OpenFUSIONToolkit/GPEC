@@ -66,19 +66,16 @@ just use the n argument. In 3D, we need to compute the basis for all modes and g
 # Returns
 
 - 2D
-  - `cos_mn_basis::Matrix{Float64}`: Cosine coefficients `cos(m*θ - n*ν)` [mtheta, mpert]
-  - `sin_mn_basis::Matrix{Float64}`: Sine coefficients `sin(m*θ - n*ν)` [mtheta, mpert]
+  - `exp_mn_basis::Matrix{ComplexF64}`: Exponential coefficients `exp(i(m*θ - n*ν))` [mtheta, mpert]
 - 3D
-  - `cos_mn_basis::Matrix{Float64}`: Cosine coefficients `cos(m*θ - n*ν - n*ϕ)` [mtheta * nzeta, mpert * npert]
-  - `sin_mn_basis::Matrix{Float64}`: Sine coefficients `sin(m*θ - n*ν - n*ϕ)` [mtheta * nzeta, mpert * npert]
+  - `exp_mn_basis::Matrix{ComplexF64}`: Exponential coefficients `exp(i(m*θ - n*ν - n*ϕ))` [mtheta * nzeta, mpert * npert]
 
 # Notes
 
 The theta and phi grids are uniform: `θᵢ = 2π*i/mtheta` for `i = 0:mtheta-1` and `ϕⱼ = 2π*j/nzeta` for `j = 0:nzeta-1`
 
 When `n=0, ν=0` (default), this reduces to simple harmonic basis:
-- `cos_mn_basis[i,l] = cos(m*θᵢ)`
-- `sin_mn_basis[i,l] = sin(m*θᵢ)`
+- `exp_mn_basis[i,l] = exp(i(m*θᵢ))`
 """
 function compute_fourier_coefficients(
     mtheta::Int,
@@ -100,17 +97,15 @@ function compute_fourier_coefficients(
         @assert length(ν) == mtheta "ν must have length mtheta"
 
         # In 2D, we only use one toroidal mode at a time
-        # Compute sin(mθ - nν) and cos(mθ - nν)
-        sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
-        cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
+        # Compute exp(i(mθ - nν))
+        exp_mn_basis = exp.(im .* ((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν))
     else # 3D
         @assert (n_2D === nothing && ν === nothing) "n_2D and ν should be nothing for 3D"
 
         # In 3D, we need to compute the basis for all modes and grid points
-        # Compute sin(mθ - nζ) and cos(mθ - nζ)
+        # Compute exp(i(mθ - nζ))
         ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
-        sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
-        cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
+        exp_mn_basis = zeros(ComplexF64, mtheta * nzeta, mpert * npert)
         for idx_n in 1:npert
             n = nlow + idx_n - 1
             n_col_offset = (idx_n - 1) * mpert
@@ -119,16 +114,13 @@ function compute_fourier_coefficients(
                 col = idx_m + n_col_offset
                 for (j, ζ) in enumerate(ζ_grid), (i, θ) in enumerate(θ_grid)
                     idx = i + (j-1)*mtheta
-                    arg = m * θ - n * ζ
-                    s, c = sincos(arg)
-                    cos_mn_basis[idx, col] = c
-                    sin_mn_basis[idx, col] = s
+                    exp_mn_basis[idx, col] = exp(im * (m * θ - n * ζ))
                 end
             end
         end
     end
 
-    return cos_mn_basis, sin_mn_basis
+    return exp_mn_basis
 end
 
 """
@@ -207,8 +199,8 @@ function FourierTransform(
     n::Int=0,
     ν::Vector{Float64}=zeros(Float64, mtheta)
 )
-    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
-    return FourierTransform(mtheta, mpert, mlow, cos_mn_basis, sin_mn_basis)
+    exp_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
+    return FourierTransform(mtheta, mpert, mlow, real(exp_mn_basis), imag(exp_mn_basis))
 end
 
 """

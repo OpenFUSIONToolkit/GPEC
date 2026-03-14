@@ -445,6 +445,82 @@
                 @test size(plasma_pts) == (16, 3)
             end
         end
+
+        # -------------------------------------------------------------------------
+        @testset "fused vs two-step Galerkin (2D, nowall)" begin
+            # Small case where both Galerkin paths are cheap: compare K_c, G_c
+            # assembled via the full M×M kernel + projection against the fused
+            # projected kernels from the unified `kernel!` API.
+            inputs = VacuumInput(
+                mtheta_in=17,
+                nzeta_in=1,
+                x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=17))),
+                z=collect(0.3 .* sin.(range(0, 2π, length=17))),
+                ν=zeros(17),
+                mlow=1,
+                mpert=2,
+                nlow=1,
+                npert=1,
+                nzeta=1,
+                mtheta=32
+            )
+            wall_settings = WallShapeSettings(shape="nowall")
+
+            plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
+            kparams = GeneralizedPerturbedEquilibrium.Vacuum.KernelParams2D(inputs.nlow)
+
+            # Fourier basis on the surface grid
+            exp_mn_basis = GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms.compute_fourier_coefficients(
+                inputs.mtheta,
+                inputs.mpert,
+                inputs.mlow,
+                inputs.nzeta,
+                inputs.npert,
+                inputs.nlow;
+                n_2D=inputs.nlow,
+                ν=plasma_surf.ν
+            )
+            M, P = size(exp_mn_basis)
+            Gram = exp_mn_basis' * exp_mn_basis
+
+            # --- Two-step Galerkin: materialize full kernels then project ---
+            grad_green_full = zeros(Float64, 2M, 2M)
+            green_full = zeros(Float64, M, M)
+            GeneralizedPerturbedEquilibrium.Vacuum.kernel!(
+                grad_green_full,
+                green_full,
+                plasma_surf,
+                plasma_surf,
+                kparams
+            )
+
+            # Exterior projected kernels from full matrices: K_c = Z^H K Z, G_c = Z^H G Z
+            K_c_two = zeros(ComplexF64, P, P)
+            G_c_two = zeros(ComplexF64, P, P)
+            tmp = zeros(ComplexF64, M, P)
+
+            grad_pp = @view grad_green_full[1:M, 1:M]
+            mul!(tmp, grad_pp, exp_mn_basis)
+            mul!(K_c_two, exp_mn_basis', tmp)
+            mul!(tmp, green_full, exp_mn_basis)
+            mul!(G_c_two, exp_mn_basis', tmp)
+
+            # --- Fused Galerkin via unified kernel! ---
+            K_c_fused = zeros(ComplexF64, P, P)
+            G_c_fused = zeros(ComplexF64, P, P)
+            GeneralizedPerturbedEquilibrium.Vacuum.projected_kernel!(
+                K_c_fused,
+                G_c_fused,
+                plasma_surf,
+                plasma_surf,
+                kparams,
+                exp_mn_basis=exp_mn_basis,
+                Gram=Gram
+            )
+
+            @test isapprox(K_c_fused, K_c_two; rtol=1e-10, atol=1e-12)
+            @test isapprox(G_c_fused, G_c_two; rtol=1e-10, atol=1e-12)
+        end
     end
 
     # -------------------------------------------------------------------------
