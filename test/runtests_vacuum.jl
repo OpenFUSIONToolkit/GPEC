@@ -514,12 +514,50 @@
                 plasma_surf,
                 plasma_surf,
                 kparams,
-                exp_mn_basis=exp_mn_basis,
-                Gram=Gram
+                exp_mn_basis,
+                Gram
             )
 
             @test isapprox(K_c_fused, K_c_two; rtol=1e-10, atol=1e-12)
             @test isapprox(G_c_fused, G_c_two; rtol=1e-10, atol=1e-12)
+        end
+
+        # -------------------------------------------------------------------------
+        @testset "wall Galerkin vs collocation (2D, conformal)" begin
+            mtheta_eq = 17
+            mtheta = 128
+            mpert = 3
+            boundary_x = collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq)))
+            boundary_z = collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq)))
+
+            inputs_colloc = VacuumInput(
+                mtheta_in=mtheta_eq, nzeta_in=1,
+                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
+                mlow=1, mpert=mpert, nlow=1, npert=1,
+                nzeta=1, mtheta=mtheta,
+                use_galerkin=false
+            )
+            inputs_galerkin = VacuumInput(
+                mtheta_in=mtheta_eq, nzeta_in=1,
+                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
+                mlow=1, mpert=mpert, nlow=1, npert=1,
+                nzeta=1, mtheta=mtheta,
+                use_galerkin=true
+            )
+
+            wall_settings = WallShapeSettings(shape="conformal", a=0.5)
+
+            wv_c, grri_c, grre_c, _, _ = compute_vacuum_response(inputs_colloc, wall_settings)
+            wv_g, grri_g, grre_g, _, _ = compute_vacuum_response(inputs_galerkin, wall_settings)
+
+            M = mtheta
+            P = mpert
+
+            @test isapprox(wv_g, wv_c; rtol=1e-8)
+            @test isapprox(grre_g[1:M, 1:(2*P)], grre_c[1:M, 1:(2*P)]; rtol=1e-8)
+            @test isapprox(grri_g[1:M, 1:(2*P)], grri_c[1:M, 1:(2*P)]; rtol=1e-8)
+            @test isapprox(grre_g[(M+1):(2*M), 1:(2*P)], grre_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
+            @test isapprox(grri_g[(M+1):(2*M), 1:(2*P)], grri_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
         end
     end
 
@@ -705,6 +743,45 @@
             # Wall and plasma should differ (conformal wall offset from plasma)
             @test !isapprox(plasma_pts, wall_pts)
             @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        @testset "wall Galerkin vs collocation (3D, conformal)" begin
+            mtheta_eq = 17
+            mtheta = 32
+            nzeta = 32
+            mpert = 2
+            npert = 2
+            boundary_x = collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq)))
+            boundary_z = collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq)))
+
+            inputs_colloc = VacuumInput(
+                mtheta_in=mtheta_eq, nzeta_in=1,
+                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
+                mlow=1, mpert=mpert, nlow=0, npert=npert,
+                nzeta=nzeta, mtheta=mtheta,
+                use_galerkin=false
+            )
+            inputs_galerkin = VacuumInput(
+                mtheta_in=mtheta_eq, nzeta_in=1,
+                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
+                mlow=1, mpert=mpert, nlow=0, npert=npert,
+                nzeta=nzeta, mtheta=mtheta,
+                use_galerkin=true
+            )
+
+            wall_settings = WallShapeSettings(shape="conformal", a=0.3)
+
+            wv_c, grri_c, grre_c, _, _ = compute_vacuum_response(inputs_colloc, wall_settings)
+            wv_g, grri_g, grre_g, _, _ = compute_vacuum_response(inputs_galerkin, wall_settings)
+
+            M = mtheta * nzeta
+            P = mpert * npert
+
+            @test isapprox(wv_g, wv_c; rtol=1e-8)
+            @test isapprox(grre_g[1:M, 1:(2*P)], grre_c[1:M, 1:(2*P)]; rtol=1e-8)
+            @test isapprox(grri_g[1:M, 1:(2*P)], grri_c[1:M, 1:(2*P)]; rtol=1e-8)
+            @test isapprox(grre_g[(M+1):(2*M), 1:(2*P)], grre_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
+            @test isapprox(grri_g[(M+1):(2*M), 1:(2*P)], grri_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
         end
 
         @testset "Kernel3D laplace_single_layer" begin

@@ -23,8 +23,9 @@ nzeta > 1 for 3D vacuum calculation.
   - `nzeta::Int`: Number of vacuum calculation toroidal grid points (1 for 2D vacuum calculation, > 1 for 3D vacuum calculation)
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
   - `use_galerkin::Bool`: Use Galerkin projection to solve in truncated Fourier space [O(P³)]
-    instead of full collocation [O(M³)]. Only applies to the no-wall case; wall cases always
-    use collocation. Defaults to `false`.
+    instead of full collocation [O(M³)]. Applies to both no-wall and wall cases. For the wall
+    case, both plasma and wall unknowns are represented in (m,n) mode space, yielding a 2P×2P
+    system with no M² storage. Defaults to `false`.
   - `fuse_projection::Bool`: When combined with `use_galerkin`, fuse the kernel assembly with
     the Fourier projection so that the full M×M kernel matrices are never materialized.
     Reduces memory from O(M²) to O(MP). Requires `use_galerkin = true`. Defaults to `false`.
