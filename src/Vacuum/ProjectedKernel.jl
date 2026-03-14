@@ -15,6 +15,9 @@
 # FLOP cost is identical to the two-step approach O(M²P), but memory drops
 # from O(M²) to O(MP + P²).
 
+# ============================================================================
+# 2D fused projected kernel
+# ============================================================================
 """
     projected_kernel!(K_c, G_c, observer, source, params, cos_basis, sin_basis, Gram)
 
@@ -37,38 +40,32 @@ Dispatches to the 2D or 3D implementation based on the geometry/params types.
 function projected_kernel! end
 
 function projected_kernel!(
-    K_c::Matrix{ComplexF64},
-    G_c::Matrix{ComplexF64},
+    K_c::AbstractMatrix{ComplexF64},
+    G_c::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     params::KernelParams2D,
     cos_basis::Matrix{Float64},
     sin_basis::Matrix{Float64},
-    Gram::Matrix{ComplexF64}
+    Gram::AbstractMatrix{ComplexF64}
 )
     _projected_kernel_2D!(K_c, G_c, observer, source, params.n, cos_basis, sin_basis, Gram)
 end
 
 function projected_kernel!(
-    K_c::Matrix{ComplexF64},
-    G_c::Matrix{ComplexF64},
+    K_c::AbstractMatrix{ComplexF64},
+    G_c::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     params::KernelParams3D,
     cos_basis::Matrix{Float64},
     sin_basis::Matrix{Float64},
-    Gram::Matrix{ComplexF64}
+    Gram::AbstractMatrix{ComplexF64}
 )
     _projected_kernel_3D!(K_c, G_c, observer, source,
         params.PATCH_RAD, params.RAD_DIM, params.INTERP_ORDER,
         cos_basis, sin_basis, Gram)
 end
-
-
-# ============================================================================
-# 2D fused projected kernel
-# ============================================================================
-
 """
     _projected_kernel_2D!(K_c, G_c, observer, source, n, cos_basis, sin_basis, Gram)
 
@@ -79,14 +76,14 @@ P×P projected matrices instead of filling the M×M kernel matrices.
 Memory: O(MP) instead of O(M²).
 """
 @with_pool pool function _projected_kernel_2D!(
-    K_c::Matrix{ComplexF64},
-    G_c::Matrix{ComplexF64},
+    K_c::AbstractMatrix{ComplexF64},
+    G_c::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int,
     cos_basis::Matrix{Float64},
     sin_basis::Matrix{Float64},
-    Gram::Matrix{ComplexF64}
+    Gram::AbstractMatrix{ComplexF64}
 )
     M, P = size(cos_basis)
     mtheta = length(observer.x)
@@ -286,8 +283,8 @@ cross-thread accumulation races — the same write pattern as the original
 Memory: O(4MP + P²) instead of O(M²).
 """
 function _projected_kernel_3D!(
-    K_c::Matrix{ComplexF64},
-    G_c::Matrix{ComplexF64},
+    K_c::AbstractMatrix{ComplexF64},
+    G_c::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
@@ -295,7 +292,7 @@ function _projected_kernel_3D!(
     INTERP_ORDER::Int,
     cos_basis::Matrix{Float64},
     sin_basis::Matrix{Float64},
-    Gram::Matrix{ComplexF64}
+    Gram::AbstractMatrix{ComplexF64}
 )
     M, P = size(cos_basis)
     num_points = observer.mtheta * observer.nzeta

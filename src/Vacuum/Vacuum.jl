@@ -72,28 +72,15 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     n_override::Union{Nothing,Int}=nothing
 )
 
+    (; mtheta, mpert, mlow, nzeta, npert, nlow, use_galerkin, fuse_projection) = inputs
+
     # Initialize surface geometries
-    geom_timing = @timed begin
-        plasma_surf = inputs.nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
-        wall = inputs.nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
-    end
-    println(" Compute geometry  TIME=$(round(geom_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(geom_timing.bytes))")
+    plasma_surf = nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
+    wall = nzeta > 1 ? WallGeometry3D(inputs, wall_settings) : WallGeometry(inputs, plasma_surf, wall_settings)
 
     # Compute Fourier basis coefficients
-    basis_timing = @timed begin
-        ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
-        cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(
-            inputs.mtheta,
-            inputs.mpert,
-            inputs.mlow,
-            inputs.nzeta,
-            inputs.npert,
-            inputs.nlow;
-            n_2D=n_override,
-            ν=ν
-        )
-    end
-    println(" Compute Fourier basis  TIME=$(round(basis_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(basis_timing.bytes))")
+    ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
+    cos_mn_basis, sin_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; n_2D=n_override, ν=ν)
     num_points_surf, num_modes = size(cos_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
@@ -101,7 +88,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     PATCH_RAD = 11
     RAD_DIM = 20
     INTERP_ORDER = 5
-    kparams = inputs.nzeta > 1 ? KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER) : KernelParams2D(n_override)
+    kparams = nzeta > 1 ? KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER) : KernelParams2D(n_override)
 
     # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
     num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
@@ -110,12 +97,12 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     grre = @view grre_in[1:num_points_total, :]
     grri = @view grri_in[1:num_points_total, :]
 
-    if wall.nowall && inputs.use_galerkin && inputs.fuse_projection
+    if wall.nowall && use_galerkin && fuse_projection
         # ================================================================
         # Fused Galerkin: kernel assembly + Fourier projection in one pass.
         # The full M×M kernel matrices are never materialized — instead the
-        # P×P projected matrices K_c and G_c are accumulated row by row as
-        # kernel values are computed.
+        # P×P projected matrices grad_green_fourier and G_c are accumulated
+        # row by row as kernel values are computed.
         #
         # Memory:  O(MP + P²)  instead of  O(M²)
         # FLOPs:   O(M²P + P³) — same as two-step Galerkin
@@ -123,115 +110,117 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         P = num_modes
         M = num_points_surf
 
-        fused_timing = @timed begin
-            # Gram matrix Gram = Z^H Z  [P × P complex]
-            Gram = complex.(cos_mn_basis' * cos_mn_basis .+ sin_mn_basis' * sin_mn_basis,
-                cos_mn_basis' * sin_mn_basis .- sin_mn_basis' * cos_mn_basis)
+        # Temporary matrices
+        exp_mn_basis = zeros!(pool, ComplexF64, M, P)
+        exp_mn_basis .= complex.(cos_mn_basis, sin_mn_basis)
+        Gram = zeros!(pool, ComplexF64, P, P)
 
-            # Fused projected kernel: K_c = Z^H K Z, G_c = Z^H G Z  [P × P complex]
-            K_c = zeros(ComplexF64, P, P)
-            G_c = zeros(ComplexF64, P, P)
-            projected_kernel!(K_c, G_c, plasma_surf, plasma_surf, kparams,
+        # Projected kernel matrices
+        grad_green_fourier = zeros!(pool, ComplexF64, P, P)
+        green_fourier = zeros!(pool, ComplexF64, P, P)
+        grad_green_fourier_int = similar!(pool, grad_green_fourier)
+        green_fourier_int = similar!(pool, green_fourier)
+
+        fused_timing = @timed begin
+            # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z  [P × P complex]
+            projected_kernel!(grad_green_fourier, green_fourier, plasma_surf, plasma_surf, kparams,
                 cos_mn_basis, sin_mn_basis, Gram)
         end
         println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
 
         solve_timing = @timed begin
-            # Solve projected BIE via SVD-based pseudoinverse [pinv handles rank deficiency]
-            c_ext = pinv(K_c) * G_c
+            # Interior kernel: K_int = -K + 2I → grad_green_fourier_int = 2·Gram - grad_green_fourier
+            # Gram matrix Gram = Z^H Z  [P × P complex]
+            mul!(Gram, exp_mn_basis', exp_mn_basis)
+            grad_green_fourier_int .= 2 .* Gram .- grad_green_fourier
+            green_fourier_int .= green_fourier
 
-            # Interior kernel: K_int = -K + 2I → K_c_int = 2·Gram - K_c
-            K_c_int = 2 .* Gram .- K_c
-            c_int = pinv(K_c_int) * G_c
+            # Solve projected BIEs for exterior and interior kernels
+            F = lu!(grad_green_fourier)
+            ldiv!(F, green_fourier)
+            F = lu!(grad_green_fourier_int)
+            ldiv!(F, green_fourier_int)
 
             # wv = (4π²/M) · Gram · c_ext  [P × P complex, Chance 2007 eq. 114]
-            wv .= (4π^2 / M) .* (Gram * c_ext)
+            wv .= (4π^2 / M) .* (Gram * green_fourier)
 
             # ── Backward-compatible reconstruction of real grri/grre ─────────
-            # The downstream code (ForceFreeStates, PerturbedEquilibrium) still expects
-            # grre/grri as [M × 2P] real matrices. Reconstruct from the complex P×P
-            # solution coefficients.  This section can be removed once the downstream
-            # modules are updated to work directly in mode space.
-            c_ext_r, c_ext_i = real.(c_ext), imag.(c_ext)
-            c_int_r, c_int_i = real.(c_int), imag.(c_int)
-
-            mul!(@view(grre[1:M, 1:P]), cos_mn_basis, c_ext_r)
-            mul!(@view(grre[1:M, 1:P]), sin_mn_basis, c_ext_i, -1.0, 1.0)
-            mul!(@view(grre[1:M, (P+1):(2*P)]), cos_mn_basis, c_ext_i)
-            mul!(@view(grre[1:M, (P+1):(2*P)]), sin_mn_basis, c_ext_r, 1.0, 1.0)
-
-            mul!(@view(grri[1:M, 1:P]), cos_mn_basis, c_int_r)
-            mul!(@view(grri[1:M, 1:P]), sin_mn_basis, c_int_i, -1.0, 1.0)
-            mul!(@view(grri[1:M, (P+1):(2*P)]), cos_mn_basis, c_int_i)
-            mul!(@view(grri[1:M, (P+1):(2*P)]), sin_mn_basis, c_int_r, 1.0, 1.0)
+            # Reconstruct M×2P real from P×P complex: grre = real(Z·c_ext), imag(Z·c_ext).
+            # This section can be removed once downstream modules work in mode space.
+            temp = zeros!(pool, ComplexF64, M, P)
+            mul!(temp, exp_mn_basis, green_fourier)
+            @view(grre[1:M, 1:P]) .= real.(temp)
+            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
+            mul!(temp, exp_mn_basis, green_fourier_int)
+            @view(grri[1:M, 1:P]) .= real.(temp)
+            @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
         end
         println(" Galerkin Solve + Reconstruct  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
 
-    elseif wall.nowall && inputs.use_galerkin
+    elseif wall.nowall && use_galerkin
         # ================================================================
         # Two-step Galerkin: full M×M kernel → project → solve in P×P.
+        # Uses complex basis Z = C + iS so projected matrices are P×P complex.
         #
         # Memory:  O(M²) for kernel storage
         # FLOPs:   O(M²P + P³)
         # ================================================================
 
+        P = num_modes
+        M = num_points_surf
+
         # Full-size kernel matrices
         grad_green = zeros!(pool, num_points_total, num_points_total)
         green_temp = zeros!(pool, num_points_surf, num_points_surf)
+
+        # Projected kernel matrices
+        grad_green_fourier = zeros!(pool, ComplexF64, P, P)
+        green_fourier = zeros!(pool, ComplexF64, P, P)
+        Gram = zeros!(pool, ComplexF64, P, P)
+        green_fourier_int = similar!(pool, green_fourier)
+        grad_green_fourier_int = similar!(pool, grad_green_fourier)
+
+        # Temporary matrices
+        exp_mn_basis = zeros!(pool, ComplexF64, M, P)
+        exp_mn_basis .= complex.(cos_mn_basis, sin_mn_basis)
+        temp = zeros!(pool, ComplexF64, M, P)
 
         pp_kernel_timing = @timed begin
             kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
         end
         println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
 
-        temp = zeros!(pool, num_points_surf, num_modes)
-
         proj_timing = @timed begin
-            # K_proj = F' * grad_green * F  [2P × 2P]
-            K_proj = zeros(2 * num_modes, 2 * num_modes)
-            mul!(temp, grad_green, cos_mn_basis)
-            mul!(@view(K_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
-            mul!(@view(K_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
-            mul!(temp, grad_green, sin_mn_basis)
-            mul!(@view(K_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
-            mul!(@view(K_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
+            # Project matrices to mode space
+            # grad_green_fourier = Z^H * grad_green * Z
+            mul!(temp, grad_green, exp_mn_basis)
+            mul!(grad_green_fourier, exp_mn_basis', temp)
+            # green_fourier = Z^H * green_temp * Z
+            mul!(temp, green_temp, exp_mn_basis)
+            mul!(green_fourier, exp_mn_basis', temp)
 
-            # G_proj = F' * green_temp * F  [2P × 2P]
-            G_proj = zeros(2 * num_modes, 2 * num_modes)
-            mul!(temp, green_temp, cos_mn_basis)
-            mul!(@view(G_proj[1:num_modes, 1:num_modes]), cos_mn_basis', temp)
-            mul!(@view(G_proj[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', temp)
-            mul!(temp, green_temp, sin_mn_basis)
-            mul!(@view(G_proj[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', temp)
-            mul!(@view(G_proj[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', temp)
+            # Interior kernel: grad_green_fourier_int = 2·Gram - grad_green_fourier
+            # Gram = Z^H Z  [P × P complex]
+            mul!(Gram, exp_mn_basis', exp_mn_basis)
+            grad_green_fourier_int .= 2 .* Gram .- grad_green_fourier
 
-            # Gram matrix F'F
-            FtF = zeros(2 * num_modes, 2 * num_modes)
-            mul!(@view(FtF[1:num_modes, 1:num_modes]), cos_mn_basis', cos_mn_basis)
-            mul!(@view(FtF[1:num_modes, (num_modes+1):(2*num_modes)]), cos_mn_basis', sin_mn_basis)
-            mul!(@view(FtF[(num_modes+1):(2*num_modes), 1:num_modes]), sin_mn_basis', cos_mn_basis)
-            mul!(@view(FtF[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]), sin_mn_basis', sin_mn_basis)
+            # Solve projected BIEs for exterior and interior kernels
+            F = lu!(grad_green_fourier)
+            ldiv!(F, green_fourier)
+            F = lu!(grad_green_fourier_int)
+            ldiv!(F, green_fourier_int)
 
-            # Solve projected systems via SVD-based pseudoinverse [pinv handles rank deficiency]
-            Y_ext = pinv(K_proj) * G_proj
-
-            # Interior kernel: K_int = -K + 2I → K_proj_int = 2*F'F - K_proj
-            K_proj_int = 2 .* FtF .- K_proj
-            Y_int = pinv(K_proj_int) * G_proj
+            # wv = (4π²/M) · Gram · green_fourier  [P × P complex, Chance 2007 eq. 114]
+            wv .= (4π^2 / M) .* (Gram * green_fourier)
 
             # ── Backward-compatible reconstruction of real grri/grre ─────────
-            # This section can be removed once downstream modules work in mode space.
-            mul!(grre, cos_mn_basis, @view(Y_ext[1:num_modes, :]))
-            mul!(grre, sin_mn_basis, @view(Y_ext[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
-            mul!(grri, cos_mn_basis, @view(Y_int[1:num_modes, :]))
-            mul!(grri, sin_mn_basis, @view(Y_int[(num_modes+1):(2*num_modes), :]), 1.0, 1.0)
-
-            # wv = complex(arr + aii, air - ari) [Chance 2007 eq. 114]
-            wv_blocks = (4π^2 / num_points_surf) .* (FtF * Y_ext)
-            wv .= complex.(
-                @view(wv_blocks[1:num_modes, 1:num_modes]) .+ @view(wv_blocks[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)]),
-                @view(wv_blocks[1:num_modes, (num_modes+1):(2*num_modes)]) .- @view(wv_blocks[(num_modes+1):(2*num_modes), 1:num_modes])
-            )
+            # Reconstruct M×2P real from P×P complex: grre = real(Z·c_ext), imag(Z·c_ext).
+            mul!(temp, exp_mn_basis, green_fourier)
+            @view(grre[1:M, 1:P]) .= real.(temp)
+            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
+            mul!(temp, exp_mn_basis, green_fourier_int)
+            @view(grri[1:M, 1:P]) .= real.(temp)
+            @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
         end
         println(" Galerkin Project and Solve  TIME=$(round(proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(proj_timing.bytes))")
 
@@ -306,7 +295,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
     inputs.force_wv_symmetry && hermitianpart!(wv)
 
-    if inputs.nzeta > 1 # 3D
+    if nzeta > 1 # 3D
         plasma_pts .= plasma_surf.r
         wall_pts .= wall.r
     else # 2D
