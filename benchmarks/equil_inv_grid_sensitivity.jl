@@ -6,7 +6,7 @@ Convergence study for the efit_by_inversion Cartesian grid parameters.
 Sweeps:
   A. refine ∈ {2, 3, 4, 5, 6, 8}  at β_z = 2.0  (legacy refine parameter)
   B. β_z   ∈ {0, 0.5, 1, 1.5, 2, 3, 4, 6}  at refine = 5  (legacy β_z sweep)
-  C. resolution_factor ∈ {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}  (adaptive grid)
+  C. resolution_factor ∈ {0.5, 1.0, 2.0, 3.0, 4.0, 6.0}  (adaptive grid, default = 4.0)
 
 Metrics (evaluated in the outer 20% of the radial domain, ψ > 0.80):
   - max |Δq(ψ)|      vs efit and vs high-res inversion reference
@@ -238,7 +238,7 @@ end
 
 # ── Sweep C: resolution_factor (adaptive grid) ────────────────────────────────
 
-rf_vals = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+rf_vals = [0.5, 1.0, 2.0, 3.0, 4.0, 6.0]
 
 println("\n" * "=" ^ 65)
 println("Sweep C: resolution_factor ∈ $rf_vals (adaptive grid)")
@@ -254,7 +254,7 @@ for rf in rf_vals
     r2_e, off_e, jac_e = spline2d_errors(pe, pe_efit,  psi_eval, θ_vals)
     r2_h, off_h, jac_h = spline2d_errors(pe, pe_hires, psi_eval, θ_vals)
 
-    marker = isapprox(rf, 1.0) ? " ← default" : ""
+    marker = isapprox(rf, 4.0) ? " ← default" : ""
     @printf("  rf=%.2f  t=%.2fs  rt=%.2e  q_efit=%.2e  q_hires=%.2e  dv_efit=%.2e  dv_hires=%.2e%s\n",
         rf, t, rt_err, q_efit, q_hires, dv_efit, dv_hires, marker)
 
@@ -370,23 +370,23 @@ try
 
     q3a = plot(xv3, yfloor([r.q_efit for r in rows_C]);  yscale=:log10, marker=:circle,
                title="|Δq| vs efit", xlabel="resolution_factor", ylabel="|Δq| max", SP...)
-    vline!(q3a, [1.0]; color=:gray, ls=:dash, label=false)
+    vline!(q3a, [4.0]; color=:gray, ls=:dash, label=false)
     q3b = plot(xv3, yfloor([r.q_hires for r in rows_C]); yscale=:log10, marker=:circle,
                title="|Δq| vs hi-res", xlabel="resolution_factor", ylabel="|Δq| max", SP...)
-    vline!(q3b, [1.0]; color=:gray, ls=:dash, label=false)
+    vline!(q3b, [4.0]; color=:gray, ls=:dash, label=false)
     d3a = plot(xv3, yfloor([r.dv_efit for r in rows_C]);  yscale=:log10, marker=:circle,
                title="|ΔdV/dψ| vs efit", xlabel="resolution_factor", ylabel="|ΔdV/dψ| max", SP...)
-    vline!(d3a, [1.0]; color=:gray, ls=:dash, label=false)
+    vline!(d3a, [4.0]; color=:gray, ls=:dash, label=false)
     d3b = plot(xv3, yfloor([r.dv_hires for r in rows_C]); yscale=:log10, marker=:circle,
                title="|ΔdV/dψ| vs hi-res", xlabel="resolution_factor", ylabel="|ΔdV/dψ| max", SP...)
-    vline!(d3b, [1.0]; color=:gray, ls=:dash, label=false)
+    vline!(d3b, [4.0]; color=:gray, ls=:dash, label=false)
     rt3 = plot(xv3, [r.rt_err for r in rows_C];   yscale=:log10, marker=:circle,
                title="roundtrip error (ψ>0.80)", xlabel="resolution_factor", ylabel="max |Δψ|", SP...)
-    vline!(rt3, [1.0]; color=:gray, ls=:dash, label="rf=1 default")
+    vline!(rt3, [4.0]; color=:gray, ls=:dash, label="rf=4 default")
     p6c = plot(; title="runtime vs resolution_factor", xlabel="resolution_factor",
                ylabel="runtime (s)", SP...)
     plot!(p6c, xv3, rt_C; marker=:circle, color=:black, label=false)
-    vline!(p6c, [1.0]; color=:gray, ls=:dash, label=false)
+    vline!(p6c, [4.0]; color=:gray, ls=:dash, label=false)
 
     savefig(plot(q3a, q3b, d3a, d3b, rt3, p6c; layout=(3,2), size=(1000,900)),
             joinpath(outdir, "convergence_with_resolution_factor.png"))
