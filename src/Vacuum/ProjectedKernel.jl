@@ -15,6 +15,32 @@
 # FLOP cost is identical to the two-step approach O(M²P), but memory drops
 # from O(M²) to O(MP + P²).
 
+# ── Helpers for small-P accumulation (avoids BLAS dispatch overhead) ──────────
+
+"""
+Accumulate `proj += w * Zt[:, col]` with SIMD. Replaces BLAS.axpy! for small P.
+"""
+@inline function _accum_row!(proj::AbstractVector{ComplexF64}, w::Float64,
+    Zt::AbstractMatrix{ComplexF64}, col::Int)
+    @inbounds @simd for p in eachindex(proj)
+        proj[p] += w * Zt[p, col]
+    end
+end
+
+"""
+Rank-1 update `A += conj(Zt[:, j]) * y^T`. Avoids allocating a conjugated temporary.
+"""
+@inline function _rank1_conj!(A::AbstractMatrix{ComplexF64},
+    Zt::AbstractMatrix{ComplexF64}, j::Int,
+    y::AbstractVector{ComplexF64})
+    @inbounds for p2 in eachindex(y)
+        y_p2 = y[p2]
+        for p1 in axes(A, 1)
+            A[p1, p2] += conj(Zt[p1, j]) * y_p2
+        end
+    end
+end
+
 # ============================================================================
 # 2D fused projected kernel
 # ============================================================================
@@ -81,6 +107,7 @@ Memory: O(MP) instead of O(M²).
 )
     M, P = size(exp_mn_basis)
     Z = exp_mn_basis
+    Zt = Matrix{ComplexF64}(transpose(Z))  # [P × M] for contiguous column access
     mtheta = length(observer.x)
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
@@ -114,6 +141,9 @@ Memory: O(MP) instead of O(M²).
     d1_spline_x(dx_dtheta_grid, theta_grid)
     d1_spline_z(dz_dtheta_grid, theta_grid)
 
+    # Pre-allocated Legendre buffer (hoisted out of green() to avoid per-call pool acquisition)
+    legendre_buf = Vector{Float64}(undef, n + 2)
+
     # Per-observer projection vectors (P-length complex): proj_z = (kernel row) · Z
     proj_kz = zeros!(pool, ComplexF64, P)
     proj_gz = zeros!(pool, ComplexF64, P)
@@ -130,17 +160,15 @@ Memory: O(MP) instead of O(M²).
             isrc = mod1(j + 1 + k, mtheta)
             G_n, gradG_n, gradG_0 = green(x_obs, z_obs,
                 source.x[isrc], source.z[isrc],
-                dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n;
+                dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, legendre_buf;
                 gamma_prefactor)
 
             wsimpson = dtheta / 3 * ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
 
             if populate_greenfunction
-                w_g = G_n * wsimpson
-                BLAS.axpy!(ComplexF64(w_g), @view(Z[isrc, :]), proj_gz)
+                _accum_row!(proj_gz, G_n * wsimpson, Zt, isrc)
             end
-            w_k = gradG_n * wsimpson
-            BLAS.axpy!(ComplexF64(w_k), @view(Z[isrc, :]), proj_kz)
+            _accum_row!(proj_kz, gradG_n * wsimpson, Zt, isrc)
 
             diag_accum -= gradG_0 * wsimpson
         end
@@ -160,7 +188,7 @@ Memory: O(MP) instead of O(M²).
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
                 G_n, gradG_n, gradG_0 = green(x_obs, z_obs,
-                    x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n;
+                    x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n, legendre_buf;
                     gamma_prefactor)
 
                 s = leftpanel ? stencils_left[ig] : stencils_right[ig]
@@ -171,16 +199,12 @@ Memory: O(MP) instead of O(M²).
                         G_n += log((theta_obs - theta_gauss)^2) / x_obs
                     end
                     @inbounds for stencil_idx in 1:5
-                        w_g = G_n * s[stencil_idx] * wgauss
-                        isrc = sing_idx[stencil_idx]
-                        BLAS.axpy!(ComplexF64(w_g), @view(Z[isrc, :]), proj_gz)
+                        _accum_row!(proj_gz, G_n * s[stencil_idx] * wgauss, Zt, sing_idx[stencil_idx])
                     end
                 end
 
                 @inbounds for stencil_idx in 1:5
-                    w_k = gradG_n * s[stencil_idx] * wgauss
-                    isrc = sing_idx[stencil_idx]
-                    BLAS.axpy!(ComplexF64(w_k), @view(Z[isrc, :]), proj_kz)
+                    _accum_row!(proj_kz, gradG_n * s[stencil_idx] * wgauss, Zt, sing_idx[stencil_idx])
                 end
 
                 diag_accum -= gradG_0 * wgauss
@@ -190,19 +214,17 @@ Memory: O(MP) instead of O(M²).
         # Analytic singular integral correction [Chance 1997 eq. 75]
         if populate_greenfunction && observer isa PlasmaGeometry
             @inbounds for stencil_idx in 1:5
-                w_g = -log_correction_array[stencil_idx] / x_obs
-                isrc = sing_idx[stencil_idx]
-                BLAS.axpy!(ComplexF64(w_g), @view(Z[isrc, :]), proj_gz)
+                _accum_row!(proj_gz, -log_correction_array[stencil_idx] / x_obs, Zt, sing_idx[stencil_idx])
             end
         end
 
         # Fold diagonal accumulation into projection
-        BLAS.axpy!(ComplexF64(diag_accum), @view(Z[j, :]), proj_kz)
+        _accum_row!(proj_kz, diag_accum, Zt, j)
 
         # ── Rank-1 accumulate: K_c += conj(Z[j,:]) ⊗ proj_kz ──
-        BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_kz, K_c_block)
+        _rank1_conj!(K_c_block, Zt, j, proj_kz)
         if populate_greenfunction
-            BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_gz, G_c_block)
+            _rank1_conj!(G_c_block, Zt, j, proj_gz)
         end
     end
 
@@ -259,6 +281,7 @@ function _projected_kernel_3D!(
 )
     M, P = size(exp_mn_basis)
     Z = exp_mn_basis
+    Zt = Matrix{ComplexF64}(transpose(Z))  # [P × M] for contiguous column access
     num_points = observer.mtheta * observer.nzeta
     dθdζ = 4π^2 / num_points
 
@@ -276,15 +299,16 @@ function _projected_kernel_3D!(
     quad_data = get_singular_quadrature(PATCH_RAD, RAD_DIM, INTERP_ORDER)
     (; PATCH_DIM, ANG_DIM, Ppou, Gpou, P2G) = quad_data
 
-    # [M × P] buffers: row idx_obs holds (kernel row idx_obs) · Z
-    KZ = zeros(ComplexF64, M, P)
-    GZ = zeros(ComplexF64, M, P)
+    # [P × M] buffers: column idx_obs holds (kernel row idx_obs) · Z
+    KZt = zeros(ComplexF64, P, M)
+    GZt = zeros(ComplexF64, P, M)
 
-    # Per-thread workspace (kernel scratch arrays + P-length accumulation vectors)
+    # Per-thread workspace (kernel scratch arrays + P-length accumulation vectors + patch mask)
     max_tid = Threads.maxthreadid()
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_tid]
     proj_kz_all = [zeros(ComplexF64, P) for _ in 1:max_tid]
     proj_gz_all = [zeros(ComplexF64, P) for _ in 1:max_tid]
+    is_patch_all = [falses(num_points) for _ in 1:max_tid]
 
     Threads.@threads :static for idx_obs in 1:num_points
         tid = Threads.threadid()
@@ -294,24 +318,40 @@ function _projected_kernel_3D!(
 
         proj_kz = proj_kz_all[tid]
         proj_gz = proj_gz_all[tid]
+        is_patch = is_patch_all[tid]
 
         fill!(proj_kz, 0.0)
         fill!(proj_gz, 0.0)
+        fill!(is_patch, false)
 
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
-        r_obs = @view observer.r[idx_obs, :]
+        @inbounds ox = observer.r[idx_obs, 1]
+        @inbounds oy = observer.r[idx_obs, 2]
+        @inbounds oz = observer.r[idx_obs, 3]
 
-        # ── FAR FIELD: Trapezoidal rule ──
+        # Mark patch source indices so the far-field loop can skip them
+        @inbounds for jj in 1:PATCH_DIM, ii in 1:PATCH_DIM
+            idx_pol = periodic_wrap(i_obs - PATCH_RAD + ii - 1, source.mtheta)
+            idx_tor = periodic_wrap(j_obs - PATCH_RAD + jj - 1, source.nzeta)
+            is_patch[idx_pol+source.mtheta*(idx_tor-1)] = true
+        end
+
+        # ── FAR FIELD: Trapezoidal rule (skip patch — handled in POU correction) ──
         @inbounds for idx_src in 1:num_points
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            w_double = laplace_double_layer(r_obs, r_src, n_src) * dθdζ
-            BLAS.axpy!(ComplexF64(w_double), @view(Z[idx_src, :]), proj_kz)
+            is_patch[idx_src] && continue
+            sx = source.r[idx_src, 1];
+            sy = source.r[idx_src, 2];
+            sz = source.r[idx_src, 3]
+            nx = source.normal[idx_src, 1];
+            ny = source.normal[idx_src, 2];
+            nz = source.normal[idx_src, 3]
+            w_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
+            _accum_row!(proj_kz, w_double, Zt, idx_src)
 
             if populate_greenfunction
-                w_single = laplace_single_layer(r_obs, r_src) * dθdζ
-                BLAS.axpy!(ComplexF64(w_single), @view(Z[idx_src, :]), proj_gz)
+                w_single = laplace_single_layer(ox, oy, oz, sx, sy, sz) * dθdζ
+                _accum_row!(proj_gz, w_single, Zt, idx_src)
             end
         end
 
@@ -327,10 +367,14 @@ function _projected_kernel_3D!(
         compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar, source.normal_orient)
 
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            r_src = @view r_polar[ir, ia, :]
-            n_src = @view n_polar[ir, ia, :]
-            M_polar_single[ir, ia] = laplace_single_layer(r_obs, r_src) * Ppou[ir, ia] * dθdζ
-            M_polar_double[ir, ia] = laplace_double_layer(r_obs, r_src, n_src) * Ppou[ir, ia] * dθdζ
+            rsx = r_polar[ir, ia, 1];
+            rsy = r_polar[ir, ia, 2];
+            rsz = r_polar[ir, ia, 3]
+            nsx = n_polar[ir, ia, 1];
+            nsy = n_polar[ir, ia, 2];
+            nsz = n_polar[ir, ia, 3]
+            M_polar_single[ir, ia] = laplace_single_layer(ox, oy, oz, rsx, rsy, rsz) * Ppou[ir, ia] * dθdζ
+            M_polar_double[ir, ia] = laplace_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz) * Ppou[ir, ia] * dθdζ
         end
 
         mul!(M_grid_single_flat, P2G, vec(M_polar_single))
@@ -338,36 +382,44 @@ function _projected_kernel_3D!(
         M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
         M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
 
+        # POU correction: evaluate kernel once with combined weight (1+Gpou) = (1-χ)
+        # since far-field skipped patch points, we include the full trapezoidal + polar here
         @inbounds for jj in 1:PATCH_DIM, ii in 1:PATCH_DIM
             idx_pol = periodic_wrap(i_obs - PATCH_RAD + ii - 1, source.mtheta)
             idx_tor = periodic_wrap(j_obs - PATCH_RAD + jj - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[ii, jj] * dθdζ
-            w_double = M_grid_double[ii, jj] + far_double
-            BLAS.axpy!(ComplexF64(w_double), @view(Z[idx_src, :]), proj_kz)
+            sx = source.r[idx_src, 1];
+            sy = source.r[idx_src, 2];
+            sz = source.r[idx_src, 3]
+            nx = source.normal[idx_src, 1];
+            ny = source.normal[idx_src, 2];
+            nz = source.normal[idx_src, 3]
+            full_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * (1.0 + Gpou[ii, jj]) * dθdζ
+            _accum_row!(proj_kz, M_grid_double[ii, jj] + full_double, Zt, idx_src)
 
             if populate_greenfunction
-                far_single = laplace_single_layer(r_obs, r_src) * Gpou[ii, jj] * dθdζ
-                w_single = M_grid_single[ii, jj] + far_single
-                BLAS.axpy!(ComplexF64(w_single), @view(Z[idx_src, :]), proj_gz)
+                full_single = laplace_single_layer(ox, oy, oz, sx, sy, sz) * (1.0 + Gpou[ii, jj]) * dθdζ
+                _accum_row!(proj_gz, M_grid_single[ii, jj] + full_single, Zt, idx_src)
             end
         end
 
-        # ── Write projected row to buffer (each idx_obs owns its row) ──
-        @inbounds KZ[idx_obs, :] .= proj_kz
+        # ── Write projected column to buffer (each idx_obs owns its column) ──
+        @inbounds for p in 1:P
+            KZt[p, idx_obs] = proj_kz[p]
+        end
         if populate_greenfunction
-            @inbounds GZ[idx_obs, :] .= proj_gz
+            @inbounds for p in 1:P
+                GZt[p, idx_obs] = proj_gz[p]
+            end
         end
     end
 
-    # ── Assemble P×P projected matrices: K_c = Z^H K Z, G_c = Z^H G Z ──
-    mul!(K_c_block, Z', KZ)
+    # ── Assemble P×P projected matrices: K_c = Z^H * KZt^T, G_c = Z^H * GZt^T ──
+    mul!(K_c_block, Z', transpose(KZt))
     K_c_block ./= 2π
     if populate_greenfunction
-        mul!(G_c_block, Z', GZ)
+        mul!(G_c_block, Z', transpose(GZt))
         G_c_block ./= 2π
     end
 

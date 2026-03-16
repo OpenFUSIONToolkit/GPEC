@@ -161,8 +161,9 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
                 ldiv!(F_int, G_int)
             end
 
-            # wv = (4π²/M) · Gram · green_fourier
-            wv .= (4π^2 / M) .* (Gram * view(G_ext, 1:P, :))
+            # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
+            mul!(wv, Gram, view(G_ext, 1:P, :))
+            wv .*= (4π^2 / M)
         end
         println(" Galerkin Solve  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
         reconstruct_timing = @timed begin

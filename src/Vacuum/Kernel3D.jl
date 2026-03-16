@@ -197,12 +197,27 @@ The single-layer kernel φ is the fundamental solution to Laplace's equation:
 
   - `Float64`: Kernel value φ(x_obs, x_src)
 """
-function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real})
+@fastmath function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real})
     @inbounds begin
         dx = x_obs[1] - x_src[1]
         dy = x_obs[2] - x_src[2]
         dz = x_obs[3] - x_src[3]
     end
+    r2 = dx*dx + dy*dy + dz*dz
+    r2 < 1e-30 && return 0.0
+    return inv(sqrt(r2))
+end
+
+"""
+Scalar-argument single-layer kernel. Avoids view creation in tight loops.
+"""
+@fastmath @inline function laplace_single_layer(
+    ox::Float64, oy::Float64, oz::Float64,
+    sx::Float64, sy::Float64, sz::Float64
+)
+    dx = ox - sx;
+    dy = oy - sy;
+    dz = oz - sz
     r2 = dx*dx + dy*dy + dz*dz
     r2 < 1e-30 && return 0.0
     return inv(sqrt(r2))
@@ -231,7 +246,7 @@ K(x_obs, x_src, n_src) = ∇_{x_src} φ · n_src = (x_obs - x_src) · n_src / |x
 
   - `Float64`: Kernel value K(x_obs, x_src, n_src)
 """
-function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real}, n_src::AbstractVector{<:Real})
+@fastmath function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real}, n_src::AbstractVector{<:Real})
     @inbounds begin
         dx = x_obs[1] - x_src[1]
         dy = x_obs[2] - x_src[2]
@@ -240,6 +255,24 @@ function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVect
         ny = n_src[2]
         nz = n_src[3]
     end
+    r2 = dx*dx + dy*dy + dz*dz
+    r2 < 1e-30 && return 0.0
+    rinv = inv(sqrt(r2))
+    r3inv = rinv * rinv * rinv
+    return (dx*nx + dy*ny + dz*nz) * r3inv
+end
+
+"""
+Scalar-argument double-layer kernel. Avoids view creation in tight loops.
+"""
+@fastmath @inline function laplace_double_layer(
+    ox::Float64, oy::Float64, oz::Float64,
+    sx::Float64, sy::Float64, sz::Float64,
+    nx::Float64, ny::Float64, nz::Float64
+)
+    dx = ox - sx;
+    dy = oy - sy;
+    dz = oz - sz
     r2 = dx*dx + dy*dy + dz*dz
     r2 < 1e-30 && return 0.0
     rinv = inv(sqrt(r2))
@@ -380,12 +413,17 @@ where each entry is φ(x_obs, x_src).
   - `grad_greenfunction`: Double-layer kernel matrix (Nobs × Nsrc) filled in place
 
   - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc) filled in place
+
   - `observer`: Observer geometry (PlasmaGeometry3D)
+
   - `source`: Source geometry (PlasmaGeometry3D)
+
   - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
 
       + Total patch size in # of gridpoints = (2 * PATCH_RAD + 1) x (2 * PATCH_RAD + 1)
+
   - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
+
   - `INTERP_ORDER`: Lagrange interpolation order
 
       + Must be ≤ (2 * PATCH_RAD + 1)
@@ -446,24 +484,26 @@ function compute_3D_kernel_matrices!(
         # Convert linear index to 2D indices
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
-        r_obs = @view observer.r[idx_obs, :]
+        @inbounds ox = observer.r[idx_obs, 1]
+        @inbounds oy = observer.r[idx_obs, 2]
+        @inbounds oz = observer.r[idx_obs, 3]
 
         # ============================================================
         # FAR FIELD: Trapezoidal rule for nonsingular source points
         # Note: kernels return zero for r_src = r_obs
         # ============================================================
         @inbounds for idx_src in 1:num_points
-            # Evaluate kernels at grid points
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            K_single = laplace_single_layer(r_obs, r_src)
-            K_double = laplace_double_layer(r_obs, r_src, n_src)
-
+            sx = source.r[idx_src, 1];
+            sy = source.r[idx_src, 2];
+            sz = source.r[idx_src, 3]
+            nx = source.normal[idx_src, 1];
+            ny = source.normal[idx_src, 2];
+            nz = source.normal[idx_src, 3]
             # Apply weights (periodic trapezoidal rule = constant weights)
+            grad_greenfunction_block[idx_obs, idx_src] = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] = K_single * dθdζ
+                greenfunction[idx_obs, idx_src] = laplace_single_layer(ox, oy, oz, sx, sy, sz) * dθdζ
             end
-            grad_greenfunction_block[idx_obs, idx_src] = K_double * dθdζ
         end
 
         # ============================================================
@@ -484,15 +524,15 @@ function compute_3D_kernel_matrices!(
 
         # Evaluate kernels at polar points with POU weighting
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            # Evaluate kernels using recomputed normal (use @view to avoid allocation)
-            r_src = @view r_polar[ir, ia, :]
-            n_src = @view n_polar[ir, ia, :]
-            K_single = laplace_single_layer(r_obs, r_src)
-            K_double = laplace_double_layer(r_obs, r_src, n_src)
-
-            # Apply quadrature weights: area element × POU, where POU contains rdrdθ already
-            M_polar_single[ir, ia] = K_single * Ppou[ir, ia] * dθdζ
-            M_polar_double[ir, ia] = K_double * Ppou[ir, ia] * dθdζ
+            # Evaluate kernels and apply quadrature weights: area element × POU, where POU contains rdrdθ already
+            rsx = r_polar[ir, ia, 1];
+            rsy = r_polar[ir, ia, 2];
+            rsz = r_polar[ir, ia, 3]
+            nsx = n_polar[ir, ia, 1];
+            nsy = n_polar[ir, ia, 2];
+            nsz = n_polar[ir, ia, 3]
+            M_polar_single[ir, ia] = laplace_single_layer(ox, oy, oz, rsx, rsy, rsz) * Ppou[ir, ia] * dθdζ
+            M_polar_double[ir, ia] = laplace_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz) * Ppou[ir, ia] * dθdζ
         end
 
         # Distribute polar singular corrections back to Cartesian grid using sparse matrix
@@ -502,25 +542,22 @@ function compute_3D_kernel_matrices!(
         M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
         M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
 
-        # Compute remaining far-field POU contribution and near-field polar quadrature result
-        # We include this region in the far-field trapezoidal rule, so use Gpou = -χ here to get 1-χ
+        # POU correction: read back far-field trapezoidal values instead of re-evaluating kernels.
+        # trap + M_grid + trap*Gpou = trap*(1+Gpou) + M_grid = trap*(1-χ) + M_grid
         @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
             # Map back to global indices
             idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
             idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
-            # Remainder of far-field contribution on the singular grid: Gpou = -χ
-            r_src = @view source.r[idx_src, :]
-            n_src = @view source.normal[idx_src, :]
-            far_single = laplace_single_layer(r_obs, r_src) * Gpou[i, j] * dθdζ
-            far_double = laplace_double_layer(r_obs, r_src, n_src) * Gpou[i, j] * dθdζ
+            trap_double = grad_greenfunction_block[idx_obs, idx_src]
+            grad_greenfunction_block[idx_obs, idx_src] = trap_double + M_grid_double[i, j] + trap_double * Gpou[i, j]
 
             # Apply near + far contributions
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] += M_grid_single[i, j] + far_single
+                trap_single = greenfunction[idx_obs, idx_src]
+                greenfunction[idx_obs, idx_src] = trap_single + M_grid_single[i, j] + trap_single * Gpou[i, j]
             end
-            grad_greenfunction_block[idx_obs, idx_src] += M_grid_double[i, j] + far_double
         end
     end
 

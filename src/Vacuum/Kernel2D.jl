@@ -141,6 +141,9 @@ but grad_greenfunction is not since it fills a different block of the
     d1_spline_x(dx_dtheta_grid, theta_grid)
     d1_spline_z(dz_dtheta_grid, theta_grid)
 
+    # Pre-allocated Legendre buffer (hoisted out of green() to avoid per-call pool acquisition)
+    legendre_buf = acquire!(pool, Float64, n + 2)
+
     # Loop through observer points
     for j in 1:mtheta
         # Get observer coordinates
@@ -150,7 +153,7 @@ but grad_greenfunction is not since it fills a different block of the
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
         @inbounds for k in 1:(mtheta-3)
             isrc = mod1(j + 1 + k, mtheta)
-            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n; gamma_prefactor)
+            G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, legendre_buf; gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
@@ -181,7 +184,7 @@ but grad_greenfunction is not since it fills a different block of the
                 dx_dtheta_gauss = d1_spline_x(theta_gauss0)
                 z_gauss = spline_z(theta_gauss0)
                 dz_dtheta_gauss = d1_spline_z(theta_gauss0)
-                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n; gamma_prefactor)
+                G_n, gradG_n, gradG_0 = green(x_obs, z_obs, x_gauss, z_gauss, dx_dtheta_gauss, dz_dtheta_gauss, n, legendre_buf; gamma_prefactor)
 
                 # Get stencil and weight for the Gaussian point
                 s = leftpanel ? stencils_left[ig] : stencils_right[ig]
@@ -639,19 +642,22 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
   - Implements analytical derivatives from Chance 1997 equations
   - The coupling terms include the Jacobian factor from the coordinate transformation
   - By default uses the 2007 Legendre function implementation (Bulirsch + Gaussian integration)
+
+An overload accepting a pre-allocated `legendre_buf::Vector{Float64}` of length `n+2` is available.
+Callers in tight loops should allocate this buffer once and pass it in to avoid per-call pool acquisition.
 """
-@with_pool pool function green(
+function green(
     x_obs::Float64,
     z_obs::Float64,
     x_source::Float64,
     z_source::Float64,
     dx_dtheta::Float64,
     dz_dtheta::Float64,
-    n::Int;
+    n::Int,
+    legendre::AbstractVector{Float64};
     gamma_prefactor::Float64=2 * sqrt(π) * gamma(0.5 - n),
     uselegacygreenfunction::Bool=false
 )
-
     x_obs2 = x_obs^2
     x_source2 = x_source^2
     x_minus2 = (x_obs - x_source)^2
@@ -670,9 +676,7 @@ according to equations (36)-(42) of Chance 1997. Replaces `green` from Fortran c
     # Argument of Legendre function 𝘴 [Chance Phys. Plasmas 1997 2161 eq. 42]
     s = (x_obs2 + x_source2 + ζ2) / R2
 
-    # Legendre functions for
-    # P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
-    legendre = acquire!(pool, Float64, n + 2)
+    # Legendre functions: P⁰ = p0, P¹ = p1, Pⁿ = pn, Pⁿ⁺¹ = pnp1
     if uselegacygreenfunction
         Pn_minus_half_1997!(legendre, s, n)
     else
