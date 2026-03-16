@@ -125,68 +125,57 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         K_int = similar!(pool, K_ext)
         G_int = similar!(pool, G_ext)
 
-        # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
-        fused_timing = @timed begin
-            kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
-        end
-        println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
+        # Fused projected kernel: compute Z^H K Z and Z^H G Z
+        kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
         if !wall.nowall
-            kernel_timing = @timed begin
-                kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
-                kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
-                kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
-            end
-            println(" Wall Galerkin Projected Kernels  TIME=$(round(kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(kernel_timing.bytes))")
+            kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
+            kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
+            kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
         end
 
-        solve_timing = @timed begin
-            # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·Gram - K_ext
-            K_int .= -K_ext
-            K_int[1:P, 1:P] .+= 2 .* Gram
-            if !wall.nowall
-                K_int[(P+1):(2*P), (P+1):(2*P)] .+= 2 .* Gram
-            end
-            G_int .= G_ext
-
-            # Solve projected BIEs for exterior and interior kernels
-            if wall.nowall
-                F_ext = lu!(K_ext[1:P, 1:P])
-                ldiv!(F_ext, @view(G_ext[1:P, :]))
-                F_int = lu!(K_int[1:P, 1:P])
-                ldiv!(F_int, @view(G_int[1:P, :]))
-            else
-                F_ext = lu!(K_ext)
-                ldiv!(F_ext, G_ext)
-                F_int = lu!(K_int)
-                ldiv!(F_int, G_int)
-            end
-
-            # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
-            mul!(wv, Gram, view(G_ext, 1:P, :))
-            wv .*= (4π^2 / M)
+        # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·Gram - K_ext
+        K_int .= -K_ext
+        K_int[1:P, 1:P] .+= 2 .* Gram
+        if !wall.nowall
+            K_int[(P+1):(2*P), (P+1):(2*P)] .+= 2 .* Gram
         end
-        println(" Galerkin Solve  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
-        reconstruct_timing = @timed begin
-            # Backward-compatible reconstruction: grre/grri in M×2P real layout
-            # Need to convert mode space to physical space and unpack the real and imaginary parts
-            # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
-            # perhaps make it a complex P * P matrix? Then don't need any of this section
-            mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
-            @view(grre[1:M, 1:P]) .= real.(temp)
-            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, view(G_int, 1:P, :))
-            @view(grri[1:M, 1:P]) .= real.(temp)
-            @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
-            if !wall.nowall
-                mul!(temp, exp_mn_basis, view(G_ext, (P+1):(2*P), :))
-                @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
-                @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-                mul!(temp, exp_mn_basis, view(G_int, (P+1):(2*P), :))
-                @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
-                @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-            end
+        G_int .= G_ext
+
+        # Solve projected BIEs for exterior and interior kernels
+        if wall.nowall
+            F_ext = lu!(K_ext[1:P, 1:P])
+            ldiv!(F_ext, @view(G_ext[1:P, :]))
+            F_int = lu!(K_int[1:P, 1:P])
+            ldiv!(F_int, @view(G_int[1:P, :]))
+        else
+            F_ext = lu!(K_ext)
+            ldiv!(F_ext, G_ext)
+            F_int = lu!(K_int)
+            ldiv!(F_int, G_int)
         end
-        println(" Reconstruct  TIME=$(round(reconstruct_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(reconstruct_timing.bytes))")
+
+        # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
+        mul!(wv, Gram, view(G_ext, 1:P, :))
+        wv .*= (4π^2 / M)
+
+        # Backward-compatible reconstruction: grre/grri in M×2P real layout
+        # Need to convert mode space to physical space and unpack the real and imaginary parts
+        # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
+        # perhaps make it a complex P * P matrix? Then don't need any of this section
+        mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
+        @view(grre[1:M, 1:P]) .= real.(temp)
+        @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
+        mul!(temp, exp_mn_basis, view(G_int, 1:P, :))
+        @view(grri[1:M, 1:P]) .= real.(temp)
+        @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
+        if !wall.nowall
+            mul!(temp, exp_mn_basis, view(G_ext, (P+1):(2*P), :))
+            @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
+            @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+            mul!(temp, exp_mn_basis, view(G_int, (P+1):(2*P), :))
+            @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
+            @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+        end
     else
         # ================================================================
         # Collocation approach: solve full physical-space system [M × M]
@@ -196,62 +185,47 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         grad_green = zeros!(pool, num_points_total, num_points_total)
         green_temp = zeros!(pool, num_points_surf, num_points_surf)
 
-        pp_kernel_timing = @timed begin
-            kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
-        end
-        println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
+        kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
 
         # Project plasma→plasma Green's function to mode space: grre[1:M, 1:2P] = real/imag(G*Z)
-        colloc_proj_timing = @timed begin
-            mul!(temp, green_temp, exp_mn_basis)
-            @view(grre[1:M, 1:P]) .= real.(temp)
-            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-        end
-        println(" Plasma Project  TIME=$(round(colloc_proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(colloc_proj_timing.bytes))")
+        mul!(temp, green_temp, exp_mn_basis)
+        @view(grre[1:M, 1:P]) .= real.(temp)
+        @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
 
         if !wall.nowall
-            wall_block_timing = @timed begin
-                # Plasma–Wall block
-                kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
-                # Wall–Wall block
-                kernel!(grad_green, green_temp, wall, wall, kparams)
-                # Wall–Plasma block
-                kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
-                # Project obs=wall, src=plasma block to mode space
-                mul!(temp, green_temp, exp_mn_basis)
-                @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
-                @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-            end
-            println(" Wall Kernel and Project  TIME=$(round(wall_block_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(wall_block_timing.bytes))")
+            # Plasma–Wall block
+            kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
+            # Wall–Wall block
+            kernel!(grad_green, green_temp, wall, wall, kparams)
+            # Wall–Plasma block
+            kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
+            # Project obs=wall, src=plasma block to mode space
+            mul!(temp, green_temp, exp_mn_basis)
+            @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
+            @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
         end
 
         # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
-        solve_timing = @timed begin
-            grri .= grre # start from same as exterior
-            grad_green_interior = similar!(pool, grad_green)
-            grad_green_interior .= grad_green
+        grri .= grre # start from same as exterior
+        grad_green_interior = similar!(pool, grad_green)
+        grad_green_interior .= grad_green
 
-            # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
-            F_ext = lu!(grad_green)
-            ldiv!(F_ext, grre)
+        # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
+        F_ext = lu!(grad_green)
+        ldiv!(F_ext, grre)
 
-            # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
-            grad_green_interior .*= -1
-            for i in 1:num_points_total
-                grad_green_interior[i, i] += 2.0
-            end
-            F_int = lu!(grad_green_interior)
-            ldiv!(F_int, grri)
+        # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
+        grad_green_interior .*= -1
+        for i in 1:num_points_total
+            grad_green_interior[i, i] += 2.0
         end
-        println(" Invert and Solve  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
+        F_int = lu!(grad_green_interior)
+        ldiv!(F_int, grri)
 
-        wv_timing = @timed begin
-            # wv = (4π²/M) · Z^H · grre_complex  [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-            temp .= complex.(@view(grre[1:M, 1:P]), @view(grre[1:M, (P+1):(2*P)]))
-            mul!(wv, exp_mn_basis', temp)
-            wv .*= (4π^2 / M)
-        end
-        println(" Compute Wv  TIME=$(round(wv_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(wv_timing.bytes))")
+        # wv = (4π²/M) · Z^H · grre_complex  [Chance Phys. Plasmas 2007 052506 eq. 115-118]
+        temp .= complex.(@view(grre[1:M, 1:P]), @view(grre[1:M, (P+1):(2*P)]))
+        mul!(wv, exp_mn_basis', temp)
+        wv .*= (4π^2 / M)
     end
 
     inputs.force_wv_symmetry && hermitianpart!(wv)
