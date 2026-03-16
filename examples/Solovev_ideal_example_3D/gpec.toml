@@ -32,8 +32,8 @@ nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 96                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
-nzvac = 64
+mthvac = 128                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+nzvac = 128
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kin_flag = false              # Kinetic EL equation (default: false)
