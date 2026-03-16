@@ -72,7 +72,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     n_override::Union{Nothing,Int}=nothing
 )
 
-    (; mtheta, mpert, mlow, nzeta, npert, nlow, use_galerkin, fuse_projection) = inputs
+    (; mtheta, mpert, mlow, nzeta, npert, nlow, use_galerkin) = inputs
 
     # Initialize surface geometries
     plasma_surf = nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
@@ -113,10 +113,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         # accumulated row by row as kernel values are computed.
         # Memory:  O(MP + P²)  instead of  O(M²)
         #
-        # Two-step (fuse_projection=false): full M×M kernel → project → solve.
-        # Memory:  O(M²) for kernel storage
-        #
-        # FLOPs (both):  O(M²P + P³)
+        # FLOPs:  O(M²P + P³)
         # ================================================================
         # Projected kernel matrices [P × P complex]
         K_ext = zeros!(pool, ComplexF64, P, P)
@@ -128,29 +125,11 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         Gram = zeros!(pool, ComplexF64, P, P)
         mul!(Gram, exp_mn_basis', exp_mn_basis)
 
-        if fuse_projection
-            # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
-            fused_timing = @timed begin
-                projected_kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
-            end
-            println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
-        else
-            # Full-size kernel matrices, then project to mode space
-            K_ext_temp = zeros!(pool, num_points_total, num_points_total)
-            G_ext_temp = zeros!(pool, num_points_surf, num_points_surf)
-            pp_kernel_timing = @timed begin
-                kernel!(K_ext_temp, G_ext_temp, plasma_surf, plasma_surf, kparams)
-            end
-            println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
-            # Project the kernels to mode space - Z^H * K * Z and Z^H * G * Z
-            proj_timing = @timed begin
-                mul!(temp, K_ext_temp, exp_mn_basis)
-                mul!(K_ext, exp_mn_basis', temp)
-                mul!(temp, G_ext_temp, exp_mn_basis)
-                mul!(G_ext, exp_mn_basis', temp)
-            end
-            println(" Project Kernel  TIME=$(round(proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(proj_timing.bytes))")
+        # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
+        fused_timing = @timed begin
+            projected_kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
         end
+        println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
 
         solve_timing = @timed begin
             # Interior kernel: K_int = -K + 2I → grad_green_fourier_int = 2·Gram - grad_green_fourier
@@ -164,15 +143,15 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
             ldiv!(F, G_int)
 
             # wv = (4π²/M) · Gram · green_fourier
-            wv .= (4π^2 / M) .* (Gram * green_fourier)
+            wv .= (4π^2 / M) .* (Gram * G_ext)
 
             # Backward-compatible reconstruction: grre/grri = real(Z·c), imag(Z·c) in M×2P real.
             # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
             # perhaps make it a complex P * P matrix? Then don't need any of this section
-            mul!(temp, exp_mn_basis, green_fourier)
+            mul!(temp, exp_mn_basis, G_ext)
             @view(grre[1:M, 1:P]) .= real.(temp)
             @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, green_fourier_int)
+            mul!(temp, exp_mn_basis, G_int)
             @view(grri[1:M, 1:P]) .= real.(temp)
             @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
         end
