@@ -28,14 +28,11 @@ and data dumping.
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
     vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
-    @time Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
+    Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
-    @inbounds for ipert in 1:numpert_total
-        @views vac_data.wv[ipert, :] .*= singfac[ipert]
-        @views vac_data.wv[:, ipert] .*= singfac[ipert]
-    end
+    @inbounds @views vac_data.wv .*= singfac .* singfac'
 
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
@@ -75,13 +72,11 @@ and data dumping.
     # Compute plasma and vacuum contributions.
     # wpt = wt' * wp * wt  ; wvt = wt' * wv * wt
     mul!(tmp_mat, wp, vac_data.wt)
-    mul!(wpt, adjoint(vac_data.wt), tmp_mat)
+    mul!(wpt, vac_data.wt', tmp_mat)
     mul!(tmp_mat, vac_data.wv, vac_data.wt)
-    mul!(wvt, adjoint(vac_data.wt), tmp_mat)
-    for ipert in 1:numpert_total
-        vac_data.ep[ipert] = wpt[ipert, ipert]
-        vac_data.ev[ipert] = wvt[ipert, ipert]
-    end
+    mul!(wvt, vac_data.wt', tmp_mat)
+    vac_data.ep .= diag(wpt)
+    vac_data.ev .= diag(wvt)
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
@@ -123,8 +118,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     # TODO: 4 spline points is arbitrary - is there a better way?
     qedge = profiles.q_spline(ctrl.psiedge)
     npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
-    psi_array = zeros(Float64, npsi + 1)
-    wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
+    psi_array = zeros!(pool, Float64, npsi + 1)
+    wv_array = zeros!(pool, ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:(npsi+1)
         # Space points evenly in q
@@ -143,10 +138,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
 
         # Apply singular factor scaling: (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
         singfac = vec((intr.mlow:intr.mhigh) .- qi .* (intr.nlow:intr.nhigh)')
-        @inbounds for ipert in 1:intr.numpert_total
-            @views wv[ipert, :] .*= singfac[ipert]
-            @views wv[:, ipert] .*= singfac[ipert]
-        end
+        @inbounds @views wv .*= singfac .* singfac'
 
         @views wv_array[i, :, :] .= wv
     end
