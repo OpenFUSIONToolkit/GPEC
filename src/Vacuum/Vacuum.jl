@@ -119,10 +119,10 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         # FLOPs (both):  O(M²P + P³)
         # ================================================================
         # Projected kernel matrices [P × P complex]
-        grad_green_fourier = zeros!(pool, ComplexF64, P, P)
-        green_fourier = zeros!(pool, ComplexF64, P, P)
-        grad_green_fourier_int = similar!(pool, grad_green_fourier)
-        green_fourier_int = similar!(pool, green_fourier)
+        K_ext = zeros!(pool, ComplexF64, P, P)
+        G_ext = zeros!(pool, ComplexF64, P, P)
+        K_int = similar!(pool, K_ext)
+        G_int = similar!(pool, G_ext)
 
         # Gram matrix required by projected_kernel! for the diagonal residue and for interior solve
         Gram = zeros!(pool, ComplexF64, P, P)
@@ -131,38 +131,37 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         if fuse_projection
             # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
             fused_timing = @timed begin
-                projected_kernel!(grad_green_fourier, green_fourier, plasma_surf, plasma_surf, kparams,
-                    exp_mn_basis, Gram)
+                projected_kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
             end
             println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
         else
             # Full-size kernel matrices, then project to mode space
-            grad_green = zeros!(pool, num_points_total, num_points_total)
-            green_temp = zeros!(pool, num_points_surf, num_points_surf)
+            K_ext_temp = zeros!(pool, num_points_total, num_points_total)
+            G_ext_temp = zeros!(pool, num_points_surf, num_points_surf)
             pp_kernel_timing = @timed begin
-                kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
+                kernel!(K_ext_temp, G_ext_temp, plasma_surf, plasma_surf, kparams)
             end
             println(" Plasma Kernel  TIME=$(round(pp_kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(pp_kernel_timing.bytes))")
             # Project the kernels to mode space - Z^H * K * Z and Z^H * G * Z
             proj_timing = @timed begin
-                mul!(temp, grad_green, exp_mn_basis)
-                mul!(grad_green_fourier, exp_mn_basis', temp)
-                mul!(temp, green_temp, exp_mn_basis)
-                mul!(green_fourier, exp_mn_basis', temp)
+                mul!(temp, K_ext_temp, exp_mn_basis)
+                mul!(K_ext, exp_mn_basis', temp)
+                mul!(temp, G_ext_temp, exp_mn_basis)
+                mul!(G_ext, exp_mn_basis', temp)
             end
             println(" Project Kernel  TIME=$(round(proj_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(proj_timing.bytes))")
         end
 
         solve_timing = @timed begin
             # Interior kernel: K_int = -K + 2I → grad_green_fourier_int = 2·Gram - grad_green_fourier
-            grad_green_fourier_int .= 2 .* Gram .- grad_green_fourier
-            green_fourier_int .= green_fourier
+            K_int .= 2 .* Gram .- K_ext
+            G_int .= G_ext
 
             # Solve projected BIEs for exterior and interior kernels
-            F = lu!(grad_green_fourier)
-            ldiv!(F, green_fourier)
-            F = lu!(grad_green_fourier_int)
-            ldiv!(F, green_fourier_int)
+            F = lu!(K_ext)
+            ldiv!(F, G_ext)
+            F = lu!(K_int)
+            ldiv!(F, G_int)
 
             # wv = (4π²/M) · Gram · green_fourier
             wv .= (4π^2 / M) .* (Gram * green_fourier)
@@ -223,7 +222,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
             K_int[(P+1):(2P), 1:P] .= .-K_wp_c
             K_int[(P+1):(2P), (P+1):(2P)] .= 2 .* Gram .- K_ww_c
 
-            # RHS [2P × P]: single-layer blocks (only plasma-source blocks are nonzero)
+            # RHS [2P × P]: single-layer blocks with plasma as source
             G_rhs_ext = zeros!(pool, ComplexF64, 2P, P)
             G_rhs_ext[1:P, :] .= G_pp_c
             G_rhs_ext[(P+1):(2P), :] .= G_wp_c
@@ -247,6 +246,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
             wv .= (4π^2 / M) .* (Gram * c_p_ext)
 
             # Backward-compatible reconstruction: grre/grri in M×2P real layout
+            # Need to convert mode space to physical space and unpack the real and imaginary parts
             mul!(temp, exp_mn_basis, c_p_ext)
             @view(grre[1:M, 1:P]) .= real.(temp)
             @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
