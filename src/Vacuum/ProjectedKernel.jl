@@ -19,7 +19,7 @@
 # 2D fused projected kernel
 # ============================================================================
 """
-    projected_kernel!(K_c, G_c, observer, source, params, exp_mn_basis, Gram)
+    kernel!(K_c, G_c, observer, source, params, exp_mn_basis, Gram)
 
 Compute the Fourier-projected kernel matrices K_c = Z^H K Z and G_c = Z^H G Z
 directly, without materializing the full M×M kernel matrices.
@@ -36,9 +36,7 @@ Dispatches to the 2D or 3D implementation based on the geometry/params types.
   - `exp_mn_basis::Matrix{ComplexF64}`: [M × P] complex Fourier basis Z = exp(i(mθ − nζ))
   - `Gram::Matrix{ComplexF64}`: [P × P] Gram matrix Z^H Z (needed for diagonal identity term)
 """
-function projected_kernel! end
-
-function projected_kernel!(
+function kernel!(
     K_c::AbstractMatrix{ComplexF64},
     G_c::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
@@ -50,7 +48,7 @@ function projected_kernel!(
     _projected_kernel_2D!(K_c, G_c, observer, source, params.n, exp_mn_basis, Gram)
 end
 
-function projected_kernel!(
+function kernel!(
     K_c::AbstractMatrix{ComplexF64},
     G_c::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
@@ -87,6 +85,12 @@ Memory: O(MP) instead of O(M²).
     dtheta = 2π / mtheta
     theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
+    # Take a view of the corresponding block of the K_c and G_c matrices
+    col_idx = (source isa PlasmaGeometry ? 1 : 2)
+    row_idx = (observer isa PlasmaGeometry ? 1 : 2)
+    K_c_block = view(K_c, ((row_idx-1)*P+1):(row_idx*P), ((col_idx-1)*P+1):(col_idx*P))
+    G_c_block = view(G_c, ((row_idx-1)*P+1):(row_idx*P), :)
+
     populate_greenfunction = source isa PlasmaGeometry
 
     # S₁ᵢ logarithmic correction factors [Chance Phys. Plasmas 1997 2161 eq. 78]
@@ -110,13 +114,9 @@ Memory: O(MP) instead of O(M²).
     d1_spline_x(dx_dtheta_grid, theta_grid)
     d1_spline_z(dz_dtheta_grid, theta_grid)
 
-    # Zero output matrices; we accumulate rank-1 updates (conj(Z[j,:]) ⊗ proj_z)
-    fill!(K_c, 0.0)
-    fill!(G_c, 0.0)
-
     # Per-observer projection vectors (P-length complex): proj_z = (kernel row) · Z
-    proj_kz = zeros(ComplexF64, P)
-    proj_gz = zeros(ComplexF64, P)
+    proj_kz = zeros!(pool, ComplexF64, P)
+    proj_gz = zeros!(pool, ComplexF64, P)
 
     for j in 1:mtheta
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
@@ -200,9 +200,9 @@ Memory: O(MP) instead of O(M²).
         BLAS.axpy!(ComplexF64(diag_accum), @view(Z[j, :]), proj_kz)
 
         # ── Rank-1 accumulate: K_c += conj(Z[j,:]) ⊗ proj_kz ──
-        BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_kz, K_c)
+        BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_kz, K_c_block)
         if populate_greenfunction
-            BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_gz, G_c)
+            BLAS.geru!(ComplexF64(1.0), conj.(@view(Z[j, :])), proj_gz, G_c_block)
         end
     end
 
@@ -210,19 +210,19 @@ Memory: O(MP) instead of O(M²).
 
     # Normals point out of vacuum for wall but inward for plasma → flip sign for plasma source
     if source isa PlasmaGeometry
-        K_c .*= -1
+        K_c_block .*= -1
     end
 
     # Diagonal residue: K += residue·I  →  K_c += residue·Gram
     # [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
     if residue != 0.0
-        K_c .+= residue .* Gram
+        K_c_block .+= residue .* Gram
     end
 
     # 2π𝒢 → 𝒢
     if populate_greenfunction
-        G_c ./= 2π
+        G_c_block ./= 2π
     end
 end
 
@@ -262,6 +262,11 @@ function _projected_kernel_3D!(
     num_points = observer.mtheta * observer.nzeta
     dθdζ = 4π^2 / num_points
 
+    # Take a view of the corresponding block of the K_c and G_c matrices
+    col_idx = (source isa PlasmaGeometry3D ? 1 : 2)
+    row_idx = (observer isa PlasmaGeometry3D ? 1 : 2)
+    K_c_block = view(K_c, ((row_idx-1)*P+1):(row_idx*P), ((col_idx-1)*P+1):(col_idx*P))
+    G_c_block = view(G_c, ((row_idx-1)*P+1):(row_idx*P), :)
     populate_greenfunction = source isa PlasmaGeometry3D
 
     if PATCH_RAD > (min(source.mtheta, source.nzeta) - 1) ÷ 2
@@ -359,17 +364,15 @@ function _projected_kernel_3D!(
     end
 
     # ── Assemble P×P projected matrices: K_c = Z^H K Z, G_c = Z^H G Z ──
-    mul!(K_c, Z', KZ)
-    K_c ./= 2π
+    mul!(K_c_block, Z', KZ)
+    K_c_block ./= 2π
     if populate_greenfunction
-        mul!(G_c, Z', GZ)
-        G_c ./= 2π
-    else
-        fill!(G_c, 0.0)
+        mul!(G_c_block, Z', GZ)
+        G_c_block ./= 2π
     end
 
     # Diagonal: K += I → K_c += Gram [for same-type source/observer]
     if typeof(source) == typeof(observer)
-        K_c .+= Gram
+        K_c_block .+= Gram
     end
 end

@@ -102,144 +102,120 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     P = num_modes
     temp = zeros!(pool, ComplexF64, M, P)
 
-    if wall.nowall && use_galerkin
-        # ================================================================
-        # Galerkin: solve system in P×P mode space. Uses complex basis
-        # Z = C + iS so projected matrices are P×P complex.
-        #
-        # Fused (fuse_projection=true): kernel assembly + Fourier projection
-        # in one pass. The full M×M kernel matrices are never materialized —
-        # instead the P×P projected matrices grad_green_fourier and G_c are
-        # accumulated row by row as kernel values are computed.
-        # Memory:  O(MP + P²)  instead of  O(M²)
-        #
-        # FLOPs:  O(M²P + P³)
-        # ================================================================
-        # Projected kernel matrices [P × P complex]
-        K_ext = zeros!(pool, ComplexF64, P, P)
-        G_ext = zeros!(pool, ComplexF64, P, P)
-        K_int = similar!(pool, K_ext)
-        G_int = similar!(pool, G_ext)
-
+    if use_galerkin
         # Gram matrix required by projected_kernel! for the diagonal residue and for interior solve
         Gram = zeros!(pool, ComplexF64, P, P)
         mul!(Gram, exp_mn_basis', exp_mn_basis)
 
-        # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
-        fused_timing = @timed begin
-            projected_kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
-        end
-        println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
+        if wall.nowall
+            # ================================================================
+            # Galerkin (no wall): solve system in P×P mode space. Uses complex basis
+            # Z = C + iS so projected matrices are P×P complex.
+            #
+            # Fused (fuse_projection=true): kernel assembly + Fourier projection
+            # in one pass. The full M×M kernel matrices are never materialized —
+            # instead the P×P projected matrices grad_green_fourier and G_c are
+            # accumulated row by row as kernel values are computed.
+            # Memory:  O(MP + P²)  instead of  O(M²)
+            #
+            # FLOPs:  O(M²P + P³)
+            # ================================================================
+            # Projected kernel matrices [P × P complex]
+            K_ext = zeros!(pool, ComplexF64, P, P)
+            G_ext = zeros!(pool, ComplexF64, P, P)
+            K_int = similar!(pool, K_ext)
+            G_int = similar!(pool, G_ext)
 
-        solve_timing = @timed begin
-            # Interior kernel: K_int = -K + 2I → grad_green_fourier_int = 2·Gram - grad_green_fourier
-            K_int .= 2 .* Gram .- K_ext
-            G_int .= G_ext
+            # Fused projected kernel: grad_green_fourier = Z^H K Z, green_fourier = Z^H G Z
+            fused_timing = @timed begin
+                kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
+            end
+            println(" Fused Projected Kernel  TIME=$(round(fused_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(fused_timing.bytes))")
 
-            # Solve projected BIEs for exterior and interior kernels
-            F = lu!(K_ext)
-            ldiv!(F, G_ext)
-            F = lu!(K_int)
-            ldiv!(F, G_int)
+            solve_timing = @timed begin
+                # Interior kernel: K_int = -K + 2I → grad_green_fourier_int = 2·Gram - grad_green_fourier
+                K_int .= 2 .* Gram .- K_ext
+                G_int .= G_ext
 
-            # wv = (4π²/M) · Gram · green_fourier
-            wv .= (4π^2 / M) .* (Gram * G_ext)
+                # Solve projected BIEs for exterior and interior kernels
+                F = lu!(K_ext)
+                ldiv!(F, G_ext)
+                F = lu!(K_int)
+                ldiv!(F, G_int)
 
-            # Backward-compatible reconstruction: grre/grri = real(Z·c), imag(Z·c) in M×2P real.
-            # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
-            # perhaps make it a complex P * P matrix? Then don't need any of this section
-            mul!(temp, exp_mn_basis, G_ext)
-            @view(grre[1:M, 1:P]) .= real.(temp)
-            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, G_int)
-            @view(grri[1:M, 1:P]) .= real.(temp)
-            @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
-        end
-        println(" Galerkin Solve + Reconstruct  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
+                # wv = (4π²/M) · Gram · green_fourier
+                wv .= (4π^2 / M) .* (Gram * G_ext)
 
-    elseif !wall.nowall && use_galerkin
-        # ================================================================
-        # Wall Galerkin: both plasma and wall unknowns in (m,n) mode space.
-        # Builds four P×P projected kernel blocks (pp, pw, wp, ww) via
-        # projected_kernel!, assembles a 2P×2P system, and solves directly.
-        # Same exp_mn_basis and Gram for all blocks (same angular grid).
-        # Memory: O(MP + P²), no M² or (2M)² storage.
-        # ================================================================
+                # Backward-compatible reconstruction: grre/grri = real(Z·c), imag(Z·c) in M×2P real.
+                # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
+                # perhaps make it a complex P * P matrix? Then don't need any of this section
+                mul!(temp, exp_mn_basis, G_ext)
+                @view(grre[1:M, 1:P]) .= real.(temp)
+                @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
+                mul!(temp, exp_mn_basis, G_int)
+                @view(grri[1:M, 1:P]) .= real.(temp)
+                @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
+            end
+            println(" Galerkin Solve + Reconstruct  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
 
-        Gram = zeros!(pool, ComplexF64, P, P)
-        mul!(Gram, exp_mn_basis', exp_mn_basis)
+        else
+            # ================================================================
+            # Wall Galerkin: both plasma and wall unknowns in (m,n) mode space.
+            # Builds four P×P projected kernel blocks (pp, pw, wp, ww) via
+            # projected_kernel!, assembles a 2P×2P system, and solves directly.
+            # Same exp_mn_basis and Gram for all blocks (same angular grid).
+            # Memory: O(MP + P²), no M² or (2M)² storage.
+            # ================================================================
 
-        # Four projected kernel blocks [P × P complex each]
-        K_pp_c = zeros!(pool, ComplexF64, P, P)
-        G_pp_c = zeros!(pool, ComplexF64, P, P)
-        K_pw_c = zeros!(pool, ComplexF64, P, P)
-        G_pw_c = zeros!(pool, ComplexF64, P, P)
-        K_wp_c = zeros!(pool, ComplexF64, P, P)
-        G_wp_c = zeros!(pool, ComplexF64, P, P)
-        K_ww_c = zeros!(pool, ComplexF64, P, P)
-        G_ww_c = zeros!(pool, ComplexF64, P, P)
-
-        kernel_timing = @timed begin
-            projected_kernel!(K_pp_c, G_pp_c, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
-            projected_kernel!(K_pw_c, G_pw_c, plasma_surf, wall, kparams, exp_mn_basis, Gram)
-            projected_kernel!(K_wp_c, G_wp_c, wall, plasma_surf, kparams, exp_mn_basis, Gram)
-            projected_kernel!(K_ww_c, G_ww_c, wall, wall, kparams, exp_mn_basis, Gram)
-        end
-        println(" Wall Galerkin Projected Kernels  TIME=$(round(kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(kernel_timing.bytes))")
-
-        solve_timing = @timed begin
-            # Assemble 2P×2P exterior system and interior system (before LU overwrites)
+            # Four projected kernel blocks [P × P complex each]
             K_ext = zeros!(pool, ComplexF64, 2P, 2P)
-            K_ext[1:P, 1:P] .= K_pp_c
-            K_ext[1:P, (P+1):(2P)] .= K_pw_c
-            K_ext[(P+1):(2P), 1:P] .= K_wp_c
-            K_ext[(P+1):(2P), (P+1):(2P)] .= K_ww_c
+            G_ext = zeros!(pool, ComplexF64, 2P, P)
+            K_int = similar!(pool, K_ext)
+            G_int = similar!(pool, G_ext)
 
-            K_int = zeros!(pool, ComplexF64, 2P, 2P)
-            K_int[1:P, 1:P] .= 2 .* Gram .- K_pp_c
-            K_int[1:P, (P+1):(2P)] .= .-K_pw_c
-            K_int[(P+1):(2P), 1:P] .= .-K_wp_c
-            K_int[(P+1):(2P), (P+1):(2P)] .= 2 .* Gram .- K_ww_c
+            kernel_timing = @timed begin
+                kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
+                kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
+                kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
+                kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
+            end
+            println(" Wall Galerkin Projected Kernels  TIME=$(round(kernel_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(kernel_timing.bytes))")
 
-            # RHS [2P × P]: single-layer blocks with plasma as source
-            G_rhs_ext = zeros!(pool, ComplexF64, 2P, P)
-            G_rhs_ext[1:P, :] .= G_pp_c
-            G_rhs_ext[(P+1):(2P), :] .= G_wp_c
+            solve_timing = @timed begin
+                # Compute interior system: K_int = 2·Gram - K_ext
+                K_int .= -K_ext
+                K_int[1:P, 1:P] .+= 2 .* Gram
+                K_int[(P+1):(2*P), (P+1):(2*P)] .+= 2 .* Gram
+                G_int .= G_ext
 
-            G_rhs_int = similar!(pool, G_rhs_ext)
-            G_rhs_int .= G_rhs_ext
+                # Exterior solve: K_ext * G_ext = G_ext
+                F_ext = lu!(K_ext)
+                ldiv!(F_ext, G_ext)
 
-            # Exterior solve: K_ext * C_ext = G_rhs_ext
-            F_ext = lu!(K_ext)
-            ldiv!(F_ext, G_rhs_ext)
-            c_p_ext = @view G_rhs_ext[1:P, :]
-            c_w_ext = @view G_rhs_ext[(P+1):(2P), :]
+                # Interior solve: K_int * C_int = G_rhs_int
+                F_int = lu!(K_int)
+                ldiv!(F_int, G_int)
 
-            # Interior solve: K_int * C_int = G_rhs_int
-            F_int = lu!(K_int)
-            ldiv!(F_int, G_rhs_int)
-            c_p_int = @view G_rhs_int[1:P, :]
-            c_w_int = @view G_rhs_int[(P+1):(2P), :]
+                # wv = (4π²/M) · Gram · G_p_ext (plasma observer only)
+                wv .= (4π^2 / M) .* (Gram * view(G_ext, 1:P, :))
 
-            # wv = (4π²/M) · Gram · c_p_ext (plasma observer only)
-            wv .= (4π^2 / M) .* (Gram * c_p_ext)
-
-            # Backward-compatible reconstruction: grre/grri in M×2P real layout
-            # Need to convert mode space to physical space and unpack the real and imaginary parts
-            mul!(temp, exp_mn_basis, c_p_ext)
-            @view(grre[1:M, 1:P]) .= real.(temp)
-            @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, c_p_int)
-            @view(grri[1:M, 1:P]) .= real.(temp)
-            @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, c_w_ext)
-            @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
-            @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, c_w_int)
-            @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
-            @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+                # Backward-compatible reconstruction: grre/grri in M×2P real layout
+                # Need to convert mode space to physical space and unpack the real and imaginary parts
+                mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
+                @view(grre[1:M, 1:P]) .= real.(temp)
+                @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
+                mul!(temp, exp_mn_basis, view(G_int, 1:P, :))
+                @view(grri[1:M, 1:P]) .= real.(temp)
+                @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
+                mul!(temp, exp_mn_basis, view(G_ext, (P+1):(2*P), :))
+                @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
+                @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+                mul!(temp, exp_mn_basis, view(G_int, (P+1):(2*P), :))
+                @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
+                @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+            end
+            println(" Wall Galerkin Solve + Reconstruct  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
         end
-        println(" Wall Galerkin Solve + Reconstruct  TIME=$(round(solve_timing.time; digits=6)) s  ALLOCATIONS=$(Base.format_bytes(solve_timing.bytes))")
 
     else
         # ================================================================
