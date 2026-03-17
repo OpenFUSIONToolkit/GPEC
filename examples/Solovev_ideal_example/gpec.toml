@@ -53,7 +53,7 @@ ucrit = 1e3                   # Maximum fraction of solutions allowed before re-
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
 save_interval = 3            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
-[WALL]
+[Wall]
 shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
 a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
 aw = 0.05                     # Half-thickness of the wall.

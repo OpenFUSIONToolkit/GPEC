@@ -67,17 +67,17 @@ The residue calculation needs to be updated for open walls.**
 
 # Arguments
 
-  - `grad_greenfunction`: Gradient Green's function matrix (output)
-  - `greenfunction`: Green's function matrix (output)
+  - `K`: Fourier-space Gradient Green's function matrix (output)
+  - `G`: Fourier-space Green's function matrix (output)
   - `observer`: Observer geometry struct (PlasmaGeometry or WallGeometry)
   - `source`: Source geometry struct (PlasmaGeometry or WallGeometry)
   - `n`: Toroidal mode number
 
 # Returns
 
-Modifies `grad_greenfunction` and `greenfunction` in place.
-Note that greenfunction is zeroed each time this function is called,
-but grad_greenfunction is not since it fills a different block of the
+Modifies `K` and `G` in place.
+Note that G is zeroed each time this function is called,
+but K is not since it fills a different block of the
 (2 * mtheta, 2 * mtheta) depending on the source/observer.
 
 # Notes
@@ -87,28 +87,26 @@ but grad_greenfunction is not since it fills a different block of the
   - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
 """
 @with_pool pool function compute_2D_kernel_matrices!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
+    K::AbstractMatrix{ComplexF64},
+    G::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
-    n::Int
+    n::Int,
+    Z::AbstractMatrix{ComplexF64},
+    Gram::AbstractMatrix{ComplexF64}
 )
 
-    mtheta = length(observer.x)
-    dtheta = 2π / mtheta
-    theta_grid = range(; start=0, length=mtheta, step=dtheta)
+    M, P = size(Z) # M = mtheta, P = num_modes
+    Zt = Matrix{ComplexF64}(transpose(Z))  # [P × M] for contiguous column access
+    dtheta = 2π / M
+    theta_grid = range(; start=0, length=M, step=dtheta)
 
     # Take a view of the corresponding block of the grad_greenfunction
-    col_index = (source isa PlasmaGeometry ? 1 : 2)
-    row_index = (observer isa PlasmaGeometry ? 1 : 2)
-    grad_greenfunction_block = view(
-        grad_greenfunction,
-        ((row_index-1)*mtheta+1):(row_index*mtheta),
-        ((col_index-1)*mtheta+1):(col_index*mtheta)
-    )
+    col_idx = (source isa PlasmaGeometry ? 1 : 2)
+    row_idx = (observer isa PlasmaGeometry ? 1 : 2)
+    K_block = view(K, ((row_idx-1)*P+1):(row_idx*P), ((col_idx-1)*P+1):(col_idx*P))
+    G_block = view(G, ((row_idx-1)*P+1):(row_idx*P), :)
 
-    # Zero out greenfunction at start of each kernel call
-    fill!(greenfunction, 0.0)
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
 
@@ -119,7 +117,7 @@ but grad_greenfunction is not since it fills a different block of the
     log_correction_array = SVector(log_correction_2, log_correction_1, log_correction_0, log_correction_1, log_correction_2)
 
     # Precompute the n-dependent prefactor 2√π·Γ(1/2-n) [Chance Phys. Plasmas 1997 2161 eq. 40]
-    # This is constant for all source/observer point pairs within this kernel call.
+    # This constant is only computed once for each n
     gamma_prefactor = 2 * sqrt(π) * gamma(0.5 - n)
 
     # Set up periodic splines used for off-grid Gaussian quadrature points
@@ -134,8 +132,8 @@ but grad_greenfunction is not since it fills a different block of the
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
-    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), M)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), M)
 
     # Call in-place API to avoid allocations
     d1_spline_x(dx_dtheta_grid, theta_grid)
@@ -144,35 +142,49 @@ but grad_greenfunction is not since it fills a different block of the
     # Pre-allocated Legendre buffer (hoisted out of green() to avoid per-call pool acquisition)
     legendre_buf = acquire!(pool, Float64, n + 2)
 
+    # Per-observer projection vectors: proj = (kernel row) · Z
+    proj_k = zeros!(pool, ComplexF64, P)
+    proj_g = zeros!(pool, ComplexF64, P)
+
     # Loop through observer points
-    for j in 1:mtheta
+    for j in 1:M
         # Get observer coordinates
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
-        # Perform Simpson integration for nonsingular source points
+        # Zero out projection terms
+        fill!(proj_k, 0.0)
+        fill!(proj_g, 0.0)
+        diag_accum = 0.0
+
+        # ============================================================
+        # FAR FIELD: Simpson integration for nonsingular source points
+        # ============================================================
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
-        @inbounds for k in 1:(mtheta-3)
-            isrc = mod1(j + 1 + k, mtheta)
+        @inbounds for k in 1:(M-3)
+            isrc = mod1(j + 1 + k, M)
             G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, legendre_buf; gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-            wsimpson = dtheta / 3 * ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
+            wsimpson = dtheta / 3 * ((k == 1 || k == M - 3) ? 1 : (iseven(k) ? 4 : 2))
 
-            # Sum contributions to Green's function matrices using Simpson weight
+            # Sum and project contributions to Green's function matrices
             if populate_greenfunction
-                greenfunction[j, isrc] += G_n * wsimpson
+                _accum_row!(proj_g, G_n * wsimpson, Zt, isrc)
             end
-            grad_greenfunction_block[j, isrc] += gradG_n * wsimpson
+            _accum_row!(proj_k, gradG_n * wsimpson, Zt, isrc)
             # Subtract regular integral component of δⱼᵢK⁰ [Chance Phys. Plasmas 1997 2161 eq. 83]
-            grad_greenfunction_block[j, j] -= gradG_0 * wsimpson
+            diag_accum -= gradG_0 * wsimpson
         end
 
-        # Perform Gaussian quadrature for singular points (source = obs point)
+        # ============================================================
+        # NEAR FIELD: Gaussian quadrature with singular correction
+        # ============================================================
         # Indices of the singularity region, [j-2, j-1, j, j+1, j+2] (allocation-free)
         for (offset_idx, offset) in enumerate(-2:2)
-            sing_idx[offset_idx] = mod1(j + offset + mtheta, mtheta)
+            sing_idx[offset_idx] = mod1(j + offset + M, M)
         end
+
         # Integrate region of length 2 * dtheta on left/right of singularity
         for leftpanel in (true, false)
             gauss_mid = theta_obs + (leftpanel ? -dtheta : dtheta)
@@ -197,54 +209,64 @@ but grad_greenfunction is not since it fills a different block of the
                         G_n += log((theta_obs - theta_gauss)^2) / x_obs
                     end
                     @inbounds for stencil_idx in 1:5
-                        greenfunction[j, sing_idx[stencil_idx]] += G_n * s[stencil_idx] * wgauss
+                        _accum_row!(proj_g, G_n * s[stencil_idx] * wgauss, Zt, sing_idx[stencil_idx])
                     end
                 end
 
                 # Second type of singularity: 𝒦ⁿ [Chance Phys. Plasmas 1997 2161 eq. 83, 86]
                 @inbounds for stencil_idx in 1:5
-                    grad_greenfunction_block[j, sing_idx[stencil_idx]] += gradG_n * s[stencil_idx] * wgauss
+                    _accum_row!(proj_k, gradG_n * s[stencil_idx] * wgauss, Zt, sing_idx[stencil_idx])
                 end
                 # Subtract off the diverging singular n=0 component
-                grad_greenfunction_block[j, j] -= gradG_0 * wgauss
+                diag_accum -= gradG_0 * wgauss
             end
         end
 
         # Subtract off analytic singular integral [Chance Phys. Plasmas 1997 2161 eq. 75] if plasma-plasma block
         if populate_greenfunction && observer isa PlasmaGeometry
             @inbounds for stencil_idx in 1:5
-                greenfunction[j, sing_idx[stencil_idx]] -= log_correction_array[stencil_idx] / x_obs
+                _accum_row!(proj_g, -log_correction_array[stencil_idx] / x_obs, Zt, sing_idx[stencil_idx])
             end
+        end
+
+        # Project the n=0 diagonal accumulation
+        _accum_row!(proj_k, diag_accum, Zt, j)
+
+        # ── Rank-1 accumulate: K/G += conj(Z[j,:]) ⋅ proj_k/g ──
+        _rank1_conj!(K_block, Zt, j, proj_k)
+        if populate_greenfunction
+            _rank1_conj!(G_block, Zt, j, proj_g)
         end
     end
 
     # Normals need to point outward from vacuum region. In VACUUM clockwise θ convention, normal points
     # out of vacuum for wall but inward for plasma, so we multiply by -1 for plasma sources
     if source isa PlasmaGeometry
-        grad_greenfunction_block .*= -1
+        K_block .*= -1
     end
 
     # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
+    # The Gram matrix is a result of the projection onto a scalar, Z⋅Zᵀ * residue
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
-    @inbounds for i in 1:mtheta
-        grad_greenfunction_block[i, i] += residue
-    end
+    K_block .+= residue .* Gram
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
     if populate_greenfunction
-        greenfunction ./= 2π
+        G_block ./= 2π
     end
 end
 
 # Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
 function kernel!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
+    K::AbstractMatrix{ComplexF64},
+    G::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
-    params::KernelParams2D
+    params::KernelParams2D,
+    Z::AbstractMatrix{ComplexF64},
+    Gram::AbstractMatrix{ComplexF64}
 )
-    return compute_2D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, params.n)
+    return compute_2D_kernel_matrices!(K, G, observer, source, params.n, Z, Gram)
 end
 
 #############################################################

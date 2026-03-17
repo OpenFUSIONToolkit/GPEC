@@ -15,32 +15,6 @@
 # FLOP cost is identical to the two-step approach O(M²P), but memory drops
 # from O(M²) to O(MP + P²).
 
-# ── Helpers for small-P accumulation (avoids BLAS dispatch overhead) ──────────
-
-"""
-Accumulate `proj += w * Zt[:, col]` with SIMD. Replaces BLAS.axpy! for small P.
-"""
-@inline function _accum_row!(proj::AbstractVector{ComplexF64}, w::Float64,
-    Zt::AbstractMatrix{ComplexF64}, col::Int)
-    @inbounds @simd for p in eachindex(proj)
-        proj[p] += w * Zt[p, col]
-    end
-end
-
-"""
-Rank-1 update `A += conj(Zt[:, j]) * y^T`. Avoids allocating a conjugated temporary.
-"""
-@inline function _rank1_conj!(A::AbstractMatrix{ComplexF64},
-    Zt::AbstractMatrix{ComplexF64}, j::Int,
-    y::AbstractVector{ComplexF64})
-    @inbounds for p2 in eachindex(y)
-        y_p2 = y[p2]
-        for p1 in axes(A, 1)
-            A[p1, p2] += conj(Zt[p1, j]) * y_p2
-        end
-    end
-end
-
 # ============================================================================
 # 2D fused projected kernel
 # ============================================================================
@@ -62,17 +36,17 @@ Dispatches to the 2D or 3D implementation based on the geometry/params types.
   - `exp_mn_basis::Matrix{ComplexF64}`: [M × P] complex Fourier basis Z = exp(i(mθ − nζ))
   - `Gram::Matrix{ComplexF64}`: [P × P] Gram matrix Z^H Z (needed for diagonal identity term)
 """
-function kernel!(
-    K_c::AbstractMatrix{ComplexF64},
-    G_c::AbstractMatrix{ComplexF64},
-    observer::Union{PlasmaGeometry,WallGeometry},
-    source::Union{PlasmaGeometry,WallGeometry},
-    params::KernelParams2D,
-    exp_mn_basis::AbstractMatrix{ComplexF64},
-    Gram::AbstractMatrix{ComplexF64}
-)
-    _projected_kernel_2D!(K_c, G_c, observer, source, params.n, exp_mn_basis, Gram)
-end
+# function kernel!(
+#     K_c::AbstractMatrix{ComplexF64},
+#     G_c::AbstractMatrix{ComplexF64},
+#     observer::Union{PlasmaGeometry,WallGeometry},
+#     source::Union{PlasmaGeometry,WallGeometry},
+#     params::KernelParams2D,
+#     exp_mn_basis::AbstractMatrix{ComplexF64},
+#     Gram::AbstractMatrix{ComplexF64}
+# )
+#     _projected_kernel_2D!(K_c, G_c, observer, source, params.n, exp_mn_basis, Gram)
+# end
 
 function kernel!(
     K_c::AbstractMatrix{ComplexF64},

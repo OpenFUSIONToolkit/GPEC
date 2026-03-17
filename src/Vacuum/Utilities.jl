@@ -152,3 +152,28 @@ Inline function for fast cross product of two 3D vectors at a given index.
         c[idx, 3] = a1*b2 - a2*b1
     end
 end
+
+# ── Helpers for small-P accumulation (avoids BLAS dispatch overhead) ──────────
+"""
+Accumulate `proj += w * Zt[:, col]` with SIMD. Replaces BLAS.axpy! for small P.
+"""
+@inline function _accum_row!(proj::AbstractVector{ComplexF64}, w::Float64,
+    Zt::AbstractMatrix{ComplexF64}, col::Int)
+    @inbounds @simd for p in eachindex(proj)
+        proj[p] += w * Zt[p, col]
+    end
+end
+
+"""
+Rank-1 update `A += conj(Zt[:, j]) * y^T`. Avoids allocating a conjugated temporary.
+"""
+@inline function _rank1_conj!(A::AbstractMatrix{ComplexF64},
+    Zt::AbstractMatrix{ComplexF64}, j::Int,
+    y::AbstractVector{ComplexF64})
+    @inbounds for p2 in eachindex(y)
+        y_p2 = y[p2]
+        for p1 in axes(A, 1)
+            A[p1, p2] += conj(Zt[p1, j]) * y_p2
+        end
+    end
+end

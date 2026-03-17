@@ -72,7 +72,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     n_override::Union{Nothing,Int}=nothing
 )
 
-    (; mtheta, mpert, mlow, nzeta, npert, nlow, use_galerkin) = inputs
+    (; mtheta, mpert, mlow, nzeta, npert, nlow) = inputs
 
     # Initialize surface geometries
     plasma_surf = nzeta > 1 ? PlasmaGeometry3D(inputs) : PlasmaGeometry(inputs)
@@ -114,69 +114,68 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     #
     # FLOPs:  O(M²P + P³)
     # ================================================================
-    if use_galerkin
-        # Gram matrix required by projected_kernel! for the diagonal residue and for interior solve
-        Gram = zeros!(pool, ComplexF64, P, P)
-        mul!(Gram, exp_mn_basis', exp_mn_basis)
+    # Gram matrix required by projected_kernel! for the diagonal residue and for interior solve
+    Gram = zeros!(pool, ComplexF64, P, P)
+    mul!(Gram, exp_mn_basis', exp_mn_basis)
 
-        # Projected kernel matrices [P × P complex]
-        K_ext = zeros!(pool, ComplexF64, 2P, 2P)
-        G_ext = zeros!(pool, ComplexF64, 2P, P)
-        K_int = similar!(pool, K_ext)
-        G_int = similar!(pool, G_ext)
+    # Projected kernel matrices [P × P complex]
+    K_ext = zeros!(pool, ComplexF64, 2P, 2P)
+    G_ext = zeros!(pool, ComplexF64, 2P, P)
+    K_int = similar!(pool, K_ext)
+    G_int = similar!(pool, G_ext)
 
-        # Fused projected kernel: compute Z^H K Z and Z^H G Z
-        kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
-        if !wall.nowall
-            kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
-            kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
-            kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
-        end
+    # Fused projected kernel: compute Z^H K Z and Z^H G Z
+    kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
+    if !wall.nowall
+        kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
+        kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
+        kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
+    end
 
-        # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·Gram - K_ext
-        K_int .= -K_ext
-        K_int[1:P, 1:P] .+= 2 .* Gram
-        if !wall.nowall
-            K_int[(P+1):(2*P), (P+1):(2*P)] .+= 2 .* Gram
-        end
-        G_int .= G_ext
+    # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·Gram - K_ext
+    K_int .= -K_ext
+    K_int[1:P, 1:P] .+= 2 .* Gram
+    if !wall.nowall
+        K_int[(P+1):(2*P), (P+1):(2*P)] .+= 2 .* Gram
+    end
+    G_int .= G_ext
 
-        # Solve projected BIEs for exterior and interior kernels
-        if wall.nowall
-            F_ext = lu!(K_ext[1:P, 1:P])
-            ldiv!(F_ext, @view(G_ext[1:P, :]))
-            F_int = lu!(K_int[1:P, 1:P])
-            ldiv!(F_int, @view(G_int[1:P, :]))
-        else
-            F_ext = lu!(K_ext)
-            ldiv!(F_ext, G_ext)
-            F_int = lu!(K_int)
-            ldiv!(F_int, G_int)
-        end
-
-        # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
-        mul!(wv, Gram, view(G_ext, 1:P, :))
-        wv .*= (4π^2 / M)
-
-        # Backward-compatible reconstruction: grre/grri in M×2P real layout
-        # Need to convert mode space to physical space and unpack the real and imaginary parts
-        # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
-        # perhaps make it a complex P * P matrix? Then don't need any of this section
-        mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
-        @view(grre[1:M, 1:P]) .= real.(temp)
-        @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-        mul!(temp, exp_mn_basis, view(G_int, 1:P, :))
-        @view(grri[1:M, 1:P]) .= real.(temp)
-        @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
-        if !wall.nowall
-            mul!(temp, exp_mn_basis, view(G_ext, (P+1):(2*P), :))
-            @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
-            @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-            mul!(temp, exp_mn_basis, view(G_int, (P+1):(2*P), :))
-            @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
-            @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-        end
+    # Solve projected BIEs for exterior and interior kernels
+    if wall.nowall
+        F_ext = lu!(K_ext[1:P, 1:P])
+        ldiv!(F_ext, @view(G_ext[1:P, :]))
+        F_int = lu!(K_int[1:P, 1:P])
+        ldiv!(F_int, @view(G_int[1:P, :]))
     else
+        F_ext = lu!(K_ext)
+        ldiv!(F_ext, G_ext)
+        F_int = lu!(K_int)
+        ldiv!(F_int, G_int)
+    end
+
+    # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
+    mul!(wv, Gram, view(G_ext, 1:P, :))
+    wv .*= (4π^2 / M)
+
+    # Backward-compatible reconstruction: grre/grri in M×2P real layout
+    # Need to convert mode space to physical space and unpack the real and imaginary parts
+    # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
+    # perhaps make it a complex P * P matrix? Then don't need any of this section
+    mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
+    @view(grre[1:M, 1:P]) .= real.(temp)
+    @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
+    mul!(temp, exp_mn_basis, view(G_int, 1:P, :))
+    @view(grri[1:M, 1:P]) .= real.(temp)
+    @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
+    if !wall.nowall
+        mul!(temp, exp_mn_basis, view(G_ext, (P+1):(2*P), :))
+        @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
+        @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+        mul!(temp, exp_mn_basis, view(G_int, (P+1):(2*P), :))
+        @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
+        @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
+    end
+    """
         # ================================================================
         # Collocation approach: solve full physical-space system [M × M]
         # Handles both no-wall and wall cases.
@@ -226,8 +225,7 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         temp .= complex.(@view(grre[1:M, 1:P]), @view(grre[1:M, (P+1):(2*P)]))
         mul!(wv, exp_mn_basis', temp)
         wv .*= (4π^2 / M)
-    end
-
+"""
     inputs.force_wv_symmetry && hermitianpart!(wv)
 
     if nzeta > 1 # 3D

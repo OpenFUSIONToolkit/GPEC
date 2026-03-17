@@ -22,10 +22,6 @@ nzeta > 1 for 3D vacuum calculation.
   - `mtheta::Int`: Number of vacuum calculation poloidal grid points
   - `nzeta::Int`: Number of vacuum calculation toroidal grid points (1 for 2D vacuum calculation, > 1 for 3D vacuum calculation)
   - `force_wv_symmetry::Bool`: Boolean flag to enforce symmetry in the vacuum response matrix
-  - `use_galerkin::Bool`: Use Galerkin projection to solve in truncated Fourier space [O(P³)]
-    instead of full collocation [O(M³)]. Applies to both no-wall and wall cases. For the wall
-    case, both plasma and wall unknowns are represented in (m,n) mode space, yielding a 2P×2P
-    system with no M² storage. Defaults to `false`.
 """
 @kwdef struct VacuumInput
     x::Vector{Float64} = Float64[]
@@ -41,7 +37,6 @@ nzeta > 1 for 3D vacuum calculation.
     mtheta::Int = 1
     nzeta::Int = 1
     force_wv_symmetry::Bool = true
-    use_galerkin::Bool = false
 end
 
 """
@@ -81,8 +76,7 @@ function VacuumInput(
     mlow::Int,
     npert::Int,
     nlow::Int;
-    force_wv_symmetry::Bool=true,
-    use_galerkin::Bool=false
+    force_wv_symmetry::Bool=true
 )
     # Extract plasma surface geometry at this psi
     r, z, ν = extract_plasma_surface_at_psi(equil, ψ)
@@ -98,8 +92,7 @@ function VacuumInput(
         npert=npert,
         mtheta=mtheta,
         nzeta=nzeta,
-        force_wv_symmetry=force_wv_symmetry,
-        use_galerkin=true
+        force_wv_symmetry=force_wv_symmetry
     )
 end
 
