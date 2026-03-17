@@ -395,68 +395,128 @@ function KernelWorkspace(PATCH_DIM::Int, RAD_DIM::Int, ANG_DIM::Int)
 end
 
 """
-    compute_3D_kernel_matrices!(grad_greenfunction, greenfunction, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER)
+    compute_3D_kernel_matrices!(K, G, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, Z, Gram)
 
-Compute boundary integral kernel matrices for 3D geometries with the singular correction
-algorithm from [Malhotra Plasma Phys. and Cont. Fusion 2019 024004].
-Uses multi-threading for parallel computation over observer points.
+Compute the **Fourier/Galerkin-projected** 3D vacuum boundary-integral kernel blocks for
+Laplace’s equation, using a high-order singular quadrature / partition-of-unity (POU)
+scheme on a tensor-product `(θ, ζ)` surface grid.
 
-  - Far regions: Rectangle rule with uniform weights (1/N)
-  - Singular regions: Polar quadrature with partition-of-unity blending
+Like the 2D kernel, this routine implements the **fused projection path** used by the vacuum solve:
+it produces the projected operators in mode space **without materializing a dense**
+`N×N` point-space kernel (where `N = mtheta * nzeta`).
 
-grad_greenfunction is the double-layer kernel matrix, where each entry is
-∇_{x_src} φ(x_obs, x_src) · n_src, and greenfunction is the single-layer kernel matrix,
-where each entry is φ(x_obs, x_src).
+## Mathematical object being discretized
 
-# Arguments
+Let `x(θ, ζ) ∈ ℝ^3` be a surface parametrization (plasma or wall surface) with outward
+unit normal `n(θ, ζ)`. The Laplace kernels are:
 
-  - `grad_greenfunction`: Double-layer kernel matrix (Nobs × Nsrc) filled in place
+  - **Single-layer**: `φ(x_obs, x_src) = 1 / |x_obs - x_src|`
+  - **Double-layer**: `∂φ/∂n_src = ∇_{x_src} φ ⋅ n_src = (x_obs - x_src) ⋅ n_src / |x_obs - x_src|^3`
 
-  - `greenfunction`: Single-layer kernel matrix (Nobs × Nsrc) filled in place
+This routine computes the *discrete, projected* operators corresponding to these kernels,
+using a uniform quadrature weight `dθdζ = 4π^2 / N` for the far field and a specialized
+near-field correction for the singular region.
 
-  - `observer`: Observer geometry (PlasmaGeometry3D)
+## Arguments and block layout
 
-  - `source`: Source geometry (PlasmaGeometry3D)
+  - `Kc`: Complex global projected double-layer kernel matrix (2P×2P).
+  - `Gc`: Complex global projected single-layer kernel matrix (2P×P).
+  - `observer`: `PlasmaGeometry3D` or `WallGeometry3D` object providing geometry data.
+  - `source`: `PlasmaGeometry3D` or `WallGeometry3D` object providing geometry data.
+  - `PATCH_RAD`: Half-width of the singular patch in grid points. Must satisfy `PATCH_RAD ≤ (min(source.mtheta, source.nzeta) - 1) ÷ 2` to avoid errors.
+  - `RAD_DIM`: Radial quadrature order on the polar grid (angular order is `2*RAD_DIM`).
+  - `INTERP_ORDER`: Lagrange interpolation order used to build `P2G` (must satisfy `INTERP_ORDER ≤ 2*PATCH_RAD+1`).
+  - `Z`: Complex Fourier basis sampled on the surface grid, shaped `N×P` (`P = number of retained modes`). `Z[idx, :]` contains the basis values at the surface node `idx`.
+  - `Gram`: Mode-space Gram matrix used to add the analytic “identity” term when `typeof(source) == typeof(observer)` (i.e. the same operator block that receives the Green’s-identity diagonal contribution).
 
-  - `PATCH_RAD`: Number of points adjacent to source point to treat as singular
+This routine fills exactly one `P×P` block view `Kc_block` (and optionally the corresponding `Gc_block`)
+selected by whether observer/source are plasma or wall.
 
-      + Total patch size in # of gridpoints = (2 * PATCH_RAD + 1) x (2 * PATCH_RAD + 1)
+## Numerical treatment of the singularity
 
-  - `RAD_DIM`: Polar radial quadrature order. Angular order = 2 * RAD_DIM
+The kernel is weakly singular as `x_src → x_obs`. The implementation follows the
+approach used in [Malhotra Journal of Comp. Phys. 2019 108791 eq. 38]
 
-  - `INTERP_ORDER`: Lagrange interpolation order
+  - **Far field** (nonsingular sources):
 
-      + Must be ≤ (2 * PATCH_RAD + 1)
+      + Use a uniform trapezoidal/rectangle rule on the `(θ, ζ)` grid.
+      + For each observer point, a square patch of size `PATCH_DIM = 2*PATCH_RAD+1`
+        surrounding the singularity is excluded from the far-field sum.
 
-# Threading
+  - **Near field** (singular patch):
 
-This function automatically uses all available threads (`Threads.nthreads()`).
-Start Julia with `julia -t auto` or set `JULIA_NUM_THREADS` to enable multi-threading.
+      + Extract a Cartesian `PATCH_DIM×PATCH_DIM` patch of the source geometry around the
+        observer-aligned source index.
+      + Interpolate the patch to a **polar quadrature grid** (`RAD_DIM × ANG_DIM`, with `ANG_DIM=2*RAD_DIM`)
+        using a precomputed sparse interpolation operator `P2G` built from tensor-product
+        Lagrange stencils (`INTERP_ORDER` controls the stencil width).
+      + Evaluate kernels on the polar grid and weight them with a **partition-of-unity**
+        quadrature factor `Ppou` that includes the polar Jacobian factor (roughly `r * dr * dθ`)
+        and a smooth cutoff function `χ(ρ)` that localizes the singular correction.
+      + Map the polar correction back onto the Cartesian patch via `P2G` and blend with the
+        far-field trapezoid contribution using `Gpou`, so the combined weight is effectively
+        `trap*(1-χ) + singular_correction`.
+
+## Fused projection and threading
+
+This function is written to be parallel over observer points:
+
+  - Each thread owns a `KernelWorkspace` (scratch arrays for patch extraction, polar interpolation,
+    and temporary kernel values), plus per-thread accumulation buffers `proj_k` / `proj_g`
+    (length `P`) and a boolean `is_patch` mask to skip patch indices in the far-field loop.
+
+  - For a given observer index `idx_obs`, the code accumulates the **projected row**
+    `(kernel row idx_obs) · Z` directly into `proj_k` / `proj_g` using `_accum_row!`, and then writes
+    these into shared buffers `KZt[:, idx_obs]` and `GZt[:, idx_obs]`. This is race-free because
+    each observer writes to a unique column.
+
+  - After the threaded loop completes, the final `P×P` blocks are assembled efficiently with BLAS:
+
+        Kc = Zᴴ * (KZt)'
+        Gc = Zᴴ * (GZt)'
+
+    implemented as `mul!(Kc_block, Z', transpose(KZt))` (and similarly for `Gc`).
+
+Normalization by `2π` is applied to match the 2D kernel convention so the downstream “add identity”
+logic is consistent between 2D/3D.
+
+## Important parameters
+
+  - `PATCH_RAD`: half-width of the singular patch in grid points. Must satisfy `PATCH_RAD ≤ (min(source.mtheta, source.nzeta) - 1) ÷ 2` to avoid errors.
+  - `RAD_DIM`: radial quadrature order on the polar grid (angular order is `2*RAD_DIM`).
+  - `INTERP_ORDER`: Lagrange interpolation order used to build `P2G` (must satisfy `INTERP_ORDER ≤ 2*PATCH_RAD+1`).
+
+## Performance notes / numerical optimizations
+
+  - **Cached quadrature data**: `get_singular_quadrature` memoizes `P2G`, `Gpou`, `Ppou`, etc. for a given
+    `(PATCH_RAD, RAD_DIM, INTERP_ORDER)` triple to avoid expensive rebuilds.
+  - **Allocation control**: all near-field arrays live in thread-local `KernelWorkspace` objects; no per-observer
+    heap allocation is intended in the hot path.
+  - **Scalar kernel evaluation**: the Laplace kernels have scalar-argument overloads to avoid view/slice creation
+    and to enable LLVM to keep values in registers.
 """
 function compute_3D_kernel_matrices!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
+    K::AbstractMatrix{ComplexF64},
+    G::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     PATCH_RAD::Int,
     RAD_DIM::Int,
-    INTERP_ORDER::Int
+    INTERP_ORDER::Int,
+    Z::AbstractMatrix{ComplexF64},
+    Gram::AbstractMatrix{ComplexF64}
 )
-    num_points = observer.mtheta * observer.nzeta
-    dθdζ = 4π^2 / (num_points)
+    N, P = size(Z) # N = mtheta * nzeta, P = num_modes
+    dθdζ = 4π^2 / N
+    Zt = Matrix{ComplexF64}(transpose(Z))  # [P × M] for contiguous column access
 
-    # Get block of grad green function matrix
+    # Take a view of the corresponding block of the K and G matrices
     col_index = (source isa PlasmaGeometry3D ? 1 : 2)
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
-    grad_greenfunction_block = view(
-        grad_greenfunction,
-        ((row_index-1)*num_points+1):(row_index*num_points),
-        ((col_index-1)*num_points+1):(col_index*num_points)
-    )
+    K_block = view(K, ((row_index-1)*P+1):(row_index*P), ((col_index-1)*P+1):(col_index*P))
+    G_block = view(G, ((row_index-1)*P+1):(row_index*P), :)
 
-    # Zero out green function matrix
-    fill!(greenfunction, 0.0)
-    # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
+    # G only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
 
     # Initialize quadrature data
@@ -470,16 +530,30 @@ function compute_3D_kernel_matrices!(
     @assert observer.mtheta ≥ PATCH_DIM "Must have observer.mtheta ≥ PATCH_DIM, got observer.mtheta=$(observer.mtheta), PATCH_DIM=$PATCH_DIM"
     @assert observer.nzeta ≥ PATCH_DIM "Must have observer.nzeta ≥ PATCH_DIM, got observer.nzeta=$(observer.nzeta), PATCH_DIM=$PATCH_DIM"
 
+    # Buffers for the projection: column idx_obs holds (kernel row idx_obs) · Z
+    KZt = zeros(ComplexF64, P, N)
+    GZt = zeros(ComplexF64, P, N)
+
     # Allocate thread-local workspaces (one per thread)
     max_threadid = Threads.maxthreadid()
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
+    proj_k_all = [zeros(ComplexF64, P) for _ in 1:max_threadid]
+    proj_g_all = [zeros(ComplexF64, P) for _ in 1:max_threadid]
+    is_patch_all = [falses(N) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:num_points
+    Threads.@threads for idx_obs in 1:N
         # Get thread-local workspace
         ws = workspaces[Threads.threadid()]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
             n_polar, M_polar_single, M_polar_double, M_grid_single_flat, M_grid_double_flat) = ws
+        proj_k = proj_k_all[Threads.threadid()]
+        proj_g = proj_g_all[Threads.threadid()]
+        is_patch = is_patch_all[Threads.threadid()]
+
+        fill!(proj_k, 0.0)
+        fill!(proj_g, 0.0)
+        fill!(is_patch, false)
 
         # Convert linear index to 2D indices
         i_obs = mod1(idx_obs, observer.mtheta)
@@ -488,21 +562,36 @@ function compute_3D_kernel_matrices!(
         @inbounds oy = observer.r[idx_obs, 2]
         @inbounds oz = observer.r[idx_obs, 3]
 
+        # Mark patch source indices so the far-field loop can skip them
+        @inbounds for jj in 1:PATCH_DIM, ii in 1:PATCH_DIM
+            idx_pol = periodic_wrap(i_obs - PATCH_RAD + ii - 1, source.mtheta)
+            idx_tor = periodic_wrap(j_obs - PATCH_RAD + jj - 1, source.nzeta)
+            is_patch[idx_pol+source.mtheta*(idx_tor-1)] = true
+        end
+
         # ============================================================
         # FAR FIELD: Trapezoidal rule for nonsingular source points
         # Note: kernels return zero for r_src = r_obs
         # ============================================================
-        @inbounds for idx_src in 1:num_points
-            sx = source.r[idx_src, 1];
-            sy = source.r[idx_src, 2];
-            sz = source.r[idx_src, 3]
-            nx = source.normal[idx_src, 1];
-            ny = source.normal[idx_src, 2];
-            nz = source.normal[idx_src, 3]
-            # Apply weights (periodic trapezoidal rule = constant weights)
-            grad_greenfunction_block[idx_obs, idx_src] = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
+        @inbounds for idx_src in 1:N
+            is_patch[idx_src] && continue
+            w_double =
+                laplace_double_layer(
+                    ox,
+                    oy,
+                    oz,
+                    source.r[idx_src, 1],
+                    source.r[idx_src, 2],
+                    source.r[idx_src, 3],
+                    source.normal[idx_src, 1],
+                    source.normal[idx_src, 2],
+                    source.normal[idx_src, 3]
+                ) * dθdζ
+            _accum_row!(proj_k, w_double, Zt, idx_src)
+
             if populate_greenfunction
-                greenfunction[idx_obs, idx_src] = laplace_single_layer(ox, oy, oz, sx, sy, sz) * dθdζ
+                w_single = laplace_single_layer(ox, oy, oz, source.r[idx_src, 1], source.r[idx_src, 2], source.r[idx_src, 3]) * dθdζ
+                _accum_row!(proj_g, w_single, Zt, idx_src)
             end
         end
 
@@ -525,11 +614,11 @@ function compute_3D_kernel_matrices!(
         # Evaluate kernels at polar points with POU weighting
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
             # Evaluate kernels and apply quadrature weights: area element × POU, where POU contains rdrdθ already
-            rsx = r_polar[ir, ia, 1];
-            rsy = r_polar[ir, ia, 2];
+            rsx = r_polar[ir, ia, 1]
+            rsy = r_polar[ir, ia, 2]
             rsz = r_polar[ir, ia, 3]
-            nsx = n_polar[ir, ia, 1];
-            nsy = n_polar[ir, ia, 2];
+            nsx = n_polar[ir, ia, 1]
+            nsy = n_polar[ir, ia, 2]
             nsz = n_polar[ir, ia, 3]
             M_polar_single[ir, ia] = laplace_single_layer(ox, oy, oz, rsx, rsy, rsz) * Ppou[ir, ia] * dθdζ
             M_polar_double[ir, ia] = laplace_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz) * Ppou[ir, ia] * dθdζ
@@ -550,49 +639,74 @@ function compute_3D_kernel_matrices!(
             idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
 
-            trap_double = grad_greenfunction_block[idx_obs, idx_src]
-            grad_greenfunction_block[idx_obs, idx_src] = trap_double + M_grid_double[i, j] + trap_double * Gpou[i, j]
+            sx = source.r[idx_src, 1]
+            sy = source.r[idx_src, 2]
+            sz = source.r[idx_src, 3]
+            nx = source.normal[idx_src, 1]
+            ny = source.normal[idx_src, 2]
+            nz = source.normal[idx_src, 3]
+
+            far_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * (1.0 + Gpou[i, j]) * dθdζ
+            _accum_row!(proj_k, M_grid_double[i, j] + far_double, Zt, idx_src)
 
             # Apply near + far contributions
             if populate_greenfunction
-                trap_single = greenfunction[idx_obs, idx_src]
-                greenfunction[idx_obs, idx_src] = trap_single + M_grid_single[i, j] + trap_single * Gpou[i, j]
+                far_single = laplace_single_layer(ox, oy, oz, sx, sy, sz) * (1.0 + Gpou[i, j]) * dθdζ
+                _accum_row!(proj_g, M_grid_single[i, j] + far_single, Zt, idx_src)
+            end
+        end
+
+        # ── Write projected column to buffer (each idx_obs owns its column) ──
+        @inbounds for p in 1:P
+            KZt[p, idx_obs] = proj_k[p]
+        end
+        if populate_greenfunction
+            @inbounds for p in 1:P
+                GZt[p, idx_obs] = proj_g[p]
             end
         end
     end
 
     # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
     # This makes the grri logic identical to the 2D kernel.
-    grad_greenfunction_block ./= 2π
-    greenfunction ./= 2π
+    mul!(K_block, Z', transpose(KZt))
+    K_block ./= 2π
+    if populate_greenfunction
+        mul!(G_block, Z', transpose(GZt))
+        G_block ./= 2π
+    end
 
     # Add the term that comes from the volume integral of Green's identity
-    typeof(source) == typeof(observer) && begin
-        for i in 1:num_points
-            grad_greenfunction_block[i, i] += 1.0
-        end
+    if typeof(source) == typeof(observer)
+        K_block .+= Gram
     end
 end
 
 """
-    kernel!(grad_greenfunction, greenfunction, observer, source, params::KernelParams3D)
+    kernel!(Kc, Gc, observer, source, params::KernelParams3D, Z, Gram)
 
-Dispatch wrapper for 3D kernel that forwards to `compute_3D_kernel_matrices!` with params.
+Public 3D kernel entry point. Forwards to:
+
+`compute_3D_kernel_matrices!(Kc, Gc, observer, source, params.PATCH_RAD, params.RAD_DIM, params.INTERP_ORDER, Z, Gram)`.
 """
 function kernel!(
-    grad_greenfunction::AbstractMatrix{Float64},
-    greenfunction::AbstractMatrix{Float64},
+    Kc::AbstractMatrix{ComplexF64},
+    Gc::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
-    params::KernelParams3D
+    params::KernelParams3D,
+    Z::AbstractMatrix{ComplexF64},
+    Gram::AbstractMatrix{ComplexF64}
 )
     return compute_3D_kernel_matrices!(
-        grad_greenfunction,
-        greenfunction,
+        Kc,
+        Gc,
         observer,
         source,
         params.PATCH_RAD,
         params.RAD_DIM,
-        params.INTERP_ORDER
+        params.INTERP_ORDER,
+        Z,
+        Gram
     )
 end

@@ -59,36 +59,106 @@ const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 # and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
 """
-    kernel!(grad_greenfunction, greenfunction, observer, source, n)
+    compute_2D_kernel_matrices!(K, G, observer, source, n, Z, Gram)
 
-Compute kernels of integral equation for Laplace's equation in a torus.
-**WARNING: This kernel only supports closed toroidal walls currently.
-The residue calculation needs to be updated for open walls.**
+Compute the **Fourier/Galerkin-projected** 2D vacuum boundary-integral kernel blocks for
+Laplace’s equation in an axisymmetric torus, **without ever forming the dense
+`M×M` “point-to-point” kernel matrices.
 
-# Arguments
+This is the fused “evaluate kernel + project” path that the vacuum solver uses:
 
-  - `K`: Fourier-space Gradient Green's function matrix (output)
-  - `G`: Fourier-space Green's function matrix (output)
-  - `observer`: Observer geometry struct (PlasmaGeometry or WallGeometry)
-  - `source`: Source geometry struct (PlasmaGeometry or WallGeometry)
-  - `n`: Toroidal mode number
+    Kc = Zᴴ * K * Z
+    Gc = Zᴴ * G
 
-# Returns
+where:
 
-Modifies `K` and `G` in place.
-Note that G is zeroed each time this function is called,
-but K is not since it fills a different block of the
-(2 * mtheta, 2 * mtheta) depending on the source/observer.
+  - `K` is the **double-layer** kernel (normal derivative of the Green’s function),
+  - `G` is the **single-layer** kernel (Green’s function itself; only needed for plasma-as-source),
+  - `Z ∈ ℂ^{M×P}` is the complex Fourier basis on the poloidal grid,
+    and `Zᴴ` is its conjugate transpose.
 
-# Notes
+Rather than computing a full kernel row `K[j, :]` and then multiplying by `Z`, this routine
+projects **on the fly**:
 
-  - Uses Simpson's rule for integration away from singular points
-  - Uses Gaussian quadrature near singular points for improved accuracy
-  - Implements analytical singularity removal [Chance Phys. Plasmas 1997 2161]
+  - For each observer node `j`, it accumulates the projected row-vector
+    `proj_k = (K[j,:] * weights) · Z` and (optionally) `proj_g = (G[j,:] * weights) · Z`
+    into length-`P` work buffers.
+
+  - It then performs a **rank-1 update** into the appropriate projected block:
+
+        Kc += conj(Z[j, :])' * proj_k
+        Gc += conj(Z[j, :])' * proj_g
+
+This reduces peak memory from `O(M^2)` to `O(MP + P^2)` while keeping the same
+mathematical discretization.
+
+## Arguments
+
+  - `Kc`: Complex global projected double-layer kernel matrix.
+  - `Gc`: Complex global projected single-layer kernel matrix.
+  - `observer`: `PlasmaGeometry` or `WallGeometry` object providing `x(θ)` and `z(θ)`.
+  - `source`: `PlasmaGeometry` or `WallGeometry` object providing `x(θ)` and `z(θ)`.
+  - `n`: Integer representing the order of the toroidal Fourier component.
+  - `Z`: Complex Fourier basis sampled on the `θ` grid.
+  - `Gram`: Mode-space Gram matrix for this basis on the discrete grid.
+
+## Block layout
+
+`Kc` and `Gc` are the complex global projected matrices. `Kc` contains four blocks corresponding to
+plasma/wall as observer/source, `Gc` contains two blocks corresponding to plasma/wall as observer.
+This function writes **only one block** to each of `Kc` and `Gc` per call:
+
+  - `Kc_block` is a `P×P` view into `Kc` selected by `(observer isa PlasmaGeometry ? 1 : 2, source isa PlasmaGeometry ? 1 : 2)`.
+  - `Gc_block` is a `P×(2P)` view into `Gc` with the same observer block-row; only the columns
+    corresponding to the source being plasma are populated (when `source isa PlasmaGeometry`).
+
+## Toroidal Green's functions
+
+  - The scalar `G_n` returned by `green(...)` is `2π * 𝒢ⁿ(θ, θ′)` (Chance 1997),
+    the `n`-th toroidal Fourier component of the Laplace Green’s function in axisymmetry.
+  - The scalar `gradG_n` returned by `green(...)` corresponds to the toroidal-mode `n`
+    contribution to the **double-layer** integrand `𝒥 * (∇′𝒢ⁿ · ∇′ℒ)`
+    (Chance 1997), i.e. the normal-derivative factor multiplied by the geometric Jacobian.
+  - `gradG_0` is the `n = 0` piece used for analytic diagonal/singularity bookkeeping.
+
+## Numerical treatment of the singularity
+
+The toroidal Green’s function kernel is weakly singular as `θ′ → θ`. The implementation follows
+Chance *Phys. Plasmas* **4**, 2161 (1997) and uses a mixed strategy:
+
+  - **Far field (nonsingular region)**: composite Simpson’s `1/3` rule on the uniform `θ` grid,
+    skipping the near-singular stencil around `j`.
+  - **Near field (singular panels)**: 8-point Gauss–Legendre quadrature on the two panels
+    of length `dtheta` immediately to the left/right of `θ_j`, using:
+      + periodic cubic splines of `source.x(θ)` and `source.z(θ)` to evaluate geometry at off-grid nodes,
+      + precomputed 5-point Lagrange stencils to map each Gauss node back to the five neighboring
+        discrete source indices `[j-2, j-1, j, j+1, j+2]` *without allocations*,
+      + analytic logarithmic/singular correction terms (`log_correction_array`) for the single-layer
+        kernel when the observer/source block is plasma–plasma (Chance 1997, e.g. eqs. 75, 78),
+      + an analytic diagonal/residue correction for the double-layer kernel (Chance 1997, Table I / residues).
+
+## Performance and allocation avoidance (hot-path optimizations)
+
+This routine is intentionally written to be allocation-light in tight loops:
+
+  - **Precomputed quadrature tables**: `GL8` and `GL8_LAGRANGE_STENCILS` are global constants.
+  - **Hoisted n-dependent constants**: `gamma_prefactor = 2√π * Γ(1/2 - n)` is computed once per call
+    and passed into `green(...)` rather than recomputed per quadrature node.
+  - **Spline derivative batching**: `∂R/∂θ` and `∂Z/∂θ` are evaluated on the full grid once (for Simpson),
+    while off-grid Gauss points evaluate splines directly.
+  - **Projection reuse**: the transpose `Zt = transpose(Z)` is materialized so that “row-accumulate”
+    operations `_accum_row!` can access `Z` with contiguous column memory.
+  - **Rank-1 assembly**: the final projected update uses `conj(Z[j,:]) ⊗ proj_*` via `_rank1_conj!`,
+    avoiding constructing intermediate `P×P` temporaries.
+
+## Caveats / limitations
+
+  - **Closed-wall assumption**: the current residue/diagonal handling is written for closed,
+    periodic toroidal boundaries. Open-wall residue logic is not implemented.
 """
 @with_pool pool function compute_2D_kernel_matrices!(
-    K::AbstractMatrix{ComplexF64},
-    G::AbstractMatrix{ComplexF64},
+    Kc::AbstractMatrix{ComplexF64},
+    Gc::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int,
@@ -104,8 +174,8 @@ but K is not since it fills a different block of the
     # Take a view of the corresponding block of the grad_greenfunction
     col_idx = (source isa PlasmaGeometry ? 1 : 2)
     row_idx = (observer isa PlasmaGeometry ? 1 : 2)
-    K_block = view(K, ((row_idx-1)*P+1):(row_idx*P), ((col_idx-1)*P+1):(col_idx*P))
-    G_block = view(G, ((row_idx-1)*P+1):(row_idx*P), :)
+    Kc_block = view(Kc, ((row_idx-1)*P+1):(row_idx*P), ((col_idx-1)*P+1):(col_idx*P))
+    Gc_block = view(Gc, ((row_idx-1)*P+1):(row_idx*P), :)
 
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
@@ -233,40 +303,45 @@ but K is not since it fills a different block of the
         _accum_row!(proj_k, diag_accum, Zt, j)
 
         # ── Rank-1 accumulate: K/G += conj(Z[j,:]) ⋅ proj_k/g ──
-        _rank1_conj!(K_block, Zt, j, proj_k)
+        _rank1_conj!(Kc_block, Zt, j, proj_k)
         if populate_greenfunction
-            _rank1_conj!(G_block, Zt, j, proj_g)
+            _rank1_conj!(Gc_block, Zt, j, proj_g)
         end
     end
 
     # Normals need to point outward from vacuum region. In VACUUM clockwise θ convention, normal points
     # out of vacuum for wall but inward for plasma, so we multiply by -1 for plasma sources
     if source isa PlasmaGeometry
-        K_block .*= -1
+        Kc_block .*= -1
     end
 
     # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
     # The Gram matrix is a result of the projection onto a scalar, Z⋅Zᵀ * residue
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
-    K_block .+= residue .* Gram
+    Kc_block .+= residue .* Gram
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
     if populate_greenfunction
-        G_block ./= 2π
+        Gc_block ./= 2π
     end
 end
 
-# Dispatch wrapper for unified 2D/3D vacuum: forwards to 5-arg compute_2D_kernel_matrices! with params.n
+"""
+    kernel!(Kc, Gc, observer, source, params::KernelParams2D, Z, Gram)
+
+Public 2D kernel entry point. This is a thin wrapper that forwards to
+`compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z, Gram)`.
+"""
 function kernel!(
-    K::AbstractMatrix{ComplexF64},
-    G::AbstractMatrix{ComplexF64},
+    Kc::AbstractMatrix{ComplexF64},
+    Gc::AbstractMatrix{ComplexF64},
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     params::KernelParams2D,
     Z::AbstractMatrix{ComplexF64},
     Gram::AbstractMatrix{ComplexF64}
 )
-    return compute_2D_kernel_matrices!(K, G, observer, source, params.n, Z, Gram)
+    return compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z, Gram)
 end
 
 #############################################################

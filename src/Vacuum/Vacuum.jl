@@ -16,7 +16,6 @@ include("DataTypes.jl")
 include("PnQuadCache.jl")
 include("Kernel2D.jl")
 include("Kernel3D.jl")
-include("ProjectedKernel.jl")
 include("Field.jl")
 
 export VacuumInput, WallShapeSettings
@@ -124,9 +123,12 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     K_int = similar!(pool, K_ext)
     G_int = similar!(pool, G_ext)
 
-    # Fused projected kernel: compute Z^H K Z and Z^H G Z
+    # Fused projected kernel: compute Z^H K Z and Z^H G Z for all operator blocks
+    # Plasma-plasma block
     kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
+    # Wall-plasma, plasma-wall, wall-wall blocks
     if !wall.nowall
+        # Wall-plasma, plasma-wall, wall-wall blocks
         kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
         kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
         kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
@@ -175,57 +177,8 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
         @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
     end
-    """
-        # ================================================================
-        # Collocation approach: solve full physical-space system [M × M]
-        # Handles both no-wall and wall cases.
-        # ================================================================
-        # Full-size kernel matrices
-        grad_green = zeros!(pool, num_points_total, num_points_total)
-        green_temp = zeros!(pool, num_points_surf, num_points_surf)
 
-        kernel!(grad_green, green_temp, plasma_surf, plasma_surf, kparams)
-
-        # Project plasma→plasma Green's function to mode space: grre[1:M, 1:2P] = real/imag(G*Z)
-        mul!(temp, green_temp, exp_mn_basis)
-        @view(grre[1:M, 1:P]) .= real.(temp)
-        @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-
-        if !wall.nowall
-            # Plasma–Wall block
-            kernel!(grad_green, green_temp, plasma_surf, wall, kparams)
-            # Wall–Wall block
-            kernel!(grad_green, green_temp, wall, wall, kparams)
-            # Wall–Plasma block
-            kernel!(grad_green, green_temp, wall, plasma_surf, kparams)
-            # Project obs=wall, src=plasma block to mode space
-            mul!(temp, green_temp, exp_mn_basis)
-            @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
-            @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-        end
-
-        # Compute both Green's functions: exterior (kernelsign=+1) then interior (kernelsign=-1)
-        grri .= grre # start from same as exterior
-        grad_green_interior = similar!(pool, grad_green)
-        grad_green_interior .= grad_green
-
-        # Solve exterior first, overwriting grad_green to save memory since we already have the interior kernel
-        F_ext = lu!(grad_green)
-        ldiv!(F_ext, grre)
-
-        # Interior flips the sign of the normal, but not the diagonal terms, so we multiply by -1 and add 2I to the diagonal
-        grad_green_interior .*= -1
-        for i in 1:num_points_total
-            grad_green_interior[i, i] += 2.0
-        end
-        F_int = lu!(grad_green_interior)
-        ldiv!(F_int, grri)
-
-        # wv = (4π²/M) · Z^H · grre_complex  [Chance Phys. Plasmas 2007 052506 eq. 115-118]
-        temp .= complex.(@view(grre[1:M, 1:P]), @view(grre[1:M, (P+1):(2*P)]))
-        mul!(wv, exp_mn_basis', temp)
-        wv .*= (4π^2 / M)
-"""
+    # Enforce symmetry in the vacuum response matrix if desired
     inputs.force_wv_symmetry && hermitianpart!(wv)
 
     if nzeta > 1 # 3D
