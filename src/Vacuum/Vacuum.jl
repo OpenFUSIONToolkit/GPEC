@@ -114,7 +114,7 @@ The key idea is:
     # Compute Fourier basis coefficients
     ν = hasproperty(plasma_surf, :ν) ? plasma_surf.ν : nothing
     exp_mn_basis = compute_fourier_coefficients(mtheta, mpert, mlow, nzeta, npert, nlow; n_2D=n_override, ν=ν)
-    num_points_surf, num_modes = size(exp_mn_basis)
+    num_points, num_modes = size(exp_mn_basis)
 
     # Create kernel parameters structs used to dispatch to the correct kernel
     # Hardcode these values for now - can expose to the user in the future
@@ -123,33 +123,16 @@ The key idea is:
     INTERP_ORDER = 5
     kparams = nzeta > 1 ? KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER) : KernelParams2D(n_override)
 
-    # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
-    num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
+    # Scales kernel matrix sizes by a factor of 2 if a wall is present (don't allocate unless needed)
+    wall_fac = wall.nowall ? 1 : 2
 
-    # Complex buffer for projecting to mode space (G*Z) and back; grre/grri stay real for backwards compatibility
-    M = num_points_surf
-    P = num_modes
-    temp = zeros!(pool, ComplexF64, M, P)
-
-    # ================================================================
-    # Galerkin: solve system in P×P mode space. Uses complex basis
-    # Z = C + iS so projected matrices are P×P complex.
-    #
-    # Fused (fuse_projection=true): kernel assembly + Fourier projection
-    # in one pass. The full M×M kernel matrices are never materialized —
-    # instead the P×P projected matrices grad_green_fourier and G_c are
-    # accumulated row by row as kernel values are computed.
-    # Memory:  O(MP + P²)  instead of  O(M²)
-    #
-    # FLOPs:  O(M²P + P³)
-    # ================================================================
     # Gram matrix required by projected_kernel! for the diagonal residue and for interior solve
-    Gram = zeros!(pool, ComplexF64, P, P)
+    Gram = zeros!(pool, ComplexF64, num_modes, num_modes)
     mul!(Gram, exp_mn_basis', exp_mn_basis)
 
     # Projected kernel matrices [P × P complex]
-    K_ext = zeros!(pool, ComplexF64, 2P, 2P)
-    G_ext = zeros!(pool, ComplexF64, 2P, P)
+    K_ext = zeros!(pool, ComplexF64, wall_fac * num_modes, wall_fac * num_modes)
+    G_ext = zeros!(pool, ComplexF64, wall_fac * num_modes, num_modes)
     K_int = similar!(pool, K_ext)
     G_int = similar!(pool, G_ext)
 
@@ -166,53 +149,48 @@ The key idea is:
 
     # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·Gram - K_ext
     K_int .= -K_ext
-    K_int[1:P, 1:P] .+= 2 .* Gram
+    K_int[1:num_modes, 1:num_modes] .+= 2 .* Gram
     if !wall.nowall
-        K_int[(P+1):(2*P), (P+1):(2*P)] .+= 2 .* Gram
+        K_int[(num_modes+1):(2*num_modes), (num_modes+1):(2*num_modes)] .+= 2 .* Gram
     end
     G_int .= G_ext
 
     # Solve projected BIEs for exterior and interior kernels
-    if wall.nowall
-        F_ext = lu!(K_ext[1:P, 1:P])
-        ldiv!(F_ext, @view(G_ext[1:P, :]))
-        F_int = lu!(K_int[1:P, 1:P])
-        ldiv!(F_int, @view(G_int[1:P, :]))
-    else
-        F_ext = lu!(K_ext)
-        ldiv!(F_ext, G_ext)
-        F_int = lu!(K_int)
-        ldiv!(F_int, G_int)
-    end
+    F_ext = lu!(K_ext)
+    ldiv!(F_ext, G_ext)
+    F_int = lu!(K_int)
+    ldiv!(F_int, G_int)
 
     # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
-    mul!(wv, Gram, view(G_ext, 1:P, :))
-    wv .*= (4π^2 / M)
+    mul!(wv, Gram, view(G_ext, 1:num_modes, :))
+    wv .*= (4π^2 / num_points)
+
+    # Enforce Hermitian symmetry if desired
+    inputs.force_wv_symmetry && hermitianpart!(wv)
 
     # Backward-compatible reconstruction: grre/grri in M×2P real layout
     # Need to convert mode space to physical space and unpack the real and imaginary parts
     # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
     # perhaps make it a complex P * P matrix? Then don't need any of this section
     # Views into output Green's function matrices for the active rows/columns
-    grre = @view grre_in[1:num_points_total, :]
-    grri = @view grri_in[1:num_points_total, :]
-    mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
-    @view(grre[1:M, 1:P]) .= real.(temp)
-    @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
-    mul!(temp, exp_mn_basis, view(G_int, 1:P, :))
-    @view(grri[1:M, 1:P]) .= real.(temp)
-    @view(grri[1:M, (P+1):(2*P)]) .= imag.(temp)
-    if !wall.nowall
-        mul!(temp, exp_mn_basis, view(G_ext, (P+1):(2*P), :))
-        @view(grre[(M+1):(2*M), 1:P]) .= real.(temp)
-        @view(grre[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-        mul!(temp, exp_mn_basis, view(G_int, (P+1):(2*P), :))
-        @view(grri[(M+1):(2*M), 1:P]) .= real.(temp)
-        @view(grri[(M+1):(2*M), (P+1):(2*P)]) .= imag.(temp)
-    end
+    grre = @view grre_in[1:(wall_fac*num_points), :]
+    grri = @view grri_in[1:(wall_fac*num_points), :]
+    temp = zeros!(pool, ComplexF64, num_points, num_modes)
 
-    # Enforce symmetry in the vacuum response matrix if desired
-    inputs.force_wv_symmetry && hermitianpart!(wv)
+    mul!(temp, exp_mn_basis, view(G_ext, 1:num_modes, :))
+    @view(grre[1:num_points, 1:num_modes]) .= real.(temp)
+    @view(grre[1:num_points, (num_modes+1):(2*num_modes)]) .= imag.(temp)
+    mul!(temp, exp_mn_basis, view(G_int, 1:num_modes, :))
+    @view(grri[1:num_points, 1:num_modes]) .= real.(temp)
+    @view(grri[1:num_points, (num_modes+1):(2*num_modes)]) .= imag.(temp)
+    if !wall.nowall
+        mul!(temp, exp_mn_basis, view(G_ext, (num_modes+1):(2*num_modes), :))
+        @view(grre[(num_points+1):(2*num_points), 1:num_modes]) .= real.(temp)
+        @view(grre[(num_points+1):(2*num_points), (num_modes+1):(2*num_modes)]) .= imag.(temp)
+        mul!(temp, exp_mn_basis, view(G_int, (num_modes+1):(2*num_modes), :))
+        @view(grri[(num_points+1):(2*num_points), 1:num_modes]) .= real.(temp)
+        @view(grri[(num_points+1):(2*num_points), (num_modes+1):(2*num_modes)]) .= imag.(temp)
+    end
 
     if nzeta > 1 # 3D
         plasma_pts .= plasma_surf.r
