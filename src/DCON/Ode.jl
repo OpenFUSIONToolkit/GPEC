@@ -143,7 +143,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
                 break
             end
             odet.q = intr.kinsing[odet.ising].q
-            if intr.mlow <= nn.q && nn.q <= intr.mhigh
+            if intr.mlow <= nn * odet.q && nn * odet.q <= intr.mhigh
                 break
             end
         end
@@ -151,7 +151,7 @@ function ode_axis_init!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.Pl
             odet.psimax = intr.psilim * (1 - eps)
             odet.next = "finish"
         else
-            odet.psimax = intr.kinsing[odet.ising].psifac - ctrl.singfac_min / abs(nn.n * intr.kinsing[odet.ising].q1)
+            odet.psimax = intr.kinsing[odet.ising].psifac - ctrl.singfac_min / abs(nn * intr.kinsing[odet.ising].q1)
             odet.next = "cross"
         end
     else
@@ -417,9 +417,19 @@ function ode_step!(odet::OdeState, ctrl::DconControl, equil::Equilibrium.PlasmaE
     sol = solve(prob, BS5(); reltol=rtol, callback=cb)
     # TODO: check absolute tolerances, check how sensitive outputs are to tolerances
 
+    retcode_str = lowercase(string(sol.retcode))
+    is_success = sol.retcode == :Success || sol.retcode == :Terminated || occursin("success", retcode_str) || occursin("terminated", retcode_str)
+    if !is_success
+        error("ODE step failed: retcode=$(sol.retcode), psi_start=$(odet.psifac), psi_end=$(odet.psimax), q=$(odet.q), max|u|=$(maximum(abs, odet.u)).")
+    end
+
     # Update u and psifac with the solution at the end of the interval
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
+
+    if any(!isfinite, odet.u)
+        error("ODE step produced non-finite solution at psi=$(odet.psifac), q=$(odet.q), retcode=$(sol.retcode).")
+    end
 
     println("   ψ = $((@sprintf "%.3f" odet.psifac)),  q= $((@sprintf "%.3f" odet.q)),  max(u) = $((@sprintf "%.2e" maximum(abs, odet.u))),  steps = $(odet.step-1)")
 end

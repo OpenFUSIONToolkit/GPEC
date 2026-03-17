@@ -1118,6 +1118,7 @@ function sing_get_f_det!(ffit::FourFitVars, psifac::Float64, intr::DconInternal,
     nq = nn * q
     singfac = [intr.mlow - nn*q + ipert for ipert in 0:(intr.mpert-1)]
     chi1 = 2π * equil.psio
+    ifac = 1im
 
     #-----------------------------------------------------------------------
     # Compute F matrix

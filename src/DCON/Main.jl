@@ -136,6 +136,19 @@ function Main(path::String="./")
             if ctrl.verbose
                 println("Initializing PENTRC")
             end
+            w_file = ""
+            t_file = ""
+            if (ctrl.kin_source == "file")
+                # Load kinetic matrices from PENTRC files
+                w_file =
+                    isempty(ctrl.kin_file_path) ?
+                    joinpath("TODELETE-WandTorqueFilesFromFortran/DIII-D", "pentrc_tgar_w_elmat_n1.out") :
+                    joinpath(ctrl.kin_file_path, "pentrc_tgar_w_elmat_n1.out")
+                t_file =
+                    isempty(ctrl.kin_file_path) ?
+                    joinpath("TODELETE-WandTorqueFilesFromFortran/DIII-D", "pentrc_tgar_t_elmat_n1.out") :
+                    joinpath(ctrl.kin_file_path, "pentrc_tgar_t_elmat_n1.out")
+            end
             #initialize_pentrc(INPUTS) #TODO: make sure to convert this- this is located in pentrc_interface.jl
             #TODO: implement any PENTRC set up here, GPEC set the pentrc equilibrium description, sets the
             #  kinetic profiles, and sets perturbed equilibrium displacements
@@ -143,7 +156,7 @@ function Main(path::String="./")
             if ctrl.verbose
                 println("   Computing Kinetic Damping Matrices")
             end
-            ffit = make_kinetic_matrix(equil, intr, ctrl, metric, ffit) #this is Claude's conversion of fourfit_kinetic_matrix with a couple small modifications
+            ffit = make_kinetic_matrix(equil, intr, ctrl, metric, ffit; w_file=w_file, t_file=t_file) #this is Claude's conversion of fourfit_kinetic_matrix with a couple small modifications
         end
         sing_scan!(intr, ctrl, equil, ffit)
         #TODO: add resist_eval eventually for computing resistive surface quantities

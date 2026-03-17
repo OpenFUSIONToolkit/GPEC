@@ -114,7 +114,7 @@ A mutable struct holding internal state variables for stability calculations.
     keq_out::Bool = false
     theta_out::Bool = false
     xlmda_out::Bool = false
-    fkg_kmats_flag::Bool = false #TODO: in Fortran this is set false by default until method 0 is selected (which is the only one we have implemented right now) then it gets flipped to true
+    fkg_kmats_flag::Bool = true #TODO: in Fortran this is set false by default until method 0 is selected (which is the only one we have implemented right now) then it gets flipped to true
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
@@ -223,9 +223,9 @@ A mutable struct containing control parameters for stability analysis, set by th
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
-    kin_source::String = "dummy"
-    kin_dummy_sigma::Float64 = 0
-    kin_file_path::String = ""
+    kin_source::String = "file"
+    kin_dummy_sigma::Float64 = 10000.0
+    kin_file_path::String = "TODELETE-WandTorqueFilesFromFortran/a10"
     con_flag::Bool = false
     kinfac1::Float64 = 1.0
     kinfac2::Float64 = 1.0

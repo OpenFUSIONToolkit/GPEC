@@ -80,6 +80,7 @@ function check_for_zero_crossings!(odet::OdeState, sq::Spl.CubicSpline{Float64},
         crit_mid = crit_mid_val * dVdpsi^2
         if (crit_mid - crit) * (crit_mid - crit_prev) < 0 && abs(crit_mid) < 0.5 * min(abs(crit), abs(crit_prev))
             zero_cross = true
+            q_mid = Spl.spline_eval!(sq, psi_mid)[4]
             println("Zero crossing detected at psi = $psi_mid, q = $q_mid")
         end
     end

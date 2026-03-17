@@ -437,63 +437,161 @@ function dummy_kinetic_matrices(numpert::Int, mpsi::Int, sigma::Float64)
 end
 
 """
-    load_gpec_dw_matrix(path::String, numpert::Int) -> (psi_vals, kwmats_flat, ktmats_flat)
+    load_pentrc_elmat(path::String; mpert::Int=25) -> (psi_vals, mats)
 
-Parse a GPEC dw matrix file and return per-psi flattened matrices. The file is
-expected to have columns: psi, i, j, real/imag pairs for T_x, T_f, T_ef, T_fp, T_efp.
-The returned kwmats map to components 1..5 in that order; component 6 is zeros.
-ktmats are returned as zeros.
+Parse a PENTRC kinetic element matrix file and return per-psi flattened matrices.
+The file contains 6 kinetic matrices (A_k, B_k, C_k, D_k, E_k, H_k) for each m1, m2 pair,
+organized by psi blocks.
+
+Returns a tuple of:
+
+  - psi_vals::Vector{Float64}: Radial grid points (normalized flux)
+  - mats::Vector{Vector{Matrix{ComplexF64}}}: 6 matrices per psi (one for each A,B,C,D,E,H)
+    Each matrix is of size (mpsi, mpert^2) where rows are psi index and columns are flattened m1,m2 pairs.
 """
-function load_gpec_dw_matrix(path::String, numpert::Int)
+function load_pentrc_elmat(path::String; mpert::Int=25)
     psi_vals = Float64[]
-    rows = [Vector{Vector{ComplexF64}}() for _ in 1:5]
-    current_psi = NaN
-    row_idx = 0
+    all_mats = Vector{Vector{Vector{ComplexF64}}}()  # One entry per psi: Vector of 6 matrices per psi
+
+    current_psi = nothing
+    current_rows = Dict{Tuple{Int,Int},Vector{Float64}}()  # (m1,m2) -> 12 real+imag values
+    m_header_seen = false
+    empty_blocks_skipped = 0
 
     open(path, "r") do io
-        for line in eachline(io)
-            s = strip(line)
-            isempty(s) && continue
-            startswith(s, "GPEC") && continue
-            startswith(s, "psi") && continue
+        for raw in eachline(io)
+            line = strip(raw)
+            isempty(line) && continue
 
-            fields = split(s)
-            length(fields) < 13 && continue
-
-            vals = map(x -> tryparse(Float64, x), fields[1:13])
-            any(v -> v === nothing, vals) && continue
-
-            psi = vals[1]
-            i = Int(vals[2])
-            j = Int(vals[3])
-
-            if row_idx == 0 || !isapprox(psi, current_psi; rtol=0.0, atol=1e-12)
-                push!(psi_vals, psi)
-                row_idx += 1
-                current_psi = psi
-                for c in 1:5
-                    push!(rows[c], zeros(ComplexF64, numpert^2))
+            # Check for psi header
+            if startswith(lowercase(line), "psi") && occursin("=", line)
+                psi_str = strip(split(line, "=")[end])
+                psi = tryparse(Float64, psi_str)
+                if psi !== nothing
+                    # Save previous psi data if exists
+                    if current_psi !== nothing && !isempty(current_rows)
+                        push!(psi_vals, current_psi)
+                        push!(all_mats, build_kinetic_mats_from_rows(current_rows, mpert))
+                    elseif current_psi !== nothing
+                        # Track empty blocks
+                        empty_blocks_skipped += 1
+                    end
+                    current_psi = psi
+                    current_rows = Dict{Tuple{Int,Int},Vector{Float64}}()
+                    m_header_seen = false
                 end
+                continue
             end
 
-            flat = i + (j - 1) * numpert
-            rows[1][row_idx][flat] = complex(vals[4], vals[5])
-            rows[2][row_idx][flat] = complex(vals[6], vals[7])
-            rows[3][row_idx][flat] = complex(vals[8], vals[9])
-            rows[4][row_idx][flat] = complex(vals[10], vals[11])
-            rows[5][row_idx][flat] = complex(vals[12], vals[13])
+            # Check for m_1 m_2 header
+            if startswith(line, "m_1") && (startswith(line, "m_1 m_2") || contains(line, "m_2"))
+                m_header_seen = true
+                continue
+            end
+
+            # Skip if we haven't seen a psi value yet
+            current_psi === nothing && continue
+
+            # Parse data rows (m1 m2 followed by 12 real/imag pairs)
+            # Handle lines that may be wrapped
+            parts = split(line)
+            if length(parts) >= 14
+                m1 = tryparse(Int, parts[1])
+                m2 = tryparse(Int, parts[2])
+                if m1 !== nothing && m2 !== nothing
+                    vals = Float64[]
+                    ok = true
+                    for k in 3:14
+                        v = tryparse(Float64, parts[k])
+                        if v === nothing
+                            ok = false
+                            break
+                        end
+                        push!(vals, v)
+                    end
+                    if ok
+                        current_rows[(m1, m2)] = vals
+                    end
+                end
+            end
         end
     end
 
-    mpsi = length(psi_vals)
-    kwmats_flat = [zeros(ComplexF64, mpsi, numpert^2) for _ in 1:6]
-    for c in 1:5
-        for r in 1:mpsi
-            kwmats_flat[c][r, :] = rows[c][r]
-        end
+    # Don't forget the last psi block
+    if current_psi !== nothing && !isempty(current_rows)
+        push!(psi_vals, current_psi)
+        push!(all_mats, build_kinetic_mats_from_rows(current_rows, mpert))
+    elseif current_psi !== nothing
+        empty_blocks_skipped += 1
     end
-    ktmats_flat = [zeros(ComplexF64, mpsi, numpert^2) for _ in 1:6]
-    return psi_vals, kwmats_flat, ktmats_flat
+
+    if isempty(psi_vals)
+        error("No data found in PENTRC file: $path (skipped $empty_blocks_skipped empty blocks)")
+    end
+
+    println("Loaded PENTRC kinetic matrices from $(length(psi_vals)) psi points (skipped $empty_blocks_skipped empty blocks)")
+
+    return psi_vals, all_mats
+end
+
+"""
+    build_kinetic_mats_from_rows(rows::Dict, mpert::Int) -> Vector{Matrix{ComplexF64}}
+
+Build 6 kinetic matrices (A_k, B_k, C_k, D_k, E_k, H_k) from parsed row data.
+Returns a vector of 6 matrices, each of size (mpert, mpert) flattened to (mpert^2,).
+
+Detects actual m-range from data to handle asymmetric ranges like (-12, +21).
+"""
+function build_kinetic_mats_from_rows(rows::Dict{Tuple{Int,Int},Vector{Float64}}, mpert::Int)
+    if isempty(rows)
+        # Return empty matrices if no data
+        return [zeros(ComplexF64, mpert^2) for _ in 1:6]
+    end
+
+    # Detect actual m-range from the data
+    all_m1 = first.(keys(rows))
+    all_m2 = last.(keys(rows))
+    m_file_min = min(minimum(all_m1), minimum(all_m2))
+    m_file_max = max(maximum(all_m1), maximum(all_m2))
+    m_file_count = m_file_max - m_file_min + 1
+
+    # If file m-range doesn't match expected mpert, use the file's range
+    if m_file_count != mpert
+        @warn "PENTRC m-range [$m_file_min, $m_file_max] (count=$m_file_count) doesn't match mpert=$mpert. Using file's range."
+        mpert = m_file_count
+    end
+
+    # Initialize 6 matrices for (A_k, B_k, C_k, D_k, E_k, H_k)
+    mats = [zeros(ComplexF64, mpert^2) for _ in 1:6]
+
+    # Map m values to array indices using the detected range
+    mlow = m_file_min
+    mhigh = m_file_max
+
+    for ((m1, m2), vals) in rows
+        # Skip if m1 or m2 out of range (should not happen if detection is correct)
+        if m1 < mlow || m1 > mhigh || m2 < mlow || m2 > mhigh
+            @warn "Data point ($m1, $m2) out of detected range [$mlow, $mhigh]"
+            continue
+        end
+
+        # Convert to 1-based indices
+        i1 = m1 - mlow + 1
+        i2 = m2 - mlow + 1
+
+        # Linear index for flattened column-major storage
+        idx = (i2 - 1) * mpert + i1
+
+        # vals has 12 elements: real(A), imag(A), real(B), imag(B), ..., real(H), imag(H)
+        mats[1][idx] = complex(vals[1], vals[2])    # A_k
+        mats[2][idx] = complex(vals[3], vals[4])    # B_k
+        mats[3][idx] = complex(vals[5], vals[6])    # C_k
+        mats[4][idx] = complex(vals[7], vals[8])    # D_k
+        mats[5][idx] = complex(vals[9], vals[10])   # E_k
+        mats[6][idx] = complex(vals[11], vals[12])  # H_k
+    end
+
+    return mats
 end
 
 """
@@ -537,8 +635,13 @@ function make_kinetic_matrix(
     intr::DconInternal,
     ctrl::DconControl,
     metric::MetricData,
-    ffit::FourFitVars
+    ffit::FourFitVars;
+    w_file::String,
+    t_file::String
 )::FourFitVars
+
+    println("w_file: $w_file")
+    println("t_file: $t_file")
 
     #TODO: in the original Fortran code, there was some parallelization stuff here so we can add that later
 
@@ -605,21 +708,50 @@ function make_kinetic_matrix(
         println("Using dummy kinetic matrices with sigma = $(ctrl.kin_dummy_sigma)")
         dummy_kwmats, dummy_ktmats = dummy_kinetic_matrices(intr.numpert_total, mpsi, ctrl.kin_dummy_sigma)
     elseif use_files
-        #TODO: these files don't contain ktmats and kwmats. These are T_x, T_f, T_ef, T_fp, T_efp instead which are response matrices or something
-        #   Make something that dumps ktmats and kwmats instead
-        file_path = isempty(ctrl.kin_file_path) ?
-                    joinpath("TODELETE-WandTorqueFilesFromFortran", "gpec_dw_matrix_n1.out") :
-                    ctrl.kin_file_path
+        println("w_file = ", w_file)
+        println("t_file = ", t_file)
 
-        psi_vals, dummy_kwmats, dummy_ktmats = load_gpec_dw_matrix(file_path, intr.numpert_total)
+        psi_vals_w, kwmats_data = load_pentrc_elmat(w_file; mpert=intr.mpert)
+        psi_vals_t, ktmats_data = load_pentrc_elmat(t_file; mpert=intr.mpert)
 
+        if psi_vals_w != psi_vals_t
+            error("Mismatch between psi grids in w and t PENTRC files")
+        end
+
+        # Convert from list of (6 matrices per psi) to list of 6 (mpsi matrices)
+        # kwmats_data[ipsi] is a vector of 6 matrices, each of size (mpert^2,)
+        dummy_kwmats = [zeros(ComplexF64, length(psi_vals_w), intr.numpert_total^2) for _ in 1:6]
+        dummy_ktmats = [zeros(ComplexF64, length(psi_vals_w), intr.numpert_total^2) for _ in 1:6]
+
+        for ipsi in 1:length(psi_vals_w)
+            for i in 1:6
+                dummy_kwmats[i][ipsi, :] = kwmats_data[ipsi][i]
+                dummy_ktmats[i][ipsi, :] = ktmats_data[ipsi][i]
+            end
+        end
+
+        # Validate loaded matrices
+        for i in 1:6
+            if !all(isfinite.(dummy_kwmats[i]))
+                @warn "Non-finite values in kwmats[$i] after loading"
+                n_nan_w = count(!isfinite, dummy_kwmats[i])
+                @warn "  kwmats[$i]: $n_nan_w non-finite entries, max|value|=$(maximum(abs.(filter(isfinite, dummy_kwmats[i]))))"
+            end
+            if !all(isfinite.(dummy_ktmats[i]))
+                @warn "Non-finite values in ktmats[$i] after loading"
+                n_nan_t = count(!isfinite, dummy_ktmats[i])
+                @warn "  ktmats[$i]: $n_nan_t non-finite entries, max|value|=$(maximum(abs.(filter(isfinite, dummy_ktmats[i]))))"
+            end
+        end
+
+        # Resample if necessary
         function resample_kin_mats(
             mats::Vector{Matrix{ComplexF64}},
             src_psi::Vector{Float64},
             dst_psi::Vector{Float64}
         )
             any(diff(src_psi) .<= 0.0) &&
-                error("GPEC dw matrix psi grid must be strictly increasing for interpolation.")
+                error("PENTRC psi grid must be strictly increasing for interpolation.")
             resampled = [zeros(ComplexF64, length(dst_psi), size(mats[1], 2)) for _ in 1:6]
             for i in 1:6
                 spline = Spl.CubicSpline(src_psi, mats[i]; bctype="extrap")
@@ -630,10 +762,10 @@ function make_kinetic_matrix(
             return resampled
         end
 
-        needs_resample = length(psi_vals) != mpsi
+        needs_resample = length(psi_vals_w) != mpsi
         if !needs_resample
             for i in 1:mpsi
-                if !isapprox(psi_vals[i], metric.xs[i]; rtol=0.0, atol=1e-10)
+                if !isapprox(psi_vals_w[i], metric.xs[i]; rtol=0.0, atol=1e-10)
                     needs_resample = true
                     break
                 end
@@ -642,10 +774,36 @@ function make_kinetic_matrix(
 
         if needs_resample
             if ctrl.verbose
-                println("Interpolating GPEC dw matrix from $(length(psi_vals)) psi points to $mpsi metric points.")
+                println("Interpolating PENTRC kinetic matrices from $(length(psi_vals_w)) psi points to $mpsi metric points.")
             end
-            dummy_kwmats = resample_kin_mats(dummy_kwmats, psi_vals, metric.xs)
-            dummy_ktmats = resample_kin_mats(dummy_ktmats, psi_vals, metric.xs)
+            dummy_kwmats = resample_kin_mats(dummy_kwmats, psi_vals_w, metric.xs)
+            dummy_ktmats = resample_kin_mats(dummy_ktmats, psi_vals_w, metric.xs)
+        end
+
+        # Pad loaded kinetic matrices to match intr.numpert_total if needed
+        loaded_mpert_sq = size(dummy_kwmats[1], 2)
+        if loaded_mpert_sq != intr.numpert_total^2
+            loaded_mpert = Int(sqrt(loaded_mpert_sq))
+            if ctrl.verbose
+                println(
+                    "Padding PENTRC kinetic matrices from $(loaded_mpert)×$(loaded_mpert) ($(loaded_mpert_sq) elements) to $(intr.numpert_total)×$(intr.numpert_total) ($(intr.numpert_total^2) elements)."
+                )
+            end
+
+            # Create padded versions
+            padded_kwmats = [zeros(ComplexF64, mpsi, intr.numpert_total^2) for _ in 1:6]
+            padded_ktmats = [zeros(ComplexF64, mpsi, intr.numpert_total^2) for _ in 1:6]
+
+            for i in 1:6
+                for ipsi in 1:mpsi
+                    # Copy loaded data (first loaded_mpert_sq elements)
+                    padded_kwmats[i][ipsi, 1:loaded_mpert_sq] = dummy_kwmats[i][ipsi, :]
+                    padded_ktmats[i][ipsi, 1:loaded_mpert_sq] = dummy_ktmats[i][ipsi, :]
+                end
+            end
+
+            dummy_kwmats = padded_kwmats
+            dummy_ktmats = padded_ktmats
         end
     end
 
@@ -658,7 +816,7 @@ function make_kinetic_matrix(
         kwmat_sum = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 6)
         ktmat_sum = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 6)
 
-        if use_dummy
+        if use_dummy || use_files
             for i in 1:6
                 kwmat_sum[:, :, i] .= reshape(dummy_kwmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
                 ktmat_sum[:, :, i] .= reshape(dummy_ktmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
@@ -695,20 +853,15 @@ function make_kinetic_matrix(
             end
         end
 
-        # Apply normalization and optional tanh smoothing
-        if ctrl.ktanh_flag
-            factor = (1.0 + tanh((psifac - ctrl.ktc) * ctrl.ktw))
-            kwmat_sum .*= ctrl.kinfac1 * factor
-            ktmat_sum .*= ctrl.kinfac2 * factor
-        else
-            kwmat_sum .*= ctrl.kinfac1
-            ktmat_sum .*= ctrl.kinfac2
-        end
-
-        if use_dummy
-            for i in 1:6
-                kwmat_sum[:, :, i] .= reshape(dummy_kwmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
-                ktmat_sum[:, :, i] .= reshape(dummy_ktmats[i][ipsi, :], intr.numpert_total, intr.numpert_total)
+        # Apply normalization and optional tanh smoothing (only for computed matrices, not loaded files)
+        if !use_files && !use_dummy
+            if ctrl.ktanh_flag
+                factor = (1.0 + tanh((psifac - ctrl.ktc) * ctrl.ktw))
+                kwmat_sum .*= ctrl.kinfac1 * factor
+                ktmat_sum .*= ctrl.kinfac2 * factor
+            else
+                kwmat_sum .*= ctrl.kinfac1
+                ktmat_sum .*= ctrl.kinfac2
             end
         end
 
@@ -729,10 +882,10 @@ function make_kinetic_matrix(
         ebat = copy(emat_ideal)
         fmat = reshape(Spl.spline_eval!(ffit.fmats_lower, psifac), intr.numpert_total, intr.numpert_total)
 
-        println("Det(amat_ideal): ", det(amat_ideal), " at psi = ", psifac)
+        #println("Det(amat_ideal): ", det(amat_ideal), " at psi = ", psifac)
         # Add kinetic contributions to ideal matrices
         amat = amat_ideal .+ kwmat_sum[:, :, 1] .+ ktmat_sum[:, :, 1]
-        println("Det(amat): ", det(amat), " at psi = ", psifac, " det(kwmat_sum[:,:,1]): ", det(kwmat_sum[:, :, 1]))
+        #=println("Det(amat): ", det(amat), " at psi = ", psifac, " det(kwmat_sum[:,:,1]): ", det(kwmat_sum[:, :, 1]))
         println(
             " det(ktmat_sum[:,:,1]): ",
             det(ktmat_sum[:, :, 1]),
@@ -742,15 +895,15 @@ function make_kinetic_matrix(
             maximum(abs.(ktmat_sum[:, :, 1])),
             "max abs(amat_ideal): ",
             maximum(abs.(amat_ideal))
-        )
-        println("min abs(amat_ideal): ", minimum(abs.(amat_ideal)))
+        )=#
+        #println("min abs(amat_ideal): ", minimum(abs.(amat_ideal)))
         #print statements for amats, kwmats, ktmats, etc and maybe min/max
         bmat = bmat_ideal .+ kwmat_sum[:, :, 2] .+ ktmat_sum[:, :, 2]
         cmat = cmat_ideal .+ kwmat_sum[:, :, 3] .+ ktmat_sum[:, :, 3]
         dmat = dmat_ideal .+ kwmat_sum[:, :, 4] .+ ktmat_sum[:, :, 4]
         emat = emat_ideal .+ kwmat_sum[:, :, 5] .+ ktmat_sum[:, :, 5]
         hmat = hmat_ideal .+ kwmat_sum[:, :, 6] .+ ktmat_sum[:, :, 6]
-        println("min abs(mats): ", minimum((minimum(abs.(amat)), minimum(abs.(bmat)), minimum(abs.(cmat)), minimum(abs.(dmat)), minimum(abs.(emat)), minimum(abs.(hmat)))))
+        #println("min abs(mats): ", minimum((minimum(abs.(amat)), minimum(abs.(bmat)), minimum(abs.(cmat)), minimum(abs.(dmat)), minimum(abs.(emat)), minimum(abs.(hmat)))))
 
         # Compute auxiliary matrices
         caat = cmat .- 2.0 .* ktmat_sum[:, :, 3]

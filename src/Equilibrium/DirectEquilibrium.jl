@@ -296,7 +296,9 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
     sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true)
 
-    if sol.retcode != :Success && sol.retcode != :Terminated
+    retcode_str = lowercase(string(sol.retcode))
+    is_success = sol.retcode == :Success || sol.retcode == :Terminated || occursin("success", retcode_str) || occursin("terminated", retcode_str)
+    if !is_success
         error("ODE integration failed for psi = $psifac with code: $(sol.retcode)")
     end
 
