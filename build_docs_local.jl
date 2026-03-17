@@ -5,14 +5,15 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 
-# Activate the docs environment
+# Build the package
+Pkg.build()
+
+# Activate and instantiate the docs environment
 Pkg.activate("docs")
-
-# Add the local package to docs environment first
-Pkg.develop(PackageSpec(; path="."))
-
-# Now instantiate to get other dependencies
 Pkg.instantiate()
+
+# Add the local package to docs environment
+Pkg.develop(PackageSpec(; path="."))
 
 # Build the documentation
 include("docs/make.jl")

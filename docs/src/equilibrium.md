@@ -19,7 +19,7 @@ Key responsibilities of the module:
 	(global parameters, q-profile finding, separatrix finding, GSE checks).
 
 The module exposes a small public API that covers setup, configuration,
-and common analyses used by other JPEC components (e.g. `ForceFreeStates`, vacuum
+and common analyses used by other JPEC components (e.g. `DCON`, vacuum
 interfaces).
 
 ## API Reference
@@ -35,6 +35,7 @@ Modules = [JPEC.Equilibrium]
 	provided).
 - `EquilibriumControl` — low-level control parameters (grid, jacobian
 	type, tolerances, etc.).
+- `EquilibriumOutput` — options controlling what output is written.
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).
@@ -64,7 +65,7 @@ Basic example: read a TOML config and build an equilibrium
 using JPEC
 
 # Build from a TOML file (searches relative paths if needed)
-pe = JPEC.Equilibrium.setup_equilibrium("docs/examples/ForceFreeStates.toml")
+pe = JPEC.Equilibrium.setup_equilibrium("docs/examples/dcon.toml")
 
 println("Magnetic axis: ", pe.params.r0, ", ", pe.params.z0)
 println("q(0) = ", pe.params.q0)
@@ -98,7 +99,8 @@ Notes:
 - Many routines rely on spline representations; the `Splines` module is
 	used heavily and should be initialized where appropriate.
 - The Equilibrium module contains several reader routines for external
-	formats (EFIT/CHEASE). Ensure required data files are present for these input formats.
+	formats (EFIT/CHEASE) and also interfaces to older Fortran helpers —
+	ensure required data files are present for those backends.
 - For programmatic usage, prefer constructing `EquilibriumConfig` from a
 	TOML file to ensure all path resolution and defaults are handled.
 

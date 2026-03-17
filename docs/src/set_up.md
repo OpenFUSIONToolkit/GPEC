@@ -23,10 +23,12 @@
         ```
 2. Install build tools in WSL
     ```shell
-    sudo apt install build-essential cmake -y
+    sudo apt install build-essential gfortran cmake -y
     ```
 
     `build-essential` → GCC, make
+
+    `gfortran` → Fortran compiler
 
     `cmake` → sometimes needed by dependencies
 
@@ -90,7 +92,35 @@ Clone it from GitHub directly to your virtual machine.
     cd JPEC
     ```
 
-6. Install the Julia packages for JPEC
+6. Build Fortran dependencies (libspline.so)
+    1. Go to the spline source folder:
+        ```shell
+        cd ~/JPEC/src/Splines/fortran
+        ```
+
+    2. Clean previous builds using
+        ```shell
+        make clean
+        ```
+
+    3. Build
+        ```shell
+        make
+        ```
+
+    4. Verify the library exists using
+        ```shell
+        ls ../../../deps/libspline.so
+        ```
+
+    5. Export library path so Julia can find it
+        ```shell
+        export LD_LIBRARY_PATH=~/JPEC/deps:$LD_LIBRARY_PATH
+        ```
+
+        Optional: add to `~/.bashrc` for persistence.
+
+7. Install the Julia packages for JPEC
     1. Launch Julia:
         ```shell
         julia
@@ -104,7 +134,7 @@ Clone it from GitHub directly to your virtual machine.
         Pkg.precompile()        # precompile all packages - probably unnecessary
         ```
 
-7. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
+8. At this point, you should be able to run the code, open a `.ipynb` notebook, or connect VS Code to your WSL session.
     1. To open a .ipynb notebook
         1. Launch Jupyter from WSL, make sure you have exited Julia using the `exit()` command and then type in the shell
         ```shell
@@ -124,86 +154,20 @@ Clone it from GitHub directly to your virtual machine.
         4. Open a terminal inside VS Code — it will automatically use WSL/Ubuntu.
         5. You can now run:
             ```shell
+            make        # rebuild libspline.so if needed
             julia       # run scripts
             jupyter notebook --no-browser
             ```
 
-        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the "Select Kernel" button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL. All dependencies are accessible.
+        6. VS Code also lets you open `.ipynb` notebooks in the WSL environment using the Jupyter extension. Click the "Select Kernel" button in the top right hand of the `.ipynb` file and select the Julia kernel installed in WSL.All dependencies (libspline.so, Julia packages) are accessible.
     3.  Run JPEC
-        1. Launch Julia and run your scripts as usual:
+        1. Make sure you are in WSL terminal, with `LD_LIBRARY_PATH` set to include deps.
+        2. Launch Julia and run your scripts as usual:
             ```shell
             include("path/to/jpec_script.jl")
             ```
 
 ## On macOS
-
-(To be completed)
-
-## Running JPEC
-
-Once JPEC is installed and built, you can run it in two ways:
-
-### As a Command-Line Script
-
-JPEC includes an executable script (`jpec`) in the project root directory. To run JPEC on a directory containing a `jpec.toml` configuration file:
-
-```bash
-./jpec path/to/directory
-```
-
-**Example:**
-```bash
-# Run JPEC on one of the included examples
-./jpec examples/DIIID-like_ideal_example
-
-# Run in the current directory (must contain jpec.toml)
-./jpec
-```
-
-The script will:
-1. Read configuration from `jpec.toml` in the specified directory
-2. Load or generate the equilibrium based on the `[Equilibrium]` section
-3. Compute force-free states (stability analysis) based on the `[ForceFreeStates]` section
-4. If a `[PerturbedEquilibrium]` section exists, compute the plasma response to external perturbations
-5. Write output to HDF5 files as configured
-
-**Early Termination:** You can stop execution early by setting:
-- `force_termination = true` in `[Equilibrium]` to stop after equilibrium setup
-- `force_termination = true` in `[ForceFreeStates]` to stop after stability analysis (before perturbed equilibrium)
-
-### As a Julia Library
-
-You can also use JPEC programmatically in your own Julia scripts or notebooks:
-
-```julia
-using JPEC
-
-# Run the full JPEC analysis pipeline
-JPEC.main(["path/to/directory"])
-
-# Or access individual modules
-using JPEC.Equilibrium
-using JPEC.Vacuum
-using JPEC.ForceFreeStates
-
-# Set up equilibrium only
-equil = Equilibrium.setup_equilibrium("path/to/jpec.toml")
-
-# Access equilibrium data
-println("q at axis: ", equil.params.q0)
-println("Beta-N: ", equil.params.betan)
-```
-
-### Configuration Files
-
-JPEC uses TOML configuration files (`jpec.toml`) with the following main sections:
-
-- **`[Equilibrium]`**: Equilibrium solver settings (input file, grid resolution, coordinate system, etc.)
-- **`[Wall]`**: Wall geometry for vacuum calculations (shape, size, position)
-- **`[ForceFreeStates]`**: Stability analysis settings (mode numbers, tolerances, flags)
-- **`[PerturbedEquilibrium]`**: Plasma response settings (forcing data, output options)
-
-See the example directories for complete configuration file templates.
 
 (Setup instructions to be added)
 

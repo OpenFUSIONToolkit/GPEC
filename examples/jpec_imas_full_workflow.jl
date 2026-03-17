@@ -1,51 +1,33 @@
 """
-Full JPEC IMAS Integration Workflow Demo
+Full JPEC IMAS Integration Workflow Demo (Synthetic Eigenvalues)
 
-This script demonstrates a complete end-to-end JPEC workflow using IMAS:
-1. Load equilibrium data from IMAS format
-2. Run JPEC/DCON stability analysis
-3. Write results back to IMAS mhd_linear structure
+This script demonstrates the complete JPEC IMAS integration using synthetic
+stability data. It tests the full round-trip:
+1. Load a g-file and convert to IMAS format (COCOS 11)
+2. Read the IMAS equilibrium through JPEC's new read_imas() path
+3. Write synthetic stability results to IMAS mhd_linear via JPEC.DCON.write_imas()
 4. Verify the complete workflow
 
-This proves that JPEC can fully integrate with IMAS-based workflows.
+The synthetic eigenvalues let us test the IMAS read/write machinery
+without running the full stability solver.
 """
 
-# JPEC.main( DIII example, ...)
+using TOML, JPEC
+import EFIT, EFIT.IMASdd
 
-#output 
-
-#convert g file (make sure the same) to IMAS (did this)
-
-#JPEC.main(DIII exmaple, dd)
-
-# make sure the input are the same except for the efit and imas 
-
-# output the same ?
-# is et[1] the same just looking at it says it s the same 
-# the dd are equivalent to the hdf5 file 
-
-#
 println("="^70)
-println("Full JPEC IMAS Integration Workflow")
+println("Full JPEC IMAS Integration Workflow (Synthetic Eigenvalues)")
+println("Using COCOS 11 (real IMAS convention)")
 println("="^70)
 println()
 
-# Activate JPEC environment
-using Pkg
-Pkg.activate(joinpath(@__DIR__, ".."))
-
-println("Loading packages...")
-using JPEC
-using EFIT
-using EFIT.IMASdd
-println("✓ Packages loaded")
-println()
-
-#load data with IMAS
-println("STEP 1: Loading equilibrium via IMAS")
+# ==========================================================================
+# STEP 1: Convert g-file to IMAS (COCOS 11)
+# ==========================================================================
+println("STEP 1: Loading g-file and converting to IMAS (COCOS 11)")
 println("-"^70)
 
-# Get test data path
+# Use the regression test equilibrium data
 data_dir = joinpath(@__DIR__, "..", "test", "test_data", "regression_equilibrium_example")
 geqdsk_path = joinpath(data_dir, "EQDSK_COCOS_02")
 
@@ -53,61 +35,58 @@ if !isfile(geqdsk_path)
     error("Test file not found: $geqdsk_path")
 end
 
-# Load gEQDSK and convert to IMAS
-println("Loading gEQDSK file: EQDSK_COCOS_02")
 g = EFIT.readg(geqdsk_path; set_time=0.0)
+println("  Loaded g-file: EQDSK_COCOS_02")
 println("  Grid: $(size(g.psirz))")
 println("  Time: $(g.time) s")
 
-# Create IMAS data dictionary
+# Create IMAS data dictionary using EFIT's standard converter (COCOS 11)
 dd = IMASdd.dd()
 dd.global_time = g.time
 dd.equilibrium.time = [g.time]
 resize!(dd.equilibrium.time_slice, 1)
 dd.equilibrium.time_slice[1].time = g.time
-
-# Convert to IMAS format
 EFIT.geqdsk2imas!(g, dd.equilibrium.time_slice[1]; wall=nothing)
-println("✓ Converted to IMAS format (COCOS 11)")
+println("  Converted to IMAS format using EFIT.geqdsk2imas! (COCOS 11)")
 println()
 
-# Set up JPEC equilibrium configuration to use IMAS
-println("Setting up JPEC with IMAS equilibrium...")
+# ==========================================================================
+# STEP 2: Read IMAS equilibrium through JPEC's new read_imas() path
+# ==========================================================================
+println("STEP 2: Reading IMAS equilibrium via JPEC.Equilibrium.setup_equilibrium()")
+println("-"^70)
+
+# Configure JPEC to use the IMAS equilibrium type
 imas_config = JPEC.Equilibrium.EquilibriumConfig(;
     eq_type = "imas",
-    eq_filename = joinpath(data_dir, "imas_output"),  # Output directory
+    eq_filename = joinpath(data_dir, "imas_output"),
     jac_type = "boozer",
     psilow = 0.01,
     psihigh = 0.994,
 )
 
-
-
-# Load equilibrium through JPEC using IMAS path
+# This calls: setup_equilibrium -> read_imas(config, dd) -> DirectRunInput -> solver
+# The COCOS 11 auto-detection and conversion happens inside read_imas()
 equil = JPEC.Equilibrium.setup_equilibrium(imas_config, dd)
-println("✓ JPEC equilibrium loaded via IMAS")
+println("  JPEC equilibrium loaded via IMAS")
 println("  Magnetic axis: R = $(round(equil.ro, digits=3)) m, Z = $(round(equil.zo, digits=3)) m")
-println("  Flux swing: ψ₀ = $(round(equil.psio, digits=3)) Wb/rad")
-println("  Safety factor: q₀ = $(round(equil.params.q0, digits=2)), q₉₅ = $(round(equil.params.q95, digits=2))")
+println("  Flux swing: psio = $(round(equil.psio, digits=3)) Wb/rad")
+println("  Safety factor: q0 = $(round(equil.params.q0, digits=2)), q95 = $(round(equil.params.q95, digits=2))")
 println()
 
-#Now JPEC/DCON stability analysis
-println("STEP 2: Running JPEC/DCON Stability Analysis")
+# ==========================================================================
+# STEP 3: Create synthetic stability result and write to IMAS
+# ==========================================================================
+println("STEP 3: Writing synthetic stability results to IMAS mhd_linear")
 println("-"^70)
 
-# Create synthetic DCON result (simulating what full JPEC would produce)
+# Build a synthetic result tuple that mimics what JPEC.main() returns
+# This tests the write_imas() machinery without running the full solver
+println("  Creating synthetic stability result for n=1 mode...")
 
-println("Creating synthetic DCON result for n=1 mode...")
+ctrl = (nn_low = 1, nn_high = 1, vac_flag = true)
 
-# Build synthetic control structure
-ctrl = (
-    nn_low = 1,
-    nn_high = 1,
-    vac_flag = true,
-)
-
-# Build synthetic internal structure (7 poloidal modes: m = -3 to 3)
-n_modes = 7
+n_modes = 7  # 7 poloidal modes: m = -3 to 3
 intr = (
     nlow = ctrl.nn_low,
     nhigh = ctrl.nn_high,
@@ -115,145 +94,120 @@ intr = (
     numpert_total = n_modes * (ctrl.nn_high - ctrl.nn_low + 1),
 )
 
-# Create synthetic vacuum data with stability results
-# First mode unstable (δW < 0), rest stable (δW > 0)
+# First mode unstable (energy < 0), rest stable (energy > 0)
 eigenvalues = zeros(ComplexF64, intr.numpert_total)
-eigenvalues[1] = -0.5 + 0.0im  # Unstable mode
+eigenvalues[1] = -0.5 + 0.0im
 for i in 2:intr.numpert_total
-    eigenvalues[i] = 0.1 * i + 0.0im  # Stable modes
+    eigenvalues[i] = 0.1 * i + 0.0im
 end
+vac_data = (et = eigenvalues,)
 
-vac_data = (
-    et = eigenvalues,
-)
-
-# Combine into result tuple
 result = (ctrl=ctrl, intr=intr, vac_data=vac_data)
 
-println("✓ Synthetic DCON result created")
-println("  Mode: n = $(ctrl.nn_low)")
-println("  Poloidal modes: $(n_modes)")
-println("  First eigenvalue: δW = $(real(eigenvalues[1])) ($(real(eigenvalues[1]) < 0 ? "UNSTABLE" : "stable"))")
-println()
-
-
-println("STEP 3: Writing results to IMAS")
-println("-"^70)
-
-# Write to IMAS using JPEC.DCON.write_imas
+# Write to IMAS using JPEC.DCON.write_imas()
 JPEC.DCON.write_imas(dd, result)
-
-println("✓ Results written to dd.mhd_linear")
+println("  Results written to dd.mhd_linear")
 println()
 
-
-println("STEP 4: Verifying IMAS Output")
+# ==========================================================================
+# STEP 4: Verify the complete IMAS round-trip
+# ==========================================================================
+println("STEP 4: Verifying IMAS output")
 println("-"^70)
 
 mhd = dd.mhd_linear
 
-# Verify metadata
-println("Metadata:")
-println("  Code name: \"$(mhd.code.name)\"")
-println("  Ideal flag: $(mhd.ideal_flag)")
-println("  Homogeneous time: $(mhd.ids_properties.homogeneous_time)")
-println("  Comment: \"$(mhd.ids_properties.comment)\"")
+println("  Metadata:")
+println("    Code name:         \"$(mhd.code.name)\"")
+println("    Ideal flag:        $(mhd.ideal_flag)")
+println("    Homogeneous time:  $(mhd.ids_properties.homogeneous_time)")
+println("    Comment:           \"$(mhd.ids_properties.comment)\"")
 println()
 
-# Verify time structure
-println("Time structure:")
-println("  Global time: $(mhd.time[1]) s")
-println("  Time slices: $(length(mhd.time_slice))")
-println("  Slice time: $(mhd.time_slice[1].time) s")
-println()
-
-# Verify mode structure
+println("  Mode results:")
 n_toroidal_modes = length(mhd.time_slice[1].toroidal_mode)
-println("Mode structure:")
-println("  Number of modes: $(n_toroidal_modes)")
-
 unstable_count = 0
 stable_count = 0
 for (i, tm) in enumerate(mhd.time_slice[1].toroidal_mode)
     global unstable_count, stable_count
     energy = tm.energy_perturbed
-    is_unstable = energy < 0
-
-    if is_unstable
+    if energy < 0
         unstable_count += 1
-        println("  Mode $i: n=$(tm.n_tor), δW=$(round(energy, digits=3)) ← UNSTABLE")
+        println("    Mode $i: n=$(tm.n_tor), energy=$(round(energy, digits=3)) <-- UNSTABLE")
     else
         stable_count += 1
     end
 end
-println("  Summary: $unstable_count unstable, $stable_count stable")
+println("    Total: $n_modes modes ($unstable_count unstable, $stable_count stable)")
 println()
 
-
+# ==========================================================================
+# VERIFICATION CHECKS
+# ==========================================================================
 println("="^70)
 println("VERIFICATION SUMMARY")
 println("="^70)
 println()
 
-all_checks_pass = true
+all_pass = true
 
-# Check 1: Equilibrium loaded correctly
+# Check 1: Equilibrium loaded correctly via IMAS
 check1 = equil isa JPEC.Equilibrium.PlasmaEquilibrium
-println("$(check1 ? "✅" : "❌") Equilibrium loaded via IMAS")
-all_checks_pass = all_checks_pass && check1
+println("$(check1 ? "PASS" : "FAIL") - Equilibrium loaded via IMAS (COCOS 11 auto-detected)")
+all_pass = all_pass && check1
 
-# Check 2: Equilibrium has correct flux
+# Check 2: Equilibrium has valid flux swing
 check2 = abs(equil.psio) > 1e-3
-println("$(check2 ? "✅" : "❌") Equilibrium has valid flux swing")
-all_checks_pass = all_checks_pass && check2
+println("$(check2 ? "PASS" : "FAIL") - Equilibrium has valid flux swing (psio = $(round(equil.psio, digits=4)))")
+all_pass = all_pass && check2
 
-# Check 3: IMAS metadata correct
+# Check 3: IMAS metadata correctly populated
 check3 = (mhd.code.name == "JPEC" &&
           mhd.ideal_flag == 1 &&
           mhd.ids_properties.homogeneous_time == 1)
-println("$(check3 ? "✅" : "❌") IMAS metadata correctly set")
-all_checks_pass = all_checks_pass && check3
+println("$(check3 ? "PASS" : "FAIL") - IMAS metadata correctly populated")
+all_pass = all_pass && check3
 
 # Check 4: Time structure correct
 check4 = (length(mhd.time) == 1 &&
           length(mhd.time_slice) == 1 &&
           mhd.time_slice[1].time == g.time)
-println("$(check4 ? "✅" : "❌") Time structure correctly populated")
-all_checks_pass = all_checks_pass && check4
+println("$(check4 ? "PASS" : "FAIL") - Time structure correct")
+all_pass = all_pass && check4
 
-# Check 5: Mode structure correct
-check5 = length(mhd.time_slice[1].toroidal_mode) == intr.numpert_total
-println("$(check5 ? "✅" : "❌") Correct number of modes ($(intr.numpert_total))")
-all_checks_pass = all_checks_pass && check5
+# Check 5: Correct number of modes
+check5 = n_toroidal_modes == intr.numpert_total
+println("$(check5 ? "PASS" : "FAIL") - Correct number of modes ($n_toroidal_modes)")
+all_pass = all_pass && check5
 
-# Check 6: Unstable mode identified
+# Check 6: Unstable mode correctly identified
 check6 = mhd.time_slice[1].toroidal_mode[1].energy_perturbed < 0
-println("$(check6 ? "✅" : "❌") Unstable mode correctly identified")
-all_checks_pass = all_checks_pass && check6
+println("$(check6 ? "PASS" : "FAIL") - Unstable mode correctly identified (energy < 0)")
+all_pass = all_pass && check6
 
-# Check 7: Energy values match
+# Check 7: Energy values match what we wrote
 check7 = true
 for i in 1:intr.numpert_total
     if !isapprox(mhd.time_slice[1].toroidal_mode[i].energy_perturbed,
                  real(vac_data.et[i]), rtol=1e-10)
-        check7 = false
+        global check7 = false
         break
     end
 end
-println("$(check7 ? "✅" : "❌") Energy values correctly stored")
-all_checks_pass = all_checks_pass && check7
+println("$(check7 ? "PASS" : "FAIL") - Energy values correctly stored in IMAS")
+all_pass = all_pass && check7
 
 println()
-if all_checks_pass
-    println(" SUCCESS: Full JPEC IMAS workflow is FUNCTIONAL!")
+if all_pass
+    println("SUCCESS: Full JPEC IMAS workflow is operational!")
     println()
     println("This demonstrates:")
-    println("  • JPEC can read equilibrium from IMAS format")
-    println("  • JPEC can process equilibrium data correctly")
-    println("  • JPEC can write stability results to IMAS mhd_linear")
-    println("  • Complete IMAS integration workflow is operational")
+    println("  1. JPEC can read equilibrium from IMAS format (COCOS 11)")
+    println("  2. JPEC auto-detects COCOS and converts correctly")
+    println("  3. JPEC.DCON.write_imas() correctly populates mhd_linear")
+    println("  4. Complete IMAS read/write integration works")
 else
-    println(" FAILURE: Some checks did not pass")
+    println("FAILURE: Some checks did not pass")
 end
 
 println()

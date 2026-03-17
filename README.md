@@ -30,7 +30,7 @@ To assist with the process of compiling release notes, please confirm to the com
 ```
 CODE - TAG - Detailed message
 ```
-where CODE is EQUIL, ForceFreeStates, VAC, etc. and TAGs are short descriptors of the type of commit. Example tags might be WIP (work in progress), MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc. Look through old commits for examples of what tags are commonly used.
+where CODE is EQUIL, DCON, VAC, etc. and TAGs are short descriptors of the type of commit. Example tags might be WIP (work in progress), MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc. Look through old commits for examples of what tags are commonly used.
 
 Again, this is currently used for the by-hand compilation of release notes. The tags thus need to be human readable but are not strictly inforced to be within some limited set. The objective is to allow a lead developer to skim through commits and pick out only the key new features / bug fixes / improvements to note in the release while not having to read all the work-in-progress or minor changes.
 

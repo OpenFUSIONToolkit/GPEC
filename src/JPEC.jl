@@ -3,12 +3,12 @@ module JPEC
 
 include("Utilities/Utilities.jl")
 import .Utilities as Utilities
-import .Utilities as Util  # Alias for compatibility with DCON
+import .Utilities as Util
 export Utilities
 
 include("Splines/Splines.jl")
 import .SplinesMod as Splines
-import .SplinesMod as Spl  # Alias for compatibility with DCON and Equilibrium
+import .SplinesMod as Spl
 export Splines
 
 include("Equilibrium/Equilibrium.jl")

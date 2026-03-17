@@ -44,8 +44,7 @@ returning the final processed `PlasmaEquilibrium` object.
 function setup_equilibrium(path::String="equil.toml")
     return setup_equilibrium(EquilibriumConfig(path))
 end
-function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)# not used dd::Union{IMASdd.dd, Nothing}=nothing, but rahter additional_input becuase it contains IMAS and after I can just call it setup_equilibrium(config,dd) 
-                                                                                  #so in that case additional_input = dd(IMAS.dd type)
+function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
     @printf "Equilibrium file: %s\n" eq_config.eq_filename
 
@@ -71,15 +70,12 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         end
 
         eq_input = sol_run(eq_config, additional_input)
-    elseif eq_type == "imas" #Check for IMAS data
-
-       
-        if additional_input === nothing # check if dd got passed in 
+    elseif eq_type == "imas"
+        if additional_input === nothing
             error("eq_type=\"imas\" requires a dd object passed as additional_input.\n" *
-                  "Usage: setup_equilibrium(config, dd)") 
+                  "Usage: setup_equilibrium(config, dd)")
         end
-
-        eq_input = read_imas(eq_config, additional_input) #if dd provided read the data
+        eq_input = read_imas(eq_config, additional_input)
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
