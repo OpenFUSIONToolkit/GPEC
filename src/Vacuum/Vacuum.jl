@@ -23,42 +23,76 @@ export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
 
 """
-    compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings)
+    _compute_vacuum_response_single!(
+        wv, grri_in, grre_in, plasma_pts, wall_pts,
+        inputs::VacuumInput, wall_settings::WallShapeSettings;
+        n_override=nothing
+    )
 
-Compute the vacuum response matrix and both Green's functions using provided vacuum inputs.
+Compute a single vacuum solve (one coupled 3D solve, or one `n`-slice in 2D) by building and solving
+the boundary integral equation in mode space with an optional conducting wall present and writing out the results:
 
-Single entry point for vacuum calculations.
+  - `wv`: complex vacuum response matrix in straight-fieldline mode space
+  - `grri_in`: interior Green's function sampled on the plasma surface in straight-fieldline mode space (real layout for backward compatibility)
+  - `grre_in`: exterior Green's function sampled on the plasma surface in straight-fieldline mode space (real layout for backward compatibility)
+  - `plasma_pts` / `wall_pts`: output point clouds for downstream plotting/diagnostics
 
-  - For **3D** (`inputs.nzeta > 1`), computes the full coupled response across all (m,n) modes defined
-    by `inputs.(mlow, mpert, nlow, npert)`.
+## Fused kernel assembly + projection
 
-  - For **2D geometry** (`inputs.nzeta == 1`), supports either:
+This routine uses a **newer kernel evaluation path** that never forms dense point-space kernel matrices.
+Instead, it fuses kernel evaluation and Fourier/Galerkin projection into a single pass.
 
-      + **single-n** (`inputs.npert == 1`): computes (m,n) response for `n = inputs.nlow`
-      + **multi-n** (`inputs.npert > 1`): loops over `n = inputs.nlow:(inputs.nlow+inputs.npert-1)` and returns
-        **blocks** of the full response matrices with one block per toroidal mode number.
+The key idea is:
 
-This is the pure Julia implementation that replaces the Fortran `mscvac` function.
-It computes both interior (grri) and exterior (grre) Green's functions for GPEC response calculations.
+  - Assemble and solve the boundary integral equation directly in `P×P` mode space.
 
-# Arguments
+  - Avoid materializing `M×M` (2D) or `N×N` (3D) kernel matrices.
 
-  - `inputs`: `VacuumInput` struct with mode numbers, grid resolution, and boundary info.
-  - `wall_settings::WallShapeSettings`: Wall geometry configuration.
+  - Uses complex basis `Z = C + iS` so projected operators are `P×P` complex.
 
-# Returns
+  - The projected operators are accumulated row-by-row while kernel values are computed.
 
-  - `wv`: Complex vacuum response matrix.
+  - Memory drops from `O(M^2)` (or `O(N^2)`) down to `O(MP + P^2)` (or `O(NP + P^2)`).
 
-      + 2D single-n: `mpert × mpert`
-      + 2D multi-n: `(mpert*npert) × (mpert*npert)` (block diagonal)
-      + 3D: `num_modes × num_modes` (full coupled)
+  - FLOPs remain dominated by the same scaling as the two-step approach (kernel evaluation + projection),
+    plus an additional `O(P^3)` for the LU factorization/solve in mode space.
 
-  - `grri`: Interior Green's function matrix.
+  - **Projected matrices**
 
-  - `grre`: Exterior Green's function matrix.
+      + Exterior projected kernel blocks are assembled into `K_ext` and `G_ext`.
+      + Interior operators are formed from the exterior ones using the discrete Green-identity diagonal term:
+        the implementation uses `K_int = 2*Gram - K_ext` for same-type source/observer blocks. This effectively
+        computes the kernel with an negative normal direction without recalculating the kernel.
 
-  - `xzpts`: Coordinate array (mtheta×4 for 2D, mtheta*nzeta×4 for 3D) [R_plasma, Z_plasma, R_wall, Z_wall].
+  - **Solves**
+
+      + If `nowall`, solve the plasma-only `P×P` system.
+      + If a wall is present, solve the coupled `2P×2P` block system.
+
+  - **Back-compat outputs**
+
+      + Although the solve is performed in mode space, `grri_in` and `grre_in` are reconstructed into the
+        legacy real `M×(2P)` layout for downstream code paths that still expect that shape.
+
+## Arguments
+
+  - **`wv::AbstractMatrix{ComplexF64}`**: output vacuum response matrix (modified in-place)
+  - **`grri_in::AbstractMatrix{Float64}`**: output interior Green's function (modified in-place; real/legacy layout)
+  - **`grre_in::AbstractMatrix{Float64}`**: output exterior Green's function (modified in-place; real/legacy layout)
+  - **`plasma_pts::AbstractMatrix{Float64}`**: plasma surface coordinates (modified in-place)
+  - **`wall_pts::AbstractMatrix{Float64}`**: wall surface coordinates (modified in-place)
+  - **`inputs::VacuumInput`**: mode ranges, grid resolution, and geometry settings
+  - **`wall_settings::WallShapeSettings`**: wall geometry configuration
+  - **`n_override::Union{Nothing,Int}`**: optional toroidal mode number override (only used for 2D)
+
+## 2D vs 3D behavior
+
+  - **3D (`inputs.nzeta > 1`)**: computes the full coupled response across all `(m, n)` modes specified by
+    `inputs.(mlow, mpert, nlow, npert)` in a single call using the 3D kernel method in Kernel3D.jl.
+  - **2D (`inputs.nzeta == 1`)**:
+      + If `inputs.npert == 1`, computes the response for `n = inputs.nlow` using the 2D kernel method in Kernel2D.jl.
+      + If `inputs.npert > 1`, the public driver loops over `n` and calls this function once per `n`,
+        writing block columns into the full output matrices using the 2D kernel method in Kernel2D.jl.
 """
 @with_pool pool function _compute_vacuum_response_single!(
     wv::AbstractMatrix{ComplexF64},
@@ -91,10 +125,6 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
 
     # Active rows for computation (plasma only if no wall, plasma+wall if wall present)
     num_points_total = wall.nowall ? num_points_surf : 2 * num_points_surf
-
-    # Views into output Green's function matrices for the active rows/columns
-    grre = @view grre_in[1:num_points_total, :]
-    grri = @view grri_in[1:num_points_total, :]
 
     # Complex buffer for projecting to mode space (G*Z) and back; grre/grri stay real for backwards compatibility
     M = num_points_surf
@@ -163,6 +193,9 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
     # Need to convert mode space to physical space and unpack the real and imaginary parts
     # TODO: propagate complex M * P grri/grre matrices to perturbed equilibrium code
     # perhaps make it a complex P * P matrix? Then don't need any of this section
+    # Views into output Green's function matrices for the active rows/columns
+    grre = @view grre_in[1:num_points_total, :]
+    grri = @view grri_in[1:num_points_total, :]
     mul!(temp, exp_mn_basis, view(G_ext, 1:P, :))
     @view(grre[1:M, 1:P]) .= real.(temp)
     @view(grre[1:M, (P+1):(2*P)]) .= imag.(temp)
