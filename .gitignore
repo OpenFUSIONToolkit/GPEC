@@ -9,6 +9,7 @@
 .vscode
 *.DS_Store
 *.pdf
+!docs/resources/*.pdf
 *.png
 *.jld2
 .gitattributes

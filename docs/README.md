@@ -1,20 +1,20 @@
-# JPEC.jl Documentation
+# GPEC.jl Documentation
 
-This directory contains the documentation source files for JPEC.jl.
+This directory contains the documentation source files for GPEC.jl.
 
 ## Building Documentation Locally
 
 To build the documentation locally:
 
 ```bash
-julia build_docs_local.jl
+julia --project=. build_docs_local.jl
 ```
 
 Or step by step:
 
 ```bash
 # From the root directory
-julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.build()'
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=docs -e 'using Pkg; Pkg.instantiate(); Pkg.develop(PackageSpec(path="."))'
 julia --project=docs docs/make.jl
 ```
@@ -38,4 +38,4 @@ The documentation is automatically built and deployed to GitHub Pages via GitHub
 
 - Julia 1.11+
 - Documenter.jl
-- All JPEC.jl dependencies (see main Project.toml)
+- All GPEC.jl dependencies (see main Project.toml)

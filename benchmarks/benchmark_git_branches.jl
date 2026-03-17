@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 """
-benchmark_git_branches.jl - Generic Git branch benchmarking tool for JPEC
+benchmark_git_branches.jl - Generic Git branch benchmarking tool for GPEC
 
 Compares performance between two Git branches or commits by running a specified
 example multiple times to warm up Julia's JIT compiler, then measuring runtime.
@@ -34,14 +34,14 @@ julia benchmarks/benchmark_git_branches.jl --example examples/DIIID-like_ideal_e
 
 # Requirements
 
-- Example directory must contain DCON.jl file that can be run via: `using JPEC; JPEC.DCON.Main("path")`
+- Example directory must contain a `gpec.toml` config file runnable via: `using GeneralizedPerturbedEquilibrium; GeneralizedPerturbedEquilibrium.main(["path"])`
 - Working directory must be clean or changes will be stashed during branch switching
 
 # Output Metrics
 
 For each branch/commit, reports:
-- Eigenmode energy (et[1]) from euler.h5
-- Integration steps from euler.h5
+- Eigenmode energy (et[1]) from gpec.h5
+- Integration steps from gpec.h5
 - Runtime (averaged over warm runs)
 - Git commit hash
 
@@ -49,7 +49,7 @@ For each branch/commit, reports:
 
 ```
 ============================================================
-JPEC Branch Benchmark Comparison
+GPEC Branch Benchmark Comparison
 ============================================================
 Example: examples/DIIID-like_ideal_example
 
@@ -158,54 +158,59 @@ end
 
 # Run the example benchmark
 function run_example_benchmark(example_path, num_runs)
-    println("\nRunning example: $example_path")
+    abs_example_path = abspath(example_path)
+    project_root = abspath(joinpath(example_path, "../.."))
+    println("\nRunning example: $abs_example_path")
     println("Warming up with $(num_runs + 1) runs...")
 
-    # First run for JIT compilation
-    println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
-    cd(example_path) do
-        Pkg.activate("../..")
-        using JPEC
-        @time JPEC.DCON.Main("./")
-    end
+    # Write a temp script so `using GeneralizedPerturbedEquilibrium` is at top-level in each subprocess.
+    # Pkg.instantiate() handles branches whose environments haven't been resolved yet.
+    tmpscript = tempname() * ".jl"
+    write(tmpscript, "using Pkg; Pkg.instantiate(); using GeneralizedPerturbedEquilibrium; GeneralizedPerturbedEquilibrium.main([ARGS[1]])\n")
 
-    # Warm runs for timing
-    runtimes = Float64[]
-    for i in 1:num_runs
-        println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
-        runtime = cd(example_path) do
-            @elapsed JPEC.DCON.Main("./")
+    try
+        # First run for JIT compilation
+        println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
+        run(`julia --project=$project_root $tmpscript $abs_example_path`)
+
+        # Warm runs for timing
+        runtimes = Float64[]
+        for i in 1:num_runs
+            println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
+            t_start = time()
+            run(`julia --project=$project_root $tmpscript $abs_example_path`)
+            runtime = time() - t_start
+            push!(runtimes, runtime)
+            println("  Runtime: $(round(runtime, digits=2)) s")
         end
-        push!(runtimes, runtime)
-        println("  Runtime: $(round(runtime, digits=2)) s")
+
+        # Extract metrics from gpec.h5
+        gpec_path = joinpath(abs_example_path, "gpec.h5")
+        if !isfile(gpec_path)
+            error("gpec.h5 not found at $gpec_path")
+        end
+
+        h5 = h5open(gpec_path, "r")
+        et = read(h5["vacuum/et"])
+        nsteps = read(h5["integration/nstep"])
+        close(h5)
+
+        avg_runtime = sum(runtimes) / length(runtimes)
+
+        return (
+            eigenvalue = real(et[1]),
+            steps = nsteps,
+            runtime = avg_runtime
+        )
+    finally
+        rm(tmpscript, force=true)
     end
-
-    # Extract metrics from euler.h5
-    euler_path = joinpath(example_path, "euler.h5")
-    if !isfile(euler_path)
-        error("euler.h5 not found at $euler_path")
-    end
-
-    h5 = h5open(euler_path, "r")
-    et = read(h5["vacuum/et"])
-    xi_psi = read(h5["integration/xi_psi"])
-    psifac = read(h5["integration/psi"])
-    close(h5)
-
-    nsteps = length(psifac)
-    avg_runtime = sum(runtimes) / length(runtimes)
-
-    return (
-        eigenvalue = real(et[1]),
-        steps = nsteps,
-        runtime = avg_runtime
-    )
 end
 
 # Main benchmarking function
 function benchmark_branches(options)
     println("="^60)
-    println("JPEC Branch Benchmark Comparison")
+    println("GPEC Branch Benchmark Comparison")
     println("="^60)
     println("Example: $(options["example"])")
     println()
@@ -290,7 +295,7 @@ function benchmark_branches(options)
     # Write to output file if requested
     if options["output"] !== nothing
         open(options["output"], "w") do f
-            write(f, "# JPEC Benchmark Comparison\n")
+            write(f, "# GPEC Benchmark Comparison\n")
             write(f, "Example: $(options["example"])\n\n")
             write(f, "## Branch 1: $(r1.name) @ $(r1.commit)\n")
             write(f, @sprintf("- Eigenmode energy: %.4f\n", r1.metrics.eigenvalue))

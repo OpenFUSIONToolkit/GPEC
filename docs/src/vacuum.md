@@ -1,22 +1,21 @@
 # Vacuum Module
 
 The Vacuum module provides magnetostatic vacuum field calculations with plasma-wall interactions.
-Refactored from VACUUM by M.S. Chance into a pure Julia implementation.
+The 2D vacuum calculations follow the approach outlined in [Chance Phys. Plasmas 1997, Chance J. Comp. Phys. 2007] with a pure Julia implementation.
 
 ## Overview
 
 The module provides:
 
-- Pure Julia implementation of vacuum response calculations (`compute_vacuum_response`, `compute_vacuum_field`)
+- Vacuum response calculations (`compute_vacuum_response`, `compute_vacuum_field`)
 - Support for various wall geometries (conformal, elliptical, dee-shaped, or custom)
 - Pre-computed Legendre functions using Bulirsch elliptic integrals for improved accuracy
-- ~~Deprecated: Fortran interface (`mscvac`, `set_dcon_params`) - use Julia API instead~~
 
 ## Key Structures
 
 ### VacuumInput
 Contains plasma boundary data and calculation parameters including:
-- Plasma boundary coordinates (r, z) on DCON theta grid
+- Plasma boundary coordinates (r, z) on GPEC theta grid
 - Free toroidal angle parameter (ν) where ϕ = 2πζ + ν(ψ, θ)
 - Poloidal mode numbers (mlow, mpert)
 - Toroidal mode number (n)
@@ -32,19 +31,19 @@ Specifies wall geometry configuration with options for:
 ## API Reference
 
 ```@autodocs
-Modules = [JPEC.Vacuum]
+Modules = [GeneralizedPerturbedEquilibrium.Vacuum]
 ```
 
 ## Functions
 
 ### compute_vacuum_response
 ```@docs
-JPEC.Vacuum.compute_vacuum_response
+GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response
 ```
 
 ### compute_vacuum_field
 ```@docs
-JPEC.Vacuum.compute_vacuum_field
+GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_field
 ```
 
 ## Example Usage
@@ -52,13 +51,13 @@ JPEC.Vacuum.compute_vacuum_field
 ### Basic Vacuum Response Calculation
 
 ```julia
-using JPEC
+using GeneralizedPerturbedEquilibrium
 
 # Create VacuumInput struct with plasma boundary data
 # Note: ν is the free toroidal angle parameter where ϕ = 2πζ + ν(ψ, θ)
-inputs = JPEC.Vacuum.VacuumInput(
-    r = plasma_r_coords,      # Plasma R coordinates on DCON theta grid
-    z = plasma_z_coords,      # Plasma Z coordinates on DCON theta grid
+inputs = GeneralizedPerturbedEquilibrium.Vacuum.VacuumInput(
+    r = plasma_r_coords,      # Plasma R coordinates on GPEC theta grid
+    z = plasma_z_coords,      # Plasma Z coordinates on GPEC theta grid
     ν = nu_array,             # Toroidal angle parameter (formerly delta/qa)
     mlow = 1,                 # Lowest poloidal mode number
     mpert = 10,               # Number of poloidal modes
@@ -69,14 +68,14 @@ inputs = JPEC.Vacuum.VacuumInput(
 )
 
 # Define wall settings
-wall_settings = JPEC.Vacuum.WallShapeSettings(
+wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(
     shape = "conformal",      # Wall shape type
     a = 0.3,                  # Wall distance parameter
     equal_arc_wall = true     # Use equal arc length spacing
 )
 
 # Compute vacuum response matrix
-wv, grri, xzpts = JPEC.Vacuum.compute_vacuum_response(inputs, wall_settings)
+wv, grri, xzpts = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_response(inputs, wall_settings)
 ```
 
 ### Vacuum Field Calculation at Observation Points
@@ -87,7 +86,7 @@ wv, grri, xzpts = JPEC.Vacuum.compute_vacuum_response(inputs, wall_settings)
 R_obs = 2.0  # Major radius of observation point
 Z_obs = 0.0  # Height of observation point
 
-chi = JPEC.Vacuum.compute_vacuum_field(R_obs, Z_obs, inputs, xi, eta, plasma_surf)
+chi = GeneralizedPerturbedEquilibrium.Vacuum.compute_vacuum_field(R_obs, Z_obs, inputs, xi, eta, plasma_surf)
 ```
 
 ## Notes
@@ -96,14 +95,4 @@ chi = JPEC.Vacuum.compute_vacuum_field(R_obs, Z_obs, inputs, xi, eta, plasma_sur
 - For large mode numbers (nρ̂ ≥ 0.1), 32-point Gaussian quadrature is used for Legendre function evaluation
 - For n=0 modes with closed walls, automatic regularization is applied
 - Wall shapes support: nowall, conformal, elliptical, dee, mod_dee, or custom from file
-- The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per Chance 1997
-
-## Migration from Fortran API
-
-The legacy Fortran interface functions (`mscvac`, `set_dcon_params`, `unset_dcon_params`) have been deprecated in favor of the Julia API. Key changes:
-
-- `delta` parameter renamed to `ν` (nu) for mathematical clarity
-- `qa` (safety factor) no longer passed separately - it's not needed in the vacuum calculation
-- `mhigh` removed - use `mpert` (number of modes) instead
-- `mtheta_eq` removed - DCON theta grid size inferred from input array length
-- Wall settings moved to `WallShapeSettings` struct for better encapsulation
+- The vacuum response matrix wv is scaled by the singular factor (m - nq)(m' - nq) per [Chance Phys. Plasmas 1997]
