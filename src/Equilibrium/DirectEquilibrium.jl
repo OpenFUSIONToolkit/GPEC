@@ -39,6 +39,7 @@ struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastIn
     power_bp::Int
     power_b::Int
     power_r::Int
+    power_rc::Int  # minor radius rfac = √((R-R₀)²+(Z-Z₀)²) power exponent
     bfield::DirectBField
     Bp_floor::Float64  # minimum Bp for integral terms (0 = disabled; arclength sets this to prevent 1/Bp overflow near x-points)
 end
@@ -270,7 +271,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     equil_config = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield, 0.0)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield, 0.0)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -311,7 +312,8 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     bp = sqrt(params.bfield.br^2 + params.bfield.bz^2)
     bt = params.bfield.f / r
     b = sqrt(bp^2 + bt^2)
-    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r)
+    rfac = y[2]
+    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r * rfac^params.power_rc)
 
     # Denominator for d(l_pol)/d(eta) = rfac |B_pol|/denominator
     denominator = params.bfield.bz * cos_eta - params.bfield.br * sin_eta

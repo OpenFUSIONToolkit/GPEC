@@ -204,7 +204,7 @@ function equilibrium_solver(input::InverseRunInput)
             spl_fs[itheta+1, 2] = f_deta
             spl_fs[itheta+1, 3] = r * jacfac
             spl_fs[itheta+1, 4] = spl_fs[itheta+1, 3] / (r * r)
-            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.power_bp * b^config.power_b / r^config.power_r
+            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.power_bp * b^config.power_b / (r^config.power_r * rfac^config.power_rc)
 
         end
         # c-----------------------------------------------------------------------

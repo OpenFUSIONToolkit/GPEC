@@ -95,7 +95,7 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     # Force equal_arc jac internally (power_bp=1,b=0,r=0): dy[5]=1 regardless of Bp near x-point.
     # The user jac SFL angle is recovered in post-processing below.
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        1, 0, 0, bfield_ode, 0.0)
+        1, 0, 0, 0, bfield_ode, 0.0)
 
     t_min = π * (r - ro)  # minimum arc before termination (half-circumference lower bound)
     condition(u, _t, integrator) = u[2] - zo
@@ -141,36 +141,106 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     # Replace arc-length in y_out[:,5] with user-jac SFL angle so equilibrium_solver
     # receives the expected SFL abscissa ∫jac·dl/Bp normalized to [0,1].
     # y_out[:,2] = ∫dl/Bp and y_out[:,4] = ∫dl/(R²Bp) are already integrated correctly.
-    _sfl_to_user_jac!(y_out, equil_config)
+    _sfl_to_user_jac!(y_out, equil_config, sol, ro, zo,
+        raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio)
 
     # bfield at the starting point carries F and P for the surface-averaged quantities
     return y_out, bfield
 end
 
 """
-    _sfl_to_user_jac!(y_out, equil_config)
+    _sfl_to_user_jac!(y_out, equil_config, sol, ro, zo, psi_in, sq_in, sq_in_deriv, psio)
 
 Replace the arc-length column y_out[:,5] with the user-jac SFL angle ∈ [0,1].
 
 After the equal_arc ODE, y_out[:,5] = arc_length. This converts it to the SFL angle
-for the user's jac_type using integrals already accumulated in the ODE:
-- Hamada (power_bp=0, b=0, r=0): SFL = ∫dl/Bp, stored in y_out[:,2]
-- PEST   (power_bp=0, b=0, r=2): SFL = ∫dl/(R²Bp), stored in y_out[:,4]
-- equal_arc (power_bp=1, b=0, r=0): SFL = arc_length, already in y_out[:,5]
+for the user's jac_type using integrals already accumulated in the ODE (fast paths) or
+post-processing bfield calls (general path):
+
+Fast paths (no extra bfield calls):
+- Hamada     (power_bp=0, b=0, r=0, rc=0): SFL = ∫dl/Bp,      stored in y_out[:,2]
+- PEST       (power_bp=0, b=0, r=2, rc=0): SFL = ∫dl/(R²Bp),  stored in y_out[:,4]
+- equal_arc  (power_bp=1, b=0, r=0, rc=0): SFL = arc_length,  in y_out[:,5]
+
+General path (bfield calls at each ODE sample point):
+- Boozer     (power_bp=0, b=2, r=0, rc=0): SFL ∝ ∫B²dl/Bp
+- Park       (power_bp=0, b=1, r=0, rc=0): SFL ∝ ∫Bdl/Bp
+- other: SFL ∝ ∫ Bp^(power_bp−1) ⋅ B^power_b / (R^power_r ⋅ rfac^power_rc) dl
 """
-function _sfl_to_user_jac!(y_out::Matrix{Float64}, equil_config::EquilibriumConfig)
+function _sfl_to_user_jac!(y_out::Matrix{Float64}, equil_config::EquilibriumConfig,
+    sol, ro::Float64, zo::Float64, psi_in, sq_in, sq_in_deriv, psio::Float64)
     power_bp = equil_config.power_bp
     power_b  = equil_config.power_b
     power_r  = equil_config.power_r
+    power_rc = equil_config.power_rc
 
-    if power_bp == 0 && power_b == 0 && power_r == 0
+    if power_bp == 0 && power_b == 0 && power_r == 0 && power_rc == 0
         # Hamada: ∫dl/Bp already in col 2
         @. y_out[:, 5] = y_out[:, 2] / y_out[end, 2]
-    elseif power_bp == 0 && power_b == 0 && power_r == 2
+    elseif power_bp == 0 && power_b == 0 && power_r == 2 && power_rc == 0
         # PEST: ∫dl/(R²Bp) already in col 4
         @. y_out[:, 5] = y_out[:, 4] / y_out[end, 4]
-    else
-        # equal_arc user jac or unsupported: arc_length → normalize in place
+    elseif power_bp == 1 && power_b == 0 && power_r == 0 && power_rc == 0
+        # equal_arc: arc_length → normalize in place
         y_out[:, 5] ./= y_out[end, 5]
+    else
+        # General case: integrand Bp^(power_bp−1) ⋅ B^power_b / (R^power_r ⋅ rfac^power_rc)
+        # Requires bfield at each ODE sample point; trapezoid integration over arc length.
+        _general_jac_from_trajectory!(y_out, sol, ro, zo,
+            power_bp, power_b, power_r, power_rc, psi_in, sq_in, sq_in_deriv, psio)
     end
+end
+
+"""
+    _general_jac_from_trajectory!(y_out, sol, ro, zo, power_bp, power_b, power_r, power_rc,
+                                   psi_in, sq_in, sq_in_deriv, psio)
+
+Compute the general SFL angle by trapezoid integration over the ODE trajectory.
+
+Integrand at each point: `Bp^(power_bp−1) ⋅ B^power_b / (R^power_r ⋅ rfac^power_rc)`
+where `B = √(Bp² + Bt²)`, `Bt = F/R`, and `rfac = √((R−R₀)²+(Z−Z₀)²)`.
+The result is normalized to [0,1] and stored in `y_out[:,5]`.
+"""
+function _general_jac_from_trajectory!(y_out::Matrix{Float64}, sol, ro::Float64, zo::Float64,
+    power_bp::Int, power_b::Int, power_r::Int, power_rc::Int,
+    psi_in, sq_in, sq_in_deriv, psio::Float64)
+    n = length(sol.u)
+    bfield = DirectBField()
+
+    prev_integrand = _jac_integrand(sol.u[1][1], sol.u[1][2], ro, zo,
+        power_bp, power_b, power_r, power_rc, bfield, psi_in, sq_in, sq_in_deriv, psio)
+    y_out[1, 5] = 0.0
+
+    for i in 2:n
+        R, Z = sol.u[i][1], sol.u[i][2]
+        curr_integrand = _jac_integrand(R, Z, ro, zo,
+            power_bp, power_b, power_r, power_rc, bfield, psi_in, sq_in, sq_in_deriv, psio)
+        ds = sol.t[i] - sol.t[i-1]
+        y_out[i, 5] = y_out[i-1, 5] + 0.5 * (prev_integrand + curr_integrand) * ds
+        prev_integrand = curr_integrand
+    end
+
+    total = y_out[end, 5]
+    if total > 0.0
+        y_out[:, 5] ./= total
+    end
+end
+
+"""
+    _jac_integrand(R, Z, ro, zo, power_bp, power_b, power_r, power_rc,
+                   bfield, psi_in, sq_in, sq_in_deriv, psio)
+
+Evaluate the SFL-angle integrand `Bp^(power_bp−1) ⋅ B^power_b / (R^power_r ⋅ rfac^power_rc)` at (R, Z).
+"""
+function _jac_integrand(R::Float64, Z::Float64, ro::Float64, zo::Float64,
+    power_bp::Int, power_b::Int, power_r::Int, power_rc::Int,
+    bfield::DirectBField, psi_in, sq_in, sq_in_deriv, psio::Float64)::Float64
+    direct_get_bfield!(bfield, R, Z, psi_in, sq_in, sq_in_deriv, psio; derivs=1)
+    Bp = sqrt(bfield.br^2 + bfield.bz^2)
+    Bt = bfield.f / R
+    B  = sqrt(Bp^2 + Bt^2)
+    rfac = sqrt((R - ro)^2 + (Z - zo)^2)
+    Bp_eff   = max(Bp,   eps(Float64))
+    rfac_eff = max(rfac, eps(Float64))
+    return Bp_eff^(power_bp - 1) * B^power_b / (R^power_r * rfac_eff^power_rc)
 end
