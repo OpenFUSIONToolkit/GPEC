@@ -23,7 +23,7 @@ If no path is given, defaults to examples/DIIID-like_ideal_example/gpec.toml.
 """
 
 using GeneralizedPerturbedEquilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: InverseCubicSpline
+using GeneralizedPerturbedEquilibrium.Equilibrium: eval_q
 using FastInterpolations
 using HDF5
 using Roots
@@ -65,15 +65,15 @@ if isnothing(params.is_diverted) || !params.is_diverted
     exit(0)
 end
 
-if isnothing(profiles.q_spline_iota_inverse)
-    println("ERROR: is_diverted=true but q_spline_iota_inverse is nothing. Check equilibrium_solver.")
+if isnothing(profiles.iota_spline)
+    println("ERROR: is_diverted=true but iota_spline is nothing. Check equilibrium_solver.")
     exit(1)
 end
 
 # --- Access spline internals ---
 # Inner iota spline: stores iota(psin) with anchor at psin=1
-iota_inner = profiles.q_spline_iota_inverse.inner
-dVdpsi_inv_inner = profiles.dVdpsi_spline_inv.inner
+iota_inner = profiles.iota_spline
+dVdpsi_inv_inner = profiles.dVdpsi_inv_spline
 
 # Grid from the direct spline
 psi_core = profiles.xs
@@ -84,7 +84,7 @@ psi_plot_edge = range(psihigh, 0.9999, length=300)
 psi_plot_all  = vcat(collect(psi_plot_core), collect(psi_plot_edge))
 
 # Direct spline evaluated everywhere (extrapolates linearly beyond psihigh)
-q_direct  = profiles.q_spline_direct.(psi_plot_all)
+q_direct  = profiles.q_spline.(psi_plot_all)
 dV_direct = profiles.dVdpsi_spline.(psi_plot_all)
 
 # Edge inverse spline (only valid in edge zone)
@@ -95,10 +95,10 @@ dV_edge_vals = [1.0 / dVdpsi_inv_inner(psi; hint=hint_dV) for psi in psi_plot_ed
 iota_edge_plot = [iota_inner(psi; hint=hint_q)  for psi in psi_plot_edge]
 
 # Key reference values
-q_at_psihigh_direct  = profiles.q_spline_direct(psihigh)
-q_at_psihigh_edge    = profiles.q_spline_iota_inverse(psihigh)
+q_at_psihigh_direct  = profiles.q_spline(psihigh)
+q_at_psihigh_edge    = eval_q(profiles, psihigh)
 dV_at_psihigh_direct = profiles.dVdpsi_spline(psihigh)
-dV_at_psihigh_edge   = profiles.dVdpsi_spline_inv(psihigh)
+dV_at_psihigh_edge   = 1.0 / profiles.dVdpsi_inv_spline(psihigh)
 
 # --- Print key diagnostics ---
 println("Continuity check at psihigh:")
@@ -132,16 +132,16 @@ q_edge_plot   = min.(q_edge_vals, q_cap)
 psi_junc = range(psihigh - 0.02, min(0.9999, psihigh + (1.0 - psihigh) * 0.7); length=300)
 
 # Direct spline: q, q', q'', q''' (only valid up to psihigh; ExtendExtrap beyond)
-q_d0_dir = profiles.q_spline_direct.(psi_junc)
+q_d0_dir = profiles.q_spline.(psi_junc)
 q_d1_dir = profiles.q_deriv.(psi_junc)
-_deriv2_q = deriv2(profiles.q_spline_direct)
-_deriv3_q = deriv3(profiles.q_spline_direct)
+_deriv2_q = deriv2(profiles.q_spline)
+_deriv3_q = deriv3(profiles.q_spline)
 q_d2_dir = _deriv2_q.(psi_junc)
 q_d3_dir = _deriv3_q.(psi_junc)
 
 # Edge inverse spline: compute via chain rule from iota inner spline
 # q = 1/iota, q' = -iota'/iota², q'' = (2iota'²-iota·iota'')/iota³, etc.
-_iota_inner  = profiles.q_spline_iota_inverse.inner
+_iota_inner  = profiles.iota_spline
 _d1_iota = deriv1(_iota_inner)
 _d2_iota = deriv2(_iota_inner)
 _d3_iota = deriv3(_iota_inner)
@@ -304,16 +304,12 @@ println(@sprintf("  Found %d rational surfaces (n=%d) in edge zone before densit
 # qlim is used to cap q-axis plots so far-edge data near the separatrix (q→∞) doesn't compress
 # the interesting region.
 psilim_bench = isempty(edge_surfaces) ? psihigh : edge_surfaces[end]
-qlim_bench   = (!isnothing(profiles.q_spline_iota_inverse) && psilim_bench > psihigh) ?
-               profiles.q_spline_iota_inverse(psilim_bench) :
-               profiles.q_spline_direct(psilim_bench)
+qlim_bench   = (!isnothing(profiles.iota_spline) && psilim_bench > psihigh) ?
+               eval_q(profiles, psilim_bench) :
+               profiles.q_spline(psilim_bench)
 
 # Helper: psi → q using iota inverse above psihigh (available to all subsequent plots)
-psi_to_q_outer = psi_arr -> map(psi_arr) do psi
-    (!isnothing(profiles.q_spline_iota_inverse) && psi > psihigh) ?
-        profiles.q_spline_iota_inverse(psi) :
-        profiles.q_spline_direct(psi)
-end
+psi_to_q_outer = psi_arr -> map(psi -> eval_q(profiles, psi), psi_arr)
 
 p6 = plot(
     collect(psi_plot_edge), q_edge_vals;
@@ -355,15 +351,9 @@ if isfile(h5file)
 
             # Convert psi → q
             hint_q7 = Ref(1)
-            q_es = map(psi_es) do psi
-                if psi > psihigh && !isnothing(profiles.q_spline_iota_inverse)
-                    profiles.q_spline_iota_inverse(psi)
-                else
-                    profiles.q_spline_direct(psi; hint=hint_q7)
-                end
-            end
+            q_es = map(psi -> eval_q(profiles, psi; hint=hint_q7), psi_es)
 
-            q_at_psihigh = profiles.q_spline_direct(psihigh)
+            q_at_psihigh = profiles.q_spline(psihigh)
             q_max_scan   = maximum(q_es)
             core_mask    = psi_es .<= psihigh
             above_mask   = psi_es .>  psihigh
@@ -515,6 +505,13 @@ if !isnothing(pe.params.r_xpoint)
     println("Saved: edge_spline_geometry.png")
 else
     println("Note: X-point not detected (limited plasma) — skipping Plot 8")
+end
+
+# Extend the rzphi spline into the far-edge zone so the GSE diagnostic can evaluate
+# GS residuals beyond psihigh.  Normally this extension is triggered by ForceFreeStates
+# after sing_find!, but the benchmark only calls setup_equilibrium.
+if !isnothing(profiles.iota_spline) && !isempty(edge_surfaces)
+    GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_extend_rzphi!(pe, edge_surfaces)
 end
 
 # --- Plots 9 and 10: GS residual diagnostics ---
@@ -704,7 +701,7 @@ end
 # The X-point geometry approach uses the iota inverse spline for q in the far edge (via
 # q_spline_iota_inverse), while F is held constant (ExtendExtrap). This plot shows how
 # q from the two sources compares across the edge region.
-if !isnothing(profiles.q_spline_iota_inverse)
+if !isnothing(profiles.iota_spline)
     println("Computing far-edge q profile comparison...")
 
     psi_edge_gse = vcat(
@@ -714,12 +711,12 @@ if !isnothing(profiles.q_spline_iota_inverse)
     unique!(sort!(psi_edge_gse))
 
     # q from direct spline (constant ExtendExtrap beyond psihigh)
-    q_direct_edge = profiles.q_spline_direct.(psi_edge_gse)
+    q_direct_edge = profiles.q_spline.(psi_edge_gse)
 
     # q from iota inverse spline (correct q behavior toward separatrix)
     above_mask_gse = psi_edge_gse .>= psihigh
     q_iota_edge = map(psi_edge_gse) do psi
-        psi >= psihigh ? profiles.q_spline_iota_inverse(psi) : profiles.q_spline_direct(psi)
+        eval_q(profiles, psi)
     end
 
     # Panel A: q_direct vs q_iota in the far edge
