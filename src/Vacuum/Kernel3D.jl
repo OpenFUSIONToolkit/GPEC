@@ -281,6 +281,34 @@ Scalar-argument double-layer kernel. Avoids view creation in tight loops.
 end
 
 """
+    laplace_single_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) -> (single, double)
+
+Fused scalar-argument Laplace single-layer and double-layer kernels.
+
+This is the hot-path variant used in the 3D projected-kernel assembly when both kernels are needed
+(`populate_greenfunction == true`). It shares the distance computation (`sqrt(r²)`) so we only pay
+for one `sqrt`/reciprocal pipeline per source/observer pair.
+"""
+@fastmath @inline function laplace_single_double_layer(
+    ox::Float64, oy::Float64, oz::Float64,
+    sx::Float64, sy::Float64, sz::Float64,
+    nx::Float64, ny::Float64, nz::Float64
+)
+    dx = ox - sx
+    dy = oy - sy
+    dz = oz - sz
+    r2 = dx*dx + dy*dy + dz*dz
+    r2 < 1e-30 && return (0.0, 0.0)
+    rinv = inv(sqrt(r2))
+    # single-layer: 1/r
+    single = rinv
+    # double-layer: (Δx·n)/r^3
+    r3inv = rinv * rinv * rinv
+    double = (dx*nx + dy*ny + dz*nz) * r3inv
+    return (single, double)
+end
+
+"""
     extract_patch!(patch, data, idx_pol_center, idx_tor_center, npol, ntor, PATCH_DIM)
 
 Extract a PATCH_DIM × PATCH_DIM patch of data centered at (idx_pol_center, idx_tor_center) with periodic wrapping.
@@ -583,12 +611,13 @@ function compute_3D_kernel_matrices!(
             ny = source.normal[idx_src, 2]
             nz = source.normal[idx_src, 3]
 
-            w_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
-            _accum_row!(proj_k, w_double, Zt, idx_src)
-
             if populate_greenfunction
-                w_single = laplace_single_layer(ox, oy, oz, sx, sy, sz) * dθdζ
-                _accum_row!(proj_g, w_single, Zt, idx_src)
+                w_single, w_double = laplace_single_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz)
+                _accum_row!(proj_k, w_double * dθdζ, Zt, idx_src)
+                _accum_row!(proj_g, w_single * dθdζ, Zt, idx_src)
+            else
+                w_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
+                _accum_row!(proj_k, w_double, Zt, idx_src)
             end
         end
 
@@ -617,8 +646,14 @@ function compute_3D_kernel_matrices!(
             nsx = n_polar[ir, ia, 1]
             nsy = n_polar[ir, ia, 2]
             nsz = n_polar[ir, ia, 3]
-            M_polar_single[ir, ia] = laplace_single_layer(ox, oy, oz, rsx, rsy, rsz) * Ppou[ir, ia] * dθdζ
-            M_polar_double[ir, ia] = laplace_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz) * Ppou[ir, ia] * dθdζ
+            if populate_greenfunction
+                w_single, w_double = laplace_single_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz)
+                M_polar_single[ir, ia] = w_single * Ppou[ir, ia] * dθdζ
+                M_polar_double[ir, ia] = w_double * Ppou[ir, ia] * dθdζ
+            else
+                # Only the double-layer kernel is needed when the source is the wall.
+                M_polar_double[ir, ia] = laplace_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz) * Ppou[ir, ia] * dθdζ
+            end
         end
 
         # Distribute polar singular corrections back to Cartesian grid using sparse matrix
@@ -643,13 +678,15 @@ function compute_3D_kernel_matrices!(
             ny = source.normal[idx_src, 2]
             nz = source.normal[idx_src, 3]
 
-            far_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * (1.0 + Gpou[i, j]) * dθdζ
-            _accum_row!(proj_k, M_grid_double[i, j] + far_double, Zt, idx_src)
-
-            # Apply near + far contributions
             if populate_greenfunction
-                far_single = laplace_single_layer(ox, oy, oz, sx, sy, sz) * (1.0 + Gpou[i, j]) * dθdζ
+                w_single, w_double = laplace_single_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz)
+                far_double = w_double * (1.0 + Gpou[i, j]) * dθdζ
+                far_single = w_single * (1.0 + Gpou[i, j]) * dθdζ
+                _accum_row!(proj_k, M_grid_double[i, j] + far_double, Zt, idx_src)
                 _accum_row!(proj_g, M_grid_single[i, j] + far_single, Zt, idx_src)
+            else
+                far_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * (1.0 + Gpou[i, j]) * dθdζ
+                _accum_row!(proj_k, M_grid_double[i, j] + far_double, Zt, idx_src)
             end
         end
 
