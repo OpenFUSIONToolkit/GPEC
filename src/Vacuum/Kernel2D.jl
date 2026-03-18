@@ -59,7 +59,7 @@ const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 # and per-n sinh/cosh cache are defined in PnQuadCache.jl.
 
 """
-    compute_2D_kernel_matrices!(K, G, observer, source, n, Z, Gram)
+    compute_2D_kernel_matrices!(K, G, observer, source, n, Z)
 
 Compute the **Fourier/Galerkin-projected** 2D vacuum boundary-integral kernel blocks for
 Laplace’s equation in an axisymmetric torus, **without ever forming the dense
@@ -100,7 +100,6 @@ mathematical discretization.
   - `source`: `PlasmaGeometry` or `WallGeometry` object providing `x(θ)` and `z(θ)`.
   - `n`: Integer representing the order of the toroidal Fourier component.
   - `Z`: Complex Fourier basis sampled on the `θ` grid.
-  - `Gram`: Diagonal of the mode-space Gram matrix for this basis on the discrete grid.
 
 ## Block layout
 
@@ -162,8 +161,7 @@ This routine is intentionally written to be allocation-light in tight loops:
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int,
-    Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractVector{ComplexF64}
+    Z::AbstractMatrix{ComplexF64}
 )
 
     M, P = size(Z) # M = mtheta, P = num_modes
@@ -316,10 +314,10 @@ This routine is intentionally written to be allocation-light in tight loops:
     end
 
     # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
-    # The residue term is diagonal in mode space and is scaled by the Gram diagonal.
+    # The residue term is diagonal in mode space and is scaled by the number of points in Fourier space.
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
-    @inbounds for p in 1:P
-        Kc_block[p, p] += residue * Gram[p]
+    @inbounds for i in 1:P
+        Kc_block[i, i] += residue * M
     end
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
@@ -329,10 +327,10 @@ This routine is intentionally written to be allocation-light in tight loops:
 end
 
 """
-    kernel!(Kc, Gc, observer, source, params::KernelParams2D, Z, Gram)
+    kernel!(Kc, Gc, observer, source, params::KernelParams2D, Z)
 
 Public 2D kernel entry point. This is a thin wrapper that forwards to
-`compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z, Gram)`.
+`compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z)`.
 """
 function kernel!(
     Kc::AbstractMatrix{ComplexF64},
@@ -340,10 +338,9 @@ function kernel!(
     observer::Union{PlasmaGeometry,WallGeometry},
     source::Union{PlasmaGeometry,WallGeometry},
     params::KernelParams2D,
-    Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractVector{ComplexF64}
+    Z::AbstractMatrix{ComplexF64}
 )
-    return compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z, Gram)
+    return compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z)
 end
 
 #############################################################

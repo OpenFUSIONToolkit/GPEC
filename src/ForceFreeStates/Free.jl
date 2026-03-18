@@ -32,7 +32,7 @@ and data dumping.
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
-    @inbounds @views vac_data.wv .*= singfac .* singfac'
+    vac_data.wv .*= singfac .* singfac'
 
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
@@ -138,7 +138,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
 
         # Apply singular factor scaling: (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
         singfac = vec((intr.mlow:intr.mhigh) .- qi .* (intr.nlow:intr.nhigh)')
-        @inbounds @views wv .*= singfac .* singfac'
+        wv .*= singfac .* singfac'
 
         @views wv_array[i, :, :] .= wv
     end

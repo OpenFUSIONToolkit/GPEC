@@ -126,17 +126,6 @@ The key idea is:
     # Scales kernel matrix sizes by a factor of 2 if a wall is present (don't allocate unless needed)
     wall_fac = wall.nowall ? 1 : 2
 
-    # Gram matrix diagonal for the discrete Fourier basis on the uniform grid.
-    #
-    # For the basis produced by `compute_fourier_coefficients(...)` (complex exponentials sampled on a
-    # uniform grid), the discrete inner products satisfy:
-    #
-    #     ZᴴZ = num_points · I
-    #
-    # up to roundoff, so the Gram matrix is diagonal. Store only the diagonal as a length-P vector.
-    Gram = acquire!(pool, ComplexF64, num_modes)
-    fill!(Gram, ComplexF64(num_points))
-
     # Projected kernel matrices [P × P complex]
     K_ext = zeros!(pool, ComplexF64, wall_fac * num_modes, wall_fac * num_modes)
     G_ext = zeros!(pool, ComplexF64, wall_fac * num_modes, num_modes)
@@ -145,24 +134,19 @@ The key idea is:
 
     # Fused projected kernel: compute Z^H K Z and Z^H G Z for all operator blocks
     # Plasma-plasma block
-    kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis, Gram)
+    kernel!(K_ext, G_ext, plasma_surf, plasma_surf, kparams, exp_mn_basis)
     # Wall-plasma, plasma-wall, wall-wall blocks
     if !wall.nowall
         # Wall-plasma, plasma-wall, wall-wall blocks
-        kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis, Gram)
-        kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis, Gram)
-        kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis, Gram)
+        kernel!(K_ext, G_ext, plasma_surf, wall, kparams, exp_mn_basis)
+        kernel!(K_ext, G_ext, wall, plasma_surf, kparams, exp_mn_basis)
+        kernel!(K_ext, G_ext, wall, wall, kparams, exp_mn_basis)
     end
 
-    # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·Gram - K_ext
+    # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·num_points - K_ext
     K_int .= -K_ext
-    @inbounds for p in 1:num_modes
-        K_int[p, p] += 2 * Gram[p]
-    end
-    if !wall.nowall
-        @inbounds for p in 1:num_modes
-            K_int[num_modes+p, num_modes+p] += 2 * Gram[p]
-        end
+    @inbounds for i in eachindex(K_int)
+        K_int[i, i] += 2 * num_points
     end
     G_int .= G_ext
 
@@ -172,12 +156,8 @@ The key idea is:
     F_int = lu!(K_int)
     ldiv!(F_int, G_int)
 
-    # Construct the vacuum response matrix: wv = (4π²/M) · Gram · G
-    wv .= view(G_ext, 1:num_modes, :)
-    @inbounds for p in 1:num_modes
-        @views wv[p, :] .*= Gram[p]
-    end
-    wv .*= (4π^2 / num_points)
+    # Construct the vacuum response matrix: wv = 4π² · G
+    wv .= 4π^2 .* view(G_ext, 1:num_modes, :)
 
     # Enforce Hermitian symmetry if desired
     inputs.force_wv_symmetry && hermitianpart!(wv)

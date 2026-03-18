@@ -321,7 +321,7 @@ function KernelWorkspace(PATCH_DIM::Int, RAD_DIM::Int, ANG_DIM::Int)
 end
 
 """
-    compute_3D_kernel_matrices!(K, G, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, Z, Gram)
+    compute_3D_kernel_matrices!(K, G, observer, source, PATCH_RAD, RAD_DIM, INTERP_ORDER, Z)
 
 Compute the **Fourier/Galerkin-projected** 3D vacuum boundary-integral kernel blocks for
 Laplace’s equation, using a high-order singular quadrature / partition-of-unity (POU)
@@ -353,7 +353,6 @@ near-field correction for the singular region.
   - `RAD_DIM`: Radial quadrature order on the polar grid (angular order is `2*RAD_DIM`).
   - `INTERP_ORDER`: Lagrange interpolation order used to build `P2G` (must satisfy `INTERP_ORDER ≤ 2*PATCH_RAD+1`).
   - `Z`: Complex Fourier basis sampled on the surface grid, shaped `N×P` (`P = number of retained modes`). `Z[idx, :]` contains the basis values at the surface node `idx`.
-  - `Gram`: Diagonal of the mode-space Gram matrix used to add the analytic “identity” term when `typeof(source) == typeof(observer)` (i.e. the same operator block that receives the Green’s-identity diagonal contribution).
 
 This routine fills exactly one `P×P` block view `Kc_block` (and optionally the corresponding `Gc_block`)
 selected by whether observer/source are plasma or wall.
@@ -429,8 +428,7 @@ function compute_3D_kernel_matrices!(
     PATCH_RAD::Int,
     RAD_DIM::Int,
     INTERP_ORDER::Int,
-    Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractVector{ComplexF64}
+    Z::AbstractMatrix{ComplexF64}
 )
     N, P = size(Z) # N = mtheta * nzeta, P = num_modes
     dθdζ = 4π^2 / N
@@ -573,8 +571,7 @@ function compute_3D_kernel_matrices!(
         end
     end
 
-    # Use the same normalization as in the 2D kernel so we can just add Gram to the diagonal
-    # This makes the grri logic identical to the 2D kernel.
+    # Use the same normalization as in the 2D kernel, which makes the grri logic identical
     mul!(K_block, Z', transpose(KZt))
     K_block ./= 2π
     if populate_greenfunction
@@ -584,18 +581,18 @@ function compute_3D_kernel_matrices!(
 
     # Add the term that comes from the volume integral of Green's identity.
     if typeof(source) == typeof(observer)
-        @inbounds for p in 1:P
-            K_block[p, p] += Gram[p]
+        @inbounds for i in 1:P
+            K_block[i, i] += N
         end
     end
 end
 
 """
-    kernel!(Kc, Gc, observer, source, params::KernelParams3D, Z, Gram)
+    kernel!(Kc, Gc, observer, source, params::KernelParams3D, Z)
 
 Public 3D kernel entry point. Forwards to:
 
-`compute_3D_kernel_matrices!(Kc, Gc, observer, source, params.PATCH_RAD, params.RAD_DIM, params.INTERP_ORDER, Z, Gram)`.
+`compute_3D_kernel_matrices!(Kc, Gc, observer, source, params.PATCH_RAD, params.RAD_DIM, params.INTERP_ORDER, Z)`.
 """
 function kernel!(
     Kc::AbstractMatrix{ComplexF64},
@@ -603,8 +600,7 @@ function kernel!(
     observer::Union{PlasmaGeometry3D,WallGeometry3D},
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     params::KernelParams3D,
-    Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractVector{ComplexF64}
+    Z::AbstractMatrix{ComplexF64}
 )
     return compute_3D_kernel_matrices!(
         Kc,
@@ -614,7 +610,6 @@ function kernel!(
         params.PATCH_RAD,
         params.RAD_DIM,
         params.INTERP_ORDER,
-        Z,
-        Gram
+        Z
     )
 end
