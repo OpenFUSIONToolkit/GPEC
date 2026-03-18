@@ -177,119 +177,19 @@ function get_singular_quadrature(PATCH_RAD::Int, RAD_DIM::Int, INTERP_ORDER::Int
 end
 
 """
-    laplace_single_layer(x_obs, x_src) -> Float64
+    laplace_kernel(ox, oy, oz, sx, sy, sz, nx, ny, nz) -> (single, double)
 
-Evaluate the Laplace single-layer (FxU) kernel between two 3D points. Returns
-0.0 if the observation point coincides with the source point to avoid singularity.
+Fused scalar-argument Laplace kernels for the 3D vacuum BIE.
 
-The single-layer kernel φ is the fundamental solution to Laplace's equation:
+Returns a tuple `(single, double)` where:
 
-```
-φ(x_obs, x_src) = 1 / |x_obs - x_src|
-```
+  - `single = 1/r` is the single-layer kernel
+  - `double = (Δx⋅n)/r^3` is the double-layer kernel
 
-# Arguments
-
-  - `x_obs`: Observation point (3D Cartesian coordinates, any AbstractVector)
-  - `x_src`: Source point (3D Cartesian coordinates, any AbstractVector)
-
-# Returns
-
-  - `Float64`: Kernel value φ(x_obs, x_src)
+This is used when `compute_3D_kernel_matrices!` needs **both** kernels for the same pair, so the
+distance computation (`sqrt(r²)`) is shared. Returns `(0.0, 0.0)` when `r² < 1e-30`.
 """
-@fastmath function laplace_single_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real})
-    @inbounds begin
-        dx = x_obs[1] - x_src[1]
-        dy = x_obs[2] - x_src[2]
-        dz = x_obs[3] - x_src[3]
-    end
-    r2 = dx*dx + dy*dy + dz*dz
-    r2 < 1e-30 && return 0.0
-    return inv(sqrt(r2))
-end
-
-"""
-Scalar-argument single-layer kernel. Avoids view creation in tight loops.
-"""
-@fastmath @inline function laplace_single_layer(
-    ox::Float64, oy::Float64, oz::Float64,
-    sx::Float64, sy::Float64, sz::Float64
-)
-    dx = ox - sx;
-    dy = oy - sy;
-    dz = oz - sz
-    r2 = dx*dx + dy*dy + dz*dz
-    r2 < 1e-30 && return 0.0
-    return inv(sqrt(r2))
-end
-
-"""
-    laplace_double_layer(x_obs, x_src, n_src) -> Float64
-
-Evaluate the Laplace double-layer (DxU) kernel between a point and a surface element. Returns
-0.0 if the observation point coincides with the source point to avoid singularity. Allocation-free
-scalar arithmetic is used for maximum performance.
-
-The double-layer kernel K is the normal derivative of the fundamental solution:
-
-```
-K(x_obs, x_src, n_src) = ∇_{x_src} φ · n_src = (x_obs - x_src) · n_src / |x_obs - x_src|³
-```
-
-# Arguments
-
-  - `x_obs`: Observation point (3D Cartesian coordinates, any AbstractVector)
-  - `x_src`: Source point on surface (3D Cartesian coordinates, any AbstractVector)
-  - `n_src`: Outward UNIT normal at source point (must be normalized!, any AbstractVector)
-
-# Returns
-
-  - `Float64`: Kernel value K(x_obs, x_src, n_src)
-"""
-@fastmath function laplace_double_layer(x_obs::AbstractVector{<:Real}, x_src::AbstractVector{<:Real}, n_src::AbstractVector{<:Real})
-    @inbounds begin
-        dx = x_obs[1] - x_src[1]
-        dy = x_obs[2] - x_src[2]
-        dz = x_obs[3] - x_src[3]
-        nx = n_src[1]
-        ny = n_src[2]
-        nz = n_src[3]
-    end
-    r2 = dx*dx + dy*dy + dz*dz
-    r2 < 1e-30 && return 0.0
-    rinv = inv(sqrt(r2))
-    r3inv = rinv * rinv * rinv
-    return (dx*nx + dy*ny + dz*nz) * r3inv
-end
-
-"""
-Scalar-argument double-layer kernel. Avoids view creation in tight loops.
-"""
-@fastmath @inline function laplace_double_layer(
-    ox::Float64, oy::Float64, oz::Float64,
-    sx::Float64, sy::Float64, sz::Float64,
-    nx::Float64, ny::Float64, nz::Float64
-)
-    dx = ox - sx;
-    dy = oy - sy;
-    dz = oz - sz
-    r2 = dx*dx + dy*dy + dz*dz
-    r2 < 1e-30 && return 0.0
-    rinv = inv(sqrt(r2))
-    r3inv = rinv * rinv * rinv
-    return (dx*nx + dy*ny + dz*nz) * r3inv
-end
-
-"""
-    laplace_single_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) -> (single, double)
-
-Fused scalar-argument Laplace single-layer and double-layer kernels.
-
-This is the hot-path variant used in the 3D projected-kernel assembly when both kernels are needed
-(`populate_greenfunction == true`). It shares the distance computation (`sqrt(r²)`) so we only pay
-for one `sqrt`/reciprocal pipeline per source/observer pair.
-"""
-@fastmath @inline function laplace_single_double_layer(
+@fastmath @inline function laplace_kernel(
     ox::Float64, oy::Float64, oz::Float64,
     sx::Float64, sy::Float64, sz::Float64,
     nx::Float64, ny::Float64, nz::Float64
@@ -342,8 +242,7 @@ end
     interpolate_to_polar!(polar_data, patch, quad_data)
 
 Interpolate Cartesian patch data to polar quadrature points using sparse matrix multiply.
-Overwrites `polar_data` using mul! function arguments, mul!(C, A, B, α, β) -> C where
-C = α * A * B + β * C.
+Overwrites `polar_data` using mul! function arguments, mul!(C, A, B) -> C where C = A * B.
 
 # Arguments
 
@@ -352,17 +251,17 @@ C = α * A * B + β * C.
   - `P2G`: Sparse interpolation matrix
 """
 function interpolate_to_polar!(polar_data::Array{Float64,3}, patch::Array{Float64,3}, P2G::SparseMatrixCSC{Float64,Int})
-    # Flatten patch to (Ngrid × dof), apply P2G' to get (Npolar × dof)
     patch_flat = reshape(patch, :, size(patch, 3))
-    mul!(reshape(polar_data, :, size(patch, 3)), P2G', patch_flat, 1.0, 0.0)
+    mul!(reshape(polar_data, :, size(patch, 3)), P2G', patch_flat)
 end
 
 """
-    compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar)
+    compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar, normal_orient)
 
 Compute normal vector (= ∂r/∂θ × ∂r/∂ζ) at polar quadrature points from interpolated tangent vectors.
 We already scaled the normals by normal_orient in the geometry construction, so we need to reapply
-that here since we are recomputing the normals from the derivatives.
+that here since we are recomputing the normals from the derivatives. We use inline cross products
+to avoid slice allocation.
 
 # Arguments
 
@@ -372,7 +271,6 @@ that here since we are recomputing the normals from the derivatives.
   - `normal_orient`: Multiplier applied to normals to make them orient out of vacuum region (+1 or -1)
 """
 function compute_polar_normal!(n_polar::Array{Float64,3}, dr_dθ::Array{Float64,3}, dr_dζ::Array{Float64,3}, normal_orient::Int)
-    # Inline cross product to avoid slice allocation
     @inbounds for ia in axes(dr_dθ, 2), ir in axes(dr_dθ, 1)
         n_polar[ir, ia, 1] = dr_dθ[ir, ia, 2] * dr_dζ[ir, ia, 3] - dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 2]
         n_polar[ir, ia, 2] = dr_dθ[ir, ia, 3] * dr_dζ[ir, ia, 1] - dr_dθ[ir, ia, 1] * dr_dζ[ir, ia, 3]
@@ -586,9 +484,9 @@ function compute_3D_kernel_matrices!(
         # Convert linear index to 2D indices
         i_obs = mod1(idx_obs, observer.mtheta)
         j_obs = (idx_obs - 1) ÷ observer.mtheta + 1
-        @inbounds ox = observer.r[idx_obs, 1]
-        @inbounds oy = observer.r[idx_obs, 2]
-        @inbounds oz = observer.r[idx_obs, 3]
+        ox = observer.r[idx_obs, 1]
+        oy = observer.r[idx_obs, 2]
+        oz = observer.r[idx_obs, 3]
 
         # Mark patch source indices so the far-field loop can skip them
         @inbounds for jj in 1:PATCH_DIM, ii in 1:PATCH_DIM
@@ -604,20 +502,13 @@ function compute_3D_kernel_matrices!(
         @inbounds for idx_src in 1:N
             is_patch[idx_src] && continue
 
-            sx = source.r[idx_src, 1]
-            sy = source.r[idx_src, 2]
-            sz = source.r[idx_src, 3]
-            nx = source.normal[idx_src, 1]
-            ny = source.normal[idx_src, 2]
-            nz = source.normal[idx_src, 3]
+            sr = view(source.r, idx_src, :)
+            sn = view(source.normal, idx_src, :)
 
+            far_single, far_double = laplace_kernel(ox, oy, oz, sr[1], sr[2], sr[3], sn[1], sn[2], sn[3]) .* dθdζ
+            _accum_row!(proj_k, far_double, Zt, idx_src)
             if populate_greenfunction
-                w_single, w_double = laplace_single_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz)
-                _accum_row!(proj_k, w_double * dθdζ, Zt, idx_src)
-                _accum_row!(proj_g, w_single * dθdζ, Zt, idx_src)
-            else
-                w_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
-                _accum_row!(proj_k, w_double, Zt, idx_src)
+                _accum_row!(proj_g, far_single, Zt, idx_src)
             end
         end
 
@@ -637,56 +528,37 @@ function compute_3D_kernel_matrices!(
         # Compute normal vectors at polar points from interpolated tangent vectors
         compute_polar_normal!(n_polar, dr_dθ_polar, dr_dζ_polar, source.normal_orient)
 
-        # Evaluate kernels at polar points with POU weighting
+        # Evaluate kernels and apply quadrature weights: area element × POU, where POU contains rdrdθ already
         @inbounds for ia in 1:ANG_DIM, ir in 1:RAD_DIM
-            # Evaluate kernels and apply quadrature weights: area element × POU, where POU contains rdrdθ already
-            rsx = r_polar[ir, ia, 1]
-            rsy = r_polar[ir, ia, 2]
-            rsz = r_polar[ir, ia, 3]
-            nsx = n_polar[ir, ia, 1]
-            nsy = n_polar[ir, ia, 2]
-            nsz = n_polar[ir, ia, 3]
-            if populate_greenfunction
-                w_single, w_double = laplace_single_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz)
-                M_polar_single[ir, ia] = w_single * Ppou[ir, ia] * dθdζ
-                M_polar_double[ir, ia] = w_double * Ppou[ir, ia] * dθdζ
-            else
-                # Only the double-layer kernel is needed when the source is the wall.
-                M_polar_double[ir, ia] = laplace_double_layer(ox, oy, oz, rsx, rsy, rsz, nsx, nsy, nsz) * Ppou[ir, ia] * dθdζ
-            end
+            sr = view(r_polar, ir, ia, :)
+            sn = view(n_polar, ir, ia, :)
+            w_single, w_double = laplace_kernel(ox, oy, oz, sr[1], sr[2], sr[3], sn[1], sn[2], sn[3]) .* Ppou[ir, ia] .* dθdζ
+            M_polar_single[ir, ia] = w_single
+            M_polar_double[ir, ia] = w_double
         end
 
         # Distribute polar singular corrections back to Cartesian grid using sparse matrix
         # grid = P2G * polar (maps Npolar → Ngrid)
-        mul!(M_grid_single_flat, P2G, vec(M_polar_single))
         mul!(M_grid_double_flat, P2G, vec(M_polar_double))
-        M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
         M_grid_double = reshape(M_grid_double_flat, PATCH_DIM, PATCH_DIM)
+        if populate_greenfunction
+            mul!(M_grid_single_flat, P2G, vec(M_polar_single))
+            M_grid_single = reshape(M_grid_single_flat, PATCH_DIM, PATCH_DIM)
+        end
 
-        # POU correction: read back far-field trapezoidal values instead of re-evaluating kernels.
-        # trap + M_grid + trap*Gpou = trap*(1+Gpou) + M_grid = trap*(1-χ) + M_grid
+        # POU correction: singular correction + (1 + Gpou) * far-field terms
         @inbounds for j in 1:PATCH_DIM, i in 1:PATCH_DIM
             # Map back to global indices
             idx_pol = periodic_wrap(i_obs - PATCH_RAD + i - 1, source.mtheta)
             idx_tor = periodic_wrap(j_obs - PATCH_RAD + j - 1, source.nzeta)
             idx_src = idx_pol + source.mtheta * (idx_tor - 1)
+            sr = view(source.r, idx_src, :)
+            sn = view(source.normal, idx_src, :)
 
-            sx = source.r[idx_src, 1]
-            sy = source.r[idx_src, 2]
-            sz = source.r[idx_src, 3]
-            nx = source.normal[idx_src, 1]
-            ny = source.normal[idx_src, 2]
-            nz = source.normal[idx_src, 3]
-
+            w_single, w_double = laplace_kernel(ox, oy, oz, sr[1], sr[2], sr[3], sn[1], sn[2], sn[3]) .* (1.0 + Gpou[i, j]) .* dθdζ
+            _accum_row!(proj_k, M_grid_double[i, j] + w_double, Zt, idx_src)
             if populate_greenfunction
-                w_single, w_double = laplace_single_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz)
-                far_double = w_double * (1.0 + Gpou[i, j]) * dθdζ
-                far_single = w_single * (1.0 + Gpou[i, j]) * dθdζ
-                _accum_row!(proj_k, M_grid_double[i, j] + far_double, Zt, idx_src)
-                _accum_row!(proj_g, M_grid_single[i, j] + far_single, Zt, idx_src)
-            else
-                far_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * (1.0 + Gpou[i, j]) * dθdζ
-                _accum_row!(proj_k, M_grid_double[i, j] + far_double, Zt, idx_src)
+                _accum_row!(proj_g, M_grid_single[i, j] + w_single, Zt, idx_src)
             end
         end
 
@@ -701,7 +573,7 @@ function compute_3D_kernel_matrices!(
         end
     end
 
-    # Use the same normalization as in the 2D kernel so we can just add I to the diagonal
+    # Use the same normalization as in the 2D kernel so we can just add Gram to the diagonal
     # This makes the grri logic identical to the 2D kernel.
     mul!(K_block, Z', transpose(KZt))
     K_block ./= 2π
