@@ -145,7 +145,7 @@ The key idea is:
 
     # Interior kernel in real space: K_int = 2I - K_ext → Fourier transformed: K_int = 2·num_points - K_ext
     K_int .= -K_ext
-    @inbounds for i in eachindex(K_int)
+    @inbounds for i in 1:(num_modes*wall_fac)
         K_int[i, i] += 2 * num_points
     end
     G_int .= G_ext
