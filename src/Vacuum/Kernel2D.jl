@@ -100,7 +100,7 @@ mathematical discretization.
   - `source`: `PlasmaGeometry` or `WallGeometry` object providing `x(θ)` and `z(θ)`.
   - `n`: Integer representing the order of the toroidal Fourier component.
   - `Z`: Complex Fourier basis sampled on the `θ` grid.
-  - `Gram`: Mode-space Gram matrix for this basis on the discrete grid.
+  - `Gram`: Diagonal of the mode-space Gram matrix for this basis on the discrete grid.
 
 ## Block layout
 
@@ -163,7 +163,7 @@ This routine is intentionally written to be allocation-light in tight loops:
     source::Union{PlasmaGeometry,WallGeometry},
     n::Int,
     Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractMatrix{ComplexF64}
+    Gram::AbstractVector{ComplexF64}
 )
 
     M, P = size(Z) # M = mtheta, P = num_modes
@@ -316,9 +316,11 @@ This routine is intentionally written to be allocation-light in tight loops:
     end
 
     # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
-    # The Gram matrix is a result of the projection onto a scalar, Z⋅Zᵀ * residue
+    # The residue term is diagonal in mode space and is scaled by the Gram diagonal.
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
-    Kc_block .+= residue .* Gram
+    @inbounds for p in 1:P
+        Kc_block[p, p] += residue * Gram[p]
+    end
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
     if populate_greenfunction
@@ -339,7 +341,7 @@ function kernel!(
     source::Union{PlasmaGeometry,WallGeometry},
     params::KernelParams2D,
     Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractMatrix{ComplexF64}
+    Gram::AbstractVector{ComplexF64}
 )
     return compute_2D_kernel_matrices!(Kc, Gc, observer, source, params.n, Z, Gram)
 end

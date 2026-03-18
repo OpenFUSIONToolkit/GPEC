@@ -427,7 +427,7 @@ near-field correction for the singular region.
   - `RAD_DIM`: Radial quadrature order on the polar grid (angular order is `2*RAD_DIM`).
   - `INTERP_ORDER`: Lagrange interpolation order used to build `P2G` (must satisfy `INTERP_ORDER ≤ 2*PATCH_RAD+1`).
   - `Z`: Complex Fourier basis sampled on the surface grid, shaped `N×P` (`P = number of retained modes`). `Z[idx, :]` contains the basis values at the surface node `idx`.
-  - `Gram`: Mode-space Gram matrix used to add the analytic “identity” term when `typeof(source) == typeof(observer)` (i.e. the same operator block that receives the Green’s-identity diagonal contribution).
+  - `Gram`: Diagonal of the mode-space Gram matrix used to add the analytic “identity” term when `typeof(source) == typeof(observer)` (i.e. the same operator block that receives the Green’s-identity diagonal contribution).
 
 This routine fills exactly one `P×P` block view `Kc_block` (and optionally the corresponding `Gc_block`)
 selected by whether observer/source are plasma or wall.
@@ -504,7 +504,7 @@ function compute_3D_kernel_matrices!(
     RAD_DIM::Int,
     INTERP_ORDER::Int,
     Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractMatrix{ComplexF64}
+    Gram::AbstractVector{ComplexF64}
 )
     N, P = size(Z) # N = mtheta * nzeta, P = num_modes
     dθdζ = 4π^2 / N
@@ -575,22 +575,19 @@ function compute_3D_kernel_matrices!(
         # ============================================================
         @inbounds for idx_src in 1:N
             is_patch[idx_src] && continue
-            w_double =
-                laplace_double_layer(
-                    ox,
-                    oy,
-                    oz,
-                    source.r[idx_src, 1],
-                    source.r[idx_src, 2],
-                    source.r[idx_src, 3],
-                    source.normal[idx_src, 1],
-                    source.normal[idx_src, 2],
-                    source.normal[idx_src, 3]
-                ) * dθdζ
+
+            sx = source.r[idx_src, 1]
+            sy = source.r[idx_src, 2]
+            sz = source.r[idx_src, 3]
+            nx = source.normal[idx_src, 1]
+            ny = source.normal[idx_src, 2]
+            nz = source.normal[idx_src, 3]
+
+            w_double = laplace_double_layer(ox, oy, oz, sx, sy, sz, nx, ny, nz) * dθdζ
             _accum_row!(proj_k, w_double, Zt, idx_src)
 
             if populate_greenfunction
-                w_single = laplace_single_layer(ox, oy, oz, source.r[idx_src, 1], source.r[idx_src, 2], source.r[idx_src, 3]) * dθdζ
+                w_single = laplace_single_layer(ox, oy, oz, sx, sy, sz) * dθdζ
                 _accum_row!(proj_g, w_single, Zt, idx_src)
             end
         end
@@ -676,9 +673,11 @@ function compute_3D_kernel_matrices!(
         G_block ./= 2π
     end
 
-    # Add the term that comes from the volume integral of Green's identity
+    # Add the term that comes from the volume integral of Green's identity.
     if typeof(source) == typeof(observer)
-        K_block .+= Gram
+        @inbounds for p in 1:P
+            K_block[p, p] += Gram[p]
+        end
     end
 end
 
@@ -696,7 +695,7 @@ function kernel!(
     source::Union{PlasmaGeometry3D,WallGeometry3D},
     params::KernelParams3D,
     Z::AbstractMatrix{ComplexF64},
-    Gram::AbstractMatrix{ComplexF64}
+    Gram::AbstractVector{ComplexF64}
 )
     return compute_3D_kernel_matrices!(
         Kc,

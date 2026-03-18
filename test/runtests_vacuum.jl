@@ -1,4 +1,5 @@
 @testset "Vacuum.jl Unit Tests" begin
+    using LinearAlgebra
 
     @testset "Vacuum.jl (2D)" begin
 
@@ -481,7 +482,7 @@
                 ν=plasma_surf.ν
             )
             M, P = size(exp_mn_basis)
-            Gram = exp_mn_basis' * exp_mn_basis
+            Gram = fill(ComplexF64(M), P)
 
             # --- Two-step Galerkin: materialize full kernels then project ---
             grad_green_full = zeros(Float64, 2M, 2M)
