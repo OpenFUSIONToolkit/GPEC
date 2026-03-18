@@ -14,11 +14,15 @@ denominator singularity of the geometric-angle ODE near x-points.
 
 RHS for the arc-length-parameterized level-set ODE.
 
-State `y = [R, Z, ∫dl/Bp, ∫dl/(R²Bp), ∫jac·dl/Bp]`.
+State `y = [R, Z, ∫dl/Bp, ∫dl/(R²Bp), arc_length]`.
 The independent variable `s` is arc length [m].
 
 The tangent direction `(dR/ds, dZ/ds) = (∂ψ/∂Z, −∂ψ/∂R) / |∇ψ|` follows the
 ψ = const level set counterclockwise, staying on the flux surface without correction.
+
+dy[5] = 1 always (equal_arc: Bp/Bp). Near x-points where Bp → 0, the position
+integration (dy[1:2]) remains well-behaved; dy[3:5] use abstol=1e20 so the solver
+never restricts step size for them.
 """
 @with_pool pool function arclength_fieldline_der!(dy, y, params::FieldLineDerivParams, _s)
     R, Z = y[1], y[2]
@@ -40,15 +44,13 @@ The tangent direction `(dR/ds, dZ/ds) = (∂ψ/∂Z, −∂ψ/∂R) / |∇ψ|` f
 
     # Bp = |∇ψ| / R (poloidal field [T])
     Bp = grad_norm / R
-    Bt = params.bfield.f / R
-    B  = sqrt(Bp^2 + Bt^2)
-    jac = Bp^params.power_bp * B^params.power_b / R^params.power_r
 
-    # Smooth floor prevents 1/Bp divergence near x-points.
-    Bp_eff = sqrt(Bp^2 + params.Bp_floor^2)
+    # Equal-arc jac: dy[5] = Bp/Bp = 1 always, self-regularizing near x-point.
+    # dy[3] and dy[4] use abstol=1e20 so the solver never restricts steps for them.
+    Bp_eff = max(Bp, eps(Float64))  # absolute guard against exact Bp=0 only
     dy[3] = 1.0 / Bp_eff           # d/ds [∫dl/Bp]
     dy[4] = 1.0 / (R^2 * Bp_eff)  # d/ds [∫dl/(R²Bp)]
-    dy[5] = jac / Bp_eff           # d/ds [∫jac·dl/Bp]
+    dy[5] = 1.0                    # d/ds [arc_length] = Bp/Bp_eff → 1 for equal_arc
 end
 
 """
@@ -90,10 +92,10 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 
     equil_config = raw_profile.config
     bfield_ode = DirectBField()
-    Bp0 = sqrt(bfield.psir^2 + bfield.psiz^2) / r
-    Bp_floor = 1e-4 * Bp0  # 0.01% of outboard-midplane Bp
+    # Force equal_arc jac internally (power_bp=1,b=0,r=0): dy[5]=1 regardless of Bp near x-point.
+    # The user jac SFL angle is recovered in post-processing below.
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield_ode, Bp_floor)
+        1, 0, 0, bfield_ode, 0.0)
 
     t_min = π * (r - ro)  # minimum arc before termination (half-circumference lower bound)
     condition(u, _t, integrator) = u[2] - zo
@@ -136,6 +138,39 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
         y_out[i, 5] = sol.u[i][5]
     end
 
+    # Replace arc-length in y_out[:,5] with user-jac SFL angle so equilibrium_solver
+    # receives the expected SFL abscissa ∫jac·dl/Bp normalized to [0,1].
+    # y_out[:,2] = ∫dl/Bp and y_out[:,4] = ∫dl/(R²Bp) are already integrated correctly.
+    _sfl_to_user_jac!(y_out, equil_config)
+
     # bfield at the starting point carries F and P for the surface-averaged quantities
     return y_out, bfield
+end
+
+"""
+    _sfl_to_user_jac!(y_out, equil_config)
+
+Replace the arc-length column y_out[:,5] with the user-jac SFL angle ∈ [0,1].
+
+After the equal_arc ODE, y_out[:,5] = arc_length. This converts it to the SFL angle
+for the user's jac_type using integrals already accumulated in the ODE:
+- Hamada (power_bp=0, b=0, r=0): SFL = ∫dl/Bp, stored in y_out[:,2]
+- PEST   (power_bp=0, b=0, r=2): SFL = ∫dl/(R²Bp), stored in y_out[:,4]
+- equal_arc (power_bp=1, b=0, r=0): SFL = arc_length, already in y_out[:,5]
+"""
+function _sfl_to_user_jac!(y_out::Matrix{Float64}, equil_config::EquilibriumConfig)
+    power_bp = equil_config.power_bp
+    power_b  = equil_config.power_b
+    power_r  = equil_config.power_r
+
+    if power_bp == 0 && power_b == 0 && power_r == 0
+        # Hamada: ∫dl/Bp already in col 2
+        @. y_out[:, 5] = y_out[:, 2] / y_out[end, 2]
+    elseif power_bp == 0 && power_b == 0 && power_r == 2
+        # PEST: ∫dl/(R²Bp) already in col 4
+        @. y_out[:, 5] = y_out[:, 4] / y_out[end, 4]
+    else
+        # equal_arc user jac or unsupported: arc_length → normalize in place
+        y_out[:, 5] ./= y_out[end, 5]
+    end
 end
