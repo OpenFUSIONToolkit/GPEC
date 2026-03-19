@@ -40,10 +40,6 @@ resolution is set adaptively from a bilinear interpolation error bound, so no ma
 tuning is needed. All three methods handle near-separatrix surfaces (psihigh up to 0.999)
 without modification.
 
-**Caveat:** `efit_by_inversion` requires `psilow ≤ 0.01`. For larger psilow values the
-innermost grid surfaces are too far from the axis for the inverse solver's boundary
-extrapolation to be reliable; a runtime warning is issued if this limit is exceeded.
-
 ## Radial grid packing
 
 The default `grid_type = "log_asymptotic"` uses a three-region grid that respects
@@ -132,7 +128,6 @@ println("Built LAR equilibrium with a = ", lorcfg.lar_a)
   Paths that are not absolute are resolved relative to the TOML file location.
 - The Equilibrium module contains readers for EFIT and CHEASE formats. Ensure the
   required data files are present and paths are set correctly in `gpec.toml`.
-- For `efit_by_inversion`, use `psilow ≤ 0.01` (see caveat above).
 
 ## See also
 

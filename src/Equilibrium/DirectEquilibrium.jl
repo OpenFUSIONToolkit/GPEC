@@ -564,6 +564,9 @@ robustness.
     )
     # q(0) by linear extrapolation from innermost surface
     q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
+    if q0 <= 0.0
+        @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
+    end
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
