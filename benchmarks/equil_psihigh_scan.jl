@@ -52,8 +52,8 @@ function run_ffs_et1(config_path::String, eq_type::String, psihigh::Float64)::Fl
     raw = TOML.parsefile(config_path)
     raw["Equilibrium"]["eq_type"] = eq_type
     raw["Equilibrium"]["psihigh"] = psihigh
-    raw["ForceFreeStates"]["force_termination"] = true   # skip perturbed equilibrium
-    raw["ForceFreeStates"]["write_outputs_to_HDF5"] = true
+    raw["ForceFreeStates"]["force_termination"] = true   # write gpec.h5 after FFS, skip PE
+    raw["ForceFreeStates"]["vac_flag"] = true
     raw["ForceFreeStates"]["verbose"] = false
 
     mktempdir() do tmpdir
