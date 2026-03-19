@@ -508,6 +508,7 @@ robustness.
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
     psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
