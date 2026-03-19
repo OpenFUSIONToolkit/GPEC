@@ -68,7 +68,7 @@
 
     @testset "EFIT Method Consistency" begin
         # All three methods solve the same equilibrium — q-profiles should broadly agree.
-        # Tolerance is 5% to allow for method-specific discretisation differences.
+        # Tolerance is 10% to allow for method-specific discretisation differences.
         q_efit      = plasma_eq_efit.profiles.q_spline.y
         q_arclength = plasma_eq_arclength.profiles.q_spline.y
         q_inversion = plasma_eq_inversion.profiles.q_spline.y

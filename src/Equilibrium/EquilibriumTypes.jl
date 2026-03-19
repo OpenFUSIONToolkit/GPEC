@@ -94,6 +94,9 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         else
             error("Cannot recognize jac_type = $(jac_type)")
         end
+        if psihigh > 1.0
+            @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
+        end
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,

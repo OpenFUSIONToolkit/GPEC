@@ -405,6 +405,10 @@ function equilibrium_solver_by_inversion(
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
+    if psilow > 0.01
+        @warn "efit_by_inversion: psilow = $psilow > 0.01 — innermost grid surfaces are too far from the axis for reliable q0 extrapolation; use psilow ≤ 0.01"
+    end
+
     # Find magnetic axis and separatrix before building psi_nodes (needed for probe integrations)
     ro, zo, _, rs2 = direct_position!(raw_profile)
 

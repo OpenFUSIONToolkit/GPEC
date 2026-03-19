@@ -50,7 +50,7 @@ runs and `refine = 8` gives near-machine-precision roundtrip error.
 <details>
 <summary><strong>Benchmark results (DIIID-like example, 8 threads)</strong></summary>
 
-**Method comparison at default parameters (psihigh=0.99, psilow=0.01, mpsi=128, mtheta=256, refine=4):**
+**Method comparison at default parameters (psihigh=0.99, psilow=1e-4, mpsi=128, mtheta=256, refine=4):**
 
 | Method | Runtime | Roundtrip max error | q monotonicity violations |
 |--------|---------|---------------------|--------------------------|
