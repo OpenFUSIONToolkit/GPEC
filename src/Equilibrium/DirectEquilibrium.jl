@@ -449,6 +449,34 @@ function make_optimal_psi_grid(psilow, psihigh, mpsi;
 end
 
 """
+    _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+
+Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`.
+
+For `"log_asymptotic"` with `mpsi=0`, estimates the separatrix log slope from two probe
+integrations and computes the minimum knot count for `psi_accuracy`. For `"ldp"`, uses
+the sin²-spaced grid. Shared by `direct_fieldline_int` and `efit_by_inversion` solvers.
+"""
+function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = equil_params.mpsi
+    if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
+        A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+        mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=equil_params.psi_accuracy)
+    elseif mpsi == 0
+        mpsi = 128
+    end
+
+    psi_nodes = if equil_params.grid_type == "log_asymptotic"
+        make_optimal_psi_grid(psilow, psihigh, mpsi)
+    elseif equil_params.grid_type == "ldp"
+        [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    else
+        error("Unsupported grid_type: $(equil_params.grid_type)")
+    end
+    return psi_nodes
+end
+
+"""
     equilibrium_solver(raw_profile)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
@@ -479,21 +507,7 @@ robustness.
     # direct_position! must run before building psi_nodes: probe integrations need ro, zo, rs2
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    mpsi = equil_params.mpsi
-    if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
-        A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
-        mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=equil_params.psi_accuracy)
-    elseif mpsi == 0
-        mpsi = 128
-    end
-
-    psi_nodes = if equil_params.grid_type == "log_asymptotic"
-        make_optimal_psi_grid(psilow, psihigh, mpsi)
-    elseif equil_params.grid_type == "ldp"
-        [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
-    else
-        error("Unsupported grid_type: $(equil_params.grid_type)")
-    end
+    psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
