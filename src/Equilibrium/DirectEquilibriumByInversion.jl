@@ -24,26 +24,33 @@ function _is_closed_curve(curve)
 end
 
 """
-    _point_in_polygon_verts(verts, r_test, z_test)
+    _winding_number_verts(verts, r_test, z_test)
 
-Ray-casting point-in-polygon test on a `Ctr.vertices` vector.
+Winding number point-in-polygon test (Sunday algorithm) on a `Ctr.vertices` vector.
+Returns the signed winding count; nonzero means the test point is inside the polygon.
+More robust than ray-casting for near-collinear edges (e.g., surfaces near an x-point).
 """
-function _point_in_polygon_verts(verts, r_test::Float64, z_test::Float64)::Bool
+function _winding_number_verts(verts, r_test::Float64, z_test::Float64)::Int
     n = length(verts)
-    inside = false
+    wn = 0
     j = n
     @inbounds for i in 1:n
         ri, zi = verts[i]
         rj, zj = verts[j]
-        if (zi > z_test) != (zj > z_test)
-            r_cross = (rj - ri) * (z_test - zi) / (zj - zi) + ri
-            if r_test < r_cross
-                inside = !inside
+        if zj <= z_test
+            if zi > z_test
+                cross = (rj - r_test) * (zi - z_test) - (ri - r_test) * (zj - z_test)
+                cross > 0 && (wn += 1)
+            end
+        else
+            if zi <= z_test
+                cross = (rj - r_test) * (zi - z_test) - (ri - r_test) * (zj - z_test)
+                cross < 0 && (wn -= 1)
             end
         end
         j = i
     end
-    return inside
+    return wn
 end
 
 """
@@ -58,7 +65,7 @@ function select_plasma_contour(curve_list, ro::Float64, zo::Float64)
     for curve in curve_list
         _is_closed_curve(curve) || continue
         verts = Ctr.vertices(curve)
-        _point_in_polygon_verts(verts, ro, zo) && return curve
+        _winding_number_verts(verts, ro, zo) != 0 && return curve
     end
     return nothing
 end
@@ -97,8 +104,12 @@ end
 
 Resample a Contour.jl curve onto a uniform geometric-angle grid, writing results
 directly into the pre-allocated `R_out` and `Z_out` vectors (views into R_table/Z_table).
-Sorts vertices by geometric angle η, appends a periodic wrap point, fits cubic splines
-R(η) and Z(η), then samples at each `theta_grid` point.
+
+Uses a polar representation: fits a cubic spline on log ρ(η) where
+ρ_i = sqrt((R_i − ro)² + (Z_i − zo)²) and η_i = atan2(Z_i − zo, R_i − ro).
+This guarantees exp(logρ_spl) > 0 everywhere — a self-intersecting contour is
+impossible by construction — making it robust near x-points where R(η) and Z(η)
+splines tend to overshoot between widely-spaced knots.
 """
 function resample_contour_to_theta_grid!(
     R_out::AbstractVector{Float64}, Z_out::AbstractVector{Float64},
@@ -116,46 +127,39 @@ function resample_contour_to_theta_grid!(
         end
     end
 
-    # Compute angles and extract R/Z in a single pass
-    η_buf = Vector{Float64}(undef, nv)
-    R_buf = Vector{Float64}(undef, nv)
-    Z_buf = Vector{Float64}(undef, nv)
+    # Compute geometric angle η and log-radius logρ in one pass
+    η_buf   = Vector{Float64}(undef, nv)
+    logρ_buf = Vector{Float64}(undef, nv)
     @inbounds for i in 1:nv
         r, z = verts[i]
-        η_buf[i] = mod(atan(z - zo, r - ro), 2π)
-        R_buf[i] = r
-        Z_buf[i] = z
+        η_buf[i]   = mod(atan(z - zo, r - ro), 2π)
+        logρ_buf[i] = log(sqrt((r - ro)^2 + (z - zo)^2))
     end
 
     idx = sortperm(η_buf)
 
     # Build extended (nv+1) sorted arrays with periodic wrap appended
-    n_ext = nv + 1
-    η_ext = Vector{Float64}(undef, n_ext)
-    R_ext = Vector{Float64}(undef, n_ext)
-    Z_ext = Vector{Float64}(undef, n_ext)
+    n_ext   = nv + 1
+    η_ext   = Vector{Float64}(undef, n_ext)
+    logρ_ext = Vector{Float64}(undef, n_ext)
     @inbounds for i in 1:nv
         k = idx[i]
-        η_ext[i] = η_buf[k]
-        R_ext[i] = R_buf[k]
-        Z_ext[i] = Z_buf[k]
+        η_ext[i]   = η_buf[k]
+        logρ_ext[i] = logρ_buf[k]
     end
-    η_ext[n_ext] = η_ext[1] + 2π
-    R_ext[n_ext] = R_ext[1]
-    Z_ext[n_ext] = Z_ext[1]
+    η_ext[n_ext]   = η_ext[1] + 2π
+    logρ_ext[n_ext] = logρ_ext[1]
 
-    R_spl = cubic_interp(η_ext, R_ext; bc=PeriodicBC(), extrap=WrapExtrap(), search=LinearBinary())
-    Z_spl = cubic_interp(η_ext, Z_ext; bc=PeriodicBC(), extrap=WrapExtrap(), search=LinearBinary())
+    logρ_spl = cubic_interp(η_ext, logρ_ext; bc=PeriodicBC(), extrap=WrapExtrap(), search=LinearBinary())
 
-    # theta_grid is in turns [0, 1]; sample the geometric-angle spline at 2π*θ radians.
-    # Monotonically increasing → shared hint gives O(1) lookups per pass.
+    # theta_grid is in turns [0, 1]; sample at 2π*θ radians and convert polar → Cartesian.
+    # Monotonically increasing η → shared hint gives O(1) lookups per step.
     hint = Ref(1)
-    @inbounds for k in eachindex(theta_grid, R_out)
-        R_out[k] = R_spl(2π * theta_grid[k]; hint=hint)
-    end
-    hint[] = 1
-    @inbounds for k in eachindex(theta_grid, Z_out)
-        Z_out[k] = Z_spl(2π * theta_grid[k]; hint=hint)
+    @inbounds for k in eachindex(theta_grid, R_out, Z_out)
+        η = 2π * theta_grid[k]
+        ρ = exp(logρ_spl(η; hint=hint))
+        R_out[k] = ro + ρ * cos(η)
+        Z_out[k] = zo + ρ * sin(η)
     end
 end
 
@@ -425,7 +429,7 @@ function equilibrium_solver_by_inversion(
         r_bbox_lo, r_bbox_hi = extrema(v[1] for v in bv)
         z_bbox_lo, z_bbox_hi = extrema(v[2] for v in bv)
         r_margin = (r_bbox_hi - r_bbox_lo) * 0.05
-        z_margin = (z_bbox_hi - z_bbox_lo) * 0.05
+        z_margin = (z_bbox_hi - z_bbox_lo) * 0.12
         r_lo = max(raw_profile.rmin, r_bbox_lo - r_margin)
         r_hi = min(raw_profile.rmax, r_bbox_hi + r_margin)
         z_lo = max(raw_profile.zmin, z_bbox_lo - z_margin)
@@ -603,6 +607,43 @@ function equilibrium_solver_by_inversion(
         @info "efit_by_inversion: $(mpsi + 1 - n_zoom_surfaces) surfaces traced by global grid, $n_zoom_surfaces by zoomed core grid ($n_near_axis_fill below threshold + $(n_zoom_surfaces - n_near_axis_fill) overlap)"
     else
         @info "efit_by_inversion: $n_contour_success surfaces traced by global grid"
+    end
+
+    # Column-wise ρ monotonicity check: for each geometric angle θ_k, ρ = sqrt((R-ro)²+(Z-zo)²)
+    # must increase with ipsi (star-shaped nesting). Detects localized crossings that a global
+    # area check misses. Accumulates all violations and prints one consolidated warning.
+    n_violations = 0
+    first_ipsi = 0
+    first_k = 0
+    worst_Δρ = 0.0
+    worst_ipsi = 0
+    worst_k = 0
+    # Iterate only 1:mtheta — column mtheta+1 is the periodic wrap of column 1 (θ=0≡θ=1)
+    # and would double-count any violation there.
+    @inbounds for k in 1:mtheta
+        ρ_prev = sqrt((R_table[1, k] - ro)^2 + (Z_table[1, k] - zo)^2)
+        for ipsi in 2:(mpsi + 1)
+            ρ = sqrt((R_table[ipsi, k] - ro)^2 + (Z_table[ipsi, k] - zo)^2)
+            if ρ < ρ_prev
+                n_violations += 1
+                if n_violations == 1
+                    first_ipsi = ipsi
+                    first_k = k
+                end
+                Δρ = ρ_prev - ρ
+                if Δρ > worst_Δρ
+                    worst_Δρ = Δρ
+                    worst_ipsi = ipsi
+                    worst_k = k
+                end
+            end
+            ρ_prev = ρ
+        end
+    end
+    if n_violations > 0
+        @warn "efit_by_inversion: ρ non-monotone at $n_violations (ipsi,θ) locations — adjacent surfaces may intersect. " *
+              "First: ipsi=$first_ipsi θ=$(@sprintf("%.3f", theta_grid[first_k])). " *
+              "Worst: ipsi=$worst_ipsi θ=$(@sprintf("%.3f", theta_grid[worst_k])) Δρ=$(@sprintf("%.3g", worst_Δρ)) m."
     end
 
     # Build InverseRunInput — same type consumed by equilibrium_solver(::InverseRunInput)
