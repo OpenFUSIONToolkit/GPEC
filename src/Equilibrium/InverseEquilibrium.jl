@@ -133,15 +133,38 @@ function equilibrium_solver(input::InverseRunInput)
     end
 
     # c-----------------------------------------------------------------------
-    # c     set up radial grid (only "ldp" implemented)
+    # c     set up radial grid
     # c-----------------------------------------------------------------------
-    if grid_type == "ldp"
+    if grid_type == "log_asymptotic"
+        if mpsi == 0 && config.psi_accuracy > 0
+            # Estimate A from q profile near psihigh (q is column 3 in sq_in)
+            ε = max(1.0 - psihigh, 0.001)
+            ψ₁ = clamp(1.0 - 3ε, psilow + 0.01, 0.999)
+            ψ₂ = clamp(1.0 - 1.5ε, psilow + 0.01, 0.999)
+            A = try
+                buf = zeros(size(sq_in.y, 2))
+                sq_in(buf, ψ₁); q1 = buf[3]
+                sq_in(buf, ψ₂); q2 = buf[3]
+                max(abs(q2 - q1) / log(2), 0.1)
+            catch
+                @warn "Could not estimate log slope from q profile, using default A=2.0"
+                2.0
+            end
+            mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=config.psi_accuracy)
+        elseif mpsi == 0
+            mpsi = 128
+        end
+        sq_xs = make_optimal_psi_grid(psilow, psihigh, mpsi)
+    elseif grid_type == "ldp"
+        if mpsi == 0
+            mpsi = 128
+        end
         sq_xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
-        sq_fs = zeros(Float64, mpsi+1, 4)
-        sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
     else
-        error("Only 'ldp' grid_type is implemented for now.")
+        error("Unsupported grid_type: $grid_type")
     end
+    sq_fs = zeros(Float64, mpsi+1, 4)
+    sq = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), extrap=ExtendExtrap())
 
     # c-----------------------------------------------------------------------
     # c     prepare new bicube type for coordinates.
@@ -204,7 +227,7 @@ function equilibrium_solver(input::InverseRunInput)
             spl_fs[itheta+1, 2] = f_deta
             spl_fs[itheta+1, 3] = r * jacfac
             spl_fs[itheta+1, 4] = spl_fs[itheta+1, 3] / (r * r)
-            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.power_bp * b^config.power_b / r^config.power_r
+            spl_fs[itheta+1, 5] = spl_fs[itheta+1, 3] * bp^config.power_bp * b^config.power_b / (r^config.power_r * max(rfac, eps(Float64))^config.power_rc)
 
         end
         # c-----------------------------------------------------------------------

@@ -19,6 +19,10 @@ The independent variable `s` is arc length [m].
 
 The tangent direction `(dR/ds, dZ/ds) = (∂ψ/∂Z, −∂ψ/∂R) / |∇ψ|` follows the
 ψ = const level set counterclockwise, staying on the flux surface without correction.
+
+Near x-points where Bp → 0, the position integration (dy[1:2]) remains well-behaved
+because `grad_norm` never appears in the denominator alone. dy[3:5] use abstol=1e20
+so the solver never restricts step size for them.
 """
 @with_pool pool function arclength_fieldline_der!(dy, y, params::FieldLineDerivParams, _s)
     R, Z = y[1], y[2]
@@ -40,15 +44,18 @@ The tangent direction `(dR/ds, dZ/ds) = (∂ψ/∂Z, −∂ψ/∂R) / |∇ψ|` f
 
     # Bp = |∇ψ| / R (poloidal field [T])
     Bp = grad_norm / R
-    Bt = params.bfield.f / R
-    B  = sqrt(Bp^2 + Bt^2)
-    jac = Bp^params.power_bp * B^params.power_b / R^params.power_r
 
-    # Smooth floor prevents 1/Bp divergence near x-points.
-    Bp_eff = sqrt(Bp^2 + params.Bp_floor^2)
+    # dy[3] and dy[4] use abstol=1e20 so the solver never restricts steps for them.
+    Bp_eff = max(Bp, eps(Float64))  # absolute guard against exact Bp=0 only
     dy[3] = 1.0 / Bp_eff           # d/ds [∫dl/Bp]
     dy[4] = 1.0 / (R^2 * Bp_eff)  # d/ds [∫dl/(R²Bp)]
-    dy[5] = jac / Bp_eff           # d/ds [∫jac·dl/Bp]
+
+    # d/ds [∫jac·dl/Bp]: integrand = Bp^(power_bp−1) · B^power_b / (R^power_r · rfac^power_rc)
+    Bt = params.bfield.f / R
+    B_val = sqrt(Bp^2 + Bt^2)
+    rfac = sqrt((R - params.ro)^2 + (Z - params.zo)^2)
+    rfac_eff = max(rfac, eps(Float64))
+    dy[5] = Bp_eff^(params.power_bp - 1) * B_val^params.power_b / (R^params.power_r * rfac_eff^params.power_rc)
 end
 
 """
@@ -90,10 +97,8 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 
     equil_config = raw_profile.config
     bfield_ode = DirectBField()
-    Bp0 = sqrt(bfield.psir^2 + bfield.psiz^2) / r
-    Bp_floor = 1e-4 * Bp0  # 0.01% of outboard-midplane Bp
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield_ode, Bp_floor)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield_ode)
 
     t_min = π * (r - ro)  # minimum arc before termination (half-circumference lower bound)
     condition(u, _t, integrator) = u[2] - zo
@@ -139,3 +144,4 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     # bfield at the starting point carries F and P for the surface-averaged quantities
     return y_out, bfield
 end
+

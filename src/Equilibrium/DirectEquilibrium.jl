@@ -39,8 +39,8 @@ struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastIn
     power_bp::Int
     power_b::Int
     power_r::Int
+    power_rc::Int  # minor radius rfac = √((R-R₀)²+(Z-Z₀)²) power exponent
     bfield::DirectBField
-    Bp_floor::Float64  # minimum Bp for integral terms (0 = disabled; arclength sets this to prevent 1/Bp overflow near x-points)
 end
 
 """
@@ -270,7 +270,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     equil_config = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield, 0.0)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -311,7 +311,8 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     bp = sqrt(params.bfield.br^2 + params.bfield.bz^2)
     bt = params.bfield.f / r
     b = sqrt(bp^2 + bt^2)
-    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r)
+    rfac = y[2]
+    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r * rfac^params.power_rc)
 
     # Denominator for d(l_pol)/d(eta) = rfac |B_pol|/denominator
     denominator = params.bfield.bz * cos_eta - params.bfield.br * sin_eta
@@ -373,6 +374,109 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
+    _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+
+Estimate the logarithmic slope A from two field-line probe integrations near the separatrix,
+using the asymptotic form q(ψ) ≃ −A·ln(1−ψ) (Fitzpatrick 2024, eq. 19).
+
+Returns A = |Δq| / ln(2). Falls back to A=2.0 on integration failure.
+"""
+function _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+    eps_sep = max(1.0 - psihigh, 0.001)
+    psi1 = clamp(1.0 - 3 * eps_sep, raw_profile.config.psilow + 0.01, 0.999)
+    psi2 = clamp(1.0 - 1.5 * eps_sep, raw_profile.config.psilow + 0.01, 0.999)
+    try
+        out1 = fieldline_int(psi1, raw_profile, ro, zo, rs2)
+        q1 = out1[2].f * out1[1][end, 4] / (2π)
+        out2 = fieldline_int(psi2, raw_profile, ro, zo, rs2)
+        q2 = out2[2].f * out2[1][end, 4] / (2π)
+        A = max(abs(q2 - q1) / log(2), 0.1)
+        @info "Estimated separatrix log slope A = $(@sprintf("%.3f", A)) from probe integrations at psi = $(@sprintf("%.4f", psi1)), $(@sprintf("%.4f", psi2))"
+        return A
+    catch err
+        @warn "Failed to estimate log slope from probe integrations, using default A=2.0: $err"
+        return 2.0
+    end
+end
+
+"""
+    make_optimal_mpsi(psilow, psihigh, A; tau, psi_split_core, psi_split_edge)
+
+Compute the minimum number of radial knots needed to achieve target accuracy τ in q,
+given the separatrix log slope A. Three-region geometric grid: core, pedestal, far edge.
+"""
+function make_optimal_mpsi(psilow, psihigh, A;
+        tau=0.005, psi_split_core=0.15, psi_split_edge=0.95)
+    dlog = (13.0 * tau / A)^(1/4)
+    N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
+    h_mid = (1.0 - psi_split_edge) * dlog
+    N_mid = ceil(Int, (psi_split_edge - psi_split_core) / h_mid)
+    N_core = ceil(Int, log(psi_split_core / psilow) / dlog)
+    mpsi = N_core + N_mid + N_edge
+    @info "Auto-mpsi: N_core=$N_core + N_mid=$N_mid + N_edge=$N_edge = $mpsi (A=$(@sprintf("%.3f",A)), tau=$tau)"
+    return mpsi
+end
+
+"""
+    make_optimal_psi_grid(psilow, psihigh, mpsi; psi_split_core, psi_split_edge)
+
+Build a three-region ψ grid with mpsi+1 knots:
+- Core  [psilow, psi_split_core]: geometric in log(ψ)        — handles axis behavior
+- Middle [psi_split_core, psi_split_edge]: uniform in ψ       — protects pedestal resolution
+- Edge  [psi_split_edge, psihigh]: geometric in log(1−ψ)     — handles logarithmic separatrix
+
+Knot counts are allocated by equal log-weight with N_edge capped at 50% to protect pedestal.
+"""
+function make_optimal_psi_grid(psilow, psihigh, mpsi;
+        psi_split_core=0.15, psi_split_edge=0.95)
+    log_core = log(psi_split_core / psilow)
+    log_mid  = log(psi_split_edge / psi_split_core)
+    log_edge = log((1.0 - psi_split_edge) / (1.0 - psihigh))
+    log_total = log_core + log_mid + log_edge
+
+    N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
+    N_core = round(Int, mpsi * log_core / log_total)
+    N_mid  = mpsi - N_edge - N_core
+
+    # Core: [psilow, psi_split_core], geometric in log(ψ)
+    core_pts = [psilow * (psi_split_core / psilow)^(i / N_core) for i in 0:N_core]
+    # Middle: [psi_split_core, psi_split_edge], uniform (skip first to avoid duplicate)
+    mid_pts = [psi_split_core + (psi_split_edge - psi_split_core) * i / N_mid for i in 1:N_mid]
+    # Edge: [psi_split_edge, psihigh], geometric in log(1−ψ) (skip first to avoid duplicate)
+    edge_pts = [1.0 - (1.0 - psi_split_edge) * ((1.0 - psihigh) / (1.0 - psi_split_edge))^(i / N_edge) for i in 1:N_edge]
+
+    return vcat(core_pts, mid_pts, edge_pts)
+end
+
+"""
+    _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+
+Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`.
+
+For `"log_asymptotic"` with `mpsi=0`, estimates the separatrix log slope from two probe
+integrations and computes the minimum knot count for `psi_accuracy`. For `"ldp"`, uses
+the sin²-spaced grid. Shared by `direct_fieldline_int` and `efit_by_inversion` solvers.
+"""
+function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = equil_params.mpsi
+    if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
+        A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+        mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=equil_params.psi_accuracy)
+    elseif mpsi == 0
+        mpsi = 128
+    end
+
+    psi_nodes = if equil_params.grid_type == "log_asymptotic"
+        make_optimal_psi_grid(psilow, psihigh, mpsi)
+    elseif equil_params.grid_type == "ldp"
+        [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    else
+        error("Unsupported grid_type: $(equil_params.grid_type)")
+    end
+    return psi_nodes
+end
+
+"""
     equilibrium_solver(raw_profile)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
@@ -397,20 +501,15 @@ robustness.
     equil_params = raw_profile.config
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
-    mpsi = equil_params.mpsi
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # TODO: grid_type = "original" Fortran logic not yet ported.
-    psi_nodes = Array{Float64}(undef, mpsi + 1)
-    if equil_params.grid_type == "ldp"
-        psi_nodes .= [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
-    else
-        error("Unsupported grid_type: $(equil_params.grid_type)")
-    end
-    theta_nodes = range(0.0, 1.0; length=mtheta + 1)
+    # direct_position! must run before building psi_nodes: probe integrations need ro, zo, rs2
+    ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    ro, zo, rs1, rs2 = direct_position!(raw_profile)
+    psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = length(psi_nodes) - 1
+    theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
     rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)

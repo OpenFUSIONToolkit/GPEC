@@ -397,16 +397,14 @@ function equilibrium_solver_by_inversion(
 )
     equil_params = raw_profile.config
     psio = raw_profile.psio
-    mpsi = equil_params.mpsi
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # Build target psi_norm grid (same ldp scheme as direct solver)
-    psi_nodes = [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    # Find magnetic axis and separatrix before building psi_nodes (needed for probe integrations)
+    ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    # Find magnetic axis and separatrix
-    ro, zo, _, _ = direct_position!(raw_profile)
+    psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, direct_fieldline_int, raw_profile, ro, zo, rs2)
 
     # Detect plasma topology for sinh-stretching direction
     topology = classify_topology(raw_profile, psio)
