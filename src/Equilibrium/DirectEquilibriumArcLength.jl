@@ -98,7 +98,7 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     equil_config = raw_profile.config
     bfield_ode = DirectBField()
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield_ode, 0.0)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield_ode)
 
     t_min = π * (r - ro)  # minimum arc before termination (half-circumference lower bound)
     condition(u, _t, integrator) = u[2] - zo
