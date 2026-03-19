@@ -430,14 +430,12 @@ function equilibrium_solver_by_inversion(
         bv = Ctr.vertices(bbox_curve)
         r_bbox_lo, r_bbox_hi = extrema(v[1] for v in bv)
         z_bbox_lo, z_bbox_hi = extrema(v[2] for v in bv)
-        r_margin    = (r_bbox_hi - r_bbox_lo) * 0.05
-        z_span      = z_bbox_hi - z_bbox_lo
-        z_margin_lo = z_span * (topology ∈ (:sn_lower, :double_null) ? 0.12 : 0.05)
-        z_margin_hi = z_span * (topology ∈ (:sn_upper, :double_null) ? 0.12 : 0.05)
+        r_margin = (r_bbox_hi - r_bbox_lo) * 0.05
+        z_margin = (z_bbox_hi - z_bbox_lo) * 0.12
         r_lo = max(raw_profile.rmin, r_bbox_lo - r_margin)
         r_hi = min(raw_profile.rmax, r_bbox_hi + r_margin)
-        z_lo = max(raw_profile.zmin, z_bbox_lo - z_margin_lo)
-        z_hi = min(raw_profile.zmax, z_bbox_hi + z_margin_hi)
+        z_lo = max(raw_profile.zmin, z_bbox_lo - z_margin)
+        z_hi = min(raw_profile.zmax, z_bbox_hi + z_margin)
     else
         r_lo, r_hi = raw_profile.rmin, raw_profile.rmax
         z_lo, z_hi = raw_profile.zmin, raw_profile.zmax
@@ -613,22 +611,33 @@ function equilibrium_solver_by_inversion(
         @info "efit_by_inversion: $n_contour_success surfaces traced by global grid"
     end
 
-    # Area monotonicity check: shoelace areas should increase with ipsi.
-    # A decreasing area indicates a self-intersecting or mis-sorted contour.
-    prev_area = 0.0
-    for ipsi in 1:(mpsi + 1)
-        R_row = @view R_table[ipsi, :]
-        Z_row = @view Z_table[ipsi, :]
-        n_θ   = length(R_row)
-        area  = 0.0
-        @inbounds for k in 1:(n_θ - 1)
-            area += R_row[k] * Z_row[k + 1] - R_row[k + 1] * Z_row[k]
+    # Column-wise ρ monotonicity check: for each geometric angle θ_k, ρ = sqrt((R-ro)²+(Z-zo)²)
+    # must increase with ipsi (star-shaped nesting). Detects localized crossings that a global
+    # area check misses. Accumulates all violations and prints one consolidated warning.
+    n_violations = 0
+    first_ipsi = 0; first_k = 0
+    worst_Δρ = 0.0; worst_ipsi = 0; worst_k = 0
+    @inbounds for k in 1:(mtheta + 1)
+        ρ_prev = sqrt((R_table[1, k] - ro)^2 + (Z_table[1, k] - zo)^2)
+        for ipsi in 2:(mpsi + 1)
+            ρ = sqrt((R_table[ipsi, k] - ro)^2 + (Z_table[ipsi, k] - zo)^2)
+            if ρ < ρ_prev
+                n_violations += 1
+                if n_violations == 1
+                    first_ipsi = ipsi; first_k = k
+                end
+                Δρ = ρ_prev - ρ
+                if Δρ > worst_Δρ
+                    worst_Δρ = Δρ; worst_ipsi = ipsi; worst_k = k
+                end
+            end
+            ρ_prev = ρ
         end
-        area = abs(area) / 2
-        if area < prev_area
-            @warn "efit_by_inversion: area non-monotone at ipsi=$ipsi (area=$(@sprintf("%.4g", area)) < prev=$(@sprintf("%.4g", prev_area))); surface may be self-intersecting"
-        end
-        prev_area = area
+    end
+    if n_violations > 0
+        @warn "efit_by_inversion: ρ non-monotone at $n_violations (ipsi,θ) locations — adjacent surfaces may intersect. " *
+              "First: ipsi=$first_ipsi θ=$(@sprintf("%.3f", theta_grid[first_k])). " *
+              "Worst: ipsi=$worst_ipsi θ=$(@sprintf("%.3f", theta_grid[worst_k])) Δρ=$(@sprintf("%.3g", worst_Δρ)) m."
     end
 
     # Build InverseRunInput — same type consumed by equilibrium_solver(::InverseRunInput)
