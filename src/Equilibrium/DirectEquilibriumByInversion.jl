@@ -409,6 +409,7 @@ function equilibrium_solver_by_inversion(
     ro, zo, _, rs2 = direct_position!(raw_profile)
 
     psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, direct_fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = length(psi_nodes) - 1
 
     # Detect plasma topology for sinh-stretching direction
     topology = classify_topology(raw_profile, psio)
