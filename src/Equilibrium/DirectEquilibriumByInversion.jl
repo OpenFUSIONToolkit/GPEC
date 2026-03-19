@@ -615,20 +615,28 @@ function equilibrium_solver_by_inversion(
     # must increase with ipsi (star-shaped nesting). Detects localized crossings that a global
     # area check misses. Accumulates all violations and prints one consolidated warning.
     n_violations = 0
-    first_ipsi = 0; first_k = 0
-    worst_Δρ = 0.0; worst_ipsi = 0; worst_k = 0
-    @inbounds for k in 1:(mtheta + 1)
+    first_ipsi = 0
+    first_k = 0
+    worst_Δρ = 0.0
+    worst_ipsi = 0
+    worst_k = 0
+    # Iterate only 1:mtheta — column mtheta+1 is the periodic wrap of column 1 (θ=0≡θ=1)
+    # and would double-count any violation there.
+    @inbounds for k in 1:mtheta
         ρ_prev = sqrt((R_table[1, k] - ro)^2 + (Z_table[1, k] - zo)^2)
         for ipsi in 2:(mpsi + 1)
             ρ = sqrt((R_table[ipsi, k] - ro)^2 + (Z_table[ipsi, k] - zo)^2)
             if ρ < ρ_prev
                 n_violations += 1
                 if n_violations == 1
-                    first_ipsi = ipsi; first_k = k
+                    first_ipsi = ipsi
+                    first_k = k
                 end
                 Δρ = ρ_prev - ρ
                 if Δρ > worst_Δρ
-                    worst_Δρ = Δρ; worst_ipsi = ipsi; worst_k = k
+                    worst_Δρ = Δρ
+                    worst_ipsi = ipsi
+                    worst_k = k
                 end
             end
             ρ_prev = ρ
