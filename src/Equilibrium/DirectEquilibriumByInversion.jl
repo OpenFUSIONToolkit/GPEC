@@ -397,16 +397,26 @@ function equilibrium_solver_by_inversion(
 )
     equil_params = raw_profile.config
     psio = raw_profile.psio
-    mpsi = equil_params.mpsi
     mtheta = equil_params.mtheta
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # Build target psi_norm grid (same ldp scheme as direct solver)
-    psi_nodes = [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    # Find magnetic axis and separatrix before building psi_nodes (needed for probe integrations)
+    ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    # Find magnetic axis and separatrix
-    ro, zo, _, _ = direct_position!(raw_profile)
+    mpsi = equil_params.mpsi
+    if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
+        A = _estimate_log_slope(direct_fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+        mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=equil_params.psi_accuracy)
+    elseif mpsi == 0
+        mpsi = 128
+    end
+
+    psi_nodes = if equil_params.grid_type == "log_asymptotic"
+        make_optimal_psi_grid(psilow, psihigh, mpsi)
+    else
+        [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    end
 
     # Detect plasma topology for sinh-stretching direction
     topology = classify_topology(raw_profile, psio)

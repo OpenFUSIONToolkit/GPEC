@@ -19,10 +19,11 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
+  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
-  - `mpsi::Int` - Number of radial grid points
+  - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)
+  - `psi_accuracy::Float64` - Target absolute error in q for auto-mpsi (used when mpsi=0 and grid_type="log_asymptotic")
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
@@ -41,10 +42,11 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     power_r::Int = 0
     power_rc::Int = 0
 
-    grid_type::String = "ldp"
+    grid_type::String = "log_asymptotic"
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.994
-    mpsi::Int = 128
+    mpsi::Int = 0
+    psi_accuracy::Float64 = 0.005
     mtheta::Int = 256
 
     newq0::Int = 0
@@ -57,7 +59,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
-        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
         force_termination, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
@@ -94,7 +96,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         end
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
-            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
             force_termination, use_galgrid)
     end
 end

@@ -133,6 +133,8 @@ psi_full = psi_lo .+ (psi_hi - psi_lo) .* sin.(range(0.0, 1.0; length=mpsi_eval+
 
 mask_core = psi_full .< 0.10
 mask_edge = psi_full .> 0.98
+# Edge coordinate: −ln(1−ψ) linearises the q ~ A·ln(1/(1−ψ)) separatrix asymptotics
+t_edge_full = -log.(1.0 .- psi_full[mask_edge])
 
 theta_select = [0.0, 0.25, 0.5, 0.75]
 theta_colors = [:blue, :green, :darkorange, :purple]
@@ -162,12 +164,25 @@ for (idx, (pname, spl_getter)) in enumerate(profile_specs)
         title="$pname — full domain  (psihigh=$psihigh_arg)")
     p_core = plot(psi_full[mask_core], y_ref[mask_core]; lw=2,
         color=method_color[ref_method], ls=method_style[ref_method],
-        label=method_label[ref_method], xlabel="ψ", ylabel=pname, title="Deep core  (ψ < 0.10)")
-    p_edge = plot(psi_full[mask_edge], y_ref[mask_edge]; lw=2,
+        label=method_label[ref_method], xlabel="ψ  (log scale)", ylabel=pname,
+        title="Deep core  (ψ < 0.10)", xscale=:log10)
+    p_edge = plot(t_edge_full, y_ref[mask_edge]; lw=2,
         color=method_color[ref_method], ls=method_style[ref_method],
-        label=method_label[ref_method], xlabel="ψ", ylabel=pname, title="Far edge  (ψ > 0.98)")
+        label=method_label[ref_method], xlabel="−ln(1−ψ)", ylabel=pname,
+        title="Far edge  (ψ > 0.98)")
     p_diff = plot(; xlabel="ψ", ylabel="Δ$pname", title="Difference (vs efit)")
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
+
+    # Scatter markers at actual ψ grid nodes for reference method
+    ref_xs = pe_ref.rzphi_xs
+    ref_ys = [spl_ref(ψ) for ψ in ref_xs]
+    scatter!(p_full, ref_xs, ref_ys; ms=3, markerstrokewidth=0, color=method_color[ref_method], label="")
+    let mask = ref_xs .< 0.10
+        scatter!(p_core, ref_xs[mask], ref_ys[mask]; ms=3, markerstrokewidth=0, color=method_color[ref_method], label="")
+    end
+    let mask = ref_xs .> 0.98
+        scatter!(p_edge, -log.(1.0 .- ref_xs[mask]), ref_ys[mask]; ms=3, markerstrokewidth=0, color=method_color[ref_method], label="")
+    end
 
     for m in compare_methods_active
         spl_m = spl_getter(pes[m])
@@ -178,9 +193,20 @@ for (idx, (pname, spl_getter)) in enumerate(profile_specs)
             label=method_label[m])
         plot!(p_core, psi_full[mask_core], y_m[mask_core]; lw=1.5,
             color=method_color[m], ls=method_style[m], label=method_label[m])
-        plot!(p_edge, psi_full[mask_edge], y_m[mask_edge]; lw=1.5,
+        plot!(p_edge, t_edge_full, y_m[mask_edge]; lw=1.5,
             color=method_color[m], ls=method_style[m], label=method_label[m])
         plot!(p_diff, psi_full, Δy; lw=1.5, color=diff_color[m], label="efit − $(method_label[m])")
+
+        # Scatter markers at actual ψ grid nodes for compare method
+        m_xs = pes[m].rzphi_xs
+        m_ys = [spl_m(ψ) for ψ in m_xs]
+        scatter!(p_full, m_xs, m_ys; ms=3, markerstrokewidth=0, color=method_color[m], label="")
+        let mask = m_xs .< 0.10
+            scatter!(p_core, m_xs[mask], m_ys[mask]; ms=3, markerstrokewidth=0, color=method_color[m], label="")
+        end
+        let mask = m_xs .> 0.98
+            scatter!(p_edge, -log.(1.0 .- m_xs[mask]), m_ys[mask]; ms=3, markerstrokewidth=0, color=method_color[m], label="")
+        end
 
         @printf("  %-14s  vs %-18s  max|Δ|=%.3e  rms|Δ|=%.3e  edge max|Δ|=%.3e\n",
             pname, method_label[m], maximum(abs.(Δy)), sqrt(mean(Δy .^ 2)),
@@ -374,8 +400,8 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
 
     p_full = plot(; xlabel="ψ", ylabel=sname,
         title="$sname — full domain  (psihigh=$psihigh_arg)")
-    p_core = plot(; xlabel="ψ", ylabel=sname, title="Deep core  (ψ < 0.10)")
-    p_edge = plot(; xlabel="ψ", ylabel=sname, title="Far edge  (ψ > 0.98)")
+    p_core = plot(; xlabel="ψ  (log scale)", ylabel=sname, title="Deep core  (ψ < 0.10)", xscale=:log10)
+    p_edge = plot(; xlabel="−ln(1−ψ)", ylabel=sname, title="Far edge  (ψ > 0.98)")
     p_diff = plot(; xlabel="ψ", ylabel="Δ$sname", title="efit − other")
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
@@ -384,7 +410,11 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
         yd = yd_all[tidx]
         plot!(p_full, psi_full, yd; color=tc, lw=2, label="efit θ=$(θ)")
         plot!(p_core, psi_full[mask_core], yd[mask_core]; color=tc, lw=2, label="efit θ=$(θ)")
-        plot!(p_edge, psi_full[mask_edge], yd[mask_edge]; color=tc, lw=2, label="efit θ=$(θ)")
+        plot!(p_edge, t_edge_full, yd[mask_edge]; color=tc, lw=2, label="efit θ=$(θ)")
+        xs = pe_ref.rzphi_xs; ys = [fn_ref(ψ, θ) for ψ in xs]
+        scatter!(p_full, xs, ys; ms=3, markerstrokewidth=0, color=tc, label="")
+        let mask = xs .< 0.10; scatter!(p_core, xs[mask], ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
+        let mask = xs .> 0.98; scatter!(p_edge, -log.(1.0 .- xs[mask]), ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
     end
 
     println("  $sname:")
@@ -399,10 +429,14 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
                 label="$(method_label[m]) θ=$(θ)")
             plot!(p_core, psi_full[mask_core], yi[mask_core]; color=tc, lw=1.2,
                 ls=method_style[m], label="$(method_label[m]) θ=$(θ)")
-            plot!(p_edge, psi_full[mask_edge], yi[mask_edge]; color=tc, lw=1.2,
+            plot!(p_edge, t_edge_full, yi[mask_edge]; color=tc, lw=1.2,
                 ls=method_style[m], label="$(method_label[m]) θ=$(θ)")
             plot!(p_diff, psi_full, Δ; color=tc, lw=1.2, ls=method_style[m],
                 label="(efit−$(method_label[m])) θ=$(θ)")
+            xs = pes[m].rzphi_xs; ys = [fn_m(ψ, θ) for ψ in xs]
+            scatter!(p_full, xs, ys; ms=3, markerstrokewidth=0, color=tc, label="")
+            let mask = xs .< 0.10; scatter!(p_core, xs[mask], ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
+            let mask = xs .> 0.98; scatter!(p_edge, -log.(1.0 .- xs[mask]), ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
 
             Δc = any(mask_core) ? Δ[mask_core] : [0.0]
             Δe = any(mask_edge) ? Δ[mask_edge] : [0.0]
@@ -436,8 +470,8 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
 
     p_full = plot(; xlabel="ψ", ylabel=ename,
         title="$ename — full domain  (psihigh=$psihigh_arg)")
-    p_core = plot(; xlabel="ψ", ylabel=ename, title="Deep core  (ψ < 0.10)")
-    p_edge = plot(; xlabel="ψ", ylabel=ename, title="Far edge  (ψ > 0.98)")
+    p_core = plot(; xlabel="ψ  (log scale)", ylabel=ename, title="Deep core  (ψ < 0.10)", xscale=:log10)
+    p_edge = plot(; xlabel="−ln(1−ψ)", ylabel=ename, title="Far edge  (ψ > 0.98)")
     p_diff = plot(; xlabel="ψ", ylabel="Δ$ename", title="efit − other")
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
@@ -446,7 +480,11 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
         yd = yd_all[tidx]
         plot!(p_full, psi_full, yd; color=tc, lw=2, label="efit θ=$(θ)")
         plot!(p_core, psi_full[mask_core], yd[mask_core]; color=tc, lw=2, label="efit θ=$(θ)")
-        plot!(p_edge, psi_full[mask_edge], yd[mask_edge]; color=tc, lw=2, label="efit θ=$(θ)")
+        plot!(p_edge, t_edge_full, yd[mask_edge]; color=tc, lw=2, label="efit θ=$(θ)")
+        xs = pe_ref.rzphi_xs; ys = [fn_ref(ψ, θ) for ψ in xs]
+        scatter!(p_full, xs, ys; ms=3, markerstrokewidth=0, color=tc, label="")
+        let mask = xs .< 0.10; scatter!(p_core, xs[mask], ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
+        let mask = xs .> 0.98; scatter!(p_edge, -log.(1.0 .- xs[mask]), ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
     end
 
     println("  $ename:")
@@ -461,10 +499,14 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
                 label="$(method_label[m]) θ=$(θ)")
             plot!(p_core, psi_full[mask_core], yi[mask_core]; color=tc, lw=1.2,
                 ls=method_style[m], label="$(method_label[m]) θ=$(θ)")
-            plot!(p_edge, psi_full[mask_edge], yi[mask_edge]; color=tc, lw=1.2,
+            plot!(p_edge, t_edge_full, yi[mask_edge]; color=tc, lw=1.2,
                 ls=method_style[m], label="$(method_label[m]) θ=$(θ)")
             plot!(p_diff, psi_full, Δ; color=tc, lw=1.2, ls=method_style[m],
                 label="(efit−$(method_label[m])) θ=$(θ)")
+            xs = pes[m].rzphi_xs; ys = [fn_m(ψ, θ) for ψ in xs]
+            scatter!(p_full, xs, ys; ms=3, markerstrokewidth=0, color=tc, label="")
+            let mask = xs .< 0.10; scatter!(p_core, xs[mask], ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
+            let mask = xs .> 0.98; scatter!(p_edge, -log.(1.0 .- xs[mask]), ys[mask]; ms=3, markerstrokewidth=0, color=tc, label="") end
 
             Δc = any(mask_core) ? Δ[mask_core] : [0.0]
             Δe = any(mask_edge) ? Δ[mask_edge] : [0.0]

@@ -5,10 +5,11 @@ jac_type = "hamada"                     # Coordinate system (hamada, pest, booze
 power_bp = 0                            # Poloidal field power exponent for Jacobian
 power_b = 0                             # Toroidal field power exponent for Jacobian
 power_r = 0                             # Major radius power exponent for Jacobian
-grid_type = "ldp"                       # Radial grid packing type
+grid_type = "log_asymptotic"            # Radial grid packing type
 psilow = 1e-3                           # Lower limit of normalized flux coordinate
 psihigh = 0.993                         # Upper limit of normalized flux coordinate
-mpsi = 128                              # Number of radial grid points
+mpsi = 0                                # Number of radial grid points (0 = auto-compute from psi_accuracy)
+psi_accuracy = 0.005                    # Target absolute error in q for auto-mpsi
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
