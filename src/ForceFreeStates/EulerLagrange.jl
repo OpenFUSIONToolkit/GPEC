@@ -77,14 +77,18 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         trim_storage!(odet)
     end
 
+    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration.
+    # Must be done BEFORE evaluate_stability_criterion!: the stability criterion uses u_store, which must
+    # contain the transformed (true) solution vectors. Using raw (pre-transform) u_store causes
+    # compute_smallest_eigenvalue to see ill-conditioned matrices for core regions (T₁ = G₁·…·Gₙ is the
+    # product of ALL Gaussian reduction matrices, which becomes poorly conditioned with many fixups).
+    transform_u!(odet, intr)
+
     # Evaluate stability criterion (critical determinant) of saved solutions
     if ctrl.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
-
-    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
-    transform_u!(odet, intr)
 
     return odet
 end

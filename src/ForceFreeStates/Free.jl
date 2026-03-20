@@ -155,7 +155,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         for ipert_n in 1:intr.npert
             # Compute vacuum matrix
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Apply singular factor scaling
@@ -196,7 +196,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     tot_eigvals = zeros(ComplexF64, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
-    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
+    dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2

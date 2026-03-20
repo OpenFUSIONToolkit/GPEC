@@ -65,7 +65,16 @@ can do it post-integration rather than during and don't directly handle file out
     psi = odet.psi_store[istep]
     u .= odet.u_store[:, :, :, istep]
     dVdpsi = profiles.dVdpsi_spline(psi; hint=odet.spline_hint)
-    crit_val, nonherm = compute_smallest_eigenvalue(u)
+    crit_val, nonherm = try
+        compute_smallest_eigenvalue(u)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        # U₂ is singular at this step (degenerate solution near a rational surface).
+        # Propagate the previous crit_store value to avoid a spurious zero crossing.
+        prev_crit = istep > 1 ? odet.crit_store[istep-1] : 0.0
+        odet.crit_store[istep] = prev_crit
+        return false, false
+    end
     odet.crit_store[istep] = crit_val * dVdpsi^2
 
     # Check for zero crossing via change in sign of crit between current and previous step
