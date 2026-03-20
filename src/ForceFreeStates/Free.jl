@@ -204,29 +204,39 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
     # FastInterpolations now natively supports complex values
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
-    wv = odet._wv_out
+    wv = copy(odet._wv_out)
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
     Ev = eigen(wt)
 
-    # Sort eigenvalues and reorder columns of wt
+    # Sort eigenvalues and reorder columns of wt (ascending eigenvalue → wt[:,1] is least stable)
     eindex = sortperm(real.(Ev.values); rev=true)
     for ipert in 1:intr.numpert_total
         wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
         tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
     end
 
-    # Normalize eigenfunction and energy (only need the first eigenmode)
+    # Compute kinetic norm ξ†J(ψ)ξ / dV_dψ for the leading eigenvector.
+    # This normalizes et, ep, ev to be dimensionally consistent with free_run!.
     isol = 1
+    v = @view wt[:, isol]
     norm = 0.0 + 0.0im
     for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
         ipert = (ipert_n - 1) * intr.mpert + ipert_m
         jpert = (ipert_n - 1) * intr.mpert + jpert_m
-        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * v[ipert] * conj(v[jpert])
     end
     norm /= dV_dpsi
     tot_eigvals[isol] /= norm
 
-    return tot_eigvals[1]
+    # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
+    # ep + ev = et by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
+    ep1 = ComplexF64(dot(v, wp * v)) / norm
+    ev1 = ComplexF64(dot(v, wv * v)) / norm
+
+    # Smallest eigenvalue of the vacuum matrix alone (independent of ODE solution).
+    evonly1 = minimum(real.(eigvals((wv + wv') / 2)))
+
+    return (et=tot_eigvals[1], ep=ep1, ev=ev1, evonly=evonly1)
 end

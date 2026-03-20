@@ -591,6 +591,9 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 
     # Since we search for the maximum dW, initialize to -Infinity
     fill!(odet.dW_edge, -Inf * (1 + im))
+    ep_edge     = fill(-Inf * (1 + im), length(odet.dW_edge))
+    ev_edge     = fill(-Inf * (1 + im), length(odet.dW_edge))
+    evonly_edge = fill(-Inf, length(odet.dW_edge))
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
@@ -600,12 +603,31 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
         odet.psifac = odet.psi_store[istep]
         if odet.psifac >= ctrl.psiedge
             odet.u .= odet.u_store[:, :, :, istep]
-            odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
+            try
+                result = free_compute_total(equil, ffit, intr, odet)
+                odet.dW_edge[istep] = result.et
+                ep_edge[istep]      = result.ep
+                ev_edge[istep]      = result.ev
+                evonly_edge[istep]  = result.evonly
+            catch e
+                e isa LinearAlgebra.SingularException || rethrow(e)
+                # U₁ is singular at this step; skip it (dW_edge stays -Inf)
+            end
         end
     end
 
+    # Build per-step scan arrays for all psiedge steps and store in odet for HDF5 output.
+    # Steps where free_compute_total failed have -Inf values; replace with NaN for clarity.
+    psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
+    odet.psi_edge_scan    = odet.psi_store[psiedge_idxs]
+    odet.et_edge_scan     = ComplexF64[isfinite(real(odet.dW_edge[i])) ? odet.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
+    odet.ep_edge_scan     = ComplexF64[isfinite(real(ep_edge[i]))      ? ep_edge[i]       : complex(NaN) for i in psiedge_idxs]
+    odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]
+    odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i])           ? evonly_edge[i]   : NaN          for i in psiedge_idxs]
+
     # Return the index that maximizes dW_edge to identify truncation point
-    return findmax(real.(odet.dW_edge))[2]
+    et_clean = replace(real.(odet.dW_edge), NaN => -Inf)
+    return findmax(et_clean)[2]
 end
 
 """

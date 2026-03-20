@@ -378,6 +378,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
   - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
+  - `psi_edge_scan::Vector{Float64}` - ψ values at each edge scan step (psifac ≥ psiedge). Populated by `findmax_dW_edge!`.
+  - `et_edge_scan::Vector{ComplexF64}` - Total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
+  - `ep_edge_scan::Vector{ComplexF64}` - Plasma energy contribution at each edge scan step.
+  - `ev_edge_scan::Vector{ComplexF64}` - Vacuum energy contribution at each edge scan step.
+  - `evonly_edge_scan::Vector{Float64}` - Smallest eigenvalue of vacuum matrix alone (wv, no plasma response) at each edge scan step.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
@@ -420,6 +425,15 @@ and a small set of temporary matrices and factors used to compute singular-layer
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+
+    # Edge stability scan results: psi values and energy components for each step in [psiedge, psilim].
+    # Populated by findmax_dW_edge! and written to HDF5 for post-processing.
+    # Steps where free_compute_total failed (singular U₁) are stored as NaN.
+    psi_edge_scan::Vector{Float64}    = Float64[]
+    et_edge_scan::Vector{ComplexF64}  = ComplexF64[]
+    ep_edge_scan::Vector{ComplexF64}  = ComplexF64[]
+    ev_edge_scan::Vector{ComplexF64}  = ComplexF64[]
+    evonly_edge_scan::Vector{Float64} = Float64[]
 
     # Data for integrator
     psifac::Float64 = 0.0

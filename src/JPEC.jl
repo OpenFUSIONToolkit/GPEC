@@ -25,6 +25,10 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
+include("Analysis/Analysis.jl")
+import .Analysis as Analysis
+export Analysis
+
 # Additional imports for main function
 using TOML
 using Printf
@@ -410,6 +414,15 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
+
+        # Write edge stability scan data (only present when psiedge < psilim)
+        if !isempty(odet.psi_edge_scan)
+            out_h5["integration/edge_scan_psi"]    = odet.psi_edge_scan
+            out_h5["integration/edge_scan_et"]     = odet.et_edge_scan
+            out_h5["integration/edge_scan_ep"]     = odet.ep_edge_scan
+            out_h5["integration/edge_scan_ev"]     = odet.ev_edge_scan
+            out_h5["integration/edge_scan_evonly"] = odet.evonly_edge_scan
+        end
 
         # Write singular surface data
         out_h5["singular/msing"] = intr.msing
