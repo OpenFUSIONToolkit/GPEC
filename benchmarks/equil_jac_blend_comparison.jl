@@ -54,8 +54,8 @@ mkpath(outdir)
 println("Output   : $outdir\n")
 
 # ─── Config factory ────────────────────────────────────────────────────────────
-function make_blend_config(path, psihigh, jac_type;
-        jac_type_edge="hamada", psi_jac_blend_start=1.0, psi_jac_blend_end=1.0)
+function make_blend_config(path, psihigh;
+        jac_type="hamada", jac_type_edge="hamada", psi_jac_blend_start=1.0, psi_jac_blend_end=1.0)
     raw = TOML.parsefile(path)
     eq = raw["Equilibrium"]
     eq["psihigh"]             = psihigh
@@ -102,7 +102,7 @@ variant_label = Dict(v[1] => v[2] for v in variants)
 pes = Dict{String, Any}()
 for (key, label, kwargs) in variants
     println("--- Running: $label ---")
-    cfg = make_blend_config(config_path, psihigh_arg, get(kwargs, :jac_type, "hamada"); kwargs...)
+    cfg = make_blend_config(config_path, psihigh_arg; kwargs...)
     try
         pes[key] = setup_equilibrium(cfg)
         println("  Done.\n")
