@@ -150,7 +150,7 @@ function equilibrium_solver(input::InverseRunInput)
                 @warn "Could not estimate log slope from q profile, using default A=2.0"
                 2.0
             end
-            mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=config.psi_accuracy)
+            mpsi = make_optimal_mpsi(psilow, psihigh, A, sq_in; tau=config.psi_accuracy)
         elseif mpsi == 0
             mpsi = 128
         end

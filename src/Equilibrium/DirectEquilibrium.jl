@@ -400,20 +400,52 @@ function _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
 end
 
 """
-    make_optimal_mpsi(psilow, psihigh, A; tau, psi_split_core, psi_split_edge)
+    _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
+
+Estimate the uniform knot spacing needed in the middle ψ region to resolve the sharpest
+profile feature (usually the pressure pedestal) to relative accuracy `tau`.
+
+Uses central-difference second derivatives of all 4 sq_in profiles on a 300-point sample.
+The required spacing for profile k is h_k = sqrt(8τ / d2_norm_k) where d2_norm_k is
+max|f''| / max|f| over [psi_split_core, psi_split_edge].
+"""
+function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
+    n_samp = 300
+    psi_samp = range(psi_split_core, psi_split_edge; length=n_samp)
+    h_samp = step(psi_samp)
+    h_min = Inf
+    buf = zeros(4)
+    all_vals = [begin sq_in(buf, ψ); copy(buf) end for ψ in psi_samp]
+    for k in 1:4
+        vals = [all_vals[i][k] for i in 1:n_samp]
+        f_scale = max(maximum(abs.(vals)), 1e-12)
+        d2_max = 0.0
+        for i in 2:n_samp-1
+            d2 = abs(vals[i+1] - 2vals[i] + vals[i-1]) / (h_samp^2 * f_scale)
+            d2_max = max(d2_max, d2)
+        end
+        d2_max < 1e-10 && continue
+        h_min = min(h_min, sqrt(8 * tau / d2_max))
+    end
+    return clamp(h_min, 1e-3, 0.2)
+end
+
+"""
+    make_optimal_mpsi(psilow, psihigh, A, sq_in; tau, psi_split_core, psi_split_edge)
 
 Compute the minimum number of radial knots needed to achieve target accuracy τ in q,
 given the separatrix log slope A. Three-region geometric grid: core, pedestal, far edge.
+The middle-region spacing is driven by profile curvature (P, F, dV/dψ, q) via sq_in.
 """
-function make_optimal_mpsi(psilow, psihigh, A;
-        tau=0.005, psi_split_core=0.15, psi_split_edge=0.95)
+function make_optimal_mpsi(psilow, psihigh, A, sq_in;
+        tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
     dlog = (13.0 * tau / A)^(1/4)
     N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
-    h_mid = (1.0 - psi_split_edge) * dlog
+    h_mid = _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     N_mid = ceil(Int, (psi_split_edge - psi_split_core) / h_mid)
     N_core = ceil(Int, log(psi_split_core / psilow) / dlog)
     mpsi = N_core + N_mid + N_edge
-    @info "Auto-mpsi: N_core=$N_core + N_mid=$N_mid + N_edge=$N_edge = $mpsi (A=$(@sprintf("%.3f",A)), tau=$tau)"
+    @info "Auto-mpsi: N_core=$N_core + N_mid=$N_mid + N_edge=$N_edge = $mpsi (A=$(@sprintf("%.3f",A)), h_mid=$(@sprintf("%.4f",h_mid)), tau=$tau)"
     return mpsi
 end
 
@@ -428,7 +460,7 @@ Build a three-region ψ grid with mpsi+1 knots:
 Knot counts are allocated by equal log-weight with N_edge capped at 50% to protect pedestal.
 """
 function make_optimal_psi_grid(psilow, psihigh, mpsi;
-        psi_split_core=0.15, psi_split_edge=0.95)
+        psi_split_core=0.03, psi_split_edge=0.98)
     log_core = log(psi_split_core / psilow)
     log_mid  = log(psi_split_edge / psi_split_core)
     log_edge = log((1.0 - psi_split_edge) / (1.0 - psihigh))
@@ -461,7 +493,7 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
     mpsi = equil_params.mpsi
     if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
         A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
-        mpsi = make_optimal_mpsi(psilow, psihigh, A; tau=equil_params.psi_accuracy)
+        mpsi = make_optimal_mpsi(psilow, psihigh, A, raw_profile.sq_in; tau=equil_params.psi_accuracy)
     elseif mpsi == 0
         mpsi = 128
     end
