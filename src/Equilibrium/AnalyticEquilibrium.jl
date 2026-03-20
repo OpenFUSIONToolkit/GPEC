@@ -141,7 +141,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000, dense=false)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=1e-8, maxiters=10000, dense=false)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
@@ -181,7 +181,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sq_xs = zeros(ma + 1)
     sq_fs = zeros(ma + 1, 3)
     r_nodes = zeros(ma + 1)
-    rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
+    rzphi_y_nodes = range(0.0, 1.0; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
 
     hint = Ref(1)

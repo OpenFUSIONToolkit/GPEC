@@ -52,6 +52,8 @@ When reviewing code, systematically evaluate:
 - Justify non-obvious algorithmic decisions ("why this tolerance? why this discretization?")
 - Reference relevant equations or papers where applicable
 - **Never** merely restate what the code obviously does
+- **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
+- **Be concise** — one line where possible. Multi-line block comments explaining session-specific investigation details, prior bugs, or path-specific differences are excessive. State what and why at a general level. Bad: 6-line block explaining that one code path uses psilow>0 while another starts at 0, what the old code did wrong, and what downstream effect it caused. Good: `# Replicate Fortran behavior: overwrite deta at axis by extrapolating from innermost surfaces.`
 
 ### 4. Code Structure
 - Functions should have single, clear responsibilities

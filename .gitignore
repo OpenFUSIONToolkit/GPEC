@@ -14,8 +14,9 @@
 *.jld2
 .gitattributes
 Manifest.toml
-build.log
+*.log
 docs/build/
 anaconda_projects/
 modovmc
 pestotv
+*.csv

@@ -39,6 +39,7 @@ struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastIn
     power_bp::Int
     power_b::Int
     power_r::Int
+    power_rc::Int  # minor radius rfac = √((R-R₀)²+(Z-Z₀)²) power exponent
     bfield::DirectBField
 end
 
@@ -269,7 +270,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     equil_config = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, bfield)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -280,7 +281,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    sol = solve(prob, BS5(); callback=callback, reltol=1e-6, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
+    sol = solve(prob, BS5(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
@@ -310,7 +311,8 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     bp = sqrt(params.bfield.br^2 + params.bfield.bz^2)
     bt = params.bfield.f / r
     b = sqrt(bp^2 + bt^2)
-    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r)
+    rfac = y[2]
+    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r * rfac^params.power_rc)
 
     # Denominator for d(l_pol)/d(eta) = rfac |B_pol|/denominator
     denominator = params.bfield.bz * cos_eta - params.bfield.br * sin_eta
@@ -372,6 +374,141 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
+    _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+
+Estimate the logarithmic slope A from two field-line probe integrations near the separatrix,
+using the asymptotic form q(ψ) ≃ −A·ln(1−ψ) (Fitzpatrick 2024, eq. 19).
+
+Returns A = |Δq| / ln(2). Falls back to A=2.0 on integration failure.
+"""
+function _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+    eps_sep = max(1.0 - psihigh, 0.001)
+    psi1 = clamp(1.0 - 3 * eps_sep, raw_profile.config.psilow + 0.01, 0.999)
+    psi2 = clamp(1.0 - 1.5 * eps_sep, raw_profile.config.psilow + 0.01, 0.999)
+    try
+        out1 = fieldline_int(psi1, raw_profile, ro, zo, rs2)
+        q1 = out1[2].f * out1[1][end, 4] / (2π)
+        out2 = fieldline_int(psi2, raw_profile, ro, zo, rs2)
+        q2 = out2[2].f * out2[1][end, 4] / (2π)
+        A = max(abs(q2 - q1) / log(2), 0.1)
+        @info "Estimated separatrix log slope A = $(@sprintf("%.3f", A)) from probe integrations at psi = $(@sprintf("%.4f", psi1)), $(@sprintf("%.4f", psi2))"
+        return A
+    catch err
+        @warn "Failed to estimate log slope from probe integrations, using default A=2.0: $err"
+        return 2.0
+    end
+end
+
+"""
+    _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
+
+Estimate the uniform knot spacing needed in the middle ψ region to resolve the sharpest
+profile feature (usually the pressure pedestal) to relative accuracy `tau`.
+
+Uses central-difference second derivatives of all 4 sq_in profiles on a 300-point sample.
+The required spacing for profile k is h_k = sqrt(8τ / d2_norm_k) where d2_norm_k is
+max|f''| / max|f| over [psi_split_core, psi_split_edge].
+"""
+function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
+    n_samp = 300
+    psi_samp = range(psi_split_core, psi_split_edge; length=n_samp)
+    h_samp = step(psi_samp)
+    h_min = Inf
+    buf = zeros(4)
+    all_vals = [begin sq_in(buf, ψ); copy(buf) end for ψ in psi_samp]
+    for k in 1:4
+        vals = [all_vals[i][k] for i in 1:n_samp]
+        f_scale = max(maximum(abs.(vals)), 1e-12)
+        d2_max = 0.0
+        for i in 2:n_samp-1
+            d2 = abs(vals[i+1] - 2vals[i] + vals[i-1]) / (h_samp^2 * f_scale)
+            d2_max = max(d2_max, d2)
+        end
+        d2_max < 1e-10 && continue
+        h_min = min(h_min, sqrt(8 * tau / d2_max))
+    end
+    return clamp(h_min, 1e-3, 0.2)
+end
+
+"""
+    make_optimal_mpsi(psilow, psihigh, A, sq_in; tau, psi_split_core, psi_split_edge)
+
+Compute the minimum number of radial knots needed to achieve target accuracy τ in q,
+given the separatrix log slope A. Three-region geometric grid: core, pedestal, far edge.
+The middle-region spacing is driven by profile curvature (P, F, dV/dψ, q) via sq_in.
+"""
+function make_optimal_mpsi(psilow, psihigh, A, sq_in;
+        tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
+    dlog = (13.0 * tau / A)^(1/4)
+    N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
+    h_mid = _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
+    N_mid = ceil(Int, (psi_split_edge - psi_split_core) / h_mid)
+    N_core = ceil(Int, log(psi_split_core / psilow) / dlog)
+    mpsi = N_core + N_mid + N_edge
+    @info "Auto-mpsi: N_core=$N_core + N_mid=$N_mid + N_edge=$N_edge = $mpsi (A=$(@sprintf("%.3f",A)), h_mid=$(@sprintf("%.4f",h_mid)), tau=$tau)"
+    return mpsi
+end
+
+"""
+    make_optimal_psi_grid(psilow, psihigh, mpsi; psi_split_core, psi_split_edge)
+
+Build a three-region ψ grid with mpsi+1 knots:
+- Core  [psilow, psi_split_core]: geometric in log(ψ)        — handles axis behavior
+- Middle [psi_split_core, psi_split_edge]: uniform in ψ       — protects pedestal resolution
+- Edge  [psi_split_edge, psihigh]: geometric in log(1−ψ)     — handles logarithmic separatrix
+
+Knot counts are allocated by equal log-weight with N_edge capped at 50% to protect pedestal.
+"""
+function make_optimal_psi_grid(psilow, psihigh, mpsi;
+        psi_split_core=0.03, psi_split_edge=0.98)
+    log_core = log(psi_split_core / psilow)
+    log_mid  = log(psi_split_edge / psi_split_core)
+    log_edge = log((1.0 - psi_split_edge) / (1.0 - psihigh))
+    log_total = log_core + log_mid + log_edge
+
+    N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
+    N_core = round(Int, mpsi * log_core / log_total)
+    N_mid  = mpsi - N_edge - N_core
+
+    # Core: [psilow, psi_split_core], geometric in log(ψ)
+    core_pts = [psilow * (psi_split_core / psilow)^(i / N_core) for i in 0:N_core]
+    # Middle: [psi_split_core, psi_split_edge], uniform (skip first to avoid duplicate)
+    mid_pts = [psi_split_core + (psi_split_edge - psi_split_core) * i / N_mid for i in 1:N_mid]
+    # Edge: [psi_split_edge, psihigh], geometric in log(1−ψ) (skip first to avoid duplicate)
+    edge_pts = [1.0 - (1.0 - psi_split_edge) * ((1.0 - psihigh) / (1.0 - psi_split_edge))^(i / N_edge) for i in 1:N_edge]
+
+    return vcat(core_pts, mid_pts, edge_pts)
+end
+
+"""
+    _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+
+Resolve `mpsi` and build `psi_nodes` for any supported `grid_type`.
+
+For `"log_asymptotic"` with `mpsi=0`, estimates the separatrix log slope from two probe
+integrations and computes the minimum knot count for `psi_accuracy`. For `"ldp"`, uses
+the sin²-spaced grid. Shared by `direct_fieldline_int` and `efit_by_inversion` solvers.
+"""
+function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = equil_params.mpsi
+    if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
+        A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
+        mpsi = make_optimal_mpsi(psilow, psihigh, A, raw_profile.sq_in; tau=equil_params.psi_accuracy)
+    elseif mpsi == 0
+        mpsi = 128
+    end
+
+    psi_nodes = if equil_params.grid_type == "log_asymptotic"
+        make_optimal_psi_grid(psilow, psihigh, mpsi)
+    elseif equil_params.grid_type == "ldp"
+        [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    else
+        error("Unsupported grid_type: $(equil_params.grid_type)")
+    end
+    return psi_nodes
+end
+
+"""
     equilibrium_solver(raw_profile)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
@@ -391,48 +528,28 @@ robustness.
     including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
-@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput)
+@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int)
 
-    # Shorthand
     equil_params = raw_profile.config
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
-    mpsi = equil_params.mpsi
     psilow = equil_params.psilow
     psihigh = equil_params.psihigh
 
-    # Warn if psihigh is too close to 1.0
-    if psihigh >= 1 - 1e-6
-        @warn "Warning: direct equilibrium with psihigh = $(psihigh) could hang on separatrix."
-    end
+    # direct_position! must run before building psi_nodes: probe integrations need ro, zo, rs2
+    ro, zo, _, rs2 = direct_position!(raw_profile)
 
-    # TODO: there's some fortran logic for grid_type = original that should be added when needed.
-
-    # Set up radial and poloidal grid
-    psi_nodes = Array{Float64}(undef, mpsi + 1)
-    if equil_params.grid_type == "ldp"
-        psi_nodes .= [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
-    else
-        # TODO: add additional grid types
-        error("Unsupported grid_type: $(equil_params.grid_type)")
-    end
+    psi_nodes = _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
+    mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
-    # Find radial position of magnetic axis and separatrix
-    ro, zo, rs1, rs2 = direct_position!(raw_profile)
-
-    # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
     rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
-
     ff_val = zeros!(pool, Float64, 4)
     ff_deriv_val = zeros!(pool, Float64, 4)
 
-    for ipsi in (mpsi+1):-1:1
-        # Integrate along the field line for this surface
-        y_out, bfield = direct_fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
-
-        # checkpoint pool for Float64 slot
+    for ipsi in (mpsi+1):-1:1  # outermost to innermost
+        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
         checkpoint!(pool, Float64)
 
         # Fit data into temporary straight fieldline poloidal angle splines
@@ -445,18 +562,14 @@ robustness.
         @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
         @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
-        # Enforce exact endpoint matching for periodic data (removes floating-point noise)
-        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
-        # Create series interpolant for all columns
         ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
-        # Interpolate `ff` onto the uniform `theta` grid for `rzphi`
+        # Resample ff onto uniform theta grid
         for itheta in 1:(mtheta+1)
             theta = theta_nodes[itheta]
-
-            # In-place operation to avoid allocations
             ff_interp(ff_val, theta)
             ff_deriv(ff_deriv_val, theta)
 
@@ -466,17 +579,14 @@ robustness.
             rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
         end
 
-        # Store surface-averaged quantities for the `sq` spline
         sq_nodes[ipsi, 1] = bfield.f * 2π
         sq_nodes[ipsi, 2] = bfield.p
         sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
         sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
-
-        # rewind pool for Float64 slot
         rewind!(pool, Float64)
     end
 
-    # Create temporary ProfileSplines for q-profile revision calculation
+    # Temporary splines for q0 extrapolation and optional newq0 revision
     profiles = ProfileSplines(
         psi_nodes,
         sq_nodes[:, 1],  # F * 2π
@@ -484,8 +594,11 @@ robustness.
         sq_nodes[:, 3],  # dV/dψ
         sq_nodes[:, 4]   # q
     )
-    # Calculate q0 using linear extrapolation: q(0) = q[1] - q'[1] * psi[1]
+    # q(0) by linear extrapolation from innermost surface
     q0 = profiles.q_spline.y[1] - profiles.q_deriv(psi_nodes[1]; hint=Ref(1)) * psi_nodes[1]
+    if q0 <= 0.0
+        @warn "q0 extrapolation to axis gives q0 = $(@sprintf("%.3f", q0)) ≤ 0 — likely a spline artifact from psilow being too large; check psilow or use newq0 to override."
+    end
     if equil_params.newq0 == -1
         equil_params.newq0 = -q0
     end
@@ -499,7 +612,6 @@ robustness.
             sq_nodes[i, 4] *= ffac
             rzphi_nodes[i, :, 3] .*= ffac
         end
-        # Re-create profiles with the revised data
         profiles = ProfileSplines(
             psi_nodes,
             sq_nodes[:, 1],  # F * 2π
@@ -508,16 +620,12 @@ robustness.
             sq_nodes[:, 4]   # q
         )
     end
-    # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
-    # theta_nodes includes both 0 and 1 (closed periodic grid).
+
     rzphi_xs = psi_nodes
-    # rzphi_ys is the materialized Vector stored in PlasmaEquilibrium for indexing/diagnostics.
-    # The Range form (theta_nodes) is used for the interpolant: it skips index search during
-    # evaluation (O(1) vs binary search) and may differ at machine-precision level from Vector.
+    # rzphi_ys is a materialized Vector (not the Range) so PlasmaEquilibrium can index it directly
     rzphi_ys = collect(theta_nodes)
 
     grid2d = (rzphi_xs, theta_nodes)
-
     opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
@@ -525,8 +633,6 @@ robustness.
     rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
     rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
 
-    # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
-    # for use in stability and transport codes
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
@@ -554,32 +660,29 @@ robustness.
                 rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
             )
-            rfac = sqrt(max(0.0, f[1])) # add in protection just in case of small negative due to numerical error
+            rfac = sqrt(max(0.0, f[1]))  # guard against spline overshoot near separatrix
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
             jacfac = f[4]
 
-            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) * d(rfac)/d(psi_norm)
-            v[1, 2] = fx[2] * 2π * rfac                             # 2π*rfac * d(eta)/d(psi_norm)
-            v[1, 3] = fx[3] * r                                     # r * d(phi_s)/d(psi_norm)
-            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0       # 1/(2rfac) d(rfac)/d(theta_new)
-            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                     # 2π*rfac * d(eta)/d(theta_new)
-            v[2, 3] = fy[3] * r                                     # r * d(phi_s)/d(theta_new)
+            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) * d(rfac)/d(psi_norm)
+            v[1, 2] = fx[2] * 2π * rfac                          # 2π*rfac * d(eta)/d(psi_norm)
+            v[1, 3] = fx[3] * r                                   # r * d(phi_s)/d(psi_norm)
+            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) d(rfac)/d(theta_new)
+            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                  # 2π*rfac * d(eta)/d(theta_new)
+            v[2, 3] = fy[3] * r                                   # r * d(phi_s)/d(theta_new)
             v33 = 2π * r
             w11 = (jacfac != 0) ? (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac : 0.0
             w12 = (jacfac * rfac != 0) ? -fy[1] * π * r / (rfac * jacfac) : 0.0
             delpsi_norm = sqrt(w11^2 + w12^2)
             modB = sqrt(((2π * psio * delpsi_norm)^2 + f_val^2) / (2π * r)^2)
 
-            # Fill in eqfun nodes
             eqfun_fs_nodes[ipsi, itheta, 1] = modB
             denom = jacfac * modB^2
             if abs(denom) > 1e-20
-                # Gyrokinetic coefficient C1
-                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]
+                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]  # gyrokinetic C1
                 eqfun_fs_nodes[ipsi, itheta, 2] = numerator_2 / denom
-                # Gyrokinetic coefficient C2
-                numerator_3 = v[2, 3] * v33 + q * v33^2
+                numerator_3 = v[2, 3] * v33 + q * v33^2                  # gyrokinetic C2
                 eqfun_fs_nodes[ipsi, itheta, 3] = numerator_3 / denom
             else
                 eqfun_fs_nodes[ipsi, itheta, 2] = 0.0
@@ -587,7 +690,7 @@ robustness.
             end
         end
     end
-    # Create 2D interpolants for physics quantities (eqfun)
+
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
