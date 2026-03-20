@@ -418,6 +418,7 @@ function write_outputs_to_HDF5(ctrl::ForceFreeStatesControl, equil::Equilibrium.
         # Write edge stability scan data (only present when psiedge < psilim)
         if !isempty(odet.psi_edge_scan)
             out_h5["integration/edge_scan_psi"]    = odet.psi_edge_scan
+            out_h5["integration/edge_scan_q"]      = odet.q_edge_scan
             out_h5["integration/edge_scan_et"]     = odet.et_edge_scan
             out_h5["integration/edge_scan_ep"]     = odet.ep_edge_scan
             out_h5["integration/edge_scan_ev"]     = odet.ev_edge_scan

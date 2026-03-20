@@ -620,6 +620,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     # Steps where free_compute_total failed have -Inf values; replace with NaN for clarity.
     psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
     odet.psi_edge_scan    = odet.psi_store[psiedge_idxs]
+    odet.q_edge_scan      = odet.q_store[psiedge_idxs]
     odet.et_edge_scan     = ComplexF64[isfinite(real(odet.dW_edge[i])) ? odet.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
     odet.ep_edge_scan     = ComplexF64[isfinite(real(ep_edge[i]))      ? ep_edge[i]       : complex(NaN) for i in psiedge_idxs]
     odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]

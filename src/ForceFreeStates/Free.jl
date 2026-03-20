@@ -236,7 +236,10 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     ev1 = ComplexF64(dot(v, wv * v)) / norm
 
     # Smallest eigenvalue of the vacuum matrix alone (independent of ODE solution).
-    evonly1 = minimum(real.(eigvals((wv + wv') / 2)))
+    # The singfac-scaled wv should be PSD by construction (congruence of PSD wv_raw), but
+    # spline interpolation can introduce small numerical noise making eigenvalues slightly
+    # negative. Clamp to zero to enforce the physical constraint.
+    evonly1 = max(0.0, minimum(real.(eigvals(Hermitian((wv + wv') / 2)))))
 
     return (et=tot_eigvals[1], ep=ep1, ev=ev1, evonly=evonly1)
 end

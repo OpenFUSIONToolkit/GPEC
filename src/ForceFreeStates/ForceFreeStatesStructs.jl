@@ -379,6 +379,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
   - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psi_edge_scan::Vector{Float64}` - ψ values at each edge scan step (psifac ≥ psiedge). Populated by `findmax_dW_edge!`.
+  - `q_edge_scan::Vector{Float64}` - q values at each edge scan step, taken directly from `q_store`.
   - `et_edge_scan::Vector{ComplexF64}` - Total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
   - `ep_edge_scan::Vector{ComplexF64}` - Plasma energy contribution at each edge scan step.
   - `ev_edge_scan::Vector{ComplexF64}` - Vacuum energy contribution at each edge scan step.
@@ -430,6 +431,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Populated by findmax_dW_edge! and written to HDF5 for post-processing.
     # Steps where free_compute_total failed (singular U₁) are stored as NaN.
     psi_edge_scan::Vector{Float64}    = Float64[]
+    q_edge_scan::Vector{Float64}      = Float64[]
     et_edge_scan::Vector{ComplexF64}  = ComplexF64[]
     ep_edge_scan::Vector{ComplexF64}  = ComplexF64[]
     ev_edge_scan::Vector{ComplexF64}  = ComplexF64[]
