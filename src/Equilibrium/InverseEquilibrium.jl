@@ -136,6 +136,7 @@ function equilibrium_solver(input::InverseRunInput)
     # c     set up radial grid
     # c-----------------------------------------------------------------------
     if grid_type == "log_asymptotic"
+        n_core_mid_edge = nothing
         if mpsi == 0 && config.psi_accuracy > 0
             # Estimate A from q profile near psihigh (q is column 3 in sq_in)
             ε = max(1.0 - psihigh, 0.001)
@@ -150,11 +151,23 @@ function equilibrium_solver(input::InverseRunInput)
                 @warn "Could not estimate log slope from q profile, using default A=2.0"
                 2.0
             end
-            mpsi = make_optimal_mpsi(psilow, psihigh, A, sq_in; tau=config.psi_accuracy)
+            n_core_mid_edge = make_optimal_mpsi(psilow, psihigh, A, sq_in; tau=config.psi_accuracy)
+            mpsi = sum(n_core_mid_edge)
         elseif mpsi == 0
             mpsi = 128
         end
-        sq_xs = make_optimal_psi_grid(psilow, psihigh, mpsi)
+        sq_xs = if n_core_mid_edge !== nothing
+            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...)
+        else
+            log_core = log(0.03 / psilow)
+            log_mid  = log(0.98 / 0.03)
+            log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
+            log_total = log_core + log_mid + log_edge
+            N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
+            N_core = round(Int, mpsi * log_core / log_total)
+            N_mid  = mpsi - N_edge - N_core
+            make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
+        end
     elseif grid_type == "ldp"
         if mpsi == 0
             mpsi = 128

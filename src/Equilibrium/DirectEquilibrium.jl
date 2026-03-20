@@ -446,30 +446,18 @@ function make_optimal_mpsi(psilow, psihigh, A, sq_in;
     N_core = ceil(Int, log(psi_split_core / psilow) / dlog)
     mpsi = N_core + N_mid + N_edge
     @info "Auto-mpsi: N_core=$N_core + N_mid=$N_mid + N_edge=$N_edge = $mpsi (A=$(@sprintf("%.3f",A)), h_mid=$(@sprintf("%.4f",h_mid)), tau=$tau)"
-    return mpsi
+    return N_core, N_mid, N_edge
 end
 
 """
-    make_optimal_psi_grid(psilow, psihigh, mpsi; psi_split_core, psi_split_edge)
+    make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge; psi_split_core, psi_split_edge)
 
-Build a three-region ψ grid with mpsi+1 knots:
-- Core  [psilow, psi_split_core]: geometric in log(ψ)        — handles axis behavior
-- Middle [psi_split_core, psi_split_edge]: uniform in ψ       — protects pedestal resolution
-- Edge  [psi_split_edge, psihigh]: geometric in log(1−ψ)     — handles logarithmic separatrix
-
-Knot counts are allocated by equal log-weight with N_edge capped at 50% to protect pedestal.
+Build a three-region ψ grid with (N_core + N_mid + N_edge)+1 knots, using the counts
+directly as provided — core and edge are geometric in log(ψ) and log(1−ψ) respectively;
+middle is uniform in ψ.
 """
-function make_optimal_psi_grid(psilow, psihigh, mpsi;
+function make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge;
         psi_split_core=0.03, psi_split_edge=0.98)
-    log_core = log(psi_split_core / psilow)
-    log_mid  = log(psi_split_edge / psi_split_core)
-    log_edge = log((1.0 - psi_split_edge) / (1.0 - psihigh))
-    log_total = log_core + log_mid + log_edge
-
-    N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
-    N_core = round(Int, mpsi * log_core / log_total)
-    N_mid  = mpsi - N_edge - N_core
-
     # Core: [psilow, psi_split_core], geometric in log(ψ)
     core_pts = [psilow * (psi_split_core / psilow)^(i / N_core) for i in 0:N_core]
     # Middle: [psi_split_core, psi_split_edge], uniform (skip first to avoid duplicate)
@@ -491,15 +479,29 @@ the sin²-spaced grid. Shared by `direct_fieldline_int` and `efit_by_inversion` 
 """
 function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profile, ro, zo, rs2)
     mpsi = equil_params.mpsi
+    n_core_mid_edge = nothing
     if equil_params.grid_type == "log_asymptotic" && mpsi == 0 && equil_params.psi_accuracy > 0
         A = _estimate_log_slope(fieldline_int, raw_profile, ro, zo, rs2, psihigh)
-        mpsi = make_optimal_mpsi(psilow, psihigh, A, raw_profile.sq_in; tau=equil_params.psi_accuracy)
+        n_core_mid_edge = make_optimal_mpsi(psilow, psihigh, A, raw_profile.sq_in; tau=equil_params.psi_accuracy)
+        mpsi = sum(n_core_mid_edge)
     elseif mpsi == 0
         mpsi = 128
     end
 
     psi_nodes = if equil_params.grid_type == "log_asymptotic"
-        make_optimal_psi_grid(psilow, psihigh, mpsi)
+        if n_core_mid_edge !== nothing
+            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...; )
+        else
+            # Fixed mpsi specified: distribute by log-weights
+            log_core = log(0.03 / psilow)
+            log_mid  = log(0.98 / 0.03)
+            log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
+            log_total = log_core + log_mid + log_edge
+            N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
+            N_core = round(Int, mpsi * log_core / log_total)
+            N_mid  = mpsi - N_edge - N_core
+            make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
+        end
     elseif equil_params.grid_type == "ldp"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
     else
