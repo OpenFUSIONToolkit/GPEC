@@ -296,10 +296,11 @@ println("\n" * "=" ^ 70)
 println("2. Flux Surface Contour Overlays")
 println("=" ^ 70)
 
-psi_contours  = collect(range(psi_lo, psi_hi; length=20))
 theta_contour = range(0.0, 1.0; length=256)
 
-R_fs = Dict(m => flux_surface_RZ(pes[m], psi_contours, theta_contour) for m in all_methods)
+# Per-method: use the actual rzphi_xs grid nodes as contour ψ values so that
+# the SFL grid dots (also at rzphi_xs × θ_sub) lie exactly on the drawn lines.
+R_fs = Dict(m => flux_surface_RZ(pes[m], pes[m].rzphi_xs, theta_contour) for m in all_methods)
 
 p_ctr_full = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
     title="Flux surfaces: all methods  (psihigh=$psihigh_arg)")
@@ -309,21 +310,22 @@ p_ctr_xpt  = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
     title="Far edge / x-point zoom (outermost 3 surfaces)")
 
 for m in all_methods
+    pe = pes[m]
     Rs, Zs = R_fs[m]
-    for k in 1:length(psi_contours)
+    n_psi = length(pe.rzphi_xs)
+    for k in 1:n_psi
         lbl = k == 1 ? method_label[m] : ""
         plot!(p_ctr_full, Rs[k], Zs[k]; color=method_color[m],
             ls=method_style[m], lw=0.9, alpha=0.7, label=lbl)
     end
     n_core = 4
-    for k in 1:min(n_core, length(psi_contours))
+    for k in 1:min(n_core, n_psi)
         lbl = k == 1 ? method_label[m] : ""
         plot!(p_ctr_core, Rs[k], Zs[k]; color=method_color[m],
             ls=method_style[m], lw=1.5, label=lbl)
     end
-    n_outer = length(psi_contours)
-    for k in (n_outer - 2):n_outer
-        lbl = k == n_outer - 2 ? method_label[m] : ""
+    for k in (n_psi - 2):n_psi
+        lbl = k == n_psi - 2 ? method_label[m] : ""
         plot!(p_ctr_xpt, Rs[k], Zs[k]; color=method_color[m],
             ls=method_style[m], lw=1.5, label=lbl)
     end
@@ -383,7 +385,7 @@ pad = 0.03
 xlims!(p_ctr_core, minimum(all_R_c) - pad, maximum(all_R_c) + pad)
 ylims!(p_ctr_core, minimum(all_Z_c) - pad, maximum(all_Z_c) + pad)
 
-n_outer = length(psi_contours)
+n_outer = length(pes[ref_method].rzphi_xs)
 all_R_e = vcat(Rc[(n_outer-2):n_outer]...); all_Z_e = vcat(Zc[(n_outer-2):n_outer]...)
 xpt_idx = argmin(all_Z_e)
 xlims!(p_ctr_xpt, all_R_e[xpt_idx] - 0.20, all_R_e[xpt_idx] + 0.20)
@@ -394,8 +396,8 @@ p_ctr_combo = plot(p_ctr_full, p_ctr_core, p_ctr_xpt; layout=(1, 3), size=(2100,
 savefig(p_ctr_combo, joinpath(outdir, "flux_contours.png"))
 
 # ─── Theta contour plot ─────────────────────────────────────────────────────
-# Lines of constant θ ("spokes") from axis to edge, with SFL grid dots.
-theta_spoke_vals = range(0.0, 1.0; length=21)[1:end-1]  # 20 spokes, 0 == 1 so drop endpoint
+# Spoke lines at the subsampled θ grid nodes; dots at (ψ_i, θ_j) intersections.
+# Using the actual grid θ values for both ensures every dot lies on a line.
 psi_dense = range(psi_lo, psi_hi; length=300)
 
 p_tht_full = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
@@ -407,7 +409,10 @@ p_tht_xpt  = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
 
 for m in all_methods
     pe = pes[m]
-    for (kidx, θ) in enumerate(theta_spoke_vals)
+    θ_all = pe.rzphi_ys
+    step = max(1, length(θ_all) ÷ 32)
+    θ_sub = θ_all[1:step:end]  # ~32 theta values used for both lines and dots
+    for (kidx, θ) in enumerate(θ_sub)
         lbl = kidx == 1 ? method_label[m] : ""
         Rs = [psi_theta_to_RZ(pe, ψ, θ)[1] for ψ in psi_dense]
         Zs = [psi_theta_to_RZ(pe, ψ, θ)[2] for ψ in psi_dense]
@@ -415,10 +420,7 @@ for m in all_methods
         plot!(p_tht_core, Rs, Zs; color=method_color[m], ls=method_style[m], lw=1.5, label=lbl)
         plot!(p_tht_xpt,  Rs, Zs; color=method_color[m], ls=method_style[m], lw=1.5, label=lbl)
     end
-    # SFL grid dots — same subsample as on flux contours
-    θ_all = pe.rzphi_ys
-    step = max(1, length(θ_all) ÷ 32)
-    θ_sub = θ_all[1:step:end]
+    # Grid dots at every (ψ_i, θ_j) intersection — by construction on the lines above
     Rg = [psi_theta_to_RZ(pe, ψ, θ)[1] for ψ in pe.rzphi_xs for θ in θ_sub]
     Zg = [psi_theta_to_RZ(pe, ψ, θ)[2] for ψ in pe.rzphi_xs for θ in θ_sub]
     scatter!(p_tht_full, Rg, Zg; ms=1.5, color=method_color[m], alpha=0.5, markerstrokewidth=0, label="")
