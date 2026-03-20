@@ -52,15 +52,19 @@ const _SECTION = "-"^40
 """
     _estimate_m_bandwidth(equil, psilim, threshold)
 
-Estimate the Fourier bandwidth of the metric Jacobian at `psilim` (the outermost flux surface).
+Estimate the Fourier bandwidth of the metric at `psilim` (the outermost flux surface).
 Returns the highest harmonic k where |a_k| > threshold * |a_0| (the DC amplitude).
-This gives the minimum poloidal mode padding needed to capture metric coupling.
+Uses r² (rzphi_rsquared) as the metric proxy: proportional to g^{θθ} and correct even in
+Hamada coordinates where the Jacobian is constant by definition but r² still varies.
 """
 function _estimate_m_bandwidth(equil, psilim, threshold)
     θ_nodes = equil.rzphi_ys
     N = length(θ_nodes) - 1  # exclude duplicate last point
     hint = (Ref(1), Ref(1))
-    jac_vals = [equil.rzphi_jac((psilim, θ_nodes[i]); hint=hint) for i in 1:N]
+    # Use r² (rzphi_rsquared) rather than the Jacobian: in Hamada coordinates J is
+    # constant by definition, giving bandwidth=0, but r² still captures the angular
+    # variation of the metric (g^{θθ} ~ r²) that drives inter-mode coupling.
+    jac_vals = [equil.rzphi_rsquared((psilim, θ_nodes[i]); hint=hint) for i in 1:N]
     dc = abs(sum(jac_vals) / N)
     dc < 1e-14 && return 4  # degenerate fallback
     k_max = 0
