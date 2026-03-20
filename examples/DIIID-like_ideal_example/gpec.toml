@@ -41,10 +41,11 @@ sing_start = 0                # Start integration at the sing_start'th rational 
 
 nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
-delta_mlow = 8                # Expands lower bound of Fourier harmonics
-delta_mhigh = 8               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 512                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 0                    # Number of points used in splines over poloidal angle (0 = auto-compute)
+m_accuracy = 0.01             # Fourier decay threshold for metric bandwidth estimation
+mlow = 0                      # Explicit lower poloidal mode bound (0 = auto-compute)
+mhigh = 0                     # Explicit upper poloidal mode bound (0 = auto-compute)
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kin_flag = false              # Kinetic EL equation (default: false)
