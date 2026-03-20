@@ -14,7 +14,7 @@ using AdaptiveArrayPools
 using Roots
 
 import ..Equilibrium
-import ..Equilibrium: eval_q
+using ..Equilibrium: eval_q
 import ..Utilities
 import ..Vacuum
 using Printf

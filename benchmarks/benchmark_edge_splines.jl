@@ -79,7 +79,7 @@ psi_core = profiles.xs
 # --- Build dense evaluation grids (completed after rzphi extension below) ---
 psi_plot_core = range(psi_core[1], psihigh, length=500)
 
-# Key reference values
+# Key reference values at psihigh
 q_at_psihigh_direct  = profiles.q_spline(psihigh)
 q_at_psihigh_edge    = eval_q(profiles, psihigh)
 dV_at_psihigh_direct = profiles.dVdpsi_spline(psihigh)
@@ -128,9 +128,11 @@ q_direct  = profiles.q_spline.(psi_plot_all)
 dV_direct = profiles.dVdpsi_spline.(psi_plot_all)
 
 # Edge inverse spline (only valid in edge zone)
-q_edge_vals    = map(psi -> 1.0 / profiles.iota_spline(psi), collect(psi_plot_edge))
-dV_edge_vals   = map(psi -> 1.0 / profiles.dVdpsi_inv_spline(psi), collect(psi_plot_edge))
-iota_edge_plot = profiles.iota_spline.(psi_plot_edge)
+hint_q  = Ref(1)
+hint_dV = Ref(1)
+q_edge_vals  = [1.0 / iota_inner(psi; hint=hint_q)  for psi in psi_plot_edge]
+dV_edge_vals = [1.0 / profiles.dVdpsi_inv_spline(psi) for psi in psi_plot_edge]
+iota_edge_plot = [iota_inner(psi; hint=hint_q)  for psi in psi_plot_edge]
 
 # --- Print key diagnostics ---
 println("Continuity check at psihigh:")
@@ -277,16 +279,10 @@ println("Saved: edge_spline_cross_section.png")
 # edge_surfaces was computed and rzphi extended before psi_plot_edge was built (above).
 # psilim_bench is overridden inside the h5open block (Plot 7) with q_es[end] from gpec.h5.
 psilim_bench = isempty(edge_surfaces) ? psihigh : edge_surfaces[end]
-qlim_bench   = (!isnothing(profiles.iota_spline) && psilim_bench > psihigh) ?
-               1.0 / profiles.iota_spline(psilim_bench) :
-               profiles.q_spline(psilim_bench)
+qlim_bench   = eval_q(profiles, psilim_bench)
 
 # Helper: psi → q using iota inverse above psihigh (available to all subsequent plots)
-psi_to_q_outer = psi_arr -> map(psi_arr) do psi
-    (!isnothing(profiles.iota_spline) && psi > psihigh) ?
-        1.0 / profiles.iota_spline(psi) :
-        profiles.q_spline(psi)
-end
+psi_to_q_outer = psi_arr -> map(psi -> eval_q(profiles, psi), psi_arr)
 
 p6 = plot(
     collect(psi_plot_edge), q_edge_vals;
@@ -328,13 +324,7 @@ if isfile(h5file)
 
             # Convert psi → q
             hint_q7 = Ref(1)
-            q_es = map(psi_es) do psi
-                if psi > psihigh && !isnothing(profiles.iota_spline)
-                    1.0 / profiles.iota_spline(psi)
-                else
-                    profiles.q_spline(psi; hint=hint_q7)
-                end
-            end
+            q_es = map(psi -> eval_q(profiles, psi), psi_es)
 
             q_at_psihigh = profiles.q_spline(psihigh)
             q_max_scan   = maximum(q_es)
@@ -493,6 +483,13 @@ if !isnothing(pe.params.r_xpoint)
     println("Saved: edge_spline_geometry.png")
 else
     println("Note: X-point not detected (limited plasma) — skipping Plot 8")
+end
+
+# Extend the rzphi spline into the far-edge zone so the GSE diagnostic can evaluate
+# GS residuals beyond psihigh.  Normally this extension is triggered by ForceFreeStates
+# after sing_find!, but the benchmark only calls setup_equilibrium.
+if !isnothing(profiles.iota_spline) && !isempty(edge_surfaces)
+    GeneralizedPerturbedEquilibrium.Equilibrium.equilibrium_extend_rzphi!(pe, edge_surfaces)
 end
 
 # --- Plots 9 and 10: GS residual diagnostics ---
@@ -696,22 +693,7 @@ if !isnothing(profiles.iota_spline)
 
     # q from iota inverse spline (correct q behavior toward separatrix)
     above_mask_gse = psi_edge_gse .>= psihigh
-    q_iota_edge = map(psi_edge_gse) do psi
-        psi >= psihigh ? 1.0 / profiles.iota_spline(psi) : profiles.q_spline(psi)
-    end
-
-    # --- iota vs psin (built into edge_spline_profiles.png later; kept as p1 for reuse) ---
-    p1 = plot(
-        collect(psi_plot_edge), iota_edge_plot;
-        xlabel = "ψₙ",
-        ylabel = "ι = 1/q",
-        title  = "Rotational transform ι = 1/q toward separatrix",
-        label  = "Edge iota spline",
-        lw = 2, color = :blue,
-        legend = :topright
-    )
-    vline!(p1, [psihigh]; label = @sprintf("psihigh = %.3f", psihigh), ls = :dash, color = :gray)
-    hline!(p1, [0.0]; label = "ι = 0 (separatrix)", ls = :dot, color = :red, lw = 1.5)
+    q_iota_edge = map(psi -> eval_q(profiles, psi), psi_edge_gse)
 
     # Panel A: q_direct vs q_iota in the far edge
     p11a = plot(psi_edge_gse, q_direct_edge;
@@ -739,8 +721,7 @@ if !isnothing(profiles.iota_spline)
         label="|dF/dψ|", lw=2, color=:red, yscale=:log10, legend=:topleft)
     vline!(p11c, [psihigh]; label=@sprintf("psihigh=%.4f", psihigh), ls=:dash, color=:gray)
 
-    # p1 (iota) is included here so all spline quality plots are in one file
-    p11 = plot(p11a, p11b, p11c, p1; layout=(4,1), size=(800, 1100))
+    p11 = plot(p11a, p11b, p11c; layout=(3,1), size=(800, 900))
     savefig(p11, joinpath(output_dir, "edge_spline_profiles.png"))
     println("Saved: edge_spline_profiles.png")
 else
