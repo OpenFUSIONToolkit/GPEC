@@ -29,16 +29,31 @@ When `eq_type` is one of the EFIT-based options, three solver strategies are ava
 | `eq_type` | Method | Best for |
 |-----------|--------|----------|
 | `"efit"` | Geometric-angle field-line ODE | Default; fast and robust for standard cases |
-| `"efit_arclength"` | Arc-length field-line ODE | Highly elongated plasmas where the geometric-angle ODE has singularities near X-points |
+| `"efit_arclength"` | Arc-length field-line ODE | Near-separatrix surfaces where the geometric-angle ODE becomes singular |
 | `"efit_by_inversion"` | Contour.jl marching-squares → inverse solver | Highest geometric accuracy; avoids ODE singularities entirely |
 
-`efit_by_inversion` traces flux surface level sets directly from ψ(R,Z) using marching
+**`efit`** integrates field lines using the geometric angle η (polar angle from the
+magnetic axis, 0→2π) as the independent variable. Position at each step is computed as
+`R = R₀ + rfac·cos(η)`, so the RHS denominator is `Bz·cos(η) − Br·sin(η)` — the
+projection of B_pol onto the radial direction. Near an X-point where Bp → 0 this
+denominator passes through zero, causing a coordinate singularity: the ODE steps
+become extremely small or the solver fails to converge.
+
+**`efit_arclength`** uses arc length along the flux surface as the independent variable
+instead. The tangent direction `(dR/ds, dZ/ds) = ∇ψ⊥/|∇ψ|` has unit magnitude by
+construction, so the position equations have no denominator and remain well-behaved
+all the way to the separatrix. The 1/Bp factors in the accumulated integrals still
+diverge near X-points, but their solver tolerances are set large so they do not
+restrict the step size — only the position tracking drives adaptivity. The two methods
+produce identical results when both succeed; `efit_arclength` extends the reliable
+range of psihigh closer to 1.
+
+**`efit_by_inversion`** traces flux surface level sets directly from ψ(R,Z) using marching
 squares, resamples each closed curve to a uniform geometric-angle grid, and feeds the
 result into the inverse equilibrium solver (the same path used by CHEASE input).
 The Cartesian evaluation grid is clipped to the separatrix bounding box and its
 resolution is set adaptively from a bilinear interpolation error bound, so no manual
-tuning is needed. All three methods handle near-separatrix surfaces (psihigh up to 0.999)
-without modification.
+tuning is needed.
 
 ## Radial grid packing
 
