@@ -128,9 +128,12 @@ end
 
 Compute and set integration ψ, q, and q' limits.
 
-`psilim` is first set to its natural upper bound from `sing_find!` results:
-- Diverted: just inside the last edge rational surface above psihigh (or psihigh if none found).
-- Limited: psihigh.
+`psilim` is set to just inside the last rational surface in the consecutive sequence
+of surfaces (sorted by ψ) whose spacing from the previous surface is at least
+`ctrl.edge_layer_width`. This filter applies to all surfaces regardless of psihigh:
+if psihigh is very close to the separatrix, tightly-packed core surfaces near psihigh
+are excluded just as above-psihigh edge surfaces are. For non-diverted (limited) plasmas
+psilim is additionally capped at psihigh.
 
 `qlim = min(q(psilim), ctrl.qhigh)`. If `ctrl.qhigh` truncates the integration before
 `psilim`, a root-find adjusts `psilim` to where `q = qhigh`:
@@ -145,20 +148,29 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     psihigh     = equil.config.psihigh
     is_diverted = !isnothing(equil.params.is_diverted) && equil.params.is_diverted
 
-    # Set psilim to its natural upper bound from sing_find! results.
-    if is_diverted
-        edge_surfs = filter(s -> s.psifac > psihigh, intr.sing)
-        if !isempty(edge_surfs)
-            # Set psilim just inside the last edge surface using the same singfac_min buffer
-            # as EulerLagrange (with a 1.1 safety margin so floating-point rounding cannot
-            # accidentally push psilim past the trigger threshold and cause the EL integrator
-            # to attempt a crossing that would step far beyond psilim).
-            n_last  = minimum(edge_surfs[end].n)
-            q1_last = edge_surfs[end].q1
-            intr.psilim = edge_surfs[end].psifac - ctrl.singfac_min * 1.1 / abs(n_last * q1_last)
+    # Walk ALL rational surfaces (sorted by ψ) and stop at the first pair whose consecutive
+    # spacing is below edge_layer_width. This ensures psilim is always set by the spacing
+    # criterion, even if psihigh is very close to the separatrix and the core search has
+    # already found many tightly-packed surfaces inside psihigh.
+    last_valid = nothing
+    psi_last   = 0.0
+    for s in intr.sing
+        if s.psifac - psi_last >= ctrl.edge_layer_width
+            last_valid = s
+            psi_last   = s.psifac
         else
-            intr.psilim = psihigh
+            break
         end
+    end
+
+    # Set psilim just inside the last valid surface using the singfac_min buffer
+    # (with a 1.1 safety margin so floating-point rounding cannot accidentally push
+    # psilim past the trigger threshold and cause the EL integrator to attempt a crossing).
+    if !isnothing(last_valid)
+        n_last  = minimum(last_valid.n)
+        q1_last = last_valid.q1
+        natural_psilim = last_valid.psifac - ctrl.singfac_min * 1.1 / abs(n_last * q1_last)
+        intr.psilim = is_diverted ? natural_psilim : min(natural_psilim, psihigh)
     else
         intr.psilim = psihigh
     end
