@@ -56,7 +56,8 @@ println("Output   : $outdir\n")
 
 # ─── Config factory ────────────────────────────────────────────────────────────
 function make_blend_config(path, psihigh;
-        jac_type="hamada", jac_type_edge="hamada", psi_jac_blend_start=1.0, psi_jac_blend_end=1.0)
+        jac_type="hamada", jac_type_edge="hamada", psi_jac_blend_start=1.0, psi_jac_blend_end=1.0,
+        mpsi=0, grid_type="log_asymptotic")
     raw = TOML.parsefile(path)
     eq = raw["Equilibrium"]
     eq["psihigh"]             = psihigh
@@ -64,6 +65,8 @@ function make_blend_config(path, psihigh;
     eq["jac_type_edge"]       = jac_type_edge
     eq["psi_jac_blend_start"] = psi_jac_blend_start
     eq["psi_jac_blend_end"]   = psi_jac_blend_end
+    eq["mpsi"]                = mpsi
+    eq["grid_type"]           = grid_type
     return Equilibrium.EquilibriumConfig(eq, dirname(path))
 end
 
@@ -255,14 +258,30 @@ println("5. Stability: eigenmode energy et[1] for each Jacobian variant")
 println("=" ^ 70)
 
 # Load FFS and Wall config from the example gpec.toml — same config for all variants.
-# The equilibrium (and thus Jacobian) is the only thing that differs.
+# Equilibria are re-built with the production grid settings (mpsi=128, grid_type="ldp",
+# default psihigh) so that et[1] matches the validated DIIID reference (~1.7).
+# The high-psihigh equilibria used for spline comparisons above are unsuitable for
+# stability: qmax reaches 6.24, the ODE crosses many more singular surfaces, and
+# numerical breakdown occurs.
 let
     inputs   = TOML.parsefile(config_path)
     ffs_cfg  = inputs["ForceFreeStates"]
     wall_cfg = get(inputs, "Wall", Dict())
 
-    # Replicate the FFS pipeline from GeneralizedPerturbedEquilibrium.main() in-process,
-    # using the already-computed PlasmaEquilibrium objects to avoid re-running the ODE solver.
+    # Build equilibria with production grid — mpsi=128, grid_type="ldp",
+    # psihigh from the original config (not the high-psihigh exploratory value).
+    pes_stab = Dict{String, Any}()
+    for (key, label, kwargs) in variants
+        cfg = make_blend_config(config_path, inputs["Equilibrium"]["psihigh"];
+            mpsi=128, grid_type="ldp", kwargs...)
+        try
+            pes_stab[key] = setup_equilibrium(cfg)
+        catch e
+            println("  Stability equil FAILED for $label: $e")
+        end
+    end
+
+    # Replicate the FFS pipeline from GeneralizedPerturbedEquilibrium.main() in-process.
     function run_stability(equil)
         intr = ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_path)
         ctrl = ForceFreeStates.ForceFreeStatesControl(;
@@ -307,18 +326,21 @@ let
         return real(vac.et[1])
     end
 
+    stab_keys = filter(k -> haskey(pes_stab, k), variant_keys)
+    haskey(pes_stab, ref_key) || error("Reference stability equil '$ref_key' failed.")
+
     et_vals = Dict{String, Float64}()
-    for k in active_keys
+    for k in stab_keys
         print("  Running FFS for variant: $(variant_label[k]) ... ")
         flush(stdout)
-        t = @elapsed et_vals[k] = run_stability(pes[k])
+        t = @elapsed et_vals[k] = run_stability(pes_stab[k])
         @printf("et[1] = %.6f  (%.1f s)\n", et_vals[k], t)
     end
 
     println()
     et_ref = et_vals[ref_key]
     @printf("  %-30s  %10s  %10s\n", "Variant", "et[1]", "Δet[1] %")
-    for k in active_keys
+    for k in stab_keys
         pct = 100.0 * (et_vals[k] - et_ref) / abs(et_ref)
         @printf("  %-30s  %10.6f  %+10.4f%%\n", variant_label[k], et_vals[k], pct)
     end
