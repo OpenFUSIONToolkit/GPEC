@@ -101,7 +101,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
-        jpsi = min(jpsi, equil.config.mpsi - 1)
+        jpsi = min(jpsi, length(profiles.xs) - 1)
 
         hint = Ref(jpsi)
         intr.psilim = find_zero(
