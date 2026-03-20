@@ -21,7 +21,7 @@ Produces (saved to benchmarks/equil_jac_blend_comparison_psihigh<value>/):
   equilibrium_contours.png — 2×3 panel: flux surfaces + theta contours (full / core / x-point)
   rzphi_splines.png     — 4×3 panel: r², offset, ν, Jacobian at θ = 0, 0.25, 0.5, 0.75
   eqfun_splines.png     — 3×3 panel: |B|, metric₁, metric₂ at select θ values
-  Printed numerical summaries for every spline.
+  Printed numerical summaries, spline differences, and stability eigenvalue et[1] per variant.
 
 Usage:
   julia --project=. benchmarks/equil_jac_blend_comparison.jl [example_path] [psihigh]
@@ -32,6 +32,7 @@ Recommended psihigh values: 0.997, 0.999
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.Equilibrium
 using TOML, Printf, Statistics, Plots
+import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
 
 const EqPlot = Analysis.Equilibrium
 
@@ -247,10 +248,87 @@ for (ename, getter) in zip(eqfun_names, eqfun_getters)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 5.  SUMMARY
+# 5.  STABILITY (et[1])
 # ═══════════════════════════════════════════════════════════════════════════════
 println("\n" * "=" ^ 70)
-println("Summary: axis / edge parameter comparison")
+println("5. Stability: eigenmode energy et[1] for each Jacobian variant")
+println("=" ^ 70)
+
+# Load FFS and Wall config from the example gpec.toml — same config for all variants.
+# The equilibrium (and thus Jacobian) is the only thing that differs.
+let
+    inputs   = TOML.parsefile(config_path)
+    ffs_cfg  = inputs["ForceFreeStates"]
+    wall_cfg = get(inputs, "Wall", Dict())
+
+    # Replicate the FFS pipeline from GeneralizedPerturbedEquilibrium.main() in-process,
+    # using the already-computed PlasmaEquilibrium objects to avoid re-running the ODE solver.
+    function run_stability(equil)
+        intr = ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_path)
+        ctrl = ForceFreeStates.ForceFreeStatesControl(;
+            (Symbol(k) => v for (k, v) in ffs_cfg)...)
+        intr.wall_settings = Vacuum.WallShapeSettings(;
+            (Symbol(k) => v for (k, v) in wall_cfg)...)
+
+        ctrl.delta_mhigh *= 2  # match main() convention
+
+        ForceFreeStates.sing_lim!(intr, ctrl, equil)
+        if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
+            ctrl.psiedge = 1.0
+        end
+
+        profiles_xs = equil.profiles.xs
+        locstab_fs  = zeros(Float64, length(profiles_xs), 5)
+        ctrl.mer_flag && ForceFreeStates.mercier_scan!(locstab_fs, equil)
+        intr.locstab = cubic_interp(profiles_xs, locstab_fs;
+            bc=CubicFit(), extrap=ExtendExtrap())
+
+        intr.nlow  = ctrl.nn_low  == 0 ? ctrl.nn_high : max(1, ctrl.nn_low)
+        intr.nhigh = ctrl.nn_high == 0 ? intr.nlow    : ctrl.nn_high
+        intr.npert = intr.nhigh - intr.nlow + 1
+
+        ForceFreeStates.sing_find!(intr, equil)
+
+        if ctrl.cyl_flag
+            intr.mlow  = ctrl.delta_mlow
+            intr.mhigh = ctrl.delta_mhigh
+        else
+            intr.mlow  = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        end
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.mband = min(max(intr.mpert - 1 - ctrl.delta_mband, 0), intr.mpert - 1)
+        intr.numpert_total = intr.mpert * intr.npert
+
+        metric = ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit   = ForceFreeStates.make_matrix(equil, intr, metric)
+        odet   = ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+        vac    = ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
+        return real(vac.et[1])
+    end
+
+    et_vals = Dict{String, Float64}()
+    for k in active_keys
+        print("  Running FFS for variant: $(variant_label[k]) ... ")
+        flush(stdout)
+        t = @elapsed et_vals[k] = run_stability(pes[k])
+        @printf("et[1] = %.6f  (%.1f s)\n", et_vals[k], t)
+    end
+
+    println()
+    et_ref = et_vals[ref_key]
+    @printf("  %-30s  %10s  %10s\n", "Variant", "et[1]", "Δet[1] %")
+    for k in active_keys
+        pct = 100.0 * (et_vals[k] - et_ref) / abs(et_ref)
+        @printf("  %-30s  %10.6f  %+10.4f%%\n", variant_label[k], et_vals[k], pct)
+    end
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6.  SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════════
+println("\n" * "=" ^ 70)
+println("6. Summary: axis / edge parameter comparison")
 println("=" ^ 70)
 
 col_labels = [variant_label[k] for k in active_keys]
