@@ -12,11 +12,18 @@ Bundles all necessary settings originally specified in the equil fortran namelis
 
   - `eq_type::String` - Type of equilibrium file ("efit", "solovev", "lar", etc.)
   - `eq_filename::String` - Path to equilibrium input file
-  - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "other")
-  - `power_bp::Int` - Poloidal field power exponent for Jacobian
-  - `power_b::Int` - Total field power exponent for Jacobian
-  - `power_r::Int` - Major radius power exponent for Jacobian
-  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
+  - `jac_type::String` - Core Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "other")
+  - `power_bp::Int` - Poloidal field power exponent for core Jacobian
+  - `power_b::Int` - Total field power exponent for core Jacobian
+  - `power_r::Int` - Major radius power exponent for core Jacobian
+  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for core Jacobian
+  - `jac_type_edge::String` - Edge Jacobian type; blended in for ψ > psi_jac_blend_start (default = "hamada" = no blend)
+  - `power_bp_edge::Int` - Poloidal field power exponent for edge Jacobian
+  - `power_b_edge::Int` - Total field power exponent for edge Jacobian
+  - `power_r_edge::Int` - Major radius power exponent for edge Jacobian
+  - `power_rc_edge::Int` - Minor radius power exponent for edge Jacobian
+  - `psi_jac_blend_start::Float64` - ψ where Jacobian blend begins (default 1.0 = no blend)
+  - `psi_jac_blend_end::Float64` - ψ where blend reaches full edge Jacobian (default 1.0 = no blend)
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
   - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp")
@@ -42,6 +49,14 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     power_r::Int = 0
     power_rc::Int = 0
 
+    jac_type_edge::String = "hamada"
+    power_bp_edge::Int = 0
+    power_b_edge::Int = 0
+    power_r_edge::Int = 0
+    power_rc_edge::Int = 0
+    psi_jac_blend_start::Float64 = 1.0
+    psi_jac_blend_end::Float64 = 1.0
+
     grid_type::String = "log_asymptotic"
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.994
@@ -59,8 +74,11 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+        jac_type_edge, power_bp_edge, power_b_edge, power_r_edge, power_rc_edge,
+        psi_jac_blend_start, psi_jac_blend_end,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
         force_termination, use_galgrid)
+        # Parse core Jacobian type
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0; power_bp = 0; power_r = 0; power_rc = 0
@@ -94,11 +112,30 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         else
             error("Cannot recognize jac_type = $(jac_type)")
         end
+        # Parse edge Jacobian type (used for blending near separatrix)
+        if psi_jac_blend_start < psi_jac_blend_end
+            if jac_type_edge == "hamada"
+                power_b_edge = 0; power_bp_edge = 0; power_r_edge = 0; power_rc_edge = 0
+            elseif jac_type_edge == "pest"
+                power_b_edge = 0; power_bp_edge = 0; power_r_edge = 2; power_rc_edge = 0
+            elseif jac_type_edge == "equal_arc"
+                power_b_edge = 0; power_bp_edge = 1; power_r_edge = 0; power_rc_edge = 0
+            elseif jac_type_edge == "boozer"
+                power_b_edge = 2; power_bp_edge = 0; power_r_edge = 0; power_rc_edge = 0
+            elseif jac_type_edge == "park"
+                power_b_edge = 1; power_bp_edge = 0; power_r_edge = 0; power_rc_edge = 0
+            elseif jac_type_edge != "other"
+                error("Cannot recognize jac_type_edge = $(jac_type_edge)")
+            end
+            @info "Edge Jacobian blending: $(jac_type) → $(jac_type_edge) over ψ ∈ [$(psi_jac_blend_start), $(psi_jac_blend_end)]"
+        end
         if psihigh > 1.0
             @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
         end
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+            jac_type_edge, power_bp_edge, power_b_edge, power_r_edge, power_rc_edge,
+            psi_jac_blend_start, psi_jac_blend_end,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
             force_termination, use_galgrid)
     end

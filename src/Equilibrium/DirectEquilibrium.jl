@@ -39,7 +39,12 @@ struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastIn
     power_bp::Int
     power_b::Int
     power_r::Int
-    power_rc::Int  # minor radius rfac = √((R-R₀)²+(Z-Z₀)²) power exponent
+    power_rc::Int      # minor radius rfac = √((R-R₀)²+(Z-Z₀)²) power exponent (core)
+    power_bp_edge::Int # edge Jacobian exponents (for blending near separatrix)
+    power_b_edge::Int
+    power_r_edge::Int
+    power_rc_edge::Int
+    w::Float64         # Jacobian blend weight: 0 = pure core, 1 = pure edge
     bfield::DirectBField
 end
 
@@ -218,6 +223,19 @@ function direct_position!(raw_profile::DirectRunInput)
 end
 
 """
+    jac_blend_weight(ψ, psi_blend_start, psi_blend_end)
+
+Cubic smoothstep blend weight for the core→edge Jacobian transition.
+Returns 0 for ψ ≤ psi_blend_start, 1 for ψ ≥ psi_blend_end, with C¹ continuity at both ends.
+When psi_blend_start ≥ psi_blend_end (default), always returns 0 (no blend).
+"""
+function jac_blend_weight(ψ::Float64, psi_blend_start::Float64, psi_blend_end::Float64)::Float64
+    psi_blend_start >= psi_blend_end && return 0.0
+    t = clamp((ψ - psi_blend_start) / (psi_blend_end - psi_blend_start), 0.0, 1.0)
+    return t^2 * (3 - 2t)
+end
+
+"""
     direct_fieldline_int(psifac, raw_profile, ro, zo, rs2)
 
 Performs the field-line integration for a single flux surface. This is a Julia adaptation
@@ -269,8 +287,11 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
 
     bfield = DirectBField()
     equil_config = raw_profile.config
+    w = jac_blend_weight(psifac, equil_config.psi_jac_blend_start, equil_config.psi_jac_blend_end)
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc,
+        equil_config.power_bp_edge, equil_config.power_b_edge, equil_config.power_r_edge, equil_config.power_rc_edge,
+        w, bfield)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -312,7 +333,9 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     bt = params.bfield.f / r
     b = sqrt(bp^2 + bt^2)
     rfac = y[2]
-    jac = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r * rfac^params.power_rc)
+    jac_core = (bp^params.power_bp) * (b^params.power_b) / (r^params.power_r * rfac^params.power_rc)
+    jac_edge = (bp^params.power_bp_edge) * (b^params.power_b_edge) / (r^params.power_r_edge * rfac^params.power_rc_edge)
+    jac = (1 - params.w) * jac_core + params.w * jac_edge
 
     # Denominator for d(l_pol)/d(eta) = rfac |B_pol|/denominator
     denominator = params.bfield.bz * cos_eta - params.bfield.br * sin_eta

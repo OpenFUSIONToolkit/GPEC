@@ -51,11 +51,14 @@ so the solver never restricts step size for them.
     dy[4] = 1.0 / (R^2 * Bp_eff)  # d/ds [∫dl/(R²Bp)]
 
     # d/ds [∫jac·dl/Bp]: integrand = Bp^(power_bp−1) · B^power_b / (R^power_r · rfac^power_rc)
+    # (power_bp−1 because arc-length parameterization already carries the 1/Bp from dl/Bp)
     Bt = params.bfield.f / R
     B_val = sqrt(Bp^2 + Bt^2)
     rfac = sqrt((R - params.ro)^2 + (Z - params.zo)^2)
     rfac_eff = max(rfac, eps(Float64))
-    dy[5] = Bp_eff^(params.power_bp - 1) * B_val^params.power_b / (R^params.power_r * rfac_eff^params.power_rc)
+    jac_core_5 = Bp_eff^(params.power_bp - 1) * B_val^params.power_b / (R^params.power_r * rfac_eff^params.power_rc)
+    jac_edge_5 = Bp_eff^(params.power_bp_edge - 1) * B_val^params.power_b_edge / (R^params.power_r_edge * rfac_eff^params.power_rc_edge)
+    dy[5] = (1 - params.w) * jac_core_5 + params.w * jac_edge_5
 end
 
 """
@@ -97,8 +100,11 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 
     equil_config = raw_profile.config
     bfield_ode = DirectBField()
+    w = jac_blend_weight(psifac, equil_config.psi_jac_blend_start, equil_config.psi_jac_blend_end)
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield_ode)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc,
+        equil_config.power_bp_edge, equil_config.power_b_edge, equil_config.power_r_edge, equil_config.power_rc_edge,
+        w, bfield_ode)
 
     t_min = π * (r - ro)  # minimum arc before termination (half-circumference lower bound)
     condition(u, _t, integrator) = u[2] - zo
