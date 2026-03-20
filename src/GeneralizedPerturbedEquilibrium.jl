@@ -50,32 +50,42 @@ const _BANNER = "="^60
 const _SECTION = "-"^40
 
 """
-    _estimate_m_bandwidth(equil, psilim, threshold)
+    _estimate_m_bandwidth(field, θ_nodes, psilim, threshold)
 
-Estimate the Fourier bandwidth of the metric at `psilim` (the outermost flux surface).
-Returns the highest harmonic k where |a_k| > threshold * |a_0| (the DC amplitude).
-Uses r² (rzphi_rsquared) as the metric proxy: proportional to g^{θθ} and correct even in
-Hamada coordinates where the Jacobian is constant by definition but r² still varies.
+Estimate the Fourier bandwidth of a 2D equilibrium field evaluated at `psilim`.
+Returns the highest harmonic k where |a_k| > threshold * peak(|field|).
+Normalizes by peak amplitude so the threshold is meaningful for zero-mean fields
+(e.g. metric cross-terms that oscillate around zero).
 """
-function _estimate_m_bandwidth(equil, psilim, threshold)
-    θ_nodes = equil.rzphi_ys
+function _estimate_m_bandwidth(field, θ_nodes, psilim, threshold)
     N = length(θ_nodes) - 1  # exclude duplicate last point
     hint = (Ref(1), Ref(1))
-    # Use r² (rzphi_rsquared) rather than the Jacobian: in Hamada coordinates J is
-    # constant by definition, giving bandwidth=0, but r² still captures the angular
-    # variation of the metric (g^{θθ} ~ r²) that drives inter-mode coupling.
-    jac_vals = [equil.rzphi_rsquared((psilim, θ_nodes[i]); hint=hint) for i in 1:N]
-    dc = abs(sum(jac_vals) / N)
-    dc < 1e-14 && return 4  # degenerate fallback
+    vals = [field((psilim, θ_nodes[i]); hint=hint) for i in 1:N]
+    peak = maximum(abs, vals)
+    peak < 1e-14 && return 0  # field is uniformly zero — contributes no bandwidth
     k_max = 0
     for k in 1:N÷2
-        cos_k = sum(jac_vals[i] * cospi(2k * (i - 1) / N) for i in 1:N) / N
-        sin_k = sum(jac_vals[i] * sinpi(2k * (i - 1) / N) for i in 1:N) / N
-        amp = sqrt(cos_k^2 + sin_k^2)
-        amp > threshold * dc && (k_max = k)
-        k_max == 0 && amp < threshold * dc / 10 && break
+        cos_k = sum(vals[i] * cospi(2k * (i - 1) / N) for i in 1:N) / N
+        sin_k = sum(vals[i] * sinpi(2k * (i - 1) / N) for i in 1:N) / N
+        sqrt(cos_k^2 + sin_k^2) > threshold * peak && (k_max = k)
     end
     return k_max
+end
+
+"""
+    _estimate_metric_bandwidth(equil, psilim, threshold)
+
+Estimate the effective Fourier bandwidth of the EL coupling at `psilim` by scanning
+all 2D equilibrium fields (rzphi_rsquared, rzphi_jac, eqfun_B, eqfun_metric1,
+eqfun_metric2), taking the maximum single-field bandwidth, then multiplying by 4 to
+account for convolution of metric products in the EL equations.
+"""
+function _estimate_metric_bandwidth(equil, psilim, threshold)
+    θ_nodes = equil.rzphi_ys
+    fields = (equil.rzphi_rsquared, equil.rzphi_jac,
+              equil.eqfun_B, equil.eqfun_metric1, equil.eqfun_metric2)
+    bw_raw = maximum(f -> _estimate_m_bandwidth(f, θ_nodes, psilim, threshold), fields)
+    return 4 * bw_raw
 end
 
 """
@@ -229,20 +239,26 @@ function main(args::Vector{String}=String[])
         intr.mlow  = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     else
-        # Physics-driven automatic computation: pad by metric Fourier bandwidth
-        bw = _estimate_m_bandwidth(equil, intr.psilim, ctrl.m_accuracy)
+        # Physics-driven automatic computation: bw = 4 × max single-field DFT bandwidth
+        # over all equilibrium metric fields, accounting for metric-product convolutions.
+        bw = _estimate_metric_bandwidth(equil, intr.psilim, ctrl.m_accuracy)
         m_core = if ctrl.sing_start == 0
             trunc(Int, min(intr.nlow * equil.params.qmin, 0))
         else
             minimum(minimum(intr.sing[ising].m) for ising in Int(ctrl.sing_start):intr.msing)
         end
         m_edge = trunc(Int, intr.nhigh * equil.params.qmax)
-        intr.mlow  = m_core - bw - ctrl.delta_mlow
-        intr.mhigh = m_edge + bw + ctrl.delta_mhigh
+        # Floors: mhigh ≥ 2*nhigh*qmax (mode coupling extends to ~2× the highest resonance),
+        # mlow ≤ -0.5*mhigh (maintain ~2:1 asymmetry toward positive m).
+        mhigh_floor = round(Int, 2 * intr.nhigh * equil.params.qmax)
+        intr.mhigh = max(m_edge + bw, mhigh_floor)
+        mlow_floor  = -round(Int, 0.5 * intr.mhigh)
+        intr.mlow  = min(m_core - bw, mlow_floor)
         # Explicit user overrides (nonzero = override)
         ctrl.mlow  != 0 && (intr.mlow  = ctrl.mlow)
         ctrl.mhigh != 0 && (intr.mhigh = ctrl.mhigh)
-        @info "Auto-m: metric bandwidth=$bw (m_accuracy=$(ctrl.m_accuracy)) → mlow=$(intr.mlow), mhigh=$(intr.mhigh)"
+        bw_raw = bw ÷ 4
+        @info "Auto-m: metric bandwidth=$(bw) (bw_raw=$bw_raw, m_accuracy=$(ctrl.m_accuracy)) → mlow=$(intr.mlow), mhigh=$(intr.mhigh)"
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     if ctrl.delta_mband >= intr.mpert
