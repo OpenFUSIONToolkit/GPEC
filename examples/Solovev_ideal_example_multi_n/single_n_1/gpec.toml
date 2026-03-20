@@ -57,9 +57,7 @@ ktw = 50.0                    # Parameter for ktanh_flag (default: 50.0)
 ion_flag = true               # Include ion dW_k when kin_flag is true
 electron_flag = false         # Include electron dW_k when kin_flag is true
 
-tol_nr = 1e-6                 # Relative tolerance of dynamic integration steps away from rationals
-tol_r = 1e-7                  # Relative tolerance of dynamic integration steps near rationals
-crossover = 1e-2              # Fractional distance from rational q at which tol switches
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 write_outputs_to_HDF5 = true

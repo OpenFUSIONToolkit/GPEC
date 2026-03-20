@@ -20,7 +20,7 @@ You adhere strictly to:
 
 **Context awareness**: You are working with GPEC (GeneralizedPerturbedEquilibrium), a Julia codebase for MHD equilibrium and stability analysis. Consider:
 - Julia 1.11 conventions and idioms
-- The existing module structure (Splines, Equilibrium, Vacuum, DCON)
+- The existing module structure (Splines, Equilibrium, Vacuum, ForceFreeStates, ForcingTerms, PerturbedEquilibrium)
 - The ongoing Fortran-to-Julia conversion effort
 - The need for parity between Fortran and Julia implementations
 
@@ -95,6 +95,6 @@ For each issue, provide:
 - Follow the commit message format: `MODULE - TAG - Detailed message`
 - Be aware of 0-based to 1-based indexing conversions from Fortran
 - Ensure compatibility with the existing test structure in `test/`
-- Consider whether changes affect diagnostic outputs (gsec.h5, gse.h5, gsei.h5)
+- Consider whether changes affect diagnostic outputs or user-facing APIs
 
 Your goal is to help create code that a fusion physicist with moderate Julia experience can read, understand, and maintain confidently.

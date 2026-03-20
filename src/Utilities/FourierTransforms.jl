@@ -88,41 +88,41 @@ function compute_fourier_coefficients(
     npert::Int,
     nlow::Int;
     n_2D::Union{Nothing, Int}=nothing,
-    ν::Vector{Float64}=zeros(Float64, mtheta)
+    ν::Union{Nothing, Vector{Float64}}=nothing
 )
-    # Validate inputs
-    @assert length(ν) == mtheta "ν must have length mtheta"
-    @assert !(nzeta > 1 && n_2D !== nothing) "If nzeta > 1, don't set n_2D since we use the full nlow - nhigh range for the toroidal modes"
-    @assert !(n_2D === nothing && nzeta == 1) "If nzeta == 1 (2D), set n_2D to the toroidal mode number"
 
     # Uniform theta grid: [0, 2π)
     θ_grid = range(; start=0, length=mtheta, step=2π/mtheta)
 
-    if !isnothing(n_2D)
+    if nzeta == 1
+        @assert n_2D !== nothing "n_2D must be set for 2D"
+        @assert ν !== nothing "ν must be set for 2D"
+        @assert length(ν) == mtheta "ν must have length mtheta"
+
         # In 2D, we only use one toroidal mode at a time
         # Compute sin(mθ - nν) and cos(mθ - nν)
         sin_mn_basis = sin.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
         cos_mn_basis = cos.((mlow .+ (0:(mpert-1))') .* θ_grid .- n_2D .* ν)
-    else # nzeta > 1
+    else # 3D
+        @assert (n_2D === nothing && ν === nothing) "n_2D and ν should be nothing for 3D"
+
         # In 3D, we need to compute the basis for all modes and grid points
-        # Compute sin(mθ - nν - nϕ) and cos(mθ - nν - nϕ)
-        ϕ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
+        # Compute sin(mθ - nζ) and cos(mθ - nζ)
+        ζ_grid = range(; start=0, length=nzeta, step=2π/nzeta)
         sin_mn_basis = zeros(mtheta * nzeta, mpert * npert)
         cos_mn_basis = zeros(mtheta * nzeta, mpert * npert)
         for idx_n in 1:npert
             n = nlow + idx_n - 1
             n_col_offset = (idx_n - 1) * mpert
-            # Precompute n*(ν + ϕ) for all (theta, phi) pairs once per n — (mtheta, nzeta)
-            nν_nϕ = n .* (ν .+ ϕ_grid')
             for idx_m in 1:mpert
                 m = mlow + idx_m - 1
                 col = idx_m + n_col_offset
-                # Broadcast m*θ over all phi; sincos halves trig evaluations
-                arg = m .* θ_grid .- nν_nϕ  # (mtheta, nzeta)
-                for k in eachindex(arg)
-                    s, c = sincos(arg[k])
-                    cos_mn_basis[k, col] = c
-                    sin_mn_basis[k, col] = s
+                for (j, ζ) in enumerate(ζ_grid), (i, θ) in enumerate(θ_grid)
+                    idx = i + (j-1)*mtheta
+                    arg = m * θ - n * ζ
+                    s, c = sincos(arg)
+                    cos_mn_basis[idx, col] = c
+                    sin_mn_basis[idx, col] = s
                 end
             end
         end
