@@ -161,17 +161,17 @@ for (idx, (pname, spl_getter)) in enumerate(profile_specs)
 
     p_full = plot(psi_full, y_ref; lw=2, color=method_color[ref_method],
         ls=method_style[ref_method], label=method_label[ref_method],
-        xlabel="ψ (normalized)", ylabel=pname,
+        xlabel="ψ (normalized)", ylabel=pname, legend=:best, xlims=(0, 1),
         title="$pname — full domain  (psihigh=$psihigh_arg)")
     p_core = plot(psi_full[mask_core], y_ref[mask_core]; lw=2,
         color=method_color[ref_method], ls=method_style[ref_method],
         label=method_label[ref_method], xlabel="ψ  (log scale)", ylabel=pname,
-        title="Deep core  (ψ < 0.10)", xscale=:log10)
+        title="Deep core  (ψ < 0.10)", xscale=:log10, legend=:none)
     p_edge = plot(t_edge_full, y_ref[mask_edge]; lw=2,
         color=method_color[ref_method], ls=method_style[ref_method],
         label=method_label[ref_method], xlabel="−ln(1−ψ)", ylabel=pname,
-        title="Far edge  (ψ > 0.98)")
-    p_diff = plot(; xlabel="ψ", ylabel="Δ$pname", title="Difference (vs efit)")
+        title="Far edge  (ψ > 0.98)", legend=:none)
+    p_diff = plot(; xlabel="ψ", ylabel="Δ$pname", title="Difference (vs efit)", legend=:none, xlims=(0, 1))
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
     # Scatter markers at actual ψ grid nodes for reference method
@@ -296,11 +296,10 @@ println("\n" * "=" ^ 70)
 println("2. Flux Surface Contour Overlays")
 println("=" ^ 70)
 
+psi_contours  = collect(range(psi_lo, psi_hi; length=20))
 theta_contour = range(0.0, 1.0; length=256)
 
-# Per-method: use the actual rzphi_xs grid nodes as contour ψ values so that
-# the SFL grid dots (also at rzphi_xs × θ_sub) lie exactly on the drawn lines.
-R_fs = Dict(m => flux_surface_RZ(pes[m], pes[m].rzphi_xs, theta_contour) for m in all_methods)
+R_fs = Dict(m => flux_surface_RZ(pes[m], psi_contours, theta_contour) for m in all_methods)
 
 p_ctr_full = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
     title="Flux surfaces: all methods  (psihigh=$psihigh_arg)")
@@ -310,22 +309,21 @@ p_ctr_xpt  = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
     title="Far edge / x-point zoom (outermost 3 surfaces)")
 
 for m in all_methods
-    pe = pes[m]
     Rs, Zs = R_fs[m]
-    n_psi = length(pe.rzphi_xs)
-    for k in 1:n_psi
+    for k in 1:length(psi_contours)
         lbl = k == 1 ? method_label[m] : ""
         plot!(p_ctr_full, Rs[k], Zs[k]; color=method_color[m],
             ls=method_style[m], lw=0.9, alpha=0.7, label=lbl)
     end
     n_core = 4
-    for k in 1:min(n_core, n_psi)
+    for k in 1:min(n_core, length(psi_contours))
         lbl = k == 1 ? method_label[m] : ""
         plot!(p_ctr_core, Rs[k], Zs[k]; color=method_color[m],
             ls=method_style[m], lw=1.5, label=lbl)
     end
-    for k in (n_psi - 2):n_psi
-        lbl = k == n_psi - 2 ? method_label[m] : ""
+    n_outer = length(psi_contours)
+    for k in (n_outer - 2):n_outer
+        lbl = k == n_outer - 2 ? method_label[m] : ""
         plot!(p_ctr_xpt, Rs[k], Zs[k]; color=method_color[m],
             ls=method_style[m], lw=1.5, label=lbl)
     end
@@ -363,20 +361,6 @@ let
 end
 end  # !isempty(r_global_grid)
 
-# SFL grid dots: scatter (ψ_i, θ_j) nodes in (R,Z) on the flux contour panels.
-# θ is subsampled to ~32 values so individual dots are visible.
-for m in all_methods
-    pe = pes[m]
-    θ_all = pe.rzphi_ys
-    step = max(1, length(θ_all) ÷ 32)
-    θ_sub = θ_all[1:step:end]
-    Rg = [psi_theta_to_RZ(pe, ψ, θ)[1] for ψ in pe.rzphi_xs for θ in θ_sub]
-    Zg = [psi_theta_to_RZ(pe, ψ, θ)[2] for ψ in pe.rzphi_xs for θ in θ_sub]
-    scatter!(p_ctr_full, Rg, Zg; ms=1.5, color=method_color[m], alpha=0.5, markerstrokewidth=0, label="")
-    scatter!(p_ctr_core, Rg, Zg; ms=2.0, color=method_color[m], alpha=0.6, markerstrokewidth=0, label="")
-    scatter!(p_ctr_xpt,  Rg, Zg; ms=2.0, color=method_color[m], alpha=0.6, markerstrokewidth=0, label="")
-end
-
 # Set zoom limits for core and x-point panels using the reference method
 Rc, Zc = R_fs[ref_method]
 n_core = 4
@@ -385,7 +369,7 @@ pad = 0.03
 xlims!(p_ctr_core, minimum(all_R_c) - pad, maximum(all_R_c) + pad)
 ylims!(p_ctr_core, minimum(all_Z_c) - pad, maximum(all_Z_c) + pad)
 
-n_outer = length(pes[ref_method].rzphi_xs)
+n_outer = length(psi_contours)
 all_R_e = vcat(Rc[(n_outer-2):n_outer]...); all_Z_e = vcat(Zc[(n_outer-2):n_outer]...)
 xpt_idx = argmin(all_Z_e)
 xlims!(p_ctr_xpt, all_R_e[xpt_idx] - 0.20, all_R_e[xpt_idx] + 0.20)
@@ -457,11 +441,11 @@ for (sidx, (sname, fn_getter)) in enumerate(rzphi_specs)
     fn_ref  = fn_getter(pe_ref)
     yd_all  = [[fn_ref(ψ, θ) for ψ in psi_full] for θ in theta_select]
 
-    p_full = plot(; xlabel="ψ", ylabel=sname,
+    p_full = plot(; xlabel="ψ", ylabel=sname, legend=:best, xlims=(0, 1),
         title="$sname — full domain  (psihigh=$psihigh_arg)")
-    p_core = plot(; xlabel="ψ  (log scale)", ylabel=sname, title="Deep core  (ψ < 0.10)", xscale=:log10)
-    p_edge = plot(; xlabel="−ln(1−ψ)", ylabel=sname, title="Far edge  (ψ > 0.98)")
-    p_diff = plot(; xlabel="ψ", ylabel="Δ$sname", title="efit − other")
+    p_core = plot(; xlabel="ψ  (log scale)", ylabel=sname, title="Deep core  (ψ < 0.10)", xscale=:log10, legend=:none)
+    p_edge = plot(; xlabel="−ln(1−ψ)", ylabel=sname, title="Far edge  (ψ > 0.98)", legend=:none)
+    p_diff = plot(; xlabel="ψ", ylabel="Δ$sname", title="efit − other", legend=:none, xlims=(0, 1))
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
     for (tidx, θ) in enumerate(theta_select)
@@ -527,11 +511,11 @@ for (eidx, (ename, fn_getter)) in enumerate(eqfun_specs)
     fn_ref  = fn_getter(pe_ref)
     yd_all  = [[fn_ref(ψ, θ) for ψ in psi_full] for θ in theta_select]
 
-    p_full = plot(; xlabel="ψ", ylabel=ename,
+    p_full = plot(; xlabel="ψ", ylabel=ename, legend=:best, xlims=(0, 1),
         title="$ename — full domain  (psihigh=$psihigh_arg)")
-    p_core = plot(; xlabel="ψ  (log scale)", ylabel=ename, title="Deep core  (ψ < 0.10)", xscale=:log10)
-    p_edge = plot(; xlabel="−ln(1−ψ)", ylabel=ename, title="Far edge  (ψ > 0.98)")
-    p_diff = plot(; xlabel="ψ", ylabel="Δ$ename", title="efit − other")
+    p_core = plot(; xlabel="ψ  (log scale)", ylabel=ename, title="Deep core  (ψ < 0.10)", xscale=:log10, legend=:none)
+    p_edge = plot(; xlabel="−ln(1−ψ)", ylabel=ename, title="Far edge  (ψ > 0.98)", legend=:none)
+    p_diff = plot(; xlabel="ψ", ylabel="Δ$ename", title="efit − other", legend=:none, xlims=(0, 1))
     hline!(p_diff, [0.0]; color=:black, lw=1, ls=:dot, label="")
 
     for (tidx, θ) in enumerate(theta_select)
