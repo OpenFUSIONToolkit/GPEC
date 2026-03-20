@@ -207,19 +207,19 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
 
     kw = (legend=false, xlabel="ψ_N")
 
-    p_et = plot(psi, real.(et); ylabel="et = ep + ev", title="Total energy"; kw...)
+    p_et = plot(psi, real.(et); ylabel="et = ep + ev", title="Total energy", kw...)
     hline!(p_et, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_et, [psilim]; color=:gray, lw=1, ls=:dash)
 
-    p_ep = plot(psi, real.(ep); ylabel="ep (plasma)"; kw...)
+    p_ep = plot(psi, real.(ep); ylabel="ep (plasma)", kw...)
     hline!(p_ep, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ep, [psilim]; color=:gray, lw=1, ls=:dash)
 
-    p_ev = plot(psi, real.(ev); ylabel="ev (vacuum)"; kw...)
+    p_ev = plot(psi, real.(ev); ylabel="ev (vacuum)", kw...)
     hline!(p_ev, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ev, [psilim]; color=:gray, lw=1, ls=:dash)
 
-    p_evonly = plot(psi, evonly; ylabel="evonly (wv alone)"; kw...)
+    p_evonly = plot(psi, evonly; ylabel="evonly (wv alone)", kw...)
     hline!(p_evonly, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_evonly, [psilim]; color=:gray, lw=1, ls=:dash)
 
