@@ -6,7 +6,8 @@ construction approaches, using "efit" as the reference.
 
 Produces (saved to benchmarks/equil_spline_comparison_psihigh<value>/):
   1. 1D profile comparisons: F, P, dV/dψ, q with full-domain, core zoom, edge zoom, and diff subplots
-  2. Flux surface contour overlays: psi(R,Z) with full, core zoom, and x-point zoom panels
+  2. Flux surface contour overlays: psi(R,Z) with SFL grid dots; full, core, and x-point zoom panels
+  2b. Theta contour lines: constant-θ spokes in (R,Z) with SFL grid dots; same three panels
   3. 2D rzphi spline profiles at θ = 0, 0.25, 0.5, 0.75 for each of the 4 geometric splines
   4. 2D eqfun physics spline profiles at the same theta slices
   5. Printed numerical summaries of deep-core and far-edge differences for every spline
@@ -360,6 +361,20 @@ let
 end
 end  # !isempty(r_global_grid)
 
+# SFL grid dots: scatter (ψ_i, θ_j) nodes in (R,Z) on the flux contour panels.
+# θ is subsampled to ~32 values so individual dots are visible.
+for m in all_methods
+    pe = pes[m]
+    θ_all = pe.rzphi_ys
+    step = max(1, length(θ_all) ÷ 32)
+    θ_sub = θ_all[1:step:end]
+    Rg = [psi_theta_to_RZ(pe, ψ, θ)[1] for ψ in pe.rzphi_xs for θ in θ_sub]
+    Zg = [psi_theta_to_RZ(pe, ψ, θ)[2] for ψ in pe.rzphi_xs for θ in θ_sub]
+    scatter!(p_ctr_full, Rg, Zg; ms=1.5, color=method_color[m], alpha=0.5, markerstrokewidth=0, label="")
+    scatter!(p_ctr_core, Rg, Zg; ms=2.0, color=method_color[m], alpha=0.6, markerstrokewidth=0, label="")
+    scatter!(p_ctr_xpt,  Rg, Zg; ms=2.0, color=method_color[m], alpha=0.6, markerstrokewidth=0, label="")
+end
+
 # Set zoom limits for core and x-point panels using the reference method
 Rc, Zc = R_fs[ref_method]
 n_core = 4
@@ -377,6 +392,48 @@ ylims!(p_ctr_xpt, all_Z_e[xpt_idx] - 0.05, all_Z_e[xpt_idx] + 0.40)
 p_ctr_combo = plot(p_ctr_full, p_ctr_core, p_ctr_xpt; layout=(1, 3), size=(2100, 800),
     left_margin=8Plots.mm, bottom_margin=6Plots.mm)
 savefig(p_ctr_combo, joinpath(outdir, "flux_contours.png"))
+
+# ─── Theta contour plot ─────────────────────────────────────────────────────
+# Lines of constant θ ("spokes") from axis to edge, with SFL grid dots.
+theta_spoke_vals = range(0.0, 1.0; length=21)[1:end-1]  # 20 spokes, 0 == 1 so drop endpoint
+psi_dense = range(psi_lo, psi_hi; length=300)
+
+p_tht_full = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
+    title="θ = const lines: all methods  (psihigh=$psihigh_arg)")
+p_tht_core = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
+    title="Deep core zoom")
+p_tht_xpt  = plot(; aspect_ratio=:equal, xlabel="R [m]", ylabel="Z [m]",
+    title="Far edge / x-point zoom")
+
+for m in all_methods
+    pe = pes[m]
+    for (kidx, θ) in enumerate(theta_spoke_vals)
+        lbl = kidx == 1 ? method_label[m] : ""
+        Rs = [psi_theta_to_RZ(pe, ψ, θ)[1] for ψ in psi_dense]
+        Zs = [psi_theta_to_RZ(pe, ψ, θ)[2] for ψ in psi_dense]
+        plot!(p_tht_full, Rs, Zs; color=method_color[m], ls=method_style[m], lw=0.9, alpha=0.7, label=lbl)
+        plot!(p_tht_core, Rs, Zs; color=method_color[m], ls=method_style[m], lw=1.5, label=lbl)
+        plot!(p_tht_xpt,  Rs, Zs; color=method_color[m], ls=method_style[m], lw=1.5, label=lbl)
+    end
+    # SFL grid dots — same subsample as on flux contours
+    θ_all = pe.rzphi_ys
+    step = max(1, length(θ_all) ÷ 32)
+    θ_sub = θ_all[1:step:end]
+    Rg = [psi_theta_to_RZ(pe, ψ, θ)[1] for ψ in pe.rzphi_xs for θ in θ_sub]
+    Zg = [psi_theta_to_RZ(pe, ψ, θ)[2] for ψ in pe.rzphi_xs for θ in θ_sub]
+    scatter!(p_tht_full, Rg, Zg; ms=1.5, color=method_color[m], alpha=0.5, markerstrokewidth=0, label="")
+    scatter!(p_tht_core, Rg, Zg; ms=2.0, color=method_color[m], alpha=0.6, markerstrokewidth=0, label="")
+    scatter!(p_tht_xpt,  Rg, Zg; ms=2.0, color=method_color[m], alpha=0.6, markerstrokewidth=0, label="")
+end
+
+xlims!(p_tht_core, minimum(all_R_c) - pad, maximum(all_R_c) + pad)
+ylims!(p_tht_core, minimum(all_Z_c) - pad, maximum(all_Z_c) + pad)
+xlims!(p_tht_xpt, all_R_e[xpt_idx] - 0.20, all_R_e[xpt_idx] + 0.20)
+ylims!(p_tht_xpt, all_Z_e[xpt_idx] - 0.05, all_Z_e[xpt_idx] + 0.40)
+
+p_tht_combo = plot(p_tht_full, p_tht_core, p_tht_xpt; layout=(1, 3), size=(2100, 800),
+    left_margin=8Plots.mm, bottom_margin=6Plots.mm)
+savefig(p_tht_combo, joinpath(outdir, "theta_contours.png"))
 println("  Saved flux contour figures.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
