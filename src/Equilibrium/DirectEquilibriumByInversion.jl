@@ -482,7 +482,7 @@ function equilibrium_solver_by_inversion(
     # lets it settle on the first lookup (Z is fixed per column, so O(log n) once then O(1)).
     # Z-hint cannot be shared across threads for a non-uniform z_grid — each thread resets it.
     ψ_fine = Matrix{Float64}(undef, nr_fine, nz_fine)
-    thread_hints = [(Ref(1), Ref(1)) for _ in 1:Threads.nthreads()]
+    thread_hints = [(Ref(1), Ref(1)) for _ in 1:Threads.maxthreadid()]
     Threads.@threads for j in 1:nz_fine
         z = z_grid[j]
         h = thread_hints[Threads.threadid()]
