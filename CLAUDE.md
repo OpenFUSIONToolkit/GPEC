@@ -200,6 +200,10 @@ julia benchmarks/benchmark_git_branches.jl \
 - Tool requires HDF5.jl for reading euler.h5 output
 - Each benchmark run takes several minutes per branch (includes compilation + warm runs)
 
+**Benchmark plot output convention:**
+- Benchmark scripts save PNG plots to `benchmarks/` or a dedicated subdirectory within it (e.g. `benchmarks/plots/`, `benchmarks/scan_edge_layer_width/`)
+- **Never save benchmark plots to `examples/`** — example directories are for inputs and reference outputs only, not diagnostic plots
+
 
 ## Architecture
 

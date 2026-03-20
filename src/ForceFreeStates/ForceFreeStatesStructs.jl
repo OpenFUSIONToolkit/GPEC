@@ -177,8 +177,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim
-  - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kin_flag::Bool` - Enable kinetic effects
@@ -204,6 +202,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
+  - `edge_layer_width::Float64` - Spacing in ψ below which edge rational surfaces are considered too dense (in the separatrix layer). Default 1e-4.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -230,8 +229,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
-    set_psilim_via_dmlim::Bool = false
-    dmlim::Float64 = 0.2
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
@@ -257,6 +254,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_wv_symmetry::Bool = true
     save_interval::Int = 3
     force_termination::Bool = false
+    edge_layer_width::Float64 = 1e-4  # psifac spacing below which edge rational surfaces are ignored
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
@@ -286,8 +284,9 @@ end
     # Shared hint for sequential evaluation (all splines evaluated at same psi)
     _hint::Base.RefValue{Int} = Ref(1)
 
-    # Used in Free.jl
-    jmat::Vector{ComplexF64} = Vector{ComplexF64}(undef, 2 * mband + 1)
+    # Spline of Jacobian Fourier coefficients J(θ, ψ) vs ψ, shape (2*mband+1) series.
+    # Evaluate at the local psi (psilim in free_run!, odet.psifac in free_compute_total).
+    jmat_spline::S = _empty_series_interp_complex(2 * mband + 1, itp_opts)
 end
 
 # Helper to create empty complex series interpolant for default initialization
@@ -374,6 +373,11 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
+  - `psi_edge_scan::Vector{Float64}` - ψ values from the edge dW scan (psiedge → psilim), populated by `findmax_dW_edge!` before storage is trimmed.
+  - `et_edge_scan::Vector{ComplexF64}` - Corresponding total energy eigenvalue et[1] at each edge-scan ψ, for diagnostic output to HDF5.
+  - `ep_edge_scan::Vector{ComplexF64}` - Corresponding plasma energy component at each edge-scan ψ.
+  - `ev_edge_scan::Vector{ComplexF64}` - Corresponding vacuum energy component at each edge-scan ψ.
+  - `evonly_edge_scan::Vector{Float64}` - Least stable eigenvalue of the wv matrix alone (EL-independent), for diagnosing wv spline quality.
   - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
@@ -404,7 +408,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Saved data throughout integration
     step::Int = 1
-    total_steps::Int = 0  # Total ODE solver steps taken (all steps, not just saved ones)
+    total_steps::Int = 0            # Total ODE solver steps taken (all steps, not just saved ones)
     psi_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     q_store::Vector{Float64} = Vector{Float64}(undef, numsteps_init)
     u_store::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, numsteps_init)
@@ -415,6 +419,13 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Used for to find peak dW in the edge
     dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
+    # Edge stability diagnostic: psi and et[1] for every step in [psiedge, psilim],
+    # saved to HDF5 before the storage is trimmed to the peak-dW step.
+    psi_edge_scan::Vector{Float64} = Float64[]
+    et_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    ep_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    ev_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    evonly_edge_scan::Vector{Float64} = Float64[]
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 

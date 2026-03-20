@@ -372,6 +372,231 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
 end
 
 """
+    direct_xpoint_find(raw_profile, ro, zo, rs1)
+
+Detect the magnetic x-point (if any) by searching for a null of the poloidal field (Br=0, Bz=0)
+near the plasma boundary. Tries the lower null first (below the magnetic axis), then upper null.
+Returns `(r_xpoint, z_xpoint, is_diverted, psi_hess_rr, psi_hess_zz, psi_hess_rz)`.
+
+`psi_hess_rr/zz/rz` are ∂²ψ_norm/∂R², ∂²ψ_norm/∂Z², ∂²ψ_norm/∂R∂Z at the X-point, used to
+build the asymptotic far-edge geometry in `direct_build_xpoint_asymptotic!`. Returns zeros for
+the Hessian when no X-point is found.
+
+After `direct_position!` renormalizes ψ, the separatrix satisfies ψ≈0 and Bp=0.
+An x-point is detected when the Newton iteration converges to a point with |ψ| < ψ_threshold.
+"""
+function direct_xpoint_find(raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs1::Float64)
+    bfield = DirectBField()
+    sq_in_deriv = deriv1(raw_profile.sq_in)
+    max_iterations = 100
+    psi_threshold = 1e-3  # convergence criterion: |ψ| < threshold at x-point candidate
+
+    # X-points in diverted plasmas lie on the inboard side, between rs1 and the magnetic axis.
+    # A guess of rs1 + 0.35*(ro-rs1) places the starting R in this inboard region; using
+    # (rs1+rs2)/2 overshoots to the plasma center and Newton misses the basin of attraction.
+    r_xguess = rs1 + 0.35 * (ro - rs1)
+
+    # Try lower null first, then upper null
+    for (label, z_guess) in (("lower", raw_profile.zmin + 0.15 * (zo - raw_profile.zmin)),
+                              ("upper", raw_profile.zmax - 0.15 * (raw_profile.zmax - zo)))
+        r, z = r_xguess, z_guess
+        dr, dz = 0.0, 0.0
+        converged = false
+        for _ in 1:max_iterations
+            direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+            det = bfield.brr * bfield.bzz - bfield.brz * bfield.bzr
+            abs(det) < 1e-20 && break
+            dr = (bfield.brz * bfield.bz - bfield.bzz * bfield.br) / det
+            dz = (bfield.bzr * bfield.br - bfield.brr * bfield.bz) / det
+            r += dr
+            z += dz
+            if abs(dr) <= 1e-8 * abs(r) && abs(dz) <= 1e-8 * abs(r)
+                converged = true
+                break
+            end
+        end
+        # Accept candidate if Newton converged and ψ is near zero (≈ separatrix)
+        if converged
+            direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+            if abs(bfield.psi / raw_profile.psio) < psi_threshold
+                @printf("   X-point (%s null) found at R = %.5f, Z = %.5f\n", label, r, z)
+                return r, z, true, bfield.psirr, bfield.psizz, bfield.psirz
+            end
+        end
+    end
+
+    return NaN, NaN, false, 0.0, 0.0, 0.0
+end
+
+"""
+    direct_build_xpoint_asymptotic!(profiles, psi_nodes, rzphi_nodes, ro, zo, theta_nodes,
+                                    r_xpoint, z_xpoint; edge_layer_width=1e-4)
+
+Extend the rzphi coordinate mapping into the far edge (psin > psihigh) using X-point
+asymptotic geometry. Returns extended `(psi_nodes, rzphi_nodes)` arrays covering the
+region from psihigh up to the last packed rational surface.
+
+**Physics**: Near the X-point with F'≈0 and P'≈0, the Grad-Shafranov equation reduces to
+Δ*ψ = 0. The local solution is a quadratic saddle surface whose level curves are hyperbolas
+in the principal eigencoordinates of the Hessian H = ∂²ψ/∂(R,Z)² at the X-point.
+
+In the Hessian approximation, the flux surface at ψ_n > psihigh scales from the X-point
+as: R(ψ_n, θ) = R_X + s·(R_high(θ) - R_X), and similarly for Z, where
+s = √((1 - ψ_n)/(1 - psihigh)). This preserves the shape of the flux surface while
+shrinking it toward the X-point as ψ_n → 1. The coordinate Jacobian J_coord is
+approximately constant in ψ in this limit (from the Hessian scaling analysis).
+
+Using this geometry with the EFIT F (held constant by ExtendExtrap), the GS residual is
+near zero (since F'≈0, P'≈0 near the separatrix), satisfying the requirement that the
+EL equation be evaluated on an approximate GS equilibrium.
+
+Only called for diverted plasmas (when `profiles.iota_spline` is set).
+"""
+function direct_build_xpoint_asymptotic!(profiles::ProfileSplines,
+    psi_nodes::AbstractVector{Float64},
+    rzphi_nodes::AbstractArray{Float64,3},
+    ro::Float64,
+    zo::Float64,
+    theta_nodes,
+    r_xpoint::Float64,
+    z_xpoint::Float64,
+    edge_surface_psis::AbstractVector{Float64})
+
+    # edge_surface_psis must come from sing_find! — the canonical source of edge rational
+    # surfaces.  Passing an empty vector returns the inputs unchanged (no extension).
+    isnothing(profiles.iota_spline) && return psi_nodes, rzphi_nodes
+    isempty(edge_surface_psis) && return psi_nodes, rzphi_nodes
+
+    psihigh = psi_nodes[end]
+    ipsi_high = length(psi_nodes)
+    mtheta_pts = size(rzphi_nodes, 2)  # mtheta+1 points (0..1 inclusive)
+
+    # Recover R(psihigh, θ) and Z(psihigh, θ) from the rzphi node data
+    R_high = zeros(Float64, mtheta_pts)
+    Z_high = zeros(Float64, mtheta_pts)
+    for itheta in 1:mtheta_pts
+        theta = theta_nodes[itheta]
+        rfac = sqrt(max(0.0, rzphi_nodes[ipsi_high, itheta, 1]))
+        offset = rzphi_nodes[ipsi_high, itheta, 2]
+        eta = 2π * (theta + offset)
+        R_high[itheta] = ro + rfac * cos(eta)
+        Z_high[itheta] = zo + rfac * sin(eta)
+    end
+
+    # Build far-edge ψ grid: 10 interior points per window between consecutive rational surfaces.
+    # Nodes beyond psilim are not needed: make_metric truncates at psilim anyway, and
+    # extending toward psin=1 introduces J→∞ singularities that make the ODE extremely stiff.
+    psi_far = Float64[psihigh]
+    boundaries = vcat([psihigh], edge_surface_psis)
+    for i in 1:(length(boundaries)-1)
+        win_pts = range(boundaries[i], boundaries[i+1]; length=12)  # 12 pts = 10 interior + 2 endpoints
+        append!(psi_far, win_pts[2:end])
+    end
+    unique!(sort!(psi_far))
+
+    npsi_far = length(psi_far)
+
+    # Build far-edge rzphi_nodes using X-point scaling.
+    # For each (ψ_n, θ): scale position from X-point by s = √((1-ψ_n)/(1-psihigh)).
+    # J_coord stays at the psihigh value (constant in ψ in the Hessian approximation).
+    # nu stays at the psihigh value (F ≈ const near separatrix → no toroidal correction change).
+    rzphi_far = zeros(Float64, npsi_far, mtheta_pts, 4)
+    for (i, psi_n) in enumerate(psi_far)
+        s = sqrt(max(0.0, (1.0 - psi_n) / (1.0 - psihigh)))
+        for itheta in 1:mtheta_pts
+            theta = theta_nodes[itheta]
+
+            # Scaled position from X-point
+            R_n = r_xpoint + s * (R_high[itheta] - r_xpoint)
+            Z_n = z_xpoint + s * (Z_high[itheta] - z_xpoint)
+
+            # rfac² and offset in GPEC pseudo-circular coordinates
+            rfac_sq_n = (R_n - ro)^2 + (Z_n - zo)^2
+            eta_n_raw = atan(Z_n - zo, R_n - ro)
+
+            # Adjust eta branch to be consistent with psihigh reference (avoids atan2 discontinuities)
+            offset_high = rzphi_nodes[ipsi_high, itheta, 2]
+            eta_high = 2π * (theta + offset_high)
+            n_wrap = round(Int, (eta_high - eta_n_raw) / (2π))
+            eta_n = eta_n_raw + n_wrap * 2π
+            offset_n = eta_n / (2π) - theta
+
+            rzphi_far[i, itheta, 1] = rfac_sq_n
+            rzphi_far[i, itheta, 2] = offset_n
+            rzphi_far[i, itheta, 3] = rzphi_nodes[ipsi_high, itheta, 3]  # nu: constant
+            rzphi_far[i, itheta, 4] = rzphi_nodes[ipsi_high, itheta, 4]  # J_coord: constant
+        end
+    end
+
+    # Extend arrays: skip psi_far[1] = psihigh which is already in psi_nodes
+    psi_extended = vcat(psi_nodes, psi_far[2:end])
+    rzphi_extended = cat(rzphi_nodes, rzphi_far[2:end, :, :]; dims=1)
+
+    @printf("   X-point asymptotic geometry built over psin ∈ [%.4f, %.6f] (%d far-edge nodes, %d edge rational surfaces)\n",
+        psihigh, psi_far[end], npsi_far - 1, length(edge_surface_psis))
+
+    return psi_extended, rzphi_extended
+end
+
+"""
+    equilibrium_extend_rzphi!(equil, edge_surface_psis)
+
+Extend the rzphi coordinate splines into the far edge (above psihigh) using the X-point
+asymptotic geometry, then rebuild the four bicubic splines in-place on `equil`.
+
+`edge_surface_psis` must be the psifac values of the edge rational surfaces found by
+`sing_find!` — the canonical source.  No-op for limited plasmas or empty surface list.
+
+Called from ForceFreeStates setup after `sing_find!` and `sing_lim!` have run, so that the
+rzphi grid covers exactly [psilow, psilim] with no gap or over-extension.
+"""
+function equilibrium_extend_rzphi!(equil::PlasmaEquilibrium, edge_surface_psis::AbstractVector{Float64})
+
+    isnothing(equil.profiles.iota_spline) && return
+    isempty(edge_surface_psis) && return
+
+    psihigh = equil.rzphi_xs[end]
+
+    # Only extend if the provided surfaces reach beyond the current grid end.
+    maximum(edge_surface_psis) <= psihigh && return
+
+    npsi_current = length(equil.rzphi_xs)
+    mtheta_pts   = length(equil.rzphi_ys)
+
+    # Recover current rzphi node values from the stored bicubic splines.
+    # nodal_derivs.partials[1, ipsi, itheta] holds the function value at each grid point.
+    rzphi_nodes = zeros(Float64, npsi_current, mtheta_pts, 4)
+    for itheta in 1:mtheta_pts
+        for ipsi in 1:npsi_current
+            rzphi_nodes[ipsi, itheta, 1] = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
+            rzphi_nodes[ipsi, itheta, 2] = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
+            rzphi_nodes[ipsi, itheta, 3] = equil.rzphi_nu.nodal_derivs.partials[1, ipsi, itheta]
+            rzphi_nodes[ipsi, itheta, 4] = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
+        end
+    end
+
+    # Extend psi_nodes and rzphi_nodes using the X-point asymptotic formula.
+    theta_nodes = range(equil.rzphi_ys[1], equil.rzphi_ys[end]; length=mtheta_pts)
+    psi_extended, rzphi_extended = direct_build_xpoint_asymptotic!(
+        equil.profiles, equil.rzphi_xs, rzphi_nodes,
+        equil.ro, equil.zo, theta_nodes,
+        equil.params.r_xpoint, equil.params.z_xpoint,
+        edge_surface_psis)
+
+    # Rebuild the four bicubic splines on the extended grid.
+    grid2d = (psi_extended, theta_nodes)
+    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    equil.rzphi_rsquared = cubic_interp(grid2d, rzphi_extended[:, :, 1]; opts2d...)
+    equil.rzphi_offset   = cubic_interp(grid2d, rzphi_extended[:, :, 2]; opts2d...)
+    equil.rzphi_nu       = cubic_interp(grid2d, rzphi_extended[:, :, 3]; opts2d...)
+    equil.rzphi_jac      = cubic_interp(grid2d, rzphi_extended[:, :, 4]; opts2d...)
+
+    equil.rzphi_xs = psi_extended
+    # rzphi_ys (theta grid) is unchanged
+end
+
+"""
     equilibrium_solver(raw_profile)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
@@ -420,6 +645,14 @@ robustness.
 
     # Find radial position of magnetic axis and separatrix
     ro, zo, rs1, rs2 = direct_position!(raw_profile)
+
+    # Detect x-point (diverted vs limited topology); also retrieve ψ Hessian at x-point
+    r_xpoint, z_xpoint, is_diverted, psi_hess_rr, psi_hess_zz, psi_hess_rz = direct_xpoint_find(raw_profile, ro, zo, rs1)
+    if is_diverted
+        println("   Plasma topology: DIVERTED (x-point detected)")
+    else
+        println("   Plasma topology: LIMITED (no x-point)")
+    end
 
     # Loop over flux surfaces from outermost to innermost, integrating over field lines
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
@@ -508,8 +741,92 @@ robustness.
             sq_nodes[:, 4]   # q
         )
     end
+    # For diverted plasmas, build edge inverse splines for q and dV/dψ that are well-behaved
+    # toward psin=1. The reciprocals iota=1/q and 1/(dV/dψ) are anchored to 0 at the separatrix.
+    # Also extend the rzphi coordinate mapping into the far edge using X-point asymptotic geometry.
+    psi_nodes_core = psi_nodes  # save reference to core grid before possible extension
+    if is_diverted
+        # Edge spline covers the transition region from ~90% of psihigh to psifac=1.0
+        psi_edge_start = psihigh * 0.9
+        edge_mask = findall(psi -> psi >= psi_edge_start, psi_nodes)
+
+        # Compute derivative-matching phantom knots just above psihigh.
+        # Without these, the single anchor at (1.0, 0) pulls the iota spline slope at psihigh
+        # away from -q'/q², causing a derivative discontinuity in q = 1/iota at the junction.
+        # Adding N phantom knots using the Taylor expansion from the direct spline forces the
+        # iota spline to reproduce the correct N-th order behaviour right at psihigh.
+        phantom_delta = 1e-4
+        q0   = sq_nodes[edge_mask[end], 4]
+        q1   = profiles.q_deriv(psihigh)
+        q2   = deriv2(profiles.q_spline)(psihigh)
+        q3   = deriv3(profiles.q_spline)(psihigh)
+        iota1_val  = -q1 / q0^2
+        iota2_val  = (2*q1^2 - q0*q2) / q0^3
+        iota3_val  = (-6*q1^3 + 6*q0*q1*q2 - q0^2*q3) / q0^4
+        phantom_psi_q = [psihigh + j * phantom_delta for j in 1:3]
+        phantom_iota  = [1/q0 + iota1_val*(j*phantom_delta) +
+                         0.5*iota2_val*(j*phantom_delta)^2 +
+                         (1/6)*iota3_val*(j*phantom_delta)^3 for j in 1:3]
+
+        V0   = sq_nodes[edge_mask[end], 3]
+        V1   = profiles.dVdpsi_deriv(psihigh)
+        V2   = deriv2(profiles.dVdpsi_spline)(psihigh)
+        Vinv1_val = -V1 / V0^2
+        Vinv2_val = (2*V1^2 - V0*V2) / V0^3
+        phantom_Vinv = [1/V0 + Vinv1_val*(j*phantom_delta) +
+                        0.5*Vinv2_val*(j*phantom_delta)^2 for j in 1:2]
+
+        # Intermediate points between phantom knots and the psi=1 anchor.
+        # CubicFit BC over a long empty interval creates a flat S-curve artifact in iota.
+        # Use iota(s) = A*√s + B*s + C*s^(3/2) with s = 1-psi, which enforces C² continuity
+        # (value, first, and second derivative) at psi=psihigh and vanishes at psi=1.
+        # Solving the 3×3 linear system at s=δ=1-psihigh gives:
+        #   A = (3ι₀ + 3ι₁δ + 2ι₂δ²)/√δ
+        #   B = -ι₁ - A/√δ - 2ι₂δ
+        #   C = (4ι₂√δ)/3 + A/(3δ)
+        n_mid = 8
+        iota0 = 1.0 / q0
+        Vinv0 = 1.0 / V0
+        δ = 1.0 - psihigh
+        A_iota = (3*iota0 + 3*iota1_val*δ + 2*iota2_val*δ^2) / sqrt(δ)
+        B_iota = -iota1_val - A_iota/sqrt(δ) - 2*iota2_val*δ
+        C_iota = (4*iota2_val*sqrt(δ))/3 + A_iota/(3*δ)
+        A_Vinv = (3*Vinv0 + 3*Vinv1_val*δ + 2*Vinv2_val*δ^2) / sqrt(δ)
+        B_Vinv = -Vinv1_val - A_Vinv/sqrt(δ) - 2*Vinv2_val*δ
+        C_Vinv = (4*Vinv2_val*sqrt(δ))/3 + A_Vinv/(3*δ)
+        psi_mid   = [psihigh + δ * i/(n_mid + 1) for i in 1:n_mid]
+        iota_mid  = [A_iota*sqrt(1.0-p) + B_iota*(1.0-p) + C_iota*(1.0-p)^1.5 for p in psi_mid]
+        Vinv_mid  = [A_Vinv*sqrt(1.0-p) + B_Vinv*(1.0-p) + C_Vinv*(1.0-p)^1.5 for p in psi_mid]
+
+        edge_psi = vcat(psi_nodes[edge_mask], phantom_psi_q, psi_mid, 1.0)
+        sort!(edge_psi)
+
+        # Iota = 1/q; anchor iota(1.0) = 0 (q → ∞ at separatrix)
+        q_iota_vals = vcat([1.0 / sq_nodes[i, 4] for i in edge_mask], phantom_iota, iota_mid, 0.0)
+        q_iota_vals = q_iota_vals[sortperm(vcat(psi_nodes[edge_mask], phantom_psi_q, psi_mid, 1.0))]
+        q_iota_inner = cubic_interp(edge_psi, q_iota_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+        profiles.iota_spline = q_iota_inner
+
+        # 1/(dV/dψ); anchor (dV/dψ)⁻¹(1.0) = 0 (dV/dψ → ∞ at separatrix)
+        # Uses 2 phantom knots (1st + 2nd derivative matching; 3rd not needed for dV/dψ)
+        edge_psi_dV = vcat(psi_nodes[edge_mask], phantom_psi_q[1:2], psi_mid, 1.0)
+        sort!(edge_psi_dV)
+        dVdpsi_inv_vals = vcat([1.0 / sq_nodes[i, 3] for i in edge_mask], phantom_Vinv, Vinv_mid, 0.0)
+        dVdpsi_inv_vals = dVdpsi_inv_vals[sortperm(vcat(psi_nodes[edge_mask], phantom_psi_q[1:2], psi_mid, 1.0))]
+        dVdpsi_inv_inner = cubic_interp(edge_psi_dV, dVdpsi_inv_vals; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+        profiles.dVdpsi_inv_spline = dVdpsi_inv_inner
+
+        @printf("   Edge inverse splines built over psin ∈ [%.4f, 1.0] (%d nodes)\n",
+            psi_edge_start, length(edge_psi))
+
+        # rzphi nodes will be extended into the far edge by equilibrium_extend_rzphi! in
+        # ForceFreeStates, using the edge rational surfaces from sing_find! as the canonical
+        # grid source.  No extension is done here; the spline is built on the core grid only.
+    end
+
     # Create 2D interpolants for geometric quantities (rzphi) with CubicFit/Periodic BCs.
     # theta_nodes includes both 0 and 1 (closed periodic grid).
+    # rzphi_xs is the (possibly extended) psi grid; eqfun is built on the core grid only.
     rzphi_xs = psi_nodes
     # rzphi_ys is the materialized Vector stored in PlasmaEquilibrium for indexing/diagnostics.
     # The Range form (theta_nodes) is used for the interpolant: it skips index search during
@@ -526,7 +843,8 @@ robustness.
     rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
 
     # Calculate physics quantities (B-field, metric components, etc.) in 2D spline `eqfun`
-    # for use in stability and transport codes
+    # for use in stability and transport codes. Built on the core psi grid only (ForceFreeStates
+    # uses rzphi directly and does not use eqfun, so far-edge extension is not needed here).
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
     for ipsi in 1:(mpsi+1)
@@ -587,14 +905,28 @@ robustness.
             end
         end
     end
-    # Create 2D interpolants for physics quantities (eqfun)
-    eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
-    eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
-    eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
+    # Create 2D interpolants for physics quantities (eqfun) on the CORE psi grid
+    core_grid2d = (psi_nodes_core, theta_nodes)
+    eqfun_B = cubic_interp(core_grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
+    eqfun_metric1 = cubic_interp(core_grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
+    eqfun_metric2 = cubic_interp(core_grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
+    pe = PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
         ro, zo, psio)
+
+    # Store x-point topology and Hessian in equilibrium parameters
+    pe.params.r_xpoint = is_diverted ? r_xpoint : nothing
+    pe.params.z_xpoint = is_diverted ? z_xpoint : nothing
+    pe.params.is_diverted = is_diverted
+    pe.params.psi_core_end = psihigh  # last psi in core field-line grid (before far-edge extension)
+    if is_diverted
+        pe.params.psi_hess_rr = psi_hess_rr
+        pe.params.psi_hess_zz = psi_hess_zz
+        pe.params.psi_hess_rz = psi_hess_rz
+    end
+
+    return pe
 end

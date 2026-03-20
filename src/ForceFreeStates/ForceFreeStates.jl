@@ -9,11 +9,12 @@ using OrdinaryDiffEq
 using HDF5
 using JLD2
 using FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary
+using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary, CubicFit, ExtendExtrap, NoExtrap
 using AdaptiveArrayPools
 using Roots
 
 import ..Equilibrium
+using ..Equilibrium: eval_q
 import ..Utilities
 import ..Vacuum
 using Printf

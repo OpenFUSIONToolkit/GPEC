@@ -7,8 +7,8 @@ power_b = 0                             # Toroidal field power exponent for Jaco
 power_r = 0                             # Major radius power exponent for Jacobian
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.993                         # Upper limit of normalized flux coordinate
-mpsi = 128                              # Number of radial grid points
+psihigh = 0.999                         # Upper limit of normalized flux coordinate
+mpsi = 256                              # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
@@ -31,9 +31,8 @@ ode_flag = true              # Integrate ODE's for determining stability of inte
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
 
-set_psilim_via_dmlim = true   # Safety factor (q) limit determined as q_ir+dmlim...
-dmlim = 0.2                   # See set_psilim_via_dmlim
-psiedge = 1.00                # If less then psilim, calculates dW(psi)...
+edge_layer_width = 1e-4       # psifac spacing below which edge rational surfaces are ignored (diverted only)
+psiedge = 0.970               # If less than psilim, scans dW(psi) from psiedge to psilim and truncates at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)

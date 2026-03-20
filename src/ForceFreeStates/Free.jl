@@ -18,8 +18,12 @@ and data dumping.
     wvt = zeros!(pool, ComplexF64, numpert_total, numpert_total)
     tmp_mat = zeros!(pool, ComplexF64, numpert_total, numpert_total)
 
-    # Evaluate dV/dpsi at the plasma edge
-    dV_dpsi = equil.profiles.dVdpsi_spline(psilim)
+    # Evaluate dV/dpsi at the plasma edge. For diverted plasmas psilim can exceed psihigh,
+    # so route to the edge inverse spline when available and psilim is beyond the core grid.
+    profiles = equil.profiles
+    dV_dpsi = intr.psilim > profiles.xs[end] ?
+              1.0 / profiles.dVdpsi_inv_spline(intr.psilim; hint=profiles._dVdpsi_inv_hint) :
+              profiles.dVdpsi_spline(psilim)
 
     # Compute plasma response matrix W = U₂ * U₁⁻¹
     if ctrl.ode_flag
@@ -51,13 +55,14 @@ and data dumping.
         vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
     end
 
-    # Normalize eigenfunction and energy.
+    # Normalize eigenfunction and energy using J(ψ) evaluated at the plasma boundary psilim.
+    jmat_at_psilim = ffit.jmat_spline(psilim)
     for isol in 1:numpert_total
         norm = 0.0 + 0.0im
         for ipert_n in 1:npert, ipert_m in 1:mpert, jpert_m in 1:mpert
             ipert = (ipert_n - 1) * mpert + ipert_m
             jpert = (ipert_n - 1) * mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+mband+1] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
+            norm += jmat_at_psilim[jpert_m-ipert_m+mband+1] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
         end
         norm /= dV_dpsi
         vac_data.wt[:, isol] ./= sqrt(norm)
@@ -110,35 +115,67 @@ end
 """
     free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute a spline of vacuum response matrices over the range of psi from 'ctrl.psi_edge' to
-`intr.qlim`. This is used for fast evaluation of wt during `ode_record_edge`. Performs the
-same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
-q-window minimum.
+Compute a spline of vacuum response matrices over [psiedge, psilim], evenly spaced in q.
+Used for fast evaluation of wt during `findmax_dW_edge!`. Performs the same function as
+`free_wvmats` in the Fortran code. Defaults to 9 spline points per rational window.
+
+Grid design: points are spaced evenly in q from qedge+ε to qlim+ε (i/npsi offset reproduces
+the develop-branch qi logic). This concentrates nodes near rational surfaces where the vacuum
+response varies most rapidly, giving accurate wv interpolation across the full scan range.
+For diverted plasmas where psilim > psihigh, the iota inverse spline is used to invert q(psi)
+above psihigh.
+
+The spline stores RAW vacuum response without singfac scaling. Singfac = (m - n*q) is
+applied analytically in free_compute_total at each scan psi, keeping the spline
+well-conditioned despite q divergence near the separatrix.
 """
-function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, _psi_scan_end::Float64)
 
-    profiles = equil.profiles
+    profiles   = equil.profiles
+    psihigh    = profiles.xs[end]
+    has_edge_q = !isnothing(profiles.iota_spline)
 
-    # Number of psi grid points for the spline: 4 per q-window minimum
-    # TODO: 4 spline points is arbitrary - is there a better way?
-    qedge = profiles.q_spline(ctrl.psiedge)
-    npsi = max(4, ceil(Int, (intr.qlim - qedge) * intr.nhigh * 4))
+    qedge        = profiles.q_spline(ctrl.psiedge)
+    q_at_psihigh = profiles.q_spline(psihigh)
+
+    # For diverted plasmas, extend the spline above psihigh using the X-point asymptotic
+    # geometry — the same geometry used by the FGK splines and jmat_spline. The upper limit
+    # is the end of the iota spline grid (last edge rational surface), capped at the
+    # last stored ODE step to avoid computing vacuum responses past the scan range.
+    psi_upper  = has_edge_q ? min(_psi_scan_end, equil.rzphi_xs[end]) : psihigh
+    q_at_upper = (has_edge_q && psi_upper > psihigh) ? eval_q(profiles, psi_upper) : q_at_psihigh
+
+    # Number of grid points: 9 per rational window over [qedge, q_at_upper]
+    npsi = max(9, ceil(Int, (q_at_upper - qedge) * intr.nhigh * 9))
     psi_array = zeros(Float64, npsi + 1)
-    wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
+    wv_array  = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
-    for i in 1:(npsi+1)
-        # Space points evenly in q
-        qi = qedge + (intr.qlim - qedge) * (i / npsi)
+    for i in 1:(npsi + 1)
+        qi = qedge + (q_at_upper - qedge) * ((i-1) / npsi)
 
-        psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
-        psi_array[i] = find_zero(
-            (psi -> profiles.q_spline(psi) - qi,
-                psi -> profiles.q_deriv(psi)),
-            psii, Roots.Newton()
-        )
+        if qi <= q_at_psihigh || !has_edge_q
+            # Core region [psiedge, psihigh]: invert q(psi) = qi using the direct spline
+            psii = ctrl.psiedge + (psihigh - ctrl.psiedge) * ((qi - qedge) / (q_at_psihigh - qedge))
+            jpsi = max(1, searchsortedlast(profiles.q_spline.y, qi))
+            hint = Ref(min(jpsi, profiles.npts_minus_1))
+            psi_array[i] = find_zero(
+                (psi -> profiles.q_spline(psi; hint=hint) - qi,
+                 psi -> profiles.q_deriv(psi; hint=hint)),
+                psii, Roots.Newton()
+            )
+        else
+            # Edge region (psihigh, psi_upper]: invert iota(psi) = 1/qi using iota spline
+            iota_target = 1.0 / qi
+            psii = psihigh + (psi_upper - psihigh) * ((qi - q_at_psihigh) / (q_at_upper - q_at_psihigh))
+            psi_array[i] = find_zero(
+                (psi -> profiles.iota_spline(psi; hint=profiles._iota_hint) - iota_target,
+                 psi -> profiles.iota_spline(psi; deriv=1, hint=profiles._iota_hint)),
+                psii, Roots.Newton()
+            )
+        end
 
         # Compute vacuum response matrix at this psi (2D single-n, 2D multi-n block-diagonal, or 3D)
-        vac_inputs = Vacuum.VacuumInput(equil, psii, ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
+        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
         wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
         # Apply singular factor scaling: (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
@@ -151,12 +188,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         @views wv_array[i, :, :] .= wv
     end
 
-    # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
     wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
-
-    # FastInterpolations now natively supports complex values - create complex series interpolant directly
-    # Use CubicFit() for native endpoint handling
-    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    wvmat   = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=NoExtrap(), search=LinearBinary())
 
     return wvmat
 end
@@ -177,37 +210,73 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     tot_eigvals = zeros(ComplexF64, intr.numpert_total)
     wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
 
-    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
+    profiles = equil.profiles
 
-    # Compute plasma response matrix
-    @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    # Compute plasma response matrix W = U₂·U₁⁻¹ / psio².
+    # Direct matrix division without column normalization, matching the develop-branch approach.
+    # Column normalization was found to over-correct well-conditioned steps near core rational
+    # surfaces (e.g. just after a q=3 fixup), giving them artificially large et values that
+    # dominate the peak search. Without column normalization, those steps give garbage or
+    # negative eigenvalues (naturally excluded from findmax), and only physically meaningful
+    # steps (well away from fixup boundaries near the edge) give large positive et.
+    wp = (@view(odet.u[:, :, 2]) / @view(odet.u[:, :, 1])) ./ equil.psio^2
 
-    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
-    # FastInterpolations now natively supports complex values
+    # Retrieve raw vacuum matrix from the spline (singfac NOT pre-applied; see free_compute_wv_spline).
+    # Apply singfac = (m - n*q(psifac)) analytically: this is the physically correct choice for
+    # the scan, since at each scan step we are evaluating stability as if the plasma boundary
+    # were at psifac, where q(psifac) is the actual safety factor at that boundary.
+    # For psi > psihigh, use the iota inverse spline (if available) to get q.
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
-    wv = odet._wv_out
+    wv = copy(odet._wv_out)
+    q_at_psifac = eval_q(profiles, odet.psifac)
+    for ipert_n in 1:intr.npert
+        n = ipert_n - 1 + intr.nlow
+        singfac = collect(intr.mlow:intr.mhigh) .- (n * q_at_psifac)
+        block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
+        # wv[i,j] = wv_raw[i,j] * singfac[i] * singfac[j] (outer-product row×column scaling)
+        @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
+    end
 
-    # Compute total energy matrix and eigen-decomposition
+    # Compute total energy matrix and eigen-decomposition.
+    # wt = wp + wv should be Hermitian by construction, but ODE roundoff accumulates over many
+    # integration steps. Enforcing the Hermitian structure (as in compute_smallest_eigenvalue)
+    # guarantees real eigenvalues and orthonormal eigenvectors.
     wt .= wp .+ wv
-    Ev = eigen(wt)
+    hermitianpart!(wt)
+    Ev = eigen(Hermitian(wt))
 
-    # Sort eigenvalues and reorder columns of wt
-    eindex = sortperm(real.(Ev.values); rev=true)
+    # Sort eigenvalues and reorder columns of wt (Ev.values are real for Hermitian)
+    eindex = sortperm(Ev.values; rev=true)
     for ipert in 1:intr.numpert_total
         wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
         tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
     end
 
-    # Normalize eigenfunction and energy (only need the first eigenmode)
-    isol = 1
-    norm = 0.0 + 0.0im
+    # Compute plasma and vacuum energy components for the dominant (smallest eigenvalue) eigenvector.
+    # wt[:,1] now holds the eigenvector corresponding to tot_eigvals[1].
+    v = @view wt[:, 1]
+    ep1 = ComplexF64(dot(v, wp * v))
+    ev1 = ComplexF64(dot(v, wv * v))
+
+    # Least stable eigenvalue of the vacuum matrix alone (EL-solution-independent diagnostic).
+    evonly1 = minimum(real(eigvals(Hermitian((wv + wv') / 2))))
+
+    # Normalize eigenvalue by ξ†J(psifac)ξ / dV_dψ(psifac), where J is evaluated at the local
+    # scan psi so the normalization is physically consistent at each point of the edge scan.
+    dV_dpsi = (!isnothing(profiles.dVdpsi_inv_spline) && odet.psifac > profiles.xs[end]) ?
+              1.0 / profiles.dVdpsi_inv_spline(odet.psifac; hint=profiles._dVdpsi_inv_hint) :
+              profiles.dVdpsi_spline(odet.psifac)
+    jmat_local = ffit.jmat_spline(odet.psifac)
+    norm_kin = zero(ComplexF64)
     for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
         ipert = (ipert_n - 1) * intr.mpert + ipert_m
         jpert = (ipert_n - 1) * intr.mpert + jpert_m
-        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+        jidx  = jpert_m - ipert_m + intr.mband + 1
+        norm_kin += jmat_local[jidx] * v[ipert] * conj(v[jpert])
     end
-    norm /= dV_dpsi
-    tot_eigvals[isol] /= norm
+    norm_kin /= dV_dpsi
+    real(norm_kin) > 0 || throw(LinearAlgebra.SingularException(0))
+    et_normalized = tot_eigvals[1] / norm_kin
 
-    return tot_eigvals[1]
+    return (et=et_normalized, ep=ep1, ev=ev1, evonly=evonly1)
 end

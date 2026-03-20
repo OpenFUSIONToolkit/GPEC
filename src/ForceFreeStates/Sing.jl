@@ -1,11 +1,14 @@
 """
-    sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
 Locate singular rational q-surfaces (q = m/nn) using a bisection method
 between extrema of the q-profile, and store their properties in `intr.sing`.
+For diverted plasmas with edge inverse splines available, also searches for rational
+surfaces above psihigh using the iota = 1/q inverse spline, stopping when consecutive
+surface spacing falls below `ctrl.edge_layer_width` (the near-separatrix dense layer).
 Performs the same function as `sing_find` in the Fortran code.
 """
-function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+function sing_find!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
     profiles = equil.profiles
 
@@ -51,65 +54,156 @@ function sing_find!(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEqui
     end
     # Sort singular surfaces by increasing ψ
     intr.sing = sort(intr.sing; by=s -> s.psifac)
+
+    # Extended rational surface search above psihigh for diverted plasmas.
+    # Uses the iota = 1/q inverse spline which is well-behaved toward the separatrix.
+    # Stops adding surfaces when spacing between consecutive surfaces < edge_layer_width.
+    if !isnothing(profiles.iota_spline)
+        psihigh = equil.config.psihigh
+        q_at_psihigh = profiles.q_spline.y[end]  # q at last direct-spline node
+
+        for n in intr.nlow:intr.nhigh
+            psi_last = psihigh
+            # Find first m above current q (increasing q, monotone in edge)
+            m = trunc(Int, n * q_at_psihigh) + 1
+            hint = Ref(1)
+            while true
+                iota_target = n / m   # iota = 1/q at the target rational surface
+
+                # iota(psihigh) > iota_target > 0 = iota(1.0), so Brent finds the root
+                iota_at_psihigh = profiles.iota_spline(psihigh; hint=hint)
+                if iota_target >= iota_at_psihigh
+                    # Surface is below psihigh — already found in core search
+                    m += 1
+                    continue
+                end
+
+                # Find psi where iota(psi) = iota_target via Brent on [psihigh, 1.0)
+                psi_bracket_hi = 1.0 - 1e-8  # stay away from exact separatrix
+                psi_new = find_zero(
+                    psi -> profiles.iota_spline(psi; hint=hint) - iota_target,
+                    (psihigh, psi_bracket_hi), Roots.Brent()
+                )
+
+                # Terminate if spacing is below edge_layer_width (in the dense separatrix layer)
+                if psi_new - psi_last < ctrl.edge_layer_width
+                    break
+                end
+
+                q_val = m / n
+                q1_val = eval_q(profiles, psi_new; deriv=1)
+
+                if any(s -> isapprox(s.q, q_val; atol=1e-8), intr.sing)
+                    push!(intr.sing[findfirst(s -> isapprox(s.q, q_val; atol=1e-8), intr.sing)].m, m)
+                    push!(intr.sing[findfirst(s -> isapprox(s.q, q_val; atol=1e-8), intr.sing)].n, n)
+                else
+                    push!(intr.sing, SingType(;
+                        m=[m],
+                        n=[n],
+                        psifac=psi_new,
+                        rho=sqrt(psi_new),
+                        q=q_val,
+                        q1=q1_val
+                    ))
+                    intr.msing += 1
+                end
+
+                psi_last = psi_new
+                m += 1
+            end
+        end
+
+        # Re-sort after adding edge surfaces
+        intr.sing = sort(intr.sing; by=s -> s.psifac)
+
+        n_edge = count(s -> s.psifac > psihigh, intr.sing)
+        if n_edge > 0
+            @info "Extended edge search found $n_edge rational surface(s) above psihigh = $psihigh"
+        end
+    end
 end
 
 """
     sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute and set integration ψ, q, and q' limits by handling cases where user truncates
-before the last singular surface. Performs a similar function to `sing_lim`
-in the Fortran code. Main differences include renaming of sas_flag -> set_psilim_via_dmlim,
-removing dW edge storage variables since we now store all integration terms in memory, and
-simplification of the logic.
+Compute and set integration ψ, q, and q' limits.
 
-The target value `qlim` is first determined from user-specified control parameters
-(`ctrl.qhigh` or `ctrl.dmlim`), subject to the constraint that it does not exceed
-`equil.params.qmax`. If set_psilim_via_dmlim is true, `qlim` is adjusted to the largest
-rational surface such that `nq + dmlim < qmax`, where qmax is the maximum q value in the equilibrium.
-If `qlim < qmax`, a Newton iteration is performed to find the corresponding
-`psilim` to integrate to.
+`psilim` is set to just inside the last rational surface in the consecutive sequence
+of surfaces (sorted by ψ) whose spacing from the previous surface is at least
+`ctrl.edge_layer_width`. This filter applies to all surfaces regardless of psihigh:
+if psihigh is very close to the separatrix, tightly-packed core surfaces near psihigh
+are excluded just as above-psihigh edge surfaces are. For non-diverted (limited) plasmas
+psilim is additionally capped at psihigh.
 
-Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
-or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
+`qlim = min(q(psilim), ctrl.qhigh)`. If `ctrl.qhigh` truncates the integration before
+`psilim`, a root-find adjusts `psilim` to where `q = qhigh`:
+- `qhigh ≤ q(psihigh)`: Newton iteration with the direct q spline.
+- `q(psihigh) < qhigh < q(psilim)`: Brent bracket on `[psihigh, psilim]` using the iota
+  inverse spline. This handles the case where a diverted plasma's edge layer extends beyond
+  psihigh but the user wants to cap the integration at an intermediate q value.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
-    profiles = equil.profiles
+    profiles    = equil.profiles
+    psihigh     = equil.config.psihigh
+    is_diverted = !isnothing(equil.params.is_diverted) && equil.params.is_diverted
 
-    # Initial guesses based on equilibrium
-    intr.qlim = min(equil.params.qmax, ctrl.qhigh) # equilibrium solve only goes up to qmax, so we're capped there
-    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
-    intr.psilim = equil.config.psihigh
-
-    # Optionally override qlim based on dmlim
-    if ctrl.set_psilim_via_dmlim
-        if ctrl.nn_low != ctrl.nn_high
-            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
-        end
-        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
-        # Normalize dmlim ∈ [0,1)
-        ctrl.dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
-
-        # Reduce qlim if above qmax
-        while intr.qlim > equil.params.qmax
-            intr.qlim -= 1.0 / ctrl.nn_low
+    # Walk ALL rational surfaces (sorted by ψ) and stop at the first pair whose consecutive
+    # spacing is below edge_layer_width. This ensures psilim is always set by the spacing
+    # criterion, even if psihigh is very close to the separatrix and the core search has
+    # already found many tightly-packed surfaces inside psihigh.
+    last_valid = nothing
+    psi_last   = 0.0
+    for s in intr.sing
+        if s.psifac - psi_last >= ctrl.edge_layer_width
+            last_valid = s
+            psi_last   = s.psifac
+        else
+            break
         end
     end
 
-    # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
-    if intr.qlim < equil.params.qmax
-        # Find nearest ψ index where q ≈ qlim
-        _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
-        jpsi = min(jpsi, equil.config.mpsi - 1)
+    # Set psilim just inside the last valid surface using the singfac_min buffer
+    # (with a 1.1 safety margin so floating-point rounding cannot accidentally push
+    # psilim past the trigger threshold and cause the EL integrator to attempt a crossing).
+    if !isnothing(last_valid)
+        n_last  = minimum(last_valid.n)
+        q1_last = last_valid.q1
+        natural_psilim = last_valid.psifac - ctrl.singfac_min * 1.1 / abs(n_last * q1_last)
+        intr.psilim = is_diverted ? natural_psilim : min(natural_psilim, psihigh)
+    else
+        intr.psilim = psihigh
+    end
 
-        hint = Ref(jpsi)
-        intr.psilim = find_zero(
-            (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
-             psi -> profiles.q_deriv(psi; hint=hint)),
-            profiles.xs[jpsi], Roots.Newton()
-        )
-        intr.q1lim = profiles.q_deriv(intr.psilim)
+    # q at the natural psilim — dispatches to iota spline in edge zone via eval_q.
+    q_at_psilim = eval_q(profiles, intr.psilim)
+
+    intr.qlim  = min(q_at_psilim, ctrl.qhigh)
+    intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
+
+    # If qhigh truncates the integration before psilim, root-find for the exact psilim.
+    if intr.qlim < q_at_psilim
+        q_at_psihigh = profiles.q_spline.y[end]
+        if intr.qlim > q_at_psihigh && !isnothing(profiles.iota_spline)
+            # qlim is in the edge zone [psihigh, psilim]: Brent bracket with iota spline.
+            psilim_before = intr.psilim
+            intr.psilim = find_zero(
+                psi -> eval_q(profiles, psi) - intr.qlim,
+                (psihigh, psilim_before), Roots.Brent(); xatol=1e-8
+            )
+            intr.q1lim = eval_q(profiles, intr.psilim; deriv=1)
+        else
+            # qlim is in the core [psilow, psihigh]: Newton with direct spline + derivative.
+            _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
+            jpsi = min(jpsi, equil.config.mpsi - 1)
+            hint = Ref(jpsi)
+            intr.psilim = find_zero(
+                (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
+                 psi -> profiles.q_deriv(psi; hint=hint)),
+                profiles.xs[jpsi], Roots.Newton()
+            )
+            intr.q1lim = profiles.q_deriv(intr.psilim)
+        end
     end
 end
 
@@ -231,10 +325,6 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 """
 @with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    q_spline = profiles.q_spline
-    q_d1 = profiles.q_deriv
-    q_d2 = deriv2(q_spline)
-    q_d3 = deriv3(q_spline)
 
     # Initial allocations
     Npert = intr.numpert_total
@@ -252,11 +342,8 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     x = zeros!(pool, ComplexF64, Npert, 2 * Npert, 2, ctrl.sing_order + 1)
     tmp_vec = acquire!(pool, ComplexF64, Npert)
 
-    # Evaluate q spline and its derivatives
-    q = (q_spline(singp.psifac),
-        q_d1(singp.psifac),
-        q_d2(singp.psifac),
-        q_d3(singp.psifac))
+    # Evaluate q and its first three derivatives at the singular surface.
+    q = eval_q(profiles, singp.psifac; deriv=3, output_lower_derivs=true)
 
     # Evaluate fmats_lower and derivatives using series interpolants
     ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
@@ -750,8 +837,9 @@ Implement kin_flag functionality
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
-    odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
+    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration.
+    # eval_q dispatches to iota spline above psihigh (diverted), direct spline otherwise.
+    odet.q = eval_q(equil.profiles, psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
     # kinetic stuff - skip for now

@@ -38,15 +38,27 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Print initial integration condition
     if ctrl.verbose
-        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
+        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" eval_q(equil.profiles, odet.psifac)))"
     end
 
     # Iterate through each integration chunk
+    psihigh = equil.profiles.xs[end]
     for chunk in chunks
+        is_above_psihigh = ctrl.psiedge < intr.psilim && chunk.psi_end > psihigh
+
         # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
+        end
+
+        # Detect early termination: if the solver did not reach chunk.psi_end 
+        # Stop the integration (ODE stiffness grows rapidly as q→∞ in the edge zone)
+        if is_above_psihigh && odet.psifac < chunk.psi_end - 1e-6
+            if ctrl.verbose
+                @warn "Above-psihigh solver terminated early at ψ = $((@sprintf "%.4f" odet.psifac)), Euler Lagrange integration"
+            end
+            break
         end
 
         # Cross a rational surface after integration if this chunk requires it
@@ -61,30 +73,38 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Deallocate unused storage of integration data
     if ctrl.psiedge < intr.psilim
-        # Find the peak dW in the edge region and truncate integration data there
+        # Find the peak dW in the edge region and truncate integration data there.
+        # Uses raw (pre-transform) u_store: after transform_u!, edge-zone steps can acquire
+        # large positive garbage et values from ill-conditioned transform products, pushing the
+        # detected peak to the wrong location. Raw U₁ produces garbage as large negative values
+        # (safely excluded from the max search), so the few well-conditioned steps near psiedge
+        # cleanly dominate the peak.
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         trim_storage!(odet)
         if ctrl.verbose
             @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
         end
 
-        # Update u, psilim, and qlim for usage in determining wp and wt
+        # Update psilim, qlim, and u to the truncated boundary (peak dW step).
+        # qlim is updated to q at the truncation psi so that free_run!'s singfac = (m - n*q_boundary)
+        # matches the actual safety factor at the plasma boundary, consistent with free_compute_total's
+        # scan metric and with the develop-branch convention (qlim = q at psilim).
         intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
+        intr.qlim   = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
         odet.step -= 1 # step was incremented one extra time in integrate_el_region!
         trim_storage!(odet)
     end
 
-    # Evaluate stability criterion (critical determinant) of saved solutions
+    # Form the true solution vectors (undo the Gaussian reductions from fixups).
+    transform_u!(odet, intr)
+
+    # Evaluate stability criterion (critical determinant) of saved solutions.
     if ctrl.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
-
-    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration
-    transform_u!(odet, intr)
 
     return odet
 end
@@ -336,11 +356,11 @@ making it clear what region is being integrated.
 
 ### TODOs
 
-Check sensitivity of results to tolerances, currently using same logic as Fortran
-Check absolute tolerances, currently only relative tolerances are updated
+Check sensitivity of results to tolerances
+Explore absolute tolerances to reduce the number of steps taken in the core
 """
 function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
-
+    
     # Fraction of the q-range defining "near boundary" dense-save zones at each end of
     # a segment. TODO: expose as a ctrl field when a good default is validated.
     near_q_frac = 0.05
@@ -348,27 +368,30 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
     # q at segment boundaries — used for symmetric near-boundary heuristic.
     # odet.q is updated at every step inside sing_der!, so we compare against these
     # fixed endpoints in the callback rather than using psi-based distances.
-    q_start = equil.profiles.q_spline(chunk.psi_start)
-    q_end   = equil.profiles.q_spline(chunk.psi_end)
+    psihigh = equil.profiles.xs[end]
+    q_start = eval_q(equil.profiles, chunk.psi_start)
+    q_end   = eval_q(equil.profiles, chunk.psi_end)
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
 
     function segment_callback!(integrator)
-        ctrl, _, _, intr, odet, chunk = integrator.p
+        ctrl, equil, _, intr, odet, chunk = integrator.p
 
         odet.total_steps += 1
         steps_in_segment[] += 1
 
-        compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
+        is_above_psihigh = integrator.t > equil.profiles.xs[end] && !isnothing(equil.profiles.iota_spline)
+        compute_solution_norms!(integrator.u, odet, ctrl, intr, false, is_above_psihigh)
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
         near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
         near_end   = abs(odet.q - q_end)   < near_q_frac * q_range
+        above_psiedge = ctrl.psiedge <= integrator.t
 
-        if near_start || near_end || (odet.step % ctrl.save_interval == 0)
+        if above_psiedge || near_start || near_end || (odet.step % ctrl.save_interval == 0)
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end
@@ -397,7 +420,6 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
         @views odet.ud_store[:, :, :, odet.step] .= odet.ud
         odet.step += 1
     end
-
     odet.u .= sol.u[end]
     odet.psifac = sol.t[end]
 end
@@ -427,7 +449,7 @@ operate on `u` directly without extra copies.
 
 Add resizing logic for unorm arrays when ifix exceeds allocated size
 """
-function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool)
+function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal, sing_flag::Bool, is_above_psihigh::Bool=false)
 
     # Compute norms of first solution vectors, abort if any are zero
     odet.unorm .= norm.(eachcol(u[:, :, 1]))
@@ -436,14 +458,18 @@ function compute_solution_norms!(u::Array{ComplexF64,3}, odet::OdeState, ctrl::F
         error("One of the first solution vector norms unorm(1,$jmax) = 0")
     end
 
-    # Normalize unorm and perform Gaussian reduction if required
+    # Normalize unorm and perform Gaussian reduction if required.
+    # Above psihigh, use ucrit/10 to trigger more frequent fixups: the ODE is stiffer
+    # (q→∞ near separatrix), so u grows faster between fixups and pre-fixup steps have
+    # large wp = U₂/U₁ eigenvalues that would otherwise dominate the edge dW scan.
+    effective_ucrit = is_above_psihigh ? ctrl.ucrit / 10 : ctrl.ucrit
     if odet.new
         odet.new = false
         odet.unorm0 .= odet.unorm
     else
         odet.unorm ./= odet.unorm0
         uratio = maximum(odet.unorm) / minimum(odet.unorm)
-        if uratio > ctrl.ucrit || sing_flag
+        if uratio > effective_ucrit || sing_flag
             # TODO: add resizing logic here as well
             if odet.ifix < ctrl.numunorms_init
                 odet.ifix += 1
@@ -522,23 +548,59 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Since we search for the maximum dW, initialize to -Infinity
+    # After integration, odet.step is one-past-the-last-valid index: each save stores at
+    # psi_store[step] then increments step. So valid indices are 1:(odet.step-1).
+    nsteps = odet.step - 1
+
+    # Since we search for the maximum dW, initialize to -Infinity.
+    # Resize to match valid step count (integration may have grown beyond numsteps_init).
+    resize!(odet.dW_edge, nsteps)
     fill!(odet.dW_edge, -Inf * (1 + im))
+    ep_edge     = fill(-Inf * (1 + im), nsteps)
+    ev_edge     = fill(-Inf * (1 + im), nsteps)
+    evonly_edge = fill(-Inf, nsteps)
 
-    # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
-    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
+    # Create a spline for wv matrix covering the actual stored integration range.
+    # Use odet.step - 1 (last valid index) to avoid reading uninitialized over-allocated slots.
+    psi_scan_end = odet.psi_store[nsteps]
+    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr, psi_scan_end)
 
-    # Loop through integration, compute dW at steps where psifac >= psiedge
-    for istep in 1:odet.step
+    # Loop through all stored steps in [psiedge, psilim] and compute dW at each.
+    # The ucrit/10 reduction above psihigh suppresses ODE fixup artifacts at edge rational
+    # surfaces so that the physical stability peak dominates the scan.
+    for istep in 1:nsteps
         odet.psifac = odet.psi_store[istep]
-        if odet.psifac >= ctrl.psiedge
+        if ctrl.psiedge <= odet.psifac
             odet.u .= odet.u_store[:, :, :, istep]
-            odet.dW_edge[istep] = free_compute_total(equil, ffit, intr, odet)
+            try
+                result = free_compute_total(equil, ffit, intr, odet)
+                odet.dW_edge[istep] = result.et
+                ep_edge[istep]      = result.ep
+                ev_edge[istep]      = result.ev
+                evonly_edge[istep]  = result.evonly
+            catch e
+                e isa LinearAlgebra.SingularException || rethrow(e)
+                # U₁ is singular or kinetic norm is non-positive at this step; skip it.
+                # dW_edge remains -Inf so this step is ignored in the max search.
+            end
         end
     end
 
-    # Return the index that maximizes dW_edge to identify truncation point
-    return findmax(real.(odet.dW_edge))[2]
+    # Extract ALL psi values from psiedge to psilim, storing NaN for steps where
+    # free_compute_total failed (SingularException). This preserves the full edge stability
+    # picture for the user: NaN clusters reveal where the splines become ill-conditioned,
+    # and the full range allows verifying that the peak is not a boundary artifact.
+    # The u_store is separately trimmed to the peak step after this function returns.
+    psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:nsteps)
+    odet.psi_edge_scan    = odet.psi_store[psiedge_idxs]
+    odet.et_edge_scan     = ComplexF64[isfinite(real(odet.dW_edge[i])) ? odet.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
+    odet.ep_edge_scan     = ComplexF64[isfinite(real(ep_edge[i]))      ? ep_edge[i]       : complex(NaN) for i in psiedge_idxs]
+    odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]
+    odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i])           ? evonly_edge[i]   : NaN          for i in psiedge_idxs]
+
+    # Return the index that maximizes dW_edge to identify the truncation point.
+    et_clean = replace(real.(odet.dW_edge), NaN => -Inf)
+    return findmax(et_clean)[2]
 end
 
 """
@@ -600,8 +662,9 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # "undoing" the Gaussian reductions to get the true solution vectors
     jfix = 1
     for ifix in 1:(odet.ifix+1)
-        # If after the last fixup, go to the end of integration
-        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
+        jfix > odet.step && break
+        # If after the last fixup (or the fixup is beyond trimmed storage), go to stored end
+        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])

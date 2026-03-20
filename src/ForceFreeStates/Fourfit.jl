@@ -45,6 +45,11 @@ The metric coefficients stored in `metric.fs` include:
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
   - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
+  - `psilim::Float64`: Upper psi limit for the metric grid (default: Inf = full grid). For
+    diverted plasmas the caller passes `intr.psilim` (set by `sing_lim!` from edge rational
+    surfaces), which extends above `psihigh` to include the near-separatrix edge region while
+    remaining well-behaved (psilim << 1). Nodes all the way to psin=1 are excluded because
+    the X-point geometry gives J→∞ there.
 
 ### Returns
 
@@ -56,18 +61,24 @@ The metric coefficients stored in `metric.fs` include:
 Add kinetic metric tensor components for kin_flag = true
 Remove mband if we decide to fully deprecate banded matrices
 """
-function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
+function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool, psilim::Float64=Inf)
 
     # TODO: add kinetic metric tensor components
 
     # --- Extract data from the PlasmaEquilibrium object ---
-    mpsi = length(equil.rzphi_xs)
+    # Truncate the rzphi_xs grid at psilim. For diverted plasmas psilim is set by sing_lim!
+    # from the edge rational surfaces, extending above psihigh but well below psin=1 where
+    # J→∞ at the X-point. Including these well-behaved near-separatrix nodes gives accurate
+    # FGK splines for the above-psihigh ODE chunks instead of ExtendExtrap frozen at psihigh.
+    profiles = equil.profiles
+    mpsi_full = length(equil.rzphi_xs)
+    mpsi = isfinite(psilim) ? searchsortedlast(equil.rzphi_xs, psilim) : mpsi_full
     mtheta = length(equil.rzphi_ys)
 
     # Set coordinate grids based on the input equilibrium
     # The equil.rzphi_ys is normalized (0 to 1), so scale to radians.
     metric = MetricData(mpsi, mtheta)
-    metric.xs .= equil.rzphi_xs
+    metric.xs .= @view equil.rzphi_xs[1:mpsi]
     metric.ys .= equil.rzphi_ys .* 2π
 
     # Temporary array for contravariant basis vectors
@@ -176,6 +187,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    jmat_flat  = zeros(ComplexF64, mpsi, 2 * intr.mband + 1)  # jmat vs psi spline data
     g11 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
     g22 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
     g33 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
@@ -206,11 +218,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         gmats_flatview = @view gmats_flat[ipsi, :]
         kmats_flatview = @view kmats_flat[ipsi, :]
         # --- Profiles ---
-        psi = profiles.xs[ipsi]
+        psi = metric.xs[ipsi]
         p1 = profiles.P_deriv(psi; hint=hint)
-        q = profiles.q_spline.y[ipsi]
-        q1 = profiles.q_deriv(psi; hint=hint)
+        # F' and P' use ExtendExtrap above psihigh — physically correct since F' ≈ 0, P' ≈ 0 near separatrix.
         jtheta = -profiles.F_deriv(psi; hint=hint)
+        q, q1 = eval_q(profiles, psi; deriv=1, output_lower_derivs=true, hint=hint)
         chi1 = 2π * equil.psio
 
         # Fill lower half (modes 0, 1, ..., mband at indices mid, mid-1, ..., 1)
@@ -238,6 +250,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
             jmat[mid+k] = conj(jmat[mid-k])
             jmat1[mid+k] = conj(jmat1[mid-k])
         end
+
+        jmat_flat[ipsi, :] .= jmat
 
         # TODO: for 3D, would need an additional nlow:nhigh loop here for n/n' coupling
         for n in intr.nlow:intr.nhigh
@@ -325,12 +339,10 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     ffit.fmats_lower = cubic_interp(metric.xs, fmats_lower_flat; ffit.itp_opts...)
     ffit.gmats = cubic_interp(metric.xs, gmats_flat; ffit.itp_opts...)
     ffit.kmats = cubic_interp(metric.xs, kmats_flat; ffit.itp_opts...)
+    ffit.jmat_spline = cubic_interp(metric.xs, jmat_flat; ffit.itp_opts...)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true
-
-    # This is used in free_run
-    ffit.jmat = jmat
 
     return ffit
 end

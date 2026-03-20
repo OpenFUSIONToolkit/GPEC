@@ -331,7 +331,7 @@ function interpolate_field_at_surface(
     end
 
     # Get safety factor at this surface
-    q = equil.profiles.q_spline(psi)
+    q = Equilibrium.eval_q(equil.profiles, psi)
 
     # Convert displacement to field using ideal MHD relation
     # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ (from FieldReconstruction.jl line 304)
@@ -395,7 +395,7 @@ function compute_current_density(
 
     # Get equilibrium quantities at this surface
     F_tor = equil.profiles.F_spline(psi)  # Toroidal field function F = R*B_tor times 2π
-    q = equil.profiles.q_spline(psi)      # Safety factor
+    q = Equilibrium.eval_q(equil.profiles, psi)      # Safety factor
 
     # Magnetic axis location
     ro = equil.ro

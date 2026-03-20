@@ -115,14 +115,6 @@ function main(args::Vector{String}=String[])
     # TODO: parallel threads logic
     ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
-    # Determine psilim and qlim (where we will integrate to)
-    sing_lim!(intr, ctrl, equil)
-    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
-        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
-            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
-        ctrl.psiedge = 1.0
-    end
-
     # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
         @warn "Reforming equilibrium splines from psihigh to psilim not implemented yet. Proceeding with psihigh = $(equil.config.psihigh)."
@@ -175,26 +167,49 @@ function main(args::Vector{String}=String[])
     intr.npert = intr.nhigh - intr.nlow + 1
     nstring = intr.npert == 1 ? "$(intr.nlow)" : "$(intr.nlow):$(intr.nhigh)"
 
-    # Find all singular surfaces in the equilibrium
-    sing_find!(intr, equil)
+    # Find all singular surfaces in the equilibrium (must run before sing_lim! for diverted edge surfaces)
+    sing_find!(intr, ctrl, equil)
+
+    # Determine psilim and qlim (where we will integrate to).
+    # Runs after sing_find! so that edge surfaces above psihigh are available for diverted plasmas.
+    sing_lim!(intr, ctrl, equil)
+
+    # Extend the rzphi coordinate splines to psilim using the edge rational surfaces from sing_find!.
+    # This is the single canonical source for the far-edge grid — sing_find! applies the
+    # edge_layer_width stopping criterion (check-before-push), so psilim = last surface before
+    # surfaces pack closer than edge_layer_width.  The rzphi grid now covers exactly [psilow, psilim].
+    if !isnothing(equil.profiles.iota_spline)
+        edge_surf_psis = Float64[s.psifac for s in intr.sing if s.psifac > equil.config.psihigh]
+        Equilibrium.equilibrium_extend_rzphi!(equil, edge_surf_psis)
+    end
 
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
     end
+    # Use the q of the outermost found rational surface to set the mode range, falling back
+    # to the direct-spline edge q if no surfaces were found. For diverted plasmas qmax = Inf,
+    # so we rely on sing rather than equil.params.qmax.
+    is_diverted = !isnothing(equil.params.is_diverted) && equil.params.is_diverted
+    q_for_mode_range = if is_diverted
+        isempty(intr.sing) ? equil.profiles.q_spline.y[end] : intr.sing[end].q
+    else
+        equil.params.qmax
+    end
+
     if ctrl.cyl_flag
         intr.mlow = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
     elseif ctrl.sing_start == 0
         intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * q_for_mode_range) + ctrl.delta_mhigh
     else
         intr.mmin = Inf # HUGE in Fortran
         for ising in Int(ctrl.sing_start):intr.msing
             intr.mmin = min(intr.mmin, sing[ising].m)
         end
         intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mhigh = trunc(Int, intr.nhigh * q_for_mode_range) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     if ctrl.delta_mband >= intr.mpert
@@ -209,15 +224,17 @@ function main(args::Vector{String}=String[])
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
             @info "Run parameters:\n" *
-                  "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
-                  "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
-                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
-                  "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
+                  "   q0    = $(@sprintf("%.3f", equil.params.q0)), qmin   = $(@sprintf("%.3f", equil.params.qmin))\n" *
+                  "   q95   = $(@sprintf("%.3f", equil.params.q95)), q99    = $(@sprintf("%.3f", equil.params.q99)), qmax   = $(@sprintf("%.3f", equil.params.qmax))\n" *
+                  "   qlim  = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
+                  "   betat = $(@sprintf("%.3f", equil.params.betat)), betan  = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
+                  "   mlow  = $(@sprintf("%5i", intr.mlow)), mhigh  = $(@sprintf("%5i", intr.mhigh)), mpert  = $(@sprintf("%5i", intr.mpert)), mband = $(@sprintf("%5i", intr.mband))\n" *
+                  "   nlow  = $(@sprintf("%5i", intr.nlow)), nhigh  = $(@sprintf("%5i", intr.nhigh)), npert  = $(@sprintf("%5i", intr.npert))"
         end
 
-        # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        # Compute metric tensor, limiting the psi grid to psilim so far-edge nodes
+        # (near the X-point where the metric diverges) are excluded from matrix splines.
+        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag, psilim=intr.psilim)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -434,6 +451,17 @@ function write_outputs_to_HDF5(
         out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
+
+        # Edge stability scan: full [psiedge, psilim] picture before u_store is trimmed.
+        # NaN entries mark steps where U₁ was singular (SingularException in free_compute_total).
+        # Stored in a dedicated top-level group so users can inspect the full scan independently.
+        if !isempty(odet.psi_edge_scan)
+            out_h5["edge_scan/psi"]               = odet.psi_edge_scan
+            out_h5["edge_scan/total_energy"]      = odet.et_edge_scan     # plasma + vacuum eigenmode energy
+            out_h5["edge_scan/plasma_energy"]     = odet.ep_edge_scan     # plasma contribution
+            out_h5["edge_scan/vacuum_energy"]     = odet.ev_edge_scan     # vacuum contribution (projected onto eigenmode)
+            out_h5["edge_scan/vacuum_eigenvalue"] = odet.evonly_edge_scan # least stable eigenvalue of vacuum matrix alone
+        end
 
         # Write singular surface data
         out_h5["singular/msing"] = intr.msing
