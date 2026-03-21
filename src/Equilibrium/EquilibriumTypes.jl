@@ -46,7 +46,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.994
     mpsi::Int = 0
-    psi_accuracy::Float64 = 0.005
+    psi_accuracy::Float64 = 0.001
     mtheta::Int = 256
 
     newq0::Int = 0

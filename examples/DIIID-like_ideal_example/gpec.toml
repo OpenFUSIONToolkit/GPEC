@@ -9,7 +9,7 @@ grid_type = "log_asymptotic"            # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
 psihigh = 0.993                         # Upper limit of normalized flux coordinate
 mpsi = 0                                # Number of radial grid points (0 = auto-compute from psi_accuracy)
-psi_accuracy = 0.005                    # Target absolute error in q for auto-mpsi
+psi_accuracy = 0.001                    # Target absolute error in q for auto-mpsi
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
