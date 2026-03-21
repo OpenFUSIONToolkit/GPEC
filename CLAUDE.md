@@ -403,12 +403,14 @@ GeneralizedPerturbedEquilibrium
 
 ## Git Workflow
 
-This project uses GitFlow:
+This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model):
 
 - Two permanent branches: `main` and `develop`
 - `main` branch updated only at release-ready stages
 - `develop` branch for integration of features
 - Feature branches off `develop`, merged back with `--no-ff`
+
+**IMPORTANT**: All development must be done on feature branches. No commits should be made directly to `develop` or `main`. Always create a feature branch from `develop`, do all work there, and open a pull request back into `develop`. This applies to bug fixes, improvements, and new features alike.
 
 **Current Development**:
 - Active branch: `perturbed_equilibrium` - Major feature implementing GPEC-style perturbed equilibrium calculations
