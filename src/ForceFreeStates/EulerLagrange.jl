@@ -690,8 +690,11 @@ function transform_u!(odet::OdeState, intr::ForceFreeStatesInternal)
     # "undoing" the Gaussian reductions to get the true solution vectors
     jfix = 1
     for ifix in 1:(odet.ifix+1)
-        # If after the last fixup, go to the end of integration
-        kfix = ifix != odet.ifix + 1 ? odet.fixstep[ifix] : odet.step
+        # If after the last fixup, go to the end of integration.
+        # Cap kfix at odet.step: fixstep entries from fixups AFTER the peak (set during integration
+        # before trim_storage!) can exceed the trimmed storage size and must be clamped.
+        kfix = ifix != odet.ifix + 1 ? min(odet.fixstep[ifix], odet.step) : odet.step
+        jfix > odet.step && break
         @views for istep in jfix:kfix
             # This is u1->u4 in Fortran
             mul!(gauss_buffer, odet.u_store[:, :, 1, istep], transforms[:, :, ifix])
