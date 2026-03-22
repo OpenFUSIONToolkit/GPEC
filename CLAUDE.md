@@ -406,11 +406,48 @@ GeneralizedPerturbedEquilibrium
 This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model):
 
 - Two permanent branches: `main` and `develop`
-- `main` branch updated only at release-ready stages
-- `develop` branch for integration of features
-- Feature branches off `develop`, merged back with `--no-ff`
+- `main` is updated only at release-ready stages via pull request from `develop`
+- `develop` is the integration branch — all feature branches merge here
 
-**IMPORTANT**: All development must be done on feature branches. No commits should be made directly to `develop` or `main`. Always create a feature branch from `develop`, do all work there, and open a pull request back into `develop`. This applies to bug fixes, improvements, and new features alike.
+**IMPORTANT**: All development must be done on feature branches. No commits should be made directly to `develop` or `main`. Always create a branch from `develop`, do all work there, and open a pull request back into `develop`.
+
+### Branch Naming
+
+Branches use a typed prefix and a lowercase hyphen-separated description:
+
+| Prefix | Purpose | Branches from | Merges into |
+|---|---|---|---|
+| `feature/` | New functionality | `develop` | `develop` |
+| `bugfix/` | Non-critical bug fixes | `develop` | `develop` |
+| `hotfix/` | Critical production fix | `main` | `main` + `develop` |
+| `performance/` | Performance improvements | `develop` | `develop` |
+| `refactor/` | Refactoring without behavior change | `develop` | `develop` |
+| `docs/` | Documentation only | `develop` | `develop` |
+| `test/` | Test additions/improvements | `develop` | `develop` |
+| `experiment/` | Exploratory work, may not merge | `develop` | — |
+
+Examples: `bugfix/sing-lim-bounds-error`, `feature/kinetic-damping`, `performance/green-function-prefactor`
+
+Author-named branches (e.g. `jmh/`, `nlogan/`) are not used — git history already records authorship on every commit.
+
+### Hotfix Workflow
+
+Hotfixes address critical bugs in production (`main`) that cannot wait for the next release cycle:
+
+1. Branch `hotfix/description` from the current tagged `main` commit
+2. Fix the bug with one or more commits
+3. Merge into `main` via pull request; tag the merge commit with a new patch version (e.g. `v0.1.1`)
+4. Merge the same branch into `develop` so the fix is not lost in the next release
+
+### Versioning
+
+This project uses semantic versioning: `v{major}.{minor}.{patch}`
+
+- **major**: breaking API or file-format changes
+- **minor**: new features, backward-compatible
+- **patch**: bug fixes (typically via hotfix branches)
+
+Tags are applied to merge commits on `main`.
 
 **Current Development**:
 - Active branch: `perturbed_equilibrium` - Major feature implementing GPEC-style perturbed equilibrium calculations
