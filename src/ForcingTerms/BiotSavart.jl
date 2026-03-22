@@ -16,6 +16,10 @@ Matches the Fortran `field_bs_psi` discretization in `field.F`.
 
 const MU0_OVER_4PI = 1e-7  # T⋅m/A
 
+# Minimum squared distance [m²] to skip in single-point evaluation (r ~ 1 μm); avoids
+# singularity when an observation point coincides with a conductor segment midpoint.
+const BIOT_SAVART_MIN_DIST_SQ = 1e-12
+
 """
     PrecomputedSegments
 
@@ -106,7 +110,7 @@ function accumulate_strand_field!(
         rz = obs_z - (zs[l] + zs[l+1]) * 0.5
 
         r2  = rx*rx + ry*ry + rz*rz
-        r2 < 1e-12 && continue  # avoid singularity (observer on conductor)
+        r2 < BIOT_SAVART_MIN_DIST_SQ && continue  # avoid singularity (observer on conductor)
         inv_r3 = prefactor / (r2 * sqrt(r2))
 
         # dB = prefactor × (dl⃗ × r⃗) / |r|³  [cross product]
@@ -209,7 +213,7 @@ function compute_biot_savart_boundary!(
         obs_y[i] = obs_R[i] * sp
     end
 
-    # Threaded loop over observation points; each index is written by one thread only
+    # Each thread writes exclusively to its own index i — no synchronization needed
     Threads.@threads for i in 1:nobs
         @inbounds begin
             ox = obs_x[i]; oy = obs_y[i]; oz = obs_Z[i]

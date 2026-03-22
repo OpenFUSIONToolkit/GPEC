@@ -8,6 +8,11 @@ Coil geometry files use the Fortran GPEC ASCII format:
   - Data: `ncoil × s × nsec` rows, each with `X Y Z` in meters (Cartesian, lab frame)
 """
 
+# Sentinel value used when nom coordinates are not user-specified (matches Fortran coil.F)
+const _NOM_UNSET_SENTINEL = 1e10
+# Threshold below which a nom value is treated as user-specified (vs. the unset sentinel)
+const _NOM_THRESHOLD = 1e3
+
 """
     CoilSet
 
@@ -243,9 +248,9 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
     tilty_cfg = _pad(cfg.tilty, ncoil)
     tiltz_cfg = _pad(cfg.tiltz, ncoil)
 
-    xnom_cfg = _pad(isempty(cfg.xnom) ? fill(1e10, ncoil) : cfg.xnom, ncoil)
-    ynom_cfg = _pad(isempty(cfg.ynom) ? fill(1e10, ncoil) : cfg.ynom, ncoil)
-    znom_cfg = _pad(isempty(cfg.znom) ? fill(1e10, ncoil) : cfg.znom, ncoil)
+    xnom_cfg = _pad(isempty(cfg.xnom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.xnom, ncoil)
+    ynom_cfg = _pad(isempty(cfg.ynom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.ynom, ncoil)
+    znom_cfg = _pad(isempty(cfg.znom) ? fill(_NOM_UNSET_SENTINEL, ncoil) : cfg.znom, ncoil)
 
     # Check if n_tilt = 0 suppresses tilts (Fortran: "no n=0 component")
     apply_tilt = n_tilt != 0
@@ -268,10 +273,10 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
                 cx, cy, cz = _arc_length_center(
                     view(cs.x, j, k, :), view(cs.y, j, k, :), view(cs.z, j, k, :)
                 )
-                # Use user-specified center if provided (|nom| < 1e3 check, matching Fortran)
-                x0 = abs(xnom_cfg[j]) < 1e3 ? xnom_cfg[j] : cx
-                y0 = abs(ynom_cfg[j]) < 1e3 ? ynom_cfg[j] : cy
-                z0 = abs(znom_cfg[j]) < 1e3 ? znom_cfg[j] : cz
+                # Use user-specified center if provided (|nom| < _NOM_THRESHOLD, matching Fortran)
+                x0 = abs(xnom_cfg[j]) < _NOM_THRESHOLD ? xnom_cfg[j] : cx
+                y0 = abs(ynom_cfg[j]) < _NOM_THRESHOLD ? ynom_cfg[j] : cy
+                z0 = abs(znom_cfg[j]) < _NOM_THRESHOLD ? znom_cfg[j] : cz
                 (x0, y0, z0)
             end
 
@@ -300,7 +305,8 @@ function apply_transforms(cs::CoilSet, cfg::CoilSetConfig; n_tilt::Int=1)
             end
 
             for l in 1:nsec
-                # Work in center frame
+                # Work in center frame. Tilts are superposed as independent small-angle
+                # perturbations (linear addition), matching Fortran coil.F convention.
                 xc = cs.x[j, k, l] - x0
                 yc = cs.y[j, k, l] - y0
                 zc = cs.z[j, k, l] - z0

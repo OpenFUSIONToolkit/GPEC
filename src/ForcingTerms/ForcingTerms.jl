@@ -187,9 +187,5 @@ include("BiotSavart.jl")
 include("CoilFourier.jl")
 
 export ForcingTermsControl, ForcingMode, load_forcing_data!
-export CoilSet, CoilSetConfig, CoilConfig
-export read_coil_dat, apply_transforms, load_coil_sets
-export BoundaryGrid, sample_boundary_grid
-export project_normal_field!, fourier_decompose_bn, compute_coil_forcing_modes!
 
 end # module ForcingTerms

@@ -12,7 +12,7 @@ suitable for the perturbed equilibrium pipeline.
 5. `compute_coil_forcing_modes!` — top-level entry point combining all steps
 """
 
-using FastInterpolations: cubic_interp, PeriodicBC
+using FastInterpolations: cubic_interp, PeriodicBC, LinearBinary
 
 """
     BoundaryGrid
@@ -60,14 +60,20 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
     end
 
     # Compute dR/dθ and dZ/dθ via periodic cubic splines on the boundary contour.
-    # Use a StepRangeLen so FastInterpolations recognizes the uniform spacing and
-    # can automatically compute the period (2π). This follows the pattern in Vacuum/Utilities.jl.
+    # LinearBinary search is optimal here: evaluation points are monotonically increasing
+    # (the same uniform grid used to construct the spline).
     θ_phys = range(0; length=mtheta, step=2π/mtheta)
-    spline_R = cubic_interp(θ_phys, R_arr; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
-    spline_Z = cubic_interp(θ_phys, Z_arr; bc=PeriodicBC(; endpoint=:exclusive, period=2π))
+    spline_R = cubic_interp(θ_phys, R_arr; bc=PeriodicBC(; endpoint=:exclusive, period=2π), search=LinearBinary())
+    spline_Z = cubic_interp(θ_phys, Z_arr; bc=PeriodicBC(; endpoint=:exclusive, period=2π), search=LinearBinary())
 
-    dR_dθ = [spline_R(θ_phys[i]; deriv=1) for i in 1:mtheta]
-    dZ_dθ = [spline_Z(θ_phys[i]; deriv=1) for i in 1:mtheta]
+    dR_dθ = zeros(mtheta)
+    dZ_dθ = zeros(mtheta)
+    hint_R = Ref(1)
+    hint_Z = Ref(1)
+    for i in 1:mtheta
+        dR_dθ[i] = spline_R(θ_phys[i]; deriv=1, hint=hint_R)
+        dZ_dθ[i] = spline_Z(θ_phys[i]; deriv=1, hint=hint_Z)
+    end
 
     phi_grid = collect(range(0; length=nzeta, step=2π/nzeta))
 
@@ -186,10 +192,9 @@ function compute_coil_forcing_modes!(
 
     verbose && @info "Computing coil forcing modes: mtheta=$mtheta, nzeta=$nzeta, n=$n, m=$m_low:$m_high"
 
-    # Step 1: boundary grid
     grid = sample_boundary_grid(equil, mtheta, nzeta)
 
-    # Step 2: observation points — (theta_i, zeta_j) → cylindrical (R, phi, Z)
+    # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)
     nobs  = mtheta * nzeta
     obs_R   = zeros(nobs)
     obs_phi = zeros(nobs)
@@ -204,7 +209,6 @@ function compute_coil_forcing_modes!(
         end
     end
 
-    # Step 3: Biot-Savart field at all observation points
     B_R   = zeros(nobs)
     B_phi = zeros(nobs)
     B_Z   = zeros(nobs)
@@ -212,13 +216,11 @@ function compute_coil_forcing_modes!(
 
     verbose && @info "  Max |B_R| = $(maximum(abs, B_R)) T, Max |B_Z| = $(maximum(abs, B_Z)) T"
 
-    # Step 4: normal projection
     bn = zeros(mtheta, nzeta)
     project_normal_field!(bn, B_R, B_Z, grid)
 
     verbose && @info "  Max |bn| = $(maximum(abs, bn)) T"
 
-    # Step 5: Fourier decomposition
     modes = fourier_decompose_bn(bn, grid, n, m_low, m_high)
 
     empty!(forcing_modes)
