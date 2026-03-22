@@ -368,19 +368,25 @@ let
         end, stab_keys)
 
     println()
-    println("  NOTE: et[1] is normalized to unit SFL mode coefficients at the boundary.")
-    println("        Cross-Jacobian comparison (Hamada vs equal_arc) is NOT meaningful.")
-    println("        Valid comparison: variants sharing the same boundary Jacobian.")
+    println("  NOTE: et[1] = δW/‖ξ‖²_K is normalized by kinetic energy of SFL mode")
+    println("        coefficients at the plasma boundary.  The interior Jacobian is a")
+    println("        coordinate choice that does not enter the physical energy on the")
+    println("        boundary surface — if numerics are sound, et[1] should be the same")
+    println("        for all variants sharing the same boundary Jacobian.  Differences")
+    println("        among such variants measure numerical error (quadrature accuracy of")
+    println("        the F/K/G matrices, ODE step distribution, spline accuracy), not physics.")
+    println("        Hamada (different boundary J) is shown for reference only — its et[1]")
+    println("        uses a different normalization and cannot be compared.")
     println()
-    @printf("  %-30s  %10s  %18s  %s\n", "Variant", "et[1]", "Δ vs equal_arc", "boundary J")
+    @printf("  %-30s  %10s  %22s  %s\n", "Variant", "et[1]", "num.err vs equal_arc", "boundary J")
     for k in stab_keys
         _, _, kw = variants[findfirst(v -> v[1] == k, variants)]
         w = boundary_w(kw)
         bdy_note = w ≈ 1.0 ? "equal_arc" : (w ≈ 0.0 ? "hamada" : @sprintf("w=%.2f", w))
         comparable = k ∈ eq_arc_keys && haskey(et_vals, eq_arc_ref)
         pct = comparable ? 100.0 * (et_vals[k] - et_vals[eq_arc_ref]) / abs(et_vals[eq_arc_ref]) : NaN
-        pct_str = isnan(pct) ? "  (not comparable)" : @sprintf("%+10.4f%%", pct)
-        @printf("  %-30s  %10.6f  %18s  %s\n", variant_label[k], et_vals[k], pct_str, bdy_note)
+        pct_str = isnan(pct) ? "        (not comparable)" : @sprintf("%+10.4f%%", pct)
+        @printf("  %-30s  %10.6f  %22s  %s\n", variant_label[k], et_vals[k], pct_str, bdy_note)
     end
 end
 
