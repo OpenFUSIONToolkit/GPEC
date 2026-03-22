@@ -133,7 +133,7 @@ println("\n[4/4] Generating diagnostic figure ...")
 p1 = plot_coil_geometry_3d(coil_sets)
 p2 = plot_coil_geometry_rz(coil_sets; equil=equil)
 p3 = plot_bn_contour(bn, MTHETA_COIL, NZETA_COIL; n=N_TOROIDAL)
-p4 = plot_mode_spectrum(forcing_modes)
+p4 = plot_mode_spectrum(forcing_modes; mlow=M_LOW, mhigh=M_HIGH)
 
 fig = plot(p1, p2, p3, p4;
     layout=(2, 2),

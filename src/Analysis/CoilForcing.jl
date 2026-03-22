@@ -130,12 +130,15 @@ A `Plots.jl` plot object.
 """
 function plot_bn_contour(bn::Matrix{Float64}, mtheta::Int, nzeta::Int;
                          n=nothing, save_path=nothing, kwargs...)
-    theta_deg = range(0; length=mtheta, stop=360)
-    zeta_deg  = range(0; length=nzeta,  stop=360)
+    # Shift rows so θ=0 (outboard midplane) is centred on the y-axis at 0°
+    bn_wrapped = circshift(bn, (mtheta ÷ 2, 0))
+    theta_deg = range(-180; step=360.0/mtheta, length=mtheta)
+    zeta_deg  = range(0;    step=360.0/nzeta,  length=nzeta)
 
     n_label = isnothing(n) ? "" : " (n=$n)"
-    p = heatmap(zeta_deg, theta_deg, bn;
+    p = heatmap(zeta_deg, theta_deg, bn_wrapped;
                 xlabel="ζ [°]", ylabel="θ [°]",
+                ylims=(-180, 180),
                 title="Normal field bₙ(θ, ζ)$n_label [T]",
                 color=:RdBu, kwargs...)
 
@@ -144,21 +147,23 @@ function plot_bn_contour(bn::Matrix{Float64}, mtheta::Int, nzeta::Int;
 end
 
 """
-    plot_mode_spectrum(forcing_modes; save_path=nothing, kwargs...)
+    plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_path=nothing, kwargs...)
 
-Plot the Fourier mode spectrum `|bmn|` vs poloidal mode number m, grouped by n.
+Plot the Fourier mode spectrum `|bmn|` vs poloidal mode number m as a step line, grouped by n.
 
 ### Arguments
 - `forcing_modes`: `Vector{ForcingMode}` from `compute_coil_forcing_modes!`
 
 ### Keyword arguments
+- `mlow`, `mhigh`: poloidal mode range for the x-axis (e.g. from ForceFreeStates config);
+  if provided, sets xlims to span the full stability range even if some modes are zero
 - `save_path`: file path to save the figure (default: `nothing`)
-- Any extra kwargs are forwarded to `Plots.bar`
+- Any extra kwargs are forwarded to `Plots.plot`
 
 ### Returns
 A `Plots.jl` plot object.
 """
-function plot_mode_spectrum(forcing_modes; save_path=nothing, kwargs...)
+function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_path=nothing, kwargs...)
     n_vals = sort(unique(m.n for m in forcing_modes))
     colors = [:blue, :red, :green, :orange, :purple, :brown]
 
@@ -172,7 +177,11 @@ function plot_mode_spectrum(forcing_modes; save_path=nothing, kwargs...)
         m_vals = [m.m for m in modes_n]
         amps   = abs.([m.amplitude for m in modes_n])
         col = colors[mod1(ni, length(colors))]
-        bar!(p, m_vals, amps; label="n=$n", color=col, alpha=0.7)
+        plot!(p, m_vals, amps; label="n=$n", color=col, lw=2, seriestype=:steppre)
+    end
+
+    if !isnothing(mlow) && !isnothing(mhigh)
+        xlims!(p, mlow - 1, mhigh + 1)
     end
 
     isnothing(save_path) || savefig(p, save_path)
