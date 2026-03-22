@@ -237,10 +237,11 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     ep1 = ComplexF64(dot(v, wp * v)) / norm
     ev1 = ComplexF64(dot(v, wv * v)) / norm
 
-    # Smallest eigenvalue of the vacuum matrix alone (independent of ODE solution).
-    # The singfac-scaled wv should be PSD by construction (congruence of PSD wv_raw), but numerical
-    # noise can make eigenvalues slightly negative. Clamp to zero to enforce the physical constraint.
-    evonly1 = max(0.0, minimum(real.(eigvals(Hermitian((wv + wv') / 2)))))
+    # Smallest eigenvalue of the vacuum matrix alone, normalized by the same kinetic norm as et/ep/ev
+    # so all four energy outputs are directly comparable. The singfac-scaled wv should be PSD by
+    # construction (congruence of PSD wv_raw), but numerical noise can make eigenvalues slightly
+    # negative. Clamp to zero to enforce the physical constraint.
+    evonly1 = max(0.0, minimum(real.(eigvals(Hermitian((wv + wv') / 2))))) / real(norm)
 
     return (et=tot_eigvals[1], ep=ep1, ev=ev1, evonly=evonly1)
 end
