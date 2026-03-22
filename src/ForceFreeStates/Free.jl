@@ -153,19 +153,12 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         )
 
         for ipert_n in 1:intr.npert
-            # Compute vacuum matrix
+            # Compute raw vacuum matrix (singfac NOT applied here; applied analytically in free_compute_total)
             n = ipert_n - 1 + intr.nlow
             vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
             wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
-            # Apply singular factor scaling
-            singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
-            @inbounds for ipert in 1:intr.mpert
-                @views wv_block[ipert, :] .*= singfac[ipert]
-                @views wv_block[:, ipert] .*= singfac[ipert]
-            end
-
-            # Store block in full wv matrix
+            # Store raw block in full wv matrix
             @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
         end
     end
@@ -201,10 +194,19 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
-    # FastInterpolations now natively supports complex values
+    # Retrieve raw vacuum matrix from spline (singfac NOT pre-applied; see free_compute_wv_spline).
+    # Apply singfac = (m - n*q(psifac)) analytically so the correct local q is used at each scan step,
+    # rather than an interpolation of singfac-pre-applied values which is inaccurate near rational surfaces
+    # (singfac passes through zero there, and interpolating a zero-crossing function distorts the peaks).
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
     wv = copy(odet._wv_out)
+    q_at_psifac = equil.profiles.q_spline(odet.psifac)
+    for ipert_n in 1:intr.npert
+        n = ipert_n - 1 + intr.nlow
+        singfac = collect(intr.mlow:intr.mhigh) .- (n * q_at_psifac)
+        block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
+        @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
+    end
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
@@ -236,9 +238,8 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     ev1 = ComplexF64(dot(v, wv * v)) / norm
 
     # Smallest eigenvalue of the vacuum matrix alone (independent of ODE solution).
-    # The singfac-scaled wv should be PSD by construction (congruence of PSD wv_raw), but
-    # spline interpolation can introduce small numerical noise making eigenvalues slightly
-    # negative. Clamp to zero to enforce the physical constraint.
+    # The singfac-scaled wv should be PSD by construction (congruence of PSD wv_raw), but numerical
+    # noise can make eigenvalues slightly negative. Clamp to zero to enforce the physical constraint.
     evonly1 = max(0.0, minimum(real.(eigvals(Hermitian((wv + wv') / 2)))))
 
     return (et=tot_eigvals[1], ep=ep1, ev=ev1, evonly=evonly1)
