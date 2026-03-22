@@ -3,6 +3,10 @@ module ForcingTerms
 
 using DelimitedFiles
 using HDF5
+using LinearAlgebra
+
+import ..Equilibrium
+import ..Utilities.FourierTransforms: compute_fourier_coefficients
 
 """
     ForcingTermsControl
@@ -13,16 +17,26 @@ User-facing control parameters from TOML [ForcingTerms] section.
 
 Forcing Data:
   - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
-  - `forcing_data_format::String` - Format of forcing data: "ascii" or "hdf5" (default: "ascii")
+  - `forcing_data_format::String` - Format: "ascii", "hdf5", or "coil"
 
-Future: Will include Fortran coil.in parameters for external coil configurations
+Coil settings (used when `forcing_data_format = "coil"`):
+  - `machine::String` - Machine name prefix for .dat files (e.g. "d3d")
+  - `dat_dir::String` - Directory containing .dat files; defaults to bundled `coil_geometries/`
+  - `mtheta_coil::Int` - Poloidal grid resolution for boundary field evaluation (default: 480)
+  - `nzeta_coil::Int` - Toroidal grid resolution; 0 = auto (32 × n)
+  - `coil_sets_raw::Vector{Dict{String,Any}}` - Parsed `[[ForcingTerms.coil_set]]` TOML blocks
 """
 Base.@kwdef mutable struct ForcingTermsControl
-    # Forcing data file settings
+    # Forcing data file settings (ascii/hdf5 formats)
     forcing_data_file::String = "forcing.dat"
     forcing_data_format::String = "ascii"
 
-    # Future: Fortran coil.in parameters will go here
+    # Coil calculation settings (coil format)
+    machine::String = ""
+    dat_dir::String = ""
+    mtheta_coil::Int = 480
+    nzeta_coil::Int = 0
+    coil_sets_raw::Vector{Dict{String,Any}} = Dict{String,Any}[]
 end
 
 """
@@ -168,6 +182,14 @@ function load_forcing_hdf5!(
     end
 end
 
+include("CoilGeometry.jl")
+include("BiotSavart.jl")
+include("CoilFourier.jl")
+
 export ForcingTermsControl, ForcingMode, load_forcing_data!
+export CoilSet, CoilSetConfig, CoilConfig
+export read_coil_dat, apply_transforms, load_coil_sets
+export BoundaryGrid, sample_boundary_grid
+export project_normal_field!, fourier_decompose_bn, compute_coil_forcing_modes!
 
 end # module ForcingTerms

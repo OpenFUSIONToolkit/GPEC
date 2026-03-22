@@ -89,7 +89,21 @@ function compute_perturbed_equilibrium(
     initialize_mode_arrays!(intr, ffs_intr)
 
     # Step 1: Load forcing data
-    load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
+    if ft_ctrl.forcing_data_format == "coil"
+        empty!(intr.forcing_modes)
+        cfg = ForcingTerms.CoilConfig(ft_ctrl)
+        coil_sets = ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow)
+        for n in ffs_intr.nlow:ffs_intr.nhigh
+            modes_n = ForcingMode[]
+            ForcingTerms.compute_coil_forcing_modes!(
+                modes_n, coil_sets, equil, cfg, n, ffs_intr.mlow, ffs_intr.mhigh;
+                verbose=ctrl.verbose
+            )
+            append!(intr.forcing_modes, modes_n)
+        end
+    else
+        load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
+    end
 
     # Step 2: Compute plasma response
     if ctrl.compute_response

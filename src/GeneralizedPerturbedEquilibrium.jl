@@ -289,9 +289,15 @@ function main(args::Vector{String}=String[])
     if "PerturbedEquilibrium" in keys(inputs)
         # Read ForcingTerms control parameters
         if "ForcingTerms" in keys(inputs)
+            forcing_raw = inputs["ForcingTerms"]
+            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
+            # kwarg splatting and handled separately via coil_sets_raw field
+            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
             ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForcingTerms"])...
+                (Symbol(k) => v for (k, v) in scalar_forcing)...
             )
+            ft_ctrl.coil_sets_raw = coil_sets_raw
         else
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end

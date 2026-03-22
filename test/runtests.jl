@@ -26,4 +26,5 @@ else
     include("./runtests_eulerlagrange.jl")
     include("./runtests_sing.jl")
     include("./runtests_fullruns.jl")
+    include("./runtests_coils.jl")
 end
