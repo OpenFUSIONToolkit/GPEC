@@ -71,7 +71,9 @@ eq_arc_keys = ["blend_wide", "blend_narrow", "equal_arc"]
 eq_arc_ref  = "equal_arc"
 
 # ─── FFS pipeline ──────────────────────────────────────────────────────────────
-function run_stability(equil, ffs_cfg, wall_cfg; delta_mhigh_override=nothing)
+function run_stability(equil, ffs_cfg, wall_cfg;
+        delta_mhigh_override=nothing,
+        delta_mlow_override=nothing)
     intr = ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_path)
     ctrl = ForceFreeStates.ForceFreeStatesControl(;
         (Symbol(k) => v for (k, v) in ffs_cfg)...)
@@ -79,6 +81,7 @@ function run_stability(equil, ffs_cfg, wall_cfg; delta_mhigh_override=nothing)
         (Symbol(k) => v for (k, v) in wall_cfg)...)
 
     ctrl.delta_mhigh = something(delta_mhigh_override, ctrl.delta_mhigh * 2)
+    ctrl.delta_mlow  = something(delta_mlow_override,  ctrl.delta_mlow)
 
     ForceFreeStates.sing_lim!(intr, ctrl, equil)
     if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
@@ -279,6 +282,39 @@ for dmh in dmhigh_vals
 end
 
 print_convergence_table("delta_mhigh", dmhigh_vals, et_dmhigh, eq_arc_keys, eq_arc_ref)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4.  CONVERGENCE IN delta_mlow
+# ═══════════════════════════════════════════════════════════════════════════════
+# The sub-resonant low-m modes (m < m_resonant_min ≈ 2) contribute to the
+# completeness of the Fourier basis.  For equal_arc, too few such modes
+# (delta_mlow < 4) causes instability — the basis is insufficient to represent
+# the physical eigenvector, which has broader mode content in equal_arc coords.
+println("\n" * "=" ^ 70)
+println("4. delta_mlow convergence  (mpsi=$NOM_MPSI, mtheta=$NOM_MTHETA, delta_mhigh=$NOM_DELTA_MHIGH)")
+println("=" ^ 70)
+println("   Reuses nominal equilibria; only delta_mlow changes in FFS.")
+println("   mlow = trunc(min(n·qmin,0)) - 4 - delta_mlow  (currently -4-8=-12)\n")
+
+dmlow_vals = [0, 2, 4, 8, 16]
+et_dmlow   = Dict(k => Float64[] for k in variant_keys)
+
+for dml in dmlow_vals
+    println("  --- delta_mlow = $dml (mlow = $(-4 - dml)) ---")
+    for k in variant_keys
+        if haskey(pes_nom, k)
+            t = @elapsed et = run_stability(pes_nom[k], ffs_cfg, wall_cfg;
+                delta_mhigh_override=NOM_DELTA_MHIGH,
+                delta_mlow_override=dml)
+            push!(et_dmlow[k], et)
+            @printf("    %-16s  et[1] = %.6f  (%.1f s)\n", variants[findfirst(v->v[1]==k,variants)][2], et, t)
+        else
+            push!(et_dmlow[k], NaN)
+        end
+    end
+end
+
+print_convergence_table("delta_mlow", dmlow_vals, et_dmlow, eq_arc_keys, eq_arc_ref)
 
 println("=" ^ 70)
 println("Done.")
