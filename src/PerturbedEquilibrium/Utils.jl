@@ -61,12 +61,20 @@ perturbed_equilibrium/
 │   ├── amplitude_real # Real parts of forcing amplitudes
 │   └── amplitude_imag # Imaginary parts of forcing amplitudes
 ├── response/
-│   ├── xi_perturbed   # Displacement field
-│   └── b_perturbed    # Magnetic field perturbation
+│   ├── xi_psi_real/imag    # Radial displacement (real/imag parts)
+│   ├── b_psi_real/imag     # Normal field component
+│   ├── b_theta_real/imag   # Poloidal field component
+│   └── b_zeta_real/imag    # Toroidal field component
 ├── singular_coupling/
-│   ├── coupling_coefficient_real
-│   ├── coupling_coefficient_imag
-│   └── resonant_amplitude
+│   ├── coupling_coefficient_real/imag
+│   ├── resonant_amplitude
+│   ├── resonant_flux         # ComplexF64 [numpert_total × msing]
+│   ├── resonant_current      # ComplexF64 [numpert_total × msing]
+│   ├── island_width_sq       # ComplexF64 [numpert_total × msing]
+│   ├── penetrated_field      # ComplexF64 [numpert_total × msing]
+│   ├── delta_prime           # ComplexF64 [numpert_total × msing]; tearing stability Δ'
+│   ├── island_half_width     # Float64 [msing]; actual w/2
+│   └── chirikov_parameter    # Float64 [msing]; island overlap metric
 └── energies/
     ├── plasma_energy
     ├── vacuum_energy
@@ -113,6 +121,13 @@ function write_outputs_to_HDF5(
         coupling_group["coupling_coefficient_real"] = real(state.coupling_coefficient)
         coupling_group["coupling_coefficient_imag"] = imag(state.coupling_coefficient)
         coupling_group["resonant_amplitude"] = state.resonant_amplitude
+        coupling_group["resonant_flux"]      = state.resonant_flux
+        coupling_group["resonant_current"]   = state.resonant_current
+        coupling_group["island_width_sq"]    = state.island_width_sq
+        coupling_group["penetrated_field"]   = state.penetrated_field
+        coupling_group["delta_prime"]        = state.delta_prime
+        coupling_group["island_half_width"]  = state.island_half_width
+        coupling_group["chirikov_parameter"] = state.chirikov_parameter
 
         # Write additional metrics
         for (key, val) in intr.singular_coupling_metrics
