@@ -259,10 +259,8 @@ println("=" ^ 70)
 
 # Load FFS and Wall config from the example gpec.toml — same config for all variants.
 # Equilibria are re-built with the production grid settings (mpsi=128, grid_type="ldp",
-# default psihigh) so that et[1] matches the validated DIIID reference (~1.7).
-# The high-psihigh equilibria used for spline comparisons above are unsuitable for
-# stability: qmax reaches 6.24, the ODE crosses many more singular surfaces, and
-# numerical breakdown occurs.
+# default psihigh) to avoid q-max blowup from psihigh_arg=0.999 (qmax=6.24 triggers
+# too many singular surfaces and numerical breakdown in the ODE).
 let
     inputs   = TOML.parsefile(config_path)
     ffs_cfg  = inputs["ForceFreeStates"]
@@ -337,12 +335,52 @@ let
         @printf("et[1] = %.6f  (%.1f s)\n", et_vals[k], t)
     end
 
+    # et[1] = δW/‖ξ‖²_K where ‖ξ‖_K uses the kinetic energy norm of mode coefficients
+    # in the SFL basis at the plasma boundary.  A unit coefficient in Hamada coordinates
+    # represents a physically different displacement amplitude than in equal_arc coordinates
+    # (Hamada J ∝ 1/Bp → ∞ near the X-point), so et[1] cannot be compared across cases
+    # with different edge Jacobians.
+    #
+    # For the blended variants at the production psihigh, jac_blend_weight is clamped to 1
+    # (pure equal_arc) at the boundary for both blend_wide (end=0.98 < psihigh) and
+    # blend_narrow (t=(psihigh-0.95)/(0.99-0.95) > 1 → clamped).  So blend_wide,
+    # blend_narrow, and pure equal_arc all share the same boundary Jacobian and their
+    # et[1] values are directly comparable.  The Hamada baseline has a different boundary
+    # Jacobian and is shown for reference only — the ~30% gap reflects normalization, not physics.
+
+    # Compute the blend weight w at the plasma boundary for each variant.
+    # Pure equal_arc (jac_type="equal_arc", no blend) has w=1 everywhere by construction.
+    psi_bdy = inputs["Equilibrium"]["psihigh"]
+    function boundary_w(kw)
+        get(kw, :jac_type, "hamada") == "equal_arc" && return 1.0
+        w_start = get(kw, :psi_jac_blend_start, 1.0)
+        w_end   = get(kw, :psi_jac_blend_end,   1.0)
+        denom = w_end - w_start
+        denom == 0.0 && return 0.0  # no blend range → pure core Jacobian everywhere
+        t = clamp((psi_bdy - w_start) / denom, 0.0, 1.0)
+        return t^2 * (3 - 2t)
+    end
+
+    eq_arc_ref  = "equal_arc"
+    eq_arc_keys = filter(k -> begin
+            _, _, kw = variants[findfirst(v -> v[1] == k, variants)]
+            boundary_w(kw) ≈ 1.0
+        end, stab_keys)
+
     println()
-    et_ref = et_vals[ref_key]
-    @printf("  %-30s  %10s  %10s\n", "Variant", "et[1]", "Δet[1] %")
+    println("  NOTE: et[1] is normalized to unit SFL mode coefficients at the boundary.")
+    println("        Cross-Jacobian comparison (Hamada vs equal_arc) is NOT meaningful.")
+    println("        Valid comparison: variants sharing the same boundary Jacobian.")
+    println()
+    @printf("  %-30s  %10s  %18s  %s\n", "Variant", "et[1]", "Δ vs equal_arc", "boundary J")
     for k in stab_keys
-        pct = 100.0 * (et_vals[k] - et_ref) / abs(et_ref)
-        @printf("  %-30s  %10.6f  %+10.4f%%\n", variant_label[k], et_vals[k], pct)
+        _, _, kw = variants[findfirst(v -> v[1] == k, variants)]
+        w = boundary_w(kw)
+        bdy_note = w ≈ 1.0 ? "equal_arc" : (w ≈ 0.0 ? "hamada" : @sprintf("w=%.2f", w))
+        comparable = k ∈ eq_arc_keys && haskey(et_vals, eq_arc_ref)
+        pct = comparable ? 100.0 * (et_vals[k] - et_vals[eq_arc_ref]) / abs(et_vals[eq_arc_ref]) : NaN
+        pct_str = isnan(pct) ? "  (not comparable)" : @sprintf("%+10.4f%%", pct)
+        @printf("  %-30s  %10.6f  %18s  %s\n", variant_label[k], et_vals[k], pct_str, bdy_note)
     end
 end
 
