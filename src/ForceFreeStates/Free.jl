@@ -142,8 +142,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:(npsi+1)
-        # Space points evenly in q
-        qi = qedge + (intr.qlim - qedge) * (i / npsi)
+        # Space points evenly in q over [qedge, qlim] (i=1 → qedge, i=npsi+1 → qlim)
+        qi = qedge + (intr.qlim - qedge) * ((i - 1) / npsi)
 
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         psi_array[i] = find_zero(

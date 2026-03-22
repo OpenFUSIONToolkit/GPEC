@@ -401,8 +401,13 @@ function integrator_callback!(integrator)
     steps_in_segment = length(integrator.sol.t)
     near_start = steps_in_segment <= 2
 
-    # Save if interval condition met, or near start/end
-    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0)
+    # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
+    # Without this, the ODE takes only a few large steps between rational surfaces and the
+    # midpoint peaks in evonly (and et) are never sampled.
+    in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
+
+    # Save if interval condition met, or near start/end, or in edge scan region
+    should_save = near_start || near_end || (odet.step % ctrl.save_interval == 0) || in_edge_scan
 
     if should_save
         # Grow arrays if out of storage space
