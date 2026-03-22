@@ -184,10 +184,13 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat` (a comp
 """
 function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
-    # Allocations
-    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    tot_eigvals = zeros(ComplexF64, intr.numpert_total)
-    wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    Npert = intr.numpert_total
+
+    # wp and wt are stack-local but unavoidable (eigen() overwrites wt, wp needed separately for ep1).
+    # These could be moved to OdeState buffers in a future pass if profiling shows they matter.
+    wp = zeros(ComplexF64, Npert, Npert)
+    tot_eigvals = zeros(ComplexF64, Npert)
+    wt = zeros(ComplexF64, Npert, Npert)
 
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
@@ -199,11 +202,17 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # rather than an interpolation of singfac-pre-applied values which is inaccurate near rational surfaces
     # (singfac passes through zero there, and interpolating a zero-crossing function distorts the peaks).
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
-    wv = copy(odet._wv_out)
+    wv = odet._wv_scratch
+    copyto!(wv, odet._wv_out)
     q_at_psifac = equil.profiles.q_spline(odet.psifac)
     for ipert_n in 1:intr.npert
         n = ipert_n - 1 + intr.nlow
-        singfac = collect(intr.mlow:intr.mhigh) .- (n * q_at_psifac)
+        # Fill singfac buffer in-place: singfac[i] = (mlow + i - 1) - n*q
+        nq = n * q_at_psifac
+        @inbounds for i in 1:intr.mpert
+            odet._singfac_buf[i] = (intr.mlow + i - 1) - nq
+        end
+        singfac = @view odet._singfac_buf[1:intr.mpert]
         block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
         @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
     end
@@ -212,14 +221,19 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     wt .= wp .+ wv
     Ev = eigen(wt)
 
-    # Sort eigenvalues and reorder columns of wt (ascending eigenvalue → wt[:,1] is least stable)
-    eindex = sortperm(real.(Ev.values); rev=true)
-    for ipert in 1:intr.numpert_total
-        wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
-        tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
+    # Sort eigenvalues by descending real part using pre-allocated buffers
+    eindex = odet._eindex_buf
+    evals_real = odet._evals_real_buf
+    @inbounds for i in 1:Npert
+        evals_real[i] = real(Ev.values[i])
+    end
+    sortperm!(eindex, evals_real; rev=true)
+    for ipert in 1:Npert
+        wt[:, ipert] .= Ev.vectors[:, eindex[Npert+1-ipert]]
+        tot_eigvals[ipert] = Ev.values[eindex[Npert+1-ipert]]
     end
 
-    # Compute kinetic norm ξ†J(ψ)ξ / dV_dψ for the leading eigenvector.
+    # Compute kinetic norm xi'*J(psi)*xi / dV_dpsi for the leading eigenvector.
     # This normalizes et, ep, ev to be dimensionally consistent with free_run!.
     isol = 1
     v = @view wt[:, isol]
@@ -234,14 +248,27 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
     # ep + ev = et by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
-    ep1 = ComplexF64(dot(v, wp * v)) / norm
-    ev1 = ComplexF64(dot(v, wv * v)) / norm
+    # Use mul! with pre-allocated _tmp_vec to avoid allocating wp*v and wv*v temporaries.
+    tmp_v = odet._tmp_vec
+    mul!(tmp_v, wp, v)
+    ep1 = ComplexF64(dot(v, tmp_v)) / norm
+    mul!(tmp_v, wv, v)
+    ev1 = ComplexF64(dot(v, tmp_v)) / norm
 
     # Smallest eigenvalue of the vacuum matrix alone, normalized by the same kinetic norm as et/ep/ev
     # so all four energy outputs are directly comparable. The singfac-scaled wv should be PSD by
     # construction (congruence of PSD wv_raw), but numerical noise can make eigenvalues slightly
     # negative. Clamp to zero to enforce the physical constraint.
-    evonly1 = max(0.0, minimum(real.(eigvals(Hermitian((wv + wv') / 2))))) / real(norm)
+    # Hermitianize wv in-place (safe: ep1 and ev1 already computed above).
+    @inbounds for j in 1:Npert
+        for i in 1:(j-1)
+            avg = (wv[i,j] + conj(wv[j,i])) / 2
+            wv[i,j] = avg
+            wv[j,i] = conj(avg)
+        end
+        wv[j,j] = real(wv[j,j]) + 0.0im
+    end
+    evonly1 = max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / real(norm)
 
     return (et=tot_eigvals[1], ep=ep1, ev=ev1, evonly=evonly1)
 end

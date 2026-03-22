@@ -427,6 +427,18 @@ and a small set of temporary matrices and factors used to compute singular-layer
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
 
+    # Pre-allocated buffers for free_compute_total to avoid per-call heap allocations.
+    # _wv_scratch: working copy of wv with singfac scaling applied in-place
+    _wv_scratch::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    # _singfac_buf: reusable buffer for singfac = (m - n*q) vector (length mpert, but sized to numpert_total for safety)
+    _singfac_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+    # _eindex_buf: reusable buffer for sortperm! output
+    _eindex_buf::Vector{Int} = Vector{Int}(undef, numpert_total)
+    # _evals_real_buf: reusable buffer for real parts of eigenvalues (used by sortperm!)
+    _evals_real_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+    # _tmp_vec: reusable buffer for matrix-vector products (wp*v, wv*v)
+    _tmp_vec::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+
     # Edge stability scan results: psi values and energy components for each step in [psiedge, psilim].
     # Populated by findmax_dW_edge! and written to HDF5 for post-processing.
     # Steps where free_compute_total failed (singular U₁) are stored as NaN.
