@@ -151,3 +151,82 @@ outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
     return y_out, bfield
 end
 
+"""
+    equal_arc_fieldline_output(equil::PlasmaEquilibrium, psifac::Float64; mtheta_eq::Int)
+        -> (R_eq, Z_eq, nu_eq, theta_jac_eq)
+
+Run the arc-length ODE at flux surface `psifac` and interpolate to `mtheta_eq` equally-spaced
+arc-length positions σ_k = k/mtheta_eq (k = 0, …, mtheta_eq−1).
+
+Returns:
+  - `R_eq`, `Z_eq`: physical coordinates at equal-arc positions
+  - `nu_eq`: toroidal angle offset ν(σ_k) matching the `rzphi_nu` convention
+  - `theta_jac_eq`: jac_type SFL angle θ_jac(σ_k) ∈ [0, 1)
+
+Requires `equil.raw_profile` to be a `DirectRunInput` (set for EFIT/CHEASE/analytic paths).
+"""
+function equal_arc_fieldline_output(equil::PlasmaEquilibrium, psifac::Float64; mtheta_eq::Int)
+    raw_profile = equil.raw_profile
+    @assert !isnothing(raw_profile) "equal_arc_fieldline_output requires equil.raw_profile (not available for inverse-method equilibria)"
+
+    # Estimate starting R on the outboard midplane
+    rs2_outer = raw_profile.rmax
+    rs2 = equil.ro + sqrt(psifac) * (rs2_outer - equil.ro)
+
+    # Run arc-length ODE (returns adaptive steps)
+    y_out, _ = arclength_fieldline_int(psifac, raw_profile, equil.ro, equil.zo, rs2)
+
+    n = size(y_out, 1)
+
+    # Recover R,Z from y_out: col1 = η (geometric angle), col3 = rfac
+    R_raw = equil.ro .+ y_out[:, 3] .* cos.(y_out[:, 1])
+    Z_raw = equil.zo .+ y_out[:, 3] .* sin.(y_out[:, 1])
+
+    # Compute cumulative arc length along the ODE trajectory
+    arc = zeros(n)
+    for i in 2:n
+        dR = R_raw[i] - R_raw[i-1]
+        dZ = Z_raw[i] - Z_raw[i-1]
+        arc[i] = arc[i-1] + sqrt(dR^2 + dZ^2)
+    end
+    L = arc[end]
+    arc_norm = arc ./ L  # normalized ∈ [0, 1]
+
+    # Build cubic splines on the ODE grid (arc_norm → quantities)
+    # arc_norm ∈ [0,1] inclusive; queries at σ ∈ [0,1) are safely interior.
+    opts = (; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    spline_R    = cubic_interp(arc_norm, R_raw;       opts...)
+    spline_Z    = cubic_interp(arc_norm, Z_raw;       opts...)
+    spline_col4 = cubic_interp(arc_norm, y_out[:, 4]; opts...)  # ∫dl/(R²Bp)
+    spline_col5 = cubic_interp(arc_norm, y_out[:, 5]; opts...)  # ∫jac·dl/Bp
+
+    col4_total = y_out[end, 4]
+    col5_total = y_out[end, 5]
+
+    # q(ψ) from the ODE (same formula as equilibrium_solver):
+    #   q = col4_total * psio / (2π)
+    q_psi = col4_total * equil.psio / (2π)
+
+    # Interpolate to uniform equal-arc grid σ_k = k/mtheta_eq
+    R_eq       = zeros(mtheta_eq)
+    Z_eq       = zeros(mtheta_eq)
+    nu_eq      = zeros(mtheta_eq)
+    theta_jac_eq = zeros(mtheta_eq)
+
+    for k in 1:mtheta_eq
+        σ = (k - 1) / mtheta_eq
+        R_eq[k] = spline_R(σ)
+        Z_eq[k] = spline_Z(σ)
+
+        col4_k = spline_col4(σ)
+        col5_k = spline_col5(σ)
+
+        # ν(s) = q * θ_jac(s) - col4(s) * psio / (2π)
+        theta_jac_k = (col5_total > 0) ? col5_k / col5_total : σ
+        nu_eq[k] = q_psi * theta_jac_k - col4_k * equil.psio / (2π)
+        theta_jac_eq[k] = theta_jac_k
+    end
+
+    return R_eq, Z_eq, nu_eq, theta_jac_eq
+end
+

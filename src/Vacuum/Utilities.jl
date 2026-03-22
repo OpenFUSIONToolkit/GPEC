@@ -113,6 +113,45 @@ function distribute_to_equal_arc_grid(xin::Vector{Float64}, zin::Vector{Float64}
 end
 
 """
+    jac_to_eq_mode_transform(theta_jac_eq, mlow_jac, mpert_jac, mlow_eq, mpert_eq) -> Matrix{ComplexF64}
+
+Compute the mode transformation matrix T[i,j] that maps equal-arc Fourier mode coefficients
+to jac_type (SFL) Fourier mode coefficients: ξ_jac = T * ξ_eq.
+
+The Green's function transforms as G_jac = T * G_eq * T'.
+
+`theta_jac_eq[k]` is the SFL angle θ_jac at equal-arc position σ_k = (k−1)/mtheta_eq, for k = 1…mtheta_eq.
+θ_jac is normalized ∈ [0, 1].
+
+T[i,j] = (1/mtheta_eq) Σ_k exp(2πi * ((mlow_jac+i-1)*θ_jac[k] - (mlow_eq+j-1)*(k-1)/mtheta_eq))
+"""
+function jac_to_eq_mode_transform(
+    theta_jac_eq::Vector{Float64},
+    mlow_jac::Int, mpert_jac::Int,
+    mlow_eq::Int, mpert_eq::Int
+)
+    mtheta_eq = length(theta_jac_eq)
+    T = zeros(ComplexF64, mpert_jac, mpert_eq)
+    inv_m = 1.0 / mtheta_eq
+
+    for k in 1:mtheta_eq
+        theta_jac_k = theta_jac_eq[k]
+        theta_eq_k  = (k - 1) * inv_m  # uniform equal-arc angle
+        for j in 1:mpert_eq
+            m_eq = mlow_eq + j - 1
+            phase_eq = -2π * m_eq * theta_eq_k
+            for i in 1:mpert_jac
+                m_jac = mlow_jac + i - 1
+                phase = 2π * m_jac * theta_jac_k + phase_eq
+                T[i, j] += cis(phase)
+            end
+        end
+    end
+    T .*= inv_m
+    return T
+end
+
+"""
     periodic_wrap(x, n) -> Int
 
 Inline function for fast periodic wrapping for indices near the valid range [1, n].

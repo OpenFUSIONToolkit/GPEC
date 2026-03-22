@@ -27,8 +27,12 @@ and data dumping.
     end
 
     # Compute vacuum response matrix in-place (handles 2D single-n, 2D multi-n block-diagonal, and 3D)
-    vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
-    Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
+    if ctrl.use_equal_arc_vacuum && !isnothing(equil.raw_profile)
+        vac_data = _free_run_equal_arc_vacuum!(vac_data, ctrl, equil, psilim, mpert, mlow, npert, nlow, wall_settings)
+    else
+        vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
+        Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
+    end
 
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((mlow:mhigh) .- qlim .* (nlow:nhigh)')
@@ -102,6 +106,75 @@ and data dumping.
               "  Plasma = $((@sprintf "%+.3e %+.3ei" real(vac_data.ep[1]) imag(vac_data.ep[1])))\n" *
               "  Vacuum = $((@sprintf "%+.3e %+.3ei" real(vac_data.ev[1]) imag(vac_data.ev[1])))\n" *
               "  Total  = $((@sprintf "%+.3e %+.3ei" real(vac_data.et[1]) imag(vac_data.et[1])))"
+    end
+
+    return vac_data
+end
+
+"""
+    _free_run_equal_arc_vacuum!(vac_data, ctrl, equil, intr, psilim, mpert, mlow, npert, nlow, wall_settings) -> VacuumData
+
+Compute the vacuum response matrix using the equal-arc boundary integration path, then transform
+back to jac_type mode coefficients via the mode transformation matrix T.
+
+This replaces the direct call to `Vacuum.compute_vacuum_response!` when `ctrl.use_equal_arc_vacuum = true`.
+Writes the result into `vac_data.wv` (and grri, grre if populated) and returns `vac_data`.
+"""
+function _free_run_equal_arc_vacuum!(
+    vac_data::VacuumData, ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    psilim::Float64, mpert::Int, mlow::Int, npert::Int, nlow::Int,
+    wall_settings
+)
+    mhigh = mlow + mpert - 1
+
+    # Equal-arc grid: at least 2×mhigh×factor points, minimum 2×mhigh×64
+    mtheta_eq = ctrl.vac_eq_arc_theta_factor * max(abs(mhigh), abs(mlow), 64)
+
+    # Run arc-length ODE and interpolate to equal-arc grid
+    R_eq, Z_eq, nu_eq, theta_jac_eq = Equilibrium.equal_arc_fieldline_output(equil, psilim; mtheta_eq=mtheta_eq)
+
+    # Size the equal-arc mode space: enough modes to resolve exp(im_jac * θ_jac(θ_eq))
+    # max_rate = max dθ_jac/dθ_eq * mtheta_eq (maximum mode number needed in equal-arc space)
+    theta_jac_wrapped = vcat(theta_jac_eq, [1.0])  # close the loop
+    dtheta_jac = diff(theta_jac_wrapped)
+    max_rate = maximum(dtheta_jac) * mtheta_eq  # dimensionless, ≥ 1 for uniform jac
+    mpert_eq_half = ceil(Int, max_rate) * mpert
+    mpert_eq = 2 * mpert_eq_half + 1  # symmetric band around 0
+    mlow_eq  = -(mpert_eq ÷ 2)
+
+    # Build VacuumInput with equal-arc surface geometry
+    vac_inputs_eq = Vacuum.VacuumInput(;
+        x=reverse(R_eq), z=reverse(Z_eq), ν=reverse(nu_eq),
+        mtheta_in=mtheta_eq, mtheta=mtheta_eq,
+        mlow=mlow_eq, mpert=mpert_eq,
+        nlow=nlow, npert=npert, nzeta_in=1, nzeta=ctrl.nzvac,
+        force_wv_symmetry=ctrl.force_wv_symmetry
+    )
+
+    # Compute vacuum response in equal-arc coordinate mode space
+    numpert_eq = mpert_eq * npert
+    vac_data_eq = VacuumData(mtheta_eq, numpert_eq, mtheta_eq)
+    Vacuum.compute_vacuum_response!(vac_data_eq, vac_inputs_eq, wall_settings)
+
+    # Mode transformation T: maps equal-arc modes → jac_type modes
+    # G_jac = T * G_eq * T'
+    # Build T for a single n; for multi-n, apply block-diagonally
+    T_single = Vacuum.jac_to_eq_mode_transform(theta_jac_eq, mlow, mpert, mlow_eq, mpert_eq)
+
+    if npert == 1
+        # Single toroidal mode: wv is mpert × mpert
+        vac_data.wv .= T_single * vac_data_eq.wv * T_single'
+    else
+        # Multi-n block-diagonal: build block-diagonal T and apply
+        numpert_total = mpert * npert
+        T_full = zeros(ComplexF64, numpert_total, numpert_eq)
+        for in in 1:npert
+            row_range = (in-1)*mpert+1 : in*mpert
+            col_range = (in-1)*mpert_eq+1 : in*mpert_eq
+            T_full[row_range, col_range] .= T_single
+        end
+        vac_data.wv .= T_full * vac_data_eq.wv * T_full'
     end
 
     return vac_data

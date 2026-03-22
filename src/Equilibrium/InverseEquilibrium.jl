@@ -373,6 +373,7 @@ function equilibrium_solver(input::InverseRunInput)
         eqfun_B, eqfun_metric1, eqfun_metric2,
         ro,
         zo,
-        psio
+        psio,
+        nothing
     )
 end

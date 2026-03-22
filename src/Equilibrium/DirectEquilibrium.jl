@@ -722,5 +722,5 @@ robustness.
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
-        ro, zo, psio)
+        ro, zo, psio, raw_profile)
 end

@@ -597,8 +597,10 @@ This object provides a complete representation of the processed plasma equilibri
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
+  - `raw_profile`: `DirectRunInput` for EFIT/CHEASE/analytic equilibria (enables re-running the
+    arc-length ODE post-construction); `nothing` for inverse-method equilibria.
 """
-mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND,R}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
@@ -621,4 +623,5 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.Cubic
     ro::Float64
     zo::Float64
     psio::Float64
+    raw_profile::R
 end
