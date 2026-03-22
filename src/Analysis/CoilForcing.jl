@@ -30,20 +30,28 @@ as lines in Cartesian (X, Y, Z) space in meters.
 A `Plots.jl` plot object.
 """
 function plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
+    # Collect all currents to set a symmetric colorscale centred at zero
+    all_currents = [I for cs in coil_sets for I in cs.currents]
+    clim = isempty(all_currents) ? 1.0 : max(maximum(abs, all_currents), eps())
+
     p = plot(; xlabel="X [m]", ylabel="Y [m]", zlabel="Z [m]",
-               title="Coil geometry (3D)", legend=:topright,
+               title="Coil geometry (3D)",
+               colorbar_title=" Current [A]",
+               clims=(-clim, clim),
+               color=:RdBu,
                camera=(30, 20), kwargs...)
 
-    colors = [:blue, :red, :green, :orange, :purple, :brown, :cyan, :magenta]
-    for (ci, cs) in enumerate(coil_sets)
-        col = colors[mod1(ci, length(colors))]
+    for cs in coil_sets
         for j in 1:cs.ncoil
+            I = cs.currents[j]
+            # Map current to [0,1] on a symmetric scale centred at zero
+            t = clamp((I + clim) / (2clim), 0.0, 1.0)
+            col = get(cgrad(:RdBu), t)
             for k in 1:cs.s
                 xs = view(cs.x, j, k, :)
                 ys = view(cs.y, j, k, :)
                 zs = view(cs.z, j, k, :)
-                label = (j == 1 && k == 1) ? cs.name : ""
-                plot!(p, xs, ys, zs; label=label, color=col, lw=1.5)
+                plot!(p, xs, ys, zs; label="", color=col, lw=1.5)
             end
         end
     end
@@ -177,7 +185,9 @@ function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_pat
         m_vals = [m.m for m in modes_n]
         amps   = abs.([m.amplitude for m in modes_n])
         col = colors[mod1(ni, length(colors))]
-        plot!(p, m_vals, amps; label="n=$n", color=col, lw=2, seriestype=:steppre)
+        m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
+        amp_ext = [0.0; amps; 0.0]
+        plot!(p, m_ext, amp_ext; label="n=$n", color=col, lw=2, seriestype=:steppre)
     end
 
     if !isnothing(mlow) && !isnothing(mhigh)
