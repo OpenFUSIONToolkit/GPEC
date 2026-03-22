@@ -184,42 +184,42 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Returns
 
-A `Plots.jl` plot object, or `nothing` if no edge scan data is present in the file.
+A `Plots.jl` plot object, or `nothing` if no `edge_scan/` group is present in the file.
 """
 function plot_edge_stability_scan(h5path; save_path=nothing)
     has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
-        if !haskey(fid, "integration/edge_scan_psi")
+        if !haskey(fid, "edge_scan/psi")
             return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
         end
         true,
-        read(fid["integration/edge_scan_q"]),
-        read(fid["integration/edge_scan_et"]),
-        read(fid["integration/edge_scan_ep"]),
-        read(fid["integration/edge_scan_ev"]),
-        read(fid["integration/edge_scan_evonly"]),
+        read(fid["edge_scan/q"]),
+        read(fid["edge_scan/total_energy"]),
+        read(fid["edge_scan/plasma_energy"]),
+        read(fid["edge_scan/vacuum_energy"]),
+        read(fid["edge_scan/vacuum_eigenvalue"]),
         read(fid["info/qlim"])
     end
 
     if !has_scan
-        @warn "No edge scan data in $h5path. Run with psiedge < psilim to generate it."
+        @warn "No edge_scan group in $h5path. Run with psiedge < psilim to generate it."
         return nothing
     end
 
     kw = (legend=false, xlabel="q")
 
-    p_et = plot(q, real.(et); ylabel="et = ep + ev", title="Total energy", kw...)
+    p_et = plot(q, real.(et); ylabel="Total Energy (plasma + vacuum)", title="Edge Stability Scan: δW vs q", kw...)
     hline!(p_et, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_et, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_ep = plot(q, real.(ep); ylabel="ep (plasma)", kw...)
+    p_ep = plot(q, real.(ep); ylabel="Plasma Energy", kw...)
     hline!(p_ep, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ep, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_ev = plot(q, real.(ev); ylabel="ev (vacuum)", kw...)
+    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy (eigenmode projected)", kw...)
     hline!(p_ev, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ev, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_evonly = plot(q, evonly; ylabel="evonly (wv alone)", kw...)
+    p_evonly = plot(q, evonly; ylabel="Lowest Vacuum Energy Eigenvalue", kw...)
     hline!(p_evonly, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_evonly, [qlim]; color=:gray, lw=1, ls=:dash)
 
