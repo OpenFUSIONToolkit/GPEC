@@ -207,7 +207,7 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
 
     kw = (legend=false, xlabel="q")
 
-    p_et = plot(q, real.(et); ylabel="Total Energy (plasma + vacuum)", title="Edge Stability Scan: δW vs q", kw...)
+    p_et = plot(q, real.(et); ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw...)
     hline!(p_et, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_et, [qlim]; color=:gray, lw=1, ls=:dash)
 
@@ -215,11 +215,11 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
     hline!(p_ep, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ep, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy (eigenmode projected)", kw...)
+    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy", kw...)
     hline!(p_ev, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ev, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_evonly = plot(q, evonly; ylabel="Lowest Vacuum Energy Eigenvalue", kw...)
+    p_evonly = plot(q, evonly; ylabel="Min Vacuum Eigenvalue", kw...)
     hline!(p_evonly, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_evonly, [qlim]; color=:gray, lw=1, ls=:dash)
 
