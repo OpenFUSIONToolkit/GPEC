@@ -26,7 +26,7 @@ using Printf
 # Configuration
 # ---------------------------------------------------------------------------
 
-BENCHMARK_DIR  = joinpath(@__DIR__, "DIIID_ideal_example")
+EXAMPLE_DIR    = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
 COIL_DIR       = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries")
 OUTPUT_FILE    = joinpath(@__DIR__, "coil_forcingterms_check.png")
 
@@ -46,10 +46,10 @@ println("="^70)
 # ---------------------------------------------------------------------------
 # Load equilibrium
 # ---------------------------------------------------------------------------
-println("\n[1/4] Loading DIII-D-like equilibrium from $BENCHMARK_DIR ...")
+println("\n[1/4] Loading DIII-D-like equilibrium from $EXAMPLE_DIR ...")
 t_equil = @elapsed begin
-    inputs    = TOML.parsefile(joinpath(BENCHMARK_DIR, "gpec.toml"))
-    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], BENCHMARK_DIR)
+    inputs    = TOML.parsefile(joinpath(EXAMPLE_DIR, "gpec.toml"))
+    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], EXAMPLE_DIR)
     equil     = Equilibrium.setup_equilibrium(eq_config)
 end
 @printf "    Done in %.1f s\n" t_equil

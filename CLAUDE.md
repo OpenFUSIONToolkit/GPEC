@@ -200,6 +200,11 @@ julia benchmarks/benchmark_git_branches.jl \
 - Tool requires HDF5.jl for reading euler.h5 output
 - Each benchmark run takes several minutes per branch (includes compilation + warm runs)
 
+**Benchmark script conventions:**
+- Benchmark scripts must reference input data from `examples/` (e.g., `joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")`). Never duplicate example inputs into `benchmarks/`.
+- If a benchmark needs modified TOML settings or a parameter scan, copy inputs to a temporary local directory at runtime — do not commit these copies.
+- All outputs (figures, CSVs, HDF5 files) must be saved into `benchmarks/` itself (or a self-described subdirectory within it, e.g., `benchmarks/coil_scan_results/`). Output files are not committed.
+
 
 ## Architecture
 
