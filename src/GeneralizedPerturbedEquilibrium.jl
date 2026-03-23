@@ -286,6 +286,13 @@ function main(args::Vector{String}=String[])
     pe_start = time()
 
     # Check for PerturbedEquilibrium section and run if present
+    if "PerturbedEquilibrium" in keys(inputs) && ctrl.use_equal_arc_vacuum
+        error("use_equal_arc_vacuum = true is incompatible with PerturbedEquilibrium calculations. " *
+              "The equal-arc vacuum path only transforms wv (the FFS eigenvalue matrix); " *
+              "grri and grre remain in equal-arc mode space and will give wrong results in " *
+              "PerturbedEquilibrium. Set use_equal_arc_vacuum = false to proceed.")
+    end
+
     if "PerturbedEquilibrium" in keys(inputs)
         # Read ForcingTerms control parameters
         if "ForcingTerms" in keys(inputs)
