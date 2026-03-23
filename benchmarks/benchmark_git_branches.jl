@@ -163,9 +163,9 @@ function run_example_benchmark(example_path, num_runs)
 
     # First run for JIT compilation
     println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
+    Pkg.activate(joinpath(example_path, "../.."))
+    @eval using JPEC
     cd(example_path) do
-        Pkg.activate("../..")
-        using JPEC
         @time JPEC.main(["./"])
     end
 
@@ -180,10 +180,10 @@ function run_example_benchmark(example_path, num_runs)
         println("  Runtime: $(round(runtime, digits=2)) s")
     end
 
-    # Extract metrics from euler.h5
-    euler_path = joinpath(example_path, "euler.h5")
+    # Extract metrics from jpec.h5
+    euler_path = joinpath(example_path, "jpec.h5")
     if !isfile(euler_path)
-        error("euler.h5 not found at $euler_path")
+        error("jpec.h5 not found at $euler_path")
     end
 
     h5 = h5open(euler_path, "r")
@@ -196,9 +196,9 @@ function run_example_benchmark(example_path, num_runs)
     avg_runtime = sum(runtimes) / length(runtimes)
 
     return (
-        eigenvalue = real(et[1]),
-        steps = nsteps,
-        runtime = avg_runtime
+        eigenvalue=real(et[1]),
+        steps=nsteps,
+        runtime=avg_runtime
     )
 end
 
@@ -224,9 +224,9 @@ function benchmark_branches(options)
         checkout_ref(options["branch1"], options["commit1"])
         commit1 = get_commit_hash("HEAD")
         results["branch1"] = (
-            name = options["branch1"],
-            commit = commit1,
-            metrics = run_example_benchmark(options["example"], options["runs"])
+            name=options["branch1"],
+            commit=commit1,
+            metrics=run_example_benchmark(options["example"], options["runs"])
         )
 
         # Benchmark branch 2
@@ -236,9 +236,9 @@ function benchmark_branches(options)
         checkout_ref(options["branch2"], options["commit2"])
         commit2 = get_commit_hash("HEAD")
         results["branch2"] = (
-            name = options["branch2"],
-            commit = commit2,
-            metrics = run_example_benchmark(options["example"], options["runs"])
+            name=options["branch2"],
+            commit=commit2,
+            metrics=run_example_benchmark(options["example"], options["runs"])
         )
 
     finally
