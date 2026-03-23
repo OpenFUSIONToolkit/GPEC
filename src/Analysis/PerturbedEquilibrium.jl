@@ -42,9 +42,10 @@ function plot_resonant_flux(h5path; save_path=nothing)
     _has_pe_data(h5path, key) ||
         return plot(; title="No resonant flux data — run with perturbed equilibrium enabled", legend=false)
 
-    resonant_flux, q_sing, msing, mn_index = h5open(h5path, "r") do fid
+    resonant_flux, q_sing, msing, pe_n = h5open(h5path, "r") do fid
         read(fid[key]), read(fid["singular/q"]),
-        read(fid["singular/msing"]), read(fid["info/mn_index"])
+        read(fid["singular/msing"]),
+        read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
     labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
@@ -53,9 +54,9 @@ function plot_resonant_flux(h5path; save_path=nothing)
     p = plot(; xlabel="rational surface", ylabel="|Φ_res|",
         title="Resonant flux |Φ_res| per surface", legend=:outertopright)
 
-    n_vals = unique(mn_index[:, 2])
+    n_vals = unique(pe_n)
     for nn in n_vals
-        n_rows = findall(j -> mn_index[j, 2] == nn, 1:size(mn_index, 1))
+        n_rows = findall(==(nn), pe_n)
         # Sum over poloidal modes for this n
         rf_n = [sum(abs.(resonant_flux[n_rows, s])) for s in 1:msing]
         bar!(p, 1:msing, rf_n; label="n=$nn", alpha=0.7)
@@ -187,9 +188,9 @@ function plot_pe_delta_prime(h5path; save_path=nothing)
     _has_pe_data(h5path, key) ||
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
 
-    delta_prime, q_sing, msing, mn_index = h5open(h5path, "r") do fid
+    delta_prime, q_sing, msing, pe_n = h5open(h5path, "r") do fid
         read(fid[key]), read(fid["singular/q"]), read(fid["singular/msing"]),
-        read(fid["info/mn_index"])
+        read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
     labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
@@ -197,9 +198,9 @@ function plot_pe_delta_prime(h5path; save_path=nothing)
     p = plot(; xlabel="rational surface", ylabel="|Δ'|",
         title="Tearing stability Δ' (PE)", legend=:outertopright)
 
-    n_vals = unique(mn_index[:, 2])
+    n_vals = unique(pe_n)
     for nn in n_vals
-        n_rows = findall(j -> mn_index[j, 2] == nn, 1:size(mn_index, 1))
+        n_rows = findall(==(nn), pe_n)
         dp_n = [maximum(abs.(delta_prime[n_rows, s])) for s in 1:msing]
         bar!(p, 1:msing, dp_n; label="n=$nn", alpha=0.7)
     end
@@ -253,9 +254,9 @@ function _plot_resonant_current(h5path)
     _has_pe_data(h5path, key) ||
         return plot(; title="No resonant current data", legend=false)
 
-    resonant_current, q_sing, msing, mn_index = h5open(h5path, "r") do fid
+    resonant_current, q_sing, msing, pe_n = h5open(h5path, "r") do fid
         read(fid[key]), read(fid["singular/q"]), read(fid["singular/msing"]),
-        read(fid["info/mn_index"])
+        read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
     labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
@@ -263,9 +264,9 @@ function _plot_resonant_current(h5path)
     p = plot(; xlabel="rational surface", ylabel="|I_res|",
         title="Resonant current |I_res| per surface", legend=:outertopright)
 
-    n_vals = unique(mn_index[:, 2])
+    n_vals = unique(pe_n)
     for nn in n_vals
-        n_rows = findall(j -> mn_index[j, 2] == nn, 1:size(mn_index, 1))
+        n_rows = findall(==(nn), pe_n)
         rc_n = [sum(abs.(resonant_current[n_rows, s])) for s in 1:msing]
         bar!(p, 1:msing, rc_n; label="n=$nn", alpha=0.7)
     end
@@ -315,19 +316,19 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     _has_pe_data(h5path, base * rkey) ||
         return plot(; title="No response data — run with perturbed equilibrium enabled", legend=false)
 
-    data_r, data_i, xs, mlow, mhigh, msing, psi_sing = h5open(h5path, "r") do fid
+    data_r, data_i, psi_response, mlow, mhigh, msing, psi_sing = h5open(h5path, "r") do fid
         read(fid[base * rkey]), read(fid[base * ikey]),
-        read(fid["splines/profiles/xs"]),
+        read(fid["integration/psi"]),
         read(fid["info/mlow"]), read(fid["info/mhigh"]),
         read(fid["singular/msing"]), read(fid["singular/psi"])
     end
 
-    data = complex.(data_r, data_i)  # shape: (numpert_total, npsi)
+    data = complex.(data_r, data_i)  # shape: (npsi, numpert_total)
     mpert = mhigh - mlow + 1
 
     # Use only the first n's modes for a clean spectrogram (single-n assumption for display)
     m_vals = mlow:mhigh
-    data_mn = data[1:mpert, :]  # first mpert rows correspond to first n
+    data_mn = data[:, 1:mpert]  # (npsi, mpert): first mpert columns = first n's modes
 
     # Top panel: line plot per mode
     p1 = plot(;
@@ -338,12 +339,12 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     )
     cmap = cgrad(:roma, mpert; categorical=true)
     for (i, m) in enumerate(m_vals)
-        plot!(p1, xs, abs.(data_mn[i, :]); label="m=$m", color=cmap[i], linewidth=1.5)
+        plot!(p1, psi_response, abs.(data_mn[:, i]); label="m=$m", color=cmap[i], linewidth=1.5)
     end
 
-    # Bottom panel: heatmap
+    # Bottom panel: heatmap — z must be (n_m_vals, n_psi) = (mpert, npsi)
     p2 = heatmap(
-        xs, collect(m_vals), abs.(data_mn);
+        psi_response, collect(m_vals), abs.(data_mn');
         xlabel="ψ_N",
         ylabel="m",
         title="",
@@ -365,8 +366,7 @@ end
 
 Three-panel composite summary of perturbed equilibrium results:
 
-  - Top-left: Island half-widths and Chirikov parameter overlay (`plot_island_widths` +
-    `plot_chirikov_parameter` on shared axes)
+  - Top-left: Island half-widths (`plot_island_widths`)
   - Top-right: Energy breakdown — plasma, vacuum, and total energies
   - Bottom: ξ_ψ mode spectrogram (`plot_mode_spectrogram`)
 

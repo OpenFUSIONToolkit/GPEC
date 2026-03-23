@@ -43,7 +43,7 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     )
     for m in modes
         mlow <= m <= mhigh || continue
-        plot!(p, psi, imag.(xi_psi[m-mlow+1, 1, :]); label="m=$m")
+        plot!(p, psi, imag.(xi_psi[m-mlow+1, 1, :]); label="m=$m")  # DCON phase convention: ξ_ψ is purely imaginary on the real axis
     end
 
     isnothing(save_path) || savefig(p, save_path)
@@ -250,7 +250,7 @@ function plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
         color=colors,
         markerstrokewidth=0
     )
-    hline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
+    vline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -364,8 +364,7 @@ function plot_dcon_summary(h5path; save_path=nothing)
         p_eval = plot_eigenvalue_spectrum(h5path; matrix_type=:total)
         p = plot(p_evec, p_crit, p_eval, p_dp; layout=(2, 2), size=(1000, 800))
     else
-        annotate!(p_crit, :center, :top,
-            text("No vacuum data — rerun with vac_flag = true for full summary", 8, :gray))
+        title!(p_crit, "Stability criterion (no vacuum data — rerun with vac_flag = true)")
         p = plot(p_crit, p_dp; layout=(1, 2), size=(1000, 400))
     end
 
