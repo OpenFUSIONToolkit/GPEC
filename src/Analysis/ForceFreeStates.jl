@@ -113,17 +113,21 @@ function plot_eigenmode_summary(h5path; save_path=nothing)
         bottom_margin=5Plots.mm
     )
 
+    colors = [real(e) < 0 ? :red : :blue for e in et]
     p3 = scatter(
         abs.(et), 1:nmodes;
         xlabel="|Eigenvalue|",
         ylabel="mode index",
         xscale=:log10,
         legend=false,
+        color=colors,
+        markerstrokewidth=0,
         left_margin=5Plots.mm,
         bottom_margin=5Plots.mm
     )
 
-    l = @layout [a{0.25h}; b c{0.25w}]
+    # Top panel (p1) shares m-axis with heatmap (p2); blank cell keeps widths aligned
+    l = @layout [a{0.25h} _{0.25w}; b c{0.25w}]
     p = plot(p1, p2, p3; layout=l, size=(950, 750))
 
     isnothing(save_path) || savefig(p, save_path)
@@ -253,7 +257,7 @@ function plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
 
     nmodes = length(et)
     ev_real = real.(et)
-    colors = [v > 0 ? :red : :green for v in ev_real]
+    colors = [v < 0 ? :red : :blue for v in ev_real]  # red = negative (unstable), blue = positive (stable)
 
     p = scatter(
         ev_real, 1:nmodes;
