@@ -70,7 +70,7 @@ Comparison:
 ```
 """
 
-using Pkg, HDF5, Printf
+using HDF5, Printf
 
 # Parse command-line arguments
 function parse_args(args)
@@ -156,26 +156,27 @@ function checkout_ref(branch, commit)
     end
 end
 
-# Run the example benchmark
+# Run the example benchmark.
+# Each run is a fresh Julia subprocess so that git branch switches take effect
+# (using JPEC only fires once per process; re-checkout without subprocess restart
+# would silently benchmark the first branch's code for all subsequent branches).
 function run_example_benchmark(example_path, num_runs)
+    example_abs = abspath(example_path)
+    project_root = abspath(joinpath(example_path, "../.."))
+    julia_expr = "using JPEC; JPEC.main([\"$example_abs/\"])"
+
     println("\nRunning example: $example_path")
     println("Warming up with $(num_runs + 1) runs...")
 
-    # First run for JIT compilation
-    println("\n[1/$(num_runs+1)] First run (JIT compilation)...")
-    Pkg.activate(joinpath(example_path, "../.."))
-    @eval using JPEC
-    cd(example_path) do
-        @time JPEC.main(["./"])
-    end
+    # First run warms precompilation cache
+    println("\n[1/$(num_runs+1)] First run (precompilation)...")
+    run(`julia --project=$project_root -e $julia_expr`)
 
-    # Warm runs for timing
+    # Warm runs for timing (precompilation cache now populated)
     runtimes = Float64[]
     for i in 1:num_runs
         println("\n[$((i+1))/$(num_runs+1)] Warm run $i...")
-        runtime = cd(example_path) do
-            @elapsed JPEC.main(["./"])
-        end
+        runtime = @elapsed run(`julia --project=$project_root -e $julia_expr`)
         push!(runtimes, runtime)
         println("  Runtime: $(round(runtime, digits=2)) s")
     end
