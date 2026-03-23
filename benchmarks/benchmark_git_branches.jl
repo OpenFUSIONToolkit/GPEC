@@ -163,7 +163,8 @@ end
 function run_example_benchmark(example_path, num_runs)
     example_abs = abspath(example_path)
     project_root = abspath(joinpath(example_path, "../.."))
-    julia_expr = "using JPEC; JPEC.main([\"$example_abs/\"])"
+    # Pkg.instantiate() ensures deps are resolved after a branch switch before loading
+    julia_expr = "import Pkg; Pkg.instantiate(); using JPEC; JPEC.main([\"$example_abs/\"])"
 
     println("\nRunning example: $example_path")
     println("Warming up with $(num_runs + 1) runs...")
