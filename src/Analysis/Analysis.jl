@@ -1,7 +1,7 @@
 """
     Analysis
 
-Post-processing and visualization utilities for GPEC simulation outputs.
+Post-processing and visualization utilities for JPEC simulation outputs.
 
 ## Submodules
 

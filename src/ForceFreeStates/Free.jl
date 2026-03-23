@@ -148,7 +148,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         psi_array[i] = find_zero(
             (psi -> profiles.q_spline(psi) - qi,
-             psi -> profiles.q_deriv(psi)),
+                psi -> profiles.q_deriv(psi)),
             psii, Roots.Newton()
         )
 
@@ -214,6 +214,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
         end
         singfac = @view odet._singfac_buf[1:intr.mpert]
         block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
+        # Broadcasting: singfac (mpert,) .* wv[block,block] .* singfac' (1,mpert) ≡ D * wv_raw * D, D = diagm(singfac)
         @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
     end
 
@@ -262,11 +263,11 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Hermitianize wv in-place (safe: ep1 and ev1 already computed above).
     @inbounds for j in 1:Npert
         for i in 1:(j-1)
-            avg = (wv[i,j] + conj(wv[j,i])) / 2
-            wv[i,j] = avg
-            wv[j,i] = conj(avg)
+            avg = (wv[i, j] + conj(wv[j, i])) / 2
+            wv[i, j] = avg
+            wv[j, i] = conj(avg)
         end
-        wv[j,j] = real(wv[j,j]) + 0.0im
+        wv[j, j] = real(wv[j, j]) + 0.0im
     end
     evonly1 = max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / real(norm)
 

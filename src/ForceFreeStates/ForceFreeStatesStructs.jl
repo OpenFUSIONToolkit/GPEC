@@ -261,7 +261,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
 end
 
-@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant, Opts<:NamedTuple}
+@kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
     mpert::Int
     mband::Int
     numpert_total::Int  # = mpert * npert (total series count per matrix = numpert_total^2)
@@ -380,9 +380,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psi_edge_scan::Vector{Float64}` - ψ values at each edge scan step (psifac ≥ psiedge). Populated by `findmax_dW_edge!`.
   - `q_edge_scan::Vector{Float64}` - q values at each edge scan step, taken directly from `q_store`.
-  - `et_edge_scan::Vector{ComplexF64}` - Total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
-  - `ep_edge_scan::Vector{ComplexF64}` - Plasma energy contribution at each edge scan step.
-  - `ev_edge_scan::Vector{ComplexF64}` - Vacuum energy contribution at each edge scan step.
+  - `et_edge_scan::Vector{Float64}` - Real part of total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
+  - `ep_edge_scan::Vector{Float64}` - Real part of plasma energy contribution at each edge scan step.
+  - `ev_edge_scan::Vector{Float64}` - Real part of vacuum energy contribution at each edge scan step.
   - `evonly_edge_scan::Vector{Float64}` - Smallest eigenvalue of vacuum matrix alone (wv, no plasma response) at each edge scan step.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
@@ -441,12 +441,13 @@ and a small set of temporary matrices and factors used to compute singular-layer
 
     # Edge stability scan results: psi values and energy components for each step in [psiedge, psilim].
     # Populated by findmax_dW_edge! and written to HDF5 for post-processing.
-    # Steps where free_compute_total failed (singular U₁) are stored as NaN.
-    psi_edge_scan::Vector{Float64}    = Float64[]
-    q_edge_scan::Vector{Float64}      = Float64[]
-    et_edge_scan::Vector{ComplexF64}  = ComplexF64[]
-    ep_edge_scan::Vector{ComplexF64}  = ComplexF64[]
-    ev_edge_scan::Vector{ComplexF64}  = ComplexF64[]
+    # Steps where free_compute_total failed (singular U₁) have -Inf in the working dW_edge buffer
+    # and are converted to NaN in the _edge_scan arrays below.
+    psi_edge_scan::Vector{Float64} = Float64[]
+    q_edge_scan::Vector{Float64} = Float64[]
+    et_edge_scan::Vector{Float64} = Float64[]
+    ep_edge_scan::Vector{Float64} = Float64[]
+    ev_edge_scan::Vector{Float64} = Float64[]
     evonly_edge_scan::Vector{Float64} = Float64[]
 
     # Data for integrator

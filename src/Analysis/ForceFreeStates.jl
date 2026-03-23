@@ -166,6 +166,7 @@ in the region [psiedge, psilim], with the plasma boundary swept from psiedge to 
 A positive et indicates stability; the truncation point is chosen at the peak et.
 
 Four subplots are shown:
+
   - **Total energy** `et = ep + ev`: total free-boundary energy eigenvalue
   - **Plasma energy** `ep`: plasma contribution to δW
   - **Vacuum energy** `ev`: vacuum (wv) contribution with singfac scaling
@@ -207,15 +208,15 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
 
     kw = (legend=false, xlabel="q")
 
-    p_et = plot(q, real.(et); ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw...)
+    p_et = plot(q, et; ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw...)
     hline!(p_et, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_et, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_ep = plot(q, real.(ep); ylabel="Plasma Energy", kw...)
+    p_ep = plot(q, ep; ylabel="Plasma Energy", kw...)
     hline!(p_ep, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ep, [qlim]; color=:gray, lw=1, ls=:dash)
 
-    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy", kw...)
+    p_ev = plot(q, ev; ylabel="Vacuum Energy", kw...)
     hline!(p_ev, [0.0]; color=:black, lw=1, ls=:dash)
     vline!(p_ev, [qlim]; color=:gray, lw=1, ls=:dash)
 
@@ -224,10 +225,10 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
     vline!(p_evonly, [qlim]; color=:gray, lw=1, ls=:dash)
 
     p = plot(p_et, p_ep, p_ev, p_evonly;
-             layout=(4, 1),
-             size=(900, 900),
-             plot_title="Edge stability scan: $h5path",
-             bottom_margin=4Plots.mm)
+        layout=(4, 1),
+        size=(900, 900),
+        plot_title="Edge stability scan: $h5path",
+        bottom_margin=4Plots.mm)
 
     isnothing(save_path) || savefig(p, save_path)
     return p

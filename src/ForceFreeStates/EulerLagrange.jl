@@ -77,11 +77,8 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         trim_storage!(odet)
     end
 
-    # Form the true solution vectors, undoing the Gaussian reduction applied in `ode_unorm!` during integration.
-    # Must be done BEFORE evaluate_stability_criterion!: the stability criterion uses u_store, which must
-    # contain the transformed (true) solution vectors. Using raw (pre-transform) u_store causes
-    # compute_smallest_eigenvalue to see ill-conditioned matrices for core regions (T₁ = G₁·…·Gₙ is the
-    # product of ALL Gaussian reduction matrices, which becomes poorly conditioned with many fixups).
+    # Undo Gaussian reduction to get true solution vectors. Must precede evaluate_stability_criterion!,
+    # which reads u_store; raw pre-transform u_store is ill-conditioned with many fixups.
     transform_u!(odet, intr)
 
     # Evaluate stability criterion (critical determinant) of saved solutions
@@ -118,7 +115,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         end
         odet.psifac = find_zero(
             (psi -> profiles.q_spline(psi) - ctrl.qlow,
-             psi -> profiles.q_deriv(psi)),
+                psi -> profiles.q_deriv(psi)),
             odet.psifac, Roots.Newton()
         )
     end
@@ -252,7 +249,14 @@ that asymptotic calculations are specific to ideal ForceFreeStates and not inher
 
   - `ising::Int` - Index of the singular surface being crossed
 """
-function cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, ising::Int)
+function cross_ideal_singular_surf!(
+    odet::OdeState,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal,
+    ising::Int
+)
 
     # Fixup solution at singular surface
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
@@ -343,7 +347,14 @@ making it clear what region is being integrated.
 Check sensitivity of results to tolerances, currently using same logic as Fortran
 Check absolute tolerances, currently only relative tolerances are updated
 """
-function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
+function integrate_el_region!(
+    odet::OdeState,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal,
+    chunk::IntegrationChunk
+)
 
     # Callback to be run at every step, handles fixups, tolerances, and data storage
     cb = DiscreteCallback((u, t, integrator) -> true, integrator_callback!)
@@ -596,8 +607,8 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 
     # Since we search for the maximum dW, initialize to -Infinity
     fill!(odet.dW_edge, -Inf * (1 + im))
-    ep_edge     = fill(-Inf * (1 + im), length(odet.dW_edge))
-    ev_edge     = fill(-Inf * (1 + im), length(odet.dW_edge))
+    ep_edge = fill(-Inf * (1 + im), length(odet.dW_edge))
+    ev_edge = fill(-Inf * (1 + im), length(odet.dW_edge))
     evonly_edge = fill(-Inf, length(odet.dW_edge))
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
@@ -611,9 +622,9 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
             try
                 result = free_compute_total(equil, ffit, intr, odet)
                 odet.dW_edge[istep] = result.et
-                ep_edge[istep]      = result.ep
-                ev_edge[istep]      = result.ev
-                evonly_edge[istep]  = result.evonly
+                ep_edge[istep] = result.ep
+                ev_edge[istep] = result.ev
+                evonly_edge[istep] = result.evonly
             catch e
                 e isa LinearAlgebra.SingularException || rethrow(e)
                 # U₁ is singular at this step; skip it (dW_edge stays -Inf)
@@ -624,12 +635,12 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     # Build per-step scan arrays for all psiedge steps and store in odet for HDF5 output.
     # Steps where free_compute_total failed have -Inf values; replace with NaN for clarity.
     psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
-    odet.psi_edge_scan    = odet.psi_store[psiedge_idxs]
-    odet.q_edge_scan      = odet.q_store[psiedge_idxs]
-    odet.et_edge_scan     = ComplexF64[isfinite(real(odet.dW_edge[i])) ? odet.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
-    odet.ep_edge_scan     = ComplexF64[isfinite(real(ep_edge[i]))      ? ep_edge[i]       : complex(NaN) for i in psiedge_idxs]
-    odet.ev_edge_scan     = ComplexF64[isfinite(real(ev_edge[i]))      ? ev_edge[i]       : complex(NaN) for i in psiedge_idxs]
-    odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i])           ? evonly_edge[i]   : NaN          for i in psiedge_idxs]
+    odet.psi_edge_scan = odet.psi_store[psiedge_idxs]
+    odet.q_edge_scan = odet.q_store[psiedge_idxs]
+    odet.et_edge_scan = Float64[isfinite(real(odet.dW_edge[i])) ? real(odet.dW_edge[i]) : NaN for i in psiedge_idxs]
+    odet.ep_edge_scan = Float64[isfinite(real(ep_edge[i])) ? real(ep_edge[i]) : NaN for i in psiedge_idxs]
+    odet.ev_edge_scan = Float64[isfinite(real(ev_edge[i])) ? real(ev_edge[i]) : NaN for i in psiedge_idxs]
+    odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i]) ? evonly_edge[i] : NaN for i in psiedge_idxs]
 
     # Return the index that maximizes dW_edge to identify truncation point
     et_clean = replace(real.(odet.dW_edge), NaN => -Inf)
