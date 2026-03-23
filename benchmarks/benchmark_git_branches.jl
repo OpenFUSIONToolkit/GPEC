@@ -158,7 +158,7 @@ end
 
 # Run the example benchmark.
 # Each run is a fresh Julia subprocess so that git branch switches take effect
-# (using JPEC only fires once per process; re-checkout without subprocess restart
+# (using statement only fires once per process; re-checkout without subprocess restart
 # would silently benchmark the first branch's code for all subsequent branches).
 function run_example_benchmark(example_path, num_runs)
     abs_example_path = abspath(example_path)
