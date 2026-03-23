@@ -206,27 +206,33 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
         return nothing
     end
 
-    kw = (legend=false, xlabel="q")
+    kw_re = (xlabel="q", label="Re")
+    kw_im = (xlabel="q", label="Im", ls=:dash)
+    vl_kw = (color=:gray, lw=1, ls=:dot, label=false)
+    hl_kw = (color=:black, lw=1, ls=:dash, label=false)
 
-    p_et = plot(q, et; ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw...)
-    hline!(p_et, [0.0]; color=:black, lw=1, ls=:dash)
-    vline!(p_et, [qlim]; color=:gray, lw=1, ls=:dash)
+    p_et = plot(q, real.(et); ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw_re...)
+    plot!(p_et, q, imag.(et); kw_im...)
+    hline!(p_et, [0.0]; hl_kw...)
+    vline!(p_et, [qlim]; vl_kw...)
 
-    p_ep = plot(q, ep; ylabel="Plasma Energy", kw...)
-    hline!(p_ep, [0.0]; color=:black, lw=1, ls=:dash)
-    vline!(p_ep, [qlim]; color=:gray, lw=1, ls=:dash)
+    p_ep = plot(q, real.(ep); ylabel="Plasma Energy", kw_re...)
+    plot!(p_ep, q, imag.(ep); kw_im...)
+    hline!(p_ep, [0.0]; hl_kw...)
+    vline!(p_ep, [qlim]; vl_kw...)
 
-    p_ev = plot(q, ev; ylabel="Vacuum Energy", kw...)
-    hline!(p_ev, [0.0]; color=:black, lw=1, ls=:dash)
-    vline!(p_ev, [qlim]; color=:gray, lw=1, ls=:dash)
+    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy", kw_re...)
+    plot!(p_ev, q, imag.(ev); kw_im...)
+    hline!(p_ev, [0.0]; hl_kw...)
+    vline!(p_ev, [qlim]; vl_kw...)
 
-    p_evonly = plot(q, evonly; ylabel="Min Vacuum Eigenvalue", kw...)
-    hline!(p_evonly, [0.0]; color=:black, lw=1, ls=:dash)
-    vline!(p_evonly, [qlim]; color=:gray, lw=1, ls=:dash)
+    p_evonly = plot(q, evonly; ylabel="Min Vac. Eigenvalue", legend=false, xlabel="q")
+    hline!(p_evonly, [0.0]; hl_kw...)
+    vline!(p_evonly, [qlim]; vl_kw...)
 
     p = plot(p_et, p_ep, p_ev, p_evonly;
         layout=(4, 1),
-        size=(900, 900),
+        size=(900, 1100),
         plot_title="Edge stability scan: $h5path",
         bottom_margin=4Plots.mm)
 

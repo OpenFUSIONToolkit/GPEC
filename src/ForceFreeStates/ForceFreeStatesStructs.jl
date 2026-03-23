@@ -380,9 +380,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
   - `psi_edge_scan::Vector{Float64}` - ψ values at each edge scan step (psifac ≥ psiedge). Populated by `findmax_dW_edge!`.
   - `q_edge_scan::Vector{Float64}` - q values at each edge scan step, taken directly from `q_store`.
-  - `et_edge_scan::Vector{Float64}` - Real part of total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
-  - `ep_edge_scan::Vector{Float64}` - Real part of plasma energy contribution at each edge scan step.
-  - `ev_edge_scan::Vector{Float64}` - Real part of vacuum energy contribution at each edge scan step.
+  - `et_edge_scan::Vector{ComplexF64}` - Total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
+  - `ep_edge_scan::Vector{ComplexF64}` - Plasma energy contribution at each edge scan step.
+  - `ev_edge_scan::Vector{ComplexF64}` - Vacuum energy contribution at each edge scan step.
   - `evonly_edge_scan::Vector{Float64}` - Smallest eigenvalue of vacuum matrix alone (wv, no plasma response) at each edge scan step.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
@@ -445,9 +445,9 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # and are converted to NaN in the _edge_scan arrays below.
     psi_edge_scan::Vector{Float64} = Float64[]
     q_edge_scan::Vector{Float64} = Float64[]
-    et_edge_scan::Vector{Float64} = Float64[]
-    ep_edge_scan::Vector{Float64} = Float64[]
-    ev_edge_scan::Vector{Float64} = Float64[]
+    et_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    ep_edge_scan::Vector{ComplexF64} = ComplexF64[]
+    ev_edge_scan::Vector{ComplexF64} = ComplexF64[]
     evonly_edge_scan::Vector{Float64} = Float64[]
 
     # Data for integrator
