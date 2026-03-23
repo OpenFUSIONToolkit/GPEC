@@ -14,6 +14,8 @@ import StaticArrays: @MMatrix, SVector
 include("EquilibriumTypes.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
+include("DirectEquilibriumArcLength.jl")
+include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
 
@@ -26,17 +28,8 @@ const mu0 = 4π * 1e-7
 """
     setup_equilibrium(eq_config::EquilibriumConfig)
 
-The main public API for the `Equilibrium` module. It orchestrates the entire
-process of reading an equilibrium file, running the appropriate solver, and
-returning the final processed `PlasmaEquilibrium` object.
-
-## Arguments:
-
-  - `eq_config`: An `EquilibriumConfig` object containing all necessary setup parameters.
-
-## Returns:
-
-  - A `PlasmaEquilibrium` object containing the final result.
+Read an equilibrium file, run the appropriate solver, and return the processed
+`PlasmaEquilibrium` with global parameters, q-profile, and GSE diagnostics.
 """
 function setup_equilibrium(path::String="equil.toml")
     return setup_equilibrium(EquilibriumConfig(path))
@@ -44,41 +37,43 @@ end
 function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothing)
 
     eq_type = eq_config.eq_type
-    # Parse file and prepare initial data structures and splines
-    if eq_type == "efit"
+
+    if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
         eq_input = read_efit(eq_config)
+        psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
+        if adjusted
+            @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
+                  "clamped to $(round(psihigh_safe; sigdigits=7))"
+            eq_input.config.psihigh = psihigh_safe
+        end
     elseif eq_type in ["chease2", "chease_ascii"]
         eq_input = read_chease_ascii(eq_config)
     elseif eq_type in ["chease", "chease_binary"]
         eq_input = read_chease_binary(eq_config)
     elseif eq_type == "lar"
-
         if additional_input === nothing
             additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
-
         eq_input = lar_run(eq_config, additional_input)
     elseif eq_type == "sol"
-
         if additional_input === nothing
             additional_input = SolovevConfig(eq_config.eq_filename)
         end
-
         eq_input = sol_run(eq_config, additional_input)
     else
         error("Equilibrium type $(equil_in.eq_type) is not implemented")
     end
 
-    # Run the appropriate solver (direct or inverse) to get a PlasmaEquilibrium struct
-    plasma_equilibrium = equilibrium_solver(eq_input)
+    if eq_type == "efit_by_inversion"
+        plasma_equilibrium = equilibrium_solver_by_inversion(eq_input)
+    elseif eq_type == "efit_arclength"
+        plasma_equilibrium = equilibrium_solver(eq_input, arclength_fieldline_int)
+    else
+        plasma_equilibrium = equilibrium_solver(eq_input)
+    end
 
-    # add global parameters to the PlasmaEquilibrium struct
     equilibrium_global_parameters!(plasma_equilibrium)
-
-    # Find q information
     equilibrium_qfind!(plasma_equilibrium)
-
-    # Diagnoses grad-shafranov solution.
     equilibrium_gse!(plasma_equilibrium)
 
     return plasma_equilibrium
@@ -94,7 +89,6 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     mpsi = length(pe.rzphi_xs) - 1
     mtheta = length(pe.rzphi_ys) - 1
 
-    # Allocate vector to store eta offset from rzphi (direct array access at grid points)
     vector = pe.rzphi_ys .+ @view pe.rzphi_offset.nodal_derivs.partials[1, end, :]
 
     edge_idx = mpsi + 1  # Edge flux surface index
@@ -143,8 +137,8 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
             η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            rfac_local = sqrt(r2)
-            rfac1 = r2y / (2 * rfac_local)
+            rfac_local = sqrt(max(0.0, r2))
+            rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
             phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
             sin_phase = sin(2π * (theta_inner + η))
             cos_phase_local = cos(2π * (theta_inner + η))
@@ -164,9 +158,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
             η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
             η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
-            rfac_local = sqrt(r2)
-            rfac1 = r2y / (2 * rfac_local)
-            rfac2 = (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local)
+            rfac_local = sqrt(max(0.0, r2))
+            rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
+            rfac2 = (rfac_local > 0) ? (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local) : 0.0
             phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
             phase2 = 2π * η2          # d²[2π(θ+η)]/dθ²
             cos_phase_local = cos(2π * (theta_inner + η))

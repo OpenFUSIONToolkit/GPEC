@@ -101,7 +101,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
-        jpsi = min(jpsi, equil.config.mpsi - 1)
+        jpsi = min(jpsi, length(profiles.xs) - 1)
 
         hint = Ref(jpsi)
         intr.psilim = find_zero(
@@ -726,7 +726,7 @@ Implement kin_flag functionality
     psieval::Float64)
 
     # Unpack structs and initialize
-    # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
+    # note the two items not used here are needed in the integrator params tuple
     _, equil, ffit, intr, odet, _ = params
 
     # Allocate temporary arrays from the pool
