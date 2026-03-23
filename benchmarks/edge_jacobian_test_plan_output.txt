@@ -1,0 +1,270 @@
+======================================================================
+PR #197 Test Plan Validation
+Example : /Users/nlogan/Code/JPEC_ode/benchmarks/../examples/DIIID-like_ideal_example
+======================================================================
+
+======================================================================
+TEST 1: T ≈ I for jac_type = "equal_arc"
+======================================================================
+For equal_arc, theta_jac[k] = k/mtheta_eq so the mixed DFT is the
+standard DFT identity: T[i,j] = δ(m_jac - m_eq) when mode spaces equal.
+[ Info: Forcing equal_arc coordinate jacobian exponents: power_*
+Building equal_arc equilibrium...
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Estimated separatrix log slope A = 0.494 from probe integrations at psi = 0.9790, 0.9895
+[ Info: Auto-mpsi: N_core=10 + N_mid=73 + N_edge=3 = 86 (A=0.494, h_mid=0.0131, tau=0.005)
+  psifac = 0.5, mtheta_eq = 128
+  theta_jac[1:5] = [-0.0, 0.007812, 0.015625, 0.023438, 0.03125]
+  Expected σ_k   = [0.0, 0.007812, 0.015625, 0.023438, 0.03125]
+  norm(T - I)    = 6.681e-15
+  norm(T)        = 4.472e+00
+  TEST 1: PASS ✓ (threshold 1e-8, got 6.68e-15)
+
+======================================================================
+TEST 2: nu_eq matches rzphi_nu within ~0.1%
+======================================================================
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+Building hamada equilibrium...
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Estimated separatrix log slope A = 0.494 from probe integrations at psi = 0.9790, 0.9895
+[ Info: Auto-mpsi: N_core=10 + N_mid=73 + N_edge=3 = 86 (A=0.494, h_mid=0.0131, tau=0.005)
+  psifac = 0.50, mtheta_eq = 512
+  max |Δν|       = 8.597e-05
+  rms |Δν|       = 3.901e-05
+  rms |Δν|/‖ν‖  = 7.733e-05 (0.0077%)
+  Edge (ψ=0.95): rms |Δν|/‖ν‖ = 1.188e-03 (0.1188%)
+  TEST 2: PASS ✓ (threshold 0.1% core, 1% edge)
+
+======================================================================
+TEST 3: use_equal_arc_vacuum = true vs standard at psihigh = 0.999
+======================================================================
+
+  psihigh       hamada (std)   hamada+eq_arc         Δet[1]%
+  ------------------------------------------------------------
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Setting psilim via dmlim: initial qlim = 5.057, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 693
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 836
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 954
+[ Info:    ψ = 0.925,  q = 4.200,  steps = 1009
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 65 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = +7.385e-01 +3.479e-05i
+│   Vacuum = +1.417e+00 -3.471e-17i
+└   Total  = +2.155e+00 +3.479e-05i
+[ Info: Setting psilim via dmlim: initial qlim = 5.057, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 693
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 836
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 954
+[ Info:    ψ = 0.925,  q = 4.200,  steps = 1009
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 65 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = +7.133e-01 +3.773e-05i
+│   Vacuum = +1.116e+00 -5.868e-17i
+└   Total  = +1.829e+00 +3.773e-05i
+  0.985             2.155422        1.828996      -15.1444%
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Setting psilim via dmlim: initial qlim = 5.257, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 678
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 827
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 945
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1074
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1127
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.807e-01 +6.176e-05i
+│   Vacuum = +2.123e+00 +7.851e-18i
+└   Total  = +1.242e+00 +6.176e-05i
+[ Info: Setting psilim via dmlim: initial qlim = 5.257, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 678
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 827
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 945
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1074
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1127
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.665e-01 +7.526e-05i
+│   Vacuum = +1.588e+00 +2.106e-17i
+└   Total  = +7.212e-01 +7.526e-05i
+  0.990             1.242193        0.721240      -41.9382%
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Setting psilim via dmlim: initial qlim = 5.426, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 681
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 822
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 937
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1066
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1119
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.606e-01 +6.028e-05i
+│   Vacuum = +2.071e+00 -3.023e-18i
+└   Total  = +1.210e+00 +6.028e-05i
+[ Info: Setting psilim via dmlim: initial qlim = 5.426, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 681
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 822
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 937
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1066
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1119
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.466e-01 +7.346e-05i
+│   Vacuum = +1.549e+00 -2.872e-16i
+└   Total  = +7.022e-01 +7.346e-05i
+  0.993             1.210462        0.702160      -41.9924%
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Setting psilim via dmlim: initial qlim = 5.579, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 681
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 825
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 947
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1074
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1128
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 65 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.428e-01 +5.908e-05i
+│   Vacuum = +2.026e+00 -2.775e-18i
+└   Total  = +1.183e+00 +5.908e-05i
+[ Info: Setting psilim via dmlim: initial qlim = 5.579, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 681
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 825
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 947
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1074
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1128
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 65 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.293e-01 +7.196e-05i
+│   Vacuum = +1.515e+00 -2.445e-17i
+└   Total  = +6.854e-01 +7.196e-05i
+  0.995             1.182732        0.685396      -42.0498%
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Setting psilim via dmlim: initial qlim = 5.799, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 683
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 827
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 948
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1080
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1132
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.180e-01 +5.713e-05i
+│   Vacuum = +1.963e+00 -5.406e-18i
+└   Total  = +1.145e+00 +5.713e-05i
+[ Info: Setting psilim via dmlim: initial qlim = 5.799, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 683
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 827
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 948
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1080
+[ Info:    ψ = 0.989,  q = 5.200,  steps = 1132
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.050e-01 +6.958e-05i
+│   Vacuum = +1.468e+00 -5.519e-18i
+└   Total  = +6.629e-01 +6.958e-05i
+  0.997             1.145024        0.662933      -42.1032%
+[ Info: Forcing hamada coordinate jacobian exponents: power_*
+[ Info: Processing EFIT g-file: /Users/nlogan/Code/JPEC_ode/examples/DIIID-like_ideal_example/TkMkr_D3Dlike_Hmode.geqdsk
+[ Info: Parsed from header: nw=257, nh=257
+[ Info: Magnetic axis found at R = 1.744, Z = -0.005
+[ Info: Inboard separatrix found at R = 1.058
+[ Info: Outboard separatrix found at R = 2.301
+[ Info: Setting psilim via dmlim: initial qlim = 6.244, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 707
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 854
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 976
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1111
+[ Info:    ψ = 0.998,  q = 6.000,  steps = 1225
+[ Info:    ψ = 0.999,  q = 6.200,  steps = 1280
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = -8.093e-01 +1.781e-04i
+│   Vacuum = +1.543e+00 -1.648e-16i
+└   Total  = +7.336e-01 +1.781e-04i
+[ Info: Setting psilim via dmlim: initial qlim = 6.244, dmlim = 0.200
+[ Info:    ψ = 0.000,  q = 1.209
+[ Info:    ψ = 0.620,  q = 2.000,  steps = 707
+[ Info:    ψ = 0.811,  q = 3.000,  steps = 854
+[ Info:    ψ = 0.909,  q = 4.000,  steps = 976
+[ Info:    ψ = 0.983,  q = 5.000,  steps = 1111
+[ Info:    ψ = 0.998,  q = 6.000,  steps = 1225
+[ Info:    ψ = 0.999,  q = 6.200,  steps = 1280
+[ Info: Evaluating fixed-boundary stability criterion
+┌ Warning: W inverse matrix was non-Hermitian beyond tolerance at 64 integration step(s)
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/FixedBoundaryStability.jl:32
+┌ Warning: X-point clustering: max dθ_jac/dθ_eq × mtheta_eq = 9.9 > cap 8.0. Capping equal-arc mode space expansion at 8.0×. Consider using jac_type_edge blending to reduce clustering.
+└ @ GeneralizedPerturbedEquilibrium.ForceFreeStates ~/Code/JPEC_ode/src/ForceFreeStates/Free.jl:150
+┌ Info: Least Stable Eigenmode Energies:
+│   Plasma = +2.694e+00 +7.142e-04i
+│   Vacuum = +1.502e+00 -4.956e-16i
+└   Total  = +4.197e+00 +7.142e-04i
+  0.999             0.733580        4.196613     +472.0727%
+
+  If use_equal_arc_vacuum improves accuracy at psihigh=0.999, et[1] should
+  be less sensitive to psihigh and converge more smoothly than the standard path.
+
+======================================================================
+Test plan complete.
+======================================================================

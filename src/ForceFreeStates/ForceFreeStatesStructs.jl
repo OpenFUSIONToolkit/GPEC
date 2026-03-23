@@ -257,8 +257,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_wv_symmetry::Bool = true
     save_interval::Int = 3
     force_termination::Bool = false
-    use_equal_arc_vacuum::Bool = false  # perform vacuum boundary integral on equal-arc surface (fixes X-point clustering)
-    vac_eq_arc_theta_factor::Int = 4    # mtheta_eq = factor × max(mhigh, 64)
+    use_equal_arc_vacuum::Bool = false  # perform vacuum boundary integral on equal-arc surface (fixes X-point clustering); requires a direct-method equilibrium (EFIT/CHEASE/analytic)
+    vac_eq_arc_theta_factor::Int = 4    # mtheta_eq = factor × max(|mhigh|, |mlow|, 64); independent of mthvac (which applies only to the standard jac-type path)
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}

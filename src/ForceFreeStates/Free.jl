@@ -30,6 +30,11 @@ and data dumping.
     if ctrl.use_equal_arc_vacuum && !isnothing(equil.raw_profile)
         vac_data = _free_run_equal_arc_vacuum!(vac_data, ctrl, equil, psilim, mpert, mlow, npert, nlow, wall_settings)
     else
+        if ctrl.use_equal_arc_vacuum && isnothing(equil.raw_profile)
+            @warn "use_equal_arc_vacuum = true requires a direct-method equilibrium (EFIT/CHEASE/analytic). " *
+                  "This equilibrium was built via the inverse method (equil.raw_profile is nothing). " *
+                  "Falling back to standard vacuum boundary integration."
+        end
         vac_inputs = Vacuum.VacuumInput(equil, psilim, ctrl.mthvac, ctrl.nzvac, mpert, mlow, npert, nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
         Vacuum.compute_vacuum_response!(vac_data, vac_inputs, wall_settings)
     end
@@ -118,7 +123,8 @@ Compute the vacuum response matrix using the equal-arc boundary integration path
 back to jac_type mode coefficients via the mode transformation matrix T.
 
 This replaces the direct call to `Vacuum.compute_vacuum_response!` when `ctrl.use_equal_arc_vacuum = true`.
-Writes the result into `vac_data.wv` (and grri, grre if populated) and returns `vac_data`.
+Writes the result into `vac_data.wv` and returns `vac_data`. Only `wv` is transformed; `grri`/`grre`
+are not populated by this path (they are not used by the core FFS eigenvalue calculation).
 """
 function _free_run_equal_arc_vacuum!(
     vac_data::VacuumData, ctrl::ForceFreeStatesControl,
@@ -139,14 +145,28 @@ function _free_run_equal_arc_vacuum!(
     theta_jac_wrapped = vcat(theta_jac_eq, [1.0])  # close the loop
     dtheta_jac = diff(theta_jac_wrapped)
     max_rate = maximum(dtheta_jac) * mtheta_eq  # dimensionless, ≥ 1 for uniform jac
+    max_rate_cap = 8.0  # cap equal-arc mode space at 8× jac mode space to bound memory/cost
+    if max_rate > max_rate_cap
+        @warn "X-point clustering: max dθ_jac/dθ_eq × mtheta_eq = $(round(max_rate; digits=1)) > cap $(max_rate_cap). " *
+              "Capping equal-arc mode space expansion at $(max_rate_cap)×. " *
+              "Consider using jac_type_edge blending to reduce clustering."
+        max_rate = max_rate_cap
+    end
     mpert_eq_half = ceil(Int, max_rate) * mpert
     mpert_eq = 2 * mpert_eq_half + 1  # symmetric band around 0
     mlow_eq  = -(mpert_eq ÷ 2)
 
+    # Close the loop: R_eq[1:mtheta_eq] is an exclusive [0,1) grid (σ=0 not repeated at end).
+    # PlasmaGeometry expects an inclusive [0, 2π] grid: y[1] ≈ y[end] for PeriodicBC.
+    # Append the σ=0 point so the closed array satisfies the periodic endpoint condition.
+    R_eq_c = vcat(R_eq, R_eq[1:1])
+    Z_eq_c = vcat(Z_eq, Z_eq[1:1])
+    ν_eq_c = vcat(nu_eq, nu_eq[1:1])
+
     # Build VacuumInput with equal-arc surface geometry
     vac_inputs_eq = Vacuum.VacuumInput(;
-        x=reverse(R_eq), z=reverse(Z_eq), ν=reverse(nu_eq),
-        mtheta_in=mtheta_eq, mtheta=mtheta_eq,
+        x=reverse(R_eq_c), z=reverse(Z_eq_c), ν=reverse(ν_eq_c),
+        mtheta_in=mtheta_eq+1, mtheta=mtheta_eq,
         mlow=mlow_eq, mpert=mpert_eq,
         nlow=nlow, npert=npert, nzeta_in=1, nzeta=ctrl.nzvac,
         force_wv_symmetry=ctrl.force_wv_symmetry
@@ -169,9 +189,9 @@ function _free_run_equal_arc_vacuum!(
         # Multi-n block-diagonal: build block-diagonal T and apply
         numpert_total = mpert * npert
         T_full = zeros(ComplexF64, numpert_total, numpert_eq)
-        for in in 1:npert
-            row_range = (in-1)*mpert+1 : in*mpert
-            col_range = (in-1)*mpert_eq+1 : in*mpert_eq
+        for i_n in 1:npert
+            row_range = (i_n-1)*mpert+1 : i_n*mpert
+            col_range = (i_n-1)*mpert_eq+1 : i_n*mpert_eq
             T_full[row_range, col_range] .= T_single
         end
         vac_data.wv .= T_full * vac_data_eq.wv * T_full'
@@ -187,6 +207,10 @@ Compute a spline of vacuum response matrices over the range of psi from 'ctrl.ps
 `intr.qlim`. This is used for fast evaluation of wt during `ode_record_edge`. Performs the
 same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
 q-window minimum.
+
+Note: this function always uses the standard (jac-type) vacuum boundary integration regardless
+of `ctrl.use_equal_arc_vacuum`. The equal-arc vacuum path is used only in `free_run!` for the
+final vacuum matrix at `psilim`.
 """
 function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
