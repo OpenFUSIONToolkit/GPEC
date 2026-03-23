@@ -39,7 +39,9 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     p = plot(;
         xlabel="ψ_N",
         ylabel="Im(ξ_ψ)",
-        title="Least Stable Eigenmode ξ_ψ"
+        title="Least Stable Eigenmode ξ_ψ",
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
     for m in modes
         mlow <= m <= mhigh || continue
@@ -96,14 +98,19 @@ function plot_eigenmode_summary(h5path; save_path=nothing)
         xlabel="m",
         ylabel="|Eigenvector|",
         title="Mode 1, |λ₁| = $(round(abs(et[1]), digits=3))",
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
 
     p2 = heatmap(
         m_vals, 1:nmodes, abs.(wt');
         xlabel="m",
         ylabel="mode index",
-        colorbar_title="|Wₜ|"
+        colorbar_title="|Wₜ|",
+        left_margin=5Plots.mm,
+        right_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
     )
 
     p3 = scatter(
@@ -111,11 +118,13 @@ function plot_eigenmode_summary(h5path; save_path=nothing)
         xlabel="|Eigenvalue|",
         ylabel="mode index",
         xscale=:log10,
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
 
     l = @layout [a{0.25h}; b c{0.25w}]
-    p = plot(p1, p2, p3; layout=l, size=(900, 700))
+    p = plot(p1, p2, p3; layout=l, size=(950, 750))
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -149,7 +158,9 @@ function plot_stability_criterion(h5path; save_path=nothing)
         xlabel="ψ_N",
         ylabel="crit",
         title="Stability criterion (smallest eigenvalue of W⁻¹) vs ψ_N",
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
 
     isnothing(save_path) || savefig(p, save_path)
@@ -201,7 +212,10 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         xlabel="m",
         ylabel="mode index",
         title="Energy eigenvectors |Wₜ| (total)",
-        colorbar_title="|Wₜ|"
+        colorbar_title="|Wₜ|",
+        left_margin=5Plots.mm,
+        right_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
     )
 
     isnothing(save_path) || savefig(p, save_path)
@@ -248,7 +262,9 @@ function plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
         title="Eigenvalue spectrum ($matrix_type)",
         legend=false,
         color=colors,
-        markerstrokewidth=0
+        markerstrokewidth=0,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
     vline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
 
@@ -319,7 +335,9 @@ function plot_delta_prime(h5path; save_path=nothing)
         title="Tearing stability Δ' (FFS asymptotic coefficients)",
         legend=false,
         color=colors,
-        xrotation=30
+        xrotation=30,
+        bottom_margin=10Plots.mm,
+        left_margin=5Plots.mm
     )
 
     isnothing(save_path) || savefig(p, save_path)
@@ -362,10 +380,10 @@ function plot_dcon_summary(h5path; save_path=nothing)
     if has_vac
         p_evec = plot_energy_eigenvectors(h5path; matrix_type=:total)
         p_eval = plot_eigenvalue_spectrum(h5path; matrix_type=:total)
-        p = plot(p_evec, p_crit, p_eval, p_dp; layout=(2, 2), size=(1000, 800))
+        p = plot(p_evec, p_crit, p_eval, p_dp; layout=(2, 2), size=(1100, 900))
     else
         title!(p_crit, "Stability criterion (no vacuum data — rerun with vac_flag = true)")
-        p = plot(p_crit, p_dp; layout=(1, 2), size=(1000, 400))
+        p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500))
     end
 
     isnothing(save_path) || savefig(p, save_path)
@@ -404,7 +422,9 @@ function plot_singular_surfaces(h5path; save_path=nothing)
         xlabel="ψ_N",
         ylabel="q",
         title="Safety factor and rational surfaces",
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
     hline!(p_q, [q0, q95]; linestyle=:dot, color=:gray, label=nothing)
     for s in 1:msing
@@ -415,7 +435,7 @@ function plot_singular_surfaces(h5path; save_path=nothing)
 
     p_dp = plot_delta_prime(h5path)
 
-    p = plot(p_q, p_dp; layout=(1, 2), size=(1000, 400))
+    p = plot(p_q, p_dp; layout=(1, 2), size=(1100, 500))
 
     isnothing(save_path) || savefig(p, save_path)
     return p

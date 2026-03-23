@@ -97,7 +97,10 @@ function plot_qprofile(h5path; show_singular=true, save_path=nothing)
         xlabel="ψ_N",
         ylabel="q",
         title="Safety factor q(ψ)",
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm,
+        right_margin=8Plots.mm  # annotations at x=1.0 need room on the right
     )
     hline!(p, [q0, q95]; linestyle=:dot, color=:gray, label=nothing)
     annotate!(p, 1.0, q0, text(" q0=$(round(q0, digits=2))", 7, :left, :gray))
@@ -147,7 +150,9 @@ function plot_pressure_profile(h5path; save_path=nothing)
         xlabel="ψ_N",
         ylabel="μ₀p",
         title="Pressure profile (βₜ=$(round(betat, digits=3)), βₚ=$(round(betap1, digits=3)))",
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
     for s in 1:msing
         vline!(p, [psi_sing[s]]; linestyle=:dash, color=:red, label=nothing)
@@ -184,7 +189,9 @@ function plot_f_profile(h5path; save_path=nothing)
         xlabel="ψ_N",
         ylabel="2πF",
         title="Toroidal field function 2πF(ψ)",
-        legend=false
+        legend=false,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
 
     isnothing(save_path) || savefig(p, save_path)
@@ -225,7 +232,8 @@ function plot_equilibrium_summary(h5path; save_path=nothing)
     p_pres = plot_pressure_profile(h5path)
     p_f    = plot_f_profile(h5path)
 
-    p = plot(p_q, p_pres, p_f; layout=(1, 3), size=(1200, 400), plot_title=title_str)
+    p = plot(p_q, p_pres, p_f; layout=(1, 3), size=(1300, 450),
+        plot_title=title_str, plot_titlefontsize=10, top_margin=8Plots.mm)
 
     isnothing(save_path) || savefig(p, save_path)
     return p

@@ -52,7 +52,8 @@ function plot_resonant_flux(h5path; save_path=nothing)
     xticks_arg = (1:msing, labels)
 
     p = plot(; xlabel="rational surface", ylabel="|Φ_res|",
-        title="Resonant flux |Φ_res| per surface", legend=:outertopright)
+        title="Resonant flux |Φ_res| per surface", legend=:outertopright,
+        left_margin=5Plots.mm, bottom_margin=10Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
@@ -105,7 +106,9 @@ function plot_island_widths(h5path; save_path=nothing)
         title="Island half-widths",
         legend=false,
         color=:steelblue,
-        xrotation=30
+        xrotation=30,
+        left_margin=5Plots.mm,
+        bottom_margin=10Plots.mm
     )
 
     isnothing(save_path) || savefig(p, save_path)
@@ -152,7 +155,9 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
         title="Chirikov overlap parameter",
         legend=false,
         color=colors,
-        xrotation=30
+        xrotation=30,
+        left_margin=5Plots.mm,
+        bottom_margin=10Plots.mm
     )
     hline!(p, [1.0]; linestyle=:dash, color=:black, label=nothing)
 
@@ -196,7 +201,8 @@ function plot_pe_delta_prime(h5path; save_path=nothing)
     labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
 
     p = plot(; xlabel="rational surface", ylabel="|Δ'|",
-        title="Tearing stability Δ' (PE)", legend=:outertopright)
+        title="Tearing stability Δ' (PE)", legend=:outertopright,
+        left_margin=5Plots.mm, bottom_margin=10Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
@@ -242,7 +248,7 @@ function plot_resonant_field(h5path; save_path=nothing)
     p4 = plot_island_widths(h5path)
     p5 = plot_chirikov_parameter(h5path)
 
-    p = plot(p1, p2, p3, p4, p5; layout=(5, 1), size=(800, 1400))
+    p = plot(p1, p2, p3, p4, p5; layout=(5, 1), size=(900, 1600))
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -262,7 +268,8 @@ function _plot_resonant_current(h5path)
     labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
 
     p = plot(; xlabel="rational surface", ylabel="|I_res|",
-        title="Resonant current |I_res| per surface", legend=:outertopright)
+        title="Resonant current |I_res| per surface", legend=:outertopright,
+        left_margin=5Plots.mm, bottom_margin=10Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
@@ -280,9 +287,10 @@ end
 
 Two-panel spectrogram of a perturbed equilibrium response field component:
 
-  - Top: `|component|` vs ψ_N, one curve per poloidal mode m (colored by m)
-  - Bottom: Heatmap of `|component|` in (ψ_N × m) space, with white dashed lines at
-    rational surface locations
+  - Top: `|component|` vs ψ_N, one curve per poloidal mode m. Only resonant modes
+    (m ∈ [0, nhigh·q95)) are labeled to keep the legend readable.
+  - Bottom: Heatmap of `|component|` in (m, ψ_N) space (psi on vertical axis), with
+    white dashed lines at rational surface locations.
 
 Inspired by `plot_spectrograms.py` from OMFIT GPEC.
 
@@ -316,10 +324,11 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     _has_pe_data(h5path, base * rkey) ||
         return plot(; title="No response data — run with perturbed equilibrium enabled", legend=false)
 
-    data_r, data_i, psi_response, mlow, mhigh, msing, psi_sing = h5open(h5path, "r") do fid
+    data_r, data_i, psi_response, mlow, mhigh, nhigh, q95, msing, psi_sing = h5open(h5path, "r") do fid
         read(fid[base * rkey]), read(fid[base * ikey]),
         read(fid["integration/psi"]),
-        read(fid["info/mlow"]), read(fid["info/mhigh"]),
+        read(fid["info/mlow"]), read(fid["info/mhigh"]), read(fid["info/nhigh"]),
+        read(fid["equil/q95"]),
         read(fid["singular/msing"]), read(fid["singular/psi"])
     end
 
@@ -330,32 +339,41 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     m_vals = mlow:mhigh
     data_mn = data[:, 1:mpert]  # (npsi, mpert): first mpert columns = first n's modes
 
-    # Top panel: line plot per mode
+    # Top panel: line plot per mode — only label resonant range m ∈ [0, nhigh·q95)
+    m_max_legend = nhigh * q95
     p1 = plot(;
         xlabel="ψ_N",
         ylabel="|$(component)|",
         title="Mode spectrogram: $(component)",
-        legend=:outertopright
+        legend=:outertopright,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
     cmap = cgrad(:roma, mpert; categorical=true)
     for (i, m) in enumerate(m_vals)
-        plot!(p1, psi_response, abs.(data_mn[:, i]); label="m=$m", color=cmap[i], linewidth=1.5)
+        show_label = 0 <= m < m_max_legend
+        plot!(p1, psi_response, abs.(data_mn[:, i]);
+            label=(show_label ? "m=$m" : nothing), color=cmap[i], linewidth=1.5)
     end
 
-    # Bottom panel: heatmap — z must be (n_m_vals, n_psi) = (mpert, npsi)
+    # Bottom panel: heatmap in (m, ψ_N) space — psi on vertical axis, m on horizontal
+    # z must be (n_psi, n_m) = (npsi, mpert) so that rows = psi, cols = m
     p2 = heatmap(
-        psi_response, collect(m_vals), abs.(data_mn');
-        xlabel="ψ_N",
-        ylabel="m",
+        collect(m_vals), psi_response, abs.(data_mn);
+        xlabel="m",
+        ylabel="ψ_N",
         title="",
-        colorbar_title="|$(component)|"
+        colorbar_title="|$(component)|",
+        left_margin=5Plots.mm,
+        right_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
     )
     # Overlay rational surface locations as white dashed lines
     for s in 1:msing
-        vline!(p2, [psi_sing[s]]; linestyle=:dash, color=:white, linewidth=1.5, label=nothing)
+        hline!(p2, [psi_sing[s]]; linestyle=:dash, color=:white, linewidth=1.5, label=nothing)
     end
 
-    p = plot(p1, p2; layout=(2, 1), size=(900, 700))
+    p = plot(p1, p2; layout=(2, 1), size=(950, 750))
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -388,7 +406,7 @@ function plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
     p_spectro  = plot_mode_spectrogram(h5path; component=:xi_psi)
 
     l = @layout [grid(1, 2){0.35h}; b]
-    p = plot(p_islands, p_energies, p_spectro; layout=l, size=(1000, 1000))
+    p = plot(p_islands, p_energies, p_spectro; layout=l, size=(1100, 1100))
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -406,7 +424,7 @@ function _plot_energies(h5path)
         read(fid["perturbed_equilibrium/energies/total_energy"])
     end
 
-    vals  = [real(ep), real(ev), real(et)]
+    vals  = [real(ep), real(ev), real(et)]  # real() in case energies are stored as complex
     names = ["Plasma", "Vacuum", "Total"]
     colors = [:steelblue, :darkorange, :green]
 
@@ -415,7 +433,9 @@ function _plot_energies(h5path)
         ylabel="Energy",
         title="Energy breakdown",
         legend=false,
-        color=colors
+        color=colors,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
     hline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
 
