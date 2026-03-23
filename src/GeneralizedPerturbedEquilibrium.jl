@@ -74,6 +74,13 @@ function main(args::Vector{String}=String[])
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
+    if ctrl.use_equal_arc_vacuum && "PerturbedEquilibrium" in keys(inputs)
+        error("use_equal_arc_vacuum = true is incompatible with PerturbedEquilibrium calculations. " *
+              "The equal-arc vacuum path only transforms wv (the FFS eigenvalue matrix); " *
+              "grri and grre remain in equal-arc mode space and will give wrong results in " *
+              "PerturbedEquilibrium. Set use_equal_arc_vacuum = false to proceed.")
+    end
+
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
@@ -284,14 +291,6 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     @info "\n  Perturbed Equilibrium\n$_SECTION"
     pe_start = time()
-
-    # Check for PerturbedEquilibrium section and run if present
-    if "PerturbedEquilibrium" in keys(inputs) && ctrl.use_equal_arc_vacuum
-        error("use_equal_arc_vacuum = true is incompatible with PerturbedEquilibrium calculations. " *
-              "The equal-arc vacuum path only transforms wv (the FFS eigenvalue matrix); " *
-              "grri and grre remain in equal-arc mode space and will give wrong results in " *
-              "PerturbedEquilibrium. Set use_equal_arc_vacuum = false to proceed.")
-    end
 
     if "PerturbedEquilibrium" in keys(inputs)
         # Read ForcingTerms control parameters

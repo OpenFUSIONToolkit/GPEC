@@ -174,7 +174,7 @@ function _free_run_equal_arc_vacuum!(
 
     # Compute vacuum response in equal-arc coordinate mode space
     numpert_eq = mpert_eq * npert
-    vac_data_eq = VacuumData(mtheta_eq, numpert_eq, mtheta_eq)
+    vac_data_eq = VacuumData(mtheta_eq, numpert_eq, mtheta_eq)  # mthvac=mtheta_eq (equal-arc grid size, not ctrl.mthvac)
     Vacuum.compute_vacuum_response!(vac_data_eq, vac_inputs_eq, wall_settings)
 
     # Mode transformation T: maps equal-arc modes → jac_type modes
@@ -182,19 +182,17 @@ function _free_run_equal_arc_vacuum!(
     # Build T for a single n; for multi-n, apply block-diagonally
     T_single = Vacuum.jac_to_eq_mode_transform(theta_jac_eq, mlow, mpert, mlow_eq, mpert_eq)
 
-    if npert == 1
-        # Single toroidal mode: wv is mpert × mpert
-        vac_data.wv .= T_single * vac_data_eq.wv * T_single'
-    else
-        # Multi-n block-diagonal: build block-diagonal T and apply
-        numpert_total = mpert * npert
-        T_full = zeros(ComplexF64, numpert_total, numpert_eq)
-        for i_n in 1:npert
-            row_range = (i_n-1)*mpert+1 : i_n*mpert
-            col_range = (i_n-1)*mpert_eq+1 : i_n*mpert_eq
-            T_full[row_range, col_range] .= T_single
-        end
-        vac_data.wv .= T_full * vac_data_eq.wv * T_full'
+    # Apply G_jac[n,n] = T * G_eq[n,n] * T' block-by-block (T is identical for all n).
+    # Avoids building a dense T_full [numpert_total × numpert_eq] and two large matmuls.
+    # Zero first: off-diagonal blocks are physically zero (different n don't couple in 2D)
+    # and are never written by mul!, but wv was allocated undef.
+    fill!(vac_data.wv, zero(ComplexF64))
+    tmp = Matrix{ComplexF64}(undef, mpert, mpert_eq)
+    for i_n in 1:npert
+        row_range = (i_n-1)*mpert+1   : i_n*mpert
+        col_range = (i_n-1)*mpert_eq+1 : i_n*mpert_eq
+        mul!(tmp, T_single, @view(vac_data_eq.wv[col_range, col_range]))
+        mul!(@view(vac_data.wv[row_range, row_range]), tmp, adjoint(T_single))
     end
 
     return vac_data
