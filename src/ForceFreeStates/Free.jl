@@ -138,17 +138,10 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
         )
 
         for ipert_n in 1:intr.npert
-            # Compute vacuum matrix
+            # Compute raw vacuum matrix (singfac NOT applied; free_compute_total applies it analytically)
             n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, intr.psilim, intr.mtheta, intr.mpert, intr.mlow, n; force_wv_symmetry=ctrl.force_wv_symmetry)
-            wv_block, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-
-            # Apply singular factor scaling
-            singfac = collect(intr.mlow:intr.mhigh) .- (n * qi)
-            @inbounds for ipert in 1:intr.mpert
-                @views wv_block[ipert, :] .*= singfac[ipert]
-                @views wv_block[:, ipert] .*= singfac[ipert]
-            end
+            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, 1, n; force_wv_symmetry=ctrl.force_wv_symmetry)
+            wv_block, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
 
             # Store block in full wv matrix
             @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
