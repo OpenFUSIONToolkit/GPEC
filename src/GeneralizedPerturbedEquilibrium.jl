@@ -74,7 +74,7 @@ function main(args::Vector{String}=String[])
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    if ctrl.use_equal_arc_vacuum && "PerturbedEquilibrium" in keys(inputs)
+    if ctrl.use_equal_arc_vacuum && !ctrl.force_termination && "PerturbedEquilibrium" in keys(inputs)
         error("use_equal_arc_vacuum = true is incompatible with PerturbedEquilibrium calculations. " *
               "The equal-arc vacuum path only transforms wv (the FFS eigenvalue matrix); " *
               "grri and grre remain in equal-arc mode space and will give wrong results in " *
