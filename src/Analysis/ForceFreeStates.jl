@@ -157,7 +157,7 @@ function plot_stability_criterion(h5path; save_path=nothing)
 end
 
 """
-    plot_edge_stability_scan(h5path; save_path=nothing)
+    plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
 
 Plot the edge stability scan energy components (et, ep, ev, evonly) vs ψ_N.
 
@@ -182,12 +182,14 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 ### Keyword arguments
 
   - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `ylims`: y-axis limits applied to all panels (default: `(-2, 3)`)
+  - `kwargs...`: Additional Plots.jl keyword arguments applied to all line plots (e.g. `lw=2`)
 
 ### Returns
 
 A `Plots.jl` plot object, or `nothing` if no `edge_scan/` group is present in the file.
 """
-function plot_edge_stability_scan(h5path; save_path=nothing)
+function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
     has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
         if !haskey(fid, "edge_scan/psi")
             return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
@@ -206,8 +208,8 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
         return nothing
     end
 
-    kw_re = (xlabel="q", label="Re")
-    kw_im = (xlabel="q", label="Im", ls=:dash)
+    kw_re = (xlabel="q", label="Re", ylims=ylims, kwargs...)
+    kw_im = (xlabel="q", label="Im", ls=:dash, ylims=ylims, kwargs...)
     vl_kw = (color=:gray, lw=1, ls=:dot, label=false)
     hl_kw = (color=:black, lw=1, ls=:dash, label=false)
 
@@ -226,7 +228,7 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
     hline!(p_ev, [0.0]; hl_kw...)
     vline!(p_ev, [qlim]; vl_kw...)
 
-    p_evonly = plot(q, evonly; ylabel="Min Vac. Eigenvalue", legend=false, xlabel="q")
+    p_evonly = plot(q, evonly; ylabel="Min Vac. Eigenvalue", legend=false, xlabel="q", ylims=ylims, kwargs...)
     hline!(p_evonly, [0.0]; hl_kw...)
     vline!(p_evonly, [qlim]; vl_kw...)
 
@@ -234,6 +236,7 @@ function plot_edge_stability_scan(h5path; save_path=nothing)
         layout=(4, 1),
         size=(900, 1100),
         plot_title="Edge stability scan: $h5path",
+        left_margin=12Plots.mm,
         bottom_margin=4Plots.mm)
 
     isnothing(save_path) || savefig(p, save_path)

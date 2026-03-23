@@ -452,6 +452,11 @@ This format is used for compiling release notes, so tags should be human-readabl
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
 - Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
 
+## Figures and plots
+
+- Always print the full absolute path of any figure or plot file you save, so the user can open it directly without searching the filesystem.
+- Always check that axis labels are not clipped. In Plots.jl there is no `tight_layout()` equivalent; use explicit margins instead: `left_margin=12Plots.mm`, `bottom_margin=4Plots.mm`, etc. When in doubt, add a generous `left_margin` to prevent y-axis label cutoff.
+
 ## Git Merge conflict resolution policy
 
 - When resolving git conflicts, do not simply accept one side.
