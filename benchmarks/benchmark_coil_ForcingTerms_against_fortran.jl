@@ -276,7 +276,7 @@ function step_series(m_vals, amps)
 end
 
 # Panel 1: coil cross-sections (R, Z) + plasma boundary
-p1 = plot_coil_geometry_rz(coil_sets; equil=equil)
+p1 = plot_coil_geometry_rz(coil_sets; equil=equil, psi=fortran_psilim)
 title!(p1, "Coil cross-sections  ($(p.machine), n=$(p.nn))")
 
 # Panel 2: bn(θ, ζ) heatmap

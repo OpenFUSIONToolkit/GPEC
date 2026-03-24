@@ -63,7 +63,7 @@ function plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
 end
 
 """
-    plot_coil_geometry_rz(coil_sets; equil=nothing, save_path=nothing, kwargs...)
+    plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing, kwargs...)
 
 Plot coil cross-sections in the (R, Z) meridional plane.
 
@@ -75,13 +75,14 @@ If `equil` is provided, the plasma boundary is overplotted for reference.
 
 ### Keyword arguments
 - `equil`: optional `PlasmaEquilibrium`; if given, overlays the plasma boundary
+- `psi`: flux surface to trace (default: `equil.rzphi_xs[end]`, the outermost grid point)
 - `save_path`: file path to save the figure (default: `nothing`)
 - Any extra kwargs are forwarded to `Plots.plot`
 
 ### Returns
 A `Plots.jl` plot object.
 """
-function plot_coil_geometry_rz(coil_sets; equil=nothing, save_path=nothing, kwargs...)
+function plot_coil_geometry_rz(coil_sets; equil=nothing, psi=nothing, save_path=nothing, kwargs...)
     p = plot(; xlabel="R [m]", ylabel="Z [m]",
                title="Coil cross-sections (R, Z)", legend=:topright,
                aspect_ratio=:equal, kwargs...)
@@ -100,10 +101,7 @@ function plot_coil_geometry_rz(coil_sets; equil=nothing, save_path=nothing, kwar
     end
 
     if !isnothing(equil)
-        # Use the outermost grid point rather than extrapolating to ψ=1.0.
-        # The equilibrium is typically computed up to psihigh < 1 (e.g. 0.993),
-        # so evaluating at exactly 1.0 would extrapolate and produce a wavy boundary.
-        psi_bnd = equil.rzphi_xs[end]
+        psi_bnd = isnothing(psi) ? equil.rzphi_xs[end] : Float64(psi)
         mtheta_boundary = length(equil.rzphi_ys)
         hint2d = (Ref(1), Ref(1))
         R_bnd = zeros(mtheta_boundary)
