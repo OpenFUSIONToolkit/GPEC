@@ -538,9 +538,9 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Compute edge indices first (post-integration, exact count) to size EdgeScanState correctly
-    psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
-    N_edge = length(psiedge_idxs)
+    # Find the first ODE step at or past psiedge; all subsequent steps are contiguous edge steps
+    edge_start = findfirst(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
+    N_edge = odet.step - edge_start + 1
 
     # Initialize EdgeScanState sized exactly to the number of edge steps
     odet.edge_scan = EdgeScanState(intr.numpert_total, N_edge)
@@ -548,15 +548,16 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
 
     # Since we search for the maximum dW, initialize to -Infinity
     fill!(es.dW_edge, -Inf * (1 + im))
-    plasma_energy_arr    = fill(-Inf * (1 + im), N_edge)
-    vacuum_energy_arr    = fill(-Inf * (1 + im), N_edge)
+    plasma_energy_arr     = fill(-Inf * (1 + im), N_edge)
+    vacuum_energy_arr     = fill(-Inf * (1 + im), N_edge)
     vacuum_eigenvalue_arr = fill(-Inf, N_edge)
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
-    # Loop with compact index j into EdgeScanState and ODE index istep into u_store
-    for (j, istep) in enumerate(psiedge_idxs)
+    # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1
+    for j in 1:N_edge
+        istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
         try
@@ -572,16 +573,16 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     end
 
     # Build per-step scan arrays; failed steps have -Inf values → NaN for HDF5 output
-    es.psi              = odet.psi_store[psiedge_idxs]
-    es.q                = odet.q_store[psiedge_idxs]
+    es.psi              = odet.psi_store[edge_start:odet.step]
+    es.q                = odet.q_store[edge_start:odet.step]
     es.total_eigenvalue  = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in es.dW_edge]
     es.plasma_energy     = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in plasma_energy_arr]
     es.vacuum_energy     = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in vacuum_energy_arr]
     es.vacuum_eigenvalue = Float64[isfinite(v) ? v : NaN for v in vacuum_eigenvalue_arr]
 
-    # Return the ODE step index at peak dW (map compact peak index → ODE index for truncation)
+    # Return the ODE step index at peak dW (compact index j maps back via edge_start)
     peak_j = argmax(real.(es.dW_edge))
-    return psiedge_idxs[peak_j]
+    return edge_start + peak_j - 1
 end
 
 """
