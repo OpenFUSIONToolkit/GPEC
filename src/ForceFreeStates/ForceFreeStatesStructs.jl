@@ -160,13 +160,16 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mer_flag::Bool` - Enable Mercier stability criterion
   - `fft_flag::Bool` - Enable Fourier transform analysis
-  - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
+  - `mthvac::Int` - Number of vacuum poloidal grid points (0 = auto-compute from mpert and surface geometry)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
   - `nn_low::Int` - Lower bound for toroidal modes
   - `nn_high::Int` - Upper bound for toroidal modes
-  - `delta_mlow::Int` - Expands lower bound of Fourier harmonics by delta_mlow
-  - `delta_mhigh::Int` - Expands upper bound of Fourier harmonics by delta_mhigh
+  - `delta_mlow::Int` - **Deprecated**: use `m_accuracy` to tune bandwidth or `mlow` for explicit override
+  - `delta_mhigh::Int` - **Deprecated**: use `m_accuracy` to tune bandwidth or `mhigh` for explicit override
+  - `mlow::Int` - Explicit lower poloidal mode bound (0 = auto-compute)
+  - `mhigh::Int` - Explicit upper poloidal mode bound (0 = auto-compute)
+  - `m_accuracy::Float64` - Fourier decay threshold for metric bandwidth estimation
   - `delta_mband::Int` - Integration keeps only this wide a band of solutions along the diagonal in m,m'
   - `thmax0::Float64` - Maximum integration step size (not yet implemented)
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
@@ -213,13 +216,16 @@ A mutable struct containing control parameters for stability analysis, set by th
     vac_flag::Bool = false
     mer_flag::Bool = false
     fft_flag::Bool = false
-    mthvac::Int = 480
+    mthvac::Int = 0
     nzvac::Int = 1
     sing_start::Int = 0
     nn_low::Int = 0
     nn_high::Int = 0
     delta_mlow::Int = 0
     delta_mhigh::Int = 0
+    mlow::Int = 0
+    mhigh::Int = 0
+    m_accuracy::Float64 = 0.01
     delta_mband::Int = 0
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)

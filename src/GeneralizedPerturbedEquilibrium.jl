@@ -49,6 +49,60 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
+"""
+    _estimate_m_bandwidth(field, θ_nodes, psilim, threshold)
+
+Estimate the Fourier bandwidth of a 2D equilibrium field evaluated at `psilim`.
+Returns the highest harmonic k where |a_k| > threshold * peak(|field|).
+Normalizes by peak amplitude so the threshold is meaningful for zero-mean fields
+(e.g. metric cross-terms that oscillate around zero).
+"""
+function _estimate_m_bandwidth(field, θ_nodes, psilim, threshold)
+    N = length(θ_nodes) - 1  # exclude duplicate last point
+    hint = (Ref(1), Ref(1))
+    vals = [field((psilim, θ_nodes[i]); hint=hint) for i in 1:N]
+    peak = maximum(abs, vals)
+    peak < 1e-14 && return 0  # field is uniformly zero — contributes no bandwidth
+    k_max = 0
+    for k in 1:N÷2
+        cos_k = sum(vals[i] * cospi(2k * (i - 1) / N) for i in 1:N) / N
+        sin_k = sum(vals[i] * sinpi(2k * (i - 1) / N) for i in 1:N) / N
+        sqrt(cos_k^2 + sin_k^2) > threshold * peak && (k_max = k)
+    end
+    return k_max
+end
+
+"""
+    _estimate_metric_bandwidth(equil, psilim, threshold)
+
+Estimate the effective Fourier bandwidth of the EL coupling at `psilim` by scanning
+all 2D equilibrium fields (rzphi_rsquared, rzphi_jac, eqfun_B, eqfun_metric1,
+eqfun_metric2), taking the maximum single-field bandwidth, then multiplying by 4 to
+account for convolution of metric products in the EL equations.
+"""
+function _estimate_metric_bandwidth(equil, psilim, threshold)
+    θ_nodes = equil.rzphi_ys
+    fields = (equil.rzphi_rsquared, equil.rzphi_jac,
+              equil.eqfun_B, equil.eqfun_metric1, equil.eqfun_metric2)
+    bw_raw = maximum(f -> _estimate_m_bandwidth(f, θ_nodes, psilim, threshold), fields)
+    return 4 * bw_raw
+end
+
+"""
+    _estimate_arc_nonuniformity(equil, psilim)
+
+Estimate the arc-length nonuniformity factor of the plasma boundary at `psilim`.
+Returns mean(ds_i) / min(ds_i) ≥ 1, where ds_i are segment lengths between adjacent
+SFL theta grid points. Values near 1 indicate uniform coverage; large values indicate
+clustering (e.g. near the X-point in Hamada coordinates), requiring more mthvac points.
+"""
+function _estimate_arc_nonuniformity(equil, psilim)
+    r, z, _ = Vacuum.extract_plasma_surface_at_psi(equil, psilim)
+    N = length(r) - 1  # exclude duplicate last point (r[end] ≈ r[1])
+    ds = [sqrt((r[i+1] - r[i])^2 + (z[i+1] - z[i])^2) for i in 1:N]
+    return sum(ds) / (N * minimum(ds))
+end
+
 function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
@@ -113,7 +167,6 @@ function main(args::Vector{String}=String[])
 
     # Set up variables
     # TODO: parallel threads logic
-    ctrl.delta_mhigh *= 2 # for consistency with Fortran DCON TODO: why is this present in the Fortran?
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
@@ -179,22 +232,33 @@ function main(args::Vector{String}=String[])
     sing_find!(intr, equil)
 
     # Determine poloidal mode numbers
-    if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
-        error("Negative delta_mlow or delta_mhigh not allowed")
+    if ctrl.delta_mlow != 0 || ctrl.delta_mhigh != 0
+        @warn "delta_mlow and delta_mhigh are deprecated. Use m_accuracy to control metric bandwidth, or mlow/mhigh for explicit bounds."
     end
     if ctrl.cyl_flag
-        intr.mlow = ctrl.delta_mlow
+        intr.mlow  = ctrl.delta_mlow
         intr.mhigh = ctrl.delta_mhigh
-    elseif ctrl.sing_start == 0
-        intr.mlow = trunc(Int, min(intr.nlow * equil.params.qmin, 0)) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     else
-        intr.mmin = Inf # HUGE in Fortran
-        for ising in Int(ctrl.sing_start):intr.msing
-            intr.mmin = min(intr.mmin, sing[ising].m)
+        # Physics-driven automatic computation: bw = 4 × max single-field DFT bandwidth
+        # over all equilibrium metric fields, accounting for metric-product convolutions.
+        bw = _estimate_metric_bandwidth(equil, intr.psilim, ctrl.m_accuracy)
+        m_core = if ctrl.sing_start == 0
+            trunc(Int, min(intr.nlow * equil.params.qmin, 0))
+        else
+            minimum(minimum(intr.sing[ising].m) for ising in Int(ctrl.sing_start):intr.msing)
         end
-        intr.mlow = intr.mmin - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        m_edge = trunc(Int, intr.nhigh * equil.params.qmax)
+        # Floors: mhigh ≥ 2*nhigh*qmax (mode coupling extends to ~2× the highest resonance),
+        # mlow ≤ -0.5*mhigh (maintain ~2:1 asymmetry toward positive m).
+        mhigh_floor = round(Int, 2 * intr.nhigh * equil.params.qmax)
+        intr.mhigh = max(m_edge + bw, mhigh_floor)
+        mlow_floor  = -round(Int, 0.5 * intr.mhigh)
+        intr.mlow  = min(m_core - bw, mlow_floor)
+        # Explicit user overrides (nonzero = override)
+        ctrl.mlow  != 0 && (intr.mlow  = ctrl.mlow)
+        ctrl.mhigh != 0 && (intr.mhigh = ctrl.mhigh)
+        bw_raw = bw ÷ 4
+        @info "Auto-m: metric bandwidth=$(bw) (bw_raw=$bw_raw, m_accuracy=$(ctrl.m_accuracy)) → mlow=$(intr.mlow), mhigh=$(intr.mhigh)"
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
     if ctrl.delta_mband >= intr.mpert
@@ -204,6 +268,16 @@ function main(args::Vector{String}=String[])
     intr.mband = intr.mpert - 1 - ctrl.delta_mband
     intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
+
+    # Auto-compute mthvac from mpert and surface arc-length nonuniformity
+    if ctrl.mthvac == 0
+        arc_factor = _estimate_arc_nonuniformity(equil, intr.psilim)
+        mthvac_nyquist  = 4 * intr.mpert
+        mthvac_physical = max(96, 6 * intr.mhigh) * arc_factor
+        raw = max(mthvac_nyquist, mthvac_physical)
+        ctrl.mthvac = 32 * cld(round(Int, raw), 32)
+        @info "Auto-mthvac=$(ctrl.mthvac) (arc_factor=$(@sprintf("%.2f", arc_factor)), mpert=$(intr.mpert))"
+    end
 
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
