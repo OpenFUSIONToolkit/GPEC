@@ -177,25 +177,18 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Compute plasma response matrix
     @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Retrieve raw vacuum matrix from spline (singfac NOT pre-applied; see free_compute_wv_spline).
-    # Apply singfac = (m - n*q(psifac)) analytically so the correct local q is used at each scan step,
-    # rather than an interpolation of singfac-pre-applied values which is inaccurate near rational surfaces
-    # (singfac passes through zero there, and interpolating a zero-crossing function distorts the peaks).
+    # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
+    # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating
+    # a zero-crossing function near rational surfaces, which would distort the peaks.
     odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
     wv = odet._wv_scratch
     copyto!(wv, odet._wv_out)
     q_at_psifac = equil.profiles.q_spline(odet.psifac)
-    for ipert_n in 1:intr.npert
-        n = ipert_n - 1 + intr.nlow
-        # Fill singfac buffer in-place: singfac[i] = (mlow + i - 1) - n*q
-        nq = n * q_at_psifac
-        @inbounds for i in 1:intr.mpert
-            odet._singfac_buf[i] = (intr.mlow + i - 1) - nq
-        end
-        singfac = @view odet._singfac_buf[1:intr.mpert]
-        block = ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)
-        # Broadcasting: singfac (mpert,) .* wv[block,block] .* singfac' (1,mpert) ≡ D * wv_raw * D, D = diagm(singfac)
-        @views wv[block, block] .= singfac .* wv[block, block] .* singfac'
+    # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
+    singfac = vec((intr.mlow:intr.mhigh) .- q_at_psifac .* (intr.nlow:intr.nhigh)')
+    @inbounds for ipert in 1:Npert
+        @views wv[ipert, :] .*= singfac[ipert]
+        @views wv[:, ipert] .*= singfac[ipert]
     end
 
     # Compute total energy matrix and eigen-decomposition

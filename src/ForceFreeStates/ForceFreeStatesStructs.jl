@@ -427,8 +427,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Pre-allocated buffers for free_compute_total to avoid per-call heap allocations.
     # _wv_scratch: working copy of wv with singfac scaling applied in-place
     _wv_scratch::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    # _singfac_buf: reusable buffer for singfac = (m - n*q) vector (length mpert, but sized to numpert_total for safety)
-    _singfac_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total)
     # _eindex_buf: reusable buffer for sortperm! output
     _eindex_buf::Vector{Int} = Vector{Int}(undef, numpert_total)
     # _evals_real_buf: reusable buffer for real parts of eigenvalues (used by sortperm!)
