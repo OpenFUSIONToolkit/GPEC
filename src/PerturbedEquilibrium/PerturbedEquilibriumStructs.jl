@@ -73,51 +73,61 @@ Response fields (mode space):
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
   - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field (psi, theta, zeta) [npsi, mpert]
 
-Singular coupling matrices [msing, numpert_total]:
-  - `resonant_flux::Matrix{ComplexF64}` - Resonant flux Φ_r/A (singcoup(1,:,:))
-  - `resonant_current::Matrix{ComplexF64}` - Resonant current (singcoup(2,:,:))
-  - `island_width_sq::Matrix{ComplexF64}` - (w/2)² in ψ_n (singcoup(3,:,:))
-  - `penetrated_field::Matrix{ComplexF64}` - Resonant field (singcoup(4,:,:))
-  - `delta_prime::Matrix{ComplexF64}` - Tearing stability Δ' (singcoup(5,:,:))
+Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
+Each row maps the full applied field to the resonant response at that surface.
+Matches Fortran `C_f_x_out`, `C_i_x_out`, etc. (shape [mode_C, m_out]).
+  - `C_resonant_flux`    - Φ_r/A coupling (singcoup row 1)
+  - `C_resonant_current` - Resonant current coupling (singcoup row 2)
+  - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
+  - `C_penetrated_field` - Penetrated field coupling (singcoup row 4)
+  - `C_delta_prime`      - Δ' coupling (singcoup row 5)
 
-Diagnostic quantities [msing]:
-  - `island_half_width::Vector{Float64}` - Actual w/2 (meters or ψ_n)
+Applied resonant vectors [n_rational] = C · forcing_amplitudes.
+Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
+  - `resonant_flux`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
+
+Diagnostics [n_rational]:
+  - `island_half_width::Vector{Float64}` - w/2 = sqrt(|island_width_sq|) from applied forcing
   - `chirikov_parameter::Vector{Float64}` - Island overlap metric
 
-Note: numpert_total = mpert × npert handles all (m,n) mode combinations
-
-Legacy fields (deprecated):
-  - `coupling_coefficient::ComplexF64` - Use singular coupling matrices instead
-  - `resonant_amplitude::Float64` - Use island diagnostics instead
+Metadata [n_rational] — identifies each (surface, n) row:
+  - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
 Energies:
-  - `plasma_energy::Float64` - Plasma perturbation energy
-  - `vacuum_energy::Float64` - Vacuum perturbation energy
-  - `total_energy::Float64` - Total perturbation energy
+  - `plasma_energy`, `vacuum_energy`, `total_energy`
 """
 @kwdef mutable struct PerturbedEquilibriumState
-    # Response fields in mode space [npsi, mpert] following GPEC notation
-    # NamedTuples contain (psi, theta, zeta) components in flux coordinates
+    # Response fields in mode space [npsi, mpert]
     xi_modes::Union{Nothing, NamedTuple} = nothing
     b_modes::Union{Nothing, NamedTuple} = nothing
 
-    # Singular coupling matrices [msing × mpert] - GPEC singcoup(1:5,:,:)
-    resonant_flux::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)        # singcoup(1,:,:)
-    resonant_current::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)     # singcoup(2,:,:)
-    island_width_sq::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)      # singcoup(3,:,:)
-    penetrated_field::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)     # singcoup(4,:,:)
-    delta_prime::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)          # singcoup(5,:,:)
+    # Coupling matrices [n_rational × numpert_total]
+    C_resonant_flux::Matrix{ComplexF64}     = zeros(ComplexF64, 0, 0)
+    C_resonant_current::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
+    C_island_width_sq::Matrix{ComplexF64}   = zeros(ComplexF64, 0, 0)
+    C_penetrated_field::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
+    C_delta_prime::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)
 
-    # Diagnostic quantities [msing]
-    island_half_width::Vector{Float64} = Float64[]     # Actual w/2 (meters or ψ_n)
-    chirikov_parameter::Vector{Float64} = Float64[]    # Island overlap
+    # Applied resonant vectors [n_rational] = C · amp_vec
+    resonant_flux::Vector{ComplexF64}       = ComplexF64[]
+    resonant_current::Vector{ComplexF64}    = ComplexF64[]
+    island_width_sq::Vector{ComplexF64}     = ComplexF64[]
+    penetrated_field::Vector{ComplexF64}    = ComplexF64[]
+    delta_prime::Vector{ComplexF64}         = ComplexF64[]
 
-    # Legacy singular coupling results (deprecated - use matrices above)
-    coupling_coefficient::ComplexF64 = 0.0 + 0.0im
-    resonant_amplitude::Float64 = 0.0
+    # Diagnostics [n_rational]
+    island_half_width::Vector{Float64}      = Float64[]
+    chirikov_parameter::Vector{Float64}     = Float64[]
+
+    # Metadata [n_rational]
+    rational_psi::Vector{Float64}           = Float64[]
+    rational_q::Vector{Float64}             = Float64[]
+    rational_m_res::Vector{Int}             = Int[]
+    rational_n::Vector{Int}                 = Int[]
+    rational_surface_idx::Vector{Int}       = Int[]
 
     # Energies
-    plasma_energy::Float64 = 0.0
-    vacuum_energy::Float64 = 0.0
-    total_energy::Float64 = 0.0
+    plasma_energy::Float64  = 0.0
+    vacuum_energy::Float64  = 0.0
+    total_energy::Float64   = 0.0
 end
