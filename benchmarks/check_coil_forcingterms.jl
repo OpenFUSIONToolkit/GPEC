@@ -30,8 +30,8 @@ EXAMPLE_DIR    = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example"
 COIL_DIR       = joinpath(@__DIR__, "..", "src", "ForcingTerms", "coil_geometries")
 OUTPUT_FILE    = joinpath(@__DIR__, "coil_forcingterms_check.png")
 
-# Standard DIII-D I-coil n=3 configuration
-COIL_CURRENT   = 7e3   # Amperes (typical RMP study value)
+# Alternating-polarity current pattern (tests color mapping and n≠3 content)
+COIL_CURRENTS  = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # Amperes per conductor
 N_TOROIDAL     = 3
 M_LOW          = -5   # ≈ n*floor(q_min) - delta_mlow = 3*1 - 8 (matching FFS convention)
 M_HIGH         = 20   # ≈ n*ceil(q_max) + delta_mhigh = 3*4 + 8
@@ -69,9 +69,9 @@ il_raw = read_coil_dat(il_file)
 iu_raw = read_coil_dat(iu_file)
 
 il_set = CoilSet(il_raw.name, il_raw.ncoil, il_raw.s, il_raw.nw, il_raw.nsec,
-    il_raw.x, il_raw.y, il_raw.z, fill(COIL_CURRENT, il_raw.ncoil))
+    il_raw.x, il_raw.y, il_raw.z, Float64.(COIL_CURRENTS[1:il_raw.ncoil]))
 iu_set = CoilSet(iu_raw.name, iu_raw.ncoil, iu_raw.s, iu_raw.nw, iu_raw.nsec,
-    iu_raw.x, iu_raw.y, iu_raw.z, fill(COIL_CURRENT, iu_raw.ncoil))
+    iu_raw.x, iu_raw.y, iu_raw.z, Float64.(COIL_CURRENTS[1:iu_raw.ncoil]))
 
 coil_sets = [il_set, iu_set]
 @printf "    %d coil sets loaded: %s (%d conductors), %s (%d conductors)\n" length(coil_sets) il_set.name il_set.ncoil iu_set.name iu_set.ncoil
@@ -138,7 +138,7 @@ p4 = plot_mode_spectrum(forcing_modes; mlow=M_LOW, mhigh=M_HIGH)
 fig = plot(p1, p2, p3, p4;
     layout=(2, 2),
     size=(1200, 900),
-    plot_title="DIII-D I-coil RMP check  (I=$(round(Int, COIL_CURRENT/1e3)) kA, n=$N_TOROIDAL)",
+    plot_title="DIII-D I-coil RMP check  (I=$(COIL_CURRENTS) A, n=$N_TOROIDAL)",
 )
 
 savefig(fig, OUTPUT_FILE)

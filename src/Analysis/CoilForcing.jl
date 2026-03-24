@@ -94,8 +94,7 @@ function plot_coil_geometry_rz(coil_sets; equil=nothing, save_path=nothing, kwar
                 R_strand = sqrt.(view(cs.x, j, k, :).^2 .+ view(cs.y, j, k, :).^2)
                 Z_strand = view(cs.z, j, k, :)
                 label = (j == 1 && k == 1) ? cs.name : ""
-                scatter!(p, R_strand, Z_strand; label=label, color=col,
-                         markersize=2, markerstrokewidth=0)
+                plot!(p, R_strand, Z_strand; label=label, color=col, lw=1.5)
             end
         end
     end
@@ -147,7 +146,7 @@ function plot_bn_contour(bn::Matrix{Float64}, mtheta::Int, nzeta::Int;
 
     n_label = isnothing(n) ? "" : " (n=$n)"
     p = heatmap(zeta_deg, theta_deg, bn_wrapped;
-                xlabel="ζ [°]", ylabel="θ [°]",
+                xlabel="zeta [deg]", ylabel="theta [deg]",
                 ylims=(-180, 180),
                 title="Normal field bₙ(θ, ζ)$n_label [T]",
                 color=:RdBu, kwargs...)
