@@ -45,7 +45,6 @@ end
     write_outputs_to_HDF5(
         state::PerturbedEquilibriumState,
         intr::PerturbedEquilibriumInternal,
-        ctrl::PerturbedEquilibriumControl,
         filename::String
     )
 
@@ -58,15 +57,29 @@ perturbed_equilibrium/
 ├── forcing_modes/
 │   ├── n              # Toroidal mode numbers
 │   ├── m              # Poloidal mode numbers
-│   ├── amplitude_real # Real parts of forcing amplitudes
-│   └── amplitude_imag # Imaginary parts of forcing amplitudes
+│   └── amplitude      # ComplexF64 forcing amplitudes
 ├── response/
-│   ├── xi_perturbed   # Displacement field
-│   └── b_perturbed    # Magnetic field perturbation
+│   ├── xi_psi         # Displacement field (ComplexF64 [npsi, mpert])
+│   ├── b_psi          # Magnetic field (ComplexF64 [npsi, mpert])
+│   ├── b_theta
+│   └── b_zeta
 ├── singular_coupling/
-│   ├── coupling_coefficient_real
-│   ├── coupling_coefficient_imag
-│   └── resonant_amplitude
+│   ├── C_resonant_flux      # [n_rational × numpert_total] coupling matrix
+│   ├── C_resonant_current
+│   ├── C_island_width_sq
+│   ├── C_penetrated_field
+│   ├── C_delta_prime
+│   ├── resonant_flux        # [n_rational] applied vector = C · amp_vec
+│   ├── resonant_current
+│   ├── island_width_sq
+│   ├── penetrated_field
+│   ├── delta_prime
+│   ├── island_half_width    # [n_rational] Float64
+│   ├── chirikov_parameter
+│   ├── rational_psi         # [n_rational] surface metadata
+│   ├── rational_q
+│   ├── rational_m_res
+│   └── rational_n
 └── energies/
     ├── plasma_energy
     ├── vacuum_energy
@@ -76,54 +89,55 @@ perturbed_equilibrium/
 function write_outputs_to_HDF5(
     state::PerturbedEquilibriumState,
     intr::PerturbedEquilibriumInternal,
-    ctrl::PerturbedEquilibriumControl,
     filename::String
 )
-    h5open(filename, "cw") do file  # "cw" = create or read/write
-        # Create perturbed_equilibrium group
+    h5open(filename, "cw") do file
         pe_group = haskey(file, "perturbed_equilibrium") ? file["perturbed_equilibrium"] : create_group(file, "perturbed_equilibrium")
 
-        # Write forcing modes
+        # Forcing modes
         forcing_group = haskey(pe_group, "forcing_modes") ? pe_group["forcing_modes"] : create_group(pe_group, "forcing_modes")
-        n_modes = [mode.n for mode in intr.forcing_modes]
-        m_modes = [mode.m for mode in intr.forcing_modes]
-        amp_real = [real(mode.amplitude) for mode in intr.forcing_modes]
-        amp_imag = [imag(mode.amplitude) for mode in intr.forcing_modes]
+        forcing_group["n"]         = [mode.n for mode in intr.forcing_modes]
+        forcing_group["m"]         = [mode.m for mode in intr.forcing_modes]
+        forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
 
-        forcing_group["n"] = n_modes
-        forcing_group["m"] = m_modes
-        forcing_group["amplitude_real"] = amp_real
-        forcing_group["amplitude_imag"] = amp_imag
-
-        # Write response fields; always write all entries, using empty arrays when not computed
+        # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
-        have_xi   = !isnothing(state.xi_modes)
-        have_b    = have_xi && !isnothing(state.b_modes)
-        response_group["xi_psi_real"]  = have_xi ? real.(state.xi_modes.psi)   : Float64[]
-        response_group["xi_psi_imag"]  = have_xi ? imag.(state.xi_modes.psi)   : Float64[]
-        response_group["b_psi_real"]   = have_b  ? real.(state.b_modes.psi)    : Float64[]
-        response_group["b_psi_imag"]   = have_b  ? imag.(state.b_modes.psi)    : Float64[]
-        response_group["b_theta_real"] = have_b  ? real.(state.b_modes.theta)  : Float64[]
-        response_group["b_theta_imag"] = have_b  ? imag.(state.b_modes.theta)  : Float64[]
-        response_group["b_zeta_real"]  = have_b  ? real.(state.b_modes.zeta)   : Float64[]
-        response_group["b_zeta_imag"]  = have_b  ? imag.(state.b_modes.zeta)   : Float64[]
+        have_xi = !isnothing(state.xi_modes)
+        have_b  = have_xi && !isnothing(state.b_modes)
+        response_group["xi_psi"]  = have_xi ? state.xi_modes.psi   : ComplexF64[]
+        response_group["b_psi"]   = have_b  ? state.b_modes.psi    : ComplexF64[]
+        response_group["b_theta"] = have_b  ? state.b_modes.theta  : ComplexF64[]
+        response_group["b_zeta"]  = have_b  ? state.b_modes.zeta   : ComplexF64[]
 
-        # Write singular coupling metrics
+        # Singular coupling
         coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")
-        coupling_group["coupling_coefficient_real"] = real(state.coupling_coefficient)
-        coupling_group["coupling_coefficient_imag"] = imag(state.coupling_coefficient)
-        coupling_group["resonant_amplitude"] = state.resonant_amplitude
 
-        # Write additional metrics
-        for (key, val) in intr.singular_coupling_metrics
-            coupling_group[key] = val
-        end
+        # Coupling matrices [n_rational × numpert_total]
+        !isempty(state.C_resonant_flux)    && (coupling_group["C_resonant_flux"]    = state.C_resonant_flux)
+        !isempty(state.C_resonant_current) && (coupling_group["C_resonant_current"] = state.C_resonant_current)
+        !isempty(state.C_island_width_sq)  && (coupling_group["C_island_width_sq"]  = state.C_island_width_sq)
+        !isempty(state.C_penetrated_field) && (coupling_group["C_penetrated_field"] = state.C_penetrated_field)
+        !isempty(state.C_delta_prime)      && (coupling_group["C_delta_prime"]      = state.C_delta_prime)
 
-        # Write energies
+        # Applied resonant vectors [n_rational]
+        !isempty(state.resonant_flux)      && (coupling_group["resonant_flux"]      = state.resonant_flux)
+        !isempty(state.resonant_current)   && (coupling_group["resonant_current"]   = state.resonant_current)
+        !isempty(state.island_width_sq)    && (coupling_group["island_width_sq"]    = state.island_width_sq)
+        !isempty(state.penetrated_field)   && (coupling_group["penetrated_field"]   = state.penetrated_field)
+        !isempty(state.delta_prime)        && (coupling_group["delta_prime"]        = state.delta_prime)
+        !isempty(state.island_half_width)  && (coupling_group["island_half_width"]  = state.island_half_width)
+        !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)
+
+        # Metadata [n_rational]
+        !isempty(state.rational_psi)       && (coupling_group["rational_psi"]       = state.rational_psi)
+        !isempty(state.rational_q)         && (coupling_group["rational_q"]         = state.rational_q)
+        !isempty(state.rational_m_res)     && (coupling_group["rational_m_res"]     = state.rational_m_res)
+        !isempty(state.rational_n)         && (coupling_group["rational_n"]         = state.rational_n)
+
+        # Energies
         energy_group = haskey(pe_group, "energies") ? pe_group["energies"] : create_group(pe_group, "energies")
         energy_group["plasma_energy"] = state.plasma_energy
         energy_group["vacuum_energy"] = state.vacuum_energy
-        energy_group["total_energy"] = state.total_energy
+        energy_group["total_energy"]  = state.total_energy
     end
-
 end

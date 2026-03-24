@@ -317,7 +317,7 @@ function main(args::Vector{String}=String[])
         if pe_ctrl.write_outputs_to_HDF5
             output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
             PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
+                pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
             @info "Results written to $output_file"
         end
