@@ -100,19 +100,22 @@ function plot_coil_geometry_rz(coil_sets; equil=nothing, save_path=nothing, kwar
     end
 
     if !isnothing(equil)
-        # Overlay plasma boundary from equilibrium rzphi splines at ψ=1
+        # Use the outermost grid point rather than extrapolating to ψ=1.0.
+        # The equilibrium is typically computed up to psihigh < 1 (e.g. 0.993),
+        # so evaluating at exactly 1.0 would extrapolate and produce a wavy boundary.
+        psi_bnd = equil.rzphi_xs[end]
         mtheta_boundary = length(equil.rzphi_ys)
         hint2d = (Ref(1), Ref(1))
         R_bnd = zeros(mtheta_boundary)
         Z_bnd = zeros(mtheta_boundary)
         for (i, θ_sfl) in enumerate(equil.rzphi_ys)
-            r_minor = sqrt(equil.rzphi_rsquared((1.0, θ_sfl); hint=hint2d))
-            θ_cyl   = 2π * (θ_sfl + equil.rzphi_offset((1.0, θ_sfl); hint=hint2d))
+            r_minor = sqrt(equil.rzphi_rsquared((psi_bnd, θ_sfl); hint=hint2d))
+            θ_cyl   = 2π * (θ_sfl + equil.rzphi_offset((psi_bnd, θ_sfl); hint=hint2d))
             R_bnd[i] = equil.ro + r_minor * cos(θ_cyl)
             Z_bnd[i] = equil.zo + r_minor * sin(θ_cyl)
         end
         plot!(p, [R_bnd; R_bnd[1]], [Z_bnd; Z_bnd[1]];
-              label="plasma boundary", color=:black, lw=2)
+              label="plasma boundary (ψ=$(round(psi_bnd; digits=3)))", color=:black, lw=2)
     end
 
     isnothing(save_path) || savefig(p, save_path)
