@@ -48,7 +48,7 @@ function plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
                 xs = view(cs.x, j, k, :)
                 ys = view(cs.y, j, k, :)
                 zs = view(cs.z, j, k, :)
-                plot!(p, xs, ys, zs; seriestype=:path3d, color=col, lw=2)
+                plot!(p, xs, ys, zs; seriestype=:path3d, color=col, lw=2, linestyle=:solid)
             end
         end
     end
@@ -192,8 +192,10 @@ function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_pat
         plot!(p, m_ext, amp_ext; label="n=$n", color=col, lw=2, seriestype=:steppre)
     end
 
+    ylims!(p, (0, Inf))
     if !isnothing(mlow) && !isnothing(mhigh)
-        xlims!(p, mlow - 1, mhigh + 1)
+        # zero endpoints are at mlow-1 and mhigh+1; add ±1 so they're visible with whitespace
+        xlims!(p, mlow - 2, mhigh + 2)
     end
 
     isnothing(save_path) || savefig(p, save_path)
