@@ -166,10 +166,10 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     Npert = intr.numpert_total
 
-    # wp and wt are stack-local but unavoidable (eigen() overwrites wt, wp needed separately for ep1).
+    # wp and wt are stack-local but unavoidable (eigen() overwrites wt, wp needed separately for plasma_energy).
     # These could be moved to OdeState buffers in a future pass if profiling shows they matter.
     wp = zeros(ComplexF64, Npert, Npert)
-    tot_eigvals = zeros(ComplexF64, Npert)
+    eigenvalues = zeros(ComplexF64, Npert)
     wt = zeros(ComplexF64, Npert, Npert)
 
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
@@ -205,11 +205,11 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     sortperm!(eindex, evals_real; rev=true)
     for ipert in 1:Npert
         wt[:, ipert] .= Ev.vectors[:, eindex[Npert+1-ipert]]
-        tot_eigvals[ipert] = Ev.values[eindex[Npert+1-ipert]]
+        eigenvalues[ipert] = Ev.values[eindex[Npert+1-ipert]]
     end
 
     # Compute kinetic norm xi'*J(psi)*xi / dV_dpsi for the leading eigenvector.
-    # This normalizes et, ep, ev to be dimensionally consistent with free_run!.
+    # This normalizes total_eigenvalue, plasma_energy, vacuum_energy to be dimensionally consistent with free_run!.
     isol = 1
     v = @view wt[:, isol]
     norm = 0.0 + 0.0im
@@ -219,22 +219,22 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
         norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * v[ipert] * conj(v[jpert])
     end
     norm /= dV_dpsi
-    tot_eigvals[isol] /= norm
+    eigenvalues[isol] /= norm
 
     # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
-    # ep + ev = et by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
+    # plasma_energy + vacuum_energy = total_eigenvalue by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
     # Use mul! with pre-allocated _tmp_vec to avoid allocating wp*v and wv*v temporaries.
     tmp_v = es._tmp_vec
     mul!(tmp_v, wp, v)
-    ep1 = ComplexF64(dot(v, tmp_v)) / norm
+    plasma_energy = ComplexF64(dot(v, tmp_v)) / norm
     mul!(tmp_v, wv, v)
-    ev1 = ComplexF64(dot(v, tmp_v)) / norm
+    vacuum_energy = ComplexF64(dot(v, tmp_v)) / norm
 
-    # Smallest eigenvalue of the vacuum matrix alone, normalized by the same kinetic norm as et/ep/ev
-    # so all four energy outputs are directly comparable. The singfac-scaled wv should be PSD by
+    # Smallest eigenvalue of the vacuum matrix alone, normalized by the same kinetic norm as the other energies
+    # so all four outputs are directly comparable. The singfac-scaled wv should be PSD by
     # construction (congruence of PSD wv_raw), but numerical noise can make eigenvalues slightly
     # negative. Clamp to zero to enforce the physical constraint.
-    # Hermitianize wv in-place (safe: ep1 and ev1 already computed above).
+    # Hermitianize wv in-place (safe: plasma_energy and vacuum_energy already computed above).
     @inbounds for j in 1:Npert
         for i in 1:(j-1)
             avg = (wv[i, j] + conj(wv[j, i])) / 2
@@ -243,7 +243,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
         end
         wv[j, j] = real(wv[j, j]) + 0.0im
     end
-    evonly1 = max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / real(norm)
+    vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / norm)
 
-    return (et=tot_eigvals[1], ep=ep1, ev=ev1, evonly=evonly1)
+    return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue)
 end

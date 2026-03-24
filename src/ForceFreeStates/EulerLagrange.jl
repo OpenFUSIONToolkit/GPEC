@@ -538,50 +538,50 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Initialize EdgeScanState (sized to match current integration storage)
-    odet.edge_scan = EdgeScanState(intr.numpert_total, odet.numsteps_init)
+    # Compute edge indices first (post-integration, exact count) to size EdgeScanState correctly
+    psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
+    N_edge = length(psiedge_idxs)
+
+    # Initialize EdgeScanState sized exactly to the number of edge steps
+    odet.edge_scan = EdgeScanState(intr.numpert_total, N_edge)
     es = odet.edge_scan
 
     # Since we search for the maximum dW, initialize to -Infinity
     fill!(es.dW_edge, -Inf * (1 + im))
-    ep_edge = fill(-Inf * (1 + im), length(es.dW_edge))
-    ev_edge = fill(-Inf * (1 + im), length(es.dW_edge))
-    evonly_edge = fill(-Inf, length(es.dW_edge))
+    plasma_energy_arr    = fill(-Inf * (1 + im), N_edge)
+    vacuum_energy_arr    = fill(-Inf * (1 + im), N_edge)
+    vacuum_eigenvalue_arr = fill(-Inf, N_edge)
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
-    # Loop through integration, compute dW at steps where psifac >= psiedge
-    for istep in 1:odet.step
+    # Loop with compact index j into EdgeScanState and ODE index istep into u_store
+    for (j, istep) in enumerate(psiedge_idxs)
         odet.psifac = odet.psi_store[istep]
-        if odet.psifac >= ctrl.psiedge
-            odet.u .= odet.u_store[:, :, :, istep]
-            try
-                result = free_compute_total(equil, ffit, intr, odet)
-                es.dW_edge[istep] = result.et
-                ep_edge[istep] = result.ep
-                ev_edge[istep] = result.ev
-                evonly_edge[istep] = result.evonly
-            catch e
-                e isa LinearAlgebra.SingularException || rethrow(e)
-                # U₁ is singular at this step; skip it (dW_edge stays -Inf)
-            end
+        odet.u .= odet.u_store[:, :, :, istep]
+        try
+            result = free_compute_total(equil, ffit, intr, odet)
+            es.dW_edge[j]            = result.total_eigenvalue
+            plasma_energy_arr[j]     = result.plasma_energy
+            vacuum_energy_arr[j]     = result.vacuum_energy
+            vacuum_eigenvalue_arr[j] = result.vacuum_eigenvalue
+        catch e
+            e isa LinearAlgebra.SingularException || rethrow(e)
+            # U₁ is singular at this step; skip it (dW_edge stays -Inf)
         end
     end
 
-    # Build per-step scan arrays for all psiedge steps.
-    # Steps where free_compute_total failed have -Inf values; replace with NaN for clarity.
-    psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
-    es.psi = odet.psi_store[psiedge_idxs]
-    es.q = odet.q_store[psiedge_idxs]
-    es.total_eigenvalue = ComplexF64[isfinite(real(es.dW_edge[i])) ? es.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
-    es.plasma_energy = ComplexF64[isfinite(real(ep_edge[i])) ? ep_edge[i] : complex(NaN) for i in psiedge_idxs]
-    es.vacuum_energy = ComplexF64[isfinite(real(ev_edge[i])) ? ev_edge[i] : complex(NaN) for i in psiedge_idxs]
-    es.vacuum_eigenvalue = Float64[isfinite(evonly_edge[i]) ? evonly_edge[i] : NaN for i in psiedge_idxs]
+    # Build per-step scan arrays; failed steps have -Inf values → NaN for HDF5 output
+    es.psi              = odet.psi_store[psiedge_idxs]
+    es.q                = odet.q_store[psiedge_idxs]
+    es.total_eigenvalue  = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in es.dW_edge]
+    es.plasma_energy     = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in plasma_energy_arr]
+    es.vacuum_energy     = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in vacuum_energy_arr]
+    es.vacuum_eigenvalue = Float64[isfinite(v) ? v : NaN for v in vacuum_eigenvalue_arr]
 
-    # Return the index that maximizes dW_edge to identify truncation point
-    et_clean = replace(real.(es.dW_edge), NaN => -Inf)
-    return findmax(et_clean)[2]
+    # Return the ODE step index at peak dW (map compact peak index → ODE index for truncation)
+    peak_j = argmax(real.(es.dW_edge))
+    return psiedge_idxs[peak_j]
 end
 
 """

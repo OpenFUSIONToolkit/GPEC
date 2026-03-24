@@ -355,7 +355,7 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
 
 ## Fields
 
-  - `dW_edge::Vector{ComplexF64}` - Per-step dW values (length `numsteps_init`); used to find peak truncation point.
+  - `dW_edge::Vector{ComplexF64}` - Per-step dW values (length `N_edge`); used to find peak truncation point.
   - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
   - `_wv_out::Matrix{ComplexF64}` - Output buffer for wvmat spline evaluation.
   - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
@@ -365,10 +365,10 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
-    numsteps_init::Int
+    N_edge::Int
 
     # Scratch: per-step dW values; used to find peak truncation point
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
+    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, N_edge)
 
     # Vacuum matrix spline and evaluation infrastructure
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
@@ -390,7 +390,7 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     vacuum_eigenvalue::Vector{Float64} = Float64[]
 end
 
-EdgeScanState(numpert_total::Int, numsteps_init::Int) = EdgeScanState(; numpert_total, numsteps_init)
+EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)
 
 """
 OdeState
