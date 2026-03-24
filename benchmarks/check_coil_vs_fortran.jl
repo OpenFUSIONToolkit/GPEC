@@ -13,7 +13,6 @@ Usage:
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.Equilibrium
-using GeneralizedPerturbedEquilibrium.Analysis.CoilForcing
 using NCDatasets
 using Plots
 using Printf
@@ -51,7 +50,7 @@ println("="^70)
 # Load equilibrium matching Fortran equil.in (psihigh=0.993, psilow=1e-4)
 # ---------------------------------------------------------------------------
 
-println("\n[1/4] Loading equilibrium (g147131.02300_DIIID_KEFIT, psihigh=0.993, psilim read from NC) ...")
+println("\n[1/5] Loading equilibrium (g147131.02300_DIIID_KEFIT, psihigh=0.993, psilim read from NC) ...")
 t_equil = @elapsed begin
     eq_dict = Dict{String,Any}(
         "eq_type"      => "efit",
@@ -68,12 +67,13 @@ t_equil = @elapsed begin
     equil = Equilibrium.setup_equilibrium(eq_config)
 end
 @printf "    Done in %.1f s\n" t_equil
+println("    bt_sign=$(equil.params.bt_sign), crnt=$(round(equil.params.crnt; digits=0)) A")
 
 # ---------------------------------------------------------------------------
 # Build coil sets matching coil.in
 # ---------------------------------------------------------------------------
 
-println("\n[2/4] Loading coil geometry (d3d c + il + iu) ...")
+println("\n[2/5] Loading coil geometry (d3d c + il + iu) ...")
 
 coil_sets_cfg = [
     CoilSetConfig(; name="c",  currents=CURRENTS_C),
@@ -93,7 +93,7 @@ end
 # Julia: Biot-Savart → normal field → Fourier decomposition
 # ---------------------------------------------------------------------------
 
-println("\n[3/4] Computing Julia coil forcing modes (n=$N_TOROIDAL, m=$MLOW:$MHIGH, $(MTHETA)×$(NZETA)) ...")
+println("\n[3/5] Computing Julia coil forcing modes (n=$N_TOROIDAL, m=$MLOW:$MHIGH, $(MTHETA)×$(NZETA)) ...")
 
 julia_modes = ForcingMode[]
 t_biot = @elapsed begin
@@ -103,7 +103,7 @@ t_biot = @elapsed begin
     for j in 1:NZETA, i in 1:MTHETA
         idx = i + (j-1)*MTHETA
         obs_R[idx]   = bnd_grid.R[i]
-        obs_phi[idx] = bnd_grid.phi_grid[j]
+        obs_phi[idx] = bnd_grid.phi_grid[j] + bnd_grid.phi_offset[i]
         obs_Z[idx]   = bnd_grid.Z[i]
     end
     B_R = zeros(nobs); B_phi = zeros(nobs); B_Z = zeros(nobs)
@@ -112,7 +112,9 @@ t_biot = @elapsed begin
     project_normal_flux!(bn, B_R, B_Z, bnd_grid)
     append!(julia_modes, fourier_decompose_bn(bn, bnd_grid, N_TOROIDAL, MLOW, MHIGH))
 end
-@printf "    Done in %.1f s,  max|bn| = %.3e T\n" t_biot maximum(abs, bn)
+@printf "    Done in %.1f s,  max|Phi_x| = %.3e T·m²\n" t_biot maximum(abs, bn)
+println("    Boundary (psi=1.0): R∈[$(round(minimum(bnd_grid.R);digits=3)), $(round(maximum(bnd_grid.R);digits=3))]  Z∈[$(round(minimum(bnd_grid.Z);digits=3)), $(round(maximum(bnd_grid.Z);digits=3))]")
+println("    phi_offset range: [$(round(minimum(bnd_grid.phi_offset);digits=3)), $(round(maximum(bnd_grid.phi_offset);digits=3))] rad")
 
 julia_m    = [md.m for md in sort(julia_modes; by=md -> md.m)]
 julia_amps = abs.([md.amplitude for md in sort(julia_modes; by=md -> md.m)])
@@ -157,7 +159,7 @@ t_lim = @elapsed begin
     for j in 1:NZETA, i in 1:MTHETA
         idx = i + (j-1)*MTHETA
         obs_R_l[idx]   = bnd_grid_lim.R[i]
-        obs_phi_l[idx] = bnd_grid_lim.phi_grid[j]
+        obs_phi_l[idx] = bnd_grid_lim.phi_grid[j] + bnd_grid_lim.phi_offset[i]
         obs_Z_l[idx]   = bnd_grid_lim.Z[i]
     end
     B_R_l = zeros(nobs); B_phi_l = zeros(nobs); B_Z_l = zeros(nobs)
@@ -166,7 +168,11 @@ t_lim = @elapsed begin
     project_normal_flux!(bn_lim, B_R_l, B_Z_l, bnd_grid_lim)
     append!(julia_modes_lim, fourier_decompose_bn(bn_lim, bnd_grid_lim, N_TOROIDAL, MLOW, MHIGH))
 end
-@printf "    Done in %.1f s,  max|bn| at psilim = %.3e T\n" t_lim maximum(abs, bn_lim)
+@printf "    Done in %.1f s,  max|Phi_x| at psilim = %.3e T·m²\n" t_lim maximum(abs, bn_lim)
+println("    Boundary (psi=psilim): R∈[$(round(minimum(bnd_grid_lim.R);digits=3)), $(round(maximum(bnd_grid_lim.R);digits=3))]  Z∈[$(round(minimum(bnd_grid_lim.Z);digits=3)), $(round(maximum(bnd_grid_lim.Z);digits=3))]")
+# Check ±m symmetry: if |Phi_x(m)| == |Phi_x(-m)| for all m, boundary may be incorrectly symmetric
+amps_lim_dict = Dict(md.m => abs(md.amplitude) for md in julia_modes_lim)
+println("    ±m symmetry check: |Phi_x(3)|=$(round(get(amps_lim_dict,3,0.0);sigdigits=4))  |Phi_x(-3)|=$(round(get(amps_lim_dict,-3,0.0);sigdigits=4))")
 
 julia_m_lim    = [md.m for md in sort(julia_modes_lim; by=md -> md.m)]
 julia_amps_lim = abs.([md.amplitude for md in sort(julia_modes_lim; by=md -> md.m)])
@@ -175,22 +181,18 @@ julia_amps_lim = abs.([md.amplitude for md in sort(julia_modes_lim; by=md -> md.
 # Print comparison table (psilim surface vs both Fortran outputs)
 # ---------------------------------------------------------------------------
 
-two_pi_sq = (2π)^2  # ≈ 39.478 — expected constant ratio Julia sfl_flux / Fortran Phi_x after R fix
-
-println("\n    m    Julia@psilim      Fortran b_n_x [T]  ratio_bnx    Fortran Phi_x [Wb]  ratio_Phix  Phix/Julia  Phix/Julia/(2π)²")
-println("    " * "-"^110)
+println("\n    m    Julia Phi_x [T·m²]   Fortran b_n_x [T]  ratio_bnx    Fortran Phi_x [Wb]  Phix/Julia")
+println("    " * "-"^90)
 for (jm, ja) in zip(julia_m_lim, julia_amps_lim)
     k = findfirst(==(jm), fortran_m)
     if !isnothing(k)
         fb = fortran_bnx[k]; fp = fortran_Phix[k]
-        ratio_bnx  = fb > 1e-30 ? ja/fb : NaN
-        ratio_Phix = fp > 1e-30 ? ja/fp : NaN
+        ratio_bnx      = fb > 1e-30 ? ja/fb : NaN
         phix_over_julia = ja > 1e-40 ? fp/ja : NaN
-        phix_norm       = isnan(phix_over_julia) ? NaN : phix_over_julia / two_pi_sq
-        @printf "    %3d  %12.4e        %12.4e      %.3f        %12.4e       %.3f      %.4f      %.4f\n" jm ja fb ratio_bnx fp ratio_Phix phix_over_julia phix_norm
+        @printf "    %3d  %12.4e        %12.4e      %.3f        %12.4e       %.4f\n" jm ja fb ratio_bnx fp phix_over_julia
     end
 end
-println("    Expected Phix/Julia/(2π)² ≈ 1.000 for all modes if R factor is correctly applied.")
+println("    Expected Phix/Julia ≈ 1.000 for all modes (Julia now outputs unit-norm = Phi_x).")
 
 # ---------------------------------------------------------------------------
 # Comparison plot
@@ -205,7 +207,7 @@ function step_series(m_vals, amps)
 end
 
 # Left panel: Julia at psi=1 (boundary) vs psilim to show surface sensitivity
-p_surf = plot(; xlabel="Poloidal mode m", ylabel="|bmn| [T]",
+p_surf = plot(; xlabel="Poloidal mode m", ylabel="|Phi_x| [T·m²]",
                 title="Surface sensitivity",
                 legend=:topright)
 jm0_ext, ja0_ext = step_series(julia_m,     julia_amps)
@@ -217,22 +219,22 @@ plot!(p_surf, jml_ext, jal_ext; seriestype=:steppre, lw=2, color=:dodgerblue,
 ylims!(p_surf, (0, Inf)); xlims!(p_surf, MLOW-2, MHIGH+2)
 
 # Right panel: Julia@psilim vs Fortran b_n_x and Phi_x
-p_comp = plot(; xlabel="Poloidal mode m", ylabel="amplitude",
+p_comp = plot(; xlabel="Poloidal mode m", ylabel="amplitude [T·m²]",
                 title="vs Fortran (n=$N_TOROIDAL)",
                 legend=:topright)
 fm_bnx_ext,  fa_bnx_ext  = step_series(fortran_m, fortran_bnx)
 fm_Phix_ext, fa_Phix_ext = step_series(fortran_m, fortran_Phix)
 plot!(p_comp, jml_ext,      jal_ext;      seriestype=:steppre, lw=2, color=:blue,
-      label="Julia ψ=psilim [T]")
+      label="Julia Phi_x ψ=psilim [T·m²]")
 plot!(p_comp, fm_bnx_ext,   fa_bnx_ext;   seriestype=:steppre, lw=2, color=:red,
       linestyle=:dash,  label="Fortran b_n_x [T]")
 plot!(p_comp, fm_Phix_ext,  fa_Phix_ext;  seriestype=:steppre, lw=2, color=:orange,
       linestyle=:dot,   label="Fortran Phi_x [Wb]")
 ylims!(p_comp, (0, Inf)); xlims!(p_comp, MLOW-2, MHIGH+2)
 
-# Third panel: Phi_x / Julia ratio per mode (should be ≈ (2π)² ≈ 39.5 for all modes)
+# Third panel: Phi_x / Julia ratio per mode (should be ≈ 1.0 — Julia now outputs unit-norm)
 p_ratio = plot(; xlabel="Poloidal mode m", ylabel="Phi_x / Julia",
-                 title="Normalization ratio (should be flat at $(round(two_pi_sq; digits=1)))",
+                 title="Normalization ratio (should be flat at 1.0)",
                  legend=:topright)
 ratio_m   = Int[]
 ratio_vals = Float64[]
@@ -245,7 +247,7 @@ for (jm, ja) in zip(julia_m_lim, julia_amps_lim)
 end
 if !isempty(ratio_m)
     scatter!(p_ratio, ratio_m, ratio_vals; color=:blue, label="Phi_x / Julia", markersize=5)
-    hline!(p_ratio, [two_pi_sq]; color=:red, linestyle=:dash, label="(2π)² ≈ $(round(two_pi_sq; digits=1))")
+    hline!(p_ratio, [1.0]; color=:red, linestyle=:dash, label="expected = 1.0")
 end
 xlims!(p_ratio, MLOW-2, MHIGH+2)
 

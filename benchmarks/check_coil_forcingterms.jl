@@ -99,7 +99,7 @@ t_biot = @elapsed begin
     for j in 1:NZETA_COIL, i in 1:MTHETA_COIL
         idx = i + (j-1)*MTHETA_COIL
         obs_R[idx]   = bnd_grid.R[i]
-        obs_phi[idx] = bnd_grid.phi_grid[j]
+        obs_phi[idx] = bnd_grid.phi_grid[j] + bnd_grid.phi_offset[i]
         obs_Z[idx]   = bnd_grid.Z[i]
     end
 

@@ -103,15 +103,13 @@ function compute_perturbed_equilibrium(
         end
     else
         norm_tag = load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
-        if norm_tag != "sfl_flux_Wb"
-            for n in ffs_intr.nlow:ffs_intr.nhigh
-                # filter returns a new Vector but still holds references to same ForcingMode objects
-                modes_n = filter(m -> m.n == n, intr.forcing_modes)
-                isempty(modes_n) && continue
-                m_vals = [m.m for m in modes_n]
-                convert_forcing_normalization!(modes_n, norm_tag, equil, n,
-                    minimum(m_vals), maximum(m_vals))
-            end
+        for n in ffs_intr.nlow:ffs_intr.nhigh
+            # filter returns a new Vector but still holds references to same ForcingMode objects
+            modes_n = filter(m -> m.n == n, intr.forcing_modes)
+            isempty(modes_n) && continue
+            m_vals = [m.m for m in modes_n]
+            convert_forcing_normalization!(modes_n, norm_tag, equil, n,
+                minimum(m_vals), maximum(m_vals))
         end
     end
 

@@ -48,11 +48,10 @@ Data structure for a single forcing mode.
 
   - `n::Int` - Toroidal mode number
   - `m::Int` - Poloidal mode number
-  - `amplitude::ComplexF64` - Complex amplitude. Units depend on normalization:
-      - `"sfl_flux_Wb"` (Julia-native, used internally): T·m², 2π-angle convention (θ ∈ [0,2π])
-      - `"normal_field_T"` (default file input): B·n̂ in Tesla, 2π-angle convention
-    Files tagged `normal_field_T` are automatically converted to `sfl_flux_Wb` using
-    the equilibrium boundary geometry before the plasma response is computed.
+  - `amplitude::ComplexF64` - Complex amplitude in unit-norm convention (= Fortran Phi_x,
+    T·m² per unit-norm cell) after loading. File inputs are tagged by their input convention:
+      - `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
+      - `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
 """
 Base.@kwdef mutable struct ForcingMode
     n::Int = 0
@@ -68,9 +67,9 @@ from the file (or `"normal_field_T"` by default if no tag is present).
 
 **Normalization tags** (set in the file, not in the TOML):
 - `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
-  Most intuitive for users specifying RMP coil fields.
-- `"sfl_flux_Wb"`: Fourier modes of R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], Julia-native
-  sfl-flux convention. Output of `compute_coil_forcing_modes!`; no conversion needed.
+  Most intuitive for users; converted to unit-norm (Phi_x) on load.
+- `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
+  Multiplied by (2π)² on load to reach unit-norm (Phi_x).
 
 **ASCII format** — optional `# normalization: <tag>` header line, then data rows:
 ```

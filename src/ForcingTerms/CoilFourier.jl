@@ -5,9 +5,9 @@ Converts coil Biot-Savart fields on the plasma boundary into Fourier mode amplit
 suitable for the perturbed equilibrium pipeline.
 
 ## Pipeline
-1. `sample_boundary_grid` — evaluate (R, Z, φ) and metric on the plasma boundary
+1. `sample_boundary_grid` — evaluate (R, Z) and unit-norm metric on the plasma boundary
 2. `compute_biot_savart_boundary!` (BiotSavart.jl) — compute B at all grid points
-3. `project_normal_field!` — extract the normal (∇ψ) component
+3. `project_normal_flux!` — compute flux Phi_x = 2π×R×(B_R ∂Z/∂θ_norm − B_Z ∂R/∂θ_norm)
 4. `fourier_decompose_bn` — 2D Fourier decompose to get bmn amplitudes
 5. `compute_coil_forcing_modes!` — top-level entry point combining all steps
 """
@@ -22,8 +22,14 @@ Pre-computed plasma boundary grid for evaluating coil fields.
 ## Fields
 - `mtheta`, `nzeta`: grid dimensions
 - `R`, `Z`: cylindrical coordinates `[mtheta]` (same for all ζ, axisymmetric)
-- `phi_grid`: toroidal angle grid `[nzeta]` = 0, 2π/nzeta, ..., 2π(nzeta-1)/nzeta
-- `dR_dtheta`, `dZ_dtheta`: poloidal derivatives `[mtheta]`
+- `phi_grid`: base toroidal angle grid `[nzeta]` in radians = `-helicity × 2π × j/nzeta`
+- `phi_offset`: per-θ toroidal angle correction `[mtheta]` from SFL coordinates:
+  `ν(ψ, θ)` scaled by `-helicity`, so the physical toroidal angle at `(i, j)` is
+  `phi_grid[j] + phi_offset[i]`. Matches Fortran's `phi = -helicity*(2π*ζ + dphi(ψ,θ))`.
+  Zero for axisymmetric equilibria on-axis; non-zero off-axis due to SFL coordinate
+  transform (Hamada/SFL θ ≠ geometric θ introduces a toroidal offset).
+- `dR_dtheta`, `dZ_dtheta`: poloidal derivatives w.r.t. unit-norm angle θ_norm ∈ [0,1]
+  `dR_dtheta[i] = dR/dθ_norm = 2π × dR/dθ_phys`
 """
 struct BoundaryGrid
     mtheta::Int
@@ -31,6 +37,7 @@ struct BoundaryGrid
     R::Vector{Float64}
     Z::Vector{Float64}
     phi_grid::Vector{Float64}
+    phi_offset::Vector{Float64}
     dR_dtheta::Vector{Float64}
     dZ_dtheta::Vector{Float64}
 end
@@ -43,8 +50,8 @@ Evaluate plasma geometry at a uniform (mtheta × nzeta) grid on the flux surface
 Uses `equil.rzphi_rsquared` and `equil.rzphi_offset` splines at the given `psi`.
 Defaults to `psi=1.0` (true plasma boundary). Use a smaller value (e.g. the
 Fortran `psilim`) to evaluate on an interior truncation surface.
-Poloidal derivatives dR/dθ and dZ/dθ are computed via periodic cubic splines
-on the resulting R(θ), Z(θ) data, following the pattern in `Vacuum/Utilities.jl`.
+Poloidal derivatives dR/dθ_norm and dZ/dθ_norm (unit-norm θ_norm ∈ [0,1]) are computed
+via periodic cubic splines on the resulting R(θ_norm), Z(θ_norm) data.
 
 The toroidal grid direction follows the Fortran GPEC convention:
   `phi_j = -helicity × 2π × j/nzeta`   where `helicity = sign(Bt) × sign(Ip)`.
@@ -68,20 +75,19 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
         Z_arr[i] = equil.zo + r_minor * sin(θ_cyl)
     end
 
-    # Compute dR/dθ and dZ/dθ via periodic cubic splines on the boundary contour.
-    # LinearBinary search is optimal here: evaluation points are monotonically increasing
-    # (the same uniform grid used to construct the spline).
-    θ_phys = range(0; length=mtheta, step=2π/mtheta)
-    spline_R = cubic_interp(θ_phys, R_arr; bc=PeriodicBC(; endpoint=:exclusive, period=2π), search=LinearBinary())
-    spline_Z = cubic_interp(θ_phys, Z_arr; bc=PeriodicBC(; endpoint=:exclusive, period=2π), search=LinearBinary())
+    # Compute dR/dθ_norm and dZ/dθ_norm via periodic cubic splines on the boundary contour.
+    # Use unit-norm θ_norm ∈ [0,1] as the spline x-axis (matches equilibrium convention).
+    # LinearBinary search is optimal: evaluation points are the same monotone grid.
+    spline_R = cubic_interp(theta_grid, R_arr; bc=PeriodicBC(; endpoint=:exclusive, period=1.0), search=LinearBinary())
+    spline_Z = cubic_interp(theta_grid, Z_arr; bc=PeriodicBC(; endpoint=:exclusive, period=1.0), search=LinearBinary())
 
     dR_dθ = zeros(mtheta)
     dZ_dθ = zeros(mtheta)
     hint_R = Ref(1)
     hint_Z = Ref(1)
     for i in 1:mtheta
-        dR_dθ[i] = spline_R(θ_phys[i]; deriv=1, hint=hint_R)
-        dZ_dθ[i] = spline_Z(θ_phys[i]; deriv=1, hint=hint_Z)
+        dR_dθ[i] = spline_R(theta_grid[i]; deriv=1, hint=hint_R)   # dR/dθ_norm
+        dZ_dθ[i] = spline_Z(theta_grid[i]; deriv=1, hint=hint_Z)   # dZ/dθ_norm
     end
 
     # Helicity sets the direction of the toroidal angle grid to match Fortran convention:
@@ -91,7 +97,17 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
     helicity = bt_sign * ip_sign
     phi_grid = collect(range(0; length=nzeta, step=-helicity * 2π/nzeta))
 
-    return BoundaryGrid(mtheta, nzeta, R_arr, Z_arr, phi_grid, dR_dθ, dZ_dθ)
+    # Toroidal angle offset ν(ψ, θ_SFL): in SFL coordinates the physical toroidal angle at
+    # grid point (θ_SFL, ζ_SFL) is  φ_phys = -helicity*(2π*ζ_SFL + ν(ψ,θ_SFL)).
+    # This matches Fortran's  phi = -helicity*(twopi*czeta + crzphi_f(3)).
+    # For a circular boundary ν≈0, but for D-shaped DIII-D geometry it can be several radians.
+    phi_offset = zeros(mtheta)
+    hint_nu = (Ref(1), Ref(1))
+    for (i, θ_sfl) in enumerate(theta_grid)
+        phi_offset[i] = -helicity * equil.rzphi_nu((psi, θ_sfl); hint=hint_nu)
+    end
+
+    return BoundaryGrid(mtheta, nzeta, R_arr, Z_arr, phi_grid, phi_offset, dR_dθ, dZ_dθ)
 end
 
 """
@@ -100,20 +116,19 @@ end
 Project the cylindrical magnetic field (B_R, B_Z) onto the plasma boundary normal
 direction ∇ψ and store in `bn[mtheta, nzeta]`.
 
-The computed quantity is the physical flux element per (θ, ζ) cell [T·m²]:
-  bn(θ, ζ) = R(θ) × (B_R(θ,ζ) × ∂Z/∂θ - B_Z(θ,ζ) × ∂R/∂θ)
+Computes the unit-norm flux element Phi_x per (θ_norm, ζ_norm) cell [T·m²]:
+  bn(θ_norm, ζ_norm) = 2π × R(θ_norm) × (B_R × ∂Z/∂θ_norm - B_Z × ∂R/∂θ_norm)
 
-This is proportional to `dΦ/(dθ·dζ)` and matches the SFL-flux convention (`sfl_flux_Wb`)
-used by the permeability matrix. The R factor arises from the Jacobian of the flux-surface
-coordinate system (Chance 1997 Eq. for normal field projection).
+The `2π` factor comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ in the
+cross-product ∂r/∂θ_norm × ∂r/∂ζ_norm. The derivatives dR/dθ_norm and dZ/dθ_norm
+are stored in `grid.dR_dtheta` and `grid.dZ_dtheta` (unit-norm convention from
+`sample_boundary_grid`).
 
-Julia uses 2π-angle convention throughout (θ ∈ [0, 2π], ζ ∈ [0, 2π]).
-The Fortran GPEC uses unit-normalized angles (θ_norm ∈ [0, 1]) and therefore includes
-an extra (2π)² factor: Fortran `Phi_x ≈ (2π)² × Julia sfl_flux_Wb`.
+The output matches Fortran GPEC's `Phi_x` convention directly (no extra factor needed).
 
 ## Arguments
-- `bn`: output array `[mtheta, nzeta]`; overwritten
-- `B_R`, `B_Z`: cylindrical field components, length `mtheta × nzeta` (flat, θ-major ordering)
+- `bn`: output array `[mtheta, nzeta]`; overwritten in-place
+- `B_R`, `B_Z`: cylindrical field components, length `mtheta × nzeta` (flat, θ-major)
 - `grid`: pre-computed boundary geometry from `sample_boundary_grid`
 """
 function project_normal_flux!(
@@ -131,7 +146,7 @@ function project_normal_flux!(
     @inbounds for j in 1:nzeta
         for i in 1:mtheta
             idx = i + (j - 1) * mtheta
-            bn[i, j] = grid.R[i] * (B_R[idx] * grid.dZ_dtheta[i] - B_Z[idx] * grid.dR_dtheta[i])
+            bn[i, j] = 2π * grid.R[i] * (B_R[idx] * grid.dZ_dtheta[i] - B_Z[idx] * grid.dR_dtheta[i])
         end
     end
 end
@@ -148,9 +163,8 @@ Coefficients are computed as:
 The factor 2 matches the GPEC/DCON convention for real signals where positive
 and negative m modes are related by conjugation.
 
-When called after `project_normal_flux!`, the returned amplitudes are in `sfl_flux_Wb`
-convention (T·m²) with Julia's 2π-angle convention (θ ∈ [0, 2π]).
-To compare with Fortran `Phi_x`: Julia sfl_flux ≈ Fortran Phi_x / (2π)².
+When called after `project_normal_flux!`, the returned amplitudes are in unit-norm
+convention equal to Fortran `Phi_x` (T·m² per unit-norm cell).
 
 Uses `compute_fourier_coefficients` from `Utilities.FourierTransforms` with the
 3D (mtheta×nzeta, mpert) basis matrix (npert=1, nlow=n).
@@ -197,7 +211,7 @@ flux from all coil sets on the plasma boundary.
 4. Project B field onto plasma boundary normal flux (`project_normal_flux!`)
 5. 2D Fourier decompose to get bmn amplitudes for mode range
 
-Output amplitudes are in `sfl_flux_Wb` convention (T·m², Julia 2π-angle convention).
+Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
 No normalization conversion is needed when using these modes with `compute_plasma_response!`.
 
 Result is appended to `forcing_modes` (existing content is cleared first).
@@ -229,7 +243,7 @@ function compute_coil_forcing_modes!(
         for i in 1:mtheta
             idx = i + (j - 1) * mtheta
             obs_R[idx]   = grid.R[i]
-            obs_phi[idx] = grid.phi_grid[j]
+            obs_phi[idx] = grid.phi_grid[j] + grid.phi_offset[i]
             obs_Z[idx]   = grid.Z[i]
         end
     end
@@ -257,20 +271,20 @@ end
 """
     convert_forcing_normalization!(modes, from_tag, equil, n, m_low, m_high; psi, mtheta, nzeta)
 
-Convert `ForcingMode` amplitudes from `from_tag` normalization to `"sfl_flux_Wb"`,
-which is the internal convention expected by `compute_plasma_response!`.
+Convert `ForcingMode` amplitudes from `from_tag` normalization to the internal
+unit-norm convention (= Fortran `Phi_x`), expected by `compute_plasma_response!`.
 
-If `from_tag == "sfl_flux_Wb"`, modes are already in the correct convention and
-this function is a no-op.
+If `from_tag == "sfl_flux_Wb"`, the user has provided amplitudes in the 2π-angle
+SFL-flux convention. These are scaled by (2π)² to reach unit-norm.
 
 If `from_tag == "normal_field_T"`, the amplitudes represent Fourier modes of B·n̂
-in Tesla with Julia's 2π-angle convention (θ ∈ [0, 2π]).  Conversion to sfl_flux_Wb:
+in Tesla (2π-angle convention). Conversion to unit-norm Phi_x:
   1. Inverse-Fourier reconstruct B·n̂(θ, ζ) from the input modes
-  2. Multiply pointwise by R(θ) × |dr/dθ(θ)| (from `sample_boundary_grid`)
-  3. Re-Fourier transform to get sfl_flux_Wb mode amplitudes
+  2. Multiply pointwise by 2π × R(θ) × |dr/dθ_norm(θ)|
+  3. Re-Fourier transform to get unit-norm mode amplitudes
 
-This conversion is a mode-mixing operation: since R and |dr/dθ| vary around
-the boundary, multiplying in real space couples different m modes.
+The `2π` factor in step 2 comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
+This conversion is a mode-mixing operation because R and |dr/dθ| vary poloidally.
 
 ## Arguments
 - `modes`: `Vector{ForcingMode}` with amplitudes to convert (modified in place)
@@ -292,7 +306,13 @@ function convert_forcing_normalization!(
     mtheta::Int = 256,
     nzeta::Int = 64
 )
-    from_tag == "sfl_flux_Wb" && return  # already correct, nothing to do
+    if from_tag == "sfl_flux_Wb"
+        # User provided 2π-angle SFL flux; scale by (2π)² to reach unit-norm (= Phi_x)
+        for mode in modes
+            mode.amplitude *= (2π)^2
+        end
+        return
+    end
 
     if from_tag != "normal_field_T"
         error("Unknown forcing normalization: \"$from_tag\". Supported: \"normal_field_T\", \"sfl_flux_Wb\".")
@@ -314,19 +334,21 @@ function convert_forcing_normalization!(
         amp_imag[idx] = imag(mode.amplitude)
     end
 
-    # Inverse DFT: field_flat[i + (j-1)*mtheta] = Σ_m (amp_r*cos + amp_i*sin)
+    # Inverse DFT: reconstruct B·n̂(θ, ζ) at grid points
     bn_hat = (cos_basis * amp_real .- sin_basis * amp_imag)  # length mtheta*nzeta
     bn_field = reshape(bn_hat, mtheta, nzeta)
 
-    # Multiply by R × |dr/dθ| to convert normal field → SFL flux
-    arc = sqrt.(grid.dR_dtheta .^ 2 .+ grid.dZ_dtheta .^ 2)  # |dr/dθ|, length mtheta
+    # Multiply by 2π × R × |dr/dθ_norm| to convert B·n̂ → unit-norm Phi_x integrand.
+    # The 2π is the toroidal Jacobian (∂r/∂ζ_norm = 2π·R·ê_φ); arc is the unit-norm
+    # arc length |dr/dθ_norm| from sample_boundary_grid.
+    arc = sqrt.(grid.dR_dtheta .^ 2 .+ grid.dZ_dtheta .^ 2)  # |dr/dθ_norm|
     for j in 1:nzeta
         for i in 1:mtheta
-            bn_field[i, j] *= grid.R[i] * arc[i]
+            bn_field[i, j] *= 2π * grid.R[i] * arc[i]
         end
     end
 
-    # Re-Fourier transform bn_field → sfl_flux_Wb mode amplitudes
+    # Re-Fourier transform bn_field → unit-norm (Phi_x) mode amplitudes
     bn_flat = vec(bn_field)
     scale = 2.0 / (mtheta * nzeta)
     new_real = scale .* (cos_basis'  * bn_flat)

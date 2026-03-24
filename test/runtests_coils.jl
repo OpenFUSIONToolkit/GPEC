@@ -164,7 +164,7 @@ end
     # Build a dummy BoundaryGrid (R/Z/derivatives don't matter for this test)
     grid = ForcingTerms.BoundaryGrid(mtheta, nzeta,
         ones(mtheta), zeros(mtheta),
-        collect(zeta_grid), ones(mtheta), zeros(mtheta))
+        collect(zeta_grid), zeros(mtheta), ones(mtheta), zeros(mtheta))
 
     m_low = 1; m_high = 10
     modes = ForcingTerms.fourier_decompose_bn(bn, grid, n0, m_low, m_high)
@@ -187,11 +187,10 @@ end
 # ---------------------------------------------------------------------------
 @testset "CoilFourier: project_normal_flux! R-factor" begin
     # A uniform vertical field B_Z = B0 on a circular boundary of radius `a`
-    # centred at major radius R0.  The normal flux element is:
-    #   bn = R * (B_R * dZ/dθ - B_Z * dR/dθ) = -B0 * R(θ) * dR/dθ
-    # where R(θ) = R0 + a*cos(θ), dR/dθ = -a*sin(θ).  So bn = B0 * a * R(θ) * sin(θ),
-    # which is NOT constant — it varies with R.  The old (incorrect) formula without R
-    # would give bn ∝ -dR/dθ = a*sin(θ) (constant amplitude), missing the R variation.
+    # centred at major radius R0.  In unit-norm convention the flux element is:
+    #   Phi_x = 2π × R × (B_R × dZ/dθ_norm - B_Z × dR/dθ_norm)
+    # where dR/dθ_norm = 2π × dR/dθ_phys = 2π × (-a*sin(θ)).
+    # For B_R=0, B_Z=B0:  Phi_x = -2π × R × B0 × dR/dθ_norm = (2π)² × B0 × a × R(θ) × sin(θ)
 
     mtheta = 64; nzeta = 1
     B0 = 1.0; R0 = 2.0; a = 0.5
@@ -200,24 +199,23 @@ end
     R_arr = R0 .+ a .* cos.(theta_phys)
     Z_arr = a .* sin.(theta_phys)
 
-    # Exact derivatives dR/dθ and dZ/dθ
-    dR_dθ = -a .* sin.(theta_phys)
-    dZ_dθ =  a .* cos.(theta_phys)
+    # Unit-norm derivatives: dR/dθ_norm = 2π × dR/dθ_phys
+    dR_dθ_norm = 2π .* (-a .* sin.(theta_phys))
+    dZ_dθ_norm = 2π .* (a .* cos.(theta_phys))
 
     phi_grid = [0.0]
-    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, R_arr, Z_arr, phi_grid, dR_dθ, dZ_dθ)
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, R_arr, Z_arr, phi_grid, zeros(mtheta), dR_dθ_norm, dZ_dθ_norm)
 
     # Uniform B_Z = B0, B_R = 0 at all points
     B_R = zeros(mtheta); B_Z = fill(B0, mtheta)
     bn  = zeros(mtheta, nzeta)
     ForcingTerms.project_normal_flux!(bn, B_R, B_Z, grid)
 
-    # Expected: bn[i,1] = R(θ) * (0*dZ/dθ - B0*dR/dθ) = B0 * a * R(θ) * sin(θ)
-    expected = B0 .* a .* R_arr .* sin.(theta_phys)
+    # Expected: 2π × R × (0×dZ_norm - B0×dR_norm) = (2π)² × B0 × a × R(θ) × sin(θ)
+    expected = (2π)^2 .* B0 .* a .* R_arr .* sin.(theta_phys)
     @test bn[:, 1] ≈ expected  rtol=1e-10
 
-    # Verify that the result varies with R — the old code without R factor would
-    # give constant amplitude across all θ.
+    # Result must vary with R (old code without R factor gave constant amplitude)
     @test std(abs.(bn[:, 1])) > 0.01 * mean(abs.(bn[:, 1]))
 end
 
