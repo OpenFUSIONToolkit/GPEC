@@ -35,26 +35,28 @@ function plot_coil_geometry_3d(coil_sets; save_path=nothing, kwargs...)
     clim = isempty(all_currents) ? 1.0 : max(maximum(abs, all_currents), eps())
 
     p = plot(; xlabel="X [m]", ylabel="Y [m]", zlabel="Z [m]",
-               title="Coil geometry (3D)",
-               colorbar_title=" Current [A]",
-               clims=(-clim, clim),
-               color=:RdBu,
+               title="Coil geometry (3D)", legend=false,
                camera=(30, 20), kwargs...)
 
     for cs in coil_sets
         for j in 1:cs.ncoil
             I = cs.currents[j]
-            # Map current to [0,1] on a symmetric scale centred at zero
+            # Map current to [0,1] on symmetric RdBu scale (blue=positive, red=negative)
             t = clamp((I + clim) / (2clim), 0.0, 1.0)
             col = get(cgrad(:RdBu), t)
             for k in 1:cs.s
                 xs = view(cs.x, j, k, :)
                 ys = view(cs.y, j, k, :)
                 zs = view(cs.z, j, k, :)
-                plot!(p, xs, ys, zs; label="", color=col, lw=1.5)
+                plot!(p, xs, ys, zs; seriestype=:path3d, color=col, lw=2)
             end
         end
     end
+
+    # Invisible scatter spanning the current range to force the colorbar to appear
+    scatter!(p, [NaN], [NaN], [NaN];
+             zcolor=[0.0], clims=(-clim, clim), color=:RdBu,
+             colorbar_title="I [A]", markersize=0)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -111,7 +113,7 @@ function plot_coil_geometry_rz(coil_sets; equil=nothing, save_path=nothing, kwar
             Z_bnd[i] = equil.zo + r_minor * sin(θ_cyl)
         end
         plot!(p, [R_bnd; R_bnd[1]], [Z_bnd; Z_bnd[1]];
-              label="plasma boundary", color=:black, lw=2, linestyle=:dash)
+              label="plasma boundary", color=:black, lw=2)
     end
 
     isnothing(save_path) || savefig(p, save_path)

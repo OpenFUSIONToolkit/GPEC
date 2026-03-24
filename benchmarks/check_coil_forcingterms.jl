@@ -33,8 +33,8 @@ OUTPUT_FILE    = joinpath(@__DIR__, "coil_forcingterms_check.png")
 # Standard DIII-D I-coil n=3 configuration
 COIL_CURRENT   = 7e3   # Amperes (typical RMP study value)
 N_TOROIDAL     = 3
-M_LOW          = 1
-M_HIGH         = 15
+M_LOW          = -5   # ≈ n*floor(q_min) - delta_mlow = 3*1 - 8 (matching FFS convention)
+M_HIGH         = 20   # ≈ n*ceil(q_max) + delta_mhigh = 3*4 + 8
 MTHETA_COIL    = 192
 NZETA_COIL     = 96    # = 32 * N_TOROIDAL
 
