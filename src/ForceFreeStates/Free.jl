@@ -160,7 +160,7 @@ Compute total complex energy eigenvalue (total1). This is a trimmed down version
 that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
 which calls this function at each step in the psiedge -> psilim region of integration. This performs
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
-wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat` (a complex-valued spline).
+wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvmat` (a complex-valued spline).
 """
 function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
@@ -180,9 +180,10 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
     # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating
     # a zero-crossing function near rational surfaces, which would distort the peaks.
-    odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
-    wv = odet._wv_scratch
-    copyto!(wv, odet._wv_out)
+    es = odet.edge_scan
+    es.wvmat(vec(es._wv_out), odet.psifac; hint=es.wv_hint)
+    wv = es._wv_scratch
+    copyto!(wv, es._wv_out)
     q_at_psifac = equil.profiles.q_spline(odet.psifac)
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((intr.mlow:intr.mhigh) .- q_at_psifac .* (intr.nlow:intr.nhigh)')
@@ -196,8 +197,8 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     Ev = eigen(wt)
 
     # Sort eigenvalues by descending real part using pre-allocated buffers
-    eindex = odet._eindex_buf
-    evals_real = odet._evals_real_buf
+    eindex = es._eindex_buf
+    evals_real = es._evals_real_buf
     @inbounds for i in 1:Npert
         evals_real[i] = real(Ev.values[i])
     end
@@ -223,7 +224,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
     # ep + ev = et by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
     # Use mul! with pre-allocated _tmp_vec to avoid allocating wp*v and wv*v temporaries.
-    tmp_v = odet._tmp_vec
+    tmp_v = es._tmp_vec
     mul!(tmp_v, wp, v)
     ep1 = ComplexF64(dot(v, tmp_v)) / norm
     mul!(tmp_v, wv, v)

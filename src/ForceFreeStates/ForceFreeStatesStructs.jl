@@ -348,6 +348,51 @@ end
 VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpoints, numpert_total, mthvac)
 
 """
+EdgeScanState
+
+Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
+Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `edge_scan/`.
+
+## Fields
+
+  - `dW_edge::Vector{ComplexF64}` - Per-step dW values (length `numsteps_init`); used to find peak truncation point.
+  - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
+  - `_wv_out::Matrix{ComplexF64}` - Output buffer for wvmat spline evaluation.
+  - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
+  - `_wv_scratch, _eindex_buf, _evals_real_buf, _tmp_vec` - Pre-allocated buffers for `free_compute_total`.
+  - `psi, q` - ψ and q values at each edge scan step.
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step.
+"""
+@kwdef mutable struct EdgeScanState
+    numpert_total::Int
+    numsteps_init::Int
+
+    # Scratch: per-step dW values; used to find peak truncation point
+    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
+
+    # Vacuum matrix spline and evaluation infrastructure
+    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    wv_hint::Base.RefValue{Int} = Ref(1)
+
+    # Pre-allocated buffers for free_compute_total
+    _wv_scratch::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    _eindex_buf::Vector{Int} = Vector{Int}(undef, numpert_total)
+    _evals_real_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total)
+    _tmp_vec::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+
+    # Scan results (written to HDF5 under edge_scan/)
+    psi::Vector{Float64} = Float64[]
+    q::Vector{Float64} = Float64[]
+    total_eigenvalue::Vector{ComplexF64} = ComplexF64[]
+    plasma_energy::Vector{ComplexF64} = ComplexF64[]
+    vacuum_energy::Vector{ComplexF64} = ComplexF64[]
+    vacuum_eigenvalue::Vector{Float64} = Float64[]
+end
+
+EdgeScanState(numpert_total::Int, numsteps_init::Int) = EdgeScanState(; numpert_total, numsteps_init)
+
+"""
 OdeState
 
 A mutable struct to hold the state of the ODE solver used by the ForceFreeStates integration routines.
@@ -373,14 +418,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-  - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
-  - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
-  - `psi_edge_scan::Vector{Float64}` - ψ values at each edge scan step (psifac ≥ psiedge). Populated by `findmax_dW_edge!`.
-  - `q_edge_scan::Vector{Float64}` - q values at each edge scan step, taken directly from `q_store`.
-  - `et_edge_scan::Vector{ComplexF64}` - Total energy eigenvalue (et[1]) at each edge scan step. NaN where `free_compute_total` failed.
-  - `ep_edge_scan::Vector{ComplexF64}` - Plasma energy contribution at each edge scan step.
-  - `ev_edge_scan::Vector{ComplexF64}` - Vacuum energy contribution at each edge scan step.
-  - `evonly_edge_scan::Vector{Float64}` - Smallest eigenvalue of vacuum matrix alone (wv, no plasma response) at each edge scan step.
+  - `edge_scan::Union{EdgeScanState, Nothing}` - Edge dW scan state and results. `nothing` when no edge scan is configured (psiedge ≥ psilim).
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
@@ -419,31 +457,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
 
-    # Used for to find peak dW in the edge
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-
-    # Pre-allocated buffers for free_compute_total to avoid per-call heap allocations.
-    # _wv_scratch: working copy of wv with singfac scaling applied in-place
-    _wv_scratch::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    # _eindex_buf: reusable buffer for sortperm! output
-    _eindex_buf::Vector{Int} = Vector{Int}(undef, numpert_total)
-    # _evals_real_buf: reusable buffer for real parts of eigenvalues (used by sortperm!)
-    _evals_real_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total)
-    # _tmp_vec: reusable buffer for matrix-vector products (wp*v, wv*v)
-    _tmp_vec::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-
-    # Edge stability scan results: psi values and energy components for each step in [psiedge, psilim].
-    # Populated by findmax_dW_edge! and written to HDF5 for post-processing.
-    # Steps where free_compute_total failed (singular U₁) have -Inf in the working dW_edge buffer
-    # and are converted to NaN in the _edge_scan arrays below.
-    psi_edge_scan::Vector{Float64} = Float64[]
-    q_edge_scan::Vector{Float64} = Float64[]
-    et_edge_scan::Vector{ComplexF64} = ComplexF64[]
-    ep_edge_scan::Vector{ComplexF64} = ComplexF64[]
-    ev_edge_scan::Vector{ComplexF64} = ComplexF64[]
-    evonly_edge_scan::Vector{Float64} = Float64[]
+    # Edge dW scan state and results (nothing when psiedge >= psilim, i.e. no edge scan)
+    edge_scan::Union{EdgeScanState, Nothing} = nothing
 
     # Data for integrator
     psifac::Float64 = 0.0
@@ -469,8 +484,6 @@ and a small set of temporary matrices and factors used to compute singular-layer
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
     spline_hint::Base.RefValue{Int} = Ref(1)
-    # Separate hint for wvmat splines (different grid size than equilibrium profiles)
-    wv_hint::Base.RefValue{Int} = Ref(1)
     # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
     # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
     rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))

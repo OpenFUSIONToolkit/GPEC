@@ -538,14 +538,18 @@ for clarity. We create the wv matrix spline once prior to the loop.
 """
 function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
+    # Initialize EdgeScanState (sized to match current integration storage)
+    odet.edge_scan = EdgeScanState(intr.numpert_total, odet.numsteps_init)
+    es = odet.edge_scan
+
     # Since we search for the maximum dW, initialize to -Infinity
-    fill!(odet.dW_edge, -Inf * (1 + im))
-    ep_edge = fill(-Inf * (1 + im), length(odet.dW_edge))
-    ev_edge = fill(-Inf * (1 + im), length(odet.dW_edge))
-    evonly_edge = fill(-Inf, length(odet.dW_edge))
+    fill!(es.dW_edge, -Inf * (1 + im))
+    ep_edge = fill(-Inf * (1 + im), length(es.dW_edge))
+    ev_edge = fill(-Inf * (1 + im), length(es.dW_edge))
+    evonly_edge = fill(-Inf, length(es.dW_edge))
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
-    odet.wvmat = free_compute_wv_spline(ctrl, equil, intr)
+    es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop through integration, compute dW at steps where psifac >= psiedge
     for istep in 1:odet.step
@@ -554,7 +558,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
             odet.u .= odet.u_store[:, :, :, istep]
             try
                 result = free_compute_total(equil, ffit, intr, odet)
-                odet.dW_edge[istep] = result.et
+                es.dW_edge[istep] = result.et
                 ep_edge[istep] = result.ep
                 ev_edge[istep] = result.ev
                 evonly_edge[istep] = result.evonly
@@ -565,18 +569,18 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
         end
     end
 
-    # Build per-step scan arrays for all psiedge steps and store in odet for HDF5 output.
+    # Build per-step scan arrays for all psiedge steps.
     # Steps where free_compute_total failed have -Inf values; replace with NaN for clarity.
     psiedge_idxs = findall(i -> odet.psi_store[i] >= ctrl.psiedge, 1:odet.step)
-    odet.psi_edge_scan = odet.psi_store[psiedge_idxs]
-    odet.q_edge_scan = odet.q_store[psiedge_idxs]
-    odet.et_edge_scan = ComplexF64[isfinite(real(odet.dW_edge[i])) ? odet.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
-    odet.ep_edge_scan = ComplexF64[isfinite(real(ep_edge[i])) ? ep_edge[i] : complex(NaN) for i in psiedge_idxs]
-    odet.ev_edge_scan = ComplexF64[isfinite(real(ev_edge[i])) ? ev_edge[i] : complex(NaN) for i in psiedge_idxs]
-    odet.evonly_edge_scan = Float64[isfinite(evonly_edge[i]) ? evonly_edge[i] : NaN for i in psiedge_idxs]
+    es.psi = odet.psi_store[psiedge_idxs]
+    es.q = odet.q_store[psiedge_idxs]
+    es.total_eigenvalue = ComplexF64[isfinite(real(es.dW_edge[i])) ? es.dW_edge[i] : complex(NaN) for i in psiedge_idxs]
+    es.plasma_energy = ComplexF64[isfinite(real(ep_edge[i])) ? ep_edge[i] : complex(NaN) for i in psiedge_idxs]
+    es.vacuum_energy = ComplexF64[isfinite(real(ev_edge[i])) ? ev_edge[i] : complex(NaN) for i in psiedge_idxs]
+    es.vacuum_eigenvalue = Float64[isfinite(evonly_edge[i]) ? evonly_edge[i] : NaN for i in psiedge_idxs]
 
     # Return the index that maximizes dW_edge to identify truncation point
-    et_clean = replace(real.(odet.dW_edge), NaN => -Inf)
+    et_clean = replace(real.(es.dW_edge), NaN => -Inf)
     return findmax(et_clean)[2]
 end
 

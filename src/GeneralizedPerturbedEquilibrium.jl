@@ -436,13 +436,14 @@ function write_outputs_to_HDF5(
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim)
-        if !isempty(odet.psi_edge_scan)
-            out_h5["edge_scan/psi"] = odet.psi_edge_scan
-            out_h5["edge_scan/q"] = odet.q_edge_scan
-            out_h5["edge_scan/total_energy"] = odet.et_edge_scan
-            out_h5["edge_scan/plasma_energy"] = odet.ep_edge_scan
-            out_h5["edge_scan/vacuum_energy"] = odet.ev_edge_scan
-            out_h5["edge_scan/vacuum_eigenvalue"] = odet.evonly_edge_scan
+        if !isnothing(odet.edge_scan)
+            es = odet.edge_scan
+            out_h5["edge_scan/psi"] = es.psi
+            out_h5["edge_scan/q"] = es.q
+            out_h5["edge_scan/total_energy"] = es.total_eigenvalue
+            out_h5["edge_scan/plasma_energy"] = es.plasma_energy
+            out_h5["edge_scan/vacuum_energy"] = es.vacuum_energy
+            out_h5["edge_scan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
         end
 
         # Write singular surface data
