@@ -524,8 +524,14 @@ Map external forcing modes to eigenmode basis.
 Matches forcing mode numbers (n,m) to the eigenmode basis used in ForceFreeStates
 and creates a forcing vector in that basis.
 
+**Unit convention**: `ForcingMode.amplitude` must be in `sfl_flux_Wb` units
+(T·m², Julia 2π-angle convention). Files loaded in `normal_field_T` convention are
+automatically converted by `convert_forcing_normalization!` before this function is called.
+The permeability matrix is constructed with the same 2π-angle convention, so the product
+`permeability * forcing_vector` is self-consistent.
+
 ## Arguments
-- `forcing_modes`: External forcing modes from input file
+- `forcing_modes`: External forcing modes, amplitudes in `sfl_flux_Wb` convention
 - `intr`: ForceFreeStates internal state with mode arrays
 
 ## Returns

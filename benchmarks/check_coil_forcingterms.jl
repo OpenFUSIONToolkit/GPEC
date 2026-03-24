@@ -107,7 +107,7 @@ t_biot = @elapsed begin
     compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
 
     bn = zeros(MTHETA_COIL, NZETA_COIL)
-    project_normal_field!(bn, B_R, B_Z, bnd_grid)
+    project_normal_flux!(bn, B_R, B_Z, bnd_grid)
 
     modes = fourier_decompose_bn(bn, bnd_grid, N_TOROIDAL, M_LOW, M_HIGH)
     append!(forcing_modes, modes)

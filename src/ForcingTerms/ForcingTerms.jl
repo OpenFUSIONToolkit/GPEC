@@ -48,7 +48,11 @@ Data structure for a single forcing mode.
 
   - `n::Int` - Toroidal mode number
   - `m::Int` - Poloidal mode number
-  - `amplitude::ComplexF64` - Complex amplitude of the forcing field
+  - `amplitude::ComplexF64` - Complex amplitude. Units depend on normalization:
+      - `"sfl_flux_Wb"` (Julia-native, used internally): T·m², 2π-angle convention (θ ∈ [0,2π])
+      - `"normal_field_T"` (default file input): B·n̂ in Tesla, 2π-angle convention
+    Files tagged `normal_field_T` are automatically converted to `sfl_flux_Wb` using
+    the equilibrium boundary geometry before the plasma response is computed.
 """
 Base.@kwdef mutable struct ForcingMode
     n::Int = 0
@@ -57,28 +61,30 @@ Base.@kwdef mutable struct ForcingMode
 end
 
 """
-    load_forcing_data!(forcing_modes::Vector{ForcingMode}, dir_path::String, forcing_data_file::String, forcing_data_format::String, verbose::Bool=false)
+    load_forcing_data!(forcing_modes, dir_path, forcing_data_file, forcing_data_format, verbose) -> String
 
-Load forcing data from ASCII or HDF5 file.
+Load forcing data from ASCII or HDF5 file. Returns the normalization tag read
+from the file (or `"normal_field_T"` by default if no tag is present).
 
-ASCII format: Three or four columns (n, m, real amplitude, [optional] imag amplitude)
-- Column 1: Toroidal mode number (n)
-- Column 2: Poloidal mode number (m)
-- Column 3: Complex amplitude (real part)
-- Column 4: Complex amplitude (imaginary part) [optional, assumes 0 if not present]
+**Normalization tags** (set in the file, not in the TOML):
+- `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
+  Most intuitive for users specifying RMP coil fields.
+- `"sfl_flux_Wb"`: Fourier modes of R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], Julia-native
+  sfl-flux convention. Output of `compute_coil_forcing_modes!`; no conversion needed.
 
-Example ASCII file:
+**ASCII format** — optional `# normalization: <tag>` header line, then data rows:
 ```
+# normalization: normal_field_T
 1  2  0.5  0.1
 1  3  0.3  -0.2
-2  4  0.8  0.0
 ```
+Columns: n, m, real(amplitude), [optional] imag(amplitude)
 
-HDF5 format:
-- Dataset "n": Integer array of toroidal mode numbers
-- Dataset "m": Integer array of poloidal mode numbers
-- Dataset "amplitude_real": Real parts of amplitudes
-- Dataset "amplitude_imag": Imaginary parts of amplitudes
+**HDF5 format** — optional root attribute `normalization` (string), plus datasets:
+- `"n"`: Integer array of toroidal mode numbers
+- `"m"`: Integer array of poloidal mode numbers
+- `"amplitude_real"`: Real parts of amplitudes
+- `"amplitude_imag"`: Imaginary parts of amplitudes (optional, default 0)
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},
@@ -86,14 +92,14 @@ function load_forcing_data!(
     forcing_data_file::String,
     forcing_data_format::String,
     verbose::Bool=false
-)
+)::String
     filepath = joinpath(dir_path, forcing_data_file)
 
     if verbose
         @info "Loading forcing data from $filepath"
     end
 
-    if forcing_data_format == "ascii"
+    norm_tag = if forcing_data_format == "ascii"
         load_forcing_ascii!(forcing_modes, filepath, verbose)
     elseif forcing_data_format == "hdf5"
         load_forcing_hdf5!(forcing_modes, filepath, verbose)
@@ -102,22 +108,41 @@ function load_forcing_data!(
     end
 
     if verbose
-        @info "Loaded $(length(forcing_modes)) forcing modes"
+        @info "Loaded $(length(forcing_modes)) forcing modes (normalization: $norm_tag)"
     end
+    return norm_tag
 end
 
 """
-    load_forcing_ascii!(forcing_modes::Vector{ForcingMode}, filepath::String, verbose::Bool)
+    load_forcing_ascii!(forcing_modes, filepath, verbose) -> String
 
-Load forcing data from ASCII file with columns: n, m, real(amplitude), imag(amplitude)
+Load forcing data from ASCII file. Returns normalization tag (`"normal_field_T"` by default).
+
+Optional first `# normalization: <tag>` header line sets the normalization.
+Remaining `#`-prefixed lines and blank lines are ignored. Data columns: n, m, real, [imag].
 """
 function load_forcing_ascii!(
     forcing_modes::Vector{ForcingMode},
     filepath::String,
     verbose::Bool
-)
+)::String
     if !isfile(filepath)
         error("Forcing data file not found: $filepath")
+    end
+
+    norm_tag = "normal_field_T"  # default
+
+    # Scan header lines for normalization tag before passing to readdlm
+    open(filepath, "r") do io
+        for line in eachline(io)
+            stripped = strip(line)
+            isempty(stripped) && continue
+            startswith(stripped, '#') || break  # stop at first non-comment line
+            m = match(r"#\s*normalization\s*:\s*(\S+)", stripped)
+            if !isnothing(m)
+                norm_tag = m.captures[1]
+            end
+        end
     end
 
     data = readdlm(filepath, comments=true, comment_char='#')
@@ -128,7 +153,6 @@ function load_forcing_ascii!(
         error("ASCII forcing file must have at least 3 columns (n, m, real_amplitude)")
     end
 
-    # Clear existing forcing modes
     empty!(forcing_modes)
 
     for i in 1:nrows
@@ -143,23 +167,30 @@ function load_forcing_ascii!(
             amplitude=complex(real_part, imag_part)
         ))
     end
+    return norm_tag
 end
 
 """
-    load_forcing_hdf5!(forcing_modes::Vector{ForcingMode}, filepath::String, verbose::Bool)
+    load_forcing_hdf5!(forcing_modes, filepath, verbose) -> String
 
-Load forcing data from HDF5 file with datasets: n, m, amplitude_real, amplitude_imag
+Load forcing data from HDF5 file. Returns normalization tag (`"normal_field_T"` by default).
+
+Optional root attribute `normalization` (string) sets the normalization.
+Required datasets: `n`, `m`, `amplitude_real`. Optional: `amplitude_imag`.
 """
 function load_forcing_hdf5!(
     forcing_modes::Vector{ForcingMode},
     filepath::String,
     verbose::Bool
-)
+)::String
     if !isfile(filepath)
         error("Forcing data file not found: $filepath")
     end
 
-    h5open(filepath, "r") do file
+    norm_tag = h5open(filepath, "r") do file
+        tag = haskey(HDF5.attrs(file), "normalization") ?
+              read(HDF5.attrs(file)["normalization"]) : "normal_field_T"
+
         n_array = read(file, "n")
         m_array = read(file, "m")
         amp_real = read(file, "amplitude_real")
@@ -169,7 +200,6 @@ function load_forcing_hdf5!(
             error("Inconsistent array lengths in HDF5 forcing file")
         end
 
-        # Clear existing forcing modes
         empty!(forcing_modes)
 
         for i in eachindex(n_array)
@@ -179,7 +209,9 @@ function load_forcing_hdf5!(
                 amplitude=complex(amp_real[i], amp_imag[i])
             ))
         end
+        return tag
     end
+    return norm_tag
 end
 
 include("CoilGeometry.jl")

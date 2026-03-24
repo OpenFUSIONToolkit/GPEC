@@ -1,5 +1,6 @@
 using Test
 using TOML
+using Statistics
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.Equilibrium
@@ -144,9 +145,10 @@ end
     @test all(grid.R .> 0)
     @test all(0.4 .< grid.R .< 2.0)  # physically reasonable for Solovev (r0=1.0, a=0.33)
 
-    # Toroidal grid should span [0, 2π)
+    # Toroidal grid starts at 0 and spans one full toroidal turn.
+    # Direction depends on helicity (sign(Bt)*sign(Ip)); test magnitude only.
     @test grid.phi_grid[1] ≈ 0.0
-    @test grid.phi_grid[end] ≈ 2π * (nzeta - 1) / nzeta
+    @test abs(grid.phi_grid[end]) ≈ 2π * (nzeta - 1) / nzeta
 end
 
 @testset "CoilFourier: fourier_decompose_bn roundtrip" begin
@@ -180,6 +182,43 @@ end
         i == idx && continue
         @test abs(mode.amplitude) < 0.05
     end
+end
+
+# ---------------------------------------------------------------------------
+@testset "CoilFourier: project_normal_flux! R-factor" begin
+    # A uniform vertical field B_Z = B0 on a circular boundary of radius `a`
+    # centred at major radius R0.  The normal flux element is:
+    #   bn = R * (B_R * dZ/dθ - B_Z * dR/dθ) = -B0 * R(θ) * dR/dθ
+    # where R(θ) = R0 + a*cos(θ), dR/dθ = -a*sin(θ).  So bn = B0 * a * R(θ) * sin(θ),
+    # which is NOT constant — it varies with R.  The old (incorrect) formula without R
+    # would give bn ∝ -dR/dθ = a*sin(θ) (constant amplitude), missing the R variation.
+
+    mtheta = 64; nzeta = 1
+    B0 = 1.0; R0 = 2.0; a = 0.5
+
+    theta_phys = range(0; length=mtheta, step=2π/mtheta)
+    R_arr = R0 .+ a .* cos.(theta_phys)
+    Z_arr = a .* sin.(theta_phys)
+
+    # Exact derivatives dR/dθ and dZ/dθ
+    dR_dθ = -a .* sin.(theta_phys)
+    dZ_dθ =  a .* cos.(theta_phys)
+
+    phi_grid = [0.0]
+    grid = ForcingTerms.BoundaryGrid(mtheta, nzeta, R_arr, Z_arr, phi_grid, dR_dθ, dZ_dθ)
+
+    # Uniform B_Z = B0, B_R = 0 at all points
+    B_R = zeros(mtheta); B_Z = fill(B0, mtheta)
+    bn  = zeros(mtheta, nzeta)
+    ForcingTerms.project_normal_flux!(bn, B_R, B_Z, grid)
+
+    # Expected: bn[i,1] = R(θ) * (0*dZ/dθ - B0*dR/dθ) = B0 * a * R(θ) * sin(θ)
+    expected = B0 .* a .* R_arr .* sin.(theta_phys)
+    @test bn[:, 1] ≈ expected  rtol=1e-10
+
+    # Verify that the result varies with R — the old code without R factor would
+    # give constant amplitude across all θ.
+    @test std(abs.(bn[:, 1])) > 0.01 * mean(abs.(bn[:, 1]))
 end
 
 # ---------------------------------------------------------------------------
