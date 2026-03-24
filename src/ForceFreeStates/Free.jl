@@ -137,15 +137,10 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
             psii, Roots.Newton()
         )
 
-        for ipert_n in 1:intr.npert
-            # Compute raw vacuum matrix (singfac NOT applied; free_compute_total applies it analytically)
-            n = ipert_n - 1 + intr.nlow
-            vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, 1, n; force_wv_symmetry=ctrl.force_wv_symmetry)
-            wv_block, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-
-            # Store block in full wv matrix
-            @views wv_array[i, ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert), ((ipert_n-1)*intr.mpert+1):(ipert_n*intr.mpert)] .= wv_block
-        end
+        # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
+        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
+        wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
+        @views wv_array[i, :, :] .= wv
     end
 
     # Flatten 3D array to (npsi+1 × numpert_total^2) for series interpolant
