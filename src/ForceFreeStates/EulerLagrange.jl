@@ -77,15 +77,14 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         trim_storage!(odet)
     end
 
-    # Undo Gaussian reduction to get true solution vectors. Must precede evaluate_stability_criterion!,
-    # which reads u_store; raw pre-transform u_store is ill-conditioned with many fixups.
-    transform_u!(odet, intr)
-
     # Evaluate stability criterion (critical determinant) of saved solutions
     if ctrl.verbose
         @info "Evaluating fixed-boundary stability criterion"
     end
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
+
+    # Undo Gaussian reduction to get true solution vectors (for free_run! eigenvector use)
+    transform_u!(odet, intr)
 
     return odet
 end
