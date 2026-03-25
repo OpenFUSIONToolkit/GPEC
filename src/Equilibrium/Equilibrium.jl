@@ -3,6 +3,7 @@ module Equilibrium
 # --- Module-level Dependencies ---
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
+using Base: Threads
 using Roots
 using TOML
 import FastInterpolations

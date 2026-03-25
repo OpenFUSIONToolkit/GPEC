@@ -41,6 +41,9 @@ struct FieldLineDerivParams{I2D<:FastInterpolations.CubicInterpolantND,S<:FastIn
     power_r::Int
     power_rc::Int  # minor radius rfac = √((R-R₀)²+(Z-Z₀)²) power exponent
     bfield::DirectBField
+    # When set, use buffers instead of pool (thread-safe for parallel flux-surface loops)
+    f_sq_buf::Union{Nothing,Vector{Float64}}
+    f1_sq_buf::Union{Nothing,Vector{Float64}}
 end
 
 """
@@ -110,6 +113,62 @@ the Julia spline implementation.
     (derivs == 1) && return
 
     # Evaluate more derivatives of B-field components
+    bf_out.brr = (bf_out.psirz - bf_out.br) / r
+    bf_out.brz = bf_out.psizz / r
+    bf_out.bzr = -(bf_out.psirr + bf_out.bz) / r
+    bf_out.bzz = -bf_out.psirz / r
+end
+
+"""
+    direct_get_bfield!_buf!(bf_out, r, z, psi_in, sq_in, sq_in_deriv, psio, f_sq_buf, f1_sq_buf; derivs=0)
+
+Same as `direct_get_bfield!` but uses pre-allocated `f_sq_buf` and `f1_sq_buf` instead of the pool.
+Thread-safe for use inside `Threads.@threads` (parallel flux-surface integration).
+"""
+function direct_get_bfield!_buf!(
+    bf_out::DirectBField,
+    r::Float64,
+    z::Float64,
+    psi_in::FastInterpolations.CubicInterpolantND,
+    sq_in::FastInterpolations.CubicSeriesInterpolant,
+    sq_in_deriv,
+    psio::Float64,
+    f_sq_buf::Vector,
+    f1_sq_buf::Vector;
+    derivs::Int=0
+)
+    if derivs == 0
+        bf_out.psi = psi_in((r, z))
+    elseif derivs == 1
+        bf_out.psi = psi_in((r, z))
+        bf_out.psir = psi_in((r, z); deriv=Val((1, 0)))
+        bf_out.psiz = psi_in((r, z); deriv=Val((0, 1)))
+    else
+        bf_out.psi = psi_in((r, z))
+        bf_out.psir = psi_in((r, z); deriv=Val((1, 0)))
+        bf_out.psiz = psi_in((r, z); deriv=Val((0, 1)))
+        bf_out.psirr = psi_in((r, z); deriv=Val((2, 0)))
+        bf_out.psirz = psi_in((r, z); deriv=Val((1, 1)))
+        bf_out.psizz = psi_in((r, z); deriv=Val((0, 2)))
+    end
+
+    psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
+    psi_norm = clamp(psi_norm, 0.0, 1.0)
+
+    sq_in(f_sq_buf, psi_norm)
+    sq_in_deriv(f1_sq_buf, psi_norm)
+    bf_out.f = f_sq_buf[1]
+    bf_out.f1 = f1_sq_buf[1]
+    bf_out.p = f_sq_buf[2]
+    bf_out.p1 = f1_sq_buf[2]
+
+    (derivs == 0) && return
+
+    bf_out.br = bf_out.psiz / r
+    bf_out.bz = -bf_out.psir / r
+
+    (derivs == 1) && return
+
     bf_out.brr = (bf_out.psirz - bf_out.br) / r
     bf_out.brz = bf_out.psizz / r
     bf_out.bzr = -(bf_out.psirr + bf_out.bz) / r
@@ -242,7 +301,7 @@ from 1:5 rather than 0:4 as in Fortran.
 
   - `bfield`: A `DirectBField` object with values at the integration start point.
 """
-function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64)::Tuple{Matrix{Float64},DirectBField}
+function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64; use_pool::Bool=true)::Tuple{Matrix{Float64},DirectBField}
 
     # Find the starting point on the flux surface (outboard midplane)
     psi0_guess = raw_profile.psio * (1.0 - psifac)
@@ -251,15 +310,31 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     sq_in_deriv = deriv1(raw_profile.sq_in)
 
+    f_sq_buf = nothing
+    f1_sq_buf = nothing
+    if !use_pool
+        n = n_series(raw_profile.sq_in)
+        f_sq_buf = Vector{Float64}(undef, n)
+        f1_sq_buf = Vector{Float64}(undef, n)
+    end
+
     # Refine starting R: find r where ψ(r, zo) = ψ₀. The df closure reads bfield.psir
     # which is populated by the preceding f call — Newton guarantees f is evaluated first.
-    r = find_zero(
-        (r -> (direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.psi - psi0_guess),
-            _ -> bfield.psir),
-        r, Roots.Newton()
-    )
-
-    direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+    if use_pool
+        r = find_zero(
+            (r -> (direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=1); bfield.psi - psi0_guess),
+                _ -> bfield.psir),
+            r, Roots.Newton()
+        )
+        direct_get_bfield!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=2)
+    else
+        r = find_zero(
+            (r -> (direct_get_bfield!_buf!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio, f_sq_buf, f1_sq_buf; derivs=1); bfield.psi - psi0_guess),
+                _ -> bfield.psir),
+            r, Roots.Newton()
+        )
+        direct_get_bfield!_buf!(bfield, r, z, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio, f_sq_buf, f1_sq_buf; derivs=2)
+    end
     psi0 = bfield.psi
 
     # Set up and solve the ODE for fieldline following
@@ -270,7 +345,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     bfield = DirectBField()
     equil_config = raw_profile.config
     params = FieldLineDerivParams(ro, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio,
-        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield)
+        equil_config.power_bp, equil_config.power_b, equil_config.power_r, equil_config.power_rc, bfield, f_sq_buf, f1_sq_buf)
 
     # Use a callback to refine the solution at each step to stay on the flux surface
     function refine_affect!(integrator)
@@ -306,7 +381,11 @@ function direct_fieldline_der!(dy, y, params::FieldLineDerivParams, eta)
     cos_eta, sin_eta = cos(eta), sin(eta)
     r = params.ro + y[2] * cos_eta
     z = params.zo + y[2] * sin_eta
-    direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
+    if params.f_sq_buf !== nothing
+        direct_get_bfield!_buf!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio, params.f_sq_buf, params.f1_sq_buf; derivs=1)
+    else
+        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
+    end
 
     bp = sqrt(params.bfield.br^2 + params.bfield.bz^2)
     bt = params.bfield.f / r
@@ -356,16 +435,26 @@ function direct_refine(rfac::Float64, eta::Float64, psi0::Float64, params::Field
     function f(rfac_inner)
         r = params.ro + rfac_inner * cos_eta
         z = params.zo + rfac_inner * sin_eta
-        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
-            params.sq_in_deriv, params.psio; derivs=0)
+        if params.f_sq_buf !== nothing
+            direct_get_bfield!_buf!(params.bfield, r, z, params.psi_in, params.sq_in,
+                params.sq_in_deriv, params.psio, params.f_sq_buf, params.f1_sq_buf; derivs=0)
+        else
+            direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
+                params.sq_in_deriv, params.psio; derivs=0)
+        end
         return params.bfield.psi - psi0
     end
 
     function fp(rfac_inner)
         r = params.ro + rfac_inner * cos_eta
         z = params.zo + rfac_inner * sin_eta
-        direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
-            params.sq_in_deriv, params.psio; derivs=1)
+        if params.f_sq_buf !== nothing
+            direct_get_bfield!_buf!(params.bfield, r, z, params.psi_in, params.sq_in,
+                params.sq_in_deriv, params.psio, params.f_sq_buf, params.f1_sq_buf; derivs=1)
+        else
+            direct_get_bfield!(params.bfield, r, z, params.psi_in, params.sq_in,
+                params.sq_in_deriv, params.psio; derivs=1)
+        end
         return params.bfield.psir * cos_eta + params.bfield.psiz * sin_eta
     end
 
@@ -547,45 +636,81 @@ robustness.
 
     sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
     rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
-    ff_val = zeros!(pool, Float64, 4)
-    ff_deriv_val = zeros!(pool, Float64, 4)
 
-    for ipsi in (mpsi+1):-1:1  # outermost to innermost
-        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
-        checkpoint!(pool, Float64)
+    t_flux_surfaces = @elapsed if Threads.nthreads() > 1
+        Threads.@threads for ipsi in 1:(mpsi+1)
+            y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2; use_pool=false)
 
-        # Fit data into temporary straight fieldline poloidal angle splines
-        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
-        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+            npt = size(y_out, 1)
+            ff_x_nodes = Vector{Float64}(undef, npt)
+            @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
 
-        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
-        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
-        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
-        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+            ff_fs_nodes = Matrix{Float64}(undef, npt, 4)
+            @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+            @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+            @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+            @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
-        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
+            ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
 
-        ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
-        ff_deriv = deriv1(ff_interp)
+            ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
+            ff_deriv = deriv1(ff_interp)
 
-        # Resample ff onto uniform theta grid
-        for itheta in 1:(mtheta+1)
-            theta = theta_nodes[itheta]
-            ff_interp(ff_val, theta)
-            ff_deriv(ff_deriv_val, theta)
+            ff_val = Vector{Float64}(undef, 4)
+            ff_deriv_val = Vector{Float64}(undef, 4)
+            for itheta in 1:(mtheta+1)
+                theta = theta_nodes[itheta]
+                ff_interp(ff_val, theta)
+                ff_deriv(ff_deriv_val, theta)
+                rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+                rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+                rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+                rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+            end
 
-            rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
-            rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
-            rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
-            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+            sq_nodes[ipsi, 1] = bfield.f * 2π
+            sq_nodes[ipsi, 2] = bfield.p
+            sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
+            sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
         end
+    else
+        ff_val = zeros!(pool, Float64, 4)
+        ff_deriv_val = zeros!(pool, Float64, 4)
 
-        sq_nodes[ipsi, 1] = bfield.f * 2π
-        sq_nodes[ipsi, 2] = bfield.p
-        sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
-        sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
-        rewind!(pool, Float64)
+        for ipsi in (mpsi+1):-1:1  # outermost to innermost
+            y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
+            checkpoint!(pool, Float64)
+
+            ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
+            @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+
+            ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
+            @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+            @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+            @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+            @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+
+            ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+
+            ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
+            ff_deriv = deriv1(ff_interp)
+
+            for itheta in 1:(mtheta+1)
+                theta = theta_nodes[itheta]
+                ff_interp(ff_val, theta)
+                ff_deriv(ff_deriv_val, theta)
+                rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+                rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+                rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+                rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+            end
+
+            sq_nodes[ipsi, 1] = bfield.f * 2π
+            sq_nodes[ipsi, 2] = bfield.p
+            sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
+            sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
+            rewind!(pool, Float64)
+        end
     end
 
     # Temporary splines for q0 extrapolation and optional newq0 revision
@@ -630,16 +755,18 @@ robustness.
     grid2d = (rzphi_xs, theta_nodes)
     opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
-    rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
-    rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
-    rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
-    rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
+    t_rzphi_interpolants = @elapsed begin
+        rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
+        rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
+        rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
+        rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
+    end
 
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
-    v = @MMatrix zeros(Float64, 2, 3)
-    for ipsi in 1:(mpsi+1)
+    t_eqfun_nodes = @elapsed Threads.@threads for ipsi in 1:(mpsi+1)
         q = profiles.q_spline.y[ipsi]
         f_val = profiles.F_spline.y[ipsi]
+        v = @MMatrix zeros(Float64, 2, 3)
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
             # Access nodal derivatives from the interpolants (grid points)
@@ -693,9 +820,13 @@ robustness.
         end
     end
 
-    eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
-    eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
-    eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
+    t_eqfun_interpolants = @elapsed begin
+        eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
+        eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
+        eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
+    end
+
+    @info "equilibrium_solver timings (wall s)" nthreads=Threads.nthreads() flux_surfaces_and_rzphi_grid=t_flux_surfaces rzphi_2d_interpolants=t_rzphi_interpolants eqfun_nodal_fill=t_eqfun_nodes eqfun_2d_interpolants=t_eqfun_interpolants
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
