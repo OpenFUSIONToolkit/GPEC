@@ -21,6 +21,7 @@ include("Field.jl")
 export VacuumInput, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
+export PlasmaGeometry
 
 """
     compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings;

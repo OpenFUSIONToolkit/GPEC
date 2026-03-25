@@ -67,14 +67,10 @@ function extract_boundary_displacements(
     # Safety factor at boundary
     q_boundary = ForceFreeStates_results.q_store[ForceFreeStates_results.step]
 
-    # Flux surface spacing dΨ/dρ
-    # In ForceFreeStates, ρ = √ψ where ψ is normalized poloidal flux
-    # The actual poloidal flux is Ψ = ψ * psio
-    # Therefore:
-    #   dΨ/dψ = psio
-    #   dψ/dρ = 2ρ = 2√ψ
-    #   dΨ/dρ = (dΨ/dψ) * (dψ/dρ) = psio * 2√ψ
-    dPsi_drho = equil.psio * 2.0 * sqrt(psi_boundary)
+    # FFS ODE integrates in ψ (normalized flux), so bwp_mn = chi1·singfac·2πi·ξ_ψ
+    # where chi1 = 2π·psio  (Fortran idcon.f: chi1 = twopi*psio)
+    # Combined flux factor = chi1·2π = (2π)²·psio  (gpeq.f: bwp_mn = chi1·singfac·twopi·ifac·xsp)
+    dPsi_drho = (2π)^2 * equil.psio
 
     return (
         ξ_psi_boundary = ξ_psi_boundary,
@@ -303,10 +299,11 @@ The Green's function matrix maps Fourier coefficients to theta-space values:
 
 ## Green's Function Structure
 
-From ForceFreeStates vacuum calculation, `green` is a real matrix [2*mtheta, 2*mpert] where:
+From the Julia vacuum module, `green` is a real matrix [2*mtheta, 2*mpert] where:
 - Rows 1:mtheta correspond to plasma surface theta points
 - Rows mtheta+1:2*mtheta correspond to wall surface theta points (if wall present)
-- Columns are packed as [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
+- Columns use GROUPED format: [Re(mode_1),...,Re(mode_N), Im(mode_1),...,Im(mode_N)]
+  (cos-response block first, then sin-response block — matches fourier_transform! in Vacuum.jl)
 
 ## Arguments
 - `green`: Green's function matrix [2*mtheta, 2*mpert]
@@ -332,12 +329,9 @@ end
     # Pack complex coefficients to real/imag format for Green's function
     # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
     mpert = length(mode_coeffs)
-    packed_coeffs = zeros!(pool, Float64, 2 * mpert) 
+    packed_coeffs = zeros!(pool, Float64, 2 * mpert)
     pack_complex_to_realimag!(packed_coeffs, mode_coeffs)
 
-    # Apply Green's function: chi_theta = green * b_fourier
-    # Extract only plasma surface rows (first mtheta rows)
-    # Result is real-valued potential at theta points
     mtheta = length(chi_theta)
     mul!(chi_theta, @view(green[1:mtheta, :]), packed_coeffs)
     return chi_theta

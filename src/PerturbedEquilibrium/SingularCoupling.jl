@@ -14,6 +14,20 @@ References:
 - [Glasser Phys. Plasmas 2016 072505] - Resistive Δ' calculation
 """
 
+# Find bracketing indices and linear interpolation weight for psi in psi_store[1:nstep].
+function _psi_bracket(psi_store::AbstractVector, psi::Float64, nstep::Int)
+    idx_r = findfirst(p -> p >= psi, @view(psi_store[1:nstep]))
+    if isnothing(idx_r) || idx_r >= nstep
+        il, ir = nstep - 1, nstep
+    elseif idx_r == 1
+        il, ir = 1, 2
+    else
+        il, ir = idx_r - 1, idx_r
+    end
+    wt = (psi - psi_store[il]) / (psi_store[ir] - psi_store[il])
+    return il, ir, wt
+end
+
 """
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
@@ -109,7 +123,21 @@ function compute_singular_coupling_metrics!(
     state.rational_n           = zeros(Int, n_rational)
     state.rational_surface_idx = zeros(Int, n_rational)
 
+    # Precompute ODE coefficient matrix C_coeffs for all PE forcing modes.
+    # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
+    # where edge_mn_k[j] = plasma_response[j,k] / (chi1·singfac_lim[j]·2πi)
+    # Matches Fortran gpout.f: edge_mn = foutmn/(chi1·singfac·twopi·ifac)  (line 604)
+    psi_lim = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
+    q_lim   = equil.profiles.q_spline(psi_lim)
+    singfac_lim = [intr.m_modes[j] - intr.n_modes[j] * q_lim for j in 1:numpert_total]
+    u_bnd   = ForceFreeStates_results.u_store[:, :, 1, ForceFreeStates_results.step]
+    # Divide each row j by singfac_lim[j] — reshape to column vector so Julia broadcasts row-wise, not column-wise.
+    edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
+    C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
+
     # Phase 3: Compute full coupling matrix rows
+    psi_store_all = ForceFreeStates_results.psi_store
+    nstep = ForceFreeStates_results.step
     for (row, (s, nn)) in enumerate(resonant_pairs)
         sing_surf = ffs_intr.sing[s]
         m_res = round(Int, sing_surf.q * nn)
@@ -128,42 +156,64 @@ function compute_singular_coupling_metrics!(
         ffs_intr.sing[s].grri = grri
         ffs_intr.sing[s].grre = grre
 
+        # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
+        ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
+
         # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
-        L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, intr)
+        L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
         m_idx = m_res - mlow + 1
         L_mm = L_surf[m_idx, m_idx]
 
         j_c   = compute_current_density(equil, sing_surf.psifac)
         area  = compute_surface_area(equil, sing_surf.psifac)
-        shear = sing_surf.q1 * sing_surf.psifac / sing_surf.q
+        # Fortran: shear = mfac(resnum)*dq/dψ / q² = n*dq/dψ / q  (gpout.f line 579)
+        shear = abs(nn) * sing_surf.q1 / sing_surf.q
 
-        # Full coupling vector [numpert_total]: first index varies, second fixed at resnum
-        # jump_vec[j] = ca_r[j,resnum,2,s] - ca_l[j,resnum,2,s]  (Δ' of mode j via resonant column)
-        if size(ForceFreeStates_results.ca_l, 4) >= s && size(ForceFreeStates_results.ca_r, 4) >= s
-            jump_vec = ForceFreeStates_results.ca_r[:, resnum, 2, s] .-
-                       ForceFreeStates_results.ca_l[:, resnum, 2, s]
-        else
-            # Fallback: finite difference for diagonal entry only
-            jump_vec = zeros(ComplexF64, numpert_total)
-            spot = 1e-6
-            lpsi = sing_surf.psifac - spot / (abs(nn) * abs(sing_surf.q1))
-            rpsi = sing_surf.psifac + spot / (abs(nn) * abs(sing_surf.q1))
-            jump_vec[resnum] = interpolate_field_derivative(ForceFreeStates_results, rpsi, resnum, resnum) -
-                               interpolate_field_derivative(ForceFreeStates_results, lpsi, resnum, resnum)
+        # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
+        # Fortran: gpeq_sol(lpsi/rpsi) → bwp1_mn(resnum)  (gpout.f lines 618–624)
+        # spot = 5e-4 matches Fortran default (gpec.f line 120)
+        spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
+        lpsi = sing_surf.psifac - spot_psi
+        rpsi = sing_surf.psifac + spot_psi
+
+        # Interpolate u_store[resnum, :, 1, psi] at lpsi and rpsi (vectors over all j columns)
+        il_l, ir_l, wt_l = _psi_bracket(psi_store_all, lpsi, nstep)
+        il_r, ir_r, wt_r = _psi_bracket(psi_store_all, rpsi, nstep)
+        u_l  = (1-wt_l) .* ForceFreeStates_results.u_store[ resnum, :, 1, il_l] .+
+                   wt_l  .* ForceFreeStates_results.u_store[ resnum, :, 1, ir_l]
+        ud_l = (1-wt_l) .* ForceFreeStates_results.ud_store[resnum, :, 1, il_l] .+
+                   wt_l  .* ForceFreeStates_results.ud_store[resnum, :, 1, ir_l]
+        u_r  = (1-wt_r) .* ForceFreeStates_results.u_store[ resnum, :, 1, il_r] .+
+                   wt_r  .* ForceFreeStates_results.u_store[ resnum, :, 1, ir_r]
+        ud_r = (1-wt_r) .* ForceFreeStates_results.ud_store[resnum, :, 1, il_r] .+
+                   wt_r  .* ForceFreeStates_results.ud_store[resnum, :, 1, ir_r]
+
+        q_l = equil.profiles.q_spline(lpsi);  q1_l = equil.profiles.q_deriv(lpsi)
+        q_r = equil.profiles.q_spline(rpsi);  q1_r = equil.profiles.q_deriv(rpsi)
+        singfac_l = m_res - nn * q_l
+        singfac_r = m_res - nn * q_r
+
+        jump_vec = Vector{ComplexF64}(undef, numpert_total)
+        for k in 1:numpert_total
+            ck    = @view C_coeffs[:, k]
+            xsp_l  = dot(u_l,  ck);  xsp1_l = dot(ud_l, ck)
+            xsp_r  = dot(u_r,  ck);  xsp1_r = dot(ud_r, ck)
+            bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
+            bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
+            jump_vec[k] = bwp1_r - bwp1_l
+            # C_penetrated_field: midpoint of b^ψ at lpsi/rpsi divided by area.
+            # Fortran: gpeq_interp_singsurf/sol evaluates bwp_mn spline at respsi  (gpout.f line 637)
+            b_l = chi1 * singfac_l * 2π * im * xsp_l
+            b_r = chi1 * singfac_r * 2π * im * xsp_r
+            state.C_penetrated_field[row, k] = (b_l + b_r) / 2 / area
         end
 
         state.C_delta_prime[row, :]      = jump_vec ./ (twopi * chi1)
         state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
-        state.C_resonant_flux[row, :]    = (L_mm / (twopi * nn * area)) .* state.C_resonant_current[row, :]
+        # No /area here — Fortran singflx = L*fkaxmn has no area (gpout.f line 632)
+        state.C_resonant_flux[row, :]    = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
         if abs(shear) > 1e-10
             state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* state.C_resonant_flux[row, :]
-        end
-
-        # C_penetrated_field: loop required (reads u_store[resnum, j, ...] per forcing mode j)
-        for j in 1:numpert_total
-            state.C_penetrated_field[row, j] = interpolate_field_at_surface(
-                ForceFreeStates_results, sing_surf.psifac, resnum, j, equil, m_res, nn
-            ) / area
         end
 
         state.rational_psi[row]          = sing_surf.psifac
@@ -309,6 +359,71 @@ function interpolate_field_at_surface(
 end
 
 """
+    compute_bwp1_mn(
+        ForceFreeStates_results::OdeState,
+        psi::Float64,
+        mode_idx::Int,
+        forcing_idx::Int,
+        equil::Equilibrium.PlasmaEquilibrium,
+        n_mode::Int,
+        m_mode::Int
+    )::ComplexF64
+
+Compute `∂b^ψ/∂ψ` at arbitrary flux surface for a given mode.
+
+Implements Fortran GPEC's `bwp1_mn` formula from `gpeq.f` lines 106–107:
+
+    bwp1_mn = 2πi·χ₁·(singfac·∂ξ_ψ/∂ψ − n·q'·ξ_ψ)
+
+where:
+- `ξ_ψ` = displacement (u_store[:, :, 1, :])
+- `∂ξ_ψ/∂ψ` = displacement derivative (ud_store[:, :, 1, :])
+- `singfac = m − n·q(ψ)`
+- `q'` = dq/dψ
+
+This is used in the delta-prime calculation: the jump
+`bwp1_mn(rpsi) - bwp1_mn(lpsi)` normalized by `2π·χ₁` gives Δ'.
+"""
+function compute_bwp1_mn(
+    ForceFreeStates_results::OdeState,
+    psi::Float64,
+    mode_idx::Int,
+    forcing_idx::Int,
+    equil::Equilibrium.PlasmaEquilibrium,
+    n_mode::Int,
+    m_mode::Int
+)::ComplexF64
+    psi_store = ForceFreeStates_results.psi_store[1:ForceFreeStates_results.step]
+    idx_right = findfirst(p -> p >= psi, psi_store)
+
+    if idx_right === nothing
+        idx_left  = ForceFreeStates_results.step - 1
+        idx_right = ForceFreeStates_results.step
+    elseif idx_right == 1
+        idx_left  = 1
+        idx_right = 2
+    else
+        idx_left = idx_right - 1
+    end
+
+    psi_left  = psi_store[idx_left]
+    psi_right = psi_store[idx_right]
+    weight    = (psi - psi_left) / (psi_right - psi_left)
+
+    xsp  = (1.0 - weight) * ForceFreeStates_results.u_store[ mode_idx, forcing_idx, 1, idx_left] +
+                   weight  * ForceFreeStates_results.u_store[ mode_idx, forcing_idx, 1, idx_right]
+    xsp1 = (1.0 - weight) * ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_left] +
+                   weight  * ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_right]
+
+    chi1    = 2π * equil.psio
+    q       = equil.profiles.q_spline(psi)
+    q1      = equil.profiles.q_deriv(psi)
+    singfac = m_mode - n_mode * q
+
+    return 2π * im * chi1 * (singfac * xsp1 - n_mode * q1 * xsp)
+end
+
+"""
     compute_current_density(
         equil::Equilibrium.PlasmaEquilibrium,
         psi::Float64
@@ -362,9 +477,7 @@ function compute_current_density(
     F_tor = equil.profiles.F_spline(psi)  # Toroidal field function F = R*B_tor times 2π
     q = equil.profiles.q_spline(psi)      # Safety factor
 
-    # Magnetic axis location
     ro = equil.ro
-    zo = equil.zo
 
     # Number of theta points for integration
     # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
@@ -478,119 +591,93 @@ end
         grri::Matrix{Float64},
         grre::Matrix{Float64},
         ffs_intr::ForceFreeStatesInternal,
-        intr::PerturbedEquilibriumInternal
+        nn::Int,
+        ν::Vector{Float64}
     )::Matrix{ComplexF64}
 
 Compute surface inductance matrix from Green's functions at flux surface.
 
-This implements the full GPEC gpvacuum_flxsurf algorithm (gpvacuum.f line 299-331):
+Implements the GPEC gpvacuum_flxsurf algorithm (gpvacuum.f lines 299–331).
 
- 1. For each mode, apply Green's functions to unit flux
- 2. Compute surface current from potential jump: kax = (chi - che) / μ₀
- 3. Fourier transform to mode space
- 4. Return inductance: L_surf = flux * inv(current)
+The Julia vacuum code uses SFL Fourier basis `cos(m*θ - n*ν)` in the column transform,
+so the row DFT must apply the matching toroidal phase correction `exp(-i*n*ν)` before
+the DFT (matching Fortran's `EXP(-ifac*nn*dphi)` in gpvacuum_flxsurf lines 308–309).
 
 ## Arguments
 
-  - `grri`: Interior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
-  - `grre`: Exterior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
+  - `grri`: Interior Green's function [2*mtheta, 2*mpert] (GROUPED: cos cols 1:mpert, sin cols mpert+1:2*mpert)
+  - `grre`: Exterior Green's function [2*mtheta, 2*mpert]
   - `ffs_intr`: ForceFreeStates internal state
-  - `intr`: PerturbedEquilibrium internal state with mode arrays
+  - `nn`: Toroidal mode number
+  - `ν`: Toroidal angle offset on the vacuum theta grid [mtheta]
 
 ## Returns
 
-Surface inductance matrix [numpert_total, numpert_total]
-
-## GPEC Reference
-
-```fortran
-DO i=1,mpert
-   vbwp_mn=0; vbwp_mn(i)=1.0
-   chi_fun = grri * vbwp_mn
-   che_fun = grre * vbwp_mn
-   kax_fun = (chi_fun - che_fun) / mu0
-   CALL iscdftf(mfac, mpert, kax_fun, mthsurf, fkaxmats(:,i))
-ENDDO
-fsurf_indmats = fflxmats * inv(fkaxmats)
-```
+Surface inductance matrix [mpert × mpert]
 """
 @with_pool pool function compute_surface_inductance_from_greens(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
     ffs_intr::ForceFreeStatesInternal,
-    intr::PerturbedEquilibriumInternal
+    nn::Int,
+    ν::Vector{Float64},
 )::Matrix{ComplexF64}
     mpert = ffs_intr.mpert
     mtheta = size(grri, 1) ÷ 2
-
-    # Physical constant
     μ₀ = 4π * 1e-7
 
-    # Create Fourier transform object
     ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
 
-    # Initialize matrices (mpert x mpert for single toroidal mode number)
-    # Green's functions are computed for a specific n, so inductance is only over poloidal modes
-    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+    flux_matrix    = zeros!(pool, ComplexF64, mpert, mpert)
     current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
 
-    # Pre-allocate loop buffers from pool
-    vbwp_mn = zeros!(pool, ComplexF64, mpert)
-    chi_theta = zeros!(pool, Float64, mtheta)
-    che_theta = zeros!(pool, Float64, mtheta)
-    kax_theta = zeros!(pool, Float64, mtheta)
+    grri_surf = @view grri[1:mtheta, :]
+    grre_surf = @view grre[1:mtheta, :]
 
-    # For each poloidal mode, compute surface current from Green's functions
+    kax_re = zeros!(pool, Float64, mtheta)
+    kax_im = zeros!(pool, Float64, mtheta)
+
+    # Toroidal phase correction: exp(-i*n*ν) matching Fortran gpvacuum_flxsurf line 308-309
+    # EXP(-ifac*nn*dphi). Precompute since it's the same for all modes.
+    cos_nν = cos.(nn .* ν)
+    sin_nν = sin.(nn .* ν)
+
     for i in 1:mpert
-        # Unit flux for mode i
-        vbwp_mn .= 0.0
-        vbwp_mn[i] = 1.0
+        flux_matrix[i, i] = 1.0
 
-        # Apply Green's functions using same approach as ResponseMatrices.jl
-        apply_green_function!(chi_theta, grri, vbwp_mn)
-        apply_green_function!(che_theta, grre, vbwp_mn)
+        for k in 1:mtheta
+            kax_re[k] = (grri_surf[k, i]        + grre_surf[k, i])        / (μ₀ * (2π)^2)
+            kax_im[k] = (grri_surf[k, mpert+i]  + grre_surf[k, mpert+i])  / (μ₀ * (2π)^2)
+        end
 
-        # Surface current from potential jump
-        @. kax_theta = (chi_theta - che_theta) / μ₀
+        # Apply exp(-i*n*ν): (kax_re - i*kax_im)*(cos(nν) - i*sin(nν))
+        kax_re_corr = kax_re .* cos_nν .- kax_im .* sin_nν
+        kax_im_corr = kax_re .* sin_nν .+ kax_im .* cos_nν
 
-        # Transform back to Fourier mode space
-        kax_modes = ft(kax_theta)
-
-        # Store in matrices
-        flux_matrix[:, i] = vbwp_mn
-        current_matrix[:, i] = kax_modes
+        current_matrix[:, i] = (ft(kax_re_corr) .- im .* ft(kax_im_corr)) ./ mtheta
     end
 
-    # Compute surface inductance: L_surf = flux * inv(current)
-    # Initialize L_surf outside try-catch for scoping
+    # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
     L_surf = zeros(ComplexF64, mpert, mpert)
 
-    # Check matrix condition before inversion
     current_mag = maximum(abs.(current_matrix))
-    current_min = minimum(abs.(current_matrix[abs.(current_matrix) .> 1e-15]))
 
     if current_mag < 1e-15
         @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
-        @warn "  This indicates grri and grre are identical or Green's functions failed." maxlog=1
-        # Fallback: diagonal approximation
         for i in 1:mpert
             L_surf[i, i] = μ₀ * 1e-6
         end
     else
         try
-            # Regularization for numerical stability
             regularization = 1e-12 * current_mag
             current_reg = current_matrix + regularization * I
 
             L_surf = flux_matrix * inv(current_reg)
 
-            # Hermitianize
+            # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
             L_surf = 0.5 * (L_surf + L_surf')
         catch e
             @warn "Surface inductance inversion failed: $e" maxlog=1
-            @warn "  Current matrix magnitude: $current_mag, min non-zero: $current_min" maxlog=1
-            @warn "  Check if Green's functions are computed correctly." maxlog=1
-            # Fallback: diagonal approximation
             for i in 1:mpert
                 L_surf[i, i] = μ₀ * 1e-6
             end
@@ -598,79 +685,6 @@ fsurf_indmats = fflxmats * inv(fkaxmats)
     end
 
     return L_surf
-end
-
-"""
-    compute_singular_flux(
-        current::ComplexF64,
-        vac_data::VacuumData,
-        ffs_intr::ForceFreeStatesInternal,
-        intr::PerturbedEquilibriumInternal,
-        sing_surf::ForceFreeStates.SingType,
-        mode_idx::Int,
-        nn::Int
-    )::ComplexF64
-
-Compute singular flux from resonant current using surface inductance.
-
-Uses surface inductance matrix at the singular surface:
-Φ = L_surf * I
-
-where L_surf is computed from Green's functions stored in sing_surf.
-
-## GPEC Formula
-
-```fortran
-fkaxmn(resnum) = singcurs(ising,i) / (twopi*nn)
-singflx_mn = MATMUL(fsurfindmats(ising,:,:), fkaxmn)
-```
-
-## Implementation
-
-Uses surface inductance matrix computed from pre-stored Green's functions.
-The Green's functions (grri, grre) are calculated at each singular surface
-during initialization and stored in the sing_surf struct for efficiency.
-"""
-function compute_singular_flux(
-    current::ComplexF64,
-    vac_data::VacuumData,
-    ffs_intr::ForceFreeStatesInternal,
-    intr::PerturbedEquilibriumInternal,
-    sing_surf::ForceFreeStates.SingType,
-    mode_idx::Int,
-    nn::Int
-)::ComplexF64
-    if abs(nn) == 0
-        return 0.0 + 0.0im
-    end
-
-    # Get mode numbers for this index
-    mpert = ffs_intr.mpert
-    mlow = ffs_intr.mlow
-    m_mode = intr.m_modes[mode_idx]
-
-    # Poloidal mode index within mpert range
-    m_idx = m_mode - mlow + 1
-
-    # Build current vector (size mpert for single toroidal mode)
-    # L_surf is mpert x mpert since Green's functions are for single n
-    current_vector = zeros(ComplexF64, mpert)
-    current_vector[m_idx] = current / (2π * nn)
-
-    # Compute surface inductance from stored Green's functions
-    # These were pre-computed at the singular surface location
-    L_surf = compute_surface_inductance_from_greens(
-        sing_surf.grri,
-        sing_surf.grre,
-        ffs_intr,
-        intr
-    )
-
-    # Compute flux: Φ = L * I
-    flux_vector = L_surf * current_vector
-
-    # Return flux at resonant mode
-    return flux_vector[m_idx]
 end
 
 """
@@ -717,7 +731,6 @@ function compute_surface_area(
 
     # Magnetic axis location
     ro = equil.ro
-    zo = equil.zo
 
     # Number of theta points for integration
     mthsurf = length(equil.rzphi_xs) - 1
