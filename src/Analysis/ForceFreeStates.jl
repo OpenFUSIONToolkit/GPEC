@@ -39,11 +39,11 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     mhigh = mlow + mpert - 1
     dW = isempty(et) ? nothing : et[1]
     title_str = isnothing(dW) ? "Least stable mode" :
-        "Least stable mode, dW = $(round(real(dW), sigdigits=4))"
+        "Least stable mode, δW = $(round(real(dW), sigdigits=4))"
 
     p = plot(;
-        xlabel=L"\psi_N",
-        ylabel=L"|\xi_\psi|",
+        xlabel="ψₙ",
+        ylabel="|ξ^ψ|",
         title=title_str,
         left_margin=5Plots.mm,
         bottom_margin=5Plots.mm
@@ -166,8 +166,8 @@ function plot_stability_criterion(h5path; save_path=nothing)
 
     p = plot(
         psi, crit;
-        xlabel=L"\psi_N",
-        ylabel=L"|D_c|",
+        xlabel="ψₙ",
+        ylabel="|Dᶜ|",
         title="Fixed-boundary stability",
         legend=false,
         left_margin=5Plots.mm,
@@ -338,7 +338,7 @@ function plot_delta_prime(h5path; save_path=nothing)
 
     p = scatter(
         psi_sing, dp_real;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="Re(Δ')",
         title="Tearing stability Δ'",
         legend=false,
@@ -429,7 +429,7 @@ function plot_singular_surfaces(h5path; save_path=nothing)
 
     p_q = plot(
         xs, q_profile;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="q",
         title="Safety factor and rational surfaces",
         legend=false,

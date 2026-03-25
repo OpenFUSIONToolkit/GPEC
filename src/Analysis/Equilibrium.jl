@@ -95,7 +95,7 @@ function plot_qprofile(h5path; show_singular=true, save_path=nothing)
 
     p = plot(
         xs, q;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="q",
         title="",
         legend=false,
@@ -148,7 +148,7 @@ function plot_pressure_profile(h5path; save_path=nothing)
 
     p = plot(
         xs, mu0p;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="μ₀p",
         title="",
         legend=false,
@@ -189,7 +189,7 @@ function plot_f_profile(h5path; save_path=nothing)
 
     p = plot(
         xs, twopif;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="2πF",
         title="",
         legend=false,
@@ -274,7 +274,7 @@ function plot_flux_surfaces_h5(h5path; n_psi=11, n_theta=18, save_path=nothing)
         plot!(p, R_grid[:, itheta], Z_grid[:, itheta];
             color=:tomato, linewidth=0.8, label=label)
     end
-    # Draw rational surface flux contours in red, annotated at the outboard midplane
+    # Draw rational surface flux contours in red, annotated at the bottom (min Z) of each
     for s in 1:msing
         idx = argmin(abs.(xs_rz .- psi_sing[s]))
         q_label = abs(q_sing[s] - round(q_sing[s])) < 0.05 ?
@@ -282,7 +282,9 @@ function plot_flux_surfaces_h5(h5path; n_psi=11, n_theta=18, save_path=nothing)
         plot!(p, [R_grid[idx, :]; R_grid[idx, 1]], [Z_grid[idx, :]; Z_grid[idx, 1]];
             color=:red, linewidth=1.5,
             label=s == 1 ? "Rational surface" : "")
-        annotate!(p, R_grid[idx, 1], Z_grid[idx, 1], text(" $q_label", 7, :left, :red))
+        itheta_bot = argmin(Z_grid[idx, :])
+        annotate!(p, R_grid[idx, itheta_bot], Z_grid[idx, itheta_bot],
+            text(" $q_label", 7, :left, :red))
     end
 
     isnothing(save_path) || savefig(p, save_path)
@@ -322,7 +324,7 @@ function plot_gse_by_theta(h5path; n_theta_lines=8, save_path=nothing)
     theta_indices = round.(Int, range(1, ntheta; length=n_theta_lines))
 
     p = plot(;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="GSE error",
         title="",
         yscale=:log10,
@@ -379,7 +381,7 @@ function plot_gse_integrated(h5path; save_path=nothing)
 
     p = plot(
         xs, vec(errlogi);
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="log₁₀(integrated GSE)",
         title="Flux-surface-integrated Grad-Shafranov error",
         legend=false,

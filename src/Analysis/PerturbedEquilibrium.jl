@@ -49,7 +49,7 @@ function plot_resonant_flux(h5path; save_path=nothing)
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    p = plot(; xlabel=L"\psi_N", ylabel="|Φ_res|",
+    p = plot(; xlabel="ψₙ", ylabel="|Φ_res|",
         title="Resonant flux |Φ_res| per surface", legend=:outertopright,
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
 
@@ -102,7 +102,7 @@ function plot_island_widths(h5path; save_path=nothing)
 
     p = scatter(
         psi_sing, island_hw;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="w/2",
         title="Island half-widths",
         legend=false,
@@ -157,7 +157,7 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
 
     p = scatter(
         psi_sing, chirikov;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="K (Chirikov)",
         title="Chirikov overlap parameter",
         legend=false,
@@ -213,7 +213,7 @@ function plot_pe_delta_prime(h5path; save_path=nothing)
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    p = plot(; xlabel=L"\psi_N", ylabel="Re(Δ')",
+    p = plot(; xlabel="ψₙ", ylabel="Re(Δ')",
         title="Tearing stability Δ' (PE)", legend=:outertopright,
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
@@ -268,6 +268,19 @@ function plot_resonant_field(h5path; save_path=nothing)
     p4 = plot_island_widths(h5path)
     p5 = plot_chirikov_parameter(h5path)
 
+    # Move outer legends inside so all panels have the same right margin
+    for p in (p1, p2, p3)
+        plot!(p; title="", legend=:topright)
+    end
+    for p in (p4, p5)
+        plot!(p; title="")
+    end
+
+    hide_xaxis!(p) = plot!(p; xlabel="", xformatter=_->"", bottom_margin=1Plots.mm)
+    for p in (p1, p2, p3, p4)
+        hide_xaxis!(p)
+    end
+
     p = plot(p1, p2, p3, p4, p5; layout=(5, 1), size=(900, 1600))
 
     isnothing(save_path) || savefig(p, save_path)
@@ -286,7 +299,7 @@ function _plot_resonant_current(h5path)
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    p = plot(; xlabel=L"\psi_N", ylabel="|I_res|",
+    p = plot(; xlabel="ψₙ", ylabel="|I_res|",
         title="Resonant current |I_res| per surface", legend=:outertopright,
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
 
@@ -365,7 +378,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     # Top panel: line plot per mode — only label resonant range m ∈ [0, nhigh·q95)
     m_max_legend = nhigh * q95
     p1 = plot(;
-        xlabel=L"\psi_N",
+        xlabel="ψₙ",
         ylabel="|$(component)|",
         title="Mode spectrogram: $(component)",
         legend=:outertopright,
@@ -384,7 +397,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     p2 = heatmap(
         collect(m_vals), psi_response, abs.(data_mn);
         xlabel="m",
-        ylabel=L"\psi_N",
+        ylabel="ψₙ",
         title="",
         colorbar_title="|$(component)|",
         left_margin=5Plots.mm,
