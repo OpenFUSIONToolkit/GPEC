@@ -34,6 +34,7 @@ function main()
     println("="^60)
 
     results = Tuple{Int,Float64}[]
+    failures = Tuple{Int,String}[]
     for n in 1:15
         cmd = addenv(
             `$(Base.julia_cmd()) --startup-file=no -t $n --project=$proj $worker $example_dir`,
@@ -45,22 +46,28 @@ function main()
         )
         @printf("  Running -t %2d ... ", n)
         flush(stdout)
-        out = read(cmd, String)
-        lines = filter(!isempty, strip.(split(out, '\n')))
-        t = nothing
-        for line in reverse(lines)
-            v = tryparse(Float64, line)
-            if v !== nothing
-                t = v
-                break
+        try
+            out = read(cmd, String)
+            lines = filter(!isempty, strip.(split(out, '\n')))
+            t = nothing
+            for line in reverse(lines)
+                v = tryparse(Float64, line)
+                if v !== nothing
+                    t = v
+                    break
+                end
             end
+            t === nothing && error("Could not parse timing from worker stdout:\n$out")
+            t = t::Float64
+            push!(results, (n, t))
+            @printf("%.4f s\n", t)
+        catch err
+            push!(failures, (n, sprint(showerror, err)))
+            @printf("FAILED\n")
         end
-        t === nothing && error("Could not parse timing from worker stdout:\n$out")
-        t = t::Float64
-        push!(results, (n, t))
-        @printf("%.4f s\n", t)
     end
 
+    isempty(results) && error("All thread counts failed; no timings to rank.")
     sorted = sort(results; by=x -> x[2], rev=true)
 
     println()
@@ -76,6 +83,10 @@ function main()
 
     best = argmin(x -> x[2], results)
     @printf("\nFastest: %d threads (%.6f s)\n", best[1], best[2])
+    if !isempty(failures)
+        failed_threads = join(first.(failures), ", ")
+        @printf("Failed thread counts (excluded): %s\n", failed_threads)
+    end
 end
 
 main()

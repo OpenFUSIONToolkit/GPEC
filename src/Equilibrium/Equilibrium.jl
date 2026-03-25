@@ -101,11 +101,48 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
     for iside in 1:2
         hint2d = (Ref(1), Ref(1))
-        theta = find_zero(
-            (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
-            theta, Roots.Newton()
-        )
+        function eta_match(theta_g)
+            theta_g + pe.rzphi_offset((psi_edge, theta_g); hint=hint2d) - eta0
+        end
+        function eta_match_deriv(theta_g)
+            1.0 + pe.rzphi_offset((psi_edge, theta_g); deriv=Val((0, 1)), hint=hint2d)
+        end
+        theta = try
+            find_zero((eta_match, eta_match_deriv), theta, Roots.Newton(); atol=1e-12, rtol=1e-12, maxevals=500)
+        catch err
+            thetas = collect(range(0.0, 1.0; length=513))
+            vals = map(eta_match, thetas)
+            br = findfirst(i -> begin
+                a = vals[i]
+                b = vals[i+1]
+                isfinite(a) && isfinite(b) && (a == 0.0 || b == 0.0 || a * b < 0.0)
+            end, 1:(length(thetas)-1))
+            if br !== nothing
+                try
+                    find_zero(eta_match, (thetas[br], thetas[br+1]), Roots.Brent(); atol=1e-12, rtol=1e-12, maxevals=1000)
+                catch
+                    fi = findall(isfinite, vals)
+                    if !isempty(fi)
+                        j = fi[argmin(abs.(vals[fi]))]
+                        @warn "η=$eta0 inboard/outboard θ: Brent failed after Newton failed; using θ=$(thetas[j]) (min |res| on grid). $err"
+                        thetas[j]
+                    else
+                        @warn "η=$eta0 separatrix θ: no finite residuals on grid; keeping initial θ=$theta. $err"
+                        theta
+                    end
+                end
+            else
+                fi = findall(isfinite, vals)
+                if !isempty(fi)
+                    j = fi[argmin(abs.(vals[fi]))]
+                    @warn "η=$eta0 separatrix θ: Newton failed, no sign change; using θ=$(thetas[j]) (min |res|). $err"
+                    thetas[j]
+                else
+                    @warn "η=$eta0 separatrix θ: Newton failed, all NaN on grid; keeping θ=$theta. $err"
+                    theta
+                end
+            end
+        end
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
@@ -171,8 +208,37 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
                    (rfac2 - rfac_local * phase1^2) * sin_phase  # ∂²z/∂θ²
         end
 
-        theta = find_zero((z_deriv, z_deriv2), theta, Roots.Newton();
-            atol=1e-12, rtol=1e-12, maxevals=1000)
+        theta = try
+            find_zero((z_deriv, z_deriv2), theta, Roots.Newton(); atol=1e-12, rtol=1e-12, maxevals=1000)
+        catch err
+            # Newton can fail on marginal geometries; fall back to a robust edge scan + Brent.
+            thetas = collect(range(0.0, 1.0; length=257))
+            vals = map(z_deriv, thetas)
+            idx = findfirst(i -> begin
+                a = vals[i]
+                b = vals[i+1]
+                isfinite(a) && isfinite(b) && (a == 0.0 || b == 0.0 || a * b < 0.0)
+            end, 1:(length(thetas)-1))
+            if idx !== nothing
+                try
+                    find_zero(z_deriv, (thetas[idx], thetas[idx+1]), Roots.Brent(); atol=1e-12, rtol=1e-12, maxevals=2000)
+                catch
+                    @warn "Separatrix extremum root find fallback failed on side=$iside; using initial theta=$theta. Original error: $err"
+                    theta
+                end
+            else
+                finite_idxs = findall(isfinite, vals)
+                if !isempty(finite_idxs)
+                    imin = argmin(abs.(vals[finite_idxs]))
+                    @warn "Separatrix extremum Newton failed on side=$iside; using nearest sampled theta. Original error: $err"
+                    thetas[finite_idxs[imin]]
+                else
+                    @warn "Separatrix extremum root find produced no finite samples on side=$iside; using initial theta=$theta. Original error: $err"
+                    theta
+                end
+            end
+        end
+        z_deriv(theta)  # refresh cached rfac/cos_phase/z_val at final theta
 
         rext[iside] = pe.ro + rfac[] * cos_phase[]
         zsep[iside] = zext[iside] = z_val[]

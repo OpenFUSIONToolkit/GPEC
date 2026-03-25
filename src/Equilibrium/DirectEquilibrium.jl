@@ -851,16 +851,10 @@ robustness.
             end
         end
     end
-    t_eqfun_nodes = @elapsed if nt > 1
-        Threads.@threads for tid in 1:nt
-            for ipsi in tid:nt:(mpsi+1)
-                _fill_eqfun_for_ipsi!(ipsi)
-            end
-        end
-    else
-        for ipsi in 1:(mpsi+1)
-            _fill_eqfun_for_ipsi!(ipsi)
-        end
+    # Sequential only: concurrent reads of nodal_derivs across several 2D splines are not
+    # reliably thread-safe in FastInterpolations; parallel fill caused clustered NaNs and downstream root-find failures.
+    t_eqfun_nodes = @elapsed for ipsi in 1:(mpsi+1)
+        _fill_eqfun_for_ipsi!(ipsi)
     end
 
     @inbounds for ipsi in 1:(mpsi+1)
