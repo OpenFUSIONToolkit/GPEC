@@ -634,44 +634,52 @@ robustness.
     mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
-    sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
-    rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
+    nt = Threads.nthreads()
+    # Avoid the Float64 pool under @threads: concurrent pool access can corrupt arrays.
+    sq_nodes = nt > 1 ? zeros(Float64, mpsi + 1, 4) : zeros!(pool, Float64, mpsi + 1, 4)
+    rzphi_nodes = nt > 1 ? zeros(Float64, mpsi + 1, mtheta + 1, 4) : zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
 
-    t_flux_surfaces = @elapsed if Threads.nthreads() > 1
-        Threads.@threads for ipsi in 1:(mpsi+1)
-            y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2; use_pool=false)
+    t_flux_surfaces = @elapsed if nt > 1
+        # Splines are not safe for concurrent eval on one instance — deepcopy per thread.
+        # Strided loops bind one profile per OS thread for the whole inner loop (no threadid() mixups).
+        raw_per_thread = [deepcopy(raw_profile) for _ in 1:nt]
+        Threads.@threads for tid in 1:nt
+            rp = raw_per_thread[tid]
+            for ipsi in tid:nt:(mpsi+1)
+                y_out, bfield = fieldline_int(psi_nodes[ipsi], rp, ro, zo, rs2; use_pool=false)
 
-            npt = size(y_out, 1)
-            ff_x_nodes = Vector{Float64}(undef, npt)
-            @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+                npt = size(y_out, 1)
+                ff_x_nodes = Vector{Float64}(undef, npt)
+                @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
 
-            ff_fs_nodes = Matrix{Float64}(undef, npt, 4)
-            @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
-            @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-            @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
-            @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+                ff_fs_nodes = Matrix{Float64}(undef, npt, 4)
+                @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+                @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+                @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+                @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
 
-            ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+                ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
 
-            ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
-            ff_deriv = deriv1(ff_interp)
+                ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
+                ff_deriv = deriv1(ff_interp)
 
-            ff_val = Vector{Float64}(undef, 4)
-            ff_deriv_val = Vector{Float64}(undef, 4)
-            for itheta in 1:(mtheta+1)
-                theta = theta_nodes[itheta]
-                ff_interp(ff_val, theta)
-                ff_deriv(ff_deriv_val, theta)
-                rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
-                rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
-                rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
-                rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+                ff_val = Vector{Float64}(undef, 4)
+                ff_deriv_val = Vector{Float64}(undef, 4)
+                for itheta in 1:(mtheta+1)
+                    theta = theta_nodes[itheta]
+                    ff_interp(ff_val, theta)
+                    ff_deriv(ff_deriv_val, theta)
+                    rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+                    rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+                    rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+                    rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+                end
+
+                sq_nodes[ipsi, 1] = bfield.f * 2π
+                sq_nodes[ipsi, 2] = bfield.p
+                sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
+                sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
             end
-
-            sq_nodes[ipsi, 1] = bfield.f * 2π
-            sq_nodes[ipsi, 2] = bfield.p
-            sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
-            sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
         end
     else
         ff_val = zeros!(pool, Float64, 4)
@@ -711,6 +719,12 @@ robustness.
             sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
             rewind!(pool, Float64)
         end
+    end
+
+    # θ ∈ [0,1] is periodic; first/last nodes are the same poloidal location. FastInterpolations
+    # PeriodicBC requires exact nodal match on dim 2 — align after parallel fills (also fixes tiny θ=0 vs θ=1 eval drift).
+    @inbounds for ipsi in 1:(mpsi+1)
+        @views rzphi_nodes[ipsi, end, :] .= rzphi_nodes[ipsi, 1, :]
     end
 
     # Temporary splines for q0 extrapolation and optional newq0 revision
@@ -818,6 +832,10 @@ robustness.
                 eqfun_fs_nodes[ipsi, itheta, 3] = 0.0
             end
         end
+    end
+
+    @inbounds for ipsi in 1:(mpsi+1)
+        @views eqfun_fs_nodes[ipsi, end, :] .= eqfun_fs_nodes[ipsi, 1, :]
     end
 
     t_eqfun_interpolants = @elapsed begin
