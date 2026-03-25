@@ -410,7 +410,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
     for ipsi in 1:(mpsi+1)
-        rfac = @. sqrt(equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, :])
+        rfac = @. sqrt(max(0.0, equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, :]))
         angle = @. 2π * (equil.rzphi_ys + equil.rzphi_offset.nodal_derivs.partials[1, ipsi, :])
         r[ipsi, :] .= ro .+ rfac .* cos.(angle)
         z[ipsi, :] .= zo .+ rfac .* sin.(angle)
@@ -420,21 +420,29 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux_fs = zeros(Float64, mpsi + 1, mtheta + 1, 2)
     flux_fsx = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # x-derivatives
     flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # y-derivatives
+    # Avoid 0/0 at magnetic axis (f1 = r² → 0) and div by zero in Jacobian f4
+    _gse_f1_div = 1e-20
+    _gse_f4_min = 1e-40
     for ipsi in 1:(mpsi+1)
         for itheta in 1:(mtheta+1)
             f1 = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
-            f2 = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
             f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
             fy1 = equil.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
             fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
             fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta]
             fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
 
-            flux_fs[ipsi, itheta, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
-            flux_fs[ipsi, itheta, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
-
-            flux_fs[ipsi, itheta, 1] *= 2π * psio / f4
-            flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
+            if !(isfinite(f1) && isfinite(f4) && isfinite(fy1) && isfinite(fy2) && isfinite(fx1) && isfinite(fx2)) || abs(f4) < _gse_f4_min
+                flux_fs[ipsi, itheta, 1] = 0.0
+                flux_fs[ipsi, itheta, 2] = 0.0
+                continue
+            end
+            f1d = max(f1, _gse_f1_div)
+            scale = (2π * psio) / f4
+            t1 = fy1^2 / (4π^2 * f1d) + (1 + fy2)^2 * 4 * f1
+            t2 = fx1 * fy1 / (4π^2 * f1d) + fx2 * (1 + fy2) * 4 * f1
+            flux_fs[ipsi, itheta, 1] = t1 * scale
+            flux_fs[ipsi, itheta, 2] = t2 * scale
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
@@ -442,15 +450,16 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
 
-    # Compute flux derivatives at all grid points for diagnostics
-    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
+    # Separate 2D hints per interpolant — sharing one hint between flux1 and flux2 can corrupt search state.
+    hint_flux1 = (Ref(1), Ref(1))
+    hint_flux2 = (Ref(1), Ref(1))
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
             query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint_flux1)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint_flux2)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint_flux1)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint_flux2)
         end
     end
 
@@ -464,8 +473,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         s2p = profiles.P_deriv(psi; hint=hint)
         for itheta in 1:(mtheta+1)
             f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-            denom = (2π * r[ipsi, itheta])^2
-            source[ipsi, itheta] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
+            rij = r[ipsi, itheta]
+            denom = max((2π * rij)^2, 1e-40)
+            if isfinite(f4) && isfinite(s1) && isfinite(s1p) && isfinite(s2p) && isfinite(rij)
+                source[ipsi, itheta] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
+            else
+                source[ipsi, itheta] = 0.0
+            end
         end
     end
 
@@ -489,6 +503,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix = zeros(Float64, mtheta + 1, 2)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
+        @. fs_matrix = ifelse(isfinite(fs_matrix), fs_matrix, 0.0)
 
         # Compute total integral using FastInterpolations native integration
         itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=PeriodicBC())

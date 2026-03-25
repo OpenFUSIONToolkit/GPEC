@@ -777,14 +777,14 @@ robustness.
     end
 
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
-    t_eqfun_nodes = @elapsed Threads.@threads for ipsi in 1:(mpsi+1)
+    eqfun_nonfinite_warn_count = Ref(0)
+    function _fill_eqfun_for_ipsi!(ipsi::Int)
         q = profiles.q_spline.y[ipsi]
         f_val = profiles.F_spline.y[ipsi]
         v = @MMatrix zeros(Float64, 2, 3)
         for itheta in 1:(mtheta+1)
             theta_norm = theta_nodes[itheta]
-            # Access nodal derivatives from the interpolants (grid points)
-            # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
+            # partials: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
             f = (
                 rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
                 rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
@@ -803,37 +803,70 @@ robustness.
                 rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
                 rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
             )
-            rfac = sqrt(max(0.0, f[1]))  # guard against spline overshoot near separatrix
+            if !(isfinite(f_val) && all(isfinite, f) && all(isfinite, fx) && all(isfinite, fy))
+                c = (eqfun_nonfinite_warn_count[] += 1)
+                if c <= 12
+                    @warn "Non-finite eqfun nodal input at (ipsi, itheta)=($ipsi, $itheta); zeroing cell. Often axis/edge degeneracy — if many core surfaces appear, investigate."
+                elseif c == 13
+                    @warn "Non-finite eqfun nodal inputs: suppressing further per-cell messages (already logged 12 samples)."
+                end
+                eqfun_fs_nodes[ipsi, itheta, :] .= 0.0
+                continue
+            end
+            rfac = sqrt(max(0.0, f[1]))
             eta = 2π * (theta_norm + f[2])
             r = ro + rfac * cos(eta)
             jacfac = f[4]
 
-            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) * d(rfac)/d(psi_norm)
-            v[1, 2] = fx[2] * 2π * rfac                          # 2π*rfac * d(eta)/d(psi_norm)
-            v[1, 3] = fx[3] * r                                   # r * d(phi_s)/d(psi_norm)
-            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) d(rfac)/d(theta_new)
-            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                  # 2π*rfac * d(eta)/d(theta_new)
-            v[2, 3] = fy[3] * r                                   # r * d(phi_s)/d(theta_new)
+            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0
+            v[1, 2] = fx[2] * 2π * rfac
+            v[1, 3] = fx[3] * r
+            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0
+            v[2, 2] = (1.0 + fy[2]) * 2π * rfac
+            v[2, 3] = fy[3] * r
             v33 = 2π * r
             w11 = (jacfac != 0) ? (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac : 0.0
             w12 = (jacfac * rfac != 0) ? -fy[1] * π * r / (rfac * jacfac) : 0.0
+            w11 = isfinite(w11) ? w11 : 0.0
+            w12 = isfinite(w12) ? w12 : 0.0
             delpsi_norm = sqrt(w11^2 + w12^2)
-            modB = sqrt(((2π * psio * delpsi_norm)^2 + f_val^2) / (2π * r)^2)
+            delpsi_norm = isfinite(delpsi_norm) ? delpsi_norm : 0.0
+            r_twopi = 2π * r
+            den_sq = max(r_twopi^2, 1e-60)
+            modB = sqrt(max(0.0, ((2π * psio * delpsi_norm)^2 + f_val^2) / den_sq))
+            modB = isfinite(modB) ? modB : 0.0
 
             eqfun_fs_nodes[ipsi, itheta, 1] = modB
             denom = jacfac * modB^2
-            if abs(denom) > 1e-20
-                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]  # gyrokinetic C1
-                eqfun_fs_nodes[ipsi, itheta, 2] = numerator_2 / denom
-                numerator_3 = v[2, 3] * v33 + q * v33^2                  # gyrokinetic C2
-                eqfun_fs_nodes[ipsi, itheta, 3] = numerator_3 / denom
+            if abs(denom) > 1e-20 && isfinite(denom)
+                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]
+                numerator_3 = v[2, 3] * v33 + q * v33^2
+                val2 = numerator_2 / denom
+                val3 = numerator_3 / denom
+                eqfun_fs_nodes[ipsi, itheta, 2] = isfinite(val2) ? val2 : 0.0
+                eqfun_fs_nodes[ipsi, itheta, 3] = isfinite(val3) ? val3 : 0.0
             else
                 eqfun_fs_nodes[ipsi, itheta, 2] = 0.0
                 eqfun_fs_nodes[ipsi, itheta, 3] = 0.0
             end
         end
     end
+    t_eqfun_nodes = @elapsed if nt > 1
+        Threads.@threads for tid in 1:nt
+            for ipsi in tid:nt:(mpsi+1)
+                _fill_eqfun_for_ipsi!(ipsi)
+            end
+        end
+    else
+        for ipsi in 1:(mpsi+1)
+            _fill_eqfun_for_ipsi!(ipsi)
+        end
+    end
 
+    @inbounds for ipsi in 1:(mpsi+1)
+        @views eqfun_fs_nodes[ipsi, end, :] .= eqfun_fs_nodes[ipsi, 1, :]
+    end
+    @. eqfun_fs_nodes = ifelse(isfinite(eqfun_fs_nodes), eqfun_fs_nodes, 0.0)
     @inbounds for ipsi in 1:(mpsi+1)
         @views eqfun_fs_nodes[ipsi, end, :] .= eqfun_fs_nodes[ipsi, 1, :]
     end
