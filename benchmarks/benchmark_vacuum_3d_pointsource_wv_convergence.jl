@@ -32,7 +32,7 @@ function analytic_two_point_potential_and_normal_derivative(plasma_surf; R0::Flo
     #
     # Neumann data convention:
     #   Vacuum kernels use the oriented (non-unit) normal vector n_vec = ∂r/∂θ × ∂r/∂ζ.
-    #   We compute dχ/dñ = ∇χ · n_vec (no unit normalization).
+    #   We compute dχ/dñ = ∇χ · n_vec (no unit normalization).
     r = plasma_surf.r
     nvec = plasma_surf.normal
     N = size(r, 1)
@@ -89,21 +89,16 @@ function project_modes_with_basis(
     return (conj(exp_mn_basis)' * f_vals) ./ num_pts
 end
 
-function run_wv_pointsource_benchmark(; R0::Float64=5.0, a_minor::Float64=2.0, mtheta_values::AbstractVector{<:Integer}=[12, 24, 32, 48, 64, 96]
+function run_wv_pointsource_benchmark(; R0::Float64=4.0, a_minor::Float64=3.0, mtheta_values::AbstractVector{<:Integer}=[16, 24, 32, 48, 64, 72]
 )
     # Fourier modes
-    # mlow = -5
-    # mpert = 11
-    # nlow = -16
-    # npert = 33
-
-    mlow = -3
-    mpert = 7
-    nlow = -3
-    npert = 7
+    mlow = -4
+    mpert = 9
+    nlow = -10
+    npert = 21
 
     # Observed aspect ratio of the grid
-    aspect_ratio_observed = 2.6
+    aspect_ratio_observed = 1.3
 
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
@@ -145,8 +140,8 @@ function run_wv_pointsource_benchmark(; R0::Float64=5.0, a_minor::Float64=2.0, m
         dchi_dn_amp = reshape(abs.(dchi_dn_modes), mpert, npert)
         push!(mode_spectra, (; mtheta, nzeta, chi_amp, dchi_dn_amp))
 
-        # Vacuum.jl uses: wv = 4π² * (K^{-1}G) in mode space.
-        # With our Neumann convention: chi ≈ (wv / 4π²) * (dchi/dñ)
+        # Vacuum.jl uses: wv = 4π² * (K⁻¹G) in mode space.
+        # With our Neumann convention: chi ≈ (wv / 4π²) * (dchi/dn̂)
         chi_pred = (wv ./ FOUR_PI2) * dchi_dn_modes
 
         # Compute relative error between analytic and predicted chi
@@ -174,24 +169,22 @@ function run_wv_pointsource_benchmark(; R0::Float64=5.0, a_minor::Float64=2.0, m
     outpath = joinpath(@__DIR__, "vacuum_3d_pointsource_wv_convergence.png")
     savefig(plt, outpath)
 
-    # Diagnostic plot: mode amplitudes for analytic chi and dchi/dñ at each resolution
-    nrows = length(mode_spectra)
-    amp_plot = plot(; layout=(nrows, 2), size=(1100, max(320, 260 * nrows)))
+    # Diagnostic plot: Fourier mode amplitudes for chi and dchi/dn at finest resolution
+    spec = mode_spectra[end]
     m_modes = mlow:(mlow+mpert-1)
     n_modes = nlow:(nlow+npert-1)
-    for (i, spec) in enumerate(mode_spectra)
-        chi_plot = log10.(spec.chi_amp .+ eps(Float64))
-        dchi_plot = log10.(spec.dchi_dn_amp .+ eps(Float64))
+    chi_plot = log10.(spec.chi_amp .+ eps(Float64))
+    dchi_plot = log10.(spec.dchi_dn_amp .+ eps(Float64))
 
-        heatmap!(amp_plot[2*i-1], n_modes, m_modes, chi_plot;
-            xlabel="n mode", ylabel="m mode",
-            title="log10|chi_modes| (mtheta=$(spec.mtheta), nzeta=$(spec.nzeta))",
-            colorbar=true)
-        heatmap!(amp_plot[2*i], n_modes, m_modes, dchi_plot;
-            xlabel="n mode", ylabel="m mode",
-            title="log10|dchi_dn_modes| (mtheta=$(spec.mtheta), nzeta=$(spec.nzeta))",
-            colorbar=true)
-    end
+    amp_plot = plot(; layout=(1, 2), size=(1100, 400))
+    heatmap!(amp_plot[1], n_modes, m_modes, chi_plot;
+        xlabel="n mode", ylabel="m mode",
+        title="log10|chi| (mtheta=$(spec.mtheta), nzeta=$(spec.nzeta))",
+        colorbar=true)
+    heatmap!(amp_plot[2], n_modes, m_modes, dchi_plot;
+        xlabel="n mode", ylabel="m mode",
+        title="log10|dchi/dn| (mtheta=$(spec.mtheta), nzeta=$(spec.nzeta))",
+        colorbar=true)
     amp_outpath = joinpath(@__DIR__, "vacuum_3d_pointsource_mode_amplitudes.png")
     savefig(amp_plot, amp_outpath)
 
