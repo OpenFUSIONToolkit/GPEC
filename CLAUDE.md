@@ -475,6 +475,7 @@ This format is used for compiling release notes, so tags should be human-readabl
 
 ### General
 - **Julia version**: 1.11 is the target version
+- **Never remove packages from Project.toml** - If a package fails to load or resolve, run `Pkg.add(...)` or `Pkg.instantiate()` to fix the local environment. Do NOT remove the package from `Project.toml`. The developer works across multiple branches and machines, so environment drift is expected — the right fix is always to update the environment to satisfy the toml, not to trim the toml to match the current environment state.
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
 - **Keep code comments concise** - A comment should be one line where possible. Do not write multi-line block comments explaining the current session's investigation, what was tried, what was wrong before, or why a specific file/path behaves differently. State what the code does and why at a general level. Example of too much detail: a 6-line block explaining that efit_by_inversion uses psilow>0 while CHEASE starts at 0, that the old code was removed, and that spline spikes result. Preferred: `# Replicate Fortran inverse.f: overwrite deta at axis (r²=0) by extrapolating from innermost surfaces.`

@@ -7,6 +7,7 @@ in the `perturbed_equilibrium/` group of a GPEC HDF5 output file.
 module PerturbedEquilibrium
 
 using HDF5
+using LaTeXStrings
 using Plots
 
 # Check that a PE dataset exists and is non-empty.
@@ -19,8 +20,8 @@ end
 """
     plot_resonant_flux(h5path; save_path=nothing)
 
-Bar chart of `|Φ_res|` (normalized resonant flux) per singular surface. One bar series per
-toroidal mode n, labeled by n value.
+Scatter plot of `|Φ_res|` (normalized resonant flux) per singular surface vs ψ_N. One
+marker series per toroidal mode n. Integer-valued q rational surfaces are annotated.
 
 Requires the perturbed equilibrium module to have been run and `singular_coupling/resonant_flux`
 to be present in the HDF5 file.
@@ -42,27 +43,28 @@ function plot_resonant_flux(h5path; save_path=nothing)
     _has_pe_data(h5path, key) ||
         return plot(; title="No resonant flux data — run with perturbed equilibrium enabled", legend=false)
 
-    resonant_flux, q_sing, msing, pe_n = h5open(h5path, "r") do fid
-        read(fid[key]), read(fid["singular/q"]),
+    resonant_flux, psi_sing, q_sing, msing, pe_n = h5open(h5path, "r") do fid
+        read(fid[key]), read(fid["singular/psi"]), read(fid["singular/q"]),
         read(fid["singular/msing"]),
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
-    xticks_arg = (1:msing, labels)
-
-    p = plot(; xlabel="rational surface", ylabel="|Φ_res|",
+    p = plot(; xlabel=L"\psi_N", ylabel="|Φ_res|",
         title="Resonant flux |Φ_res| per surface", legend=:outertopright,
-        left_margin=5Plots.mm, bottom_margin=10Plots.mm)
+        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
         n_rows = findall(==(nn), pe_n)
-        # Sum over poloidal modes for this n
         rf_n = [sum(abs.(resonant_flux[n_rows, s])) for s in 1:msing]
-        bar!(p, 1:msing, rf_n; label="n=$nn", alpha=0.7)
+        scatter!(p, psi_sing, rf_n; label="n=$nn", markersize=7, markerstrokewidth=0)
+        # Annotate integer-q surfaces only (avoids overcrowding for n>1)
+        for s in 1:msing
+            abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
+            annotate!(p, psi_sing[s], rf_n[s],
+                text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
+        end
     end
-    plot!(p; xticks=xticks_arg, xrotation=30)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -71,7 +73,8 @@ end
 """
     plot_island_widths(h5path; save_path=nothing)
 
-Bar chart of island half-width `w/2` per singular surface.
+Scatter plot of island half-width `w/2` per singular surface vs ψ_N.
+Integer-valued q rational surfaces are annotated.
 
 Requires `singular_coupling/island_half_width` in the HDF5 file.
 
@@ -92,24 +95,28 @@ function plot_island_widths(h5path; save_path=nothing)
     _has_pe_data(h5path, key) ||
         return plot(; title="No island width data — run with perturbed equilibrium enabled", legend=false)
 
-    island_hw, q_sing, msing = h5open(h5path, "r") do fid
-        read(fid[key]), read(fid["singular/q"]), read(fid["singular/msing"])
+    island_hw, psi_sing, q_sing, msing = h5open(h5path, "r") do fid
+        read(fid[key]), read(fid["singular/psi"]), read(fid["singular/q"]),
+        read(fid["singular/msing"])
     end
 
-    labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
-
-    p = bar(
-        1:msing, island_hw;
-        xticks=(1:msing, labels),
-        xlabel="rational surface",
+    p = scatter(
+        psi_sing, island_hw;
+        xlabel=L"\psi_N",
         ylabel="w/2",
         title="Island half-widths",
         legend=false,
         color=:steelblue,
-        xrotation=30,
+        markersize=7,
+        markerstrokewidth=0,
         left_margin=5Plots.mm,
-        bottom_margin=10Plots.mm
+        bottom_margin=5Plots.mm
     )
+    for s in 1:msing
+        abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
+        annotate!(p, psi_sing[s], island_hw[s],
+            text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
+    end
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -118,8 +125,9 @@ end
 """
     plot_chirikov_parameter(h5path; save_path=nothing)
 
-Bar chart of the Chirikov overlap parameter per singular surface, with a horizontal reference
-line at K = 1 (island overlap threshold). Bars are colored red when K > 1.
+Scatter plot of the Chirikov overlap parameter per singular surface vs ψ_N, with a horizontal
+reference line at K = 1 (island overlap threshold). Points are colored red when K > 1.
+Integer-valued q rational surfaces are annotated.
 
 Requires `singular_coupling/chirikov_parameter` in the HDF5 file.
 
@@ -140,26 +148,31 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
     _has_pe_data(h5path, key) ||
         return plot(; title="No Chirikov data — run with perturbed equilibrium enabled", legend=false)
 
-    chirikov, q_sing, msing = h5open(h5path, "r") do fid
-        read(fid[key]), read(fid["singular/q"]), read(fid["singular/msing"])
+    chirikov, psi_sing, q_sing, msing = h5open(h5path, "r") do fid
+        read(fid[key]), read(fid["singular/psi"]), read(fid["singular/q"]),
+        read(fid["singular/msing"])
     end
 
-    labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
     colors = [k > 1.0 ? :red : :steelblue for k in chirikov]
 
-    p = bar(
-        1:msing, chirikov;
-        xticks=(1:msing, labels),
-        xlabel="rational surface",
+    p = scatter(
+        psi_sing, chirikov;
+        xlabel=L"\psi_N",
         ylabel="K (Chirikov)",
         title="Chirikov overlap parameter",
         legend=false,
         color=colors,
-        xrotation=30,
+        markersize=7,
+        markerstrokewidth=0,
         left_margin=5Plots.mm,
-        bottom_margin=10Plots.mm
+        bottom_margin=5Plots.mm
     )
     hline!(p, [1.0]; linestyle=:dash, color=:black, label=nothing)
+    for s in 1:msing
+        abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
+        annotate!(p, psi_sing[s], chirikov[s],
+            text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
+    end
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -168,8 +181,9 @@ end
 """
     plot_pe_delta_prime(h5path; save_path=nothing)
 
-Bar chart of `|Δ'|` per singular surface computed by the perturbed equilibrium module
-(from `singular_coupling/delta_prime`). One bar series per toroidal mode n.
+Scatter plot of `Re(Δ')` per singular surface vs ψ_N, computed by the perturbed equilibrium
+module (from `singular_coupling/delta_prime`). One marker series per toroidal mode n.
+Integer-valued q rational surfaces are annotated.
 
 This is complementary to `Analysis.ForceFreeStates.plot_delta_prime`, which uses the FFS
 asymptotic coefficients. The PE result includes the vacuum Green's function contribution.
@@ -193,24 +207,30 @@ function plot_pe_delta_prime(h5path; save_path=nothing)
     _has_pe_data(h5path, key) ||
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
 
-    delta_prime, q_sing, msing, pe_n = h5open(h5path, "r") do fid
-        read(fid[key]), read(fid["singular/q"]), read(fid["singular/msing"]),
+    delta_prime, psi_sing, q_sing, msing, pe_n = h5open(h5path, "r") do fid
+        read(fid[key]), read(fid["singular/psi"]), read(fid["singular/q"]),
+        read(fid["singular/msing"]),
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
-
-    p = plot(; xlabel="rational surface", ylabel="|Δ'|",
+    p = plot(; xlabel=L"\psi_N", ylabel="Re(Δ')",
         title="Tearing stability Δ' (PE)", legend=:outertopright,
-        left_margin=5Plots.mm, bottom_margin=10Plots.mm)
+        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
+    hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
 
     n_vals = unique(pe_n)
     for nn in n_vals
         n_rows = findall(==(nn), pe_n)
-        dp_n = [maximum(abs.(delta_prime[n_rows, s])) for s in 1:msing]
-        bar!(p, 1:msing, dp_n; label="n=$nn", alpha=0.7)
+        dp_n = [real(delta_prime[n_rows[1], s]) for s in 1:msing]
+        colors = [v > 0 ? :red : :steelblue for v in dp_n]
+        scatter!(p, psi_sing, dp_n; label="n=$nn", color=colors,
+            markersize=7, markerstrokewidth=0)
+        for s in 1:msing
+            abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
+            annotate!(p, psi_sing[s], dp_n[s],
+                text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
+        end
     end
-    plot!(p; xticks=(1:msing, labels), xrotation=30)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -219,10 +239,10 @@ end
 """
     plot_resonant_field(h5path; save_path=nothing)
 
-Five-panel summary of resonant coupling quantities at each singular surface:
+Five-panel summary of resonant coupling quantities at each singular surface vs ψ_N:
 
   - `|Φ_res|`: resonant flux (`plot_resonant_flux`)
-  - `|Δ'|`: tearing stability parameter (`plot_pe_delta_prime`)
+  - `Re(Δ')`: tearing stability parameter (`plot_pe_delta_prime`)
   - `|I_res|`: resonant current
   - `w/2`: island half-width (`plot_island_widths`)
   - `K`: Chirikov overlap parameter (`plot_chirikov_parameter`)
@@ -254,30 +274,33 @@ function plot_resonant_field(h5path; save_path=nothing)
     return p
 end
 
-# Internal helper — resonant current bar chart
+# Internal helper — resonant current scatter plot
 function _plot_resonant_current(h5path)
     key = "perturbed_equilibrium/singular_coupling/resonant_current"
     _has_pe_data(h5path, key) ||
         return plot(; title="No resonant current data", legend=false)
 
-    resonant_current, q_sing, msing, pe_n = h5open(h5path, "r") do fid
-        read(fid[key]), read(fid["singular/q"]), read(fid["singular/msing"]),
+    resonant_current, psi_sing, q_sing, msing, pe_n = h5open(h5path, "r") do fid
+        read(fid[key]), read(fid["singular/psi"]), read(fid["singular/q"]),
+        read(fid["singular/msing"]),
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    labels = ["q=$(round(q_sing[s], digits=3))" for s in 1:msing]
-
-    p = plot(; xlabel="rational surface", ylabel="|I_res|",
+    p = plot(; xlabel=L"\psi_N", ylabel="|I_res|",
         title="Resonant current |I_res| per surface", legend=:outertopright,
-        left_margin=5Plots.mm, bottom_margin=10Plots.mm)
+        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
         n_rows = findall(==(nn), pe_n)
         rc_n = [sum(abs.(resonant_current[n_rows, s])) for s in 1:msing]
-        bar!(p, 1:msing, rc_n; label="n=$nn", alpha=0.7)
+        scatter!(p, psi_sing, rc_n; label="n=$nn", markersize=7, markerstrokewidth=0)
+        for s in 1:msing
+            abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
+            annotate!(p, psi_sing[s], rc_n[s],
+                text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
+        end
     end
-    plot!(p; xticks=(1:msing, labels), xrotation=30)
 
     return p
 end
@@ -342,7 +365,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     # Top panel: line plot per mode — only label resonant range m ∈ [0, nhigh·q95)
     m_max_legend = nhigh * q95
     p1 = plot(;
-        xlabel="ψ_N",
+        xlabel=L"\psi_N",
         ylabel="|$(component)|",
         title="Mode spectrogram: $(component)",
         legend=:outertopright,
@@ -361,7 +384,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     p2 = heatmap(
         collect(m_vals), psi_response, abs.(data_mn);
         xlabel="m",
-        ylabel="ψ_N",
+        ylabel=L"\psi_N",
         title="",
         colorbar_title="|$(component)|",
         left_margin=5Plots.mm,

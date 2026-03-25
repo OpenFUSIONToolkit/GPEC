@@ -7,13 +7,14 @@ results stored in GPEC HDF5 output files.
 module ForceFreeStates
 
 using HDF5
+using LaTeXStrings
 using Plots
 
 """
     plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
 
-Plot Im(ξ_ψ) vs ψ_N for the least stable eigenmode, showing one curve per requested
-poloidal mode number m.
+Plot |ξ_ψ| vs ψ_N for the least stable eigenmode, showing one curve per requested
+poloidal mode number m. The title includes the first eigenvalue dW = et[1].
 
 ### Arguments
 
@@ -29,23 +30,27 @@ poloidal mode number m.
 A `Plots.jl` plot object.
 """
 function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
-    mlow, xi_psi, psi = h5open(h5path, "r") do fid
-        read(fid["info/mlow"]), read(fid["integration/xi_psi"]), read(fid["integration/psi"])
+    mlow, xi_psi, psi, et = h5open(h5path, "r") do fid
+        read(fid["info/mlow"]), read(fid["integration/xi_psi"]),
+        read(fid["integration/psi"]), read(fid["vacuum/et"])
     end
 
     mpert = size(xi_psi, 1)
     mhigh = mlow + mpert - 1
+    dW = isempty(et) ? nothing : et[1]
+    title_str = isnothing(dW) ? "Least stable mode" :
+        "Least stable mode, dW = $(round(real(dW), sigdigits=4))"
 
     p = plot(;
-        xlabel="ψ_N",
-        ylabel="Im(ξ_ψ)",
-        title="Least Stable Eigenmode ξ_ψ",
+        xlabel=L"\psi_N",
+        ylabel=L"|\xi_\psi|",
+        title=title_str,
         left_margin=5Plots.mm,
         bottom_margin=5Plots.mm
     )
     for m in modes
         mlow <= m <= mhigh || continue
-        plot!(p, psi, imag.(xi_psi[m-mlow+1, 1, :]); label="m=$m")  # DCON phase convention: ξ_ψ is purely imaginary on the real axis
+        plot!(p, psi, abs.(xi_psi[m-mlow+1, 1, :]); label="m=$m")
     end
 
     isnothing(save_path) || savefig(p, save_path)
@@ -126,9 +131,11 @@ function plot_eigenmode_summary(h5path; save_path=nothing)
         bottom_margin=5Plots.mm
     )
 
-    # Top panel (p1) shares m-axis with heatmap (p2); blank cell keeps widths aligned
+    # Top panel (p1) shares m-axis with heatmap (p2); blank cell keeps widths aligned.
+    # Plots.jl assigns plots sequentially to ALL layout slots including `_`, so pass an
+    # explicit empty plot() to fill the blank top-right cell.
     l = @layout [a{0.25h} _{0.25w}; b c{0.25w}]
-    p = plot(p1, p2, p3; layout=l, size=(950, 750))
+    p = plot(p1, plot(), p2, p3; layout=l, size=(950, 750))
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -159,13 +166,14 @@ function plot_stability_criterion(h5path; save_path=nothing)
 
     p = plot(
         psi, crit;
-        xlabel="ψ_N",
-        ylabel="crit",
-        title="Stability criterion (smallest eigenvalue of W⁻¹) vs ψ_N",
+        xlabel=L"\psi_N",
+        ylabel=L"|D_c|",
+        title="Fixed-boundary stability",
         legend=false,
         left_margin=5Plots.mm,
         bottom_margin=5Plots.mm
     )
+    hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -260,9 +268,9 @@ function plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
     colors = [v < 0 ? :red : :blue for v in ev_real]  # red = negative (unstable), blue = positive (stable)
 
     p = scatter(
-        ev_real, 1:nmodes;
-        xlabel="Re(eigenvalue)",
-        ylabel="mode index",
+        1:nmodes, ev_real;
+        xlabel="mode index",
+        ylabel="Re(eigenvalue)",
         title="Eigenvalue spectrum ($matrix_type)",
         legend=false,
         color=colors,
@@ -270,7 +278,7 @@ function plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
         left_margin=5Plots.mm,
         bottom_margin=5Plots.mm
     )
-    vline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
+    hline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
@@ -279,9 +287,9 @@ end
 """
     plot_delta_prime(h5path; save_path=nothing)
 
-Bar chart of `|Δ'|` per singular surface, computed from the stored asymptotic coefficients
-`ca_left` and `ca_right`. Bars are colored red (tearing unstable, Re(Δ') > 0) or blue
-(tearing stable).
+Scatter plot of `Re(Δ')` per singular surface vs ψ_N, computed from the stored asymptotic
+coefficients `ca_left` and `ca_right`. Points are colored red (tearing unstable, Re(Δ') > 0)
+or blue (tearing stable). Integer-valued q rational surfaces are annotated.
 
 Δ' is computed as `(ca_right[resnum,resnum,2,s] - ca_left[resnum,resnum,2,s]) / (4π² ψ₀)`,
 where `resnum` is the linear mode index of the (m,n) resonant pair at surface `s`.
@@ -299,8 +307,8 @@ where `resnum` is the linear mode index of the (m,n) resonant pair at surface `s
 A `Plots.jl` plot object.
 """
 function plot_delta_prime(h5path; save_path=nothing)
-    msing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
-        read(fid["singular/msing"]), read(fid["singular/q"]),
+    msing, psi_sing, q_sing, ca_l, ca_r, psio, mn_index = h5open(h5path, "r") do fid
+        read(fid["singular/msing"]), read(fid["singular/psi"]), read(fid["singular/q"]),
         read(fid["singular/ca_left"]), read(fid["singular/ca_right"]),
         read(fid["equil/psio"]), read(fid["info/mn_index"])
     end
@@ -311,11 +319,8 @@ function plot_delta_prime(h5path; save_path=nothing)
     chi1 = 2π * psio
 
     dp_vals = ComplexF64[]
-    labels = String[]
-
     for s in 1:msing
         q_s = q_sing[s]
-        # Find the resonant mode index: (m, n) in mn_index with m/n ≈ q_s
         resnum = findfirst(1:numpert_total) do j
             n_j = mn_index[j, 2]
             n_j != 0 && abs(mn_index[j, 1] / n_j - q_s) < 1e-6
@@ -326,35 +331,36 @@ function plot_delta_prime(h5path; save_path=nothing)
             dp = (ca_r[resnum, resnum, 2, s] - ca_l[resnum, resnum, 2, s]) / (2π * chi1)
             push!(dp_vals, dp)
         end
-        push!(labels, "q=$(round(q_s, digits=3))")
     end
 
-    colors = [real(v) > 0 ? :red : :steelblue for v in dp_vals]
+    dp_real = real.(dp_vals)
+    colors = [v > 0 ? :red : :steelblue for v in dp_real]
 
-    p = bar(
-        1:msing, abs.(dp_vals);
-        xticks=(1:msing, labels),
-        xlabel="rational surface",
-        ylabel="|Δ'|",
-        title="Tearing stability Δ' (FFS asymptotic coefficients)",
+    p = scatter(
+        psi_sing, dp_real;
+        xlabel=L"\psi_N",
+        ylabel="Re(Δ')",
+        title="Tearing stability Δ'",
         legend=false,
         color=colors,
-        xrotation=30,
-        bottom_margin=10Plots.mm,
-        left_margin=5Plots.mm
+        markersize=7,
+        markerstrokewidth=0,
+        left_margin=5Plots.mm,
+        bottom_margin=5Plots.mm
     )
+    hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
 
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
 """
-    plot_dcon_summary(h5path; save_path=nothing)
+    plot_ffs_summary(h5path; save_path=nothing)
 
 Four-panel summary of ForceFreeStates (DCON-style) stability results, combining:
 
   - Energy eigenvector heatmap (`plot_energy_eigenvectors`)
-  - Stability criterion vs ψ_N (`plot_stability_criterion`)
+  - Fixed-boundary stability criterion |D_c| vs ψ_N (`plot_stability_criterion`)
   - Eigenvalue spectrum (`plot_eigenvalue_spectrum`)
   - Tearing stability Δ' at each rational surface (`plot_delta_prime`)
 
@@ -373,7 +379,7 @@ panels are shown.
 
 A `Plots.jl` plot object.
 """
-function plot_dcon_summary(h5path; save_path=nothing)
+function plot_ffs_summary(h5path; save_path=nothing)
     has_vac = h5open(h5path, "r") do fid
         haskey(fid, "vacuum/wt") && !isempty(read(fid["vacuum/wt"]))
     end
@@ -383,8 +389,8 @@ function plot_dcon_summary(h5path; save_path=nothing)
 
     if has_vac
         p_evec = plot_energy_eigenvectors(h5path; matrix_type=:total)
-        p_eval = plot_eigenvalue_spectrum(h5path; matrix_type=:total)
-        p = plot(p_evec, p_crit, p_eval, p_dp; layout=(2, 2), size=(1100, 900))
+        p_modes = plot_mode_displacement(h5path)
+        p = plot(p_evec, p_crit, p_modes, p_dp; layout=(2, 2), size=(1100, 900))
     else
         title!(p_crit, "Stability criterion (no vacuum data — rerun with vac_flag = true)")
         p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500))
@@ -400,7 +406,7 @@ end
 Two-panel summary of singular (rational) surface locations and tearing stability:
 
   - Left: q(ψ) profile with vertical markers at each rational surface
-  - Right: `|Δ'|` bar chart at each rational surface (`plot_delta_prime`)
+  - Right: `Re(Δ')` scatter plot at each rational surface vs ψ_N (`plot_delta_prime`)
 
 ### Arguments
 
@@ -423,7 +429,7 @@ function plot_singular_surfaces(h5path; save_path=nothing)
 
     p_q = plot(
         xs, q_profile;
-        xlabel="ψ_N",
+        xlabel=L"\psi_N",
         ylabel="q",
         title="Safety factor and rational surfaces",
         legend=false,

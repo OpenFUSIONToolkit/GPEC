@@ -11,6 +11,9 @@ mkpath(outdir)
 p = Analysis.Equilibrium.plot_equilibrium_summary(h5path)
 savefig(p, joinpath(outdir, "equil_summary.png"))
 
+p = Analysis.Equilibrium.plot_flux_surfaces_h5(h5path)
+savefig(p, joinpath(outdir, "equil_flux_surfaces.png"))
+
 p = Analysis.Equilibrium.plot_qprofile(h5path)
 savefig(p, joinpath(outdir, "equil_qprofile.png"))
 
@@ -24,9 +27,6 @@ savefig(p, joinpath(outdir, "equil_F.png"))
 p = Analysis.ForceFreeStates.plot_mode_displacement(h5path; modes=1:5)
 savefig(p, joinpath(outdir, "ffs_mode_displacement.png"))
 
-p = Analysis.ForceFreeStates.plot_eigenmode_summary(h5path)
-savefig(p, joinpath(outdir, "ffs_eigenmode_summary.png"))
-
 p = Analysis.ForceFreeStates.plot_stability_criterion(h5path)
 savefig(p, joinpath(outdir, "ffs_stability_criterion.png"))
 
@@ -39,8 +39,8 @@ savefig(p, joinpath(outdir, "ffs_eigenvalue_spectrum.png"))
 p = Analysis.ForceFreeStates.plot_delta_prime(h5path)
 savefig(p, joinpath(outdir, "ffs_delta_prime.png"))
 
-p = Analysis.ForceFreeStates.plot_dcon_summary(h5path)
-savefig(p, joinpath(outdir, "ffs_dcon_summary.png"))
+p = Analysis.ForceFreeStates.plot_ffs_summary(h5path)
+savefig(p, joinpath(outdir, "ffs_summary.png"))
 
 p = Analysis.ForceFreeStates.plot_singular_surfaces(h5path)
 savefig(p, joinpath(outdir, "ffs_singular_surfaces.png"))
