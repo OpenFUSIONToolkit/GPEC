@@ -10,65 +10,6 @@ using LaTeXStrings
 using Plots
 
 """
-    plot_flux_surfaces(plasma_eq; n_psi=11, n_theta=13)
-
-Plot flux surface contours (constant ψ, blue) and field-line angle contours (constant θ, red)
-in physical (R, Z) space.
-
-### Arguments
-
-  - `plasma_eq`: A `GeneralizedPerturbedEquilibrium.Equilibrium.PlasmaEquilibrium` object
-
-### Keyword arguments
-
-  - `n_psi`: Number of constant-ψ contours to draw (default: 11)
-  - `n_theta`: Number of constant-θ contours to draw (default: 13)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_flux_surfaces(plasma_eq; n_psi=11, n_theta=13)
-    n_psi_grid = size(plasma_eq.rzphi_rsquared.nodal_derivs.partials, 2)
-    n_theta_grid = size(plasma_eq.rzphi_rsquared.nodal_derivs.partials, 3)
-
-    # Build R and Z on the full nodal grid
-    R_grid = Matrix{Float64}(undef, n_psi_grid, n_theta_grid)
-    Z_grid = Matrix{Float64}(undef, n_psi_grid, n_theta_grid)
-    for ipsi in 1:n_psi_grid
-        rfac = @. sqrt(max(0.0, plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, ipsi, :]))
-        angle = @. 2π * (plasma_eq.rzphi_ys + plasma_eq.rzphi_offset.nodal_derivs.partials[1, ipsi, :])
-        R_grid[ipsi, :] = plasma_eq.ro .+ rfac .* cos.(angle)
-        Z_grid[ipsi, :] = plasma_eq.zo .+ rfac .* sin.(angle)
-    end
-
-    p = plot(;
-        title="Flux Coordinate System Contours in (R, Z)",
-        xlabel="R [m]",
-        ylabel="Z [m]",
-        aspect_ratio=:equal,
-        legend=:outertopright
-    )
-
-    psi_indices = round.(Int, range(1, n_psi_grid; length=n_psi))
-    theta_indices = round.(Int, range(1, n_theta_grid; length=n_theta))
-
-    for (i, ipsi) in enumerate(psi_indices)
-        label = i == 1 ? "Constant ψ" : ""
-        plot!(p, [R_grid[ipsi, :]; R_grid[ipsi, 1]], [Z_grid[ipsi, :]; Z_grid[ipsi, 1]];
-            color=:blue, linewidth=1.5, label=label)
-    end
-
-    for (i, itheta) in enumerate(theta_indices)
-        label = i == 1 ? "Constant θ" : ""
-        plot!(p, R_grid[:, itheta], Z_grid[:, itheta];
-            color=:red, linewidth=1.0, label=label)
-    end
-
-    return p
-end
-
-"""
     plot_qprofile(h5path; show_singular=true, save_path=nothing)
 
 Plot the safety factor q(ψ) profile, with optional vertical markers at each rational surface
@@ -95,7 +36,7 @@ function plot_qprofile(h5path; show_singular=true, save_path=nothing)
 
     p = plot(
         xs, q;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="q",
         title="",
         legend=false,
@@ -148,7 +89,7 @@ function plot_pressure_profile(h5path; save_path=nothing)
 
     p = plot(
         xs, mu0p;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="μ₀p",
         title="",
         legend=false,
@@ -189,7 +130,7 @@ function plot_f_profile(h5path; save_path=nothing)
 
     p = plot(
         xs, twopif;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="2πF",
         title="",
         legend=false,
@@ -206,7 +147,7 @@ function plot_f_profile(h5path; save_path=nothing)
 end
 
 """
-    plot_flux_surfaces_h5(h5path; n_psi=11, n_theta=18, save_path=nothing)
+    plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
 
 Plot flux surface contours (constant ψ, blue) and field-line angle spokes (constant θ, red)
 in physical (R, Z) space, reading nodal grid data directly from HDF5.
@@ -228,7 +169,7 @@ Theta spokes are drawn at `n_theta` evenly spaced values.
 
 A `Plots.jl` plot object.
 """
-function plot_flux_surfaces_h5(h5path; n_psi=11, n_theta=18, save_path=nothing)
+function plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
     rcoords, offset_data, xs_rz, ys_rz, ro, zo, msing, psi_sing, q_sing = h5open(h5path, "r") do fid
         read(fid["splines/rzphi/rcoords"]), read(fid["splines/rzphi/offset"]),
         read(fid["splines/rzphi/xs"]), read(fid["splines/rzphi/ys"]),
@@ -324,7 +265,7 @@ function plot_gse_by_theta(h5path; n_theta_lines=8, save_path=nothing)
     theta_indices = round.(Int, range(1, ntheta; length=n_theta_lines))
 
     p = plot(;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="GSE error",
         title="",
         yscale=:log10,
@@ -381,7 +322,7 @@ function plot_gse_integrated(h5path; save_path=nothing)
 
     p = plot(
         xs, vec(errlogi);
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="log₁₀(integrated GSE)",
         title="Flux-surface-integrated Grad-Shafranov error",
         legend=false,
@@ -427,7 +368,7 @@ function plot_equilibrium_summary(h5path; save_path=nothing)
 
     title_str = "q0=$(round(q0,digits=2))  q95=$(round(q95,digits=2))  βₜ=$(round(betat,digits=3))  βₙ=$(round(betan,digits=3))  κ=$(round(kappa,digits=2))  li1=$(round(li1,digits=3))"
 
-    p_rz   = plot_flux_surfaces_h5(h5path)
+    p_rz   = plot_flux_surfaces(h5path)
     p_q    = plot_qprofile(h5path; show_singular=true)
     p_pres = plot_pressure_profile(h5path)
     p_f    = plot_f_profile(h5path)

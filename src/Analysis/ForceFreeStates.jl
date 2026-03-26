@@ -42,7 +42,8 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
         "Least stable mode, δW = $(round(real(dW), sigdigits=4))"
 
     p = plot(;
-        xlabel="ψₙ",
+        xlims=(0, 1),
+        xlabel="Norm. Poloidal Flux",
         ylabel="|ξ^ψ|",
         title=title_str,
         left_margin=5Plots.mm,
@@ -57,92 +58,9 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     return p
 end
 
-"""
-    plot_eigenmode_summary(h5path; save_path=nothing)
-
-Three-panel summary of the free-boundary energy matrix eigenmodes, analogous to the
-DCON summary plot produced by OMFIT GPEC.
-
-Panels:
-
-  - Top: |eigenvector| vs index for the least stable mode
-  - Bottom-left: heatmap of |W_t| (eigenvectors) vs mode index
-  - Bottom-right: |eigenvalue| on log scale vs mode index
-
-Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC conventions.
-
-### Arguments
-
-  - `h5path`: Path to a GPEC HDF5 output file with vacuum data (`vac_flag = true`)
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_eigenmode_summary(h5path; save_path=nothing)
-    wt, et, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["vacuum/wt"]), read(fid["vacuum/et"]),
-        read(fid["equil/psio"]), read(fid["info/mlow"])
-    end
-
-    isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
-
-    chi1 = 2π * psio
-    wt = wt * (chi1 * 1e-3)
-
-    nmn = size(wt, 1)
-    nmodes = size(wt, 2)
-    m_vals = (0:(nmn-1)) .+ mlow
-
-    p1 = plot(
-        m_vals, abs.(wt[:, 1]);
-        xlabel="m",
-        ylabel="|Eigenvector|",
-        title="Mode 1, |λ₁| = $(round(abs(et[1]), digits=3))",
-        legend=false,
-        left_margin=5Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-
-    p2 = heatmap(
-        m_vals, 1:nmodes, abs.(wt');
-        xlabel="m",
-        ylabel="mode index",
-        colorbar_title="|Wₜ|",
-        left_margin=5Plots.mm,
-        right_margin=10Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-
-    colors = [real(e) < 0 ? :red : :blue for e in et]
-    p3 = scatter(
-        abs.(et), 1:nmodes;
-        xlabel="|Eigenvalue|",
-        ylabel="mode index",
-        xscale=:log10,
-        legend=false,
-        color=colors,
-        markerstrokewidth=0,
-        left_margin=5Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-
-    # Top panel (p1) shares m-axis with heatmap (p2); blank cell keeps widths aligned.
-    # Plots.jl assigns plots sequentially to ALL layout slots including `_`, so pass an
-    # explicit empty plot() to fill the blank top-right cell.
-    l = @layout [a{0.25h} _{0.25w}; b c{0.25w}]
-    p = plot(p1, plot(), p2, p3; layout=l, size=(950, 750))
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
 
 """
-    plot_stability_criterion(h5path; save_path=nothing)
+    plot_fixed_boundarystability_criterion(h5path; save_path=nothing)
 
 Plot the stability criterion (smallest eigenvalue of W⁻¹, `crit`) vs ψ_N.
 A sign change in `crit` during integration indicates an ideal fixed-boundary instability.
@@ -159,16 +77,17 @@ A sign change in `crit` during integration indicates an ideal fixed-boundary ins
 
 A `Plots.jl` plot object.
 """
-function plot_stability_criterion(h5path; save_path=nothing)
+function plot_fixed_boundarystability_criterion(h5path; save_path=nothing)
     psi, crit = h5open(h5path, "r") do fid
         read(fid["integration/psi"]), read(fid["integration/crit"])
     end
 
     p = plot(
         psi, crit;
-        xlabel="ψₙ",
+        xlims=(0, 1),
+        xlabel="Norm. Poloidal Flux",
         ylabel="|Dᶜ|",
-        title="Fixed-boundary stability",
+        title="Fixed-Boundary Stability",
         legend=false,
         left_margin=5Plots.mm,
         bottom_margin=5Plots.mm
@@ -221,10 +140,10 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
 
     p = heatmap(
         m_vals, 1:nmodes, abs.(wt_scaled');
-        xlabel="m",
-        ylabel="mode index",
-        title="Energy eigenvectors |Wₜ| (total)",
-        colorbar_title="|Wₜ|",
+        xlabel="Poloidal Harmonic",
+        ylabel="Eigenmode Index",
+        title="Total Energy Eigenvectors",
+        colorbar_title="Harmonic Amplitude",
         left_margin=5Plots.mm,
         right_margin=10Plots.mm,
         bottom_margin=5Plots.mm
@@ -235,7 +154,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
 end
 
 """
-    plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
+    plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
 
 Scatter plot of energy eigenvalues vs mode index. Points are colored red (unstable, Re > 0)
 or green (stable, Re < 0), with a dashed reference line at zero.
@@ -253,7 +172,7 @@ or green (stable, Re < 0), with a dashed reference line at zero.
 
 A `Plots.jl` plot object.
 """
-function plot_eigenvalue_spectrum(h5path; matrix_type=:total, save_path=nothing)
+function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
     dataset = Dict(:total => "vacuum/et", :plasma => "vacuum/ep", :vacuum => "vacuum/ev")
     haskey(dataset, matrix_type) || error("matrix_type must be :total, :plasma, or :vacuum")
 
@@ -338,7 +257,8 @@ function plot_delta_prime(h5path; save_path=nothing)
 
     p = scatter(
         psi_sing, dp_real;
-        xlabel="ψₙ",
+        xlims=(0, 1),
+        xlabel="Norm. Poloidal Flux",
         ylabel="Re(Δ')",
         title="Tearing stability Δ'",
         legend=false,
@@ -361,7 +281,7 @@ Four-panel summary of ForceFreeStates (DCON-style) stability results, combining:
 
   - Energy eigenvector heatmap (`plot_energy_eigenvectors`)
   - Fixed-boundary stability criterion |D_c| vs ψ_N (`plot_stability_criterion`)
-  - Eigenvalue spectrum (`plot_eigenvalue_spectrum`)
+  - Eigenvalue spectrum (`plot_eigenvalues`)
   - Tearing stability Δ' at each rational surface (`plot_delta_prime`)
 
 If no vacuum data is present (`vac_flag = false`), only the stability criterion and Δ'
@@ -395,57 +315,6 @@ function plot_ffs_summary(h5path; save_path=nothing)
         title!(p_crit, "Stability criterion (no vacuum data — rerun with vac_flag = true)")
         p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500))
     end
-
-    isnothing(save_path) || savefig(p, save_path)
-    return p
-end
-
-"""
-    plot_singular_surfaces(h5path; save_path=nothing)
-
-Two-panel summary of singular (rational) surface locations and tearing stability:
-
-  - Left: q(ψ) profile with vertical markers at each rational surface
-  - Right: `Re(Δ')` scatter plot at each rational surface vs ψ_N (`plot_delta_prime`)
-
-### Arguments
-
-  - `h5path`: Path to a GPEC HDF5 output file
-
-### Keyword arguments
-
-  - `save_path`: If provided, save the figure to this path (default: `nothing`)
-
-### Returns
-
-A `Plots.jl` plot object.
-"""
-function plot_singular_surfaces(h5path; save_path=nothing)
-    xs, q_profile, q0, q95, msing, psi_sing, q_sing = h5open(h5path, "r") do fid
-        read(fid["splines/profiles/xs"]), read(fid["splines/profiles/q"]),
-        read(fid["equil/q0"]), read(fid["equil/q95"]),
-        read(fid["singular/msing"]), read(fid["singular/psi"]), read(fid["singular/q"])
-    end
-
-    p_q = plot(
-        xs, q_profile;
-        xlabel="ψₙ",
-        ylabel="q",
-        title="Safety factor and rational surfaces",
-        legend=false,
-        left_margin=5Plots.mm,
-        bottom_margin=5Plots.mm
-    )
-    hline!(p_q, [q0, q95]; linestyle=:dot, color=:gray, label=nothing)
-    for s in 1:msing
-        vline!(p_q, [psi_sing[s]]; linestyle=:dash, color=:red, label=nothing)
-        annotate!(p_q, psi_sing[s], q_sing[s],
-            text("  q=$(round(q_sing[s], digits=2))", 7, :left, :red))
-    end
-
-    p_dp = plot_delta_prime(h5path)
-
-    p = plot(p_q, p_dp; layout=(1, 2), size=(1100, 500))
 
     isnothing(save_path) || savefig(p, save_path)
     return p

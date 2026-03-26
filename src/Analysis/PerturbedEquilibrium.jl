@@ -49,7 +49,7 @@ function plot_resonant_flux(h5path; save_path=nothing)
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    p = plot(; xlabel="ψₙ", ylabel="|Φ_res|",
+    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|Φ_res|",
         title="Resonant flux |Φ_res| per surface", legend=:outertopright,
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
 
@@ -102,7 +102,7 @@ function plot_island_widths(h5path; save_path=nothing)
 
     p = scatter(
         psi_sing, island_hw;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="w/2",
         title="Island half-widths",
         legend=false,
@@ -157,7 +157,7 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
 
     p = scatter(
         psi_sing, chirikov;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="K (Chirikov)",
         title="Chirikov overlap parameter",
         legend=false,
@@ -179,7 +179,7 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
 end
 
 """
-    plot_pe_delta_prime(h5path; save_path=nothing)
+    plot_driven_delta_prime(h5path; save_path=nothing)
 
 Scatter plot of `Re(Δ')` per singular surface vs ψ_N, computed by the perturbed equilibrium
 module (from `singular_coupling/delta_prime`). One marker series per toroidal mode n.
@@ -202,7 +202,7 @@ Requires `singular_coupling/delta_prime` in the HDF5 file.
 
 A `Plots.jl` plot object.
 """
-function plot_pe_delta_prime(h5path; save_path=nothing)
+function plot_driven_delta_prime(h5path; save_path=nothing)
     key = "perturbed_equilibrium/singular_coupling/delta_prime"
     _has_pe_data(h5path, key) ||
         return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
@@ -213,7 +213,7 @@ function plot_pe_delta_prime(h5path; save_path=nothing)
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    p = plot(; xlabel="ψₙ", ylabel="Re(Δ')",
+    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
         title="Tearing stability Δ' (PE)", legend=:outertopright,
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
@@ -242,7 +242,7 @@ end
 Five-panel summary of resonant coupling quantities at each singular surface vs ψ_N:
 
   - `|Φ_res|`: resonant flux (`plot_resonant_flux`)
-  - `Re(Δ')`: tearing stability parameter (`plot_pe_delta_prime`)
+  - `Re(Δ')`: tearing stability parameter (`plot_driven_delta_prime`)
   - `|I_res|`: resonant current
   - `w/2`: island half-width (`plot_island_widths`)
   - `K`: Chirikov overlap parameter (`plot_chirikov_parameter`)
@@ -263,7 +263,7 @@ A `Plots.jl` plot object.
 """
 function plot_resonant_field(h5path; save_path=nothing)
     p1 = plot_resonant_flux(h5path)
-    p2 = plot_pe_delta_prime(h5path)
+    p2 = plot_driven_delta_prime(h5path)
     p3 = _plot_resonant_current(h5path)
     p4 = plot_island_widths(h5path)
     p5 = plot_chirikov_parameter(h5path)
@@ -299,7 +299,7 @@ function _plot_resonant_current(h5path)
         read(fid["perturbed_equilibrium/forcing_modes/n"])
     end
 
-    p = plot(; xlabel="ψₙ", ylabel="|I_res|",
+    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|I_res|",
         title="Resonant current |I_res| per surface", legend=:outertopright,
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
 
@@ -378,7 +378,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     # Top panel: line plot per mode — only label resonant range m ∈ [0, nhigh·q95)
     m_max_legend = nhigh * q95
     p1 = plot(;
-        xlabel="ψₙ",
+        xlabel="Norm. Poloidal Flux",
         ylabel="|$(component)|",
         title="Mode spectrogram: $(component)",
         legend=:outertopright,
@@ -397,7 +397,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
     p2 = heatmap(
         collect(m_vals), psi_response, abs.(data_mn);
         xlabel="m",
-        ylabel="ψₙ",
+        ylabel="Norm. Poloidal Flux",
         title="",
         colorbar_title="|$(component)|",
         left_margin=5Plots.mm,
