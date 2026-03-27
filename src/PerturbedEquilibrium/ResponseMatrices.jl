@@ -197,69 +197,84 @@ end
 
 """
     calc_plasma_inductance(
-        flux_matrix::Matrix{ComplexF64},
-        energy_vector::Vector{ComplexF64}
+        vac_data::VacuumData,
+        ffs_intr::ForceFreeStatesInternal,
+        psio::Float64
     )::Matrix{ComplexF64}
 
-Calculate plasma inductance matrix using energy-based formula (resp_index=0).
+Calculate plasma inductance matrix using the wt0-based formula (Fortran default
+resp_induct_flag=TRUE from gpresp.f lines 201-213).
 
-Formula from gpresp.f lines 214-226:
+Fortran formula:
 ```
-L[i,j] = Σ_k flux[i,k] * conj(flux[j,k]) / (et[k] * 2)
+t1 = -1/(chi1*(m(i)-n*qlim)*twopi*ifac)   →  im/(chi1*s_i*2π)
+t2 =  1/(chi1*(m(j)-n*qlim)*twopi*ifac)   → -im/(chi1*s_j*2π)
+temp2(i,j) = 2*t1*wt0(i,j)*t2
+Lambda = inv(temp2)
 ```
+
+Note: vac_data.wt0 already contains singfac^2 factors (s_i*s_j) baked into the
+vacuum term via the scaling applied in Free.jl lines 34-37. The t1/t2 factors
+divide by s_i*s_j, correctly recovering the properly-normalized inductance.
 
 ## Arguments
-- `flux_matrix`: Vacuum flux matrix from build_flux_matrix
-- `energy_vector`: Total energy for each eigenmode (vac_data.et)
+- `vac_data`: Vacuum data containing wt0 (total energy matrix before eigenvector sorting)
+- `ffs_intr`: ForceFreeStates internal state with mode info (mlow, mpert, nlow, qlim)
+- `psio`: Total toroidal flux [Wb/rad] from equilibrium (equil.psio)
 
 ## Returns
-- Plasma inductance matrix [mpert, mpert]
+- Plasma inductance matrix Lambda [numpert_total × numpert_total]
 """
 function calc_plasma_inductance(
-    flux_matrix::Matrix{ComplexF64},
-    energy_vector::Vector{ComplexF64}
+    vac_data::VacuumData,
+    ffs_intr::ForceFreeStatesInternal,
+    psio::Float64
 )::Matrix{ComplexF64}
 
-    mpert = size(flux_matrix, 1)
-    L = zeros(ComplexF64, mpert, mpert)
+    mpert = ffs_intr.numpert_total
+    chi1  = 2π * psio          # = Fortran's chi1 = twopi*psio
+    n     = ffs_intr.nlow
+    qlim  = ffs_intr.qlim      # q at psilim
 
-    for i in 1:mpert
-        for j in 1:mpert
-            for k in 1:mpert
-                if abs(energy_vector[k]) > 1e-10  # Avoid division by zero
-                    L[i,j] += flux_matrix[i,k] * conj(flux_matrix[j,k]) / (energy_vector[k] * 2.0)
-                end
-            end
-        end
+    # Singular factors s_i = m_i - n*qlim  (same as Fortran: mfac(i) - nn*qlim)
+    s = [((i-1) % ffs_intr.mpert + ffs_intr.mlow) - n * qlim for i in 1:mpert]
+
+    # Apply Fortran idcon.f line 292 normalization: wt0 = wt0/(mu0*2)*psio^2
+    # Julia's vac_data.wt0 is raw wp+wv; Fortran additionally scales by psio^2/(mu0*2)
+    mu0 = 4π * 1e-7
+    wt0_norm = vac_data.wt0 .* (psio^2 / (mu0 * 2))
+
+    # Build temp2[i,j] = 2*t1_i*wt0[i,j]*t2_j  (gpresp.f line 207)
+    temp2 = Matrix{ComplexF64}(undef, mpert, mpert)
+    for i in 1:mpert, j in 1:mpert
+        t1 = im / (chi1 * s[i] * 2π)
+        t2 = -im / (chi1 * s[j] * 2π)
+        temp2[i,j] = 2 * t1 * wt0_norm[i,j] * t2
     end
 
-    return L
+    return inv(temp2)
 end
 
 """
-    pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
+    pack_complex_grouped!(packed, modes)
 
-Pack complex mode coefficients into real/imaginary pairs for Green's function application.
+Pack complex mode coefficients into grouped real/imaginary format for Green's function application.
 
-Converts [a+bi, c+di, ...] to [a, b, c, d, ...]
+Converts [a+bi, c+di, ...] to [a, c, ..., b, d, ...] (real block first, then imaginary block).
+
+This matches the column layout of Julia's Vacuum grri/grre matrices, which store
+cos-response columns (1:mpert) followed by sin-response columns (mpert+1:2mpert).
+[Vacuum.jl: fourier_transform!(grre, cos_mn_basis) then fourier_transform!(grre, sin_mn_basis; col_offset=mpert)]
 
 ## Arguments
+- `packed`: Output array [2*mpert]
 - `modes`: Complex Fourier mode coefficients [mpert]
-
-## Returns
-- Packed real/imaginary array [2*mpert]
 """
-function pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
-    mpert = length(modes)
-    packed = zeros(Float64, 2 * mpert)
-    return pack_complex_to_realimag!(packed, modes)
-end
-
-function pack_complex_to_realimag!(packed::AbstractVector{Float64}, modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
+function pack_complex_grouped!(packed::AbstractVector{Float64}, modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
     mpert = length(modes)
     for i in 1:mpert
-        packed[2*i - 1] = real(modes[i])
-        packed[2*i] = imag(modes[i])
+        packed[i]       = real(modes[i])
+        packed[i+mpert] = imag(modes[i])
     end
     return packed
 end
@@ -287,54 +302,57 @@ function unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{Com
 end
 
 """
-    apply_green_function(
+    apply_green_function_complex(
         green::Matrix{Float64},
         mode_coeffs::Vector{ComplexF64}
-    )::Vector{Float64}
+    )::Vector{ComplexF64}
 
-Apply Green's function to Fourier mode coefficients to get potential in theta space.
+Apply Green's function to Fourier mode coefficients to get COMPLEX potential in theta space.
 
-The Green's function matrix maps Fourier coefficients to theta-space values:
-    χ(θ) = G * b_fourier
+Computes the full complex chi(θ) = Σ_m bwp_m * exp(-im*m*θ) by combining two real
+Green's function applications matching Fortran gpeq_surface (gpeq.f lines 553-569):
 
-## Green's Function Structure
+```fortran
+rbwp_mn = CONJG(bwp_mn)
+grri_real = MATMUL(grri, (/REAL(rbwp_mn), -AIMAG(rbwp_mn)/))  ! packed [Re, Im]
+grri_imag = MATMUL(grri, (/AIMAG(rbwp_mn), REAL(rbwp_mn)/))   ! packed [-Im, Re]
+chi_fun = grri_real - ifac*grri_imag                            ! chi = real - i*imag
+```
 
-From the Julia vacuum module, `green` is a real matrix [2*mtheta, 2*mpert] where:
-- Rows 1:mtheta correspond to plasma surface theta points
-- Rows mtheta+1:2*mtheta correspond to wall surface theta points (if wall present)
-- Columns use GROUPED format: [Re(mode_1),...,Re(mode_N), Im(mode_1),...,Im(mode_N)]
-  (cos-response block first, then sin-response block — matches fourier_transform! in Vacuum.jl)
+The complex combination ensures chi represents the proper exp(-im*θ) DFT kernel.
 
 ## Arguments
-- `green`: Green's function matrix [2*mtheta, 2*mpert]
-- `mode_coeffs`: Complex Fourier mode coefficients [mpert]
+- `green`: Green's function matrix [2*mtheta, 2*mpert] in GROUPED column format
+- `mode_coeffs`: Complex Fourier mode coefficients [mpert] (bwp_mn for one eigenmode)
 
 ## Returns
-- Potential values in theta space [mtheta] at plasma surface (real-valued)
+- Complex potential values χ(θ) at plasma surface [mtheta]
 """
-function apply_green_function(
+function apply_green_function_complex(
     green::Matrix{Float64},
     mode_coeffs::Vector{ComplexF64}
-)::Vector{Float64}
-    mtheta = size(green, 1) ÷ 2
-    chi_theta = Vector{Float64}(undef, mtheta)
-    return apply_green_function!(chi_theta, green, mode_coeffs)
-end
-
-@with_pool pool function apply_green_function!(
-    chi_theta::AbstractVector{Float64},
-    green::Matrix{Float64},
-    mode_coeffs::AbstractVector{ComplexF64}
-)
-    # Pack complex coefficients to real/imag format for Green's function
-    # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
+)::Vector{ComplexF64}
     mpert = length(mode_coeffs)
-    packed_coeffs = zeros!(pool, Float64, 2 * mpert)
-    pack_complex_to_realimag!(packed_coeffs, mode_coeffs)
+    mtheta = size(green, 1) ÷ 2
+    G = @view green[1:mtheta, :]
 
-    mtheta = length(chi_theta)
-    mul!(chi_theta, @view(green[1:mtheta, :]), packed_coeffs)
-    return chi_theta
+    # Packed [Re(1),...,Re(N), Im(1),...,Im(N)] → computes real part of chi
+    packed_real = zeros(Float64, 2 * mpert)
+    for i in 1:mpert
+        packed_real[i]       =  real(mode_coeffs[i])
+        packed_real[i+mpert] =  imag(mode_coeffs[i])
+    end
+
+    # Packed [-Im(1),...,-Im(N), Re(1),...,Re(N)] → computes imaginary part of chi
+    packed_imag = zeros(Float64, 2 * mpert)
+    for i in 1:mpert
+        packed_imag[i]       = -imag(mode_coeffs[i])
+        packed_imag[i+mpert] =  real(mode_coeffs[i])
+    end
+
+    chi_real = G * packed_real
+    chi_imag = G * packed_imag
+    return complex.(chi_real, -chi_imag)   # chi_fun = chi_real - i*chi_imag
 end
 
 
@@ -414,19 +432,23 @@ function calc_surface_inductance(
         mode_end = min(mpert, numpert_total)
         bwp_modes = flux_matrix[mode_start:mode_end, j]
 
-        # Apply interior Green's function to get χ(θ) at plasma surface
-        chi_theta = apply_green_function(grri, bwp_modes)
+        # Compute complex chi(θ) = Σ_m bwp_m * exp(-im*m*θ) at plasma surface
+        # Fortran gpeq_surface: chi_fun = grri_real - i*grri_imag, normalized by 1/(2π)²
+        chi_theta = apply_green_function_complex(grri, bwp_modes) ./ (2π)^2
 
-        # Apply exterior Green's function to get χ_e(θ) at plasma surface
-        che_theta = apply_green_function(grre, bwp_modes)
+        # Compute complex che(θ) from exterior Green's function, with sign flip
+        # Fortran: che_fun = -che_fun/(twopi**2), so kax = (chi - che)/mu0 = (chi + che_raw)/mu0/(2π)²
+        che_theta = apply_green_function_complex(grre, bwp_modes) ./ (2π)^2
 
-        # Compute surface current in theta space: kax(θ) = (χ - χ_e) / μ₀
-        # This is the jump in potential across the plasma surface
-        kax_theta = (chi_theta .- che_theta) ./ μ₀
+        # Surface current: kax = (chi + che_raw) / μ₀  [che sign absorbed from Fortran's negation]
+        kax_theta = (chi_theta .+ che_theta) ./ μ₀
 
-        # Transform back to Fourier mode space using pre-computed FourierTransform
-        # ft(data) performs forward transform: theta → modes
-        kax_modes = ft(kax_theta)
+        # Transform to mode space, matching Fortran iscdftf normalization:
+        # iscdftf: funcm(i) = (1/fs) * Σⱼ func(j) * exp(-2πi*m*j/fs)
+        # The reversal in Fortran + exp(-im) convention = exp(+im) without reversal
+        # so: kax_mn_fortran = (1/mtheta) * Σᵢ kax_fun[i] * exp(+2πim*i/N)
+        # Julia FourierTransform has no 1/N factor, so divide here to match.
+        kax_modes = ft(kax_theta) ./ mtheta
 
         # Store in kax_matrix for this eigenmode
         kax_matrix[mode_start:mode_end, j] = kax_modes
@@ -475,36 +497,27 @@ end
         surface_inductance::Matrix{ComplexF64}
     )::Matrix{ComplexF64}
 
-Calculate permeability matrix relating applied forcing to plasma response.
+Calculate permeability matrix P = Lambda * L^{-1}.
 
-Formula: μ = L_plasma^(-1) * L_surface
-
-This gives the linear response of the plasma to external perturbations.
+Matches Fortran gpresp.f gpresp_permeab (lines 346-397):
+```fortran
+permeabmats(j,:,:) = MATMUL(plas_indmats(j,:,:), surf_indinvmats(j,:,:))
+```
+where surf_indinvmats is inv(surface_inductance) computed via ZHETRF/ZHETRS.
 
 ## Arguments
-- `plasma_inductance`: Plasma inductance matrix
-- `surface_inductance`: Surface inductance matrix
+- `plasma_inductance`: Plasma inductance matrix Lambda
+- `surface_inductance`: Surface inductance matrix L
 
 ## Returns
-- Permeability matrix [mpert, mpert]
+- Permeability matrix P = Lambda * L^{-1} [mpert, mpert]
 """
 function calc_permeability(
     plasma_inductance::Matrix{ComplexF64},
     surface_inductance::Matrix{ComplexF64}
 )::Matrix{ComplexF64}
-
-    # Invert plasma inductance and multiply by surface inductance
-    # μ = L_plasma^(-1) * L_surface
-
-    try
-        plas_inv = inv(plasma_inductance)
-        permeability = plas_inv * surface_inductance
-        return permeability
-    catch e
-        @warn "Failed to invert plasma inductance matrix: $e"
-        # Return identity as fallback
-        return Matrix{ComplexF64}(I, size(plasma_inductance))
-    end
+    # P = Lambda * L^{-1}  (right-division solves for P s.t. P*L = Lambda)
+    return plasma_inductance / surface_inductance
 end
 
 """
