@@ -100,6 +100,10 @@ function write_outputs_to_HDF5(
         forcing_group["m"]         = [mode.m for mode in intr.forcing_modes]
         forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
 
+        # Control surface perturbation vectors (Phi_x and Phi_tot = P*Phi_x)
+        !isempty(state.forcing_vec)  && (pe_group["forcing_vec"]  = state.forcing_vec)
+        !isempty(state.response_vec) && (pe_group["response_vec"] = state.response_vec)
+
         # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
         have_xi = !isnothing(state.xi_modes)

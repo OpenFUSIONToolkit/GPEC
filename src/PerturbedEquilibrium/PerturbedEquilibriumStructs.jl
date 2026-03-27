@@ -126,6 +126,10 @@ Energies:
     rational_n::Vector{Int}                 = Int[]
     rational_surface_idx::Vector{Int}       = Int[]
 
+    # Control surface perturbation vectors [numpert_total]
+    forcing_vec::Vector{ComplexF64}   = ComplexF64[]  # Phi_x: external forcing in eigenmode basis
+    response_vec::Vector{ComplexF64}  = ComplexF64[]  # Phi_tot = P * Phi_x: total plasma response
+
     # Energies
     plasma_energy::Float64  = 0.0
     vacuum_energy::Float64  = 0.0

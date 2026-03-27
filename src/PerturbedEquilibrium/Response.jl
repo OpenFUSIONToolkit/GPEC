@@ -43,6 +43,9 @@ function compute_plasma_response!(
     forcing_vector = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
     response_vector = compute_plasma_response_vector(permeability, forcing_vector)
 
+    state.forcing_vec  = forcing_vector
+    state.response_vec = response_vector
+
     xi_modes, b_modes = reconstruct_physical_fields(
         response_vector, ForceFreeStates_results, equil, ffs_intr, intr
     )
