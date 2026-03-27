@@ -290,9 +290,17 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    # Initialize solutions with the identity matrix for U_22 [Glasser Phys. Plasmas 2016 112506 Section VI]
+    # Initialize U_22 = I and U_11 = I [Glasser Phys. Plasmas 2016 112506 Section VI].
+    # Exception: m=0, n=1 diagonal of U_11 is left at zero. For m=0 the regular Frobenius
+    # solution at the axis is ψ^0 = constant, so U_11=1 seeds the irregular (logarithmic)
+    # solution at full amplitude regardless of ψ_low, producing a spurious axis singularity.
+    m0n1_ipert = (intr.mlow <= 0 <= intr.mhigh && intr.nlow <= 1 <= intr.nhigh) ?
+        (0 - intr.mlow + 1) + (1 - intr.nlow) * intr.mpert : nothing
     for ipert in 1:intr.numpert_total
         odet.u[ipert, ipert, 2] = 1
+        if ipert != m0n1_ipert
+            odet.u[ipert, ipert, 1] = 1
+        end
     end
 end
 
