@@ -6,6 +6,7 @@ The Analysis module provides post-processing and visualization utilities for GPE
 
 - `ForceFreeStates`: Plotting functions for DCON-style ideal MHD stability results
 - `Equilibrium`: Plotting functions for equilibrium objects
+- `PerturbedEquilibrium`: Plotting functions for perturbed equilibrium results
 
 ```@docs
 GeneralizedPerturbedEquilibrium.Analysis
@@ -21,4 +22,10 @@ Modules = [GeneralizedPerturbedEquilibrium.Analysis.ForceFreeStates]
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Analysis.Equilibrium]
+```
+
+## PerturbedEquilibrium
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibrium]
 ```
