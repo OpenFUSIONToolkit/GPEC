@@ -79,6 +79,12 @@ function compute_plasma_response!(
     state.xi_modes = xi_modes
     state.b_modes  = b_modes
 
+    b_n_modes, xi_n_modes = compute_b_n_xi_n_modes(
+        xi_modes.psi, b_modes.psi, ForceFreeStates_results, equil, ffs_intr
+    )
+    state.b_n_modes  = b_n_modes
+    state.xi_n_modes = xi_n_modes
+
     if ctrl.verbose
         @info "Response complete: $(length(intr.forcing_modes)) forcing modes, max amplitude = $(@sprintf("%.3e", maximum(abs.(response_vector))))"
     end

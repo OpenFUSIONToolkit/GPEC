@@ -290,7 +290,8 @@ function load_julia_outputs(h5_path::String)
         pe = "perturbed_equilibrium"
         julia["forcing_vec"]  = haskey(f, "$pe/forcing_vec")  ? read(f, "$pe/forcing_vec")  : ComplexF64[]
         julia["response_vec"] = haskey(f, "$pe/response_vec") ? read(f, "$pe/response_vec") : ComplexF64[]
-        julia["b_psi"]        = haskey(f, "$pe/response/b_psi") ? read(f, "$pe/response/b_psi") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["b_n"]          = haskey(f, "$pe/response/b_n")        ? read(f, "$pe/response/b_n")        : Matrix{ComplexF64}(undef, 0, 0)
+        julia["Jbgradpsi"]    = haskey(f, "$pe/response/Jbgradpsi")  ? read(f, "$pe/response/Jbgradpsi")  : Matrix{ComplexF64}(undef, 0, 0)
         julia["psi_grid"]     = haskey(f, "integration/psi")    ? read(f, "integration/psi")    : Float64[]
         # mn_index[:, 1] = m values, mn_index[:, 2] = n values for each mode index
         julia["m_modes"]      = haskey(f, "info/mn_index") ? Int.(read(f, "info/mn_index")[:, 1]) : Int[]
@@ -857,10 +858,10 @@ function generate_plots(fort, julia, bench_dir, nn)
     # Clamp to available m range
     res_m_vals = filter(m -> m in m_ctrl, res_m_vals)
 
-    # b_psi panels (up to 4 resonant modes)
+    # b_n panels (up to 4 resonant modes): compare Julia b_n to Fortran b_n
     bpsi_panels = []
     j_psi_grid  = julia["psi_grid"]
-    j_bpsi      = julia["b_psi"]
+    j_bn        = julia["b_n"]
     f_psi_prof  = fort["psi_n_prof"]
     f_bn        = fort["b_n"]
     f_m_out     = fort["m_out"]
@@ -876,24 +877,23 @@ function generate_plots(fort, julia, bench_dir, nn)
             f_prof = abs.(f_bn[:, f_midx])
             f_max  = maximum(f_prof)
             f_max > 0 && plot!(pb, f_psi_prof, f_prof ./ f_max;
-                lw=2, color=:steelblue, label="Fortran")
+                lw=2, color=:steelblue, label="Fortran b_n")
         end
 
-        if !isnothing(j_midx) && !isempty(j_psi_grid) && !isempty(j_bpsi)
-            j_prof = abs.(j_bpsi[:, j_midx])
+        if !isnothing(j_midx) && !isempty(j_psi_grid) && !isempty(j_bn)
+            j_prof = abs.(j_bn[:, j_midx])
             j_max  = maximum(j_prof)
             rms_diff = NaN
             if !isnothing(f_midx) && !isempty(f_psi_prof)
                 # Interpolate Julia onto Fortran psi grid for RMS comparison
                 f_prof_abs = abs.(f_bn[:, f_midx])
-                f_rms = sqrt(mean(f_prof_abs.^2))
                 j_on_fg = [_interp1(j_psi_grid, j_prof, p) for p in f_psi_prof]
-                if f_rms > 0
+                if maximum(j_on_fg) > 0 && maximum(f_prof_abs) > 0
                     rms_diff = sqrt(mean((j_on_fg ./ maximum(j_on_fg) .- f_prof_abs ./ maximum(f_prof_abs)).^2))
                 end
             end
             j_max > 0 && plot!(pb, j_psi_grid, j_prof ./ j_max;
-                lw=2, color=:orange, linestyle=:dash, label="Julia")
+                lw=2, color=:orange, linestyle=:dash, label="Julia b_n")
             !isnan(rms_diff) && annotate!(pb, 0.8, 0.85,
                 text(@sprintf("RMS=%.3f", rms_diff), 9, :center))
         end

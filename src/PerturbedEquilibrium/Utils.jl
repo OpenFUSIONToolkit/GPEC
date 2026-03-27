@@ -59,8 +59,10 @@ perturbed_equilibrium/
 │   ├── m              # Poloidal mode numbers
 │   └── amplitude      # ComplexF64 forcing amplitudes
 ├── response/
-│   ├── xi_psi         # Displacement field (ComplexF64 [npsi, mpert])
-│   ├── b_psi          # Magnetic field (ComplexF64 [npsi, mpert])
+│   ├── xi_psi         # Covariant radial displacement ξ_ψ (ComplexF64 [npsi, mpert])
+│   ├── Jbgradpsi      # J×b^ψ Jacobian-weighted contravariant field (ComplexF64 [npsi, mpert])
+│   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, mpert])
+│   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
 ├── singular_coupling/
@@ -115,10 +117,12 @@ function write_outputs_to_HDF5(
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
-        response_group["xi_psi"]  = have_xi ? state.xi_modes.psi   : ComplexF64[]
-        response_group["b_psi"]   = have_b  ? state.b_modes.psi    : ComplexF64[]
-        response_group["b_theta"] = have_b  ? state.b_modes.theta  : ComplexF64[]
-        response_group["b_zeta"]  = have_b  ? state.b_modes.zeta   : ComplexF64[]
+        response_group["xi_psi"]    = have_xi ? state.xi_modes.psi   : ComplexF64[]
+        response_group["Jbgradpsi"] = have_b  ? state.b_modes.psi    : ComplexF64[]  # J×b^ψ (Jbgradpsi)
+        response_group["b_theta"]   = have_b  ? state.b_modes.theta  : ComplexF64[]
+        response_group["b_zeta"]    = have_b  ? state.b_modes.zeta   : ComplexF64[]
+        response_group["b_n"]       = !isnothing(state.b_n_modes)  ? state.b_n_modes  : ComplexF64[]
+        response_group["xi_n"]      = !isnothing(state.xi_n_modes) ? state.xi_n_modes : ComplexF64[]
 
         # Singular coupling
         coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")

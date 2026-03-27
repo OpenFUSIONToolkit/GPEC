@@ -71,7 +71,9 @@ Results from perturbed equilibrium calculations.
 
 Response fields (mode space):
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field (psi, theta, zeta) [npsi, mpert]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field (psi, theta, zeta) [npsi, mpert]; b_modes.psi = Jbgradpsi (J×b^ψ)
+  - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
+  - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, mpert]
 
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
@@ -106,6 +108,8 @@ Energies:
     # Response fields in mode space [npsi, mpert]
     xi_modes::Union{Nothing, NamedTuple} = nothing
     b_modes::Union{Nothing, NamedTuple} = nothing
+    b_n_modes::Union{Nothing, Matrix{ComplexF64}}  = nothing  # physical normal field b_n [npsi, mpert]
+    xi_n_modes::Union{Nothing, Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
 
     # Coupling matrices [n_rational × numpert_total]
     C_resonant_flux::Matrix{ComplexF64}     = zeros(ComplexF64, 0, 0)

@@ -299,3 +299,88 @@ function compute_perturbed_field_modes(
 
     return b_psi_modes, b_theta_modes, b_zeta_modes
 end
+
+"""
+    compute_b_n_xi_n_modes(
+        xi_psi_modes::Matrix{ComplexF64},
+        b_psi_modes::Matrix{ComplexF64},
+        ForceFreeStates_results::OdeState,
+        equil::Equilibrium.PlasmaEquilibrium,
+        ffs_intr::ForceFreeStatesInternal
+    ) -> (b_n_modes, xi_n_modes)
+
+Compute physical normal field b_n and displacement xi_n in mode space.
+
+Mimics Fortran gpout_xbnormal (gpout.f lines 3353–3358):
+1. IDFT: reconstruct theta-space function from mode amplitudes (Jbgradpsi or J×ξ_ψ)
+2. Divide by J(θ)×|∇ψ|(θ) at each theta point to get the physical normal component
+3. Forward DFT back to mode space
+
+The mode-space fields b_psi_modes and xi_psi_modes are the Jacobian-weighted
+contravariant ψ components (Jbgradpsi, J×ξ_ψ). Dividing by J×|∇ψ| yields the
+physical (geometric) normal components b_n and xi_n [Park Phys. Plasmas 2007 052110].
+
+# Returns
+
+Tuple (b_n_modes, xi_n_modes), each [npsi, mpert] ComplexF64.
+"""
+function compute_b_n_xi_n_modes(
+    xi_psi_modes::Matrix{ComplexF64},
+    b_psi_modes::Matrix{ComplexF64},
+    ForceFreeStates_results::OdeState,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffs_intr::ForceFreeStatesInternal
+)
+    npsi, mpert = size(b_psi_modes)
+    mlow  = ffs_intr.mlow
+    mthsurf = length(equil.rzphi_xs) - 1   # number of DFT theta points (periodic)
+    ro = equil.ro
+    twopi = 2π
+
+    b_n_modes  = zeros(ComplexF64, npsi, mpert)
+    xi_n_modes = zeros(ComplexF64, npsi, mpert)
+
+    # Pre-compute mode indices and DFT phase table
+    m_vals = [mlow + ipert - 1 for ipert in 1:mpert]
+    thetas = [(k - 1) / mthsurf for k in 1:mthsurf]   # [0, 1/mthsurf, ..., (mthsurf-1)/mthsurf]
+    # exp(+2πi*m*θ) for IDFT; exp(-2πi*m*θ) for forward DFT
+    phase_fwd  = [exp( twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
+    phase_back = [exp(-twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
+
+    for ipsi in 1:npsi
+        psi = ForceFreeStates_results.psi_store[ipsi]
+        hint2d_psi = (Ref(1), Ref(1))
+
+        # IDFT: mode space → theta space (Jbgradpsi and J×ξ_ψ)
+        bwp_fun  = phase_fwd * b_psi_modes[ipsi, :]   # [mthsurf]
+        xwp_fun  = phase_fwd * xi_psi_modes[ipsi, :]  # [mthsurf]
+
+        # J(θ)×delpsi(θ) at this radial surface
+        jd = zeros(Float64, mthsurf)
+        for k in 1:mthsurf
+            theta = thetas[k]
+            r2    = equil.rzphi_rsquared((psi, theta); hint=hint2d_psi)
+            deta  = equil.rzphi_offset((psi, theta); hint=hint2d_psi)
+            jac   = equil.rzphi_jac((psi, theta); hint=hint2d_psi)
+            r2_y  = equil.rzphi_rsquared((psi, theta); deriv=Val((0, 1)), hint=hint2d_psi)
+            deta_y = equil.rzphi_offset((psi, theta); deriv=Val((0, 1)), hint=hint2d_psi)
+            rfac  = sqrt(abs(r2))
+            eta   = twopi * (theta + deta)
+            r     = ro + rfac * cos(eta)
+            w11   = (1.0 + deta_y) * twopi^2 * rfac * r / jac
+            w12   = -r2_y * π * r / (rfac * jac)
+            delpsi = sqrt(w11^2 + w12^2)
+            jd[k]  = jac * delpsi
+        end
+
+        # Divide by J×delpsi → physical normal components in theta space
+        bno_fun  = bwp_fun ./ jd
+        xno_fun  = xwp_fun ./ jd
+
+        # Forward DFT: theta space → mode space (1/mthsurf normalization matches Fortran iscdftf)
+        b_n_modes[ipsi, :]  = (phase_back' * bno_fun) ./ mthsurf
+        xi_n_modes[ipsi, :] = (phase_back' * xno_fun) ./ mthsurf
+    end
+
+    return b_n_modes, xi_n_modes
+end
