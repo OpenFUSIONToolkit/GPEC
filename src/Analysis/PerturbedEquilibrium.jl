@@ -51,7 +51,7 @@ function plot_resonant_flux(h5path; save_path=nothing)
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|Φ_res|",
         title="Resonant flux |Φ_res| per surface", legend=:outertopright,
-        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
+        left_margin=10Plots.mm, bottom_margin=5Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
@@ -109,7 +109,7 @@ function plot_island_widths(h5path; save_path=nothing)
         color=:steelblue,
         markersize=7,
         markerstrokewidth=0,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     for s in 1:msing
@@ -164,7 +164,7 @@ function plot_chirikov_parameter(h5path; save_path=nothing)
         color=colors,
         markersize=7,
         markerstrokewidth=0,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     hline!(p, [1.0]; linestyle=:dash, color=:black, label=nothing)
@@ -215,7 +215,7 @@ function plot_driven_delta_prime(h5path; save_path=nothing)
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
         title="Tearing stability Δ' (PE)", legend=:outertopright,
-        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
+        left_margin=10Plots.mm, bottom_margin=5Plots.mm)
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
 
     n_vals = unique(pe_n)
@@ -301,7 +301,7 @@ function _plot_resonant_current(h5path)
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|I_res|",
         title="Resonant current |I_res| per surface", legend=:outertopright,
-        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
+        left_margin=10Plots.mm, bottom_margin=5Plots.mm)
 
     n_vals = unique(pe_n)
     for nn in n_vals
@@ -382,7 +382,7 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
         ylabel="|$(component)|",
         title="Mode spectrogram: $(component)",
         legend=:outertopright,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     cmap = cgrad(:roma, mpert; categorical=true)
@@ -400,8 +400,8 @@ function plot_mode_spectrogram(h5path; component=:xi_psi, save_path=nothing)
         ylabel="Norm. Poloidal Flux",
         title="",
         colorbar_title="|$(component)|",
-        left_margin=5Plots.mm,
-        right_margin=10Plots.mm,
+        left_margin=10Plots.mm,
+        right_margin=20Plots.mm,
         bottom_margin=5Plots.mm
     )
     # Overlay rational surface locations as white dashed lines
@@ -437,43 +437,44 @@ Three-panel composite summary of perturbed equilibrium results:
 A `Plots.jl` plot object.
 """
 function plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
-    p_islands  = plot_island_widths(h5path)
-    p_energies = _plot_energies(h5path)
+    p_islands  = plot_resonant_flux(h5path)
+    p_bpsi     = _plot_bpsi_edge_spectrum(h5path)
     p_spectro  = plot_mode_spectrogram(h5path; component=:xi_psi)
 
     l = @layout [grid(1, 2){0.35h}; b]
-    p = plot(p_islands, p_energies, p_spectro; layout=l, size=(1100, 1100))
+    p = plot(p_islands, p_bpsi, p_spectro; layout=l, size=(1100, 1100))
 
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
 
-# Internal helper — energy breakdown bar chart
-function _plot_energies(h5path)
-    key = "perturbed_equilibrium/energies/plasma_energy"
-    _has_pe_data(h5path, key) ||
-        return plot(; title="No energy data", legend=false)
+# Internal helper — |b_psi(m)| spectrum at the outermost psi surface
+function _plot_bpsi_edge_spectrum(h5path)
+    base = "perturbed_equilibrium/response/"
+    _has_pe_data(h5path, base * "b_psi_real") ||
+        return plot(; title="No b_psi data — run with perturbed equilibrium enabled", legend=false)
 
-    ep, ev, et = h5open(h5path, "r") do fid
-        read(fid["perturbed_equilibrium/energies/plasma_energy"]),
-        read(fid["perturbed_equilibrium/energies/vacuum_energy"]),
-        read(fid["perturbed_equilibrium/energies/total_energy"])
+    data_r, data_i, mlow, mhigh = h5open(h5path, "r") do fid
+        read(fid[base * "b_psi_real"]), read(fid[base * "b_psi_imag"]),
+        read(fid["info/mlow"]), read(fid["info/mhigh"])
     end
 
-    vals  = [real(ep), real(ev), real(et)]  # real() in case energies are stored as complex
-    names = ["Plasma", "Vacuum", "Total"]
-    colors = [:steelblue, :darkorange, :green]
+    mpert  = mhigh - mlow + 1
+    m_vals = mlow:mhigh
+    data   = complex.(data_r, data_i)   # (npsi, numpert_total)
+    bpsi_edge = abs.(data[end, 1:mpert])
 
     p = bar(
-        names, vals;
-        ylabel="Energy",
-        title="Energy breakdown",
+        collect(m_vals), bpsi_edge;
+        xlabel="m",
+        ylabel="|b_ψ|",
+        title="b_ψ spectrum at ψ edge",
         legend=false,
-        color=colors,
-        left_margin=5Plots.mm,
+        color=:steelblue,
+        linewidth=0,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
-    hline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
 
     return p
 end

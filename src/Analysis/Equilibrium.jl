@@ -41,7 +41,7 @@ function plot_qprofile(h5path; show_singular=true, save_path=nothing)
         title="",
         legend=false,
         xlims=(0, 1),
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm,
         right_margin=8Plots.mm  # annotations at x=1.0 need room on the right
     )
@@ -94,7 +94,7 @@ function plot_pressure_profile(h5path; save_path=nothing)
         title="",
         legend=false,
         xlims=(0, 1),
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     for s in 1:msing
@@ -135,7 +135,7 @@ function plot_f_profile(h5path; save_path=nothing)
         title="",
         legend=false,
         xlims=(0, 1),
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     for s in 1:msing
@@ -198,7 +198,7 @@ function plot_flux_surfaces(h5path; n_psi=11, n_theta=18, save_path=nothing)
         ylabel="Z [m]",
         aspect_ratio=:equal,
         legend=:outertopright,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
 
@@ -270,7 +270,7 @@ function plot_gse_by_theta(h5path; n_theta_lines=8, save_path=nothing)
         title="",
         yscale=:log10,
         xlims=(0, 1),
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     for (i, itheta) in enumerate(theta_indices)
@@ -326,7 +326,7 @@ function plot_gse_integrated(h5path; save_path=nothing)
         ylabel="log₁₀(integrated GSE)",
         title="Flux-surface-integrated Grad-Shafranov error",
         legend=false,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
 

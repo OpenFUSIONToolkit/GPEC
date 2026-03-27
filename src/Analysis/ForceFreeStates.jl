@@ -46,7 +46,7 @@ function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
         xlabel="Norm. Poloidal Flux",
         ylabel="|ξ^ψ|",
         title=title_str,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     for m in modes
@@ -60,7 +60,7 @@ end
 
 
 """
-    plot_fixed_boundarystability_criterion(h5path; save_path=nothing)
+    plot_fixed_boundary_stability_criterion(h5path; save_path=nothing)
 
 Plot the stability criterion (smallest eigenvalue of W⁻¹, `crit`) vs ψ_N.
 A sign change in `crit` during integration indicates an ideal fixed-boundary instability.
@@ -77,7 +77,7 @@ A sign change in `crit` during integration indicates an ideal fixed-boundary ins
 
 A `Plots.jl` plot object.
 """
-function plot_fixed_boundarystability_criterion(h5path; save_path=nothing)
+function plot_fixed_boundary_stability_criterion(h5path; save_path=nothing)
     psi, crit = h5open(h5path, "r") do fid
         read(fid["integration/psi"]), read(fid["integration/crit"])
     end
@@ -89,7 +89,7 @@ function plot_fixed_boundarystability_criterion(h5path; save_path=nothing)
         ylabel="|Dᶜ|",
         title="Fixed-Boundary Stability",
         legend=false,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
@@ -144,8 +144,8 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         ylabel="Eigenmode Index",
         title="Total Energy Eigenvectors",
         colorbar_title="Harmonic Amplitude",
-        left_margin=5Plots.mm,
-        right_margin=10Plots.mm,
+        left_margin=10Plots.mm,
+        right_margin=20Plots.mm,
         bottom_margin=5Plots.mm
     )
 
@@ -194,7 +194,7 @@ function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
         legend=false,
         color=colors,
         markerstrokewidth=0,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     hline!(p, [0]; linestyle=:dash, color=:black, label=nothing)
@@ -265,7 +265,7 @@ function plot_delta_prime(h5path; save_path=nothing)
         color=colors,
         markersize=7,
         markerstrokewidth=0,
-        left_margin=5Plots.mm,
+        left_margin=10Plots.mm,
         bottom_margin=5Plots.mm
     )
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
@@ -304,16 +304,16 @@ function plot_ffs_summary(h5path; save_path=nothing)
         haskey(fid, "vacuum/wt") && !isempty(read(fid["vacuum/wt"]))
     end
 
-    p_crit = plot_stability_criterion(h5path)
+    p_crit = plot_fixed_boundary_stability_criterion(h5path)
     p_dp = plot_delta_prime(h5path)
 
     if has_vac
         p_evec = plot_energy_eigenvectors(h5path; matrix_type=:total)
         p_modes = plot_mode_displacement(h5path)
-        p = plot(p_evec, p_crit, p_modes, p_dp; layout=(2, 2), size=(1100, 900))
+        p = plot(p_evec, p_crit, p_modes, p_dp; layout=(2, 2), size=(1100, 900), right_margin=10Plots.mm)
     else
         title!(p_crit, "Stability criterion (no vacuum data — rerun with vac_flag = true)")
-        p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500))
+        p = plot(p_crit, p_dp; layout=(1, 2), size=(1100, 500), right_margin=10Plots.mm)
     end
 
     isnothing(save_path) || savefig(p, save_path)
