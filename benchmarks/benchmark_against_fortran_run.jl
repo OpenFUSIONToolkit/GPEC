@@ -860,8 +860,8 @@ function main(argv=ARGS)
     @printf "  psilim=%.6f,  qlim=%.4f,  %d rational surfaces\n" fort["psilim"] fort["qlim"] length(fort["psi_n_rational"])
     @printf "  m range: %d:%d\n" fort["mlow"] fort["mhigh"]
 
-    bench_name = basename(fortran_dir) * "_resonant_response_benchmark"
-    bench_dir  = joinpath(homedir(), "Code", "benchmarks_for_gpec_fortran_to_julia", bench_name)
+    bench_name = "fortran_vs_julia_" * basename(fortran_dir)
+    bench_dir  = joinpath(@__DIR__, bench_name)
     mkpath(bench_dir)
     println("\nBenchmark directory: $bench_dir")
 
