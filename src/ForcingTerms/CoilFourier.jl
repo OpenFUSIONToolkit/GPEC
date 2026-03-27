@@ -224,14 +224,15 @@ function compute_coil_forcing_modes!(
     n::Int,
     m_low::Int,
     m_high::Int;
+    psi::Float64 = 1.0,
     verbose::Bool = false
 )
     nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : 32 * max(1, abs(n))
     mtheta = cfg.mtheta_coil
 
-    verbose && @info "Computing coil forcing modes: mtheta=$mtheta, nzeta=$nzeta, n=$n, m=$m_low:$m_high"
+    verbose && @info "Computing coil forcing modes: mtheta=$mtheta, nzeta=$nzeta, n=$n, m=$m_low:$m_high, psi=$psi"
 
-    grid = sample_boundary_grid(equil, mtheta, nzeta)
+    grid = sample_boundary_grid(equil, mtheta, nzeta; psi)
 
     # Lay out observation points: (theta_i, zeta_j) → cylindrical (R, phi, Z)
     nobs  = mtheta * nzeta

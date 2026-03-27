@@ -93,6 +93,12 @@ Diagnostics [n_rational]:
 Metadata [n_rational] — identifies each (surface, n) row:
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
+Control surface matrices [numpert_total × numpert_total]:
+  - `plasma_inductance` - Lambda (wt0-based plasma inductance)
+  - `surface_inductance` - L (vacuum surface inductance from Green's functions)
+  - `permeability` - P = Lambda * L^{-1} (plasma response matrix, Phi_tot = P * Phi_x)
+  - `reluctance` - Rho = L^{-1} * (Lambda - L) * L^{-1}
+
 Energies:
   - `plasma_energy`, `vacuum_energy`, `total_energy`
 """
@@ -129,6 +135,12 @@ Energies:
     # Control surface perturbation vectors [numpert_total]
     forcing_vec::Vector{ComplexF64}   = ComplexF64[]  # Phi_x: external forcing in eigenmode basis
     response_vec::Vector{ComplexF64}  = ComplexF64[]  # Phi_tot = P * Phi_x: total plasma response
+
+    # Control surface matrices [numpert_total × numpert_total]
+    plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Lambda
+    surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L
+    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P = Lambda * L^{-1}
+    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # Rho = L^{-1}*(Lambda-L)*L^{-1}
 
     # Energies
     plasma_energy::Float64  = 0.0

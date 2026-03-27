@@ -97,7 +97,7 @@ function compute_perturbed_equilibrium(
             modes_n = ForcingMode[]
             ForcingTerms.compute_coil_forcing_modes!(
                 modes_n, coil_sets, equil, cfg, n, ffs_intr.mlow, ffs_intr.mhigh;
-                verbose=ctrl.verbose
+                psi=ffs_intr.psilim, verbose=ctrl.verbose
             )
             append!(intr.forcing_modes, modes_n)
         end

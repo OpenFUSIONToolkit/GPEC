@@ -72,6 +72,7 @@ All in mode space, matching GPEC output format.
 """
 function reconstruct_physical_fields(
     response_vector::Vector{ComplexF64},
+    flux_matrix::Matrix{ComplexF64},
     ForceFreeStates_results::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal,
@@ -84,6 +85,7 @@ function reconstruct_physical_fields(
     # Step 1: Sum weighted eigenmode contributions to get covariant ξ_ψ in mode space
     xi_psi_modes = sum_eigenmode_contributions(
         response_vector,
+        flux_matrix,
         ForceFreeStates_results,
         ffs_intr
     )
@@ -117,72 +119,53 @@ end
 """
     sum_eigenmode_contributions(
         response_vector::Vector{ComplexF64},
+        flux_matrix::Matrix{ComplexF64},
         ForceFreeStates_results::OdeState,
         ffs_intr::ForceFreeStatesInternal
     ) -> xi_psi_modes
 
 Sum eigenmode contributions weighted by response coefficients.
 
-The response vector contains one coefficient for each (i,j) eigenmode pair.
-This function weights each eigenmode by its coefficient and sums them to
-get the total covariant radial displacement ξ_ψ in mode space.
+`response_vector` (= P * Phi_x) is in mode (m,n) basis. To reconstruct physical
+fields from eigenmode solutions in u_store, first project to eigenmode amplitudes:
+    alpha = flux_matrix \\ response_vector
 
-Mimics GPEC's approach where the DCON eigenmodes are weighted by the
-plasma response to external forcing.
+Then sum eigenmode contributions at each radial point:
+    xi_psi[ipsi, :] = u_store[:, :, 1, ipsi] * alpha
+
+Matches Fortran's idcon_build + gpeq_sol workflow (gpresp.f / gpeq.f).
 
 # Arguments
 
-- `response_vector::Vector{ComplexF64}`: Response coefficient for each eigenmode [numpert_total]
-- `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store containing eigenmodes
-- `ffs_intr::ForceFreeStatesInternal`: Mode information (mpert, etc.)
+- `response_vector`: Mode-basis response Phi_tot [numpert_total]
+- `flux_matrix`: Flux matrix [mode × eigenmode] from build_flux_matrix
+- `ForceFreeStates_results`: OdeState with u_store (eigenmode-transformed)
+- `ffs_intr`: Mode information (mpert, etc.)
 
 # Returns
 
-- `xi_psi_modes::Matrix{ComplexF64}`: Covariant radial displacement ξ_ψ(ψ, m) [npsi, mpert]
-
-# Notes
-
-- In ForceFreeStates formulation, u_store[:, :, 1, :] contains ξ_ψ (covariant radial displacement)
-- The response vector is ordered as [mode1_mode1, mode1_mode2, ..., mode2_mode1, ...]
-- We sum over all (i,j) eigenmode pairs to get the total response for each mode i
-- This corresponds to xsp_mn in GPEC notation
+- `xi_psi_modes`: Covariant radial displacement ξ_ψ(ψ, m) [npsi, mpert]
 """
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
+    flux_matrix::Matrix{ComplexF64},
     ForceFreeStates_results::OdeState,
     ffs_intr::ForceFreeStatesInternal
 )
-    # Extract dimensions
-    numpert_total = length(response_vector)
-    npsi = size(ForceFreeStates_results.u_store, 4)
     mpert = ffs_intr.mpert
+    npsi  = size(ForceFreeStates_results.u_store, 4)
 
-    # Initialize output array (npsi × mpert)
-    # xsp_mn in GPEC notation (covariant radial displacement)
+    # Convert mode-basis response (Phi_tot) to eigenmode amplitudes alpha
+    # flux_matrix[mode, eigenmode], so: flux_matrix * alpha = response_vector
+    alpha = flux_matrix \ response_vector   # [mpert]
+
+    # Sum: xi_psi[ipsi, :] = u_store[:, :, 1, ipsi] * alpha
+    # u_store[mode_i, eigenmode_j, 1, ipsi] * alpha[j] summed over j
     xi_psi_modes = zeros(ComplexF64, npsi, mpert)
-
-    # Sum weighted eigenmode contributions
-    # For each eigenmode pair (i, j) in the response matrix
-    idx = 1
-    for i in 1:mpert
-        for j in 1:mpert
-            if idx > numpert_total
-                break
-            end
-
-            # Weight this eigenmode by its response coefficient
-            coeff = response_vector[idx]
-
-            # Add this eigenmode's contribution to each radial point
-            # Accumulate into mode i (diagonal contribution)
-            for ipsi in 1:npsi
-                # u_store[i, j, component, radial_index]
-                # Component 1 = ξ_ψ (covariant radial displacement)
-                xi_psi_modes[ipsi, i] += coeff * ForceFreeStates_results.u_store[i, j, 1, ipsi]
-            end
-
-            idx += 1
-        end
+    for ipsi in 1:npsi
+        mul!(view(xi_psi_modes, ipsi, :),
+             ForceFreeStates_results.u_store[:, :, 1, ipsi],
+             alpha)
     end
 
     return xi_psi_modes

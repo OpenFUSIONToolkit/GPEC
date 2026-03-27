@@ -248,6 +248,16 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
         fort["Phi_tot"] = complex.(phi_tot[:, 1], phi_tot[:, 2])
 
         fort["m_vals_ctrl"] = Int.(ds["m"][:])
+
+        # Control surface matrices (resp_index=0): NC shape (mode, mode, 2) in Julia
+        for (key, nc_var) in [("P", "P"), ("Lambda", "Lambda"), ("L_surf", "L"), ("rho", "rho")]
+            if haskey(ds, nc_var)
+                raw = Float64.(ds[nc_var][:, :, :])  # (mode, mode, 2) → last dim real/imag
+                fort[key] = complex.(raw[:, :, 1], raw[:, :, 2])
+            else
+                fort[key] = Matrix{ComplexF64}(undef, 0, 0)
+            end
+        end
     end
 
     return fort
@@ -284,6 +294,13 @@ function load_julia_outputs(h5_path::String)
         julia["psi_grid"]     = haskey(f, "integration/psi")    ? read(f, "integration/psi")    : Float64[]
         # mn_index[:, 1] = m values, mn_index[:, 2] = n values for each mode index
         julia["m_modes"]      = haskey(f, "info/mn_index") ? Int.(read(f, "info/mn_index")[:, 1]) : Int[]
+
+        # Control surface matrices
+        rm = "$pe/response_matrices"
+        julia["permeability"]       = haskey(f, "$rm/permeability")       ? read(f, "$rm/permeability")       : Matrix{ComplexF64}(undef, 0, 0)
+        julia["plasma_inductance"]  = haskey(f, "$rm/plasma_inductance")  ? read(f, "$rm/plasma_inductance")  : Matrix{ComplexF64}(undef, 0, 0)
+        julia["surface_inductance"] = haskey(f, "$rm/surface_inductance") ? read(f, "$rm/surface_inductance") : Matrix{ComplexF64}(undef, 0, 0)
+        julia["reluctance"]         = haskey(f, "$rm/reluctance")         ? read(f, "$rm/reluctance")         : Matrix{ComplexF64}(undef, 0, 0)
     end
     return julia
 end
@@ -497,6 +514,12 @@ end
 
 rel_pct(a, b) = abs(b) > 1e-30 ? @sprintf("%.1f%%", 100 * abs(a - b) / abs(b)) : "N/A"
 
+function step_series(m_vals, amps)
+    m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
+    amp_ext = [0.0; amps; 0.0]
+    return m_ext, amp_ext
+end
+
 function find_julia_row(julia, q_int::Int, nn::Int)
     rat_q = julia["rational_q"]
     rat_n = julia["rational_n"]
@@ -594,6 +617,62 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
         end
     else
         push!(lines, "Phi_tot data unavailable")
+    end
+    push!(lines, "")
+
+    push!(lines, "--- P Matrix |diagonal| comparison (n=$nn) ---")
+    f_P = fort["P"]
+    j_P = julia["permeability"]
+    if !isempty(f_P) && !isempty(j_P) && size(f_P) == size(j_P)
+        mpert = size(f_P, 1)
+        push!(lines, @sprintf("%-5s  %-14s  %-14s  %-6s", "m", "|P_fort[i,i]|", "|P_julia[i,i]|", "Rel%"))
+        m_ctrl = fort["m_vals_ctrl"]
+        for i in 1:mpert
+            m = i <= length(m_ctrl) ? m_ctrl[i] : i
+            fp = abs(f_P[i, i])
+            jp = abs(j_P[i, i])
+            push!(lines, @sprintf("%-5d  %14.4e  %14.4e  %-6s", m, fp, jp, rel_pct(fp, jp)))
+        end
+    else
+        push!(lines, "P matrix unavailable or size mismatch")
+    end
+    push!(lines, "")
+
+    push!(lines, "--- Lambda (plasma inductance) |diagonal| comparison (n=$nn) ---")
+    f_L = fort["Lambda"]
+    j_L = julia["plasma_inductance"]
+    if !isempty(f_L) && !isempty(j_L) && size(f_L) == size(j_L)
+        mpert = size(f_L, 1)
+        push!(lines, @sprintf("%-5s  %-14s  %-14s  %-6s  %-10s", "m", "|Λ_fort[i,i]|", "|Λ_julia[i,i]|", "Rel%", "Ratio j/f"))
+        m_ctrl = fort["m_vals_ctrl"]
+        for i in 1:mpert
+            m = i <= length(m_ctrl) ? m_ctrl[i] : i
+            fl = abs(f_L[i, i])
+            jl = abs(j_L[i, i])
+            ratio = fl > 0 ? jl/fl : NaN
+            push!(lines, @sprintf("%-5d  %14.4e  %14.4e  %-6s  %10.3f", m, fl, jl, rel_pct(fl, jl), ratio))
+        end
+    else
+        push!(lines, "Lambda matrix unavailable or size mismatch (fort=$(size(f_L)), julia=$(size(j_L)))")
+    end
+    push!(lines, "")
+
+    push!(lines, "--- L (surface inductance) |diagonal| comparison (n=$nn) ---")
+    f_LS = fort["L_surf"]
+    j_LS = julia["surface_inductance"]
+    if !isempty(f_LS) && !isempty(j_LS) && size(f_LS) == size(j_LS)
+        mpert = size(f_LS, 1)
+        push!(lines, @sprintf("%-5s  %-14s  %-14s  %-6s  %-10s", "m", "|L_fort[i,i]|", "|L_julia[i,i]|", "Rel%", "Ratio j/f"))
+        m_ctrl = fort["m_vals_ctrl"]
+        for i in 1:mpert
+            m = i <= length(m_ctrl) ? m_ctrl[i] : i
+            fl = abs(f_LS[i, i])
+            jl = abs(j_LS[i, i])
+            ratio = fl > 0 ? jl/fl : NaN
+            push!(lines, @sprintf("%-5d  %14.4e  %14.4e  %-6s  %10.3f", m, fl, jl, rel_pct(fl, jl), ratio))
+        end
+    else
+        push!(lines, "L matrix unavailable or size mismatch (fort=$(size(f_LS)), julia=$(size(j_LS)))")
     end
     push!(lines, "")
 
@@ -727,20 +806,14 @@ function generate_plots(fort, julia, bench_dir, nn)
     p6 = plot(; xlabel="m", ylabel="|Φ| [Wb]", title="Phi_x & Phi_tot spectrum (n=$nn)",
               legend=:topright)
     if !isempty(j_fvec) && !isempty(f_phi_x)
-        # step_series helper for spectrum plots
-        function _ss(mv, av)
-            m_ext = [mv[1]-1; mv; mv[end]+1]
-            a_ext = [0.0; av; 0.0]
-            return m_ext, a_ext
-        end
         jfx_amps  = [abs(get(Dict(zip(j_mmodes, j_fvec)),  m, NaN+0im)) for m in m_ctrl]
         jft_amps  = [abs(get(Dict(zip(j_mmodes, j_rvec)),  m, NaN+0im)) for m in m_ctrl]
         ffx_amps  = abs.(f_phi_x)
         fft_amps  = abs.(f_phi_tot)
-        me, jfe = _ss(m_ctrl, replace(jfx_amps, NaN=>0.0))
-        _,  jte = _ss(m_ctrl, replace(jft_amps, NaN=>0.0))
-        _,  ffe = _ss(m_ctrl, ffx_amps)
-        _,  fte = _ss(m_ctrl, fft_amps)
+        me, jfe = step_series(m_ctrl, replace(jfx_amps, NaN=>0.0))
+        _,  jte = step_series(m_ctrl, replace(jft_amps, NaN=>0.0))
+        _,  ffe = step_series(m_ctrl, ffx_amps)
+        _,  fte = step_series(m_ctrl, fft_amps)
         plot!(p6, me, ffe; seriestype=:steppre, lw=2, color=:steelblue, label="Φ_x Fortran")
         plot!(p6, me,  jfe; seriestype=:steppre, lw=2, color=:steelblue, linestyle=:dash, label="Φ_x Julia")
         plot!(p6, me,  fte; seriestype=:steppre, lw=2, color=:orange,    label="Φ_tot Fortran")
@@ -758,6 +831,25 @@ function generate_plots(fort, julia, bench_dir, nn)
         ylabel="|W_t|", legend=false, color=[:steelblue, :orange], alpha=0.8)
     annotate!(p7, 1.5, min(fv,jv)*0.5,
         text(@sprintf("Δ=%.1f%%", 100*abs(fv-jv)/fv), 9, :center))
+
+    # P matrix diagonal comparison
+    f_P = fort["P"]
+    j_P = julia["permeability"]
+    m_ctrl = fort["m_vals_ctrl"]
+    p8 = plot(; xlabel="Poloidal mode m", ylabel="|P[i,i]|",
+               title="|P| diagonal  (n=$nn)", legend=:topright)
+    if !isempty(f_P) && !isempty(j_P)
+        mpert_p = min(size(f_P, 1), size(j_P, 1), length(m_ctrl))
+        ms = m_ctrl[1:mpert_p]
+        fp_diag = [abs(f_P[i,i]) for i in 1:mpert_p]
+        jp_diag = [abs(j_P[i,i]) for i in 1:mpert_p]
+        me_f, fe = step_series(ms, fp_diag)
+        me_j, je = step_series(ms, jp_diag)
+        plot!(p8, me_f, fe; seriestype=:steppre, lw=2, color=:steelblue, label="Fortran")
+        plot!(p8, me_j, je; seriestype=:steppre, lw=2, color=:orange, linestyle=:dash, label="Julia")
+    else
+        annotate!(p8, 0.5, 0.5, text("data unavailable", 10, :center))
+    end
 
     # --- Row 3: b_psi profiles for resonant m harmonics ---
     # Identify resonant m values from rational surfaces
@@ -814,8 +906,8 @@ function generate_plots(fort, julia, bench_dir, nn)
         push!(bpsi_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    layout = @layout [a b c; d e f g; h i j k]
-    p = plot(p1, p2, p3, p4, p5, p6, p7, bpsi_panels...; layout=layout, size=(1800, 1350),
+    layout = @layout [a b c; d e f g h; i j k l]
+    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, bpsi_panels...; layout=layout, size=(2100, 1350),
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")
     savefig(p, outfile)
