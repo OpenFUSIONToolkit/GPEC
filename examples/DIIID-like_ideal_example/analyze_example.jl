@@ -2,7 +2,7 @@ using Pkg;
 Pkg.activate(joinpath(@__DIR__, "../.."))
 using GeneralizedPerturbedEquilibrium, Plots
 using GeneralizedPerturbedEquilibrium: Analysis
-gr()
+isinteractive() ? plotlyjs() : gr()
 
 h5path = joinpath(@__DIR__, "gpec.h5")
 
