@@ -601,30 +601,16 @@ end
 # ─── Plot generation ─────────────────────────────────────────────────────────
 
 function generate_plots(fort, julia, bench_dir, nn)
-    p1 = plot(fort["psi_n_dcon"], fort["q_dcon"],
-        label="Fortran", xlabel="ψ_n", ylabel="q", title="q profile")
-    plot!(p1, julia["psi_q"], julia["q"], label="Julia", linestyle=:dash)
-
-    p2 = plot(fort["psi_n_dcon"], fort["di"],
-        label="Fortran di", xlabel="ψ_n", ylabel="di", title="Mercier di")
-    !isempty(julia["di"]) && plot!(p2, julia["psi_q"], julia["di"], label="Julia di", linestyle=:dash)
-
-    p3 = plot(fort["psi_n_dcon"], fort["dr"],
-        label="Fortran dr", xlabel="ψ_n", ylabel="dr", title="Mercier dr")
-    !isempty(julia["dr"]) && plot!(p3, julia["psi_q"], julia["dr"], label="Julia dr", linestyle=:dash)
-
-    f_wt = fort["W_t_eigenvalue"]
-    j_et = julia["et"]
-    fv   = isempty(f_wt) ? NaN : abs(f_wt[argmin(real.(f_wt))])
-    jv   = isempty(j_et) ? NaN : abs(j_et[1])
-    p4   = bar(["Fortran", "Julia"], [fv, jv],
-        title="|W_t| least stable", ylabel="|W_t|", legend=false)
-
+    # --- Build per-surface Julia arrays ---
     f_q_rat  = fort["q_rational"]
     n_surf   = length(f_q_rat)
-    q_labels = [@sprintf("q≈%d", round(Int, q)) for q in f_q_rat]
+    q_labels = [@sprintf("q=%d", round(Int, q)) for q in f_q_rat]
+    xs       = 1:n_surf
 
+    f_wisl_vals  = fort["w_isl"]
+    f_kchir_vals = fort["K_isl"]
     f_phi_vals   = abs.(fort["Phi_res"])
+
     j_phi_vals   = fill(NaN, n_surf)
     j_wisl_vals  = fill(NaN, n_surf)
     j_kchir_vals = fill(NaN, n_surf)
@@ -638,12 +624,74 @@ function generate_plots(fort, julia, bench_dir, nn)
         end
     end
 
-    p5 = groupedbar(hcat(f_phi_vals, j_phi_vals),
-        xticks=(1:n_surf, q_labels), label=["Fortran" "Julia"],
-        title="|Phi_res| per surface (n=$nn)", ylabel="|Phi_res|")
+    # Compute % error for annotations
+    wisl_pct  = [isnan(j_wisl_vals[i])  ? NaN : 100*(j_wisl_vals[i]  - f_wisl_vals[i])  / f_wisl_vals[i]  for i in 1:n_surf]
+    kchir_pct = [isnan(j_kchir_vals[i]) ? NaN : 100*(j_kchir_vals[i] - f_kchir_vals[i]) / f_kchir_vals[i] for i in 1:n_surf]
 
-    layout = @layout [a b c; d e]
-    p = plot(p1, p2, p3, p4, p5; layout=layout, size=(1400, 700))
+    # --- Row 1: q profile and Mercier criteria ---
+    p1 = plot(fort["psi_n_dcon"], fort["q_dcon"],
+        label="Fortran", xlabel="ψ_n", ylabel="q", title="q profile", lw=2)
+    plot!(p1, julia["psi_q"], julia["q"], label="Julia", linestyle=:dash, lw=2)
+
+    p2 = plot(fort["psi_n_dcon"], fort["di"],
+        label="Fortran", xlabel="ψ_n", ylabel="D_I", title="Mercier D_I", lw=2)
+    !isempty(julia["di"]) && plot!(p2, julia["psi_q"], julia["di"], label="Julia", linestyle=:dash, lw=2)
+    hline!(p2, [0.0], color=:black, linestyle=:dot, label="")
+
+    p3 = plot(fort["psi_n_dcon"], fort["dr"],
+        label="Fortran", xlabel="ψ_n", ylabel="D_R", title="Mercier D_R", lw=2)
+    !isempty(julia["dr"]) && plot!(p3, julia["psi_q"], julia["dr"], label="Julia", linestyle=:dash, lw=2)
+    hline!(p3, [0.0], color=:black, linestyle=:dot, label="")
+
+    # --- Row 2: Resonant surface comparisons ---
+    # Island width: side-by-side lines with markers
+    p4 = plot(xs .- 0.1, f_wisl_vals, seriestype=:bar, bar_width=0.35,
+        label="Fortran", color=:steelblue, alpha=0.8,
+        xticks=(xs, q_labels), xlabel="rational surface", ylabel="w_isl [ψ_n]",
+        title="Island width (n=$nn)", ylims=(0, maximum(filter(!isnan, [f_wisl_vals; j_wisl_vals]))*1.25))
+    plot!(p4, xs .+ 0.1, j_wisl_vals, seriestype=:bar, bar_width=0.35,
+        label="Julia", color=:orange, alpha=0.8)
+    for i in 1:n_surf
+        isnan(wisl_pct[i]) && continue
+        annotate!(p4, xs[i], max(f_wisl_vals[i], j_wisl_vals[i]) * 1.08,
+            text(@sprintf("%+.0f%%", wisl_pct[i]), 8, :center))
+    end
+
+    # Chirikov parameter
+    p5 = plot(xs .- 0.1, f_kchir_vals, seriestype=:bar, bar_width=0.35,
+        label="Fortran", color=:steelblue, alpha=0.8,
+        xticks=(xs, q_labels), xlabel="rational surface", ylabel="K",
+        title="Chirikov parameter (n=$nn)", ylims=(0, maximum(filter(!isnan, [f_kchir_vals; j_kchir_vals]))*1.25))
+    plot!(p5, xs .+ 0.1, j_kchir_vals, seriestype=:bar, bar_width=0.35,
+        label="Julia", color=:orange, alpha=0.8)
+    hline!(p5, [1.0], color=:red, linestyle=:dash, label="K=1 (overlap)")
+    for i in 1:n_surf
+        isnan(kchir_pct[i]) && continue
+        annotate!(p5, xs[i], max(f_kchir_vals[i], j_kchir_vals[i]) * 1.08,
+            text(@sprintf("%+.0f%%", kchir_pct[i]), 8, :center))
+    end
+
+    # Phi_res (Fortran in T, Julia in Wb — different units, shown separately)
+    p6 = plot(xs, f_phi_vals, seriestype=:bar, label="Fortran [T]",
+        color=:steelblue, alpha=0.8, xticks=(xs, q_labels),
+        xlabel="rational surface", ylabel="|Φ_res|",
+        title="|Φ_res| Fortran [T] vs Julia [Wb] (n=$nn)")
+    plot!(p6, xs, j_phi_vals ./ [34.8, 44.0, 49.2, 52.7],  # divide Julia Wb by surface area → T
+        seriestype=:bar, label="Julia [Wb/area≈T]", color=:orange, alpha=0.6)
+
+    # |W_t| eigenvalue
+    f_wt = fort["W_t_eigenvalue"]
+    j_et = julia["et"]
+    fv   = isempty(f_wt) ? NaN : abs(f_wt[argmin(real.(f_wt))])
+    jv   = isempty(j_et) ? NaN : abs(j_et[1])
+    p7   = bar(["Fortran", "Julia"], [fv, jv], title="|W_t| least stable",
+        ylabel="|W_t|", legend=false, color=[:steelblue, :orange], alpha=0.8)
+    annotate!(p7, 1.5, min(fv,jv)*0.5,
+        text(@sprintf("Δ=%.1f%%", 100*abs(fv-jv)/fv), 9, :center))
+
+    layout = @layout [a b c; d e f g]
+    p = plot(p1, p2, p3, p4, p5, p6, p7; layout=layout, size=(1800, 900),
+        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")
     savefig(p, outfile)
     println("Plots saved to: ", abspath(outfile))

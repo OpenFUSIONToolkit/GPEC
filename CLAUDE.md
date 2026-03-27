@@ -492,6 +492,19 @@ This format is used for compiling release notes, so tags should be human-readabl
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `gpec.toml` file
 
+### Plotting
+- **Spectrum plots** (any plot with discrete mode numbers m or n on the x-axis) must use `seriestype=:steppre` with a `step_series` helper that pads zeros on both ends. Pattern from `benchmarks/benchmark_coil_ForcingTerms_against_fortran.jl`:
+  ```julia
+  function step_series(m_vals, amps)
+      m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
+      amp_ext = [0.0; amps; 0.0]
+      return m_ext, amp_ext
+  end
+  # Usage:
+  m_ext, a_ext = step_series(m_vals, amplitudes)
+  plot!(p, m_ext, a_ext; seriestype=:steppre, lw=2, label="...")
+  ```
+
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
