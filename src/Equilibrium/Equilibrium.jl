@@ -3,6 +3,7 @@ module Equilibrium
 # --- Module-level Dependencies ---
 
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
+using Base: Threads
 using Roots
 using TOML
 import FastInterpolations
@@ -100,11 +101,48 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
     for iside in 1:2
         hint2d = (Ref(1), Ref(1))
-        theta = find_zero(
-            (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
-            theta, Roots.Newton()
-        )
+        function eta_match(theta_g)
+            theta_g + pe.rzphi_offset((psi_edge, theta_g); hint=hint2d) - eta0
+        end
+        function eta_match_deriv(theta_g)
+            1.0 + pe.rzphi_offset((psi_edge, theta_g); deriv=Val((0, 1)), hint=hint2d)
+        end
+        theta = try
+            find_zero((eta_match, eta_match_deriv), theta, Roots.Newton(); atol=1e-12, rtol=1e-12, maxevals=500)
+        catch err
+            thetas = collect(range(0.0, 1.0; length=513))
+            vals = map(eta_match, thetas)
+            br = findfirst(i -> begin
+                a = vals[i]
+                b = vals[i+1]
+                isfinite(a) && isfinite(b) && (a == 0.0 || b == 0.0 || a * b < 0.0)
+            end, 1:(length(thetas)-1))
+            if br !== nothing
+                try
+                    find_zero(eta_match, (thetas[br], thetas[br+1]), Roots.Brent(); atol=1e-12, rtol=1e-12, maxevals=1000)
+                catch
+                    fi = findall(isfinite, vals)
+                    if !isempty(fi)
+                        j = fi[argmin(abs.(vals[fi]))]
+                        @warn "η=$eta0 inboard/outboard θ: Brent failed after Newton failed; using θ=$(thetas[j]) (min |res| on grid). $err"
+                        thetas[j]
+                    else
+                        @warn "η=$eta0 separatrix θ: no finite residuals on grid; keeping initial θ=$theta. $err"
+                        theta
+                    end
+                end
+            else
+                fi = findall(isfinite, vals)
+                if !isempty(fi)
+                    j = fi[argmin(abs.(vals[fi]))]
+                    @warn "η=$eta0 separatrix θ: Newton failed, no sign change; using θ=$(thetas[j]) (min |res|). $err"
+                    thetas[j]
+                else
+                    @warn "η=$eta0 separatrix θ: Newton failed, all NaN on grid; keeping θ=$theta. $err"
+                    theta
+                end
+            end
+        end
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
@@ -170,8 +208,37 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
                    (rfac2 - rfac_local * phase1^2) * sin_phase  # ∂²z/∂θ²
         end
 
-        theta = find_zero((z_deriv, z_deriv2), theta, Roots.Newton();
-            atol=1e-12, rtol=1e-12, maxevals=1000)
+        theta = try
+            find_zero((z_deriv, z_deriv2), theta, Roots.Newton(); atol=1e-12, rtol=1e-12, maxevals=1000)
+        catch err
+            # Newton can fail on marginal geometries; fall back to a robust edge scan + Brent.
+            thetas = collect(range(0.0, 1.0; length=257))
+            vals = map(z_deriv, thetas)
+            idx = findfirst(i -> begin
+                a = vals[i]
+                b = vals[i+1]
+                isfinite(a) && isfinite(b) && (a == 0.0 || b == 0.0 || a * b < 0.0)
+            end, 1:(length(thetas)-1))
+            if idx !== nothing
+                try
+                    find_zero(z_deriv, (thetas[idx], thetas[idx+1]), Roots.Brent(); atol=1e-12, rtol=1e-12, maxevals=2000)
+                catch
+                    @warn "Separatrix extremum root find fallback failed on side=$iside; using initial theta=$theta. Original error: $err"
+                    theta
+                end
+            else
+                finite_idxs = findall(isfinite, vals)
+                if !isempty(finite_idxs)
+                    imin = argmin(abs.(vals[finite_idxs]))
+                    @warn "Separatrix extremum Newton failed on side=$iside; using nearest sampled theta. Original error: $err"
+                    thetas[finite_idxs[imin]]
+                else
+                    @warn "Separatrix extremum root find produced no finite samples on side=$iside; using initial theta=$theta. Original error: $err"
+                    theta
+                end
+            end
+        end
+        z_deriv(theta)  # refresh cached rfac/cos_phase/z_val at final theta
 
         rext[iside] = pe.ro + rfac[] * cos_phase[]
         zsep[iside] = zext[iside] = z_val[]
@@ -409,7 +476,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     z = zeros(Float64, mpsi + 1, mtheta + 1)
 
     for ipsi in 1:(mpsi+1)
-        rfac = @. sqrt(equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, :])
+        rfac = @. sqrt(max(0.0, equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, :]))
         angle = @. 2π * (equil.rzphi_ys + equil.rzphi_offset.nodal_derivs.partials[1, ipsi, :])
         r[ipsi, :] .= ro .+ rfac .* cos.(angle)
         z[ipsi, :] .= zo .+ rfac .* sin.(angle)
@@ -419,21 +486,29 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux_fs = zeros(Float64, mpsi + 1, mtheta + 1, 2)
     flux_fsx = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # x-derivatives
     flux_fsy = zeros(Float64, mpsi + 1, mtheta + 1, 2)  # y-derivatives
+    # Avoid 0/0 at magnetic axis (f1 = r² → 0) and div by zero in Jacobian f4
+    _gse_f1_div = 1e-20
+    _gse_f4_min = 1e-40
     for ipsi in 1:(mpsi+1)
         for itheta in 1:(mtheta+1)
             f1 = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta]
-            f2 = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, itheta]
             f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
             fy1 = equil.rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta]
             fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, itheta]
             fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta]
             fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, itheta]
 
-            flux_fs[ipsi, itheta, 1] = fy1^2 / (4π^2 * f1) + (1 + fy2)^2 * 4 * f1
-            flux_fs[ipsi, itheta, 2] = fx1 * fy1 / (4π^2 * f1) + fx2 * (1 + fy2) * 4 * f1
-
-            flux_fs[ipsi, itheta, 1] *= 2π * psio / f4
-            flux_fs[ipsi, itheta, 2] *= 2π * psio / f4
+            if !(isfinite(f1) && isfinite(f4) && isfinite(fy1) && isfinite(fy2) && isfinite(fx1) && isfinite(fx2)) || abs(f4) < _gse_f4_min
+                flux_fs[ipsi, itheta, 1] = 0.0
+                flux_fs[ipsi, itheta, 2] = 0.0
+                continue
+            end
+            f1d = max(f1, _gse_f1_div)
+            scale = (2π * psio) / f4
+            t1 = fy1^2 / (4π^2 * f1d) + (1 + fy2)^2 * 4 * f1
+            t2 = fx1 * fy1 / (4π^2 * f1d) + fx2 * (1 + fy2) * 4 * f1
+            flux_fs[ipsi, itheta, 1] = t1 * scale
+            flux_fs[ipsi, itheta, 2] = t2 * scale
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
@@ -441,15 +516,16 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
 
-    # Compute flux derivatives at all grid points for diagnostics
-    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
+    # Separate 2D hints per interpolant — sharing one hint between flux1 and flux2 can corrupt search state.
+    hint_flux1 = (Ref(1), Ref(1))
+    hint_flux2 = (Ref(1), Ref(1))
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
             query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint_flux1)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint_flux2)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint_flux1)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint_flux2)
         end
     end
 
@@ -463,8 +539,13 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         s2p = profiles.P_deriv(psi; hint=hint)
         for itheta in 1:(mtheta+1)
             f4 = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-            denom = (2π * r[ipsi, itheta])^2
-            source[ipsi, itheta] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
+            rij = r[ipsi, itheta]
+            denom = max((2π * rij)^2, 1e-40)
+            if isfinite(f4) && isfinite(s1) && isfinite(s1p) && isfinite(s2p) && isfinite(rij)
+                source[ipsi, itheta] = f4 / (2π * psio * π^2) * (s1 * s1p / denom + s2p)
+            else
+                source[ipsi, itheta] = 0.0
+            end
         end
     end
 
@@ -488,6 +569,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix = zeros(Float64, mtheta + 1, 2)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
+        @. fs_matrix = ifelse(isfinite(fs_matrix), fs_matrix, 0.0)
 
         # Compute total integral using FastInterpolations native integration
         itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=PeriodicBC())
