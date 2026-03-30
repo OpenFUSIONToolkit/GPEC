@@ -379,21 +379,16 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ff
     end
 
     if ctrl.fixed_axis
-        # Legacy initialization: U₁ = I, U₂ = I with U₁(m=0, n=1) = 0.
-        # This suppresses the spurious logarithmic Frobenius solution for m=0 but
-        # also excludes the physical constant-displacement solution. Retained for comparison.
-        m0n1_ipert = (intr.mlow <= 0 <= intr.mhigh && intr.nlow <= 1 <= intr.nhigh) ?
-            (0 - intr.mlow + 1) + (1 - intr.nlow) * intr.mpert : nothing
+        # Original Glasser initialization: U₁=0, U₂=I [Glasser 2016 §VI].
+        # Constrains the axis displacement ξ^ψ=0 for all modes (fixed magnetic axis).
+        # Retained as a reference/comparison option; the default (fixed_axis=false) is Frobenius.
         for ipert in 1:intr.numpert_total
             odet.u[ipert, ipert, 2] = 1
-            if ipert != m0n1_ipert
-                odet.u[ipert, ipert, 1] = 1
-            end
         end
     else
         # Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
         # (non-logarithmic) solution for each mode, including the correct constant
-        # displacement solution for the degenerate m=0 case.
+        # displacement solution for the degenerate m=0 case (free magnetic axis).
         U1_init, U2_init = compute_axis_init(ffit, profiles, intr, odet.psifac)
         odet.u[:, :, 1] .= U1_init
         odet.u[:, :, 2] .= U2_init
