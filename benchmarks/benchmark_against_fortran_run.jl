@@ -302,6 +302,7 @@ function load_julia_outputs(h5_path::String)
         julia["plasma_inductance"]  = haskey(f, "$rm/plasma_inductance")  ? read(f, "$rm/plasma_inductance")  : Matrix{ComplexF64}(undef, 0, 0)
         julia["surface_inductance"] = haskey(f, "$rm/surface_inductance") ? read(f, "$rm/surface_inductance") : Matrix{ComplexF64}(undef, 0, 0)
         julia["reluctance"]         = haskey(f, "$rm/reluctance")         ? read(f, "$rm/reluctance")         : Matrix{ComplexF64}(undef, 0, 0)
+        julia["wt0"]                = haskey(f, "vacuum/wt0")             ? read(f, "vacuum/wt0")             : Matrix{ComplexF64}(undef, 0, 0)
     end
     return julia
 end
@@ -914,6 +915,92 @@ function generate_plots(fort, julia, bench_dir, nn)
     println("Plots saved to: ", abspath(outfile))
 end
 
+# ─── Matrix heatmap figure ───────────────────────────────────────────────────
+
+"""
+    _mat_heatmap(M, title_str, m_vals; rel_err=false)
+
+Return a heatmap panel for matrix M.  Values are plotted on a log₁₀ scale so
+that orders-of-magnitude variation is visible.  When `rel_err=true` the colour
+scale is labelled as log₁₀(rel error).
+"""
+function _mat_heatmap(M::AbstractMatrix, title_str::String, m_vals;
+                      rel_err::Bool=false, clims=nothing)
+    vals = log10.(max.(abs.(M), 1e-30))   # floor at 1e-30 to avoid -Inf
+    label = rel_err ? "log₁₀(|ΔM/M|)" : "log₁₀|M|"
+    kw = isnothing(clims) ? () : (clims=clims,)
+    heatmap(m_vals, m_vals, vals;
+        title=title_str, xlabel="m′", ylabel="m",
+        color=:viridis, colorbar_title=label,
+        xrotation=45, yflip=false, kw...)
+end
+
+function _mat_heatmap_empty(title_str)
+    p = plot(; title=title_str, axis=false, legend=false, border=:none)
+    annotate!(p, 0.5, 0.5, text("unavailable", 9, :center))
+    return p
+end
+
+"""
+    generate_matrix_plots(fort, julia, bench_dir, nn)
+
+Save `matrix_comparison_plots.png` showing element-wise |M| heatmaps for the
+fundamental response matrices L, Λ, P and the vacuum energy matrix wt0.
+
+Layout (rows × 3 columns):
+  • Col 1: |M| Fortran   Col 2: |M| Julia   Col 3: relative error |ΔM/M_fort|
+  • Row 4 (wt0): Julia only — no Fortran reference available in NetCDF outputs.
+"""
+function generate_matrix_plots(fort, julia, bench_dir, nn)
+    m_ctrl = fort["m_vals_ctrl"]
+
+    f_L   = fort["L_surf"]
+    f_La  = fort["Lambda"]
+    f_P   = fort["P"]
+    j_L   = julia["surface_inductance"]
+    j_La  = julia["plasma_inductance"]
+    j_P   = julia["permeability"]
+    j_wt0 = julia["wt0"]
+
+    panels = Any[]
+
+    for (name, f_M, j_M) in [("L  (surface inductance)", f_L, j_L),
+                               ("Λ  (plasma inductance)",  f_La, j_La),
+                               ("P  (permeability)",        f_P, j_P)]
+        ok = !isempty(f_M) && !isempty(j_M) && size(f_M) == size(j_M)
+        if ok
+            # Use a common colour range for the first two panels
+            all_vals = log10.(max.(abs.([f_M; j_M]), 1e-30))
+            clims_mat = (minimum(all_vals), maximum(all_vals))
+            push!(panels, _mat_heatmap(f_M, "|$name| — Fortran",  m_ctrl; clims=clims_mat))
+            push!(panels, _mat_heatmap(j_M, "|$name| — Julia",    m_ctrl; clims=clims_mat))
+            rel_err = abs.(j_M .- f_M) ./ (abs.(f_M) .+ 1e-30)
+            push!(panels, _mat_heatmap(rel_err, "Rel. error |$name|", m_ctrl; rel_err=true))
+        else
+            for _ in 1:3
+                push!(panels, _mat_heatmap_empty("|$name| (data unavailable)"))
+            end
+        end
+    end
+
+    # wt0 — fundamental vacuum energy matrix, Julia only
+    if !isempty(j_wt0)
+        push!(panels, _mat_heatmap(j_wt0, "|wt0| — Julia (no Fortran ref.)", m_ctrl))
+        # Fill the remaining two slots to keep the 3-column layout
+        push!(panels, plot(; title="", axis=false, legend=false, border=:none))
+        push!(panels, plot(; title="", axis=false, legend=false, border=:none))
+    end
+
+    nrows = length(panels) ÷ 3
+    p = plot(panels...;
+        layout=(nrows, 3),
+        size=(1800, 420 * nrows),
+        left_margin=8Plots.mm, bottom_margin=8Plots.mm, top_margin=4Plots.mm)
+    outfile = joinpath(bench_dir, "matrix_comparison_plots.png")
+    savefig(p, outfile)
+    println("Matrix plots saved to: ", abspath(outfile))
+end
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 function main(argv=ARGS)
@@ -1029,6 +1116,7 @@ function main(argv=ARGS)
     println("\nComparison table saved to: ", abspath(table_path))
 
     do_plot && generate_plots(fort, julia, bench_dir, p.nn)
+    do_plot && generate_matrix_plots(fort, julia, bench_dir, p.nn)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
