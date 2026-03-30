@@ -77,7 +77,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
 
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => (k == "free_axis_zero_ms" ? convert(Vector{Int}, v) : v) for (k, v) in inputs["ForceFreeStates"])...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
     # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
