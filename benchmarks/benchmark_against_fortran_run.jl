@@ -870,7 +870,9 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_prof = abs.(j_prof_complex)
         f_max  = isempty(f_prof) ? 0.0 : maximum(f_prof)
         j_max  = isempty(j_prof) ? 0.0 : maximum(j_prof)
-        f_max > 0 && plot!(pb, f_psi, f_prof ./ f_max; lw=2, color=:steelblue, label=f_label)
+        f_max > 0 && plot!(pb, f_psi, f_prof ./ f_max;
+            lw=1.5, color=:steelblue, label=f_label,
+            markershape=:x, markersize=2, markerstrokewidth=1, markeralpha=0.6)
         rms_diff = NaN
         if j_max > 0 && f_max > 0 && !isempty(j_psi)
             j_on_fg  = [_interp1(j_psi, j_prof, p) for p in f_psi]
@@ -879,7 +881,9 @@ function generate_plots(fort, julia, bench_dir, nn)
             if j_max_on > 0
                 rms_diff = sqrt(mean((j_on_fg ./ j_max_on .- f_norm).^2))
             end
-            plot!(pb, j_psi, j_prof ./ j_max; lw=2, color=:orange, linestyle=:dash, label=j_label)
+            plot!(pb, j_psi, j_prof ./ j_max;
+                lw=1.5, color=:orange, linestyle=:dash, label=j_label,
+                markershape=:x, markersize=4, markerstrokewidth=1.5, markeralpha=0.9)
         end
         !isnan(rms_diff) && annotate!(pb, 0.8, 0.85, text(@sprintf("RMS=%.3f", rms_diff), 9, :center))
         return pb
@@ -925,7 +929,7 @@ function generate_plots(fort, julia, bench_dir, nn)
         push!(bn_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    layout = @layout [a b c; d e f g h; i j k l; m{0.25h} n o p]
+    layout = @layout [a b c; d e f g h; i j k l; m n o p]
     p = plot(p1, p2, p3, p4, p5, p6, p7, p8, jbgp_panels..., bn_panels...;
         layout=layout, size=(2100, 1800),
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
