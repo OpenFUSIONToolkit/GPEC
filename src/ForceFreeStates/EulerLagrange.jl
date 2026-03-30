@@ -170,7 +170,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
         # initialize_el_at_singular_surf!(ctrl, equil, intr, odet)
@@ -251,7 +251,94 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+    compute_axis_init(ffit, profiles, intr, psi_low) -> (U1_init, U2_init)
+
+Compute axis initial conditions for the Euler-Lagrange ODE via the Frobenius
+leading-coefficient eigenvalue problem [Glasser Phys. Plasmas 2016 112506 Eq. 51]:
+
+    lim_{ψ→0} [ψ M(ψ) − a I] v = 0
+
+For each mode j, solves the 2×2 Frobenius eigenvalue problem for the diagonal block of
+A₀ = ψ_low · M(ψ_low). The eigenvector with Re(a) ≥ 0 is the regular (non-singular)
+Frobenius solution. Returns U₁_init and U₂_init normalized so that U₂_init = I (consistent
+with the N independent solutions convention).
+
+For m≠0 the regular eigenvector has a negligible U₁ component (~ψ_low^(|m|/2)), recovering
+the Glasser [0, I] limit as ψ_low → 0. For m=0 (degenerate a≈0), the regular eigenvector
+is identified by dominant |U₁| component, giving the physically correct constant-displacement
+Frobenius solution and avoiding the spurious logarithmic irregularity.
+"""
+function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplines,
+        intr::ForceFreeStatesInternal, psi_low::Float64)
+    N    = intr.numpert_total
+    hint = Ref(1)
+
+    # Evaluate stability matrices at psi_low
+    F_lower = zeros(ComplexF64, N, N)
+    kmat    = zeros(ComplexF64, N, N)
+    gmat    = zeros(ComplexF64, N, N)
+    ffit.fmats_lower(vec(F_lower), psi_low; hint=hint)
+    ffit.kmats(vec(kmat),          psi_low; hint=hint)
+    ffit.gmats(vec(gmat),          psi_low; hint=hint)
+
+    # singfac[j] = 1 / (m_j − n_j · q) for each mode j
+    q0      = profiles.q_spline(psi_low; hint=hint)
+    singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q0 .* (intr.nlow:intr.nhigh)'))
+
+    # F̄⁻¹ = (F_lower · F_lower')⁻¹ via the Cholesky factor
+    Finv = Matrix{ComplexF64}(I, N, N)
+    ldiv!(LowerTriangular(F_lower), Finv)
+    ldiv!(UpperTriangular(F_lower'), Finv)
+
+    U1_init = zeros(ComplexF64, N, N)
+    U2_init = Matrix{ComplexF64}(I, N, N)
+
+    for j in 1:N
+        sf = singfac[j]
+        fi = Finv[j, j]
+        k  = kmat[j, j]
+        kd = conj(k)          # K̄†[j,j]
+        g  = gmat[j, j]
+
+        # 2×2 ODE matrix block for mode j [Glasser 2016 Eq. 22-24, diagonal approximation]
+        m11 = -sf * fi * k
+        m12 =  sf^2 * fi
+        m21 =  g - kd * fi * k
+        m22 =  sf * kd * fi
+
+        # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
+        F_eig = eigen([psi_low*m11  psi_low*m12;
+                       psi_low*m21  psi_low*m22])
+        eig_vals = F_eig.values
+        eig_vecs = F_eig.vectors
+
+        # Select the regular eigenvector: larger Re(a) for m≠0.
+        # For degenerate a≈0 (m=0): prefer dominant |U₁| component (regular = constant solution).
+        r1 = real(eig_vals[1])
+        r2 = real(eig_vals[2])
+        i_reg = if abs(r1 - r2) > Base.sqrt(Base.eps(Float64))
+            r1 > r2 ? 1 : 2
+        else
+            abs(eig_vecs[1, 1]) >= abs(eig_vecs[2, 1]) ? 1 : 2
+        end
+
+        v1, v2 = eig_vecs[1, i_reg], eig_vecs[2, i_reg]
+
+        # Normalize so that U₂_init[j,j] = 1. If v₂ ≈ 0 (purely displacement solution),
+        # set U₁=1, U₂=0 instead.
+        if abs(v2) > Base.sqrt(Base.eps(Float64)) * abs(v1)
+            U1_init[j, j] = v1 / v2
+        else
+            U1_init[j, j] =  one(ComplexF64)
+            U2_init[j, j] = zero(ComplexF64)
+        end
+    end
+
+    return U1_init, U2_init
+end
+
+"""
+    initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
 Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
@@ -260,7 +347,8 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 
 Move ising_start logic to chunk_el_integration_bounds?
 """
-function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars,
+        profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
     # Default psifac to minimum equilibrium psi value
     odet.psifac = profiles.xs[1]
@@ -290,18 +378,12 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    # Initialize U_22 = I and U_11 = I [Glasser Phys. Plasmas 2016 112506 Section VI].
-    # Exception: m=0, n=1 diagonal of U_11 is left at zero. For m=0 the regular Frobenius
-    # solution at the axis is ψ^0 = constant, so U_11=1 seeds the irregular (logarithmic)
-    # solution at full amplitude regardless of ψ_low, producing a spurious axis singularity.
-    m0n1_ipert = (intr.mlow <= 0 <= intr.mhigh && intr.nlow <= 1 <= intr.nhigh) ?
-        (0 - intr.mlow + 1) + (1 - intr.nlow) * intr.mpert : nothing
-    for ipert in 1:intr.numpert_total
-        odet.u[ipert, ipert, 2] = 1
-        if ipert != m0n1_ipert
-            odet.u[ipert, ipert, 1] = 1
-        end
-    end
+    # Initialize [U₁, U₂] using Frobenius leading-coefficient eigenvectors [Glasser 2016 §VI Eq. 51].
+    # For m≠0 this recovers [0, I] in the ψ_low → 0 limit; for m=0 it selects the physically
+    # correct constant Frobenius solution rather than the spurious logarithmic one.
+    U1_init, U2_init = compute_axis_init(ffit, profiles, intr, odet.psifac)
+    odet.u[:, :, 1] .= U1_init
+    odet.u[:, :, 2] .= U2_init
 end
 
 # TODO: NOT IMPLEMENTED YET! (low priority, just make sure sing_start = 0 in toml)
