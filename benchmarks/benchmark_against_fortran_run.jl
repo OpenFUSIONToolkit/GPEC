@@ -226,11 +226,13 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
         fort["w_isl"] = Float64.(ds["w_isl"][:])
         fort["K_isl"] = Float64.(ds["K_isl"][:])
 
-        # b_n profile vs psi for all modes
+        # radial profiles vs psi for all modes
         fort["psi_n_prof"] = Float64.(ds["psi_n"][:])
         fort["m_out"]      = Int.(ds["m_out"][:])
         b_n_raw = Float64.(ds["b_n"][:, :, :])
         fort["b_n"] = complex.(b_n_raw[:, :, 1], b_n_raw[:, :, 2])
+        jbgp_raw = Float64.(ds["Jbgradpsi"][:, :, :])
+        fort["Jbgradpsi"] = complex.(jbgp_raw[:, :, 1], jbgp_raw[:, :, 2])
     end
 
     NCDataset(control_file, "r") do ds
@@ -859,56 +861,73 @@ function generate_plots(fort, julia, bench_dir, nn)
     # Clamp to available m range
     res_m_vals = filter(m -> m in m_ctrl, res_m_vals)
 
-    # b_n panels (up to 4 resonant modes): compare Julia b_n to Fortran b_n
-    bpsi_panels = []
-    j_psi_grid  = julia["psi_grid"]
-    j_bn        = julia["b_n"]
-    f_psi_prof  = fort["psi_n_prof"]
-    f_bn        = fort["b_n"]
-    f_m_out     = fort["m_out"]
+    # Helper: build a normalised radial profile panel for one mode
+    function _profile_panel(ylabel_str, title_str,
+                             f_psi, f_prof_complex, f_label,
+                             j_psi, j_prof_complex, j_label)
+        pb = plot(; xlabel="ψ_n", ylabel=ylabel_str, title=title_str, legend=:topright)
+        f_prof = abs.(f_prof_complex)
+        j_prof = abs.(j_prof_complex)
+        f_max  = isempty(f_prof) ? 0.0 : maximum(f_prof)
+        j_max  = isempty(j_prof) ? 0.0 : maximum(j_prof)
+        f_max > 0 && plot!(pb, f_psi, f_prof ./ f_max; lw=2, color=:steelblue, label=f_label)
+        rms_diff = NaN
+        if j_max > 0 && f_max > 0 && !isempty(j_psi)
+            j_on_fg  = [_interp1(j_psi, j_prof, p) for p in f_psi]
+            j_max_on = maximum(j_on_fg)
+            f_norm   = f_prof ./ f_max
+            if j_max_on > 0
+                rms_diff = sqrt(mean((j_on_fg ./ j_max_on .- f_norm).^2))
+            end
+            plot!(pb, j_psi, j_prof ./ j_max; lw=2, color=:orange, linestyle=:dash, label=j_label)
+        end
+        !isnan(rms_diff) && annotate!(pb, 0.8, 0.85, text(@sprintf("RMS=%.3f", rms_diff), 9, :center))
+        return pb
+    end
 
+    j_psi_grid = julia["psi_grid"]
+    f_psi_prof = fort["psi_n_prof"]
+    f_m_out    = fort["m_out"]
+
+    # Row 3: Jbgradpsi profiles — direct apples-to-apples (both = chi1*singfac*2πi*ξ_ψ in mode space)
+    jbgp_panels = []
+    j_jbgp = julia["Jbgradpsi"]
+    f_jbgp = fort["Jbgradpsi"]
     for m_res in res_m_vals[1:min(end, 4)]
         f_midx = findfirst(==(m_res), f_m_out)
         j_midx = findfirst(==(m_res), j_mmodes)
-
-        pb = plot(; xlabel="ψ_n", ylabel="|b_n| (norm.)",
-                  title="b_n  m=$m_res (n=$nn)", legend=:topright)
-
-        if !isnothing(f_midx) && !isempty(f_psi_prof)
-            f_prof = abs.(f_bn[:, f_midx])
-            f_max  = maximum(f_prof)
-            f_max > 0 && plot!(pb, f_psi_prof, f_prof ./ f_max;
-                lw=2, color=:steelblue, label="Fortran b_n")
-        end
-
-        if !isnothing(j_midx) && !isempty(j_psi_grid) && !isempty(j_bn)
-            j_prof = abs.(j_bn[:, j_midx])
-            j_max  = maximum(j_prof)
-            rms_diff = NaN
-            if !isnothing(f_midx) && !isempty(f_psi_prof)
-                # Interpolate Julia onto Fortran psi grid for RMS comparison
-                f_prof_abs = abs.(f_bn[:, f_midx])
-                j_on_fg = [_interp1(j_psi_grid, j_prof, p) for p in f_psi_prof]
-                if maximum(j_on_fg) > 0 && maximum(f_prof_abs) > 0
-                    rms_diff = sqrt(mean((j_on_fg ./ maximum(j_on_fg) .- f_prof_abs ./ maximum(f_prof_abs)).^2))
-                end
-            end
-            j_max > 0 && plot!(pb, j_psi_grid, j_prof ./ j_max;
-                lw=2, color=:orange, linestyle=:dash, label="Julia b_n")
-            !isnan(rms_diff) && annotate!(pb, 0.8, 0.85,
-                text(@sprintf("RMS=%.3f", rms_diff), 9, :center))
-        end
-
-        push!(bpsi_panels, pb)
+        fp = (!isnothing(f_midx) && !isempty(f_jbgp)) ? f_jbgp[:, f_midx] : ComplexF64[]
+        jp = (!isnothing(j_midx) && !isempty(j_jbgp)) ? j_jbgp[:, j_midx] : ComplexF64[]
+        push!(jbgp_panels, _profile_panel(
+            "|Jbgradpsi| (norm.)", "Jbgradpsi  m=$m_res (n=$nn)",
+            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+    end
+    while length(jbgp_panels) < 4
+        push!(jbgp_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    # Pad to 4 panels if fewer resonant modes
-    while length(bpsi_panels) < 4
-        push!(bpsi_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
+    # Row 4: b_n profiles — Julia b_n (via IDFT/divide/DFT) vs Fortran b_n
+    bn_panels = []
+    j_bn = julia["b_n"]
+    f_bn = fort["b_n"]
+    for m_res in res_m_vals[1:min(end, 4)]
+        f_midx = findfirst(==(m_res), f_m_out)
+        j_midx = findfirst(==(m_res), j_mmodes)
+        fp = (!isnothing(f_midx) && !isempty(f_bn)) ? f_bn[:, f_midx] : ComplexF64[]
+        jp = (!isnothing(j_midx) && !isempty(j_bn)) ? j_bn[:, j_midx] : ComplexF64[]
+        push!(bn_panels, _profile_panel(
+            "|b_n| (norm.)", "b_n  m=$m_res (n=$nn)",
+            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+    end
+    while length(bn_panels) < 4
+        push!(bn_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    layout = @layout [a b c; d e f g h; i j k l]
-    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, bpsi_panels...; layout=layout, size=(2100, 1350),
+    layout = @layout [a b c; d e f g h; i j k l; m{0.25h} n o p]
+    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, jbgp_panels..., bn_panels...;
+        layout=layout, size=(2100, 1800),
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")
     savefig(p, outfile)
@@ -951,7 +970,7 @@ Layout (rows × 3 columns):
   • Col 1: |M| Fortran   Col 2: |M| Julia   Col 3: relative error |ΔM/M_fort|
   • Row 4 (wt0): Julia only — no Fortran reference available in NetCDF outputs.
 """
-function generate_matrix_plots(fort, julia, bench_dir, nn)
+function generate_matrix_plots(fort, julia, bench_dir, _nn)
     m_ctrl = fort["m_vals_ctrl"]
 
     f_L   = fort["L_surf"]
