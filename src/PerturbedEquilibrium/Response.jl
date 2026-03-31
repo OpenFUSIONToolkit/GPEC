@@ -80,7 +80,7 @@ function compute_plasma_response!(
     state.b_modes  = b_modes
 
     b_n_modes, xi_n_modes = compute_b_n_xi_n_modes(
-        xi_modes.psi, b_modes.psi, ForceFreeStates_results, equil, ffs_intr
+        xi_modes.psi, b_modes.psi, ForceFreeStates_results, equil, ffs_intr, vac_data.mthvac
     )
     state.b_n_modes  = b_n_modes
     state.xi_n_modes = xi_n_modes

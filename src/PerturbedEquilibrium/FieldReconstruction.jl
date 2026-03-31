@@ -306,7 +306,8 @@ end
         b_psi_modes::Matrix{ComplexF64},
         ForceFreeStates_results::OdeState,
         equil::Equilibrium.PlasmaEquilibrium,
-        ffs_intr::ForceFreeStatesInternal
+        ffs_intr::ForceFreeStatesInternal,
+        mthvac::Int
     ) -> (b_n_modes, xi_n_modes)
 
 Compute physical normal field b_n and displacement xi_n in mode space.
@@ -321,6 +322,10 @@ Fortran's xwp_mn includes a Jacobian convolution (gpeq_contra), making xwp_fun(�
 so Fortran divides by J·|∇ψ|. Here we skip the Jacobian convolution and divide by |∇ψ| only,
 which gives the same result: ξ_n = ξ_ψ/|∇ψ|, b_n = b^ψ/|∇ψ| [Park Phys. Plasmas 2007 052110].
 
+`mthvac` sets the DFT theta resolution; Fortran uses mthsurf = max(mthvac, mtheta).  The
+bicubic splines support arbitrary evaluation points, so any mthvac ≥ length(equil.rzphi_ys)-1
+gives correct results; higher values reduce aliasing from the 1/|∇ψ| division.
+
 # Returns
 
 Tuple (b_n_modes, xi_n_modes), each [npsi, mpert] ComplexF64.
@@ -330,11 +335,13 @@ function compute_b_n_xi_n_modes(
     b_psi_modes::Matrix{ComplexF64},
     ForceFreeStates_results::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
-    ffs_intr::ForceFreeStatesInternal
+    ffs_intr::ForceFreeStatesInternal,
+    mthvac::Int
 )
     npsi, mpert = size(b_psi_modes)
     mlow  = ffs_intr.mlow
-    mthsurf = length(equil.rzphi_ys) - 1   # number of DFT theta points (periodic)
+    # Match Fortran: mthsurf = max(mthvac, mtheta); bicubic splines support any resolution
+    mthsurf = max(mthvac, length(equil.rzphi_ys) - 1)
     ro = equil.ro
     twopi = 2π
 

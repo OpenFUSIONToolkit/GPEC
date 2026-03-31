@@ -41,6 +41,7 @@ julia --project=benchmarks benchmarks/benchmark_fortran.jl /path/to/DIIID_ideal_
 """
 
 using Dates
+using DelimitedFiles
 using HDF5
 using NCDatasets
 using Plots
@@ -458,19 +459,9 @@ function write_gpec_toml_file(
     end
 end
 
-# ─── Phi_x comparison (coil mode) ────────────────────────────────────────────
+# ─── Equilibrium setup helper ─────────────────────────────────────────────────
 
-"""
-Compute Julia Phi_x via Biot-Savart and compare with Fortran Phi_coil.
-Returns (julia_amps, fortran_amps, m_vals) all aligned on the same m grid.
-"""
-function compare_phix(
-    p::FortranRunParams,
-    fort::Dict,
-    fortran_dir::String,
-    coil_dat_dir::String
-)
-    println("  Loading equilibrium for Phi_x check...")
+function setup_equil(p::FortranRunParams, fortran_dir::String)
     eq_dict = Dict{String,Any}(
         "eq_type"      => p.eq_type,
         "eq_filename"  => p.eq_filename,
@@ -483,7 +474,23 @@ function compare_phix(
         "etol"         => 1e-7,
     )
     eq_config = Equilibrium.EquilibriumConfig(eq_dict, fortran_dir)
-    equil     = Equilibrium.setup_equilibrium(eq_config)
+    return Equilibrium.setup_equilibrium(eq_config)
+end
+
+# ─── Phi_x comparison (coil mode) ────────────────────────────────────────────
+
+"""
+Compute Julia Phi_x via Biot-Savart and compare with Fortran Phi_coil.
+Returns (julia_amps, fortran_amps, m_vals, equil).
+"""
+function compare_phix(
+    p::FortranRunParams,
+    fort::Dict,
+    fortran_dir::String,
+    coil_dat_dir::String
+)
+    println("  Loading equilibrium for Phi_x check...")
+    equil = setup_equil(p, fortran_dir)
 
     psilim = fort["psilim"]
     m_vals = fort["m_vals"]
@@ -517,7 +524,7 @@ function compare_phix(
     julia_amps = Dict(md.m => abs(md.amplitude) for md in julia_modes)
     fort_amps  = Dict(m => fort["Phi_x_amp"][k] for (k, m) in enumerate(m_vals))
 
-    return julia_amps, fort_amps, m_vals
+    return julia_amps, fort_amps, m_vals, equil
 end
 
 # ─── Comparison table ────────────────────────────────────────────────────────
@@ -1066,6 +1073,200 @@ function generate_matrix_plots(fort, julia, bench_dir, _nn)
     println("Matrix plots saved to: ", abspath(outfile))
 end
 
+# ─── Geometry diagnostic (delpsi, jac, area vs debug_xbnormal.csv) ───────────
+
+"""
+    load_debug_geometry(fortran_dir)
+
+Load Fortran debug_xbnormal.csv.  Returns `nothing` if the file is absent.
+
+The CSV header says `istep,psi,itheta,theta,delpsi,jac,area` but the actual
+Fortran WRITE order is `istep, itheta, psifac(istep), theta, delpsi, jac, area`
+(columns 2 and 3 are swapped vs the header).
+"""
+function load_debug_geometry(fortran_dir::String)
+    csv_path = joinpath(fortran_dir, "debug_xbnormal.csv")
+    isfile(csv_path) || return nothing
+    data = readdlm(csv_path, ',', skipstart=1)
+    return (
+        istep  = Int.(data[:, 1]),
+        itheta = Int.(data[:, 2]),      # header says "psi" but actual is itheta
+        psi    = Float64.(data[:, 3]),  # header says "itheta" but actual is psi
+        theta  = Float64.(data[:, 4]),
+        delpsi = Float64.(data[:, 5]),
+        jac    = Float64.(data[:, 6]),
+        area   = Float64.(data[:, 7]),
+    )
+end
+
+"""
+    compare_geometry(equil, fortran_dir, bench_dir; do_plot=true)
+
+Compare Julia delpsi/jac/area profiles against Fortran debug_xbnormal.csv.
+
+Replicates the inner loop of `compute_b_n_xi_n_modes` at the Fortran (psi,θ)
+grid points — no src changes, all diagnostic code lives here.
+
+Prints a per-surface comparison table and (if do_plot=true) saves
+`geometry_comparison.png` to bench_dir.
+"""
+function compare_geometry(equil, fortran_dir::String, bench_dir::String; do_plot::Bool=true)
+    fort_geom = load_debug_geometry(fortran_dir)
+    if isnothing(fort_geom)
+        println("  debug_xbnormal.csv not found — skipping geometry diagnostic")
+        return
+    end
+    println("  Loaded $(length(fort_geom.psi)) geometry records from debug_xbnormal.csv")
+
+    # Subsample psi surfaces — every 20th gives ~50 surfaces
+    all_psis = sort(unique(fort_geom.psi))
+    sel_psis = all_psis[1:20:end]
+    println("  Comparing $(length(sel_psis)) / $(length(all_psis)) psi surfaces (stride 20)")
+
+    twopi = 2π
+    ro    = equil.ro
+
+    ratio_means    = Float64[]
+    ratio_stds     = Float64[]
+    area_fort_vals = Float64[]
+    area_julia_vals= Float64[]
+    jac_ratio_means= Float64[]
+    psi_sel        = Float64[]
+
+    mid_psi = sel_psis[argmin(abs.(sel_psis .- 0.5))]
+    mid_tw = Float64[]; mid_dp_fort = Float64[]; mid_dp_julia = Float64[]
+    mid_jac_fort = Float64[]; mid_jac_julia = Float64[]
+
+    for psi in sel_psis
+        mask    = fort_geom.psi .== psi
+        thetas  = fort_geom.theta[mask]
+        dp_fort = fort_geom.delpsi[mask]
+        jac_f   = fort_geom.jac[mask]
+        itheta  = fort_geom.itheta[mask]
+        area_f  = fort_geom.area[mask][1]
+
+        ord    = sortperm(thetas)
+        thetas  = thetas[ord]
+        dp_fort = dp_fort[ord]
+        jac_f   = jac_f[ord]
+        itheta  = itheta[ord]
+
+        # Evaluate Julia formula (identical to compute_b_n_xi_n_modes inner loop)
+        hint = (Ref(1), Ref(1))
+        dp_julia  = zeros(Float64, length(thetas))
+        jac_julia = zeros(Float64, length(thetas))
+        for (k, theta) in enumerate(thetas)
+            r2     = equil.rzphi_rsquared((psi, theta); hint=hint)
+            deta   = equil.rzphi_offset((psi, theta); hint=hint)
+            jac    = equil.rzphi_jac((psi, theta); hint=hint)
+            r2_y   = equil.rzphi_rsquared((psi, theta); deriv=Val((0, 1)), hint=hint)
+            deta_y = equil.rzphi_offset((psi, theta); deriv=Val((0, 1)), hint=hint)
+            rfac   = sqrt(abs(r2))
+            r      = ro + rfac * cos(twopi * (theta + deta))
+            w11    = (1.0 + deta_y) * twopi^2 * rfac * r / jac
+            w12    = -r2_y * π * r / (rfac * jac)
+            dp_julia[k]  = sqrt(w11^2 + w12^2)
+            jac_julia[k] = jac
+        end
+
+        # Area over interior points only (exclude the wrap-around itheta=mthsurf row)
+        mthsurf_fort = maximum(itheta)
+        interior = itheta .< mthsurf_fort
+        area_j = sum(interior) > 0 ? mean(jac_julia[interior] .* dp_julia[interior]) : NaN
+
+        ratio = dp_julia ./ dp_fort
+        push!(ratio_means,     mean(ratio))
+        push!(ratio_stds,      std(ratio))
+        push!(area_fort_vals,  area_f)
+        push!(area_julia_vals, area_j)
+        push!(jac_ratio_means, mean(jac_julia ./ jac_f))
+        push!(psi_sel, psi)
+
+        if psi == mid_psi
+            mid_tw       = thetas .* twopi   # display in radians
+            mid_dp_fort  = dp_fort
+            mid_dp_julia = dp_julia
+            mid_jac_fort  = jac_f
+            mid_jac_julia = jac_julia
+        end
+    end
+
+    # Print quantitative table
+    println()
+    println("  delpsi/jac/area comparison — Julia vs Fortran debug_xbnormal.csv")
+    println("  " * "-"^80)
+    @printf "  %-8s  %-20s  %-16s  %-10s  %-10s\n" "ψ" "delpsi_ratio mean±std" "area_ratio" "jac_ratio" ""
+    println("  " * "-"^80)
+    stride = max(1, length(psi_sel) ÷ 10)
+    for i in 1:stride:length(psi_sel)
+        ar = isnan(area_julia_vals[i]) ? NaN : area_julia_vals[i] / area_fort_vals[i]
+        @printf "  %-8.4f  %.4f ± %-12.4f  %-10.4f  %-10.4f\n" psi_sel[i] ratio_means[i] ratio_stds[i] ar jac_ratio_means[i]
+    end
+    println("  " * "-"^80)
+    valid_area = .!isnan.(area_julia_vals)
+    mean_area_ratio = sum(valid_area) > 0 ? mean(area_julia_vals[valid_area] ./ area_fort_vals[valid_area]) : NaN
+    @printf "  GLOBAL means:  delpsi_ratio=%.4f ± %.4f  area_ratio=%.4f  jac_ratio=%.4f\n" mean(ratio_means) mean(ratio_stds) mean_area_ratio mean(jac_ratio_means)
+    println()
+
+    # Point detail at psi≈0.5
+    if !isempty(mid_dp_julia)
+        @printf "  Point detail at ψ=%.4f (theta in radians):\n" mid_psi
+        println("  " * "-"^60)
+        @printf "  %-8s  %-14s  %-14s  %-8s  %-10s  %-10s\n" "θ" "delpsi_julia" "delpsi_fort" "ratio" "jac_julia" "jac_fort"
+        for tgt in [0.0, π/4, π/2, π, 3π/2]
+            idx = argmin(abs.(mid_tw .- tgt))
+            @printf "  %-8.4f  %-14.6f  %-14.6f  %-8.4f  %-10.4f  %-10.4f\n" mid_tw[idx] mid_dp_julia[idx] mid_dp_fort[idx] mid_dp_julia[idx]/mid_dp_fort[idx] mid_jac_julia[idx] mid_jac_fort[idx]
+        end
+        println()
+    end
+
+    do_plot || return
+
+    # 6-panel figure
+    mid_label = "ψ≈$(round(mid_psi; digits=3))"
+
+    p1 = plot(; xlabel="θ [rad]", ylabel="delpsi", title="delpsi(θ) at $mid_label", legend=:topright)
+    if !isempty(mid_dp_fort)
+        plot!(p1, mid_tw, mid_dp_fort;  lw=2, color=:steelblue, label="Fortran")
+        plot!(p1, mid_tw, mid_dp_julia; lw=2, color=:orange, linestyle=:dash, label="Julia")
+    end
+
+    p2 = plot(; xlabel="θ [rad]", ylabel="ratio", title="delpsi_julia / delpsi_fort at $mid_label", legend=false)
+    if !isempty(mid_dp_fort) && all(mid_dp_fort .> 0)
+        plot!(p2, mid_tw, mid_dp_julia ./ mid_dp_fort; lw=2, color=:green)
+        hline!(p2, [1.0]; color=:black, linestyle=:dot)
+    end
+
+    p3 = plot(psi_sel, ratio_means; ribbon=ratio_stds, fillalpha=0.3, lw=2,
+              xlabel="ψ_n", ylabel="mean(delpsi ratio)", title="delpsi ratio mean ± std vs ψ", legend=false)
+    hline!(p3, [1.0]; color=:black, linestyle=:dot)
+
+    p4 = plot(; xlabel="θ [rad]", ylabel="jac", title="jac(θ) at $mid_label", legend=:topright)
+    if !isempty(mid_jac_fort)
+        plot!(p4, mid_tw, mid_jac_fort;  lw=2, color=:steelblue, label="Fortran")
+        plot!(p4, mid_tw, mid_jac_julia; lw=2, color=:orange, linestyle=:dash, label="Julia")
+    end
+
+    p5 = plot(; xlabel="ψ_n", ylabel="mean(jac × delpsi)", title="area vs ψ", legend=:topright)
+    if !isempty(area_fort_vals)
+        plot!(p5, psi_sel, area_fort_vals; lw=2, color=:steelblue, label="Fortran")
+        valid = .!isnan.(area_julia_vals)
+        plot!(p5, psi_sel[valid], area_julia_vals[valid]; lw=2, color=:orange, linestyle=:dash, label="Julia")
+    end
+
+    p6 = plot(psi_sel, ratio_stds; lw=2, color=:red,
+              xlabel="ψ_n", ylabel="std(delpsi ratio)", title="delpsi ratio θ-variation vs ψ", legend=false)
+    hline!(p6, [0.0]; color=:black, linestyle=:dot)
+
+    pg = plot(p1, p2, p3, p4, p5, p6;
+              layout=@layout([a b c; d e f]),
+              size=(1500, 900),
+              left_margin=8Plots.mm, bottom_margin=8Plots.mm)
+    outfile = joinpath(bench_dir, "geometry_comparison.png")
+    savefig(pg, outfile)
+    println("  Geometry comparison plot saved to: ", abspath(outfile))
+end
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 function main(argv=ARGS)
@@ -1120,11 +1321,12 @@ function main(argv=ARGS)
     end
 
     # Step 3: Phi_x comparison (coil mode only)
+    equil = nothing
     if use_file_forcing
         println("\n[3/5] Skipped Phi_x comparison (file-forcing mode)")
     else
         println("\n[3/5] Julia Biot-Savart Phi_x vs Fortran Phi_coil ...")
-        julia_amps, fort_amps, m_vals = compare_phix(p, fort, fortran_dir, coil_dat_dir)
+        julia_amps, fort_amps, m_vals, equil = compare_phix(p, fort, fortran_dir, coil_dat_dir)
 
         println("  m      Julia |Phi_x| [T·m²]   Fortran |Phi_x| [T·m²]   ratio")
         println("  " * "-"^60)
@@ -1139,6 +1341,15 @@ function main(argv=ARGS)
         if !isempty(ratios)
             @printf "  Mean ratio = %.4f ± %.4f  (ideal: 1.0000)\n" mean(ratios) std(ratios)
         end
+    end
+
+    # Step 3b: Geometry diagnostic (delpsi/jac/area vs debug_xbnormal.csv)
+    if isfile(joinpath(fortran_dir, "debug_xbnormal.csv"))
+        println("\n[3b] Geometry diagnostic (delpsi, jac, area vs debug_xbnormal.csv) ...")
+        if isnothing(equil)
+            equil = setup_equil(p, fortran_dir)
+        end
+        compare_geometry(equil, fortran_dir, bench_dir; do_plot=do_plot)
     end
 
     # Step 4: Write config and run Julia GPEC
