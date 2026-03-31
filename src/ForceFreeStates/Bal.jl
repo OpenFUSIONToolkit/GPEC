@@ -289,7 +289,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     end
 
     # compute curvature terms using native cubic_interp with PeriodicBC
-    spl0_interp = cubic_interp(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); search=LinearBinary(), bc=PeriodicBC())
+    spl0_interp = cubic_interp(theta_grid, hcat(1 ./ bsq, jac .* b1 ./ bsq); bc=PeriodicBC())
     spl0_d1 = deriv1(spl0_interp)
     # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
     spl0_fs1 = stack(spl0_d1(theta_grid))
@@ -369,7 +369,7 @@ function prepare_ballooning_coefficients(ipsi::Int, plasma_eq::Equilibrium.Plasm
     spl2_fs_new = copy(spl2_fsi)
 
     # Compute derivatives of spl1 for second-order terms
-    spl1_interp = cubic_interp(theta_grid, spl1_fs; search=LinearBinary(), bc=PeriodicBC())
+    spl1_interp = cubic_interp(theta_grid, spl1_fs; bc=PeriodicBC())
     spl1_d1 = deriv1(spl1_interp)
     # Evaluate derivatives at all theta points (returns Vector of Vectors, stack to matrix)
     spl1_fs1 = stack(spl1_d1(theta_grid))

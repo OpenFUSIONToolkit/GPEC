@@ -5,8 +5,7 @@ module Equilibrium
 using Printf, OrdinaryDiffEq, DiffEqCallbacks, LinearAlgebra, HDF5
 using Roots
 using TOML
-import FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, deriv2, deriv3, LinearBinary, CubicFit, PeriodicBC, AbstractExtrap, ExtendExtrap, WrapExtrap, n_series
+using FastInterpolations
 using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
 
@@ -102,7 +101,7 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         hint2d = (Ref(1), Ref(1))
         theta = find_zero(
             (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=Val((0, 1)), hint=hint2d)),
+                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=DerivOp(0, 1), hint=hint2d)),
             theta, Roots.Newton()
         )
         r2 = pe.rzphi_rsquared((psi_edge, theta))
@@ -134,9 +133,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         # offset spline. We solve z1(θ) = 0 where z1 = ∂z/∂θ.
         function z_deriv(theta_inner)
             r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
-            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
             rfac_local = sqrt(max(0.0, r2))
             rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
             phase1 = 2π * (1 + η1)   # d[2π(θ+η)]/dθ
@@ -153,11 +152,11 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
 
         function z_deriv2(theta_inner)
             r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            r2yy = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
+            r2yy = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=DerivOp(0, 2), hint=hint2d)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
-            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 1)), hint=hint2d)
-            η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=Val((0, 2)), hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
+            η2 = pe.rzphi_offset((psi_edge, theta_inner); deriv=DerivOp(0, 2), hint=hint2d)
             rfac_local = sqrt(max(0.0, r2))
             rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
             rfac2 = (rfac_local > 0) ? (r2yy - r2y * rfac1 / rfac_local) / (2 * rfac_local) : 0.0
@@ -437,7 +436,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux_opts = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    flux_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
 
@@ -446,10 +445,10 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
             query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((1, 0)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=Val((0, 1)), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=Val((0, 1)), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=DerivOp(1, 0), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=DerivOp(1, 0), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=DerivOp(0, 1), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=DerivOp(0, 1), hint=hint2d)
         end
     end
 
@@ -490,7 +489,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 2] = source[ipsi, :]
 
         # Compute total integral using FastInterpolations native integration
-        itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=PeriodicBC())
+        itp = cubic_interp(equil.rzphi_ys, Series(fs_matrix); bc=PeriodicBC())
         term[ipsi, :] .= FastInterpolations.integrate(itp)
     end
 

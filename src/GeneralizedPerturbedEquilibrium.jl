@@ -34,8 +34,7 @@ using TOML
 using Printf
 using HDF5
 
-# Import FastInterpolations functions and types needed in main
-import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
+using FastInterpolations
 
 import AdaptiveArrayPools: @with_pool
 
@@ -146,7 +145,7 @@ function main(args::Vector{String}=String[])
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=ExtendExtrap())
+    intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
 
     # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
