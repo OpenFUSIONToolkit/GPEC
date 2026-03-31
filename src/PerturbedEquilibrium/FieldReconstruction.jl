@@ -312,13 +312,14 @@ end
 Compute physical normal field b_n and displacement xi_n in mode space.
 
 Mimics Fortran gpout_xbnormal (gpout.f lines 3353–3358):
-1. IDFT: reconstruct theta-space function from mode amplitudes (Jbgradpsi or J×ξ_ψ)
-2. Divide by J(θ)×|∇ψ|(θ) at each theta point to get the physical normal component
+1. IDFT: reconstruct theta-space function from mode amplitudes (b^ψ or ξ_ψ)
+2. Divide by |∇ψ|(θ) at each theta point to get the physical normal component
 3. Forward DFT back to mode space
 
-The mode-space fields b_psi_modes and xi_psi_modes are the Jacobian-weighted
-contravariant ψ components (Jbgradpsi, J×ξ_ψ). Dividing by J×|∇ψ| yields the
-physical (geometric) normal components b_n and xi_n [Park Phys. Plasmas 2007 052110].
+Note: Julia's b_psi_modes = b^ψ and xi_psi_modes = ξ_ψ, with no Jacobian factor.
+Fortran's xwp_mn includes a Jacobian convolution (gpeq_contra), making xwp_fun(θ) = J(θ)·ξ_ψ(θ),
+so Fortran divides by J·|∇ψ|. Here we skip the Jacobian convolution and divide by |∇ψ| only,
+which gives the same result: ξ_n = ξ_ψ/|∇ψ|, b_n = b^ψ/|∇ψ| [Park Phys. Plasmas 2007 052110].
 
 # Returns
 
@@ -370,7 +371,7 @@ function compute_b_n_xi_n_modes(
             w11   = (1.0 + deta_y) * twopi^2 * rfac * r / jac
             w12   = -r2_y * π * r / (rfac * jac)
             delpsi = sqrt(w11^2 + w12^2)
-            jd[k]  = jac * delpsi
+            jd[k]  = delpsi
         end
 
         # Divide by J×delpsi → physical normal components in theta space

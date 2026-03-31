@@ -233,6 +233,10 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
         fort["b_n"] = complex.(b_n_raw[:, :, 1], b_n_raw[:, :, 2])
         jbgp_raw = Float64.(ds["Jbgradpsi"][:, :, :])
         fort["Jbgradpsi"] = complex.(jbgp_raw[:, :, 1], jbgp_raw[:, :, 2])
+        xigp_raw = Float64.(ds["xigradpsi"][:, :, :])
+        fort["xigradpsi"] = complex.(xigp_raw[:, :, 1], xigp_raw[:, :, 2])
+        xi_n_raw_f = Float64.(ds["xi_n"][:, :, :])
+        fort["xi_n"] = complex.(xi_n_raw_f[:, :, 1], xi_n_raw_f[:, :, 2])
     end
 
     NCDataset(control_file, "r") do ds
@@ -294,6 +298,8 @@ function load_julia_outputs(h5_path::String)
         julia["response_vec"] = haskey(f, "$pe/response_vec") ? read(f, "$pe/response_vec") : ComplexF64[]
         julia["b_n"]          = haskey(f, "$pe/response/b_n")        ? read(f, "$pe/response/b_n")        : Matrix{ComplexF64}(undef, 0, 0)
         julia["Jbgradpsi"]    = haskey(f, "$pe/response/Jbgradpsi")  ? read(f, "$pe/response/Jbgradpsi")  : Matrix{ComplexF64}(undef, 0, 0)
+        julia["xi_psi"]       = haskey(f, "$pe/response/xi_psi")     ? read(f, "$pe/response/xi_psi")     : Matrix{ComplexF64}(undef, 0, 0)
+        julia["xi_n"]         = haskey(f, "$pe/response/xi_n")       ? read(f, "$pe/response/xi_n")       : Matrix{ComplexF64}(undef, 0, 0)
         julia["psi_grid"]     = haskey(f, "integration/psi")    ? read(f, "integration/psi")    : Float64[]
         # mn_index[:, 1] = m values, mn_index[:, 2] = n values for each mode index
         julia["m_modes"]      = haskey(f, "info/mn_index") ? Int.(read(f, "info/mn_index")[:, 1]) : Int[]
@@ -929,9 +935,45 @@ function generate_plots(fort, julia, bench_dir, nn)
         push!(bn_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    layout = @layout [a b c; d e f g h; i j k l; m n o p]
-    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, jbgp_panels..., bn_panels...;
-        layout=layout, size=(2100, 1800),
+    # Row 5: xigradpsi (xi_psi) profiles
+    xigp_panels = []
+    j_xigp = julia["xi_psi"]
+    f_xigp = fort["xigradpsi"]
+    for m_res in res_m_vals[1:min(end, 4)]
+        f_midx = findfirst(==(m_res), f_m_out)
+        j_midx = findfirst(==(m_res), j_mmodes)
+        fp = (!isnothing(f_midx) && !isempty(f_xigp)) ? f_xigp[:, f_midx] : ComplexF64[]
+        jp = (!isnothing(j_midx) && !isempty(j_xigp)) ? j_xigp[:, j_midx] : ComplexF64[]
+        push!(xigp_panels, _profile_panel(
+            "|ξ_ψ| (norm.)", "xigradpsi  m=$m_res (n=$nn)",
+            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+    end
+    while length(xigp_panels) < 4
+        push!(xigp_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
+    end
+
+    # Row 6: xi_n profiles
+    xin_panels = []
+    j_xin = julia["xi_n"]
+    f_xin = fort["xi_n"]
+    for m_res in res_m_vals[1:min(end, 4)]
+        f_midx = findfirst(==(m_res), f_m_out)
+        j_midx = findfirst(==(m_res), j_mmodes)
+        fp = (!isnothing(f_midx) && !isempty(f_xin)) ? f_xin[:, f_midx] : ComplexF64[]
+        jp = (!isnothing(j_midx) && !isempty(j_xin)) ? j_xin[:, j_midx] : ComplexF64[]
+        push!(xin_panels, _profile_panel(
+            "|ξ_n| (norm.)", "xi_n  m=$m_res (n=$nn)",
+            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+    end
+    while length(xin_panels) < 4
+        push!(xin_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
+    end
+
+    layout = @layout [a b c; d e f g h; i j k l; m n o p; q r s t; u v w x]
+    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, jbgp_panels..., bn_panels..., xigp_panels..., xin_panels...;
+        layout=layout, size=(2100, 2700),
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")
     savefig(p, outfile)
