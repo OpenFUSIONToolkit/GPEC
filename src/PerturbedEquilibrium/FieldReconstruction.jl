@@ -334,7 +334,7 @@ function compute_b_n_xi_n_modes(
 )
     npsi, mpert = size(b_psi_modes)
     mlow  = ffs_intr.mlow
-    mthsurf = length(equil.rzphi_xs) - 1   # number of DFT theta points (periodic)
+    mthsurf = length(equil.rzphi_ys) - 1   # number of DFT theta points (periodic)
     ro = equil.ro
     twopi = 2π
 

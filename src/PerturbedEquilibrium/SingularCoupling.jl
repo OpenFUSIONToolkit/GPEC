@@ -481,7 +481,7 @@ function compute_current_density(
 
     # Number of theta points for integration
     # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
-    mthsurf = length(equil.rzphi_xs) - 1
+    mthsurf = length(equil.rzphi_ys) - 1
 
     # Integrate around flux surface using trapezoidal rule
     integral = 0.0
@@ -733,7 +733,7 @@ function compute_surface_area(
     ro = equil.ro
 
     # Number of theta points for integration
-    mthsurf = length(equil.rzphi_xs) - 1
+    mthsurf = length(equil.rzphi_ys) - 1
 
     # Integrate around flux surface using trapezoidal rule
     area = 0.0
