@@ -100,17 +100,24 @@ function reconstruct_physical_fields(
         ffs_intr
     )
 
-    # Package outputs in NamedTuples for clarity
-    xi_modes = (
-        psi = xi_psi_modes,      # [npsi, mpert] - covariant radial displacement
-        theta = zeros(ComplexF64, npsi, mpert),  # Placeholder - not computed from ForceFreeStates
-        zeta = zeros(ComplexF64, npsi, mpert)    # Placeholder - not computed from ForceFreeStates
-    )
+    # Compute J·b^ψ for HDF5 output (Fortran convention: Jacobian-weighted Jbgradpsi).
+    # Hamada Jacobian is constant in θ at each ψ, so evaluate once at θ=0 per surface.
+    Jb_psi_modes = similar(b_psi_modes)
+    for ipsi in 1:npsi
+        psi = ForceFreeStates_results.psi_store[ipsi]
+        Jb_psi_modes[ipsi, :] = equil.rzphi_jac((psi, 0.0)) .* b_psi_modes[ipsi, :]
+    end
 
+    xi_modes = (
+        psi = xi_psi_modes,
+        theta = zeros(ComplexF64, npsi, mpert),
+        zeta = zeros(ComplexF64, npsi, mpert)
+    )
     b_modes = (
-        psi = b_psi_modes,       # [npsi, mpert] - contravariant radial field
-        theta = b_theta_modes,   # [npsi, mpert] - contravariant poloidal field
-        zeta = b_zeta_modes      # [npsi, mpert] - contravariant toroidal field
+        psi       = b_psi_modes,    # b^ψ (no Jacobian) — used for b_n normal projection
+        Jbgradpsi = Jb_psi_modes,   # J·b^ψ — stored to HDF5, matches Fortran's Jbgradpsi convention
+        theta     = b_theta_modes,
+        zeta      = b_zeta_modes
     )
 
     return xi_modes, b_modes
@@ -307,7 +314,6 @@ end
         ForceFreeStates_results::OdeState,
         equil::Equilibrium.PlasmaEquilibrium,
         ffs_intr::ForceFreeStatesInternal,
-        mthvac::Int
     ) -> (b_n_modes, xi_n_modes)
 
 Compute physical normal field b_n and displacement xi_n in mode space.
@@ -322,9 +328,8 @@ Fortran's xwp_mn includes a Jacobian convolution (gpeq_contra), making xwp_fun(�
 so Fortran divides by J·|∇ψ|. Here we skip the Jacobian convolution and divide by |∇ψ| only,
 which gives the same result: ξ_n = ξ_ψ/|∇ψ|, b_n = b^ψ/|∇ψ| [Park Phys. Plasmas 2007 052110].
 
-`mthvac` sets the DFT theta resolution; Fortran uses mthsurf = max(mthvac, mtheta).  The
-bicubic splines support arbitrary evaluation points, so any mthvac ≥ length(equil.rzphi_ys)-1
-gives correct results; higher values reduce aliasing from the 1/|∇ψ| division.
+DFT resolution: `mthsurf = mtheta = length(equil.rzphi_ys) - 1`. This is sufficient since
+Nyquist (mtheta/2) >> 2·max|m|, so no aliasing from the 1/|∇ψ| division.
 
 # Returns
 
@@ -336,12 +341,10 @@ function compute_b_n_xi_n_modes(
     ForceFreeStates_results::OdeState,
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal,
-    mthvac::Int
 )
     npsi, mpert = size(b_psi_modes)
     mlow  = ffs_intr.mlow
-    # Match Fortran: mthsurf = max(mthvac, mtheta); bicubic splines support any resolution
-    mthsurf = max(mthvac, length(equil.rzphi_ys) - 1)
+    mthsurf = length(equil.rzphi_ys) - 1
     ro = equil.ro
     twopi = 2π
 

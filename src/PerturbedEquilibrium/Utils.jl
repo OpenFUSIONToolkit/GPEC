@@ -117,8 +117,8 @@ function write_outputs_to_HDF5(
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
-        response_group["xi_psi"]    = have_xi ? state.xi_modes.psi   : ComplexF64[]
-        response_group["Jbgradpsi"] = have_b  ? state.b_modes.psi    : ComplexF64[]  # J×b^ψ (Jbgradpsi)
+        response_group["xi_psi"]    = have_xi ? state.xi_modes.psi        : ComplexF64[]
+        response_group["Jbgradpsi"] = have_b  ? state.b_modes.Jbgradpsi : ComplexF64[]  # J×b^ψ (Hamada Jac × b^ψ)
         response_group["b_theta"]   = have_b  ? state.b_modes.theta  : ComplexF64[]
         response_group["b_zeta"]    = have_b  ? state.b_modes.zeta   : ComplexF64[]
         response_group["b_n"]       = !isnothing(state.b_n_modes)  ? state.b_n_modes  : ComplexF64[]
