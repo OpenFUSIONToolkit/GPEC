@@ -1080,23 +1080,56 @@ end
 
 Load Fortran debug_xbnormal.csv.  Returns `nothing` if the file is absent.
 
-The CSV header says `istep,psi,itheta,theta,delpsi,jac,area` but the actual
-Fortran WRITE order is `istep, itheta, psifac(istep), theta, delpsi, jac, area`
-(columns 2 and 3 are swapped vs the header).
+The CSV header says `istep,psi,itheta,theta,...` but the actual Fortran WRITE
+order is `istep, itheta, psifac(istep), theta, ...` (columns 2 and 3 swapped).
+
+Supports two file formats:
+- Old (7 header cols): one physical line per record, no xnofun
+- New (8 header cols): 9 values per record split across 2 physical lines;
+  the 9th value (on the second line) is imag(xnofun); first line also includes
+  real(xnofun) as the 8th value.  Returns `xnofun` field if present.
 """
 function load_debug_geometry(fortran_dir::String)
     csv_path = joinpath(fortran_dir, "debug_xbnormal.csv")
     isfile(csv_path) || return nothing
+
+    header_line = open(io -> readline(io), csv_path)
+    ncols_header = count(',', header_line) + 1
+
     data = readdlm(csv_path, ',', skipstart=1)
-    return (
-        istep  = Int.(data[:, 1]),
-        itheta = Int.(data[:, 2]),      # header says "psi" but actual is itheta
-        psi    = Float64.(data[:, 3]),  # header says "itheta" but actual is psi
-        theta  = Float64.(data[:, 4]),
-        delpsi = Float64.(data[:, 5]),
-        jac    = Float64.(data[:, 6]),
-        area   = Float64.(data[:, 7]),
-    )
+    nphys = size(data, 1)
+
+    if ncols_header <= 7
+        # Old format: 7 columns, 1 physical line per record
+        return (
+            istep  = Int.(data[:, 1]),
+            itheta = Int.(data[:, 2]),
+            psi    = Float64.(data[:, 3]),
+            theta  = Float64.(data[:, 4]),
+            delpsi = Float64.(data[:, 5]),
+            jac    = Float64.(data[:, 6]),
+            area   = Float64.(data[:, 7]),
+            xnofun = ComplexF64[],
+        )
+    else
+        # New format: 2 physical lines per logical record.
+        # Odd physical rows contain cols 1-8: istep, itheta, psi, theta,
+        #   delpsi, jac, area, real(xnofun)  (+trailing empty due to comma)
+        # Even physical rows contain col 1: imag(xnofun)
+        nrows = nphys ÷ 2
+        odd  = data[1:2:end, :]
+        even = data[2:2:end, 1]
+        return (
+            istep  = Int.(Float64.(odd[1:nrows, 1])),
+            itheta = Int.(Float64.(odd[1:nrows, 2])),
+            psi    = Float64.(odd[1:nrows, 3]),
+            theta  = Float64.(odd[1:nrows, 4]),
+            delpsi = Float64.(odd[1:nrows, 5]),
+            jac    = Float64.(odd[1:nrows, 6]),
+            area   = Float64.(odd[1:nrows, 7]),
+            xnofun = Complex.(Float64.(odd[1:nrows, 8]), Float64.(even[1:nrows])),
+        )
+    end
 end
 
 """
@@ -1267,6 +1300,283 @@ function compare_geometry(equil, fortran_dir::String, bench_dir::String; do_plot
     println("  Geometry comparison plot saved to: ", abspath(outfile))
 end
 
+# ─── xno_mn diagnostic (debug_xno_mn.csv: Fortran mode-space xi_n on full ODE grid) ──
+
+"""
+    load_debug_xno_mn(fortran_dir)
+
+Load debug_xno_mn.csv — Fortran's mode-space xi_n (xno_mn) on the full ODE radial grid.
+Returns nothing if the file is absent.
+
+Columns: istep, ipert, m, real_xno_mn, imag_xno_mn
+"""
+function load_debug_xno_mn(fortran_dir::String)
+    csv_path = joinpath(fortran_dir, "debug_xno_mn.csv")
+    isfile(csv_path) || return nothing
+    data = readdlm(csv_path, ',', skipstart=1)
+    return (
+        istep  = Int.(data[:, 1]),
+        ipert  = Int.(data[:, 2]),
+        m      = Int.(data[:, 3]),
+        xno_mn = Complex.(Float64.(data[:, 4]), Float64.(data[:, 5])),
+    )
+end
+
+"""
+    compare_xno_mn(equil, fort, julia, fortran_dir, bench_dir; do_plot=true)
+
+Compare Julia xi_n (from gpec.h5) against Fortran's raw mode-space xi_n
+from debug_xno_mn.csv — bypassing the NetCDF to test whether the issue is
+in the pipeline itself or only in the NetCDF output.
+
+Also compares Fortran's NetCDF xi_n with the raw debug CSV to check whether
+Fortran applies any post-processing before writing to NetCDF.
+
+If debug_xbnormal.csv contains xnofun (theta-space intermediate result),
+additionally recomputes Julia's theta-space xno_fun from xi_psi stored in
+the HDF5 and compares directly against Fortran's theta-space signal.
+"""
+function compare_xno_mn(equil, fort, julia, fortran_dir::String, bench_dir::String; do_plot::Bool=true)
+    fort_xno = load_debug_xno_mn(fortran_dir)
+    if isnothing(fort_xno)
+        println("  debug_xno_mn.csv not found — skipping xno_mn diagnostic")
+        return
+    end
+
+    # Build psi map istep → psi from debug_xbnormal.csv (itheta=0 rows)
+    fort_geom = load_debug_geometry(fortran_dir)
+    if isnothing(fort_geom)
+        println("  debug_xbnormal.csv needed for psi map — skipping xno_mn diagnostic")
+        return
+    end
+    geom_mask = fort_geom.itheta .== 0
+    geom_ord  = sortperm(fort_geom.istep[geom_mask])
+    fort_psi_full = fort_geom.psi[geom_mask][geom_ord]   # [nstep] psi per istep
+
+    # Build Fortran xi_n matrix [nstep, mpert] from debug CSV
+    nstep      = maximum(fort_xno.istep)
+    m_vals_fort = sort(unique(fort_xno.m))
+    mpert_fort  = length(m_vals_fort)
+    fort_xn     = zeros(ComplexF64, nstep, mpert_fort)
+    for row in eachindex(fort_xno.istep)
+        is = fort_xno.istep[row]
+        im = findfirst(==(fort_xno.m[row]), m_vals_fort)
+        isnothing(im) || (fort_xn[is, im] = fort_xno.xno_mn[row])
+    end
+
+    # Julia xi_n from HDF5
+    j_xin    = julia["xi_n"]
+    j_psi    = julia["psi_grid"]
+    j_mmodes = julia["m_modes"]
+
+    # Fortran NetCDF xi_n (already loaded in fort dict)
+    f_xin_nc = fort["xi_n"]    # [npsi_nc, mpert_nc]
+    f_psi_nc = fort["psi_n_prof"]
+    f_m_nc   = fort["m_out"]
+
+    # Resonant m values (q=2,3,4,5 → m=2,3,4,5 for n=1)
+    res_m_vals = sort(unique(round.(Int, fort["q_rational"])))
+    res_m_vals = filter(m -> m in m_vals_fort, res_m_vals)
+
+    println()
+    println("  xi_n comparison: Julia (HDF5) vs Fortran debug_xno_mn.csv vs Fortran NetCDF")
+    println("  " * "-"^90)
+    @printf "  %-4s  %-14s  %-14s  %-8s  %-14s  %-8s  %-8s\n" "m" "max|fort_csv|" "max|julia_h5|" "ratio" "max|fort_nc|" "nc/csv" "rms_shp"
+    println("  " * "-"^90)
+
+    for m_res in res_m_vals
+        im_csv  = findfirst(==(m_res), m_vals_fort)
+        im_julia = findfirst(==(m_res), j_mmodes)
+        im_nc   = findfirst(==(m_res), f_m_nc)
+        isnothing(im_csv) && continue
+
+        fp_csv  = abs.(fort_xn[:, im_csv])
+        jp      = (isnothing(im_julia) || isempty(j_xin)) ? Float64[] : abs.(j_xin[:, im_julia])
+        fp_nc   = (isnothing(im_nc) || isempty(f_xin_nc)) ? Float64[] : abs.(f_xin_nc[:, im_nc])
+
+        max_csv  = maximum(fp_csv)
+        max_julia = isempty(jp) ? NaN : maximum(jp)
+        max_nc   = isempty(fp_nc) ? NaN : maximum(fp_nc)
+        ratio_ju = isnan(max_julia) ? NaN : max_julia / max_csv
+        ratio_nc = isnan(max_nc) ? NaN : max_nc / max_csv
+
+        # Shape RMS: Julia profile on Fortran full-grid psi, both normalized
+        rms = NaN
+        if !isempty(jp) && max_csv > 0 && max_julia > 0 && !isempty(j_psi)
+            jp_on_fg = [_interp1(j_psi, jp, p) for p in fort_psi_full]
+            max_jp   = maximum(jp_on_fg)
+            if max_jp > 0
+                rms = sqrt(mean((jp_on_fg ./ max_jp .- fp_csv ./ max_csv).^2))
+            end
+        end
+
+        @printf "  %-4d  %14.4e  %14s  %8s  %14s  %8s  %8s\n" m_res max_csv (isnan(max_julia) ? "N/A" : @sprintf("%.4e", max_julia)) (isnan(ratio_ju) ? "N/A" : @sprintf("%.4f", ratio_ju)) (isnan(max_nc) ? "N/A" : @sprintf("%.4e", max_nc)) (isnan(ratio_nc) ? "N/A" : @sprintf("%.4f", ratio_nc)) (isnan(rms) ? "N/A" : @sprintf("%.4f", rms))
+    end
+    println("  " * "-"^90)
+    println("  Columns: ratio = julia/csv,  nc/csv = Fortran_NetCDF/Fortran_debug_csv")
+    println("  Shape RMS computed after normalizing both profiles to max=1")
+    println()
+
+    # ── Theta-space xno_fun comparison ──────────────────────────────────────────
+    # If debug_xbnormal.csv has xnofun, compare Julia's intermediate theta-space
+    # result (recomputed from xi_psi in HDF5) against Fortran's theta-space signal.
+    # This isolates whether the error is in IDFT/division or in the final DFT.
+    j_xipsi  = julia["xi_psi"]
+    j_mmodes = julia["m_modes"]
+    has_xnofun = !isempty(fort_geom.xnofun)
+    has_xipsi  = !isempty(j_xipsi) && !isempty(j_psi) && !isnothing(equil)
+
+    if has_xnofun && has_xipsi
+        println("  Theta-space xno_fun(θ) comparison at psi≈0.5 (Julia recomputed from xi_psi):")
+        println("  " * "-"^90)
+
+        # Select psi surface closest to 0.5 from Fortran's geometry grid
+        all_psis = sort(unique(fort_geom.psi))
+        tgt_psi  = all_psis[argmin(abs.(all_psis .- 0.5))]
+
+        mask = fort_geom.psi .== tgt_psi
+        fort_thetas  = fort_geom.theta[mask]
+        fort_xnofun  = fort_geom.xnofun[mask]
+        ord = sortperm(fort_thetas)
+        fort_thetas = fort_thetas[ord]
+        fort_xnofun = fort_xnofun[ord]
+        _ = length(fort_thetas) - 1   # mthsurf_fort (unused — Julia uses fixed 512)
+
+        # Find Julia's psi grid point closest to tgt_psi
+        j_ipsi = argmin(abs.(j_psi .- tgt_psi))
+        j_psi_val = j_psi[j_ipsi]
+
+        # Recompute Julia's theta-space xno_fun using same formula as compute_b_n_xi_n_modes
+        twopi   = 2π
+        ro      = equil.ro
+        mthsurf_julia = 512   # match mthvac used in the fix
+        j_thetas = [(k - 1) / mthsurf_julia for k in 1:mthsurf_julia]
+
+        # Build IDFT phase table at Julia theta grid
+        j_m_vals = j_mmodes  # [mpert]
+        phase_fwd = [exp(twopi * im * m * t) for t in j_thetas, m in j_m_vals]  # [mthsurf, mpert]
+
+        xi_row = j_xipsi[j_ipsi, :]   # [mpert] mode amplitudes at this psi
+        xwp_fun = phase_fwd * xi_row  # [mthsurf] theta-space xi_psi
+
+        # Compute delpsi at Julia theta grid
+        hint2d = (Ref(1), Ref(1))
+        jd = zeros(Float64, mthsurf_julia)
+        for k in 1:mthsurf_julia
+            theta  = j_thetas[k]
+            r2     = equil.rzphi_rsquared((j_psi_val, theta); hint=hint2d)
+            deta   = equil.rzphi_offset((j_psi_val, theta); hint=hint2d)
+            jac    = equil.rzphi_jac((j_psi_val, theta); hint=hint2d)
+            r2_y   = equil.rzphi_rsquared((j_psi_val, theta); deriv=Val((0, 1)), hint=hint2d)
+            deta_y = equil.rzphi_offset((j_psi_val, theta); deriv=Val((0, 1)), hint=hint2d)
+            rfac   = sqrt(abs(r2))
+            r      = ro + rfac * cos(twopi * (theta + deta))
+            w11    = (1.0 + deta_y) * twopi^2 * rfac * r / jac
+            w12    = -r2_y * π * r / (rfac * jac)
+            jd[k]  = sqrt(w11^2 + w12^2)
+        end
+        xno_fun_julia = xwp_fun ./ jd  # theta-space xi_n
+
+        # Interpolate Fortran xno_fun to Julia theta grid for direct comparison
+        fort_th_2pi = fort_thetas .* twopi
+        j_th_2pi    = j_thetas    .* twopi
+        fort_re_on_jgrid = [_interp1(fort_thetas, real.(fort_xnofun), t) for t in j_thetas]
+        fort_im_on_jgrid = [_interp1(fort_thetas, imag.(fort_xnofun), t) for t in j_thetas]
+        fort_xno_on_jgrid = Complex.(fort_re_on_jgrid, fort_im_on_jgrid)
+
+        max_f = maximum(abs.(fort_xnofun))
+        max_j = maximum(abs.(xno_fun_julia))
+        ratio_amp = max_j / max_f
+        rms_re = sqrt(mean((real.(xno_fun_julia) ./ max_j .- real.(fort_xno_on_jgrid) ./ max_f).^2))
+        rms_im = sqrt(mean((imag.(xno_fun_julia) ./ max_j .- imag.(fort_xno_on_jgrid) ./ max_f).^2))
+
+        @printf "  ψ=%.4f (Julia grid: %.4f):  max|fort|=%.4e  max|julia|=%.4e  ratio=%.4f\n" tgt_psi j_psi_val max_f max_j ratio_amp
+        @printf "  Shape RMS:  real=%.4f   imag=%.4f   (both normalized to max=1)\n" rms_re rms_im
+        println()
+        @printf "  %-8s  %-16s  %-16s  %-16s  %-16s\n" "θ" "Re(xno_julia)" "Re(xno_fort)" "Im(xno_julia)" "Im(xno_fort)"
+        for tgt in [0.0, 0.25, 0.5, 0.75]
+            idx_j = argmin(abs.(j_thetas .- tgt))
+            idx_f = argmin(abs.(fort_thetas .- tgt))
+            @printf "  %-8.4f  %-16.6e  %-16.6e  %-16.6e  %-16.6e\n" j_thetas[idx_j] real(xno_fun_julia[idx_j]) real(fort_xnofun[idx_f]) imag(xno_fun_julia[idx_j]) imag(fort_xnofun[idx_f])
+        end
+        println()
+
+        if do_plot
+            # Additional panel: theta-space xno_fun comparison
+            p_re = plot(j_th_2pi, real.(xno_fun_julia) ./ max_j;
+                lw=2, color=:orange, linestyle=:dash, label="Julia",
+                xlabel="θ [rad]", ylabel="Re(xno_fun)/max", title="Re(xno_fun) at ψ≈$(round(tgt_psi; digits=3))")
+            plot!(p_re, fort_th_2pi, real.(fort_xnofun) ./ max_f;
+                lw=2, color=:steelblue, label="Fortran")
+
+            p_im = plot(j_th_2pi, imag.(xno_fun_julia) ./ max_j;
+                lw=2, color=:orange, linestyle=:dash, label="Julia",
+                xlabel="θ [rad]", ylabel="Im(xno_fun)/max", title="Im(xno_fun) at ψ≈$(round(tgt_psi; digits=3))")
+            plot!(p_im, fort_th_2pi, imag.(fort_xnofun) ./ max_f;
+                lw=2, color=:steelblue, label="Fortran")
+
+            p_abs = plot(j_th_2pi, abs.(xno_fun_julia) ./ max_j;
+                lw=2, color=:orange, linestyle=:dash, label="Julia",
+                xlabel="θ [rad]", ylabel="|xno_fun|/max", title="|xno_fun| at ψ≈$(round(tgt_psi; digits=3))")
+            plot!(p_abs, fort_th_2pi, abs.(fort_xnofun) ./ max_f;
+                lw=2, color=:steelblue, label="Fortran")
+
+            pg_theta = plot(p_re, p_im, p_abs;
+                layout=(1, 3), size=(1500, 450),
+                left_margin=8Plots.mm, bottom_margin=8Plots.mm)
+            outfile_theta = joinpath(bench_dir, "xnofun_theta_comparison.png")
+            savefig(pg_theta, outfile_theta)
+            println("  Theta-space xno_fun plot saved to: ", abspath(outfile_theta))
+        end
+    elseif has_xnofun && !has_xipsi
+        println("  (Theta-space comparison skipped: Julia xi_psi not available in HDF5)")
+    elseif !has_xnofun
+        println("  (Theta-space comparison skipped: xnofun not found in debug_xbnormal.csv)")
+    end
+
+    do_plot || return
+
+    # Figure: |xi_n|(psi) for each resonant m — Julia vs Fortran CSV vs Fortran NC
+    panels = []
+    for m_res in res_m_vals[1:min(end, 4)]
+        im_csv  = findfirst(==(m_res), m_vals_fort)
+        im_julia = findfirst(==(m_res), j_mmodes)
+        im_nc   = findfirst(==(m_res), f_m_nc)
+        isnothing(im_csv) && continue
+
+        fp_csv  = abs.(fort_xn[:, im_csv])
+        jp      = (isnothing(im_julia) || isempty(j_xin)) ? Float64[] : abs.(j_xin[:, im_julia])
+        fp_nc   = (isnothing(im_nc) || isempty(f_xin_nc)) ? Float64[] : abs.(f_xin_nc[:, im_nc])
+
+        max_csv = maximum(fp_csv)
+        pb = plot(; xlabel="ψ_n", ylabel="|ξ_n| (norm.)", title="xi_n  m=$m_res", legend=:topright)
+        max_csv > 0 && plot!(pb, fort_psi_full, fp_csv ./ max_csv;
+            lw=2, color=:steelblue, label="Fort CSV (full grid)", alpha=0.7)
+        if !isempty(jp)
+            max_j = maximum(jp)
+            max_j > 0 && plot!(pb, j_psi, jp ./ max_j;
+                lw=2, color=:orange, linestyle=:dash, label="Julia HDF5")
+        end
+        if !isempty(fp_nc)
+            max_nc = maximum(fp_nc)
+            max_nc > 0 && plot!(pb, f_psi_nc, fp_nc ./ max_nc;
+                lw=1.5, color=:green, linestyle=:dot, label="Fort NC")
+        end
+        push!(panels, pb)
+    end
+    while length(panels) < 4
+        push!(panels, plot(; axis=false, legend=false, border=:none))
+    end
+
+    pg = plot(panels...;
+              layout=(2, 2),
+              size=(1200, 900),
+              left_margin=8Plots.mm, bottom_margin=8Plots.mm)
+    outfile = joinpath(bench_dir, "xno_mn_comparison.png")
+    savefig(pg, outfile)
+    println("  xno_mn comparison plot saved to: ", abspath(outfile))
+end
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 function main(argv=ARGS)
@@ -1393,6 +1703,12 @@ function main(argv=ARGS)
 
     do_plot && generate_plots(fort, julia, bench_dir, p.nn)
     do_plot && generate_matrix_plots(fort, julia, bench_dir, p.nn)
+
+    # Step 5b: xno_mn diagnostic — compare Julia xi_n against Fortran raw debug CSV
+    if isfile(joinpath(fortran_dir, "debug_xno_mn.csv"))
+        println("\n[5b] xno_mn diagnostic (Julia xi_n vs Fortran debug_xno_mn.csv) ...")
+        compare_xno_mn(equil, fort, julia, fortran_dir, bench_dir; do_plot=do_plot)
+    end
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

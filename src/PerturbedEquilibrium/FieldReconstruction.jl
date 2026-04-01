@@ -385,9 +385,10 @@ function compute_b_n_xi_n_modes(
         bno_fun  = bwp_fun ./ jd
         xno_fun  = xwp_fun ./ jd
 
-        # Forward DFT: theta space → mode space (1/mthsurf normalization matches Fortran iscdftf)
-        b_n_modes[ipsi, :]  = (phase_back' * bno_fun) ./ mthsurf
-        xi_n_modes[ipsi, :] = (phase_back' * xno_fun) ./ mthsurf
+        # Forward DFT: theta space → mode space (1/mthsurf normalization matches Fortran iscdftf).
+        # Must use transpose (not adjoint) so the phase is exp(-2πi·m·θ), not exp(+2πi·m·θ).
+        b_n_modes[ipsi, :]  = (transpose(phase_back) * bno_fun) ./ mthsurf
+        xi_n_modes[ipsi, :] = (transpose(phase_back) * xno_fun) ./ mthsurf
     end
 
     return b_n_modes, xi_n_modes
