@@ -350,4 +350,81 @@
             @test isfinite(dri.psio)
         end
     end
+
+    @testset "Separatrix geometry and kappa" begin
+        # Build a full Solovev equilibrium at sufficient resolution for the
+        # separatrix finder (equilibrium_separatrix_find!) to run.
+        #
+        # rsep[1] = outboard midplane R,  rsep[2] = inboard midplane R
+        # zsep[1] = bottom extremum Z,    zsep[2] = top extremum Z
+        # rext    = R at top/bottom extrema,  zext = zsep (identical)
+        # kappa   = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])  (elongation)
+
+        Eq = GeneralizedPerturbedEquilibrium.Equilibrium
+
+        function build_solovev_equilibrium(; e=1.6, a=0.33, r0=1.0, q0=1.9,
+                mpsi=64, mtheta=128)
+            eq_config = Eq.EquilibriumConfig(;
+                eq_type="sol", eq_filename="unused",
+                jac_type="pest", grid_type="ldp",
+                psilow=1e-4, psihigh=0.99999, mpsi=mpsi, mtheta=mtheta)
+            sol_config = Eq.SolovevConfig(64, 64, 64, e, a, r0, q0, 1.0, 1.0, 1.0)
+            dri = Eq.sol_run(eq_config, sol_config)
+            return Eq.equilibrium_solver(dri)
+        end
+
+        @testset "Elongated Solovev (e=1.6)" begin
+            pe = build_solovev_equilibrium(e=1.6)
+            rsep, zsep, rext, zext = Eq.equilibrium_separatrix_find!(pe)
+
+            # zsep[1] = bottom (negative Z), zsep[2] = top (positive Z)
+            @test zsep[1] < 0.0
+            @test zsep[2] > 0.0
+            @test zsep[1] < zsep[2]
+
+            # rsep[1] = outboard (R > R₀), rsep[2] = inboard (R < R₀)
+            @test rsep[1] > pe.ro
+            @test rsep[2] < pe.ro
+            @test rsep[1] > rsep[2]
+
+            # zext identical to zsep
+            @test zext ≈ zsep
+
+            # Up-down symmetry of Solovev: |zsep_bottom| ≈ |zsep_top|
+            @test abs(zsep[1]) ≈ abs(zsep[2]) rtol=0.01
+
+            # Extremum R should be near the magnetic axis
+            @test abs(rext[1] - pe.ro) < 0.2 * (rsep[1] - rsep[2])
+            @test abs(rext[2] - pe.ro) < 0.2 * (rsep[1] - rsep[2])
+
+            # kappa ≈ elongation
+            kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
+            @test kappa > 0
+            @test kappa ≈ 1.6 rtol=0.02
+        end
+
+        @testset "Circular Solovev (e=1.0)" begin
+            pe = build_solovev_equilibrium(e=1.0)
+            rsep, zsep, rext, zext = Eq.equilibrium_separatrix_find!(pe)
+
+            @test zsep[1] < 0.0
+            @test zsep[2] > 0.0
+            @test zsep[1] < zsep[2]
+            @test rsep[1] > rsep[2]
+
+            kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
+            @test kappa > 0
+            @test kappa ≈ 1.0 rtol=0.02
+        end
+
+        @testset "kappa via equilibrium_global_parameters!" begin
+            pe = build_solovev_equilibrium(e=1.6)
+            Eq.equilibrium_global_parameters!(pe)
+
+            @test pe.params.kappa > 0
+            @test pe.params.kappa ≈ 1.6 rtol=0.02
+            @test pe.params.zsep[1] < pe.params.zsep[2]
+            @test pe.params.rsep[1] > pe.params.rsep[2]
+        end
+    end
 end
