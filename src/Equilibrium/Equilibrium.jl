@@ -86,30 +86,23 @@ Performs the same function as equil_out_sep_find in the Fortran code.
 """
 function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     mpsi = length(pe.rzphi_xs) - 1
-    mtheta = length(pe.rzphi_ys) - 1
-
-    vector = pe.rzphi_ys .+ @view pe.rzphi_offset.nodal_derivs.partials[1, end, :]
-
     edge_idx = mpsi + 1  # Edge flux surface index
     psi_edge = pe.rzphi_xs[edge_idx]
-    eta0 = 0.0
-    idx = findmin(abs.(vector .- eta0))[2]
-    theta = pe.rzphi_ys[idx]
     rsep = zeros(2)
 
+    # Outboard and inboard midplane R via bracketed Brent on θ + η(θ) - η₀ = 0.
+    # iside=1 → outboard (η₀=0.0, θ near 0),  iside=2 → inboard (η₀=0.5, θ near 0.5).
     for iside in 1:2
+        eta0 = (iside == 1) ? 0.0 : 0.5
         hint2d = (Ref(1), Ref(1))
+        theta_lo, theta_hi = (iside == 1) ? (-0.25, 0.25) : (0.25, 0.75)
         theta = find_zero(
-            (theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-                theta -> 1.0 + pe.rzphi_offset((psi_edge, theta); deriv=DerivOp(0, 1), hint=hint2d)),
-            theta, Roots.Newton()
+            theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
+            (theta_lo, theta_hi), Roots.Brent()
         )
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
-        eta0 = 0.5
-        idx = findmin(abs.(vector .- eta0))[2]
-        theta = pe.rzphi_ys[idx]
     end
 
     # Top and bottom separatrix Z extrema via bracketed Brent on ∂z/∂θ = 0.

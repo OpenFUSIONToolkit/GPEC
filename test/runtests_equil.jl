@@ -377,15 +377,24 @@
             pe = build_solovev_equilibrium(e=1.6)
             rsep, zsep, rext, zext = Eq.equilibrium_separatrix_find!(pe)
 
-            # zsep[1] = bottom (negative Z), zsep[2] = top (positive Z)
-            @test zsep[1] < 0.0
-            @test zsep[2] > 0.0
-            @test zsep[1] < zsep[2]
-
             # rsep[1] = outboard (R > R₀), rsep[2] = inboard (R < R₀)
             @test rsep[1] > pe.ro
             @test rsep[2] < pe.ro
             @test rsep[1] > rsep[2]
+
+            # rsep values consistent with r0=1.0, a=0.33 (Shafranov shift makes it approximate)
+            amean = (rsep[1] - rsep[2]) / 2
+            rmean = (rsep[1] + rsep[2]) / 2
+            @test amean ≈ 0.33 rtol=0.15
+            @test rmean ≈ 1.0 rtol=0.15
+
+            # rsep should be on the midplane (Z ≈ 0)
+            # (verified indirectly: R at η=0 and η=0.5 are midplane by definition)
+
+            # zsep[1] = bottom (negative Z), zsep[2] = top (positive Z)
+            @test zsep[1] < 0.0
+            @test zsep[2] > 0.0
+            @test zsep[1] < zsep[2]
 
             # zext identical to zsep
             @test zext ≈ zsep
@@ -407,10 +416,16 @@
             pe = build_solovev_equilibrium(e=1.0)
             rsep, zsep, rext, zext = Eq.equilibrium_separatrix_find!(pe)
 
+            @test rsep[1] > pe.ro
+            @test rsep[2] < pe.ro
+            @test rsep[1] > rsep[2]
+
             @test zsep[1] < 0.0
             @test zsep[2] > 0.0
             @test zsep[1] < zsep[2]
-            @test rsep[1] > rsep[2]
+
+            # For circular cross-section, rext[1] ≈ rext[2] (top/bottom at same R)
+            @test rext[1] ≈ rext[2] rtol=0.01
 
             kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
             @test kappa > 0
