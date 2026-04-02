@@ -96,10 +96,16 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         eta0 = (iside == 1) ? 0.0 : 0.5
         hint2d = (Ref(1), Ref(1))
         theta_lo, theta_hi = (iside == 1) ? (-0.25, 0.25) : (0.25, 0.75)
-        theta = find_zero(
-            theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
-            (theta_lo, theta_hi), Roots.Brent()
-        )
+        side_label = (iside == 1) ? "outboard" : "inboard"
+        theta = try
+            find_zero(
+                theta -> theta + pe.rzphi_offset((psi_edge, theta); hint=hint2d) - eta0,
+                (theta_lo, theta_hi), Roots.Brent();
+                atol=1e-12, rtol=1e-12)
+        catch e
+            error("Separatrix $side_label midplane root not found in bracket " *
+                  "[$(theta_lo), $(theta_hi)]: $(e.msg)")
+        end
         r2 = pe.rzphi_rsquared((psi_edge, theta))
         offset = pe.rzphi_offset((psi_edge, theta))
         rsep[iside] = pe.ro + sqrt(r2) * cos(2π * (theta + offset))
@@ -140,8 +146,14 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         end
 
         theta_lo, theta_hi = (iside == 1) ? (0.5, 1.0) : (0.0, 0.5)
-        theta = find_zero(z_deriv, (theta_lo, theta_hi), Roots.Brent();
-            atol=1e-12, rtol=1e-12)
+        side_label = (iside == 1) ? "bottom" : "top"
+        theta = try
+            find_zero(z_deriv, (theta_lo, theta_hi), Roots.Brent();
+                atol=1e-12, rtol=1e-12)
+        catch e
+            error("Separatrix $side_label Z-extremum root not found in bracket " *
+                  "[$(theta_lo), $(theta_hi)]: $(e.msg)")
+        end
 
         rext[iside] = pe.ro + rfac[] * cos_phase[]
         zsep[iside] = zext[iside] = z_val[]
