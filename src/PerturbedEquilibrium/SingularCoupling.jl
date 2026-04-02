@@ -188,9 +188,7 @@ function compute_singular_coupling_metrics!(
 
         # Interpolate u and du/dψ at lpsi and rpsi using stored ODE solution.
         # Value (u): Hermite cubic using ud_store for smoother interpolation than linear.
-        # Derivative (ud): 2-point central diff of u_store only — avoids ud_store, which
-        #   can be in the wrong basis at Gaussian reduction steps and from rejected ODE steps
-        #   near outer surfaces (where the solution varies rapidly).
+        # Derivative (ud): chord slope from u_store only — see comment below.
         il_l, ir_l, _ = _psi_bracket(psi_store_all, lpsi, nstep)
         il_r, ir_r, _ = _psi_bracket(psi_store_all, rpsi, nstep)
 
@@ -206,6 +204,10 @@ function compute_singular_coupling_metrics!(
 
         u_l  = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
         u_r  = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
+        # Derivative (ud): chord slope from u_store only — ud_store can be systematically off near
+        # outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
+        # then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
+        # this by using only u values, which are accurately stored by the ODE integrator.
         ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
         ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
 
