@@ -301,7 +301,7 @@ function equilibrium_solver(input::InverseRunInput)
             sq_fs[ipsi+1, 4] *= ffac
             rzphi_fs[ipsi+1, :, 3] *= ffac
         end
-        sq = cubic_interp(sq_xs, sq_fs; extrap=ExtendExtrap())
+        sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
         f_sq = sq.y
         sq_deriv = deriv1(sq)
         f1_sq_hi = sq_deriv(sq_xs[end])

@@ -156,7 +156,7 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
 
     # FastInterpolations now natively supports complex values - create complex series interpolant directly
     # Use CubicFit() (default) for native endpoint handling
-    wvmat = cubic_interp(psi_array, wv_flat; extrap=ExtendExtrap())
+    wvmat = cubic_interp(psi_array, Series(wv_flat); extrap=ExtendExtrap())
 
     return wvmat
 end
