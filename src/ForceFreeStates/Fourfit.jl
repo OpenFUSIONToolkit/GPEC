@@ -316,15 +316,15 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
 
     # FastInterpolations now natively supports complex values - no need to split real/imag
     # Create complex series interpolants with per-column extrap BC
-    ffit.amats = cubic_interp(metric.xs, amats_flat; ffit.itp_opts...)
-    ffit.bmats = cubic_interp(metric.xs, bmats_flat; ffit.itp_opts...)
-    ffit.cmats = cubic_interp(metric.xs, cmats_flat; ffit.itp_opts...)
-    ffit.dmats = cubic_interp(metric.xs, dmats_flat; ffit.itp_opts...)
-    ffit.emats = cubic_interp(metric.xs, emats_flat; ffit.itp_opts...)
-    ffit.hmats = cubic_interp(metric.xs, hmats_flat; ffit.itp_opts...)
-    ffit.fmats_lower = cubic_interp(metric.xs, fmats_lower_flat; ffit.itp_opts...)
-    ffit.gmats = cubic_interp(metric.xs, gmats_flat; ffit.itp_opts...)
-    ffit.kmats = cubic_interp(metric.xs, kmats_flat; ffit.itp_opts...)
+    ffit.amats = cubic_interp(metric.xs, Series(amats_flat); ffit.itp_opts...)
+    ffit.bmats = cubic_interp(metric.xs, Series(bmats_flat); ffit.itp_opts...)
+    ffit.cmats = cubic_interp(metric.xs, Series(cmats_flat); ffit.itp_opts...)
+    ffit.dmats = cubic_interp(metric.xs, Series(dmats_flat); ffit.itp_opts...)
+    ffit.emats = cubic_interp(metric.xs, Series(emats_flat); ffit.itp_opts...)
+    ffit.hmats = cubic_interp(metric.xs, Series(hmats_flat); ffit.itp_opts...)
+    ffit.fmats_lower = cubic_interp(metric.xs, Series(fmats_lower_flat); ffit.itp_opts...)
+    ffit.gmats = cubic_interp(metric.xs, Series(gmats_flat); ffit.itp_opts...)
+    ffit.kmats = cubic_interp(metric.xs, Series(kmats_flat); ffit.itp_opts...)
 
     # TODO: set powers
     # Do we need this yet? Only called if power_flag = true

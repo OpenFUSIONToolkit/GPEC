@@ -6,6 +6,7 @@ using Printf
 using LinearAlgebra
 using Statistics
 using AdaptiveArrayPools
+using FastInterpolations
 
 # Import parent modules
 import ..Equilibrium
