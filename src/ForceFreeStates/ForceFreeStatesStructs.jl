@@ -355,39 +355,26 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
 
 ## Fields
 
-  - `dW_edge::Vector{ComplexF64}` - Per-step dW values (length `N_edge`); used to find peak truncation point.
   - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
-  - `_wv_out::Matrix{ComplexF64}` - Output buffer for wvmat spline evaluation.
   - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
-  - `_wv_scratch, _eindex_buf, _evals_real_buf, _tmp_vec` - Pre-allocated buffers for `free_compute_total`.
   - `psi, q` - ψ and q values at each edge scan step.
-  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step.
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step (NaN for failed steps).
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
     N_edge::Int
 
-    # Scratch: per-step dW values; used to find peak truncation point
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, N_edge)
-
     # Vacuum matrix spline and evaluation infrastructure
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
     wv_hint::Base.RefValue{Int} = Ref(1)
 
-    # Pre-allocated buffers for free_compute_total
-    _wv_scratch::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    _eindex_buf::Vector{Int} = Vector{Int}(undef, numpert_total)
-    _evals_real_buf::Vector{Float64} = Vector{Float64}(undef, numpert_total)
-    _tmp_vec::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
-
-    # Scan results (written to HDF5 under edge_scan/)
-    psi::Vector{Float64} = Float64[]
-    q::Vector{Float64} = Float64[]
-    total_eigenvalue::Vector{ComplexF64} = ComplexF64[]
-    plasma_energy::Vector{ComplexF64} = ComplexF64[]
-    vacuum_energy::Vector{ComplexF64} = ComplexF64[]
-    vacuum_eigenvalue::Vector{Float64} = Float64[]
+    # Scan results (written to HDF5 under edge_scan/; NaN where free_compute_total raised SingularException)
+    psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
+    q::Vector{Float64} = Vector{Float64}(undef, N_edge)
+    total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    plasma_energy::Vector{ComplexF64}    = fill(complex(NaN), N_edge)
+    vacuum_energy::Vector{ComplexF64}    = fill(complex(NaN), N_edge)
+    vacuum_eigenvalue::Vector{Float64}   = fill(NaN, N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)
@@ -418,7 +405,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-  - `edge_scan::Union{EdgeScanState, Nothing}` - Edge dW scan state and results. `nothing` when no edge scan is configured (psiedge ≥ psilim).
+  - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
@@ -457,8 +444,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
 
-    # Edge dW scan state and results (nothing when psiedge >= psilim, i.e. no edge scan)
-    edge_scan::Union{EdgeScanState, Nothing} = nothing
+    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    edge_scan::EdgeScanState
 
     # Data for integrator
     psifac::Float64 = 0.0
@@ -489,5 +476,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 end
 
-# Initialize function for OdeState with relevant parameters for array initialization
-OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+# Initialize function for OdeState with relevant parameters for array initialization.
+# edge_scan is initialized as a disabled sentinel (N_edge=0); replaced by findmax_dW_edge! when a scan runs.
+OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
+    OdeState(; numpert_total, numsteps_init, numunorms_init, msing,
+               edge_scan=EdgeScanState(numpert_total, 0))

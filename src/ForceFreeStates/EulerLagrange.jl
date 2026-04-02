@@ -546,42 +546,31 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     odet.edge_scan = EdgeScanState(intr.numpert_total, N_edge)
     es = odet.edge_scan
 
-    # Since we search for the maximum dW, initialize to -Infinity
-    fill!(es.dW_edge, -Inf * (1 + im))
-    plasma_energy_arr     = fill(-Inf * (1 + im), N_edge)
-    vacuum_energy_arr     = fill(-Inf * (1 + im), N_edge)
-    vacuum_eigenvalue_arr = fill(-Inf, N_edge)
+    es.psi .= odet.psi_store[edge_start:odet.step]
+    es.q   .= odet.q_store[edge_start:odet.step]
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
-    # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1
+    # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
+    # Result arrays are pre-initialized to NaN; failed steps (SingularException) stay NaN.
     for j in 1:N_edge
         istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
         try
             result = free_compute_total(equil, ffit, intr, odet)
-            es.dW_edge[j]            = result.total_eigenvalue
-            plasma_energy_arr[j]     = result.plasma_energy
-            vacuum_energy_arr[j]     = result.vacuum_energy
-            vacuum_eigenvalue_arr[j] = result.vacuum_eigenvalue
+            es.total_eigenvalue[j]  = result.total_eigenvalue
+            es.plasma_energy[j]     = result.plasma_energy
+            es.vacuum_energy[j]     = result.vacuum_energy
+            es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
         catch e
             e isa LinearAlgebra.SingularException || rethrow(e)
-            # U₁ is singular at this step; skip it (dW_edge stays -Inf)
         end
     end
 
-    # Build per-step scan arrays; failed steps have -Inf values → NaN for HDF5 output
-    es.psi              = odet.psi_store[edge_start:odet.step]
-    es.q                = odet.q_store[edge_start:odet.step]
-    es.total_eigenvalue  = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in es.dW_edge]
-    es.plasma_energy     = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in plasma_energy_arr]
-    es.vacuum_energy     = ComplexF64[isfinite(real(v)) ? v : complex(NaN) for v in vacuum_energy_arr]
-    es.vacuum_eigenvalue = Float64[isfinite(v) ? v : NaN for v in vacuum_eigenvalue_arr]
-
-    # Return the ODE step index at peak dW (compact index j maps back via edge_start)
-    peak_j = argmax(real.(es.dW_edge))
+    # Return the ODE step index at peak total_eigenvalue (NaN-safe; failed steps ignored)
+    peak_j = argmax(j -> isnan(real(es.total_eigenvalue[j])) ? typemin(Float64) : real(es.total_eigenvalue[j]), 1:N_edge)
     return edge_start + peak_j - 1
 end
 

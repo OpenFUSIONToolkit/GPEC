@@ -436,7 +436,7 @@ function write_outputs_to_HDF5(
         out_h5["integration/crit"] = odet.crit_store
 
         # Write edge stability scan data (only present when psiedge < psilim)
-        if !isnothing(odet.edge_scan)
+        if !isempty(odet.edge_scan.psi)
             es = odet.edge_scan
             out_h5["edge_scan/psi"] = es.psi
             out_h5["edge_scan/q"] = es.q

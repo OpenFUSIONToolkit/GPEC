@@ -162,28 +162,27 @@ which calls this function at each step in the psiedge -> psilim region of integr
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
 wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvmat` (a complex-valued spline).
 """
-function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
+@with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
     Npert = intr.numpert_total
-
-    # wp and wt are stack-local but unavoidable (eigen() overwrites wt, wp needed separately for plasma_energy).
-    # These could be moved to OdeState buffers in a future pass if profiling shows they matter.
-    wp = zeros(ComplexF64, Npert, Npert)
-    eigenvalues = zeros(ComplexF64, Npert)
-    wt = zeros(ComplexF64, Npert, Npert)
+    wp          = zeros!(pool, ComplexF64, Npert, Npert)
+    eigenvalues = zeros!(pool, ComplexF64, Npert)
+    wt          = zeros!(pool, ComplexF64, Npert, Npert)
+    wv          = zeros!(pool, ComplexF64, Npert, Npert)
+    eindex      = zeros!(pool, Int, Npert)
+    evals_real  = zeros!(pool, Float64, Npert)
+    tmp_v       = zeros!(pool, ComplexF64, Npert)
 
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix
-    @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
     # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
     # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating
     # a zero-crossing function near rational surfaces, which would distort the peaks.
     es = odet.edge_scan
-    es.wvmat(vec(es._wv_out), odet.psifac; hint=es.wv_hint)
-    wv = es._wv_scratch
-    copyto!(wv, es._wv_out)
+    es.wvmat(vec(wv), odet.psifac; hint=es.wv_hint)
     q_at_psifac = equil.profiles.q_spline(odet.psifac)
     # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
     singfac = vec((intr.mlow:intr.mhigh) .- q_at_psifac .* (intr.nlow:intr.nhigh)')
@@ -196,9 +195,7 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     wt .= wp .+ wv
     Ev = eigen(wt)
 
-    # Sort eigenvalues by descending real part using pre-allocated buffers
-    eindex = es._eindex_buf
-    evals_real = es._evals_real_buf
+    # Sort eigenvalues by descending real part
     @inbounds for i in 1:Npert
         evals_real[i] = real(Ev.values[i])
     end
@@ -223,8 +220,6 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
 
     # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
     # plasma_energy + vacuum_energy = total_eigenvalue by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
-    # Use mul! with pre-allocated _tmp_vec to avoid allocating wp*v and wv*v temporaries.
-    tmp_v = es._tmp_vec
     mul!(tmp_v, wp, v)
     plasma_energy = ComplexF64(dot(v, tmp_v)) / norm
     mul!(tmp_v, wv, v)
@@ -234,15 +229,6 @@ function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitV
     # so all four outputs are directly comparable. The singfac-scaled wv should be PSD by
     # construction (congruence of PSD wv_raw), but numerical noise can make eigenvalues slightly
     # negative. Clamp to zero to enforce the physical constraint.
-    # Hermitianize wv in-place (safe: plasma_energy and vacuum_energy already computed above).
-    @inbounds for j in 1:Npert
-        for i in 1:(j-1)
-            avg = (wv[i, j] + conj(wv[j, i])) / 2
-            wv[i, j] = avg
-            wv[j, i] = conj(avg)
-        end
-        wv[j, j] = real(wv[j, j]) + 0.0im
-    end
     vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / norm)
 
     return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue)
