@@ -1,3 +1,4 @@
+*.cov
 *.mod
 *.dylib
 *.dll

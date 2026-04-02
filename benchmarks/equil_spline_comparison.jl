@@ -236,8 +236,8 @@ let
     psilow_g  = cfg_inv.psilow
     topology_g = Equilibrium.classify_topology(raw_inv, psio_g)
 
-    ψ_RR = abs(raw_inv.psi_in((ro_g, zo_g); deriv=Val((2, 0))))
-    ψ_ZZ = abs(raw_inv.psi_in((ro_g, zo_g); deriv=Val((0, 2))))
+    ψ_RR = abs(raw_inv.psi_in((ro_g, zo_g); deriv=DerivOp(2, 0)))
+    ψ_ZZ = abs(raw_inv.psi_in((ro_g, zo_g); deriv=DerivOp(0, 2)))
     a_low_g = min(sqrt(2 * psilow_g * psio_g / ψ_RR), sqrt(2 * psilow_g * psio_g / ψ_ZZ))
 
     nw_g = length(raw_inv.psi_in_xs)

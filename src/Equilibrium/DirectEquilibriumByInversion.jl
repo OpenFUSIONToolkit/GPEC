@@ -150,7 +150,7 @@ function resample_contour_to_theta_grid!(
     η_ext[n_ext]   = η_ext[1] + 2π
     logρ_ext[n_ext] = logρ_ext[1]
 
-    logρ_spl = cubic_interp(η_ext, logρ_ext; bc=PeriodicBC(), extrap=WrapExtrap(), search=LinearBinary())
+    logρ_spl = cubic_interp(η_ext, logρ_ext; bc=PeriodicBC())
 
     # theta_grid is in turns [0, 1]; sample at 2π*θ radians and convert polar → Cartesian.
     # Monotonically increasing η → shared hint gives O(1) lookups per step.
@@ -344,8 +344,8 @@ function adaptive_grid_params(
     # Required cell widths at each LCFS vertex from bilinear interpolation error formula
     if bbox_curve !== nothing
         for (R, Z) in Ctr.vertices(bbox_curve)
-            ψ_RR = abs(raw_profile.psi_in((R, Z); deriv=Val((2, 0))))
-            ψ_ZZ = abs(raw_profile.psi_in((R, Z); deriv=Val((0, 2))))
+            ψ_RR = abs(raw_profile.psi_in((R, Z); deriv=DerivOp(2, 0)))
+            ψ_ZZ = abs(raw_profile.psi_in((R, Z); deriv=DerivOp(0, 2)))
             ψ_RR > 0 && push!(dR_reqs, sqrt(8 * Δψ / ψ_RR))
             ψ_ZZ > 0 && push!(dZ_reqs, sqrt(8 * Δψ / ψ_ZZ))
         end
@@ -354,8 +354,8 @@ function adaptive_grid_params(
     # Axis constraint: global grid cell ≤ 0.2 × a_low (minimum semi-axis of innermost surface).
     # Using min(a_R, a_Z) for both directions matches the old scale_r/scale_z target_cell_frac
     # logic and ensures the constraint is the same in both directions.
-    ψ_RR_ax = abs(raw_profile.psi_in((ro, zo); deriv=Val((2, 0))))
-    ψ_ZZ_ax = abs(raw_profile.psi_in((ro, zo); deriv=Val((0, 2))))
+    ψ_RR_ax = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(2, 0)))
+    ψ_ZZ_ax = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(0, 2)))
     a_low_ax = min(sqrt(2 * psilow * psio / ψ_RR_ax), sqrt(2 * psilow * psio / ψ_ZZ_ax))
     push!(dR_reqs, 0.2 * a_low_ax)
     push!(dZ_reqs, 0.2 * a_low_ax)
@@ -442,8 +442,8 @@ function equilibrium_solver_by_inversion(
 
     # ψ curvature at axis: needed for near_axis_threshold and zoomed core grid sizing.
     # a_low = min semi-axis of the innermost flux surface (at psilow) from ψ ≈ ½|ψ_RR|dR².
-    ψ_RR_abs = abs(raw_profile.psi_in((ro, zo); deriv=Val((2, 0))))
-    ψ_ZZ_abs = abs(raw_profile.psi_in((ro, zo); deriv=Val((0, 2))))
+    ψ_RR_abs = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(2, 0)))
+    ψ_ZZ_abs = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(0, 2)))
     a_low = min(sqrt(2 * psilow * psio / ψ_RR_abs), sqrt(2 * psilow * psio / ψ_ZZ_abs))
 
     # Compute physics-based (n, β) from LCFS curvature sampling and axis constraint.
@@ -650,7 +650,7 @@ function equilibrium_solver_by_inversion(
     # Build InverseRunInput — same type consumed by equilibrium_solver(::InverseRunInput)
     rz_in_xs = psi_nodes
     rz_in_ys = theta_grid
-    itp_opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_table; itp_opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_table; itp_opts2d...)
