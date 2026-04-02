@@ -226,6 +226,12 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
 
         fort["w_isl"] = Float64.(ds["w_isl"][:])
         fort["K_isl"] = Float64.(ds["K_isl"][:])
+        if haskey(ds, "I_res")
+            i_res_raw = Float64.(ds["I_res"][:, :])
+            fort["I_res"] = complex.(i_res_raw[:, 1], i_res_raw[:, 2])
+        else
+            fort["I_res"] = ComplexF64[]
+        end
 
         # radial profiles vs psi for all modes
         fort["psi_n_prof"] = Float64.(ds["psi_n"][:])
@@ -290,6 +296,7 @@ function load_julia_outputs(h5_path::String)
         julia["rational_q"]         = haskey(f, "$sc/rational_q")         ? read(f, "$sc/rational_q")         : Float64[]
         julia["rational_n"]         = haskey(f, "$sc/rational_n")         ? read(f, "$sc/rational_n")         : Int[]
         julia["resonant_flux"]      = haskey(f, "$sc/resonant_flux")      ? read(f, "$sc/resonant_flux")      : ComplexF64[]
+        julia["resonant_current"]   = haskey(f, "$sc/resonant_current")   ? read(f, "$sc/resonant_current")   : ComplexF64[]
         julia["island_half_width"]  = haskey(f, "$sc/island_half_width")  ? read(f, "$sc/island_half_width")  : Float64[]
         julia["chirikov_parameter"] = haskey(f, "$sc/chirikov_parameter") ? read(f, "$sc/chirikov_parameter") : Float64[]
         julia["delta_prime"]        = haskey(f, "$sc/delta_prime")        ? read(f, "$sc/delta_prime")        : ComplexF64[]
@@ -746,31 +753,10 @@ end
 # ─── Plot generation ─────────────────────────────────────────────────────────
 
 function generate_plots(fort, julia, bench_dir, nn)
-    # --- Build per-surface Julia arrays ---
     f_q_rat  = fort["q_rational"]
     n_surf   = length(f_q_rat)
-    q_labels = [@sprintf("q=%d", round(Int, q)) for q in f_q_rat]
-    xs       = 1:n_surf
 
-    f_wisl_vals  = fort["w_isl"]
-    f_kchir_vals = fort["K_isl"]
-
-    j_wisl_vals  = fill(NaN, n_surf)
-    j_kchir_vals = fill(NaN, n_surf)
-
-    for (i, fq_r) in enumerate(f_q_rat)
-        row = find_julia_row(julia, round(Int, fq_r), nn)
-        if row > 0
-            !isempty(julia["island_half_width"])  && (j_wisl_vals[i]  = 2*julia["island_half_width"][row])
-            !isempty(julia["chirikov_parameter"]) && (j_kchir_vals[i] = julia["chirikov_parameter"][row])
-        end
-    end
-
-    # Compute % error for annotations
-    wisl_pct  = [isnan(j_wisl_vals[i])  ? NaN : 100*(j_wisl_vals[i]  - f_wisl_vals[i])  / f_wisl_vals[i]  for i in 1:n_surf]
-    kchir_pct = [isnan(j_kchir_vals[i]) ? NaN : 100*(j_kchir_vals[i] - f_kchir_vals[i]) / f_kchir_vals[i] for i in 1:n_surf]
-
-    # --- Row 1: q profile and Mercier criteria ---
+    # --- Row 1: q profile, Mercier, W_t scatter, |P| diagonal ---
     p1 = plot(fort["psi_n_dcon"], fort["q_dcon"],
         label="Fortran", xlabel="ψ_n", ylabel="q", title="q profile", lw=2)
     plot!(p1, julia["psi_q"], julia["q"], label="Julia", linestyle=:dash, lw=2)
@@ -785,35 +771,44 @@ function generate_plots(fort, julia, bench_dir, nn)
     !isempty(julia["dr"]) && plot!(p3, julia["psi_q"], julia["dr"], label="Julia", linestyle=:dash, lw=2)
     hline!(p3, [0.0], color=:black, linestyle=:dot, label="")
 
-    # --- Row 2: Resonant surface comparisons ---
-    # Island width: side-by-side lines with markers
-    p4 = plot(xs .- 0.1, f_wisl_vals, seriestype=:bar, bar_width=0.35,
-        label="Fortran", color=:steelblue, alpha=0.8,
-        xticks=(xs, q_labels), xlabel="rational surface", ylabel="w_isl [ψ_n]",
-        title="Island width (n=$nn)", ylims=(0, maximum(filter(!isnan, [f_wisl_vals; j_wisl_vals]))*1.25))
-    plot!(p4, xs .+ 0.1, j_wisl_vals, seriestype=:bar, bar_width=0.35,
-        label="Julia", color=:orange, alpha=0.8)
-    for i in 1:n_surf
-        isnan(wisl_pct[i]) && continue
-        annotate!(p4, xs[i], max(f_wisl_vals[i], j_wisl_vals[i]) * 1.08,
-            text(@sprintf("%+.0f%%", wisl_pct[i]), 8, :center))
+    # W_t eigenvalue scatter (log y), all eigenvalues vs index
+    f_wt = fort["W_t_eigenvalue"]
+    j_et = julia["et"]
+    p4 = plot(; xlabel="mode index", ylabel="|W_t|", title="|W_t| eigenvalues",
+               yscale=:log10, legend=:topright)
+    if !isempty(f_wt)
+        f_sorted = sort(abs.(f_wt))
+        scatter!(p4, 1:length(f_sorted), f_sorted; color=:steelblue, markersize=5,
+                 markershape=:circle, label="Fortran")
+    end
+    if !isempty(j_et)
+        j_sorted = sort(abs.(j_et))
+        scatter!(p4, 1:length(j_sorted), j_sorted; color=:orange, markersize=5,
+                 markershape=:circle, label="Julia", markerstrokewidth=0)
     end
 
-    # Chirikov parameter
-    p5 = plot(xs .- 0.1, f_kchir_vals, seriestype=:bar, bar_width=0.35,
-        label="Fortran", color=:steelblue, alpha=0.8,
-        xticks=(xs, q_labels), xlabel="rational surface", ylabel="K",
-        title="Chirikov parameter (n=$nn)", ylims=(0, maximum(filter(!isnan, [f_kchir_vals; j_kchir_vals]))*1.25))
-    plot!(p5, xs .+ 0.1, j_kchir_vals, seriestype=:bar, bar_width=0.35,
-        label="Julia", color=:orange, alpha=0.8)
-    hline!(p5, [1.0], color=:red, linestyle=:dash, label="K=1 (overlap)")
-    for i in 1:n_surf
-        isnan(kchir_pct[i]) && continue
-        annotate!(p5, xs[i], max(f_kchir_vals[i], j_kchir_vals[i]) * 1.08,
-            text(@sprintf("%+.0f%%", kchir_pct[i]), 8, :center))
+    # |P| diagonal comparison
+    f_P = fort["P"]
+    j_P = julia["permeability"]
+    m_ctrl = fort["m_vals_ctrl"]
+    p5 = plot(; xlabel="Poloidal mode m", ylabel="|P[i,i]|",
+               title="|P| diagonal  (n=$nn)", legend=:topright)
+    if !isempty(f_P) && !isempty(j_P)
+        mpert_p = min(size(f_P, 1), size(j_P, 1), length(m_ctrl))
+        ms = m_ctrl[1:mpert_p]
+        fp_diag = [abs(f_P[i,i]) for i in 1:mpert_p]
+        jp_diag = [abs(j_P[i,i]) for i in 1:mpert_p]
+        me_f, fe = step_series(ms, fp_diag)
+        me_j, je = step_series(ms, jp_diag)
+        plot!(p5, me_f, fe; seriestype=:steppre, lw=2, color=:steelblue, label="Fortran")
+        plot!(p5, me_j, je; seriestype=:steppre, lw=2, color=:orange, linestyle=:dash, label="Julia")
+    else
+        annotate!(p5, 0.5, 0.5, text("data unavailable", 10, :center))
     end
 
-    # Phi_tot spectrum: |Phi_x| and |Phi_tot| vs m, Julia vs Fortran
+    # --- Row 2: Phi_x/tot spectrum and singular coupling vs psi ---
+
+    # Phi_x & Phi_tot spectrum
     m_ctrl   = fort["m_vals_ctrl"]
     f_phi_x  = fort["Phi_x"]
     f_phi_tot = fort["Phi_tot"]
@@ -823,50 +818,77 @@ function generate_plots(fort, julia, bench_dir, nn)
     p6 = plot(; xlabel="m", ylabel="|Φ| [Wb]", title="Phi_x & Phi_tot spectrum (n=$nn)",
               legend=:topright)
     if !isempty(j_fvec) && !isempty(f_phi_x)
-        jfx_amps  = [abs(get(Dict(zip(j_mmodes, j_fvec)),  m, NaN+0im)) for m in m_ctrl]
-        jft_amps  = [abs(get(Dict(zip(j_mmodes, j_rvec)),  m, NaN+0im)) for m in m_ctrl]
-        ffx_amps  = abs.(f_phi_x)
-        fft_amps  = abs.(f_phi_tot)
+        jfx_amps = [abs(get(Dict(zip(j_mmodes, j_fvec)), m, NaN+0im)) for m in m_ctrl]
+        jft_amps = [abs(get(Dict(zip(j_mmodes, j_rvec)), m, NaN+0im)) for m in m_ctrl]
+        ffx_amps = abs.(f_phi_x)
+        fft_amps = abs.(f_phi_tot)
         me, jfe = step_series(m_ctrl, replace(jfx_amps, NaN=>0.0))
         _,  jte = step_series(m_ctrl, replace(jft_amps, NaN=>0.0))
         _,  ffe = step_series(m_ctrl, ffx_amps)
         _,  fte = step_series(m_ctrl, fft_amps)
         plot!(p6, me, ffe; seriestype=:steppre, lw=2, color=:steelblue, label="Φ_x Fortran")
-        plot!(p6, me,  jfe; seriestype=:steppre, lw=2, color=:steelblue, linestyle=:dash, label="Φ_x Julia")
-        plot!(p6, me,  fte; seriestype=:steppre, lw=2, color=:orange,    label="Φ_tot Fortran")
-        plot!(p6, me,  jte; seriestype=:steppre, lw=2, color=:orange,    linestyle=:dash, label="Φ_tot Julia")
+        plot!(p6, me, jfe; seriestype=:steppre, lw=2, color=:steelblue, linestyle=:dash, label="Φ_x Julia")
+        plot!(p6, me, fte; seriestype=:steppre, lw=2, color=:orange,    label="Φ_tot Fortran")
+        plot!(p6, me, jte; seriestype=:steppre, lw=2, color=:orange,    linestyle=:dash, label="Φ_tot Julia")
     else
         annotate!(p6, 0.5, 0.5, text("data unavailable", 10, :center))
     end
 
-    # |W_t| eigenvalue
-    f_wt = fort["W_t_eigenvalue"]
-    j_et = julia["et"]
-    fv   = isempty(f_wt) ? NaN : abs(f_wt[argmin(real.(f_wt))])
-    jv   = isempty(j_et) ? NaN : abs(j_et[1])
-    p7   = bar(["Fortran", "Julia"], [fv, jv], title="|W_t| least stable",
-        ylabel="|W_t|", legend=false, color=[:steelblue, :orange], alpha=0.8)
-    annotate!(p7, 1.5, min(fv,jv)*0.5,
-        text(@sprintf("Δ=%.1f%%", 100*abs(fv-jv)/fv), 9, :center))
-
-    # P matrix diagonal comparison
-    f_P = fort["P"]
-    j_P = julia["permeability"]
-    m_ctrl = fort["m_vals_ctrl"]
-    p8 = plot(; xlabel="Poloidal mode m", ylabel="|P[i,i]|",
-               title="|P| diagonal  (n=$nn)", legend=:topright)
-    if !isempty(f_P) && !isempty(j_P)
-        mpert_p = min(size(f_P, 1), size(j_P, 1), length(m_ctrl))
-        ms = m_ctrl[1:mpert_p]
-        fp_diag = [abs(f_P[i,i]) for i in 1:mpert_p]
-        jp_diag = [abs(j_P[i,i]) for i in 1:mpert_p]
-        me_f, fe = step_series(ms, fp_diag)
-        me_j, je = step_series(ms, jp_diag)
-        plot!(p8, me_f, fe; seriestype=:steppre, lw=2, color=:steelblue, label="Fortran")
-        plot!(p8, me_j, je; seriestype=:steppre, lw=2, color=:orange, linestyle=:dash, label="Julia")
-    else
-        annotate!(p8, 0.5, 0.5, text("data unavailable", 10, :center))
+    # Helper: singular coupling vs psi scatter with q-value labels
+    function _singcoup_panel(ylabel_str, title_str,
+                              f_psi, f_vals, f_q_labels,
+                              j_psi, j_vals)
+        p = plot(; xlabel="ψ_n", ylabel=ylabel_str, title=title_str, legend=:topright)
+        if !isempty(f_psi) && !isempty(f_vals)
+            scatter!(p, f_psi, f_vals; color=:steelblue, markersize=7, markershape=:circle, label="Fortran")
+            plot!(p, f_psi, f_vals; color=:steelblue, lw=1, linestyle=:dot, label="")
+            for (xi, yi, qi) in zip(f_psi, f_vals, f_q_labels)
+                annotate!(p, xi, yi, text(qi, 7, :bottom, :center))
+            end
+        end
+        if !isempty(j_psi) && !isempty(j_vals)
+            scatter!(p, j_psi, j_vals; color=:orange, markersize=5, markershape=:circle,
+                     label="Julia", markerstrokewidth=0)
+            plot!(p, j_psi, j_vals; color=:orange, lw=1, linestyle=:dot, label="")
+        end
+        return p
     end
+
+    # Collect per-surface values for singular coupling panels
+    f_psi_rat = fort["psi_n_rational"]
+    f_q_labels = [@sprintf("q=%d", round(Int, q)) for q in f_q_rat]
+
+    # Delta (Δ')
+    f_delta_vals = isempty(fort["Delta"]) ? Float64[] : real.(fort["Delta"])
+    j_delta_psi  = julia["rational_psi"]
+    j_delta_vals = isempty(julia["delta_prime"]) ? Float64[] : real.(julia["delta_prime"])
+    p7 = _singcoup_panel("Re(Δ')", "Δ' vs ψ  (n=$nn)",
+                          f_psi_rat, f_delta_vals, f_q_labels,
+                          j_delta_psi, j_delta_vals)
+
+    # I_res (resonant current)
+    f_ires_vals = isempty(fort["I_res"]) ? Float64[] : abs.(fort["I_res"])
+    j_ires_psi  = julia["rational_psi"]
+    j_ires_vals = isempty(julia["resonant_current"]) ? Float64[] : abs.(julia["resonant_current"])
+    p8 = _singcoup_panel("|I_res| [A]", "|I_res| vs ψ  (n=$nn)",
+                          f_psi_rat, f_ires_vals, f_q_labels,
+                          j_ires_psi, j_ires_vals)
+
+    # Phi_res (resonant flux / area)
+    f_phires_vals = isempty(fort["Phi_res"]) ? Float64[] : abs.(fort["Phi_res"])
+    j_phires_psi  = julia["rational_psi"]
+    j_phires_vals = isempty(julia["resonant_flux"]) ? Float64[] : abs.(julia["resonant_flux"])
+    p9 = _singcoup_panel("|Φ_res| [T]", "|Φ_res| vs ψ  (n=$nn)",
+                          f_psi_rat, f_phires_vals, f_q_labels,
+                          j_phires_psi, j_phires_vals)
+
+    # w_isl (island full width)
+    f_wisl_vals = fort["w_isl"]
+    j_wisl_psi  = julia["rational_psi"]
+    j_wisl_vals = isempty(julia["island_half_width"]) ? Float64[] : 2 .* julia["island_half_width"]
+    p10 = _singcoup_panel("w_isl [ψ_n]", "Island width vs ψ  (n=$nn)",
+                           f_psi_rat, f_wisl_vals, f_q_labels,
+                           j_wisl_psi, j_wisl_vals)
 
     # --- Row 3: b_psi profiles for resonant m harmonics ---
     # Identify resonant m values from rational surfaces
@@ -978,8 +1000,8 @@ function generate_plots(fort, julia, bench_dir, nn)
         push!(xin_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    layout = @layout [a b c; d e f g h; i j k l; m n o p; q r s t; u v w x]
-    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, jbgp_panels..., bn_panels..., xigp_panels..., xin_panels...;
+    layout = @layout [a b c d e; f g h i j; k l m n; o p q r; s t u v; w x y z]
+    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, jbgp_panels..., bn_panels..., xigp_panels..., xin_panels...;
         layout=layout, size=(2100, 2700),
         left_margin=5Plots.mm, bottom_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")

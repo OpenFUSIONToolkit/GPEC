@@ -82,7 +82,7 @@ function reconstruct_physical_fields(
     npsi = size(ForceFreeStates_results.u_store, 4)
     mpert = ffs_intr.mpert
 
-    # Step 1: Sum weighted eigenmode contributions to get covariant ξ_ψ in mode space
+    # Sum weighted eigenmode contributions to get covariant ξ_ψ in mode space
     xi_psi_modes = sum_eigenmode_contributions(
         response_vector,
         flux_matrix,
@@ -90,7 +90,7 @@ function reconstruct_physical_fields(
         ffs_intr
     )
 
-    # Step 2: Compute perturbed field in mode space using ideal MHD relations
+    # Compute perturbed field in mode space using ideal MHD relations
     # [Park Phys. Plasmas 2007 052110 eq. 8-10]
     # This mimics GPEC's gpeq_sol and gpeq_contra
     b_psi_modes, b_theta_modes, b_zeta_modes = compute_perturbed_field_modes(
@@ -100,12 +100,35 @@ function reconstruct_physical_fields(
         ffs_intr
     )
 
-    # Compute J·b^ψ for HDF5 output (Fortran convention: Jacobian-weighted Jbgradpsi).
-    # Hamada Jacobian is constant in θ at each ψ, so evaluate once at θ=0 per surface.
+    # Compute b^ψ / area for HDF5 output — matches Fortran's fast-path Jbgradpsi (when jac_out==jac_type
+    # and tmag_out != 0, i.e. the normal case for Hamada in == Hamada out).
+    # Fortran: bwpmns = bwp_mn / area, where bwp_mn = xsp_mn-based b^ψ ≈ b^ψ_julia, and
+    # area = Σ J·delpsi/mthsurf (= J·<|∇ψ|>_θ for Hamada where J is const over θ).
+    ro = equil.ro
+    mthsurf = length(equil.rzphi_ys) - 1
+    thetas_for_avg = [(k - 1) / mthsurf for k in 1:mthsurf]
     Jb_psi_modes = similar(b_psi_modes)
     for ipsi in 1:npsi
         psi = ForceFreeStates_results.psi_store[ipsi]
-        Jb_psi_modes[ipsi, :] = equil.rzphi_jac((psi, 0.0)) .* b_psi_modes[ipsi, :]
+        hint2d = (Ref(1), Ref(1))
+        area = 0.0
+        for k in 1:mthsurf
+            theta = thetas_for_avg[k]
+            r2     = equil.rzphi_rsquared((psi, theta); hint=hint2d)
+            deta   = equil.rzphi_offset((psi, theta);   hint=hint2d)
+            jac    = equil.rzphi_jac((psi, theta);      hint=hint2d)
+            r2_y   = equil.rzphi_rsquared((psi, theta); deriv=Val((0,1)), hint=hint2d)
+            deta_y = equil.rzphi_offset((psi, theta);   deriv=Val((0,1)), hint=hint2d)
+            rfac   = sqrt(abs(r2))
+            eta    = 2π * (theta + deta)
+            r      = ro + rfac * cos(eta)
+            w11    = (1.0 + deta_y) * 4π^2 * rfac * r / jac
+            w12    = -r2_y * π * r / (rfac * jac)
+            delpsi = sqrt(w11^2 + w12^2)
+            area  += jac * delpsi
+        end
+        area /= mthsurf   # area = <J·|∇ψ|>_θ, matching Fortran's gpout_xbnormal area computation
+        Jb_psi_modes[ipsi, :] = b_psi_modes[ipsi, :] ./ area
     end
 
     xi_modes = (
@@ -115,7 +138,7 @@ function reconstruct_physical_fields(
     )
     b_modes = (
         psi       = b_psi_modes,    # b^ψ (no Jacobian) — used for b_n normal projection
-        Jbgradpsi = Jb_psi_modes,   # J·b^ψ — stored to HDF5, matches Fortran's Jbgradpsi convention
+        Jbgradpsi = Jb_psi_modes,   # b^ψ / <J·|∇ψ|>_θ — matches Fortran's fast-path Jbgradpsi convention
         theta     = b_theta_modes,
         zeta      = b_zeta_modes
     )
@@ -362,12 +385,15 @@ function compute_b_n_xi_n_modes(
         psi = ForceFreeStates_results.psi_store[ipsi]
         hint2d_psi = (Ref(1), Ref(1))
 
-        # IDFT: mode space → theta space (Jbgradpsi and J×ξ_ψ)
+        # IDFT: mode space → theta space
         bwp_fun  = phase_fwd * b_psi_modes[ipsi, :]   # [mthsurf]
         xwp_fun  = phase_fwd * xi_psi_modes[ipsi, :]  # [mthsurf]
 
-        # J(θ)×delpsi(θ) at this radial surface
-        jd = zeros(Float64, mthsurf)
+        # delpsi(θ) = |∇ψ|(θ) at this radial surface; jd_b = J·|∇ψ| for b_n divisor.
+        # xi_n: xwp_fun ≈ J·ξ_ψ (J-weighted via gpeq_contra metric), divide by delpsi; J cancels.
+        # b_n:  bwp_fun ≈ b^ψ (not J-weighted), Fortran divides by J·delpsi → match with jd_b.
+        delpsis = zeros(Float64, mthsurf)
+        jacs  = zeros(Float64, mthsurf)
         for k in 1:mthsurf
             theta = thetas[k]
             r2    = equil.rzphi_rsquared((psi, theta); hint=hint2d_psi)
@@ -381,12 +407,13 @@ function compute_b_n_xi_n_modes(
             w11   = (1.0 + deta_y) * twopi^2 * rfac * r / jac
             w12   = -r2_y * π * r / (rfac * jac)
             delpsi = sqrt(w11^2 + w12^2)
-            jd[k]  = delpsi
+            delpsis[k] = delpsi
+            jacs[k]  = jac
         end
 
-        # Divide by J×delpsi → physical normal components in theta space
-        bno_fun  = bwp_fun ./ jd
-        xno_fun  = xwp_fun ./ jd
+        # Divide by |∇ψ| (xi_n) or J·|∇ψ| (b_n) → physical normal components in theta space
+        bno_fun  = bwp_fun ./ (jacs .* delpsis)
+        xno_fun  = xwp_fun ./ delpsis
 
         # Forward DFT: theta space → mode space (1/mthsurf normalization matches Fortran iscdftf).
         # Must use transpose (not adjoint) so the phase is exp(-2πi·m·θ), not exp(+2πi·m·θ).

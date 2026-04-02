@@ -210,10 +210,13 @@ function compute_singular_coupling_metrics!(
 
         state.C_delta_prime[row, :]      = jump_vec ./ (twopi * chi1)
         state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
-        # No /area here — Fortran singflx = L*fkaxmn has no area (gpout.f line 632)
-        state.C_resonant_flux[row, :]    = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
+        # singflx_pre = L_mm * singcurs / (twopi*nn)  (gpout.f line 632: singflx_mn = L * fkaxmn)
+        # Phi_res = singflx_pre / area  (gpout.f line 639: singbnoflxs = singflx_mn / area)
+        # island_width_sq uses singflx_pre WITHOUT /area  (gpout.f line 640-641: islandhwids = 4*singflx_mn/...)
+        singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
+        state.C_resonant_flux[row, :] = singflx_pre ./ area
         if abs(shear) > 1e-10
-            state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* state.C_resonant_flux[row, :]
+            state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
         end
 
         state.rational_psi[row]          = sing_surf.psifac

@@ -71,7 +71,7 @@ Results from perturbed equilibrium calculations.
 
 Response fields (mode space):
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, Jbgradpsi=J·b^ψ, theta=b^θ, zeta=b^ζ [npsi, mpert]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, Jbgradpsi=b^ψ/<J·|∇ψ|>_θ (Fortran Jbgradpsi convention), theta=b^θ, zeta=b^ζ [npsi, mpert]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, mpert]
 
