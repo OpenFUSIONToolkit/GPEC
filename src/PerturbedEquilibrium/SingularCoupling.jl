@@ -28,6 +28,16 @@ function _psi_bracket(psi_store::AbstractVector, psi::Float64, nstep::Int)
     return il, ir, wt
 end
 
+
+# Cubic Hermite interpolant value at psi given endpoint values and derivatives.
+function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
+    h = psi_b - psi_a
+    t = (psi - psi_a) / h
+    h00 = 2t^3 - 3t^2 + 1;  h10 = t^3 - 2t^2 + t
+    h01 = -2t^3 + 3t^2;     h11 = t^3 - t^2
+    return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
+end
+
 """
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
@@ -176,17 +186,28 @@ function compute_singular_coupling_metrics!(
         lpsi = sing_surf.psifac - spot_psi
         rpsi = sing_surf.psifac + spot_psi
 
-        # Interpolate u_store[resnum, :, 1, psi] at lpsi and rpsi (vectors over all j columns)
-        il_l, ir_l, wt_l = _psi_bracket(psi_store_all, lpsi, nstep)
-        il_r, ir_r, wt_r = _psi_bracket(psi_store_all, rpsi, nstep)
-        u_l  = (1-wt_l) .* ForceFreeStates_results.u_store[ resnum, :, 1, il_l] .+
-                   wt_l  .* ForceFreeStates_results.u_store[ resnum, :, 1, ir_l]
-        ud_l = (1-wt_l) .* ForceFreeStates_results.ud_store[resnum, :, 1, il_l] .+
-                   wt_l  .* ForceFreeStates_results.ud_store[resnum, :, 1, ir_l]
-        u_r  = (1-wt_r) .* ForceFreeStates_results.u_store[ resnum, :, 1, il_r] .+
-                   wt_r  .* ForceFreeStates_results.u_store[ resnum, :, 1, ir_r]
-        ud_r = (1-wt_r) .* ForceFreeStates_results.ud_store[resnum, :, 1, il_r] .+
-                   wt_r  .* ForceFreeStates_results.ud_store[resnum, :, 1, ir_r]
+        # Interpolate u and du/dψ at lpsi and rpsi using stored ODE solution.
+        # Value (u): Hermite cubic using ud_store for smoother interpolation than linear.
+        # Derivative (ud): 2-point central diff of u_store only — avoids ud_store, which
+        #   can be in the wrong basis at Gaussian reduction steps and from rejected ODE steps
+        #   near outer surfaces (where the solution varies rapidly).
+        il_l, ir_l, _ = _psi_bracket(psi_store_all, lpsi, nstep)
+        il_r, ir_r, _ = _psi_bracket(psi_store_all, rpsi, nstep)
+
+        u_node  = ForceFreeStates_results.u_store
+        ud_node = ForceFreeStates_results.ud_store
+        ua_l = u_node[ resnum, :, 1, il_l];  ub_l = u_node[ resnum, :, 1, ir_l]
+        ua_r = u_node[ resnum, :, 1, il_r];  ub_r = u_node[ resnum, :, 1, ir_r]
+        dua_l = ud_node[resnum, :, 1, il_l]; dub_l = ud_node[resnum, :, 1, ir_l]
+        dua_r = ud_node[resnum, :, 1, il_r]; dub_r = ud_node[resnum, :, 1, ir_r]
+
+        psi_il_l = psi_store_all[il_l];  psi_ir_l = psi_store_all[ir_l]
+        psi_il_r = psi_store_all[il_r];  psi_ir_r = psi_store_all[ir_r]
+
+        u_l  = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
+        u_r  = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
+        ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
+        ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
 
         q_l = equil.profiles.q_spline(lpsi);  q1_l = equil.profiles.q_deriv(lpsi)
         q_r = equil.profiles.q_spline(rpsi);  q1_r = equil.profiles.q_deriv(rpsi)
@@ -465,7 +486,7 @@ from the equilibrium bicubic spline (rzphi). The integrand includes:
 
   - jac: Jacobian of flux coordinates
   - |∇ψ|: Flux gradient magnitude (delpsi)
-  - sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)²
+  - sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)² where F = R·B_tor
 """
 function compute_current_density(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -477,7 +498,7 @@ function compute_current_density(
     twopi = 2π
 
     # Get equilibrium quantities at this surface
-    F_tor = equil.profiles.F_spline(psi)  # Toroidal field function F = R*B_tor times 2π
+    F_tor = equil.profiles.F_spline(psi)  # Toroidal field function (2π·R·B_tor in GPEC convention)
     q = equil.profiles.q_spline(psi)      # Safety factor
 
     ro = equil.ro
@@ -523,8 +544,7 @@ function compute_current_density(
         # Flux gradient magnitude |∇ψ|
         delpsi = sqrt(w11^2 + w12^2)
 
-        # Magnetic field quantity: sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²
-        # F is toroidal field function (already includes factor of 2π from sq)
+        # sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²  where F = R·B_tor (Fortran sq%f(1))
         sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * r)^2
 
         # Integrand function
