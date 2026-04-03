@@ -135,6 +135,7 @@ struct FortranRunParams
     machine::String
     coil_names::Vector{String}
     coil_currents::Vector{Vector{Float64}}
+    euler_stride::Int
 end
 
 function parse_fortran_run(dir::String)
@@ -152,12 +153,13 @@ function parse_fortran_run(dir::String)
     mpsi      = _find_int(eq_text,    "mpsi";      default=128)
     mtheta_eq = _find_int(eq_text,    "mtheta";    default=256)
 
-    nn          = _find_int(dcon_text, "nn";          default=1)
+    nn          = _find_int(dcon_text, "nn";           default=1)
     delta_mlow  = _find_int(dcon_text, "delta_mlow";  default=8)
     delta_mhigh = _find_int(dcon_text, "delta_mhigh"; default=8)
     dmlim       = _find_scalar(dcon_text, "dmlim";    default=0.2)
     qlow        = _find_scalar(dcon_text, "qlow";     default=1.02)
     psiedge     = _find_scalar(dcon_text, "psiedge";  default=1.0)
+    euler_stride = _find_int(dcon_text, "euler_stride"; default=1)
 
     mtheta_coil = _find_int(coil_text, "cmtheta";  default=480)
     nzeta_coil  = _find_int(coil_text, "cmzeta";   default=40)
@@ -180,7 +182,7 @@ function parse_fortran_run(dir::String)
 
     return FortranRunParams(eq_type, eq_file, jac_type, grid_type, psilow, psihigh, mpsi,
         mtheta_eq, nn, delta_mlow, delta_mhigh, dmlim, qlow, psiedge,
-        mtheta_coil, nzeta_coil, machine, coil_names, coil_currents)
+        mtheta_coil, nzeta_coil, machine, coil_names, coil_currents, euler_stride)
 end
 
 # ─── Load Fortran NC outputs ─────────────────────────────────────────────────
@@ -388,7 +390,7 @@ function write_gpec_toml_coil(
         println(io, "mthvac   = 512")
         println(io, "eulerlagrange_tolerance = 1e-7")
         println(io, "singfac_min = 1e-4")
-        println(io, "save_interval = 1")
+        println(io, "save_interval = $(p.euler_stride)")
         println(io)
         println(io, "[ForcingTerms]")
         println(io, "forcing_data_format = \"coil\"")
@@ -453,7 +455,7 @@ function write_gpec_toml_file(
         println(io, "mthvac   = 512")
         println(io, "eulerlagrange_tolerance = 1e-7")
         println(io, "singfac_min = 1e-4")
-        println(io, "save_interval = 3")
+        println(io, "save_interval = $(p.euler_stride)")
         println(io)
         println(io, "[ForcingTerms]")
         println(io, "forcing_data_file   = \"forcing.dat\"")
