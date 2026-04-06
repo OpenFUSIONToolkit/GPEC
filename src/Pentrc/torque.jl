@@ -19,7 +19,7 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
     where * = F,T,P for full,trapped,passing
 
 # Optional Arguments
-- `op_wmats::Array{ComplexF64,3}`: Store DCON matrix elements
+- `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
 
 # Returns
 - `ComplexF64`: Toroidal torque due to nonambipolar transport

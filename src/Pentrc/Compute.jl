@@ -3,7 +3,7 @@
 
 High-level computation functions for PENTRC.
 Orchestrates torque/energy calculations across multiple methods.
-Can be called from both Main() and DCON kinetic_flag.
+Can be called from both Main() and ForceFreeStates kinetic_flag.
 """
 
 """
@@ -262,17 +262,17 @@ end
 """
     compute_kinetic_contribution(ctrl::PentrcControl, equil, ffit)::Dict
 
-Compute kinetic contributions for DCON when kinetic_flag=true.
-This function is called from DCON's Main.jl for kinetic EL calculations.
+Compute kinetic contributions for ForceFreeStates when kinetic_flag=true.
+This function is called from ForceFreeStates's Main.jl for kinetic EL calculations.
 
 # Arguments
 - `ctrl::PentrcControl`: PENTRC control parameters
-- `equil`: Equilibrium structure from DCON
-- `ffit`: Fourier-fitted variables from DCON
+- `equil`: Equilibrium structure from ForceFreeStates
+- `ffit`: Fourier-fitted variables from ForceFreeStates
 
 # Returns
 - `Dict`: Dictionary containing kinetic matrix contributions to add to FourFit
-         Keys: :fmat_kin, :gmat_kin, :kmat_kin (matrices to add to DCON)
+         Keys: :fmat_kin, :gmat_kin, :kmat_kin (matrices to add to ForceFreeStates)
 """
 function compute_kinetic_contribution(ctrl::PentrcControl, equil, ffit)
     
@@ -286,7 +286,7 @@ function compute_kinetic_contribution(ctrl::PentrcControl, equil, ffit)
     # TODO: Implement kinetic matrix calculations
     # 1. For each psi in equilibrium grid
     # 2. Call tpsi!() to get torque/energy
-    # 3. Convert to DCON matrix format
+    # 3. Convert to ForceFreeStates matrix format
     # 4. Accumulate in kinetic_results
     
     return kinetic_results

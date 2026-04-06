@@ -8,12 +8,12 @@ on equilibrium stability through torque and energy deposition calculations.
 
 Can operate in two modes:
 1. Standalone: Calculate kinetic torque/energy for a given equilibrium
-2. Library: Provide kinetic contributions to DCON's stability analysis (kinetic_flag=true)
+2. Library: Provide kinetic contributions to ForceFreeStates's stability analysis (kinetic_flag=true)
 
 ## Module Structure
 
 ### [Tier 1] Core Library Functions (Low-level)
-These functions are designed to be called from both PENTRC and DCON:
+These functions are designed to be called from both PENTRC and ForceFreeStates:
 - `Torque.jl`: tpsi!() - Core torque calculation (low-level API)
 - `Energy.jl`: Kinetic energy calculations
 - `Pitch.jl`: Pitch angle dependent calculations
@@ -23,7 +23,7 @@ Orchestrates Tier 1 functions for specific use cases:
 - `Compute.jl`: Main computational routines
   - compute_torque_all_methods!()
   - compute_matrix_calculation!()
-  - compute_kinetic_contribution() ← Called by DCON when kinetic_flag=true
+  - compute_kinetic_contribution() ← Called by ForceFreeStates when kinetic_flag=true
 
 ### [Tier 3] Standalone Program
 Only used for independent PENTRC execution:
@@ -43,7 +43,7 @@ Only used for independent PENTRC execution:
 PENTRC.Main("/path/to/config")
 ```
 
-### For DCON kinetic_flag=true:
+### For ForceFreeStates kinetic_flag=true:
 ```julia
 kinetic_results = PENTRC.compute_kinetic_contribution(ctrl, equil, ffit)
 ```
@@ -63,8 +63,9 @@ using HDF5
 using Printf
 using Statistics
 
-import ..Spl
-import ..DCON
+using FastInterpolations
+using Roots
+import ..ForceFreeStates
 import ..Equilibrium
 
 # ============================================================================
@@ -77,7 +78,7 @@ include("Grid.jl")
 include("Utils.jl")
 
 # ============================================================================
-# [TIER 1] Core library functions (low-level, can be called from DCON)
+# [TIER 1] Core library functions (low-level, can be called from ForceFreeStates)
 # ============================================================================
 include("torque.jl")
 include("energy.jl")

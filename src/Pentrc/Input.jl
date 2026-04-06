@@ -6,7 +6,6 @@ Handles namelists, TOML files, and equilibrium data.
 """
 
 using TOML
-import ..Spl
 
 """
     read_pentrc_config(config_path::String)::PentrcControl
@@ -199,11 +198,11 @@ end
     initialize_pentrc(ctrl::PentrcControl, equil)
 
 Initialize PENTRC with equilibrium and kinetic data.
-Called both when PENTRC runs standalone and when DCON kinetic_flag=true.
+Called both when PENTRC runs standalone and when ForceFreeStates kinetic_flag=true.
 
 # Arguments
 - `ctrl::PentrcControl`: Configuration from config file
-- `equil`: Equilibrium structure from DCON
+- `equil`: Equilibrium structure from ForceFreeStates
 
 # Side effects
 - Loads kinetic profiles
@@ -228,55 +227,22 @@ end
 
 
 """
-    read_equil(idcon_file::String; verbose=false)
+    read_equil(equil; verbose=false)
 
-Read equilibrium from DCON binary file.
-Sets up all equilibrium splines (sq, geom, rzphi, eqfun) via DCON interface.
+Initialize PENTRC equilibrium data from a PlasmaEquilibrium.
+In the Julia implementation, equilibrium data is passed directly in memory
+rather than read from binary files as in the Fortran PENTRC.
 
 # Arguments
-- `idcon_file::String`: Path to DCON equilibrium binary file
+- `equil`: PlasmaEquilibrium from Equilibrium module
 - `verbose::Bool`: Print progress messages
-
-# Side effects
-- Calls DCON.idcon_read() to load equilibrium
-- Sets up metric tensors via DCON.idcon_metric()
-- Forms action matrices via DCON.idcon_action_matrices()
-- Enables access to: sq, geom, rzphi, eqfun, smats, tmats, xmats, ymats, zmats
 """
-function read_equil(idcon_file::String; verbose=false)
-    
-    if !isfile(idcon_file)
-        error("DCON equilibrium file not found: $idcon_file")
-    end
-    
+function read_equil(equil; verbose=false)
     if verbose
-        println("Reading equilibrium from DCON file: $idcon_file")
+        println("Initializing PENTRC equilibrium from PlasmaEquilibrium")
     end
-    
-    # Call DCON interface functions to read equilibrium
-    try
-        # Set the idconfile path
-        DCON.idcon_read(idcon_file)
-        
-        # Transform to working coordinates
-        DCON.idcon_transform()
-        
-        # Reconstruct metric tensors
-        DCON.idcon_metric()
-        
-        # Form action matrices
-        DCON.idcon_action_matrices()
-        
-        if verbose
-            println("  -> Equilibrium loaded successfully")
-            # These would be accessible from DCON module
-        end
-        
-        return nothing
-        
-    catch e
-        error("Failed to read equilibrium: $(e.msg)")
-    end
+    # TODO: Extract PENTRC-specific profiles (sq, geom, kin) from equil
+    return nothing
 end
 
 
@@ -446,7 +412,7 @@ function read_kin(kin_file::String; zi=1, zimp=6, mi=2, mimp=12,
         dn_i_dpsi = (kin_data[i+1, 2] - kin_data[i-1, 2]) / (2.0 / nkin)
         dT_i_dpsi = (kin_data[i+1, 4] - kin_data[i-1, 4]) / (2.0 / nkin)
         
-        chi1 = 1.0  # TODO: Get from DCON equilibrium
+        chi1 = 1.0  # TODO: Get from ForceFreeStates equilibrium
         
         wdian[i] = -twopi * kin_data[i, 4] * dn_i_dpsi / (e * zi * chi1 * kin_data[i, 2])
         wdiat[i] = -twopi * dT_i_dpsi / (e * zi * chi1)
@@ -553,7 +519,7 @@ function read_peq(peq_file::String; jac_in="default", jsurf_in=0, tmag_in=1,
     # This is complex - requires:
     # 1. Reading ASCII table with complex mode data
     # 2. Detecting psi-outer vs m-outer loop ordering
-    # 3. Coordinate transformation to DCON jacobian
+    # 3. Coordinate transformation to ForceFreeStates jacobian
     # 4. Mode spectrum interpolation (newm function)
     # 5. Clebsch to flux surface decomposition
     
@@ -661,7 +627,7 @@ Decomposes Clebsch displacements into Fourier modes and computes dB/B, div(ξ_pe
 - `ms::Vector`: Poloidal mode numbers
 - `xmp1mns::Matrix`: xi^(psi-1) component (psi, m)
 - `xspmns::Matrix`: xi^psi component (psi, m)  
-- `xmsmns::Matrix`: xi^alpha component (psi, m) [in DCON units/chi1]
+- `xmsmns::Matrix`: xi^alpha component (psi, m) [in ForceFreeStates units/chi1]
 - `set_dbdx::Bool`: Calculate and set dB/B and div splines (default=true)
 - `debug::Bool`: Print intermediate messages
 
@@ -669,12 +635,12 @@ Decomposes Clebsch displacements into Fourier modes and computes dB/B, div(ξ_pe
 Updates global xs_m, dbob_m, divx_m splines for all perturbation components.
 
 # Notes
-Requires DCON matrix structure access for metric calculations.
+Requires ForceFreeStates matrix structure access for metric calculations.
 """
 function set_peq(psi::Vector, ms::Vector, xmp1mns::Matrix, xspmns::Matrix, xmsmns::Matrix;
                  set_dbdx=true, debug=false)
     
-    # TODO: Full implementation requires DCON metric matrices
+    # TODO: Full implementation requires ForceFreeStates metric matrices
     # 1. Allocate xs_m splines for 3 components
     # 2. Fill from input (psi, m) -> (psi, mfac) mapping
     # 3. Calculate dB/B = -xi_psi' + (S-matrix operations)
@@ -695,7 +661,7 @@ function set_peq(psi::Vector, ms::Vector, xmp1mns::Matrix, xspmns::Matrix, xmsmn
     end
     
     # For now, stub implementation
-    # Full implementation needs DCON accessor functions
+    # Full implementation needs ForceFreeStates accessor functions
     ## xs_m splines would be set here
     ## dbob_m and divx_m would be calculated
     
@@ -710,7 +676,7 @@ Set up equilibrium from equilibrium structure.
 Initializes all equilibrium splines and parameters needed for PENTRC.
 
 # Arguments
-- `equil`: Equilibrium structure (typically from DCON)
+- `equil`: Equilibrium structure (typically from ForceFreeStates)
 """
 function set_eq(equil)
     # TODO: Implement equilibrium setup
@@ -814,7 +780,7 @@ end
 Read psi-m matrix of Lagrangian dB/B and div(xi_perp) from file.
 
 Converts between different jacobian coordinate systems (PEST, Boozer, etc.)
-and interpolates to DCON mode spectrum (mfac).
+and interpolates to ForceFreeStates mode spectrum (mfac).
 
 # Arguments
 - `pmodb_file::String`: Path to perturbation equilibrium matrix file

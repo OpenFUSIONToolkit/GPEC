@@ -30,7 +30,8 @@ makedocs(;
             "Utilities" => "utilities.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
-            "Analysis" => "analysis.md"
+            "Analysis" => "analysis.md",
+            "PENTRC" => "pentrc.md"
         ],
         "Citations" => "citations.md",
     ],
