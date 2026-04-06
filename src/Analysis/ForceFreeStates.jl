@@ -154,6 +154,93 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
 end
 
 """
+    plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
+
+Plot the edge stability scan energy components (et, ep, ev, evonly) vs ψ_N.
+
+The edge scan evaluates `δW_total = δW_plasma + δW_vacuum` at each stored integration step
+in the region [psiedge, psilim], with the plasma boundary swept from psiedge to psilim.
+A positive et indicates stability; the truncation point is chosen at the peak et.
+
+Four subplots are shown:
+
+  - **Total energy** `et = ep + ev`: total free-boundary energy eigenvalue
+  - **Plasma energy** `ep`: plasma contribution to δW
+  - **Vacuum energy** `ev`: vacuum (wv) contribution with singfac scaling
+  - **Vacuum-only eigenvalue** `evonly`: smallest eigenvalue of wv alone (no plasma response)
+
+A horizontal dashed line at zero marks the stability boundary. A vertical dashed line marks
+`psilim` (the final truncation psi, where the peak et was found).
+
+### Arguments
+
+  - `h5path`: Path to a GPEC HDF5 output file produced with `psiedge < psilim`
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `ylims`: y-axis limits applied to all panels (default: `(-2, 3)`)
+  - `kwargs...`: Additional Plots.jl keyword arguments applied to all line plots (e.g. `lw=2`)
+
+### Returns
+
+A `Plots.jl` plot object, or `nothing` if no `edge_scan/` group is present in the file.
+"""
+function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
+    has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
+        if !haskey(fid, "edge_scan/psi")
+            return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
+        end
+        true,
+        read(fid["edge_scan/q"]),
+        read(fid["edge_scan/total_energy"]),
+        read(fid["edge_scan/plasma_energy"]),
+        read(fid["edge_scan/vacuum_energy"]),
+        read(fid["edge_scan/vacuum_eigenvalue"]),
+        read(fid["info/qlim"])
+    end
+
+    if !has_scan
+        @warn "No edge_scan group in $h5path. Run with psiedge < psilim to generate it."
+        return nothing
+    end
+
+    kw_re = (xlabel="q", label="Re", ylims=ylims, kwargs...)
+    kw_im = (xlabel="q", label="Im", ls=:dash, ylims=ylims, kwargs...)
+    vl_kw = (color=:gray, lw=1, ls=:dot, label=false)
+    hl_kw = (color=:black, lw=1, ls=:dash, label=false)
+
+    p_et = plot(q, real.(et); ylabel="Total Energy", title="Edge Stability Scan: δW vs q", kw_re...)
+    plot!(p_et, q, imag.(et); kw_im...)
+    hline!(p_et, [0.0]; hl_kw...)
+    vline!(p_et, [qlim]; vl_kw...)
+
+    p_ep = plot(q, real.(ep); ylabel="Plasma Energy", kw_re...)
+    plot!(p_ep, q, imag.(ep); kw_im...)
+    hline!(p_ep, [0.0]; hl_kw...)
+    vline!(p_ep, [qlim]; vl_kw...)
+
+    p_ev = plot(q, real.(ev); ylabel="Vacuum Energy", kw_re...)
+    plot!(p_ev, q, imag.(ev); kw_im...)
+    hline!(p_ev, [0.0]; hl_kw...)
+    vline!(p_ev, [qlim]; vl_kw...)
+
+    p_evonly = plot(q, evonly; ylabel="Min Vac. Eigenvalue", legend=false, xlabel="q", ylims=ylims, kwargs...)
+    hline!(p_evonly, [0.0]; hl_kw...)
+    vline!(p_evonly, [qlim]; vl_kw...)
+
+    p = plot(p_et, p_ep, p_ev, p_evonly;
+        layout=(4, 1),
+        size=(900, 1100),
+        plot_title="Edge stability scan: $h5path",
+        left_margin=12Plots.mm,
+        bottom_margin=4Plots.mm)
+
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
     plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
 
 Scatter plot of energy eigenvalues vs mode index. Points are colored red (unstable, Re > 0)
