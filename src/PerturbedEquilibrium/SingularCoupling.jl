@@ -423,8 +423,8 @@ function compute_current_density(
         r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)           # rfac²
         deta = equil.rzphi_offset((psi, theta); hint=hint2d)           # angle offset
         jac = equil.rzphi_jac((psi, theta); hint=hint2d)               # Jacobian
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)  # ∂(rfac²)/∂theta
-        deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)  # ∂(deta)/∂theta
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1), hint=hint2d)  # ∂(rfac²)/∂theta
+        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1), hint=hint2d)  # ∂(deta)/∂theta
 
         rfac = sqrt(abs(r2))
         fy_rfac2 = r2_y
@@ -773,8 +773,8 @@ function compute_surface_area(
         r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
         jac = equil.rzphi_jac((psi, theta); hint=hint2d)
         deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-        deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
+        r2_y = equil.rzphi_rsquared((psi, theta); deriv=(0, 1), hint=hint2d)
+        deta_y = equil.rzphi_offset((psi, theta); deriv=(0, 1), hint=hint2d)
 
         # Compute rfac
         rfac = sqrt(abs(r2))

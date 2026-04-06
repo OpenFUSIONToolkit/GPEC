@@ -96,7 +96,7 @@ function read_efit(config::EquilibriumConfig)
         sqrt.(psi_norm_grid)
     )
     sq_xs = collect(psi_norm_grid)
-    sq_in = cubic_interp(sq_xs, Series(sq_fs_nodes); extrap=ExtendExtrap())
+    sq_in = cubic_interp(sq_xs, sq_fs_nodes; extrap=ExtendExtrap())
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -177,7 +177,7 @@ function read_chease_binary(config::EquilibriumConfig)
         fs_copy = copy(fs)
         fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
         # Create final spline with modified data
-        sq_in = cubic_interp(xs, Series(fs_copy); extrap=ExtendExtrap())
+        sq_in = cubic_interp(xs, fs_copy; extrap=ExtendExtrap())
 
         # --- 2D Geometry ---
         mtau = ntnova + 1  # Same with ASCII
@@ -356,7 +356,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
     # Create final spline with modified data
-    sq_in = cubic_interp(xs, Series(fs_copy); extrap=ExtendExtrap())
+    sq_in = cubic_interp(xs, fs_copy; extrap=ExtendExtrap())
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
