@@ -1,16 +1,59 @@
 """
+    _build_x_matrix(mpert, mlow, sigma; hermitian=true)
+
+Build an mpert×mpert X-shaped matrix with diagonal σ and anti-diagonal entries.
+
+If `hermitian=true`, anti-diagonal entries are imaginary: W[i,j] = i·sign(m_i)·σ,
+which preserves W = W† (Hermiticity). This is appropriate for components Ak, Ck, Hk
+(Eqs 7.30, 7.32, 7.35 of Logan 2015).
+
+If `hermitian=false`, anti-diagonal entries are real: W[i,j] = sign(m_i)·σ,
+which breaks Hermiticity (W ≠ W†). This is appropriate for components Bk, Dk, Ek
+(Eqs 7.31, 7.33, 7.34 of Logan 2015) which are not self-adjoint in general.
+"""
+function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=true)
+    W = zeros(ComplexF64, mpert, mpert)
+    for i in 1:mpert
+        m_i = mlow + i - 1
+        W[i, i] = sigma
+
+        # Anti-diagonal: find j such that m_j = -m_i
+        j = -m_i - mlow + 1
+        if 1 <= j <= mpert && i != j
+            if hermitian
+                # Imaginary: W[i,j] = i·sign(m_i)·σ preserves W = W†
+                W[i, j] = im * sign(m_i) * sigma
+            else
+                # Real: W[i,j] = sign(m_i)·σ breaks Hermiticity
+                W[i, j] = sign(m_i) * sigma
+            end
+        end
+    end
+    return W
+end
+
+"""
     dummy_kinetic_matrices(mpert, mpsi, sigma, mlow)
 
-Build X-shaped Hermitian dummy kinetic energy matrices for testing.
+Build X-shaped dummy kinetic energy matrices for testing all 6 components.
 
-The W matrix at each ψ grid point has:
+Populates all 6 components of the W (energy) matrices with X-shaped patterns
+scaled by `sigma`. Components have physically motivated Hermiticity properties
+matching the real kinetic matrices (Logan 2015 thesis, Eqs 7.30-7.35):
 
-  - Diagonal (m = m'): σ
-  - Anti-diagonal (m = -m'): i·sign(m)·σ  (imaginary, to preserve Hermiticity)
-  - All other entries: 0
+| Component | Matrix | Coupling | Hermitian | Scale |
+|:--------- |:------ |:-------- |:--------- |:----- |
+| 1         | Ak     | W*z·Wz   | Yes       | σ     |
+| 2         | Bk     | W*z·Wx   | No        | σ     |
+| 3         | Ck     | W*z·Wy   | Yes       | 0.5σ  |
+| 4         | Dk     | W*x·Wx   | No        | 0.3σ  |
+| 5         | Ek     | W*x·Wy   | No        | 0.2σ  |
+| 6         | Hk     | W*y·Wy   | Yes       | 0.1σ  |
 
-Only component 1 (A-matrix perturbation) is populated; components 2-6 are zero.
-Torque matrices (T) are all zero.
+Hermitian components use imaginary anti-diagonal entries (i·sign(m)·σ);
+non-Hermitian components use real anti-diagonal entries (sign(m)·σ).
+
+Torque matrices (T) are all zero (torque requires finite rotation frequency).
 
 Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
 """
@@ -18,25 +61,23 @@ function dummy_kinetic_matrices(mpert::Int, mpsi::Int, sigma::Float64, mlow::Int
     kw_flat = zeros(ComplexF64, mpsi, mpert^2, 6)
     kt_flat = zeros(ComplexF64, mpsi, mpert^2, 6)
 
-    # Build a single mpert×mpert X-shaped Hermitian matrix
-    W = zeros(ComplexF64, mpert, mpert)
-    for i in 1:mpert
-        m_i = mlow + i - 1
-        # Diagonal: W[i,i] = σ
-        W[i, i] = sigma
+    # Component scaling factors and Hermiticity properties
+    # (component_index, scale_factor, is_hermitian)
+    component_specs = [
+        (1, 1.0, true),   # Ak: Hermitian, full scale
+        (2, 1.0, false),  # Bk: non-Hermitian, full scale (drives resonance shift P)
+        (3, 0.5, true),   # Ck: Hermitian, half scale
+        (4, 0.3, false),  # Dk: non-Hermitian (enters f0mat)
+        (5, 0.2, false),  # Ek: non-Hermitian (enters K matrix)
+        (6, 0.1, true)   # Hk: Hermitian, small (enters G only)
+    ]
 
-        # Anti-diagonal: find j such that m_j = -m_i
-        j = -m_i - mlow + 1
-        if 1 <= j <= mpert && i != j
-            # W[i,j] = i·sign(m_i)·σ for Hermiticity: conj(W[j,i]) = conj(i·sign(m_j)·σ) = -i·sign(m_j)·σ = i·sign(m_i)·σ = W[i,j]
-            W[i, j] = im * sign(m_i) * sigma
+    for (ic, scale, is_herm) in component_specs
+        W = _build_x_matrix(mpert, mlow, sigma * scale; hermitian=is_herm)
+        w_flat = vec(W)
+        for ipsi in 1:mpsi
+            kw_flat[ipsi, :, ic] .= w_flat
         end
-    end
-
-    # Replicate across all ψ grid points, component 1 only
-    w_flat = vec(W)  # column-major flattening
-    for ipsi in 1:mpsi
-        kw_flat[ipsi, :, 1] .= w_flat
     end
 
     return kw_flat, kt_flat
