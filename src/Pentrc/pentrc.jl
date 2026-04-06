@@ -30,7 +30,7 @@ Only used for independent PENTRC execution:
 - `Main.jl`: Entry point Main(path::String)
 
 ### [Tier 4] Supporting Functions
-- `PentrcStructs.jl`: Data structures (PentrcControl, PentrcInternal, PentrcOutput)
+- `PentrcStructs.jl`: Data structures (PentrcControl, PentrcInternal)
 - `Input.jl`: Configuration reading and parsing
 - `Output.jl`: File I/O and formatting
 - `Grid.jl`: Grid management and manipulation

@@ -8,48 +8,47 @@ Handles ASCII and NetCDF output formatting.
 using Printf
 
 """
-    init_output(outp::PentrcOutput, dir_path::String)
+    init_output(outp::PentrcControl, dir_path::String)
 
 Initialize output directory and open file handles.
 
 # Arguments
-- `outp::PentrcOutput`: Output configuration
+- `outp::PentrcControl`: Output configuration
 - `dir_path::String`: Working directory path
 """
-function init_output(outp::PentrcOutput, dir_path::String)
-    
+function init_output(ctrl::PentrcControl, dir_path::String)
+
     # Create output directory if it doesn't exist
-    output_dir = isempty(outp.output_dir) ? dir_path : outp.output_dir
-    if !ispath(output_dir)
-        mkpath(output_dir)
+    if !ispath(dir_path)
+        mkpath(dir_path)
     end
-    
-    return output_dir
+
+    return dir_path
 end
 
 
 """
-    write_torque_ascii(outp::PentrcOutput, nn::Int, method::String, 
+    write_torque_ascii(outp::PentrcControl, nn::Int, method::String, 
                        psi::Vector{Float64}, torque::Vector{ComplexF64})
 
 Write torque calculation results to ASCII file.
 
 # Arguments
-- `outp::PentrcOutput`: Output configuration
+- `outp::PentrcControl`: Output configuration
 - `nn::Int`: Toroidal mode number
 - `method::String`: Calculation method name
 - `psi::Vector{Float64}`: Poloidal flux values
 - `torque::Vector{ComplexF64}`: Computed torque values
 """
-function write_torque_ascii(outp::PentrcOutput, nn::Int, method::String,
+function write_torque_ascii(ctrl::PentrcControl, intr::PentrcInternal, nn::Int, method::String,
                            psi::Vector{Float64}, torque::Vector{ComplexF64})
-    
-    if !outp.write_torque_ascii
+
+    if !ctrl.output_torque || !ctrl.output_ascii
         return
     end
-    
+
     nstring = @sprintf("%4d", nn)
-    fname = joinpath(outp.output_dir, "pentrc_torque_$(method)_n$(strip(nstring)).out")
+    fname = joinpath(intr.dir_path, "pentrc_torque_$(method)_n$(strip(nstring)).out")
     
     open(fname, "w") do f
         println(f, "PENTRC TORQUE CALCULATION")
@@ -67,28 +66,28 @@ end
 
 
 """
-    write_orbit_ascii(outp::PentrcOutput, nn::Int, psi::Float64, 
+    write_orbit_ascii(outp::PentrcControl, nn::Int, psi::Float64, 
                       theta::Vector{Float64}, orbit::Vector{ComplexF64})
 
 Write orbit/equilibrium data to ASCII file.
 
 # Arguments
-- `outp::PentrcOutput`: Output configuration
+- `outp::PentrcControl`: Output configuration
 - `nn::Int`: Toroidal mode number
 - `psi::Float64`: Poloidal flux value
 - `theta::Vector{Float64}`: Poloidal angle array
 - `orbit::Vector{ComplexF64}`: Orbit data
 """
-function write_orbit_ascii(outp::PentrcOutput, nn::Int, psi::Float64,
+function write_orbit_ascii(ctrl::PentrcControl, intr::PentrcInternal, nn::Int, psi::Float64,
                           theta::Vector{Float64}, orbit::Vector{ComplexF64})
-    
-    if !outp.write_orbit_ascii
+
+    if !ctrl.output_orbit || !ctrl.output_ascii
         return
     end
-    
+
     nstring = @sprintf("%4d", nn)
     pstring = @sprintf("%.4f", psi)
-    fname = joinpath(outp.output_dir, "pentrc_orbit_n$(strip(nstring))_psi$(strip(pstring)).out")
+    fname = joinpath(intr.dir_path, "pentrc_orbit_n$(strip(nstring))_psi$(strip(pstring)).out")
     
     open(fname, "w") do f
         println(f, "PENTRC ORBIT DATA")
@@ -105,28 +104,28 @@ end
 
 
 """
-    write_energy_ascii(outp::PentrcOutput, nn::Int, psi::Float64,
+    write_energy_ascii(outp::PentrcControl, nn::Int, psi::Float64,
                        xlmda::Vector{Float64}, energy::Vector{Float64})
 
 Write kinetic energy data to ASCII file.
 
 # Arguments
-- `outp::PentrcOutput`: Output configuration
+- `outp::PentrcControl`: Output configuration
 - `nn::Int`: Toroidal mode number
 - `psi::Float64`: Poloidal flux value
 - `xlmda::Vector{Float64}`: Pitch angle array
 - `energy::Vector{Float64}`: Energy values
 """
-function write_energy_ascii(outp::PentrcOutput, nn::Int, psi::Float64,
+function write_energy_ascii(ctrl::PentrcControl, intr::PentrcInternal, nn::Int, psi::Float64,
                            xlmda::Vector{Float64}, energy::Vector{Float64})
-    
-    if !outp.write_energy_ascii
+
+    if !ctrl.output_ascii
         return
     end
-    
+
     nstring = @sprintf("%4d", nn)
     pstring = @sprintf("%.4f", psi)
-    fname = joinpath(outp.output_dir, "pentrc_energy_n$(strip(nstring))_psi$(strip(pstring)).out")
+    fname = joinpath(intr.dir_path, "pentrc_energy_n$(strip(nstring))_psi$(strip(pstring)).out")
     
     open(fname, "w") do f
         println(f, "PENTRC KINETIC ENERGY")

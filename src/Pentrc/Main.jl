@@ -27,26 +27,9 @@ function Main(path::String)
     # [2] Setup execution environment
     start_time = time()
     
-    # Clear output directory if requested
-    if ctrl.clean && ispath(path)
-        try
-            run(`bash -c "rm -f pentrc_*.out"`)
-        catch
-            # Silent fail if directory cleanup isn't possible
-        end
-    end
-    
-    # Set threading
-    if ctrl.pentrc_threads > 0
-        if ctrl.pentrc_threads > Threads.nthreads()
-            @warn "Requested $(ctrl.pentrc_threads) threads but only $(Threads.nthreads()) available"
-        end
-    end
-    
     # [3] Setup output
-    outp = PentrcOutput(; output_dir=path)
-    init_output(outp, path)
-    
+    init_output(ctrl, path)
+
     # [4] Initialize internal state
     intr = PentrcInternal(; dir_path=path)
     intr.flags = get_method_flags(ctrl)
@@ -65,7 +48,7 @@ function Main(path::String)
     # [6] Print moment type
     if ctrl.verbose
         println("-----" ^ 10)
-        if ctrl.qt
+        if ctrl.moment == "heat"
             println("Calculating HEAT transport")
         else
             println("Calculating PARTICLE transport and TORQUE")

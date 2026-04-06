@@ -2,125 +2,108 @@
     PentrcStructs
 
 Data structures for the PENTRC module.
-Consolidates all global variables into logical structures.
+Follows the @kwdef mutable struct pattern used by ForceFreeStates and PerturbedEquilibrium.
 """
 
 # ============================================================================
-# Control/Input Parameters
+# Control/Input Parameters (from TOML [PENTRC] section)
 # ============================================================================
 """
     PentrcControl
 
-Main control structure for PENTRC simulations.
-Corresponds to input namelist variables.
+User-facing control parameters from TOML [PENTRC] section.
+Configures which NTV methods to run, species parameters, tolerances, and output options.
+
+Constructed via keyword arguments or from a TOML dict:
+```julia
+ctrl = PentrcControl(; (Symbol(k) => v for (k, v) in inputs["PENTRC"])...)
+```
 """
-struct PentrcControl
+@kwdef mutable struct PentrcControl
     # Moment type
-    moment::String              # "heat" or "pressure"
-    qt::Bool                    # true if moment == "heat"
-    
+    moment::String = "pressure"     # "heat" or "pressure"
+
     # Method flags (which methods to calculate)
-    fgar_flag::Bool
-    tgar_flag::Bool
-    pgar_flag::Bool
-    rlar_flag::Bool
-    clar_flag::Bool
-    fcgl_flag::Bool
-    wxyz_flag::Bool
-    fkmm_flag::Bool
-    tkmm_flag::Bool
-    pkmm_flag::Bool
-    frmm_flag::Bool
-    trmm_flag::Bool
-    prmm_flag::Bool
-    fwmm_flag::Bool
-    twmm_flag::Bool
-    pwmm_flag::Bool
-    ftmm_flag::Bool
-    ttmm_flag::Bool
-    ptmm_flag::Bool
-    
-    # Output flags
-    eq_out::Bool
-    theta_out::Bool
-    xlmda_out::Bool
-    eqpsi_out::Bool
-    output_ascii::Bool
-    output_netcdf::Bool
-    output_orbit::Bool
-    output_ffuns::Bool
-    output_torque::Bool
-    
-    # Grid flags
-    equil_grid::Bool
-    input_grid::Bool
-    dynamic_grid::Bool
-    
-    # Diagnostic flags
-    fnml_flag::Bool
-    ellip_flag::Bool
-    diag_flag::Bool
-    term_flag::Bool
-    force_xialpha::Bool
-    clean::Bool
-    
+    fgar_flag::Bool = true          # Full general-aspect-ratio
+    tgar_flag::Bool = false         # Trapped particle GAR
+    pgar_flag::Bool = false         # Passing particle GAR
+    rlar_flag::Bool = false         # Trapped particle large-aspect-ratio
+    clar_flag::Bool = false         # Trapped cylindrical LAR
+    fcgl_flag::Bool = false         # Fluid Chew-Goldberger-Low
+    fwmm_flag::Bool = false         # Full energy via MXM E-L matrix
+    twmm_flag::Bool = false         # Trapped energy via MXM E-L matrix
+    pwmm_flag::Bool = false         # Passing energy via MXM E-L matrix
+    ftmm_flag::Bool = false         # Full torque via MXM E-L matrix
+    ttmm_flag::Bool = false         # Trapped torque via MXM E-L matrix
+    ptmm_flag::Bool = false         # Passing torque via MXM E-L matrix
+    fkmm_flag::Bool = false         # Full MXM E-L energy matrix norm
+    tkmm_flag::Bool = false         # Trapped MXM E-L energy matrix norm
+    pkmm_flag::Bool = false         # Passing MXM E-L energy matrix norm
+    frmm_flag::Bool = false         # Full MXM E-L torque matrix norm
+    trmm_flag::Bool = false         # Trapped MXM E-L torque matrix norm
+    prmm_flag::Bool = false         # Passing MXM E-L torque matrix norm
+
+    # Grid integration flags
+    equil_grid::Bool = true         # Integrate on equilibrium grid
+    input_grid::Bool = false        # Integrate on input grid
+    dynamic_grid::Bool = true       # Dynamic LSODE integration
+
     # Plasma species parameters
-    zi::Int                     # Ion charge
-    mi::Int                     # Ion mass (proton masses)
-    zimp::Int                   # Impurity charge
-    mimp::Int                   # Impurity mass
-    electron::Bool              # Calculate for electrons
-    
+    zi::Int = 1                     # Ion charge (fundamental units)
+    mi::Int = 2                     # Ion mass (proton masses)
+    zimp::Int = 6                   # Impurity charge
+    mimp::Int = 12                  # Impurity mass
+    electron::Bool = false          # Include electron contribution
+
     # Mode numbers
-    nl::Int                     # Bounce harmonic number
-    nn::Int                     # Toroidal mode number (from equilibrium)
-    
-    # Grid parameters
-    tmag_in::Int
-    jsurf_in::Int
-    power_bin::Int
-    power_bpin::Int
-    power_rin::Int
-    power_rcin::Int
-    
-    # Thread control
-    pentrc_threads::Int
-    openmp_threads::Int
-    
+    nn::Int = 1                     # Toroidal mode number
+    nl::Int = 1                     # Bounce harmonic number
+
     # Tolerances
-    atol_xlmda::Float64
-    rtol_xlmda::Float64
-    
+    atol_xlmda::Float64 = 1e-12    # Absolute tolerance for pitch angle integration
+    rtol_xlmda::Float64 = 1e-9     # Relative tolerance for pitch angle integration
+
     # Scaling factors
-    nfac::Float64
-    tfac::Float64
-    wefac::Float64
-    wdfac::Float64
-    wpfac::Float64
-    nufac::Float64
-    divxfac::Float64
-    
+    nfac::Float64 = 1.0            # Density scaling
+    tfac::Float64 = 1.0            # Temperature scaling
+    wefac::Float64 = 1.0           # ExB rotation scaling
+    wdfac::Float64 = 1.0           # Magnetic drift scaling
+    wpfac::Float64 = 1.0           # Indirect rotation scaling
+    nufac::Float64 = 1.0           # Collisionality scaling
+    divxfac::Float64 = 1.0         # div(xi_perp) scaling
+
+    # Energy integration parameters
+    nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
+    f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
+
     # Diagnostic parameters
-    diag_psi::Float64
-    psi_out::Vector{Float64}
-    psilims::Vector{Float64}
-    
-    # Output parameters
-    data_dir::String
-    nutype::String
-    f0type::String
-    jac_in::String
-    
-    # File references
-    idconfile::String
-    kinetic_file::String
-    gpec_file::String
-    peq_file::String
-    pmodb_file::String
-    
+    psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi
+
+    # Diagnostic output flags
+    eq_out::Bool = false            # Output equilibrium profiles
+    theta_out::Bool = false         # Output theta-dependent quantities
+    xlmda_out::Bool = false         # Output pitch angle profiles
+    eqpsi_out::Bool = false         # Output equilibrium psi profiles
+
+    # Output configuration
+    write_outputs_to_HDF5::Bool = true
+    HDF5_filename::String = "gpec.h5"
+    output_ascii::Bool = false
+    output_torque::Bool = true
+    output_orbit::Bool = false
+
+    # Input files (relative to dir_path)
+    kinetic_file::String = "kinetic.dat"
+    gpec_file::String = "gpec.h5"
+
+    # Diagnostic flags
+    fnml_flag::Bool = false         # Fourier mode coupling diagnostics
+    ellip_flag::Bool = false        # Elliptic integral diagnostics
+    diag_flag::Bool = false         # General diagnostics
+    force_xialpha::Bool = false     # Force xi_alpha formulation
+
     # Debugging
-    verbose::Bool
-    indebug::Bool
+    verbose::Bool = false
 end
 
 
@@ -131,122 +114,72 @@ end
     PentrcInternal
 
 Internal working state for PENTRC calculations.
-Holds intermediate results and temporary data.
+Holds equilibrium-derived quantities, profile interpolants, and integration results.
+
+Fields replacing former module-level globals:
+- `ro`, `bo`, `chi1`: Equilibrium geometry parameters
+- `mthsurf`, `mfac`: Poloidal grid info
+- `sq`, `kin`, `geom`: Profile interpolants
+- `dbob_m`, `divx_m`: Perturbation mode interpolants
 """
-struct PentrcInternal
-    dir_path::String                    # Working directory
-    ro::Float64                         # Major radius
-    bo::Float64                         # Field on axis
-    
+@kwdef mutable struct PentrcInternal
+    dir_path::String = ""
+
+    # Equilibrium-derived quantities (replaces former globals)
+    ro::Float64 = 0.0              # Major radius [m]
+    bo::Float64 = 0.0              # Toroidal field on axis [T]
+    chi1::Float64 = 0.0            # 2π * ψ_o (flux normalization)
+    mthsurf::Int = 0               # Number of poloidal grid points
+    mfac::Vector{Int} = Int[]      # Poloidal mode numbers
+    nn::Int = 0                    # Toroidal mode number
+
+    # Profile interpolants (populated by initialize_from_equilibrium!)
+    sq::Any = nothing              # Safety factor + flux profiles
+    kin::Any = nothing             # Kinetic profiles (n, T per species)
+    geom::Any = nothing            # Geometric profiles
+    dbob_m::Any = nothing          # δB/B perturbation modes
+    divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes
+
     # Integration results
-    tphi::ComplexF64                    # Total torque/energy
-    tsurf::ComplexF64                   # Surface torque/energy  
-    teq::ComplexF64                     # Equilibrium grid result
-    
-    # Grid arrays
-    grid_type::String                   # "equil", "input", or "lsode"
-    psi_grid::Vector{Float64}
-    
-    # Output state
-    nstring::String
-    method::String
-    wtw::Array{ComplexF64, 3}           # Kinetic matrix storage
-    
-    # Status tracking
-    psi_out_valid::Vector{Float64}
-    nvalid::Int
-    
-    # Method/flags array
-    flags::Vector{Bool}                 # [fgar, tgar, ..., prmm]
-    methods::Vector{String}
-    docs::Vector{String}
-end
+    tphi::ComplexF64 = 0.0 + 0.0im    # Total torque/energy
+    tsurf::ComplexF64 = 0.0 + 0.0im   # Surface torque/energy
+    teq::ComplexF64 = 0.0 + 0.0im     # Equilibrium grid result
 
-function PentrcInternal(; dir_path::String=".", ro::Float64=1.0, bo::Float64=1.0)
-    return PentrcInternal(
-        dir_path,
-        ro,
-        bo,
-        ComplexF64(0, 0),
-        ComplexF64(0, 0),
-        ComplexF64(0, 0),
-        "equil",
-        Float64[],
-        "",
-        "",
-        Array{ComplexF64,3}(undef, 0, 0, 0),
-        Float64[],
-        0,
-        fill(false, 18),
-        ["fgar", "tgar", "pgar", "rlar", "clar", "fcgl",
-         "fwmm", "twmm", "pwmm", "ftmm", "ttmm", "ptmm",
-         "fkmm", "tkmm", "pkmm", "frmm", "trmm", "prmm"],
-        ["Full general-aspect-ratio calculation",
-         "Trapped particle general-aspect-ratio calculation",
-         "Passing particle general-aspect-ratio calculation",
-         "Trapped particle large-aspect-ratio calculation",
-         "Trapped particle cylindrical large-aspect-ratio calculation",
-         "Fluid Chew–Goldberger–Low calculation",
-         "Full energy calculation using MXM Euler–Lagrange matrix",
-         "Trapped energy calculation using MXM Euler–Lagrange matrix",
-         "Passing energy calculation using MXM Euler–Lagrange matrix",
-         "Full torque calculation using MXM Euler–Lagrange matrix",
-         "Trapped torque calculation using MXM Euler–Lagrange matrix",
-         "Passing torque calculation using MXM Euler–Lagrange matrix",
-         "Full MXM Euler–Lagrange energy matrix norm calculation",
-         "Trapped MXM Euler–Lagrange energy matrix norm calculation",
-         "Passing MXM Euler–Lagrange energy matrix norm calculation",
-         "Full MXM Euler–Lagrange torque matrix norm calculation",
-         "Trapped MXM Euler–Lagrange torque matrix norm calculation",
-         "Passing MXM Euler–Lagrange torque matrix norm calculation"]
-    )
-end
+    # Grid
+    grid_type::String = "equil"
+    psi_grid::Vector{Float64} = Float64[]
 
+    # Method tracking
+    method::String = ""
+    wtw::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
+    psi_out_valid::Vector{Float64} = Float64[]
+    nvalid::Int = 0
 
-# ============================================================================
-# Output Configuration
-# ============================================================================
-"""
-    PentrcOutput
+    # Status
+    flags::Vector{Bool} = fill(false, 18)
+    methods::Vector{String} = [
+        "fgar", "tgar", "pgar", "rlar", "clar", "fcgl",
+        "fwmm", "twmm", "pwmm", "ftmm", "ttmm", "ptmm",
+        "fkmm", "tkmm", "pkmm", "frmm", "trmm", "prmm"]
+    docs::Vector{String} = [
+        "Full general-aspect-ratio calculation",
+        "Trapped particle general-aspect-ratio calculation",
+        "Passing particle general-aspect-ratio calculation",
+        "Trapped particle large-aspect-ratio calculation",
+        "Trapped particle cylindrical large-aspect-ratio calculation",
+        "Fluid Chew–Goldberger–Low calculation",
+        "Full energy calculation using MXM Euler–Lagrange matrix",
+        "Trapped energy calculation using MXM Euler–Lagrange matrix",
+        "Passing energy calculation using MXM Euler–Lagrange matrix",
+        "Full torque calculation using MXM Euler–Lagrange matrix",
+        "Trapped torque calculation using MXM Euler–Lagrange matrix",
+        "Passing torque calculation using MXM Euler–Lagrange matrix",
+        "Full MXM Euler–Lagrange energy matrix norm calculation",
+        "Trapped MXM Euler–Lagrange energy matrix norm calculation",
+        "Passing MXM Euler–Lagrange energy matrix norm calculation",
+        "Full MXM Euler–Lagrange torque matrix norm calculation",
+        "Trapped MXM Euler–Lagrange torque matrix norm calculation",
+        "Passing MXM Euler–Lagrange torque matrix norm calculation"]
 
-Output file and formatting configuration.
-"""
-struct PentrcOutput
-    output_dir::String
-    write_orbit_ascii::Bool
-    write_orbit_netcdf::Bool
-    write_pitch_ascii::Bool
-    write_pitch_netcdf::Bool
-    write_energy_ascii::Bool
-    write_energy_netcdf::Bool
-    write_torque_ascii::Bool
-    write_torque_netcdf::Bool
-    write_elmat_ascii::Bool
-    fname_format::String               # "ascii", "netcdf", "both"
-end
-
-function PentrcOutput(; output_dir::String=".", 
-                      write_orbit_ascii::Bool=false,
-                      write_orbit_netcdf::Bool=false,
-                      write_pitch_ascii::Bool=false,
-                      write_pitch_netcdf::Bool=false,
-                      write_energy_ascii::Bool=false,
-                      write_energy_netcdf::Bool=false,
-                      write_torque_ascii::Bool=true,
-                      write_torque_netcdf::Bool=false,
-                      write_elmat_ascii::Bool=false,
-                      fname_format::String="ascii")
-    return PentrcOutput(
-        output_dir,
-        write_orbit_ascii,
-        write_orbit_netcdf,
-        write_pitch_ascii,
-        write_pitch_netcdf,
-        write_energy_ascii,
-        write_energy_netcdf,
-        write_torque_ascii,
-        write_torque_netcdf,
-        write_elmat_ascii,
-        fname_format
-    )
+    verbose::Bool = false
 end
