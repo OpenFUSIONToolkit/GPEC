@@ -372,9 +372,9 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
     q::Vector{Float64} = Vector{Float64}(undef, N_edge)
     total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
-    plasma_energy::Vector{ComplexF64}    = fill(complex(NaN), N_edge)
-    vacuum_energy::Vector{ComplexF64}    = fill(complex(NaN), N_edge)
-    vacuum_eigenvalue::Vector{Float64}   = fill(NaN, N_edge)
+    plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)
@@ -445,7 +445,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
 
     # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
-    edge_scan::EdgeScanState
+    edge_scan::EdgeScanState = EdgeScanState(numpert_total, 0)
 
     # Data for integrator
     psifac::Float64 = 0.0
@@ -476,8 +476,5 @@ and a small set of temporary matrices and factors used to compute singular-layer
     rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 end
 
-# Initialize function for OdeState with relevant parameters for array initialization.
-# edge_scan is initialized as a disabled sentinel (N_edge=0); replaced by findmax_dW_edge! when a scan runs.
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
-    OdeState(; numpert_total, numsteps_init, numunorms_init, msing,
-               edge_scan=EdgeScanState(numpert_total, 0))
+    OdeState(; numpert_total, numsteps_init, numunorms_init, msing)

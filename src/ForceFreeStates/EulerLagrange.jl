@@ -547,26 +547,21 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es = odet.edge_scan
 
     es.psi .= odet.psi_store[edge_start:odet.step]
-    es.q   .= odet.q_store[edge_start:odet.step]
+    es.q .= odet.q_store[edge_start:odet.step]
 
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
-    # Result arrays are pre-initialized to NaN; failed steps (SingularException) stay NaN.
     for j in 1:N_edge
         istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
-        try
-            result = free_compute_total(equil, ffit, intr, odet)
-            es.total_eigenvalue[j]  = result.total_eigenvalue
-            es.plasma_energy[j]     = result.plasma_energy
-            es.vacuum_energy[j]     = result.vacuum_energy
-            es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
-        catch e
-            e isa LinearAlgebra.SingularException || rethrow(e)
-        end
+        result = free_compute_total(equil, ffit, intr, odet)
+        es.total_eigenvalue[j] = result.total_eigenvalue
+        es.plasma_energy[j] = result.plasma_energy
+        es.vacuum_energy[j] = result.vacuum_energy
+        es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
     end
 
     # Return the ODE step index at peak total_eigenvalue (NaN-safe; failed steps ignored)
