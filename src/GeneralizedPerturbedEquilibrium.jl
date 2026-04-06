@@ -323,6 +323,23 @@ function main(args::Vector{String}=String[])
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
     # ----------------------------------------------------------------
+    # PENTRC (Neoclassical Toroidal Viscosity)
+    # ----------------------------------------------------------------
+    if "PENTRC" in keys(inputs)
+        @info "\n  PENTRC\n$_SECTION"
+        pentrc_start = time()
+
+        pentrc_ctrl = PENTRC.PentrcControl(;
+            (Symbol(k) => v for (k, v) in inputs["PENTRC"])...
+        )
+        pentrc_intr = PENTRC.PentrcInternal(; dir_path=intr.dir_path)
+        PENTRC.initialize_from_equilibrium!(pentrc_intr, equil)
+        PENTRC.compute_torque_all_methods!(pentrc_intr, pentrc_ctrl, equil)
+
+        @info "PENTRC completed in $(@sprintf("%.3f", time() - pentrc_start)) s"
+    end
+
+    # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
