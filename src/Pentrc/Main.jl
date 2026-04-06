@@ -1,51 +1,41 @@
 """
-    Main(path::String)
+    Main(path::String, equil)
 
 PENTRC main entry point for standalone execution.
 Reads configuration, sets up equilibrium, and runs calculations.
 
 # Arguments
 - `path::String`: Path to directory containing pentrc.toml and equilibrium files
+- `equil`: PlasmaEquilibrium from Equilibrium module
 
 # Usage
 ```julia
-PENTRC.Main("/path/to/config/directory")
+PENTRC.Main("/path/to/config/directory", equil)
 ```
 """
-function Main(path::String)
-    
-    # [1] Read configuration
+function Main(path::String, equil)
+
+    # Read configuration
     config_path = joinpath(path, "pentrc.toml")
     ctrl = read_pentrc_config(config_path)
-    
+
     if ctrl.verbose
         println()
         println("PENTRC START => v3.00")
         println("_" ^ 50)
     end
-    
-    # [2] Setup execution environment
+
     start_time = time()
-    
-    # [3] Setup output
+
+    # Setup output
     init_output(ctrl, path)
 
-    # [4] Initialize internal state
+    # Initialize internal state from equilibrium
     intr = PentrcInternal(; dir_path=path)
+    initialize_from_equilibrium!(intr, equil)
     intr.flags = get_method_flags(ctrl)
-    
-    # [5] Administrative setup
-    if ctrl.fnml_flag
-        # TODO: set_fymnl()
-    end
-    if ctrl.ellip_flag
-        # TODO: set_ellip()
-    end
-    if ctrl.diag_flag
-        diagnose_all()
-    end
-    
-    # [6] Print moment type
+
+    # Print moment type
     if ctrl.verbose
         println("-----" ^ 10)
         if ctrl.moment == "heat"
@@ -55,15 +45,15 @@ function Main(path::String)
         end
         println("-----" ^ 10)
     end
-    
-    # [7] Run computations
-    compute_matrix_calculation!(intr, ctrl)
-    compute_torque_all_methods!(intr, ctrl)
-    
-    # [8] Prepare output
+
+    # Run computations
+    compute_matrix_calculation!(intr, ctrl, equil)
+    compute_torque_all_methods!(intr, ctrl, equil)
+
+    # Prepare output
     prepare_output(intr, ctrl)
-    
-    # [9] Print summary
+
+    # Print summary
     if ctrl.verbose
         elapsed = time() - start_time
         println()
@@ -71,15 +61,6 @@ function Main(path::String)
         @printf("Elapsed time: %.2f seconds\n", elapsed)
         println("=" ^ 50)
     end
-    
-    return intr
-end
 
-# Allow standalone execution
-if abspath(PROGRAM_FILE) == @__FILE__
-    if length(ARGS) < 1
-        error("Usage: julia Main.jl <path/to/config>")
-    end
-    config_path = ARGS[1]
-    Main(config_path)
+    return intr
 end

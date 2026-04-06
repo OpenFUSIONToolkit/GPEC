@@ -246,6 +246,27 @@ function read_equil(equil; verbose=false)
     return nothing
 end
 
+"""
+    initialize_from_equilibrium!(intr::PentrcInternal, equil)
+
+Populate PentrcInternal fields from a PlasmaEquilibrium.
+Extracts geometry, profiles, and grid info needed for NTV calculations.
+
+# Arguments
+- `intr::PentrcInternal`: Internal state to populate
+- `equil`: PlasmaEquilibrium from Equilibrium module
+"""
+function initialize_from_equilibrium!(intr::PentrcInternal, equil)
+    intr.ro = equil.ro
+    intr.bo = equil.params.bo
+    intr.chi1 = 2π * equil.psio
+    intr.mthsurf = length(equil.rzphi_ys) - 1
+
+    # TODO: Construct profile interpolants (sq, kin, geom) from equil
+    # TODO: Construct perturbation interpolants (dbob_m, divx_m) from ForceFreeStates output
+    # TODO: Extract poloidal mode numbers (mfac) from perturbation data
+end
+
 
 """
     read_kin(kin_file::String; zi=1, zimp=6, mi=2, mimp=12, 

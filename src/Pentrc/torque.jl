@@ -1,5 +1,5 @@
 """
-    tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method, equil;
+    tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method, equil, intr;
          op_wmats=nothing)
 
 Toroidal torque resulting from nonambipolar transport in perturbed equilibrium.
@@ -18,6 +18,7 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 - `method::String`: Integration method (RLAR, CLAR, *GAR, *TMM, *WMM, *KMM)
     where * = F,T,P for full,trapped,passing
 - `equil`: PlasmaEquilibrium with 2D interpolants
+- `intr::PentrcInternal`: Internal state with profile interpolants and geometry
 
 # Optional Arguments
 - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
@@ -27,10 +28,10 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
-              electron::Bool, method::String, equil;
+              electron::Bool, method::String, equil, intr::PentrcInternal;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing)
 
-    if tdebug
+    if intr.verbose
         println("torque - tpsi function, psi = ", psi)
         println("  electron ", electron)
         println("  ell ", l)
@@ -54,11 +55,11 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     end
 
     # Get perturbations (CubicSeriesInterpolant callable syntax)
-    dbob_m_f = dbob_m(psi)
-    divx_m_f = divx_m(psi)
+    dbob_m_f = intr.dbob_m(psi)
+    divx_m_f = intr.divx_m(psi)
 
     # Sample poloidal quantities on theta grid
-    mthsurf_local = mthsurf
+    mthsurf_local = intr.mthsurf
     xs = collect(range(0.0, 1.0, length=mthsurf_local + 1))
     B_vals = Vector{Float64}(undef, mthsurf_local + 1)
     dBdpsi_vals = Vector{Float64}(undef, mthsurf_local + 1)
@@ -71,10 +72,10 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         pt = (psi, theta)
 
         B_vals[i+1] = equil.eqfun_B(pt)
-        dBdpsi_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(1, 0)) / chi1
+        dBdpsi_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(1, 0)) / intr.chi1
         dBdtheta_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(0, 1))
-        jac_vals[i+1] = equil.rzphi_jac(pt) / chi1
-        djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0)) / chi1^2
+        jac_vals[i+1] = equil.rzphi_jac(pt) / intr.chi1
+        djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0)) / intr.chi1^2
     end
 
     # Create periodic interpolant for poloidal quantities
@@ -128,18 +129,18 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     end
 
     # Get flux function variables (CubicSeriesInterpolant callable syntax)
-    sq_s_f = sq(psi)
-    kin_f = kin(psi)
-    kin_f1 = kin(psi; deriv=1)
-    geom_f = geom(psi)
+    sq_s_f = intr.sq(psi)
+    kin_f = intr.kin(psi)
+    kin_f1 = intr.kin(psi; deriv=1)
+    geom_f = intr.geom(psi)
 
     q = sq_s_f[4]
     welec = kin_f[5]
-    wdian = -twopi * kin_f[s+2] * kin_f1[s] / (chrg * chi1 * kin_f[s])
-    wdiat = -twopi * kin_f1[s+2] / (chrg * chi1)
+    wdian = -twopi * kin_f[s+2] * kin_f1[s] / (chrg * intr.chi1 * kin_f[s])
+    wdiat = -twopi * kin_f1[s+2] / (chrg * intr.chi1)
     wphi = welec + wdian + wdiat
-    wtran = sqrt(2 * kin_f[s+2] / mass) / (q * ro)
-    wgyro = chrg * bo / mass
+    wtran = sqrt(2 * kin_f[s+2] / mass) / (q * intr.ro)
+    wgyro = chrg * intr.bo / mass
     nuk = kin_f[s+6]
 
     rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
@@ -160,41 +161,41 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
     nueff = kin_f[s+6] / (2 * epsr)
 
-    if tdebug
+    if intr.verbose
         @printf("   eq values = %.1e %.1e %.1e %.1e %.1e %.1e %.1f %d\n",
                wdian, wdiat, welec, wdhat, wbhat, nueff, q, 0)
     end
 
-    if tdebug
+    if intr.verbose
         println("  method = ", method)
     end
 
     # Method selection
     if method == "fcgl"
-        tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil)
+        tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr)
 
     elseif method == "rlar"
         tpsi_var[] = calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
                                     wdhat, wbhat, nueff, sq_s_f, kin_f, s,
-                                    dbob_m_f, bmin)
+                                    dbob_m_f, intr.bo, bmin)
 
     elseif method == "clar"
         tpsi_var[] = calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                    nuk, bo, bmax, bmin, kin_f, s, mass, chrg,
+                                    nuk, intr.bo, bmax, bmin, kin_f, s, mass, chrg,
                                     tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
 
     elseif method in ["fgar", "tgar", "pgar", "fwmm", "twmm", "pwmm",
                       "ftmm", "ttmm", "ptmm", "fkmm", "tkmm", "pkmm",
                       "frmm", "trmm", "prmm"]
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                   nuk, bo, bmax, bmin, kin_f, s, mass, chrg,
+                                   nuk, intr.bo, bmax, bmin, kin_f, s, mass, chrg,
                                    tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
                                    method, op_wmats)
     else
         error("ERROR: torque - unknown method")
     end
 
-    if tdebug
+    if intr.verbose
         println("torque - end function, psi = ", psi)
     end
 
@@ -207,7 +208,7 @@ end
 # ============================================================================
 
 """
-    calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil)::ComplexF64
+    calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr)::ComplexF64
 
 Calculate FCGL (Full Circular Gyrokinetic Landau) torque.
 Implements simplified energy balance equation.
@@ -215,14 +216,14 @@ Only valid for bounce harmonic l=0.
 
 Based on: [Logan et al., Phys. Plasmas 2013]
 """
-function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil)::ComplexF64
+function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr::PentrcInternal)::ComplexF64
 
     # Only implemented for l=0
     if l != 0
         return ComplexF64(0.0, 0.0)
     end
 
-    mthsurf_local = mthsurf
+    mthsurf_local = intr.mthsurf
 
     # Create spline for poloidal integrands
     cglspl = zeros(2, mthsurf_local + 1)
@@ -236,7 +237,7 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil)::C
         jac_val = equil.rzphi_jac((psi, theta))
 
         # Fourier component of field perturbations
-        expm = exp(im * twopi * mfac * theta)
+        expm = exp(im * twopi * intr.mfac * theta)
         dbob = sum(dbob_m_f .* expm)  # dB/B
         divx = sum(divx_m_f .* expm) * divxfac  # ∇·ξ⊥
 
@@ -276,7 +277,7 @@ Valid for low aspect ratio tokamaks (ε << 1).
 Reference: [Logan et al., Phys. Plasmas, 2013]
 """
 function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                        wdhat, wbhat, nueff, sq_s_f, kin_f, s, dbob_m_f, bmin=0.5)::ComplexF64
+                        wdhat, wbhat, nueff, sq_s_f, kin_f, s, dbob_m_f, bo, bmin=0.5)::ComplexF64
 
     # Setup parameters for energy integration
     lnq = Float64(l)  # Resonant mode for trapped particles
