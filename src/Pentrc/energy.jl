@@ -26,17 +26,18 @@ AUTHOR: Logan
 EMAIL: nikolas.logan@columbia.edu
 """
 
-include("params.jl")  # For r8, mp, me, e, npsi_out, nell_out, nlambda_out, nmethods, methods, version
-include("utilities.jl")  # For get_free_file_unit, append_2d, check
-include("dcon_interface.jl")  # For shotnum, shottime, machine
-
-try
-    using NCDatasets  # NetCDF library
-catch
-    @warn "NCDatasets not available; NetCDF functionality disabled."
-end
-using DifferentialEquations  # Julia's ODE solver (replaces LSODE)
+using OrdinaryDiffEq
 using Printf
+
+# Constants formerly in params.jl
+const nmethods = 18
+const methods_list = [
+    "fgar", "tgar", "pgar", "rlar", "clar", "fcgl",
+    "fwmm", "twmm", "pwmm", "ftmm", "ttmm", "ptmm",
+    "fkmm", "tkmm", "pkmm", "frmm", "trmm", "prmm"]
+const npsi_out = 100
+const nell_out = 10
+const nlambda_out = 200
 
 # Global variables with defaults
 xatol = 1e-12
@@ -53,8 +54,8 @@ xdebug = false
 const maxstep = 10000
 energy_imaxis = false
 
-# Thread-local variables (using task-local storage in Julia)
-const energy_state = TaskLocalValue{Dict{Symbol,Any}}(() -> Dict(
+# Module-level state for energy integrand (will be replaced by struct fields in Phase 6)
+const energy_state = Dict{Symbol,Any}(
     :energy_n => 0,
     :energy_wn => 0.0,
     :energy_wt => 0.0,
@@ -63,11 +64,10 @@ const energy_state = TaskLocalValue{Dict{Symbol,Any}}(() -> Dict(
     :energy_wb => 0.0,
     :energy_nuk => 0.0,
     :energy_leff => 0.0
-))
+)
 
-# Helper functions to access thread-local state
-get_energy_var(key) = energy_state[][key]
-set_energy_var!(key, val) = (energy_state[][key] = val)
+get_energy_var(key) = energy_state[key]
+set_energy_var!(key, val) = (energy_state[key] = val)
 
 # Record structure
 mutable struct Record
@@ -371,7 +371,7 @@ function record_method(method::String, psi::Float64, ell::Int, leff::Float64,
     
     # Find the right record
     for m in 1:nmethods
-        if method == methods[m]
+        if method == methods_list[m]
             if debug
                 println("  method ", method)
             end

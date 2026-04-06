@@ -6,6 +6,7 @@ Handles namelists, TOML files, and equilibrium data.
 """
 
 using TOML
+using DelimitedFiles
 
 """
     read_pentrc_config(config_path::String)::PentrcControl
@@ -280,11 +281,9 @@ function read_kin(kin_file::String; zi=1, zimp=6, mi=2, mimp=12,
     if !isfile(kin_file)
         error("Kinetic profile file not found: $kin_file")
     end
-    
-    using DelimitedFiles
-    
+
     # Read ASCII table (skipping header lines)
-    table = readdlm(kin_file)
+    table = DelimitedFiles.readdlm(kin_file)
     
     # Filter out non-numeric rows
     table_clean = Float64[]
@@ -299,12 +298,8 @@ function read_kin(kin_file::String; zi=1, zimp=6, mi=2, mimp=12,
         println("Table shape: ", size(table))
     end
     
-    # Physical constants
-    const eV_to_J = 1.602e-19
-    const mp = 1.672_614e-27  # proton mass (kg)
-    const me = 9.109_1e-31     # electron mass (kg)
-    const e = 1.602_191_7e-19  # elementary charge (C)
-    const twopi = 2π
+    # Physical constants (use module-level PENTRC constants where possible)
+    eV_to_J = 1.602e-19
     
     ndata = size(table, 1)
     nkin = 100
@@ -568,7 +563,6 @@ function read_gpec_peq(gpec_file::String; write_log=false, verbose=false)
     # For Julia, we'll support both binary and HDF5 formats
     if endswith(gpec_file, ".h5") || endswith(gpec_file, ".hdf5")
         # HDF5 format
-        using HDF5
         h5open(gpec_file, "r") do fid
             ms = read(fid, "ms")
             mp = read(fid, "mp")
@@ -722,7 +716,6 @@ function read_fnml(fnml_file::String; verbose=false)
     # Support both binary and HDF5 formats
     if endswith(fnml_file, ".h5") || endswith(fnml_file, ".hdf5")
         # HDF5 format
-        using HDF5
         h5open(fnml_file, "r") do fid
             nfk = read(fid, "nfk")
             nft = read(fid, "nft")
@@ -808,10 +801,8 @@ function read_pmodb(pmodb_file::String; jac_in="default", jsurf_in=0, tmag_in=1,
         println("Reading perturbation equilibrium matrix from: $pmodb_file")
     end
     
-    using DelimitedFiles
-    
     # Read ASCII table
-    table = readdlm(pmodb_file)
+    table = DelimitedFiles.readdlm(pmodb_file)
     
     # Filter numeric rows
     table_clean = Float64[]

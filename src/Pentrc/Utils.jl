@@ -18,18 +18,6 @@ AUTHOR: Logan
 EMAIL: nikolas.logan@columbia.edu
 """
 
-# Wrap utilities in a module so it can be `using`-ed or included cleanly.
-module Utilities
-
-include(joinpath(@__DIR__, "params.jl"))  # For r4, r8, twopi
-# NCDatasets is optional; make its import non-fatal so Utilities can be
-# included even when NetCDF support is not installed in the environment.
-try
-    @eval using NCDatasets
-catch err
-    @warn "NCDatasets not available; NetCDF functionality disabled." exception=(err, catch_backtrace())
-end # module Utilities
-
 using Printf
 using Statistics
 
@@ -53,7 +41,6 @@ function get_free_file_unit(lu_max=-1)
     # Return a random number that could be used as an identifier
     return rand(1:m)
 end
-end # module Utilities
 
 """
     to_upper(strIn)

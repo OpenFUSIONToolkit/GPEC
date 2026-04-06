@@ -82,6 +82,8 @@ include("Utils.jl")
 # ============================================================================
 include("torque.jl")
 include("energy.jl")
+include("energy_integration.jl")
+include("special.jl")
 include("Pitch.jl")
 
 # ============================================================================
