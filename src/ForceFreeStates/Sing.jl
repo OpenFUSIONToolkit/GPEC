@@ -106,7 +106,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         hint = Ref(jpsi)
         intr.psilim = find_zero(
             (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
-             psi -> profiles.q_deriv(psi; hint=hint)),
+                psi -> profiles.q_deriv(psi; hint=hint)),
             profiles.xs[jpsi], Roots.Newton()
         )
         intr.q1lim = profiles.q_deriv(intr.psilim)
@@ -229,7 +229,14 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-@with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function compute_sing_mmat!(
+    mmat::Array{ComplexF64,4},
+    singp::SingType,
+    ctrl::ForceFreeStatesControl,
+    profiles::Equilibrium.ProfileSplines,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal
+)
 
     q_spline = profiles.q_spline
     q_d1 = profiles.q_deriv
@@ -260,21 +267,21 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 
     # Evaluate fmats_lower and derivatives using series interpolants
     ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate gmats and derivatives
     ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate kmats and derivatives
     ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
-    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
-    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
+    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=1)
+    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=2)
+    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=3)
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
@@ -754,10 +761,90 @@ Implement kin_flag functionality
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
-    # kinetic stuff - skip for now
-    if false #(TODO: kin_flag)
-        error("kin_flag not implemented yet")
+    ctrl = params[1]
+
+    if ctrl.kin_flag && intr.fkg_kmats_flag
+        # ---- Kinetic path with pre-computed FKG matrices ----
+        # Load pre-computed kinetic matrices from splines
+        # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
+        ffit.amats(vec(amat), psieval; hint=ffit._hint)
+        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
+        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+
+        # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
+        f0mat = similar!(pool, amat)
+        pmat_kin = similar!(pool, amat)
+        paat_kin = similar!(pool, amat)
+        kkmat_kin = similar!(pool, amat)
+        kkaat_kin = similar!(pool, amat)
+        r1mat_kin = similar!(pool, amat)
+        r2mat_kin = similar!(pool, amat)
+        r3mat_kin = similar!(pool, amat)
+        gaat_kin = similar!(pool, amat)
+
+        ffit.f0mats(vec(f0mat), psieval; hint=ffit._hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=ffit._hint)
+        ffit.paats(vec(paat_kin), psieval; hint=ffit._hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit._hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit._hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit._hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit._hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit._hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=ffit._hint)
+
+        # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
+        ipiv = acquire!(pool, Int64, Npert)
+        LAPACK.getrf!(amat, ipiv)
+        LAPACK.getrs!('N', amat, ipiv, bmat)
+        LAPACK.getrs!('N', amat, ipiv, cmat)
+
+        # Build singfac-dependent F, K, K†, G† matrices
+        # F(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1  [Fortran sing.f lines 1102-1105]
+        # K(i,j) = q1*KK + R2                        [lines 1106-1107]
+        # K†(i,j) = KK†*q2 + R3                      [lines 1108-1109]
+        # where q1 = singfac for row index m1, q2 = singfac for col index m2
+        # Note: singfac here is (m - n*q), NOT 1/(m-n*q) as in the ideal path
+        singfac_direct = acquire!(pool, Float64, Npert)
+        singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
+        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'
+
+        # Build F, K, K† with singfac (using fmat_lower, kmat, gmat as workspace for F, K, K†)
+        kaat_kin = similar!(pool, amat)  # K† matrix
+        for j in 1:Npert
+            q2 = singfac_direct[j]
+            for i in 1:Npert
+                q1 = singfac_direct[i]
+                fmat_lower[i, j] = q1 * f0mat[i, j] * q2 - q1 * pmat_kin[i, j] -
+                                   conj(paat_kin[j, i]) * q2 + r1mat_kin[i, j]
+                kmat[i, j] = q1 * kkmat_kin[i, j] + r2mat_kin[i, j]
+                kaat_kin[i, j] = kkaat_kin[i, j] * q2 + r3mat_kin[i, j]
+            end
+        end
+        # gmat = gaat (already loaded)
+        gmat .= gaat_kin
+
+        # Compute du (kinetic ODE: no explicit Q⁻¹ factors, absorbed into F/K/K†)
+        # du₁ = F⁻¹(u₂ - K·u₁)  [Fortran sing.f lines 1200-1215]
+        du1 .= u2
+        mul!(tmp_mat, kmat, u1)
+        du1 .-= tmp_mat
+        # LU factorize F (non-Hermitian, non-symmetric)
+        ipiv2 = acquire!(pool, Int64, Npert)
+        LAPACK.getrf!(fmat_lower, ipiv2)
+        LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
+
+        # du₂ = G†·u₁ + K†·du₁  [Fortran sing.f lines 1217-1222]
+        mul!(tmp_mat, gmat, u1)
+        du2 .= tmp_mat
+        mul!(tmp_mat, kaat_kin, du1)
+        du2 .+= tmp_mat
+
+    elseif ctrl.kin_flag
+        # ---- Kinetic path without FKG precomputation (recompute per step) ----
+        error("Non-FKG kinetic path not yet implemented. Set fkg_kmats_flag=true.")
+
     else
+        # ---- Ideal path ----
         # Evaluate matrix splines at the current psi value using shared hint
         ffit.amats(vec(amat), psieval; hint=ffit._hint)
         ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
@@ -767,18 +854,10 @@ Implement kin_flag functionality
         ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
 
         # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
-        # Equivalent to: Afact = cholesky!(Hermitian(amat)); ldiv!(Afact, bmat); ldiv!(Afact, cmat)
-        # but calls LAPACK directly to avoid Hermitian/Cholesky wrapper allocations in this hot loop
         LAPACK.potrf!('U', amat)
         LAPACK.potrs!('U', amat, bmat)
         LAPACK.potrs!('U', amat, cmat)
 
-    end
-
-    # Compute du
-    if false #(TODO: kin_flag)
-        error("kin_flag not implemented yet")
-    else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         du1 .= u2 .* singfac_vec
@@ -786,12 +865,12 @@ Implement kin_flag functionality
         du1 .-= tmp_mat
         ldiv!(LowerTriangular(fmat_lower), du1)
         ldiv!(UpperTriangular(fmat_lower'), du1)
-        # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
+        # du[2] = G * u[1] + K̄^† * du[1]
         mul!(tmp_mat, gmat, u1)
         du2 .= tmp_mat
         mul!(tmp_mat, adjoint(kmat), du1)
         du2 .+= tmp_mat
-        # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
+        # du[1] *= Q⁻¹
         du1 .*= singfac_vec
     end
 

@@ -42,7 +42,7 @@ import AdaptiveArrayPools: @with_pool
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
 using .ForceFreeStates: sing_lim!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
-using .ForceFreeStates: make_metric, make_matrix
+using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
 const _BANNER = "="^60
@@ -145,7 +145,7 @@ function main(args::Vector{String}=String[])
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
+    intr.locstab = cubic_interp(profiles_xs, locstab_fs; extrap=ExtendExtrap())
 
     # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -226,7 +226,10 @@ function main(args::Vector{String}=String[])
         ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
-            error("kin_flag not implemented yet")
+            if ctrl.verbose
+                @info "Computing kinetic matrices (source: $(ctrl.kin_source))"
+            end
+            make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
         end
 
         # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during

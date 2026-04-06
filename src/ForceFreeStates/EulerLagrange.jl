@@ -51,11 +51,10 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
         # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
-            if ctrl.kin_flag
-                error("kin_flag = true not implemented yet!")
-            else
-                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
-            end
+            # Ideal singular surface crossings are used for both ideal and kinetic modes.
+            # Kinetic singular surfaces (from ksing_find) would use cross_kinetic_singular_surf!
+            # but that is handled separately when kinetic singular surfaces are present.
+            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
         end
     end
 

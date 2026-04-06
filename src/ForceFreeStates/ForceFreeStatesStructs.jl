@@ -141,7 +141,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
@@ -182,9 +182,11 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kin_flag::Bool` - Enable kinetic effects
+  - `kin_source::String` - Kinetic matrix source: "dummy" (σ*I test), "file" (load from PENTRC files), "pentrc" (compute via PENTRC)
+  - `kin_dummy_sigma::Float64` - Scaling factor σ for dummy kinetic matrices (only used when kin_source="dummy")
   - `con_flag::Bool` - Continue integration through rationals without zeroing singular solutions
-  - `kinfac1::Float64` - First kinetic scaling factor (not yet implemented)
-  - `kinfac2::Float64` - Second kinetic scaling factor (not yet implemented)
+  - `kinfac1::Float64` - Scaling factor applied to kinetic energy matrices (W)
+  - `kinfac2::Float64` - Scaling factor applied to kinetic torque matrices (T)
   - `kingridtype::Int` - Type of kinetic grid (0=standard) (not yet implemented)
   - `ktanh_flag::Bool` - Enable hyperbolic tangent profile (not yet implemented)
   - `passing_flag::Bool` - Include passing particles (not yet implemented)
@@ -235,6 +237,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
+    kin_source::String = "dummy"
+    kin_dummy_sigma::Float64 = 0.0
     con_flag::Bool = false
     kinfac1::Float64 = 1.0
     kinfac2::Float64 = 1.0
@@ -277,8 +281,25 @@ end
     emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
+    kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+    # Kinetic torque matrix splines: 6 components
+    ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+
+    # Pre-computed FKG kinetic matrices (populated when fkg_kmats_flag=true)
+    f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r1mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -294,13 +315,13 @@ end
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Series(Y))
+    return cubic_interp(xs, Y)
 end
 
 function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Series(Y); itp_opts...)
+    return cubic_interp(xs, Y; itp_opts...)
 end
 
 # Convenience constructor
@@ -467,6 +488,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
     zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
+
+    # Kinetic workspace arrays: evaluated from kwmats/ktmats splines at current psi
+    kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+    ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups

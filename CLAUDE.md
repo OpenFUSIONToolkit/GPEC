@@ -107,7 +107,7 @@ GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 - **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
   - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
   - Published: PhD Thesis, Princeton University (2015)
-  - Describes: Complete PENTRC theory and implementation
+  - Describes: Complete PENTRC theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
 
 ### Additional References
 
