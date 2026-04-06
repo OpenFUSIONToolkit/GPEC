@@ -11,31 +11,33 @@ on:
       - develop
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  test:
+    name: runtests ${{ matrix.version }} - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 'lts' # long-term support (currently 1.10)
+          - '1.11'
+          - '1.x'  # latest (currently 1.12)
+        os:
+          - ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Julia
-        uses: julia-actions/setup-julia@v1
+        uses: julia-actions/setup-julia@v2
         with:
-          version: '1.11'
+          version: ${{ matrix.version }}
 
-      - name: Restore Julia cache (packages, artifacts, compiled, registries)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.julia/packages
-            ~/.julia/artifacts
-            ~/.julia/compiled
-            ~/.julia/registries
-          # include Manifest.toml so cache invalidates when resolved versions change
-          key: ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml','**/Manifest.toml') }}
-          restore-keys: |
-           ${{ runner.os }}-julia-${{ hashFiles('**/Project.toml','**/Manifest.toml') }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
-      - name: Run tests (instantiate without registry update + test)
-        run: julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(update_registry=false); include("test/runtests.jl")'
+      - name: Cache Julia packages
+        uses: julia-actions/cache@v2
+
+      - name: Build Julia packages
+        uses: julia-actions/julia-buildpkg@v1
+
+      - name: Run tests
+        uses: julia-actions/julia-runtest@v1

@@ -79,8 +79,8 @@ include("Utils.jl")
 # ============================================================================
 # [TIER 1] Core library functions (low-level, can be called from DCON)
 # ============================================================================
-include("Torque.jl")
-include("Energy.jl")
+include("torque.jl")
+include("energy.jl")
 include("Pitch.jl")
 
 # ============================================================================
