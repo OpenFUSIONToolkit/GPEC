@@ -202,20 +202,16 @@ end
         psio::Float64
     )::Matrix{ComplexF64}
 
-Calculate plasma inductance matrix using the wt0-based formula (Fortran default
-resp_induct_flag=TRUE from gpresp.f lines 201-213).
+Calculate plasma inductance matrix Λ using the wt0-based energy formula
+(matches Fortran `gpresp_induct` with `resp_induct_flag=TRUE`).
 
-Fortran formula:
-```
-t1 = -1/(chi1*(m(i)-n*qlim)*twopi*ifac)   →  im/(chi1*s_i*2π)
-t2 =  1/(chi1*(m(j)-n*qlim)*twopi*ifac)   → -im/(chi1*s_j*2π)
-temp2(i,j) = 2*t1*wt0(i,j)*t2
-Lambda = inv(temp2)
-```
+    Λ = inv(2·t₁·wt0·t₂)
 
-Note: vac_data.wt0 already contains singfac^2 factors (s_i*s_j) baked into the
-vacuum term via the scaling applied in Free.jl lines 34-37. The t1/t2 factors
-divide by s_i*s_j, correctly recovering the properly-normalized inductance.
+where t₁ = im/(χ₁·s_i·2π), t₂ = -im/(χ₁·s_j·2π), s_i = m_i - n·q_lim.
+
+Note: `vac_data.wt0` already contains singfac² factors (s_i·s_j) baked into the
+vacuum term via the scaling in `free_run!`. The t₁/t₂ factors divide by s_i·s_j,
+correctly recovering the properly-normalized inductance.
 
 ## Arguments
 - `vac_data`: Vacuum data containing wt0 (total energy matrix before eigenvector sorting)
@@ -239,12 +235,12 @@ function calc_plasma_inductance(
     # Singular factors s_i = m_i - n*qlim  (same as Fortran: mfac(i) - nn*qlim)
     s = [((i-1) % ffs_intr.mpert + ffs_intr.mlow) - n * qlim for i in 1:mpert]
 
-    # Apply Fortran idcon.f line 292 normalization: wt0 = wt0/(mu0*2)*psio^2
+    # Fortran idcon_norm: wt0 = wt0/(mu0*2)*psio^2
     # Julia's vac_data.wt0 is raw wp+wv; Fortran additionally scales by psio^2/(mu0*2)
     mu0 = 4π * 1e-7
     wt0_norm = vac_data.wt0 .* (psio^2 / (mu0 * 2))
 
-    # Build temp2[i,j] = 2*t1_i*wt0[i,j]*t2_j  (gpresp.f line 207)
+    # Build temp2[i,j] = 2·t1_i·wt0[i,j]·t2_j (matches Fortran gpresp_induct)
     temp2 = Matrix{ComplexF64}(undef, mpert, mpert)
     for i in 1:mpert, j in 1:mpert
         t1 = im / (chi1 * s[i] * 2π)
@@ -309,17 +305,11 @@ end
 
 Apply Green's function to Fourier mode coefficients to get COMPLEX potential in theta space.
 
-Computes the full complex chi(θ) = Σ_m bwp_m * exp(-im*m*θ) by combining two real
-Green's function applications matching Fortran gpeq_surface (gpeq.f lines 553-569):
+Computes the full complex χ(θ) = Σ_m bwp_m·exp(-im·m·θ) by combining two real
+Green's function applications (matches Fortran `gpeq_surface` conjugate packing convention).
 
-```fortran
-rbwp_mn = CONJG(bwp_mn)
-grri_real = MATMUL(grri, (/REAL(rbwp_mn), -AIMAG(rbwp_mn)/))  ! packed [Re, Im]
-grri_imag = MATMUL(grri, (/AIMAG(rbwp_mn), REAL(rbwp_mn)/))   ! packed [-Im, Re]
-chi_fun = grri_real - ifac*grri_imag                            ! chi = real - i*imag
-```
-
-The complex combination ensures chi represents the proper exp(-im*θ) DFT kernel.
+The CONJG(bwp_mn) packing and the `real - i*imag` recombination ensure χ represents
+the proper exp(-im·θ) DFT kernel.
 
 ## Arguments
 - `green`: Green's function matrix [2*mtheta, 2*mpert] in GROUPED column format
@@ -497,13 +487,7 @@ end
         surface_inductance::Matrix{ComplexF64}
     )::Matrix{ComplexF64}
 
-Calculate permeability matrix P = Lambda * L^{-1}.
-
-Matches Fortran gpresp.f gpresp_permeab (lines 346-397):
-```fortran
-permeabmats(j,:,:) = MATMUL(plas_indmats(j,:,:), surf_indinvmats(j,:,:))
-```
-where surf_indinvmats is inv(surface_inductance) computed via ZHETRF/ZHETRS.
+Calculate permeability matrix P = Λ·L⁻¹ (matches Fortran `gpresp_permeab`).
 
 ## Arguments
 - `plasma_inductance`: Plasma inductance matrix Lambda

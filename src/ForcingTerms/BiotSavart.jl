@@ -121,15 +121,15 @@ function accumulate_strand_field!(
 end
 
 """
-    _accumulate_precomputed!(bx, by, bz, ox, oy, oz, seg)
+    _accumulate_precomputed(ox, oy, oz, seg) -> (dbx, dby, dbz)
 
-Inner kernel: accumulate Biot-Savart field from pre-computed segments onto
-scalar accumulators. Returns `(dbx, dby, dbz)` increments.
+Inner kernel: accumulate Biot-Savart field from pre-computed segments.
+Returns `(dbx, dby, dbz)` increments. Matches Fortran `field_bs_psi` midpoint rule.
 
 Operates on `PrecomputedSegments` with contiguous arrays for maximum
 cache efficiency.
 """
-@inline function _accumulate_precomputed!(
+@inline function _accumulate_precomputed(
     ox::Float64, oy::Float64, oz::Float64,
     seg::PrecomputedSegments
 )
@@ -144,8 +144,10 @@ cache efficiency.
         rz = oz - seg.midz[l]
 
         r2 = rx*rx + ry*ry + rz*rz
-        inv_r3 = pf / (r2 * sqrt(r2))
-        # r2 < 1e-12 case: observer is never on conductor in boundary evaluation
+        # Guard: zero contribution if observer is on conductor (avoids Inf/NaN)
+        safe_r2 = ifelse(r2 < BIOT_SAVART_MIN_DIST_SQ, one(r2), r2)
+        scale   = ifelse(r2 < BIOT_SAVART_MIN_DIST_SQ, zero(pf), pf)
+        inv_r3  = scale / (safe_r2 * sqrt(safe_r2))
 
         bx_acc += (seg.dly[l]*rz - seg.dlz[l]*ry) * inv_r3
         by_acc += (seg.dlz[l]*rx - seg.dlx[l]*rz) * inv_r3
@@ -222,7 +224,7 @@ function compute_biot_savart_boundary!(
             bz_total = 0.0
 
             for seg in all_segments
-                dbx, dby, dbz = _accumulate_precomputed!(ox, oy, oz, seg)
+                dbx, dby, dbz = _accumulate_precomputed(ox, oy, oz, seg)
                 bx_total += dbx
                 by_total += dby
                 bz_total += dbz

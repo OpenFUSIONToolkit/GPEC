@@ -125,8 +125,11 @@ end
 
 Plot the normal magnetic field `bn(θ, ζ)` on the plasma boundary as a 2D heatmap.
 
+Expects the raw Biot-Savart B·n̂ field in Tesla (before `project_normal_flux!`
+converts to flux). If plotting post-projection data, note units are T·m² not T.
+
 ### Arguments
-- `bn`: normal field matrix `[mtheta, nzeta]` in Tesla
+- `bn`: normal field matrix `[mtheta, nzeta]` — typically B·n̂ in Tesla
 - `mtheta`: number of poloidal grid points
 - `nzeta`: number of toroidal grid points
 
@@ -177,7 +180,7 @@ function plot_mode_spectrum(forcing_modes; mlow=nothing, mhigh=nothing, save_pat
     n_vals = sort(unique(m.n for m in forcing_modes))
     colors = [:blue, :red, :green, :orange, :purple, :brown]
 
-    p = plot(; xlabel="Poloidal mode m", ylabel="|bmn| [T]",
+    p = plot(; xlabel="Poloidal mode m", ylabel="|Φ_x(m,n)| [unit-norm]",
                title="Coil forcing mode spectrum",
                legend=:topright, kwargs...)
 

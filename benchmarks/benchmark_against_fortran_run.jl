@@ -1066,8 +1066,8 @@ function generate_plots(fort, julia, bench_dir, nn)
 
     layout = @layout [a b c d e; f g h i j; k l m n; o p q r; s t u v; w x y z]
     p = plot(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, jbgp_panels..., bn_panels..., xigp_panels..., xin_panels...;
-        layout=layout, size=(2100, 2700),
-        left_margin=5Plots.mm, bottom_margin=5Plots.mm)
+        layout=layout, size=(2600, 2900),
+        left_margin=20Plots.mm, right_margin=5Plots.mm, bottom_margin=8Plots.mm, top_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")
     savefig(p, outfile)
     println("Plots saved to: ", abspath(outfile))

@@ -1,7 +1,7 @@
 """
 Singular surface coupling and field calculations.
 
-Implements GPEC's singular surface analysis (gpout.f lines 585-665, 1700-1810):
+Implements GPEC's singular surface analysis (Fortran `gpout_resp` / `gpout_respinfo`):
 - Delta' (tearing stability parameter)
 - Resonant currents
 - Island half-widths
@@ -136,7 +136,7 @@ function compute_singular_coupling_metrics!(
     # Precompute ODE coefficient matrix C_coeffs for all PE forcing modes.
     # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
     # where edge_mn_k[j] = plasma_response[j,k] / (chi1·singfac_lim[j]·2πi)
-    # Matches Fortran gpout.f: edge_mn = foutmn/(chi1·singfac·twopi·ifac)  (line 604)
+    # Matches Fortran gpout_resp: edge_mn = foutmn/(chi1·singfac·twopi·ifac)
     psi_lim = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
     q_lim   = equil.profiles.q_spline(psi_lim)
     singfac_lim = [intr.m_modes[j] - intr.n_modes[j] * q_lim for j in 1:numpert_total]
@@ -176,12 +176,14 @@ function compute_singular_coupling_metrics!(
 
         j_c   = compute_current_density(equil, sing_surf.psifac)
         area  = compute_surface_area(equil, sing_surf.psifac)
-        # Fortran: shear = mfac(resnum)*dq/dψ / q² = n*dq/dψ / q  (gpout.f line 579)
+        # Matches Fortran gpout_resp: shear = m*dq/dψ / q² = n*dq/dψ / q (since m=n*q).
+        # Uses abs(nn) because island_half_width = sqrt(abs(island_width_sq)), so the sign
+        # of shear only affects the sign of C_island_width_sq, not the physical island width.
         shear = abs(nn) * sing_surf.q1 / sing_surf.q
 
         # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
-        # Fortran: gpeq_sol(lpsi/rpsi) → bwp1_mn(resnum)  (gpout.f lines 618–624)
-        # spot = 5e-4 matches Fortran default (gpec.f line 120)
+        # Matches Fortran gpout_resp: evaluate bwp1_mn at lpsi/rpsi via gpeq_sol
+        # spot = 5e-4 matches Fortran default singfac_min
         spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
         lpsi = sing_surf.psifac - spot_psi
         rpsi = sing_surf.psifac + spot_psi
@@ -225,7 +227,7 @@ function compute_singular_coupling_metrics!(
             bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
             jump_vec[k] = bwp1_r - bwp1_l
             # C_penetrated_field: midpoint of b^ψ at lpsi/rpsi divided by area.
-            # Fortran: gpeq_interp_singsurf/sol evaluates bwp_mn spline at respsi  (gpout.f line 637)
+            # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi
             b_l = chi1 * singfac_l * 2π * im * xsp_l
             b_r = chi1 * singfac_r * 2π * im * xsp_r
             state.C_penetrated_field[row, k] = (b_l + b_r) / 2 / area
@@ -233,9 +235,8 @@ function compute_singular_coupling_metrics!(
 
         state.C_delta_prime[row, :]      = jump_vec ./ (twopi * chi1)
         state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
-        # singflx_pre = L_mm * singcurs / (twopi*nn)  (gpout.f line 632: singflx_mn = L * fkaxmn)
-        # Phi_res = singflx_pre / area  (gpout.f line 639: singbnoflxs = singflx_mn / area)
-        # island_width_sq uses singflx_pre WITHOUT /area  (gpout.f line 640-641: islandhwids = 4*singflx_mn/...)
+        # Matches Fortran gpout_resp: singflx = L·fkaxmn, singbnoflxs = singflx/area,
+        # islandhwids = 4·singflx/(2π·shear·q·chi1)
         singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
         state.C_resonant_flux[row, :] = singflx_pre ./ area
         if abs(shear) > 1e-10
@@ -375,7 +376,7 @@ function interpolate_field_at_surface(
     q = equil.profiles.q_spline(psi)
 
     # Convert displacement to field using ideal MHD relation
-    # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ (from FieldReconstruction.jl line 304)
+    # b^ψ = χ₁·(m - n·q)·2πi·ξ_ψ [Park 2007 eq. 8]
     chi1 = 2π * equil.psio
     twopi = 2π
     singfac = m_mode - n_mode * q
@@ -397,7 +398,7 @@ end
 
 Compute `∂b^ψ/∂ψ` at arbitrary flux surface for a given mode.
 
-Implements Fortran GPEC's `bwp1_mn` formula from `gpeq.f` lines 106–107:
+Implements Fortran GPEC's `bwp1_mn` formula from `gpeq_sol`:
 
     bwp1_mn = 2πi·χ₁·(singfac·∂ξ_ψ/∂ψ − n·q'·ξ_ψ)
 
@@ -457,7 +458,7 @@ end
 
 Compute effective current density coefficient at given flux surface.
 
-Implements GPEC's j_c calculation (gpout.f line 560-578):
+Implements GPEC's j_c calculation (Fortran `gpout_respinfo`):
 j_c = χ₁² * q / (μ₀ * integral)
 
 where the integral is computed via flux surface integration:
@@ -622,11 +623,11 @@ end
 
 Compute surface inductance matrix from Green's functions at flux surface.
 
-Implements the GPEC gpvacuum_flxsurf algorithm (gpvacuum.f lines 299–331).
+Implements the GPEC `gpvacuum_flxsurf` algorithm.
 
 The Julia vacuum code uses SFL Fourier basis `cos(m*θ - n*ν)` in the column transform,
 so the row DFT must apply the matching toroidal phase correction `exp(-i*n*ν)` before
-the DFT (matching Fortran's `EXP(-ifac*nn*dphi)` in gpvacuum_flxsurf lines 308–309).
+the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correction).
 
 ## Arguments
 
@@ -662,7 +663,7 @@ Surface inductance matrix [mpert × mpert]
     kax_re = zeros!(pool, Float64, mtheta)
     kax_im = zeros!(pool, Float64, mtheta)
 
-    # Toroidal phase correction: exp(-i*n*ν) matching Fortran gpvacuum_flxsurf line 308-309
+    # Toroidal phase correction: exp(-i*n*ν) matching Fortran gpvacuum_flxsurf
     # EXP(-ifac*nn*dphi). Precompute since it's the same for all modes.
     cos_nν = cos.(nn .* ν)
     sin_nν = sin.(nn .* ν)
@@ -720,7 +721,7 @@ end
 
 Compute flux surface area at given ψ.
 
-Implements GPEC's area calculation (gpout.f line 568):
+Implements GPEC's area calculation (Fortran `gpout_respinfo`):
 area = ∫ jac * |∇ψ| dθ
 
 where the integral is computed around the flux surface.

@@ -5,14 +5,17 @@ Converts coil Biot-Savart fields on the plasma boundary into Fourier mode amplit
 suitable for the perturbed equilibrium pipeline.
 
 ## Pipeline
-1. `sample_boundary_grid` — evaluate (R, Z) and unit-norm metric on the plasma boundary
-2. `compute_biot_savart_boundary!` (BiotSavart.jl) — compute B at all grid points
-3. `project_normal_flux!` — compute flux Phi_x = 2π×R×(B_R ∂Z/∂θ_norm − B_Z ∂R/∂θ_norm)
-4. `fourier_decompose_bn` — 2D Fourier decompose to get bmn amplitudes
-5. `compute_coil_forcing_modes!` — top-level entry point combining all steps
+- `sample_boundary_grid` — evaluate (R, Z) and unit-norm metric on the plasma boundary
+- `compute_biot_savart_boundary!` (BiotSavart.jl) — compute B at all grid points
+- `project_normal_flux!` — compute flux Φ_x = 2π×R×(B_R ∂Z/∂θ − B_Z ∂R/∂θ)
+- `fourier_decompose_bn` — 2D Fourier decompose to get bmn amplitudes
+- `compute_coil_forcing_modes!` — top-level entry point combining all steps
 """
 
 using FastInterpolations: cubic_interp, PeriodicBC, LinearBinary
+
+# Default toroidal points per period when nzeta_coil is not specified
+const NZETA_POINTS_PER_PERIOD = 32
 
 """
     BoundaryGrid
@@ -205,11 +208,11 @@ Top-level entry point: compute Fourier mode amplitudes of the normal magnetic
 flux from all coil sets on the plasma boundary.
 
 ## Pipeline
-1. Build boundary grid at (mtheta × nzeta) resolution, with helicity from `equil.params`
-2. Lay out observation points in (R, φ, Z) for all (θ, ζ) combinations
-3. Run threaded Biot-Savart summation over all coil sets
-4. Project B field onto plasma boundary normal flux (`project_normal_flux!`)
-5. 2D Fourier decompose to get bmn amplitudes for mode range
+- Build boundary grid at (mtheta × nzeta) resolution, with helicity from `equil.params`
+- Lay out observation points in (R, φ, Z) for all (θ, ζ) combinations
+- Run threaded Biot-Savart summation over all coil sets (matches Fortran `field_bs_psi`)
+- Project B field onto plasma boundary normal flux (`project_normal_flux!`)
+- 2D Fourier decompose to get bmn amplitudes for mode range
 
 Output amplitudes are in unit-norm convention (= Fortran `Phi_x`).
 No normalization conversion is needed when using these modes with `compute_plasma_response!`.
@@ -227,7 +230,7 @@ function compute_coil_forcing_modes!(
     psi::Float64 = 1.0,
     verbose::Bool = false
 )
-    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : 32 * max(1, abs(n))
+    nzeta = cfg.nzeta_coil > 0 ? cfg.nzeta_coil : NZETA_POINTS_PER_PERIOD * max(1, abs(n))
     mtheta = cfg.mtheta_coil
 
     verbose && @info "Computing coil forcing modes: mtheta=$mtheta, nzeta=$nzeta, n=$n, m=$m_low:$m_high, psi=$psi"
@@ -280,11 +283,11 @@ SFL-flux convention. These are scaled by (2π)² to reach unit-norm.
 
 If `from_tag == "normal_field_T"`, the amplitudes represent Fourier modes of B·n̂
 in Tesla (2π-angle convention). Conversion to unit-norm Phi_x:
-  1. Inverse-Fourier reconstruct B·n̂(θ, ζ) from the input modes
-  2. Multiply pointwise by 2π × R(θ) × |dr/dθ_norm(θ)|
-  3. Re-Fourier transform to get unit-norm mode amplitudes
+  - Inverse-Fourier reconstruct B·n̂(θ, ζ) from the input modes
+  - Multiply pointwise by 2π × R(θ) × |dr/dθ_norm(θ)|
+  - Re-Fourier transform to get unit-norm mode amplitudes
 
-The `2π` factor in step 2 comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
+The 2π factor comes from the toroidal Jacobian ∂r/∂ζ_norm = 2π·R·ê_φ.
 This conversion is a mode-mixing operation because R and |dr/dθ| vary poloidally.
 
 ## Arguments
