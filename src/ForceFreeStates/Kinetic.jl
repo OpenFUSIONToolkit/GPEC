@@ -4,12 +4,12 @@
 Build an mpert×mpert X-shaped matrix with diagonal σ and anti-diagonal entries.
 
 If `hermitian=true`, anti-diagonal entries are imaginary: W[i,j] = i·sign(m_i)·σ,
-which preserves W = W† (Hermiticity). This is appropriate for components Ak, Ck, Hk
-(Eqs 7.30, 7.32, 7.35 of Logan 2015).
+which preserves W = W† (Hermiticity). This is appropriate for components Ak, Ck, Dk, Hk
+which are self-adjoint (X†X form, Logan 2015 Eqs 7.30, 7.32, 7.33, 7.35).
 
 If `hermitian=false`, anti-diagonal entries are real: W[i,j] = sign(m_i)·σ,
-which breaks Hermiticity (W ≠ W†). This is appropriate for components Bk, Dk, Ek
-(Eqs 7.31, 7.33, 7.34 of Logan 2015) which are not self-adjoint in general.
+which breaks Hermiticity (W ≠ W†). This is appropriate for cross-term components Bk, Ek
+(Eqs 7.31, 7.34 of Logan 2015) which are not self-adjoint in general.
 """
 function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=true)
     W = zeros(ComplexF64, mpert, mpert)
@@ -44,12 +44,12 @@ portable across equilibria:
 
 | Component | Matrix | Coupling | Hermitian | Relative to |
 |:--------- |:------ |:-------- |:--------- |:----------- |
-| 1         | Ak     | W*z·Wz   | Yes       | ‖A(ψ)‖_F    |
-| 2         | Bk     | W*z·Wx   | No        | ‖B(ψ)‖_F    |
-| 3         | Ck     | W*z·Wy   | Yes       | ‖C(ψ)‖_F    |
-| 4         | Dk     | W*x·Wx   | No        | ‖D(ψ)‖_F    |
-| 5         | Ek     | W*x·Wy   | No        | ‖E(ψ)‖_F    |
-| 6         | Hk     | W*y·Wy   | Yes       | ‖H(ψ)‖_F    |
+| 1         | Ak     | Wz†·Wz   | Yes       | ‖A(ψ)‖_F    |
+| 2         | Bk     | Wz†·Wx   | No        | ‖B(ψ)‖_F    |
+| 3         | Ck     | Wz†·Wy   | Yes       | ‖C(ψ)‖_F    |
+| 4         | Dk     | Wx†·Wx   | Yes       | ‖D(ψ)‖_F    |
+| 5         | Ek     | Wx†·Wy   | No        | ‖E(ψ)‖_F    |
+| 6         | Hk     | Wy†·Wy   | Yes       | ‖H(ψ)‖_F    |
 
 Hermitian components use imaginary anti-diagonal entries (i·sign(m)·σ);
 non-Hermitian components use real anti-diagonal entries (sign(m)·σ).
@@ -69,7 +69,10 @@ function dummy_kinetic_matrices(
     # Map component index → ideal matrix spline and Hermiticity
     # (component_index, ideal_spline, is_hermitian)
     ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats, ffit.emats, ffit.hmats]
-    is_hermitian = [true, false, true, false, false, true]
+    # Ak, Ck, Hk are explicitly Hermitian (Logan 2015 p.169). Dk is also Hermitian
+    # because ideal D is self-adjoint (p.155) and Dk = Wx†·Wx is trivially self-adjoint.
+    # Bk and Ek are cross terms (Wz†·Wx, Wx†·Wy) and are not Hermitian in general.
+    is_hermitian = [true, false, true, true, false, true]
 
     # Build unit X-pattern matrices (Hermitian and non-Hermitian variants)
     X_herm = _build_x_matrix(mpert, mlow, 1.0; hermitian=true)
