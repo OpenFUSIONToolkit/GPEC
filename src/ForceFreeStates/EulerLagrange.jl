@@ -122,12 +122,9 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
     # and kin_flag = true would also live here when implemented.
-    if false #(TODO: kin_flag)
-    # for ising = 1:kmsing
-    #     if kinsing[ising].psifac > psifac
-    #         break
-    #     end
-    # end
+    if ctrl.kin_flag && ctrl.con_flag
+        # No singular surface tracking needed for continuous kinetic integration
+        odet.ising_start = 0
     else
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
@@ -188,8 +185,18 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
     end
 
     # -------------------- Create chunks ------------------------
-    if false  # TODO: kin_flag
-    # Kinetic not implemented yet, some of the below code might be able to be reused?
+    if ctrl.kin_flag && ctrl.con_flag
+        # Single chunk from axis to edge. Kinetic contributions regularize the
+        # F-matrix singularity at rational surfaces (Logan 2015 Eq 7.46), making
+        # them integrable. The adaptive ODE solver handles stiffness automatically.
+        push!(chunks, IntegrationChunk(;
+            psi_start=psi_current,
+            psi_end=(intr.psilim * (1 - eps)),
+            needs_crossing=false,
+            ising=0
+        ))
+    elseif ctrl.kin_flag
+        error("Discontinuous kinetic integration (con_flag=false) not yet implemented. Set con_flag=true.")
     else
         # Loop through singular surfaces to cross until edge is reached
         ising_current = find_next_resonant_surface!(ising_current, intr)

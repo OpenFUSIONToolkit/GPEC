@@ -226,6 +226,10 @@ function main(args::Vector{String}=String[])
         ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
+            if !ctrl.con_flag
+                @warn "kin_flag=true requires con_flag=true (continuous integration). Setting con_flag=true."
+                ctrl.con_flag = true
+            end
             if ctrl.verbose
                 @info "Computing kinetic matrices (source: $(ctrl.kin_source))"
             end
