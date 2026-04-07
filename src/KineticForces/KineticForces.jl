@@ -41,32 +41,23 @@ using Roots
 import ..ForceFreeStates
 import ..Equilibrium
 
-# ============================================================================
-# [TIER 4] Supporting data structures and utilities
-# ============================================================================
-include("PentrcStructs.jl")
+# Supporting data structures and utilities
+include("KineticForcesStructs.jl")
 include("Input.jl")
 include("Output.jl")
 include("Grid.jl")
 include("Utils.jl")
 
-# ============================================================================
-# [TIER 1] Core library functions (low-level, can be called from ForceFreeStates)
-# ============================================================================
-include("torque.jl")
-include("energy.jl")
-include("energy_integration.jl")
-include("special.jl")
-include("Pitch.jl")
+# Core library functions
+include("Torque.jl")
+include("EnergyIntegration.jl")
+include("Special.jl")
+include("PitchIntegration.jl")
 
-# ============================================================================
-# [TIER 2] High-level computation functions
-# ============================================================================
+# High-level computation functions
 include("Compute.jl")
 
-# ============================================================================
-# [TIER 3] Standalone program entry point
-# ============================================================================
+# Standalone program entry point
 include("Main.jl")
 
 # ============================================================================

@@ -9,18 +9,18 @@ using TOML
 using DelimitedFiles
 
 """
-    read_pentrc_config(config_path::String)::PentrcControl
+    read_pentrc_config(config_path::String)::KineticForcesControl
 
-Read PENTRC configuration from TOML file and return PentrcControl structure.
+Read PENTRC configuration from TOML file and return KineticForcesControl structure.
 Provides sensible defaults for missing parameters.
 
 # Arguments
 - `config_path::String`: Path to pentrc.toml configuration file
 
 # Returns
-- `PentrcControl`: Control structure with all parameters
+- `KineticForcesControl`: Control structure with all parameters
 """
-function read_pentrc_config(config_path::String)::PentrcControl
+function read_pentrc_config(config_path::String)::KineticForcesControl
     
     # Load TOML file
     if !isfile(config_path)
@@ -149,7 +149,7 @@ function read_pentrc_config(config_path::String)::PentrcControl
     indebug = get_cfg("indebug", false)
     
     # Create and return control structure
-    return PentrcControl(
+    return KineticForcesControl(
         moment, qt,
         fgar_flag, tgar_flag, pgar_flag, rlar_flag, clar_flag, fcgl_flag, wxyz_flag,
         fkmm_flag, tkmm_flag, pkmm_flag, frmm_flag, trmm_flag, prmm_flag,
@@ -172,14 +172,14 @@ function read_pentrc_config(config_path::String)::PentrcControl
 end
 
 """
-    get_method_flags(ctrl::PentrcControl)::Vector{Bool}
+    get_method_flags(ctrl::KineticForcesControl)::Vector{Bool}
 
 Extract method flags from control structure in correct order.
 
 # Returns
 - `Vector{Bool}`: Flags in order [fgar, tgar, ..., prmm]
 """
-function get_method_flags(ctrl::PentrcControl)::Vector{Bool}
+function get_method_flags(ctrl::KineticForcesControl)::Vector{Bool}
     return [
         ctrl.fgar_flag, ctrl.tgar_flag, ctrl.pgar_flag, 
         ctrl.rlar_flag, ctrl.clar_flag, ctrl.fcgl_flag,
@@ -196,13 +196,13 @@ end
 # ============================================================================
 
 """
-    initialize_pentrc(ctrl::PentrcControl, equil)
+    initialize_pentrc(ctrl::KineticForcesControl, equil)
 
 Initialize PENTRC with equilibrium and kinetic data.
 Called both when PENTRC runs standalone and when ForceFreeStates kinetic_flag=true.
 
 # Arguments
-- `ctrl::PentrcControl`: Configuration from config file
+- `ctrl::KineticForcesControl`: Configuration from config file
 - `equil`: Equilibrium structure from ForceFreeStates
 
 # Side effects
@@ -210,7 +210,7 @@ Called both when PENTRC runs standalone and when ForceFreeStates kinetic_flag=tr
 - Sets up equilibrium splines
 - Initializes perturbation data
 """
-function initialize_pentrc(ctrl::PentrcControl, equil)
+function initialize_pentrc(ctrl::KineticForcesControl, equil)
     
     # TODO: Implement full initialization
     # 1. Read kinetic profiles (read_kin)
@@ -247,16 +247,16 @@ function read_equil(equil; verbose=false)
 end
 
 """
-    initialize_from_equilibrium!(intr::PentrcInternal, equil)
+    initialize_from_equilibrium!(intr::KineticForcesInternal, equil)
 
-Populate PentrcInternal fields from a PlasmaEquilibrium.
+Populate KineticForcesInternal fields from a PlasmaEquilibrium.
 Extracts geometry, profiles, and grid info needed for NTV calculations.
 
 # Arguments
-- `intr::PentrcInternal`: Internal state to populate
+- `intr::KineticForcesInternal`: Internal state to populate
 - `equil`: PlasmaEquilibrium from Equilibrium module
 """
-function initialize_from_equilibrium!(intr::PentrcInternal, equil)
+function initialize_from_equilibrium!(intr::KineticForcesInternal, equil)
     intr.ro = equil.ro
     intr.bo = equil.params.bo
     intr.chi1 = 2π * equil.psio

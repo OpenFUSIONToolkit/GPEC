@@ -31,7 +31,7 @@ function Main(path::String, equil)
     init_output(ctrl, path)
 
     # Initialize internal state from equilibrium
-    intr = PentrcInternal(; dir_path=path)
+    intr = KineticForcesInternal(; dir_path=path)
     initialize_from_equilibrium!(intr, equil)
     intr.flags = get_method_flags(ctrl)
 

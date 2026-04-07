@@ -7,17 +7,17 @@ Can be called from both Main() and ForceFreeStates kinetic_flag.
 """
 
 """
-    compute_matrix_calculation!(intr::PentrcInternal, ctrl::PentrcControl, equil)
+    compute_matrix_calculation!(intr::KineticForcesInternal, ctrl::KineticForcesControl, equil)
 
 Compute and output explicit kinetic matrix calculations.
 Stores results in output files for visualization/debugging.
 
 # Arguments
-- `intr::PentrcInternal`: Internal state with method flags
-- `ctrl::PentrcControl`: Control parameters
+- `intr::KineticForcesInternal`: Internal state with method flags
+- `ctrl::KineticForcesControl`: Control parameters
 - `equil`: PlasmaEquilibrium
 """
-function compute_matrix_calculation!(intr::PentrcInternal, ctrl::PentrcControl, equil)
+function compute_matrix_calculation!(intr::KineticForcesInternal, ctrl::KineticForcesControl, equil)
 
     if !ctrl.output_ascii
         return
@@ -33,17 +33,17 @@ end
 
 
 """
-    compute_torque_all_methods!(intr::PentrcInternal, ctrl::PentrcControl, equil)
+    compute_torque_all_methods!(intr::KineticForcesInternal, ctrl::KineticForcesControl, equil)
 
 Calculate torque/energy for all enabled methods.
 Main computational loop performing integrations.
 
 # Arguments
-- `intr::PentrcInternal`: Internal state (to be updated with results)
-- `ctrl::PentrcControl`: Control parameters specifying which methods to run
+- `intr::KineticForcesInternal`: Internal state (to be updated with results)
+- `ctrl::KineticForcesControl`: Control parameters specifying which methods to run
 - `equil`: PlasmaEquilibrium with 2D interpolants
 """
-function compute_torque_all_methods!(intr::PentrcInternal, ctrl::PentrcControl, equil)
+function compute_torque_all_methods!(intr::KineticForcesInternal, ctrl::KineticForcesControl, equil)
 
     # Get method flags in correct order
     flags = get_method_flags(ctrl)
@@ -135,16 +135,16 @@ end
 
 
 """
-    prepare_output(intr::PentrcInternal, ctrl::PentrcControl)
+    prepare_output(intr::KineticForcesInternal, ctrl::KineticForcesControl)
 
 Prepare output files based on control flags.
 Writes results to ASCII files or HDF5.
 
 # Arguments
-- `intr::PentrcInternal`: Computed results
-- `ctrl::PentrcControl`: Output configuration
+- `intr::KineticForcesInternal`: Computed results
+- `ctrl::KineticForcesControl`: Output configuration
 """
-function prepare_output(intr::PentrcInternal, ctrl::PentrcControl)
+function prepare_output(intr::KineticForcesInternal, ctrl::KineticForcesControl)
     # TODO: Implement output writing
     # ASCII output via Output.jl functions
     # HDF5 output via ctrl.write_outputs_to_HDF5
@@ -152,22 +152,22 @@ end
 
 
 """
-    compute_kinetic_contribution(ctrl::PentrcControl, equil, intr::PentrcInternal, ffit)::Dict
+    compute_kinetic_contribution(ctrl::KineticForcesControl, equil, intr::KineticForcesInternal, ffit)::Dict
 
 Compute kinetic contributions for ForceFreeStates when kinetic_flag=true.
 This function is called from ForceFreeStates's Main.jl for kinetic EL calculations.
 
 # Arguments
-- `ctrl::PentrcControl`: PENTRC control parameters
+- `ctrl::KineticForcesControl`: PENTRC control parameters
 - `equil`: Equilibrium structure from ForceFreeStates
-- `intr::PentrcInternal`: Internal state with profile interpolants
+- `intr::KineticForcesInternal`: Internal state with profile interpolants
 - `ffit`: Fourier-fitted variables from ForceFreeStates
 
 # Returns
 - `Dict`: Dictionary containing kinetic matrix contributions to add to FourFit
          Keys: :fmat_kin, :gmat_kin, :kmat_kin (matrices to add to ForceFreeStates)
 """
-function compute_kinetic_contribution(ctrl::PentrcControl, equil, intr::PentrcInternal, ffit)
+function compute_kinetic_contribution(ctrl::KineticForcesControl, equil, intr::KineticForcesInternal, ffit)
 
     # Create result dictionary
     kinetic_results = Dict(

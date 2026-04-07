@@ -18,7 +18,7 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 - `method::String`: Integration method (RLAR, CLAR, *GAR, *TMM, *WMM, *KMM)
     where * = F,T,P for full,trapped,passing
 - `equil`: PlasmaEquilibrium with 2D interpolants
-- `intr::PentrcInternal`: Internal state with profile interpolants and geometry
+- `intr::KineticForcesInternal`: Internal state with profile interpolants and geometry
 
 # Optional Arguments
 - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
@@ -28,7 +28,7 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
-              electron::Bool, method::String, equil, intr::PentrcInternal;
+              electron::Bool, method::String, equil, intr::KineticForcesInternal;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing)
 
     if intr.verbose
@@ -216,7 +216,7 @@ Only valid for bounce harmonic l=0.
 
 Based on: [Logan et al., Phys. Plasmas 2013]
 """
-function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr::PentrcInternal)::ComplexF64
+function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr::KineticForcesInternal)::ComplexF64
 
     # Only implemented for l=0
     if l != 0

@@ -143,22 +143,22 @@ end
 
 
 """
-    setup_psi_grid(grid_type::String, equil, intr::PentrcInternal, 
-                   ctrl::PentrcControl)::Vector{Float64}
+    setup_psi_grid(grid_type::String, equil, intr::KineticForcesInternal, 
+                   ctrl::KineticForcesControl)::Vector{Float64}
 
 Set up poloidal flux grid for calculations based on specified type.
 
 # Arguments
 - `grid_type::String`: One of "equil", "input", or "lsode"
 - `equil`: Equilibrium structure
-- `intr::PentrcInternal`: Internal state with equilibrium data
-- `ctrl::PentrcControl`: Control parameters
+- `intr::KineticForcesInternal`: Internal state with equilibrium data
+- `ctrl::KineticForcesControl`: Control parameters
 
 # Returns
 - `Vector{Float64}`: Poloidal flux grid points
 """
-function setup_psi_grid(grid_type::String, equil, intr::PentrcInternal,
-                       ctrl::PentrcControl)::Vector{Float64}
+function setup_psi_grid(grid_type::String, equil, intr::KineticForcesInternal,
+                       ctrl::KineticForcesControl)::Vector{Float64}
     
     psi_grid = Float64[]
     
@@ -196,17 +196,17 @@ end
 
 
 """
-    get_psi_output_surfaces(ctrl::PentrcControl)::Vector{Float64}
+    get_psi_output_surfaces(ctrl::KineticForcesControl)::Vector{Float64}
 
 Get list of psi surfaces where detailed output is requested.
 
 # Arguments
-- `ctrl::PentrcControl`: Control parameters containing psi_out
+- `ctrl::KineticForcesControl`: Control parameters containing psi_out
 
 # Returns
 - `Vector{Float64}`: Valid psi values for output (0 < psi < 1)
 """
-function get_psi_output_surfaces(ctrl::PentrcControl)::Vector{Float64}
+function get_psi_output_surfaces(ctrl::KineticForcesControl)::Vector{Float64}
     
     psi_valid = Float64[]
     

@@ -8,15 +8,15 @@ Handles ASCII and NetCDF output formatting.
 using Printf
 
 """
-    init_output(outp::PentrcControl, dir_path::String)
+    init_output(outp::KineticForcesControl, dir_path::String)
 
 Initialize output directory and open file handles.
 
 # Arguments
-- `outp::PentrcControl`: Output configuration
+- `outp::KineticForcesControl`: Output configuration
 - `dir_path::String`: Working directory path
 """
-function init_output(ctrl::PentrcControl, dir_path::String)
+function init_output(ctrl::KineticForcesControl, dir_path::String)
 
     # Create output directory if it doesn't exist
     if !ispath(dir_path)
@@ -28,19 +28,19 @@ end
 
 
 """
-    write_torque_ascii(outp::PentrcControl, nn::Int, method::String, 
+    write_torque_ascii(outp::KineticForcesControl, nn::Int, method::String, 
                        psi::Vector{Float64}, torque::Vector{ComplexF64})
 
 Write torque calculation results to ASCII file.
 
 # Arguments
-- `outp::PentrcControl`: Output configuration
+- `outp::KineticForcesControl`: Output configuration
 - `nn::Int`: Toroidal mode number
 - `method::String`: Calculation method name
 - `psi::Vector{Float64}`: Poloidal flux values
 - `torque::Vector{ComplexF64}`: Computed torque values
 """
-function write_torque_ascii(ctrl::PentrcControl, intr::PentrcInternal, nn::Int, method::String,
+function write_torque_ascii(ctrl::KineticForcesControl, intr::KineticForcesInternal, nn::Int, method::String,
                            psi::Vector{Float64}, torque::Vector{ComplexF64})
 
     if !ctrl.output_torque || !ctrl.output_ascii
@@ -66,19 +66,19 @@ end
 
 
 """
-    write_orbit_ascii(outp::PentrcControl, nn::Int, psi::Float64, 
+    write_orbit_ascii(outp::KineticForcesControl, nn::Int, psi::Float64, 
                       theta::Vector{Float64}, orbit::Vector{ComplexF64})
 
 Write orbit/equilibrium data to ASCII file.
 
 # Arguments
-- `outp::PentrcControl`: Output configuration
+- `outp::KineticForcesControl`: Output configuration
 - `nn::Int`: Toroidal mode number
 - `psi::Float64`: Poloidal flux value
 - `theta::Vector{Float64}`: Poloidal angle array
 - `orbit::Vector{ComplexF64}`: Orbit data
 """
-function write_orbit_ascii(ctrl::PentrcControl, intr::PentrcInternal, nn::Int, psi::Float64,
+function write_orbit_ascii(ctrl::KineticForcesControl, intr::KineticForcesInternal, nn::Int, psi::Float64,
                           theta::Vector{Float64}, orbit::Vector{ComplexF64})
 
     if !ctrl.output_orbit || !ctrl.output_ascii
@@ -104,19 +104,19 @@ end
 
 
 """
-    write_energy_ascii(outp::PentrcControl, nn::Int, psi::Float64,
+    write_energy_ascii(outp::KineticForcesControl, nn::Int, psi::Float64,
                        xlmda::Vector{Float64}, energy::Vector{Float64})
 
 Write kinetic energy data to ASCII file.
 
 # Arguments
-- `outp::PentrcControl`: Output configuration
+- `outp::KineticForcesControl`: Output configuration
 - `nn::Int`: Toroidal mode number
 - `psi::Float64`: Poloidal flux value
 - `xlmda::Vector{Float64}`: Pitch angle array
 - `energy::Vector{Float64}`: Energy values
 """
-function write_energy_ascii(ctrl::PentrcControl, intr::PentrcInternal, nn::Int, psi::Float64,
+function write_energy_ascii(ctrl::KineticForcesControl, intr::KineticForcesInternal, nn::Int, psi::Float64,
                            xlmda::Vector{Float64}, energy::Vector{Float64})
 
     if !ctrl.output_ascii
@@ -141,15 +141,15 @@ end
 
 
 """
-    print_summary(intr::PentrcInternal, ctrl::PentrcControl)
+    print_summary(intr::KineticForcesInternal, ctrl::KineticForcesControl)
 
 Print summary information about computation to stdout.
 
 # Arguments
-- `intr::PentrcInternal`: Computation results
-- `ctrl::PentrcControl`: Control parameters
+- `intr::KineticForcesInternal`: Computation results
+- `ctrl::KineticForcesControl`: Control parameters
 """
-function print_summary(intr::PentrcInternal, ctrl::PentrcControl)
+function print_summary(intr::KineticForcesInternal, ctrl::KineticForcesControl)
     
     if !ctrl.verbose
         return

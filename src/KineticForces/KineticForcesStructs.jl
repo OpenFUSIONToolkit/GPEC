@@ -1,25 +1,15 @@
 """
-    PentrcStructs
+    KineticForcesControl
 
-Data structures for the PENTRC module.
-Follows the @kwdef mutable struct pattern used by ForceFreeStates and PerturbedEquilibrium.
-"""
-
-# ============================================================================
-# Control/Input Parameters (from TOML [PENTRC] section)
-# ============================================================================
-"""
-    PentrcControl
-
-User-facing control parameters from TOML [PENTRC] section.
+User-facing control parameters from the TOML `[KineticForces]` section.
 Configures which NTV methods to run, species parameters, tolerances, and output options.
 
 Constructed via keyword arguments or from a TOML dict:
 ```julia
-ctrl = PentrcControl(; (Symbol(k) => v for (k, v) in inputs["PENTRC"])...)
+ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForces"])...)
 ```
 """
-@kwdef mutable struct PentrcControl
+@kwdef mutable struct KineticForcesControl
     # Moment type
     moment::String = "pressure"     # "heat" or "pressure"
 
@@ -111,7 +101,7 @@ end
 # Internal State/Working Variables
 # ============================================================================
 """
-    PentrcInternal
+    KineticForcesInternal
 
 Internal working state for PENTRC calculations.
 Holds equilibrium-derived quantities, profile interpolants, and integration results.
@@ -122,7 +112,7 @@ Fields replacing former module-level globals:
 - `sq`, `kin`, `geom`: Profile interpolants
 - `dbob_m`, `divx_m`: Perturbation mode interpolants
 """
-@kwdef mutable struct PentrcInternal
+@kwdef mutable struct KineticForcesInternal
     dir_path::String = ""
 
     # Equilibrium-derived quantities (replaces former globals)
