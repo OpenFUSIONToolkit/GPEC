@@ -18,7 +18,7 @@ example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIII
 config_path = joinpath(example_path, "gpec.toml")
 output_dir = @__DIR__
 
-sigma_values = [1e-9, 1e-6, 1e-3]
+sigma_values = [1e-12, 1e-9, 1e-6]
 
 """
 Run GPEC with kinetic dummy matrices at the given σ. Returns (et, psi, xi_psi, nstep_total)
