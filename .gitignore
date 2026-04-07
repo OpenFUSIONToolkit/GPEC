@@ -1,4 +1,3 @@
-*.cov
 *.mod
 *.dylib
 *.dll
@@ -10,14 +9,11 @@
 .vscode
 *.DS_Store
 *.pdf
-!docs/resources/*.pdf
-*.png
-*.jld2
 .gitattributes
 Manifest.toml
-*.log
+build.log
 docs/build/
 anaconda_projects/
-modovmc
-pestotv
-*.csv
+src/Pentrc/*.f90
+src/Pentrc/*.f
+src/Pentrc/*.F90
