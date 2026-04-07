@@ -46,12 +46,10 @@ include("KineticForcesStructs.jl")
 include("Input.jl")
 include("Output.jl")
 include("Grid.jl")
-include("Utils.jl")
 
 # Core library functions
 include("Torque.jl")
 include("EnergyIntegration.jl")
-include("Special.jl")
 include("PitchIntegration.jl")
 
 # High-level computation functions
