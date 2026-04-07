@@ -332,8 +332,10 @@ function main(args::Vector{String}=String[])
         kf_ctrl = KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...
         )
-        kf_intr = KineticForces.KineticForcesInternal(; dir_path=intr.dir_path)
-        KineticForces.initialize_from_equilibrium!(kf_intr, equil)
+        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
+        if @isdefined(pe_state)
+            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr)
+        end
 
         kf_state = KineticForces.KineticForcesState()
         KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil)

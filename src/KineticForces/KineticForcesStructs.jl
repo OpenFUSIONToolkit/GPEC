@@ -106,9 +106,7 @@ Fields replacing former module-level globals:
 - `dbob_m`, `divx_m`: Perturbation mode interpolants
 """
 @kwdef mutable struct KineticForcesInternal
-    dir_path::String = ""
-
-    # Equilibrium-derived quantities (replaces former globals)
+    # Equilibrium-derived quantities
     ro::Float64 = 0.0              # Major radius [m]
     bo::Float64 = 0.0              # Toroidal field on axis [T]
     chi1::Float64 = 0.0            # 2π * ψ_o (flux normalization)
@@ -116,7 +114,7 @@ Fields replacing former module-level globals:
     mfac::Vector{Int} = Int[]      # Poloidal mode numbers
     nn::Int = 0                    # Toroidal mode number
 
-    # Profile interpolants (populated by initialize_from_equilibrium!)
+    # Profile interpolants (populated from PlasmaEquilibrium)
     sq::Any = nothing              # Safety factor + flux profiles
     kin::Any = nothing             # Kinetic profiles (n, T per species)
     geom::Any = nothing            # Geometric profiles
@@ -135,11 +133,6 @@ Fields replacing former module-level globals:
     # Method tracking
     method::String = ""
     wtw::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
-    psi_out_valid::Vector{Float64} = Float64[]
-    nvalid::Int = 0
-
-    # Status
-    flags::Vector{Bool} = fill(false, 18)
     methods::Vector{String} = [
         "fgar", "tgar", "pgar", "rlar", "clar", "fcgl",
         "fwmm", "twmm", "pwmm", "ftmm", "ttmm", "ptmm",
@@ -165,6 +158,35 @@ Fields replacing former module-level globals:
         "Passing MXM Euler–Lagrange torque matrix norm calculation"]
 
     verbose::Bool = false
+end
+
+"""
+    KineticForcesInternal(equil; verbose=false)
+
+Construct KineticForcesInternal from a PlasmaEquilibrium, extracting
+the equilibrium geometry parameters needed for NTV calculations.
+"""
+function KineticForcesInternal(equil; verbose::Bool=false)
+    KineticForcesInternal(;
+        ro      = equil.ro,
+        bo      = equil.params.b0,
+        chi1    = 2π * equil.psio,
+        mthsurf = length(equil.rzphi_ys) - 1,
+        verbose,
+    )
+end
+
+"""
+    set_perturbation_data!(kf_intr, pe_state, ffs_intr)
+
+Populate perturbation mode numbers from ForceFreeStatesInternal.
+Perturbation interpolants (dbob_m, divx_m) will be built from
+PerturbedEquilibriumState once the full pipeline is connected.
+"""
+function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_intr)
+    kf_intr.mfac = collect(ffs_intr.mlow:ffs_intr.mhigh)
+    kf_intr.nn = ffs_intr.nlow
+    # TODO: Build dbob_m and divx_m interpolants from pe_state.b_modes / pe_state.xi_modes
 end
 
 

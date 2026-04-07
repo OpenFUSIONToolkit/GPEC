@@ -22,7 +22,14 @@ For each method, integrates over flux surfaces in `intr.psi_grid` by calling
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
                                      ctrl::KineticForcesControl, equil)
 
-    flags = get_method_flags(ctrl)
+    flags = [
+        ctrl.fgar_flag, ctrl.tgar_flag, ctrl.pgar_flag,
+        ctrl.rlar_flag, ctrl.clar_flag, ctrl.fcgl_flag,
+        ctrl.fwmm_flag, ctrl.twmm_flag, ctrl.pwmm_flag,
+        ctrl.ftmm_flag, ctrl.ttmm_flag, ctrl.ptmm_flag,
+        ctrl.fkmm_flag, ctrl.tkmm_flag, ctrl.pkmm_flag,
+        ctrl.frmm_flag, ctrl.trmm_flag, ctrl.prmm_flag
+    ]
     psi_grid = intr.psi_grid
 
     for m in 1:length(intr.methods)

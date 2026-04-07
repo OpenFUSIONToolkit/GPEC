@@ -21,14 +21,12 @@ to MHD stability through torque and energy deposition calculations.
 
 ### Supporting Functions
 - `KineticForcesStructs.jl`: Data structures (KineticForcesControl, KineticForcesInternal)
-- `Input.jl`: Configuration reading and parsing
 - `Output.jl`: HDF5 output
 - `Grid.jl`: Grid management
 """
 
 using LinearAlgebra
 using LinearAlgebra.LAPACK
-using TOML
 using FFTW
 using OrdinaryDiffEq
 using HDF5
@@ -42,7 +40,6 @@ import ..Equilibrium
 
 # Supporting data structures and utilities
 include("KineticForcesStructs.jl")
-include("Input.jl")
 include("Output.jl")
 include("Grid.jl")
 
