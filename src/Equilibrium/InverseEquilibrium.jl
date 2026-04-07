@@ -179,7 +179,7 @@ function equilibrium_solver(input::InverseRunInput)
         error("Unsupported grid_type: $grid_type")
     end
     sq_fs = zeros(Float64, mpsi+1, 4)
-    sq = cubic_interp(sq_xs, sq_fs; extrap=ExtendExtrap())
+    sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
 
     # c-----------------------------------------------------------------------
     # c     prepare new bicube type for coordinates.
@@ -220,10 +220,10 @@ function equilibrium_solver(input::InverseRunInput)
             query_point = (psifac, theta)
             f_rsq = rz_rsq(query_point; hint=hint2d)
             f_deta = rz_deta(query_point; hint=hint2d)
-            fx_rsq = rz_rsq(query_point; deriv=(1, 0), hint=hint2d)
-            fx_deta = rz_deta(query_point; deriv=(1, 0), hint=hint2d)
-            fy_rsq = rz_rsq(query_point; deriv=(0, 1), hint=hint2d)
-            fy_deta = rz_deta(query_point; deriv=(0, 1), hint=hint2d)
+            fx_rsq = rz_rsq(query_point; deriv=DerivOp(1, 0), hint=hint2d)
+            fx_deta = rz_deta(query_point; deriv=DerivOp(1, 0), hint=hint2d)
+            fy_rsq = rz_rsq(query_point; deriv=DerivOp(0, 1), hint=hint2d)
+            fy_deta = rz_deta(query_point; deriv=DerivOp(0, 1), hint=hint2d)
 
             if f_rsq < 0
                 error("Invalid extrapolation near axis, rerun with larger value of psilow")
@@ -253,7 +253,7 @@ function equilibrium_solver(input::InverseRunInput)
         # (Numerical operations may have broken exact periodicity)
         @views spl_fs[end, :] .= spl_fs[1, :]
 
-        spl = cubic_interp(spl_xs, spl_fs; bc=PeriodicBC())
+        spl = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
         spl_xs .= spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
@@ -268,7 +268,7 @@ function equilibrium_solver(input::InverseRunInput)
         # then evaluate at the uniform SFL theta grid (rzphi_ys). This correctly
         # propagates the SFL coordinate transformation into the rzphi splines.
         # (Using spl.y directly would give pre-transformation values — wrong for eqfun.)
-        spl_post = cubic_interp(spl_xs, spl_fs; bc=PeriodicBC())
+        spl_post = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         hint_post = Ref(1)
         for itheta in 0:mtheta
             spl_post(spl_post_buf, rzphi_ys[itheta+1]; hint=hint_post)
@@ -281,7 +281,7 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[ipsi+1, 4] = spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
     end
 
-    sq = cubic_interp(sq_xs, sq_fs; extrap=ExtendExtrap())
+    sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
 
     # Access sq nodal values directly (evaluating at own knots returns stored data)
     f_sq = sq.y
@@ -303,7 +303,7 @@ function equilibrium_solver(input::InverseRunInput)
             sq_fs[ipsi+1, 4] *= ffac
             rzphi_fs[ipsi+1, :, 3] *= ffac
         end
-        sq = cubic_interp(sq_xs, sq_fs; extrap=ExtendExtrap())
+        sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
         f_sq = sq.y
         sq_deriv = deriv1(sq)
         f1_sq_hi = sq_deriv(sq_xs[end])

@@ -171,7 +171,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, fs_r; extrap=ExtendExtrap())
+    spl = cubic_interp(xs_r, Series(fs_r); extrap=ExtendExtrap())
     spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
@@ -212,7 +212,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    sq_in = cubic_interp(sq_xs, sq_fs; extrap=ExtendExtrap())
+    sq_in = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = r_nodes
     rz_in_ys = collect(rzphi_y_nodes)
@@ -283,7 +283,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
-    sq_in = cubic_interp(psis, sqfs; extrap=ExtendExtrap())
+    sq_in = cubic_interp(psis, Series(sqfs); extrap=ExtendExtrap())
 
     # Compute 2D data and spline
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]

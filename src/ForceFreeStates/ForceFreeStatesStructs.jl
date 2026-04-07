@@ -141,7 +141,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
@@ -320,13 +320,13 @@ end
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Y)
+    return cubic_interp(xs, Series(Y))
 end
 
 function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Y; itp_opts...)
+    return cubic_interp(xs, Series(Y); itp_opts...)
 end
 
 # Convenience constructor

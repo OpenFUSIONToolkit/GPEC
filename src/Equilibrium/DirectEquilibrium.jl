@@ -77,23 +77,23 @@ the Julia spline implementation.
         bf_out.psi = psi_in((r, z))
     elseif derivs == 1
         bf_out.psi = psi_in((r, z))
-        bf_out.psir = psi_in((r, z); deriv=(1, 0))
-        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
+        bf_out.psir = psi_in((r, z); deriv=DerivOp(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=DerivOp(0, 1))
     else # derivs >= 2
         bf_out.psi = psi_in((r, z))
-        bf_out.psir = psi_in((r, z); deriv=(1, 0))
-        bf_out.psiz = psi_in((r, z); deriv=(0, 1))
-        bf_out.psirr = psi_in((r, z); deriv=(2, 0))
-        bf_out.psirz = psi_in((r, z); deriv=(1, 1))
-        bf_out.psizz = psi_in((r, z); deriv=(0, 2))
+        bf_out.psir = psi_in((r, z); deriv=DerivOp(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=DerivOp(0, 1))
+        bf_out.psirr = psi_in((r, z); deriv=DerivOp(2, 0))
+        bf_out.psirz = psi_in((r, z); deriv=DerivOp(1, 1))
+        bf_out.psizz = psi_in((r, z); deriv=DerivOp(0, 2))
     end
 
     # Evaluate magnetic fields from equilibrium profiles
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    f_sq = acquire!(pool, eltype(sq_in.y), size(sq_in.y, 2))
-    f1_sq = acquire!(pool, eltype(sq_in_deriv.parent.y), size(sq_in_deriv.parent.y, 2))
+    f_sq = acquire!(pool, eltype(sq_in.y), n_series(sq_in))
+    f1_sq = acquire!(pool, eltype(sq_in_deriv.parent.y), n_series(sq_in_deriv.parent))
     sq_in(f_sq, psi_norm)
     sq_in_deriv(f1_sq, psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
@@ -570,7 +570,7 @@ robustness.
 
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
-        ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
+        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
         # Resample ff onto uniform theta grid

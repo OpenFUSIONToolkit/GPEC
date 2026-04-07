@@ -348,8 +348,8 @@ function adaptive_grid_params(
     # Required cell widths at each LCFS vertex from bilinear interpolation error formula
     if bbox_curve !== nothing
         for (R, Z) in Ctr.vertices(bbox_curve)
-            ψ_RR = abs(raw_profile.psi_in((R, Z); deriv=(2, 0)))
-            ψ_ZZ = abs(raw_profile.psi_in((R, Z); deriv=(0, 2)))
+            ψ_RR = abs(raw_profile.psi_in((R, Z); deriv=DerivOp(2, 0)))
+            ψ_ZZ = abs(raw_profile.psi_in((R, Z); deriv=DerivOp(0, 2)))
             ψ_RR > 0 && push!(dR_reqs, sqrt(8 * Δψ / ψ_RR))
             ψ_ZZ > 0 && push!(dZ_reqs, sqrt(8 * Δψ / ψ_ZZ))
         end
@@ -358,8 +358,8 @@ function adaptive_grid_params(
     # Axis constraint: global grid cell ≤ 0.2 × a_low (minimum semi-axis of innermost surface).
     # Using min(a_R, a_Z) for both directions matches the old scale_r/scale_z target_cell_frac
     # logic and ensures the constraint is the same in both directions.
-    ψ_RR_ax = abs(raw_profile.psi_in((ro, zo); deriv=(2, 0)))
-    ψ_ZZ_ax = abs(raw_profile.psi_in((ro, zo); deriv=(0, 2)))
+    ψ_RR_ax = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(2, 0)))
+    ψ_ZZ_ax = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(0, 2)))
     a_low_ax = min(sqrt(2 * psilow * psio / ψ_RR_ax), sqrt(2 * psilow * psio / ψ_ZZ_ax))
     push!(dR_reqs, 0.2 * a_low_ax)
     push!(dZ_reqs, 0.2 * a_low_ax)
@@ -446,8 +446,8 @@ function equilibrium_solver_by_inversion(
 
     # ψ curvature at axis: needed for near_axis_threshold and zoomed core grid sizing.
     # a_low = min semi-axis of the innermost flux surface (at psilow) from ψ ≈ ½|ψ_RR|dR².
-    ψ_RR_abs = abs(raw_profile.psi_in((ro, zo); deriv=(2, 0)))
-    ψ_ZZ_abs = abs(raw_profile.psi_in((ro, zo); deriv=(0, 2)))
+    ψ_RR_abs = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(2, 0)))
+    ψ_ZZ_abs = abs(raw_profile.psi_in((ro, zo); deriv=DerivOp(0, 2)))
     a_low = min(sqrt(2 * psilow * psio / ψ_RR_abs), sqrt(2 * psilow * psio / ψ_ZZ_abs))
 
     # Compute physics-based (n, β) from LCFS curvature sampling and axis constraint.

@@ -160,8 +160,8 @@ function make_kinetic_matrix(
 
     # Build splines for each of the 6 components
     for ic in 1:6
-        ffit.kwmats[ic] = cubic_interp(xs, @view(kw_flat[:, :, ic]); ffit.itp_opts...)
-        ffit.ktmats[ic] = cubic_interp(xs, @view(kt_flat[:, :, ic]); ffit.itp_opts...)
+        ffit.kwmats[ic] = cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...)
+        ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
     end
 
     # Pre-compute FKG derived matrices (default behavior, as in Fortran method=0)
@@ -316,15 +316,15 @@ function _compute_fkg_matrices!(
     end
 
     # Build FKG splines
-    ffit.f0mats = cubic_interp(xs, f0_flat; ffit.itp_opts...)
-    ffit.pmats = cubic_interp(xs, p_flat; ffit.itp_opts...)
-    ffit.paats = cubic_interp(xs, pa_flat; ffit.itp_opts...)
-    ffit.kkmats = cubic_interp(xs, kk_flat; ffit.itp_opts...)
-    ffit.kkaats = cubic_interp(xs, kka_flat; ffit.itp_opts...)
-    ffit.r1mats = cubic_interp(xs, r1_flat; ffit.itp_opts...)
-    ffit.r2mats = cubic_interp(xs, r2_flat; ffit.itp_opts...)
-    ffit.r3mats = cubic_interp(xs, r3_flat; ffit.itp_opts...)
-    ffit.gaats = cubic_interp(xs, ga_flat; ffit.itp_opts...)
+    ffit.f0mats = cubic_interp(xs, Series(f0_flat); ffit.itp_opts...)
+    ffit.pmats = cubic_interp(xs, Series(p_flat); ffit.itp_opts...)
+    ffit.paats = cubic_interp(xs, Series(pa_flat); ffit.itp_opts...)
+    ffit.kkmats = cubic_interp(xs, Series(kk_flat); ffit.itp_opts...)
+    ffit.kkaats = cubic_interp(xs, Series(kka_flat); ffit.itp_opts...)
+    ffit.r1mats = cubic_interp(xs, Series(r1_flat); ffit.itp_opts...)
+    ffit.r2mats = cubic_interp(xs, Series(r2_flat); ffit.itp_opts...)
+    ffit.r3mats = cubic_interp(xs, Series(r3_flat); ffit.itp_opts...)
+    ffit.gaats = cubic_interp(xs, Series(ga_flat); ffit.itp_opts...)
 
     # Preserve ideal A/B/C splines before overwrite (for mat_flag output)
     ffit.amats_ideal = ffit.amats
@@ -333,9 +333,9 @@ function _compute_fkg_matrices!(
 
     # Overwrite ideal A/B/C splines with kinetic-modified versions
     # sing_der! loads these when fkg_kmats_flag=true
-    ffit.amats = cubic_interp(xs, ak_flat; ffit.itp_opts...)
-    ffit.bmats = cubic_interp(xs, bk_flat; ffit.itp_opts...)
-    ffit.cmats = cubic_interp(xs, ck_flat; ffit.itp_opts...)
+    ffit.amats = cubic_interp(xs, Series(ak_flat); ffit.itp_opts...)
+    ffit.bmats = cubic_interp(xs, Series(bk_flat); ffit.itp_opts...)
+    ffit.cmats = cubic_interp(xs, Series(ck_flat); ffit.itp_opts...)
 
     return nothing
 end

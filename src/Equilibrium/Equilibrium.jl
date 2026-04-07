@@ -129,9 +129,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
         # ∂z/∂θ where z(θ) = zo + √r²(θ) · sin(2π(θ + η(θ)))
         function z_deriv(theta_inner)
             r2 = pe.rzphi_rsquared((psi_edge, theta_inner); hint=hint2d)
-            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=(0, 1), hint=hint2d)
+            r2y = pe.rzphi_rsquared((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
             η = pe.rzphi_offset((psi_edge, theta_inner); hint=hint2d)
-            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=(0, 1), hint=hint2d)
+            η1 = pe.rzphi_offset((psi_edge, theta_inner); deriv=DerivOp(0, 1), hint=hint2d)
             rfac_local = sqrt(max(0.0, r2))
             rfac1 = (rfac_local > 0) ? r2y / (2 * rfac_local) : 0.0
             phase1 = 2π * (1 + η1)
@@ -428,10 +428,10 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
     for ipsi in 0:mpsi
         for itheta in 0:mtheta
             query_point = (equil.rzphi_xs[ipsi+1], equil.rzphi_ys[itheta+1])
-            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=(1, 0), hint=hint2d)
-            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=(1, 0), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=(0, 1), hint=hint2d)
-            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=(0, 1), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=DerivOp(1, 0), hint=hint2d)
+            flux_fsx[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=DerivOp(1, 0), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 1] = flux1(query_point; deriv=DerivOp(0, 1), hint=hint2d)
+            flux_fsy[ipsi+1, itheta+1, 2] = flux2(query_point; deriv=DerivOp(0, 1), hint=hint2d)
         end
     end
 
@@ -472,7 +472,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix[:, 2] = source[ipsi, :]
 
         # Compute total integral using FastInterpolations native integration
-        itp = cubic_interp(equil.rzphi_ys, fs_matrix; bc=PeriodicBC())
+        itp = cubic_interp(equil.rzphi_ys, Series(fs_matrix); bc=PeriodicBC())
         term[ipsi, :] .= FastInterpolations.integrate(itp)
     end
 
