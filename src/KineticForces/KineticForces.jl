@@ -1,57 +1,30 @@
-module PENTRC 
+module KineticForces
 
 """
-PENTRC - Perturbed Equilibrium Nonambipolar Transport Code
+KineticForces - Kinetic torque and energy calculations for perturbed equilibria
 
-A Julia implementation of the PENTRC code for calculating kinetic effects
-on equilibrium stability through torque and energy deposition calculations.
-
-Can operate in two modes:
-1. Standalone: Calculate kinetic torque/energy for a given equilibrium
-2. Library: Provide kinetic contributions to ForceFreeStates's stability analysis (kinetic_flag=true)
+Calculates neoclassical toroidal viscosity (NTV) and kinetic energy contributions
+to MHD stability through torque and energy deposition calculations.
 
 ## Module Structure
 
-### [Tier 1] Core Library Functions (Low-level)
-These functions are designed to be called from both PENTRC and ForceFreeStates:
-- `Torque.jl`: tpsi!() - Core torque calculation (low-level API)
-- `Energy.jl`: Kinetic energy calculations
-- `Pitch.jl`: Pitch angle dependent calculations
+### Core Library Functions
+- `Torque.jl`: tpsi!() - Core torque calculation at a single flux surface
+- `EnergyIntegration.jl`: ODE-based energy-space integration
+- `PitchIntegration.jl`: ODE-based pitch-angle integration
 
-### [Tier 2] High-level Computation Functions
-Orchestrates Tier 1 functions for specific use cases:
-- `Compute.jl`: Main computational routines
+### High-level Computation
+- `Compute.jl`: Orchestration routines
   - compute_torque_all_methods!()
   - compute_matrix_calculation!()
   - compute_kinetic_contribution() ← Called by ForceFreeStates when kinetic_flag=true
 
-### [Tier 3] Standalone Program
-Only used for independent PENTRC execution:
-- `Main.jl`: Entry point Main(path::String)
-
-### [Tier 4] Supporting Functions
-- `PentrcStructs.jl`: Data structures (PentrcControl, PentrcInternal)
+### Supporting Functions
+- `KineticForcesStructs.jl`: Data structures (KineticForcesControl, KineticForcesInternal)
 - `Input.jl`: Configuration reading and parsing
-- `Output.jl`: File I/O and formatting
-- `Grid.jl`: Grid management and manipulation
+- `Output.jl`: HDF5 output
+- `Grid.jl`: Grid management
 - `Utils.jl`: Common utilities
-
-## Public API
-
-### For PENTRC standalone:
-```julia
-PENTRC.Main("/path/to/config")
-```
-
-### For ForceFreeStates kinetic_flag=true:
-```julia
-kinetic_results = PENTRC.compute_kinetic_contribution(ctrl, equil, ffit)
-```
-
-### For direct torque calculation:
-```julia
-tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method)
-```
 """
 
 using LinearAlgebra
@@ -111,4 +84,4 @@ const rad2deg = 180 / π
 const deg2rad = π / 180
 const iunit = 1im               # equivalent to Fortran's (0,1)
 
-end  # module PENTRC
+end  # module KineticForces

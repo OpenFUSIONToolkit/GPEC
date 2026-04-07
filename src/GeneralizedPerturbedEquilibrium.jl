@@ -25,9 +25,9 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
-include("Pentrc/pentrc.jl")
-import .PENTRC as PENTRC
-export PENTRC
+include("KineticForces/KineticForces.jl")
+import .KineticForces as KineticForces
+export KineticForces
 
 include("Analysis/Analysis.jl")
 import .Analysis as Analysis
@@ -323,20 +323,20 @@ function main(args::Vector{String}=String[])
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
     # ----------------------------------------------------------------
-    # PENTRC (Neoclassical Toroidal Viscosity)
+    # KineticForces (Neoclassical Toroidal Viscosity)
     # ----------------------------------------------------------------
-    if "PENTRC" in keys(inputs)
-        @info "\n  PENTRC\n$_SECTION"
-        pentrc_start = time()
+    if "KineticForces" in keys(inputs)
+        @info "\n  KineticForces\n$_SECTION"
+        kf_start = time()
 
-        pentrc_ctrl = PENTRC.PentrcControl(;
-            (Symbol(k) => v for (k, v) in inputs["PENTRC"])...
+        kf_ctrl = KineticForces.KineticForcesControl(;
+            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...
         )
-        pentrc_intr = PENTRC.PentrcInternal(; dir_path=intr.dir_path)
-        PENTRC.initialize_from_equilibrium!(pentrc_intr, equil)
-        PENTRC.compute_torque_all_methods!(pentrc_intr, pentrc_ctrl, equil)
+        kf_intr = KineticForces.KineticForcesInternal(; dir_path=intr.dir_path)
+        KineticForces.initialize_from_equilibrium!(kf_intr, equil)
+        KineticForces.compute_torque_all_methods!(kf_intr, kf_ctrl, equil)
 
-        @info "PENTRC completed in $(@sprintf("%.3f", time() - pentrc_start)) s"
+        @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
     end
 
     # ----------------------------------------------------------------
