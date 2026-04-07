@@ -160,12 +160,15 @@ p2 = plot(; layout=(length(m_values), 1), size=(900, 250 * length(m_values)),
     left_margin=14Plots.mm, bottom_margin=6Plots.mm, right_margin=4Plots.mm)
 
 for (im, m) in enumerate(m_values)
+    m_idx = m - mlow + 1
+    ideal_ymax = 0.0
+
     # Plot ideal reference first
     if ideal !== nothing
-        m_idx = m - mlow + 1
         if 1 <= m_idx <= size(ideal.xi_psi, 1)
             # xi_psi is (numpert_total, numpert_total, nstep) — take norm across solution vectors
             profile = [sqrt(sum(abs2, ideal.xi_psi[m_idx, :, istep])) for istep in 1:length(ideal.psi)]
+            ideal_ymax = maximum(profile)
             plot!(p2, ideal.psi, profile;
                 subplot=im, label=(im == 1 ? "Ideal" : ""), color=:black, lw=2, ls=:dash)
         end
@@ -175,7 +178,6 @@ for (im, m) in enumerate(m_values)
     for (isig, sigma) in enumerate(sigma_values)
         haskey(results, sigma) || continue
         r = results[sigma]
-        m_idx = m - mlow + 1
         if 1 <= m_idx <= size(r.xi_psi, 1)
             profile = [sqrt(sum(abs2, r.xi_psi[m_idx, :, istep])) for istep in 1:length(r.psi)]
             lbl = (im == 1) ? @sprintf("σ=%.0e", sigma) : ""
@@ -184,8 +186,11 @@ for (im, m) in enumerate(m_values)
         end
     end
 
+    # Scale y-axis based on ideal profile maximum (with 20% headroom)
+    ymax = ideal_ymax > 0 ? 1.5 * ideal_ymax : nothing
     plot!(p2; subplot=im, ylabel="m=$m |ξ_ψ|",
-        xlabel=(im == length(m_values) ? "ψ" : ""))
+        xlabel=(im == length(m_values) ? "ψ" : ""),
+        ylims=(ymax !== nothing ? (0, ymax) : :auto))
 end
 plot!(p2; plot_title="Eigenmode Profiles: Kinetic σ Scan")
 
