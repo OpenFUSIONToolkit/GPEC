@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="760" viewBox="0 0 960 760">
+<rect width="100%" height="100%" fill="#f8f8f8"/>
+<text x="80" y="40" font-size="24" font-family="Helvetica" fill="#111">TGAR local profile comparison (ell = 1)</text>
+<text x="80" y="68" font-size="14" font-family="Helvetica" fill="#444">Blue: Fortran points + line, Orange: Julia line, x-axis: psi</text>
+<rect x="80.0" y="110.0" width="820.0" height="250.0" fill="white" stroke="#cccccc"/>
+<line x1="80.0" y1="360.0" x2="900.0" y2="360.0" stroke="#333" stroke-width="1"/>
+<line x1="80.0" y1="110.0" x2="80.0" y2="360.0" stroke="#333" stroke-width="1"/>
+<text x="80.0" y="98.0" font-size="18" font-family="Helvetica" fill="#111">Real part</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="2.5" points="80.00,342.58 327.43,342.63 517.83,342.52 583.69,342.55 660.19,342.63 797.97,342.61 827.27,342.76 850.08,342.28 866.34,307.40 900.00,145.81"/>
+<polyline fill="none" stroke="#d95f02" stroke-width="2.5" points="80.00,342.61 327.43,342.62 517.83,342.47 583.69,342.49 660.19,342.62 797.97,342.56 827.27,342.08 850.08,295.71 866.34,299.48 900.00,127.24"/>
+<circle cx="80.00" cy="342.58" r="3.2" fill="#1f77b4"/>
+<circle cx="327.43" cy="342.63" r="3.2" fill="#1f77b4"/>
+<circle cx="517.83" cy="342.52" r="3.2" fill="#1f77b4"/>
+<circle cx="583.69" cy="342.55" r="3.2" fill="#1f77b4"/>
+<circle cx="660.19" cy="342.63" r="3.2" fill="#1f77b4"/>
+<circle cx="797.97" cy="342.61" r="3.2" fill="#1f77b4"/>
+<circle cx="827.27" cy="342.76" r="3.2" fill="#1f77b4"/>
+<circle cx="850.08" cy="342.28" r="3.2" fill="#1f77b4"/>
+<circle cx="866.34" cy="307.40" r="3.2" fill="#1f77b4"/>
+<circle cx="900.00" cy="145.81" r="3.2" fill="#1f77b4"/>
+<text x="80.0" y="382.0" font-size="12" font-family="Helvetica" fill="#333">psi min = 0.020, psi max = 0.992</text>
+<text x="310.0" y="382.0" font-size="12" font-family="Helvetica" fill="#333">y min = -2.474e-01, y max = 3.313e+00</text>
+<rect x="80.0" y="430.0" width="820.0" height="250.0" fill="white" stroke="#cccccc"/>
+<line x1="80.0" y1="680.0" x2="900.0" y2="680.0" stroke="#333" stroke-width="1"/>
+<line x1="80.0" y1="430.0" x2="80.0" y2="680.0" stroke="#333" stroke-width="1"/>
+<text x="80.0" y="418.0" font-size="18" font-family="Helvetica" fill="#111">Imaginary part</text>
+<polyline fill="none" stroke="#1f77b4" stroke-width="2.5" points="80.00,574.90 327.43,575.73 517.83,569.55 583.69,571.89 660.19,575.76 797.97,574.68 827.27,570.93 850.08,543.29 866.34,587.92 900.00,520.75"/>
+<polyline fill="none" stroke="#d95f02" stroke-width="2.5" points="80.00,575.09 327.43,575.59 517.83,568.59 583.69,570.47 660.19,575.71 797.97,573.39 827.27,559.16 850.08,447.24 866.34,597.17 900.00,662.76"/>
+<circle cx="80.00" cy="574.90" r="3.2" fill="#1f77b4"/>
+<circle cx="327.43" cy="575.73" r="3.2" fill="#1f77b4"/>
+<circle cx="517.83" cy="569.55" r="3.2" fill="#1f77b4"/>
+<circle cx="583.69" cy="571.89" r="3.2" fill="#1f77b4"/>
+<circle cx="660.19" cy="575.76" r="3.2" fill="#1f77b4"/>
+<circle cx="797.97" cy="574.68" r="3.2" fill="#1f77b4"/>
+<circle cx="827.27" cy="570.93" r="3.2" fill="#1f77b4"/>
+<circle cx="850.08" cy="543.29" r="3.2" fill="#1f77b4"/>
+<circle cx="866.34" cy="587.92" r="3.2" fill="#1f77b4"/>
+<circle cx="900.00" cy="520.75" r="3.2" fill="#1f77b4"/>
+<text x="80.0" y="702.0" font-size="12" font-family="Helvetica" fill="#333">psi min = 0.020, psi max = 0.992</text>
+<text x="310.0" y="702.0" font-size="12" font-family="Helvetica" fill="#333">y min = -4.593e+00, y max = 6.438e+00</text>
+</svg>

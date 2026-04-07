@@ -1,0 +1,73 @@
+&PENT_INPUT
+    kinetic_file="g147131.02300_DIIID_KEFIT.kin"
+    peq_file  = "gpec_xclebsch_n1.out"
+    pmodb_file = "gpec_pmodb_n1.out"
+    idconfile = "euler.bin"
+    data_dir = "/Users/iseonjae/Desktop/GPEC/pentrc"
+
+    mi = 2
+    zi = 1
+    mimp = 12
+    zimp = 6
+    nl = 4
+    electron = .false.
+    nutype = "harmonic"
+    f0type = "maxwellian"
+    jac_in = "hamada"
+    jsurf_in = 0
+    tmag_in = 1
+/
+&PENT_CONTROL
+    wefac = 1
+    wdfac = 1
+    wpfac = 1
+    nufac = 1
+    divxfac = 1
+
+    force_xialpha = .false.
+
+    atol_xlmda = 1e-9
+    rtol_xlmda = 1e-5
+    atol_psi = 1e-3
+    rtol_psi = 1e-4
+    ntheta = 128
+    nlmda = 128
+
+    xmax = 128
+    ximag = 0.0
+    psilims = 0 1
+/
+&PENT_OUTPUT
+    moment = "pressure"
+
+    fgar_flag = .false.
+    tgar_flag = .false.
+    pgar_flag = .true.
+    clar_flag = .false.
+    rlar_flag = .false.
+    fcgl_flag = .false.
+    wxyz_flag = .false.
+    fkmm_flag = .false.
+    ftmm_flag = .false.
+    fwmm_flag = .false.
+
+    xlmda_out = .false.
+    theta_out = .false.
+    psi_out = 0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9
+
+    dynamic_grid = .false.
+    equil_grid = .true.
+    input_grid = .false.
+
+    verbose = .true.
+    clean = .false.
+/
+&PENT_ADMIN
+    fnml_flag = .false.
+    ellip_flag = .false.
+    diag_flag = .false.
+    indebug = .false.
+    tdebug = .false.
+    lambdadebug = .false.
+    xdebug = .false.
+/
