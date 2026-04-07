@@ -127,7 +127,6 @@ Fields replacing former module-level globals:
     teq::ComplexF64 = 0.0 + 0.0im     # Equilibrium grid result
 
     # Grid
-    grid_type::String = "equil"
     psi_grid::Vector{Float64} = Float64[]
 
     # Method tracking
