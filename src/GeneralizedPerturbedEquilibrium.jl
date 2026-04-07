@@ -472,6 +472,16 @@ function write_outputs_to_HDF5(
         out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
         out_h5["vacuum/y_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
         out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
+
+        # Write kinetic parameters when kinetic mode is enabled
+        if ctrl.kin_flag
+            out_h5["kinetic/kin_source"] = ctrl.kin_source
+            out_h5["kinetic/kin_dummy_sigma"] = ctrl.kin_dummy_sigma
+            out_h5["kinetic/con_flag"] = ctrl.con_flag
+            out_h5["kinetic/kinfac1"] = ctrl.kinfac1
+            out_h5["kinetic/kinfac2"] = ctrl.kinfac2
+            out_h5["kinetic/fkg_kmats_flag"] = intr.fkg_kmats_flag
+        end
     end
 end
 
