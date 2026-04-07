@@ -1,127 +1,80 @@
-# PERTURBED EQUILIBRIUM NONAMBIPOLAR TRANSPORT CODE
-
 """
-energy_integration module
+    EnergyIntegration
 
-DESCRIPTION:
-    Functional form of the energy integrand as found in
-    [Logan, Park, et al., Phys. Plasma, 2013] and various integration
-    methods.
-
-PUBLIC MEMBER FUNCTIONS:
-    xintgnd             - Resonance operator Eq. (20)
-    xintgrl_lsode       - Dynamic energy integration
-    xintrgl_spline      - Spline integration
-
-PUBLIC DATA MEMBERS:
-    xatol               - absolute tolerance of lsode
-    xrtol               - relative tolerance of lsode
-
-REVISION HISTORY:
-    2014.03.06 -Logan- initial writing.
-    2025.11.30 -Fairborn- Converted to Julia 
-    Converted using Claude AI for first pass
-
-AUTHOR: Logan
-EMAIL: nikolas.logan@columbia.edu
+Energy-space ODE integration for the kinetic resonance operator.
+Implements the energy integrand from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 """
 
 using OrdinaryDiffEq
-using Printf
 
 # Integration defaults
-xatol = 1e-12
-xrtol = 1e-9
-xmax = 72.0
-ximag = 0.00
-xnufac = 1.00
-xnutype = "harmonic"
-xf0type = "maxwellian"
-qt = false
-
-# Module variables for internal use
-const maxstep = 10000
-energy_imaxis = false
-
-# Module-level state for energy integrand (passed via closure in commit 8)
-const energy_state = Dict{Symbol,Any}(
-    :energy_n => 0,
-    :energy_wn => 0.0,
-    :energy_wt => 0.0,
-    :energy_we => 0.0,
-    :energy_wd => 0.0,
-    :energy_wb => 0.0,
-    :energy_nuk => 0.0,
-    :energy_leff => 0.0
-)
-
-get_energy_var(key) = energy_state[key]
-set_energy_var!(key, val) = (energy_state[key] = val)
+const ENERGY_XMAX = 72.0
+const ENERGY_MAXITERS = 10000
 
 """
-    xintgrl_lsode(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method; op_record=false)
+    EnergyParams
 
-Dynamic energy integration using ODE solver. Module global variables
-xatol, xrtol are used for tolerances and xmax, ximag are used
-to define integration path (0->i*ximag, i*ximag->xmax+i*ximag).
+Parameters passed to the energy ODE integrand via the ODE problem's `p` field.
+"""
+struct EnergyParams
+    wn::Float64       # density gradient diamagnetic drift frequency
+    wt::Float64       # temperature gradient diamagnetic drift frequency
+    we::Float64       # electric precession frequency
+    wd::Float64       # magnetic precession frequency
+    wb::Float64       # bounce frequency / sqrt(x)
+    nuk::Float64      # effective Krook collision frequency
+    leff::Float64     # effective bounce harmonic
+    n::Int            # toroidal mode number
+    nutype::String    # collision operator type
+    f0type::String    # distribution function type
+    nufac::Float64    # collisionality scaling factor
+    ximag::Float64    # imaginary contour offset
+    qt::Bool          # heat flux calculation flag
+    imag_axis::Bool   # true when integrating along imaginary axis
+end
 
-Module global variable xnutype is used to determine collision
-operator. Default is harmonic, and valid choices are:
-    "zero" : collisionless
-    "small" : 1e-6*(we+wd) (krook value ignored)
-    "krook" : krook operator (unmodified argument)
-    "harmonic" : (1+(l/2)^2)*krook*x^-3/2
+"""
+    integrate_energy_ode(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
+                         nutype="harmonic", f0type="maxwellian", nufac=1.0,
+                         ximag=0.0, qt=false,
+                         atol=1e-12, rtol=1e-9)::ComplexF64
 
-Module's global variable xf0type is used to determine
-denominator. Default is "maxwellian" and valid options are:
-    "maxwellian" : x^(5/2)*exp(-x)
+Integrate the kinetic resonance operator over normalized energy x = E/T.
+Uses OrdinaryDiffEq/Tsit5 adaptive ODE solver.
 
-Pro-tip: To calculate offset rotation use we=-wn-wt.
+The integration path optionally steps off the real axis (0 → i*ximag)
+then integrates along (0 → xmax + i*ximag) to handle poles.
 
-# Arguments
-- `wn`: density gradient diamagnetic drift frequency
-- `wt`: temperature gradient diamagnetic drift frequency
-- `we`: electric precession frequency
-- `wd`: magnetic precession frequency
-- `wb`: bounce frequency divided by x (x=E/T)
-- `nuk`: effective Krook collision frequency (i.e. /2eps for trapped)
-- `ell`: Bounce harmonic
-- `leff`: effective bounce harmonic ell-sigma*n*q where sigma=0(1) for trapped(passing)
-- `n`: toroidal mode number
-- `psi`: Flux surface (for record keeping only)
-- `lambda`: Normalized pitch angle muB0/E (for record keeping only)
-- `method`: Integration method name
-- `op_record`: Store integration energy-space profile in memory
+Collision operator types (`nutype`):
+- `"zero"`: collisionless
+- `"small"`: 1e-5 * we
+- `"krook"`: unmodified Krook operator
+- `"harmonic"`: (1 + (l/2)^2) * krook * x^(-3/2)
+
+Distribution function types (`f0type`):
+- `"maxwellian"`: standard Maxwellian, Eq. (8) of [Logan, Park, et al., 2013]
+- `"jkp"`: Jong-Kyu Park approximation [Park, Boozer, Menard, PRL 2009]
+- `"cgl"`: Chew-Goldberger-Low limit
 
 # Returns
-- `ComplexF64`: energy integral
+- `ComplexF64`: energy integral value
 """
-function xintgrl_lsode(wn::Float64, wt::Float64, we::Float64, wd::Float64,
-                       wb::Float64, nuk::Float64, ell::Int, leff::Float64,
-                       n::Int, psi::Float64, lambda::Float64, method::String)
+function integrate_energy_ode(wn::Float64, wt::Float64, we::Float64, wd::Float64,
+                              wb::Float64, nuk::Float64, ell::Int, leff::Float64,
+                              n::Int, psi::Float64, lambda::Float64, method::String;
+                              nutype::String="harmonic", f0type::String="maxwellian",
+                              nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+                              atol::Float64=1e-12, rtol::Float64=1e-9)::ComplexF64
 
-    # Set module-level variables for access in integrand
-    set_energy_var!(:energy_wn, wn)
-    set_energy_var!(:energy_wt, wt)
-    set_energy_var!(:energy_we, we)
-    set_energy_var!(:energy_wd, wd)
-    set_energy_var!(:energy_wb, wb)
-    set_energy_var!(:energy_nuk, nuk)
-    set_energy_var!(:energy_leff, leff)
-    set_energy_var!(:energy_n, n)
-    
-    y = [0.0, 0.0]   # [real, imag] parts of integral
-    yi = [0.0, 0.0]  # Integration along imaginary axis
-    
+    y = [0.0, 0.0]    # [real, imag] parts of integral
+    yi = [0.0, 0.0]   # Integration along imaginary axis
+
     # Optionally step off real axis to avoid poles
     if ximag != 0.0
-        global energy_imaxis = true
-        x_start = 1e-15
-        x_end = ximag
-
-        prob = ODEProblem(xintgrnd!, yi, (x_start, x_end))
-        sol = solve(prob, Tsit5();
-                    abstol=xatol, reltol=xrtol, maxiters=maxstep)
+        p_imag = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
+                              nutype, f0type, nufac, ximag, qt, true)
+        prob = ODEProblem(energy_integrand!, yi, (1e-15, ximag), p_imag)
+        sol = solve(prob, Tsit5(); abstol=atol, reltol=rtol, maxiters=ENERGY_MAXITERS)
         yi = sol.u[end]
 
         if sol.retcode != :Success
@@ -129,110 +82,69 @@ function xintgrl_lsode(wn::Float64, wt::Float64, we::Float64, wd::Float64,
         end
     end
 
-    # Integration in real space to xmax
-    global energy_imaxis = false
-    x_start = 1e-15
-    x_end = xmax
-
-    prob = ODEProblem(xintgrnd!, y, (x_start, x_end))
-    sol = solve(prob, Tsit5();
-                abstol=xatol, reltol=xrtol, maxiters=maxstep)
+    # Integration along real axis to xmax
+    p_real = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
+                          nutype, f0type, nufac, ximag, qt, false)
+    prob = ODEProblem(energy_integrand!, y, (1e-15, ENERGY_XMAX), p_real)
+    sol = solve(prob, Tsit5(); abstol=atol, reltol=rtol, maxiters=ENERGY_MAXITERS)
     y = sol.u[end]
 
     if sol.retcode != :Success
-        @warn "xintgrl_lsode failed at psi=$psi, lambda=$lambda, leff=$leff. Consider complex contour (ximag>0)."
+        @warn "integrate_energy_ode failed at psi=$psi, lambda=$lambda, leff=$leff. Consider complex contour (ximag>0)."
     end
-    
-    # Return complex integral
+
     return ComplexF64(y[1] + yi[1], y[2] + yi[2])
 end
 
 """
-    xintgrnd!(ydot, y, p, x)
+    energy_integrand!(ydot, y, p::EnergyParams, x)
 
-Energy integrand (y) as a function of normalized energy (x) as
-defined in Eq. (8) of [Logan, Park, et al., Phys. Plasma, 2013].
-
-This is the ODE form for DifferentialEquations.jl
+Energy integrand as a function of normalized energy x = E/T.
+Implements the resonance operator from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 
 # Arguments
-- `ydot`: Output derivative [real, imag]
-- `y`: Current state [real integral, imag integral]
-- `p`: Parameters (unused, for DifferentialEquations.jl compatibility)
-- `x`: Normalized energy (E/T)
+- `ydot`: output derivative [real(f), imag(f)]
+- `y`: current state (unused by the integrand, integral accumulates via ODE solver)
+- `p::EnergyParams`: physical parameters and integration mode
+- `x`: normalized energy E/T
 """
-function xintgrnd!(ydot, y, p, x)
-    # Complex contour determined by global variable
-    cx = energy_imaxis ? im * x : x + im * ximag
-    
-    # Get thread-local variables
-    energy_wn = get_energy_var(:energy_wn)
-    energy_wt = get_energy_var(:energy_wt)
-    energy_we = get_energy_var(:energy_we)
-    energy_wd = get_energy_var(:energy_wd)
-    energy_wb = get_energy_var(:energy_wb)
-    energy_nuk = get_energy_var(:energy_nuk)
-    energy_leff = get_energy_var(:energy_leff)
-    energy_n = get_energy_var(:energy_n)
-    
-    # Collisionality determined by global variable
-    if xnutype == "zero"
-        nux = 0.0
-    elseif xnutype == "small"
-        nux = 1e-5 * energy_we
-    elseif xnutype == "krook"
-        nux = energy_nuk
-    elseif xnutype == "harmonic"
-        if x == 0
-            nux = floatmax(Float64)  # Avoid 0^-3 = NaN
-        else
-            nux = energy_nuk * (1 + 0.25 * energy_leff^2) * cx^(-1.5)
-        end
+function energy_integrand!(ydot, y, p::EnergyParams, x)
+    cx = p.imag_axis ? im * x : x + im * p.ximag
+
+    # Collision frequency
+    nux = if p.nutype == "zero"
+        0.0
+    elseif p.nutype == "small"
+        1e-5 * p.we
+    elseif p.nutype == "krook"
+        p.nuk
+    elseif p.nutype == "harmonic"
+        x == 0 ? floatmax(Float64) : p.nuk * (1 + 0.25 * p.leff^2) * cx^(-1.5)
     else
-        error("ERROR: xintgrnd - nutype must be zero, small, krook, or harmonic")
+        error("nutype must be zero, small, krook, or harmonic")
     end
-    nux = xnufac * nux
-    
-    # Zeroth order distribution behavior
-    denom = im * (energy_leff * energy_wb * sqrt(cx) + 
-                  energy_n * (energy_we + energy_wd * cx)) - nux
-    
-    if xf0type == "maxwellian"
-        # Standard solution from [Logan, Park, et al., Phys. Plasma, 2013]
-        fx = (energy_we + energy_wn + energy_wt * (cx - 1.5)) * 
-             cx^2.5 * exp(-cx) / denom
-    elseif xf0type == "jkp"
-        # Jong-Kyu Park [Park,Boozer,Menard, PRL 2009] approx neoclassical offset
-        fx = (energy_we + energy_wn + energy_wt * 2) * 
-             cx^2.5 * exp(-cx) / denom
-    elseif xf0type == "cgl"
-        # Chew-Goldberger-Low limit (we+wd -> inf)
-        fx = cx^2.5 * exp(-cx) / (im * energy_n) / 1.0
+    nux = p.nufac * nux
+
+    # Resonance denominator: i*(l_eff*wb*sqrt(x) + n*(we + wd*x)) - nu
+    denom = im * (p.leff * p.wb * sqrt(cx) + p.n * (p.we + p.wd * cx)) - nux
+
+    # Distribution function contribution
+    fx = if p.f0type == "maxwellian"
+        (p.we + p.wn + p.wt * (cx - 1.5)) * cx^2.5 * exp(-cx) / denom
+    elseif p.f0type == "jkp"
+        (p.we + p.wn + p.wt * 2) * cx^2.5 * exp(-cx) / denom
+    elseif p.f0type == "cgl"
+        cx^2.5 * exp(-cx) / (im * p.n)
     else
-        error("ERROR: xintgrnd - f0 type must be maxwellian, jkp, or cgl")
+        error("f0type must be maxwellian, jkp, or cgl")
     end
-    
-    # Heat flux calculation
-    if qt
+
+    # Heat flux moment
+    if p.qt
         fx = (cx - 2.5) * fx
     end
-    
-    if false  # Debug output
-        println("nutype = ", xnutype)
-        println("f0type = ", xf0type)
-        println("ximag  = ", ximag)
-        println("imaxis = ", energy_imaxis)
-        println("omegas = ", energy_wn, " ", energy_wt, " ", energy_we, " ", 
-                energy_wd, " ", energy_wb, " ", energy_nuk)
-        println("n,l    = ", energy_n, " ", energy_leff)
-        println("x      = ", x)
-        println("fx     = ", fx)
-    end
-    
-    # Decouple two real space solutions
+
     ydot[1] = real(fx)
     ydot[2] = imag(fx)
-    
     return nothing
 end
-

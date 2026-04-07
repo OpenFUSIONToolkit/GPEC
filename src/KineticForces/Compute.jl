@@ -10,7 +10,8 @@ Orchestrates torque/energy calculations across multiple methods.
                                 ctrl::KineticForcesControl, equil)
 
 Calculate torque/energy for all enabled methods using ODE integration.
-Results accumulate in `state`.
+For each method, integrates over flux surfaces in `intr.psi_grid` by calling
+`tpsi!()` at each surface.  Results accumulate in `state`.
 
 # Arguments
 - `state::KineticForcesState`: Accumulates results for all methods
@@ -22,6 +23,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                                      ctrl::KineticForcesControl, equil)
 
     flags = get_method_flags(ctrl)
+    psi_grid = intr.psi_grid
 
     for m in 1:length(intr.methods)
         if !flags[m]
@@ -34,26 +36,45 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         if ctrl.verbose
             println("---------------------------------------------")
             println("$method - $(intr.docs[m])")
-            println("$method - Calculating using dynamic integration")
         end
 
-        tphi = tintgrl_lsode(ctrl.psilims, ctrl.nn, ctrl.nl, ctrl.zi, ctrl.mi,
-                              ctrl.wdfac, ctrl.divxfac, ctrl.electron, method)
-        intr.tphi = tphi
+        # Integrate over flux surfaces
+        npsi = length(psi_grid)
+        torque_vs_psi = zeros(ComplexF64, npsi)
+        energy_vs_psi = zeros(ComplexF64, npsi)
+        tpsi_val = Ref{ComplexF64}(0.0 + 0.0im)
 
-        # Store result in state
+        for i in 1:npsi
+            tpsi!(tpsi_val, psi_grid[i], ctrl.nn, ctrl.nl, ctrl.zi, ctrl.mi,
+                  ctrl.wdfac, ctrl.divxfac, ctrl.electron, method, equil, intr)
+            torque_vs_psi[i] = tpsi_val[]
+            energy_vs_psi[i] = complex(0.0, imag(tpsi_val[]) / (2 * ctrl.nn))
+        end
+
+        # Trapezoidal integration for total torque
+        total_torque = ComplexF64(0.0, 0.0)
+        for i in 2:npsi
+            dpsi = psi_grid[i] - psi_grid[i-1]
+            total_torque += 0.5 * (torque_vs_psi[i-1] + torque_vs_psi[i]) * dpsi
+        end
+
         result = MethodResult(;
             method=method,
             nn=ctrl.nn,
-            total_torque=tphi,
-            total_energy=complex(0.0, imag(tphi) / (2 * ctrl.nn))
+            psi_grid=copy(psi_grid),
+            torque_vs_psi=torque_vs_psi,
+            energy_vs_psi=energy_vs_psi,
+            total_torque=total_torque,
+            total_energy=complex(0.0, imag(total_torque) / (2 * ctrl.nn))
         )
         state.method_results[method] = result
 
         if ctrl.verbose
-            @printf("%-24s%11.3e\n", "Total torque = ", real(tphi))
-            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(tphi) / (2 * ctrl.nn))
-            @printf("%-24s%11.3e\n", "alpha/s  = ", real(tphi) / (-1 * imag(tphi)))
+            @printf("%-24s%11.3e\n", "Total torque = ", real(total_torque))
+            @printf("%-24s%11.3e\n", "Total Kinetic Energy = ", imag(total_torque) / (2 * ctrl.nn))
+            if imag(total_torque) != 0.0
+                @printf("%-24s%11.3e\n", "alpha/s  = ", real(total_torque) / (-1 * imag(total_torque)))
+            end
             println("$method - Finished")
             println("---------------------------------------------")
         end

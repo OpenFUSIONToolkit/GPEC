@@ -285,9 +285,9 @@ function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
     # Maximum pitch angle parameter (use safe estimate)
     lmdamax = min(1.0/(1-epsr), bo/bmin)
 
-    # Energy space integration via LSODE
+    # Energy space ODE integration
     # This computes ∫ K(x) dx where K is the resonance operator
-    xint = xintgrl_lsode(wdian, wdiat, welec, wdhat, wbhat, nueff,
+    xint = integrate_energy_ode(wdian, wdiat, welec, wdhat, wbhat, nueff,
                          l, lnq, n, psi, lmdamax, "rlar")
 
     # Kappa/bounce averaging (effect of field perturbations)

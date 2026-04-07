@@ -12,7 +12,7 @@ Power-law grid spacing is available via `Utilities.powspace()`.
 Set up poloidal flux grid for calculations based on specified type.
 
 # Arguments
-- `grid_type::String`: One of "equil", "input", or "lsode"
+- `grid_type::String`: One of "equil" or "input"
 - `equil`: Equilibrium structure
 - `intr::KineticForcesInternal`: Internal state with equilibrium data
 - `ctrl::KineticForcesControl`: Control parameters
@@ -37,11 +37,6 @@ function setup_psi_grid(grid_type::String, equil, intr::KineticForcesInternal,
         # Use input displacement perturbation grid
         # TODO: Implement based on input file structure
         error("Input grid not yet implemented")
-        
-    elseif grid_type == "lsode"
-        # Use LSODE integration grid
-        # This is computed adaptively during integration
-        psi_grid = ctrl.psilims  # Start with limits, will be populated during ODE solve
         
     else
         error("Unknown grid type: $grid_type")
