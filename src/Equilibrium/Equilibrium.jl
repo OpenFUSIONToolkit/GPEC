@@ -17,6 +17,7 @@ include("DirectEquilibriumArcLength.jl")
 include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
+include("KineticProfiles.jl")
 
 # --- Expose types and functions to the user ---
 export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
