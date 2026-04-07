@@ -1,182 +1,99 @@
 """
     Output
 
-Output file management for PENTRC results.
-Handles ASCII and NetCDF output formatting.
+HDF5 output for KineticForces results.
+All results accumulate in KineticForcesState during computation,
+then write to gpec.h5 in a single pass.
 """
 
-using Printf
-
 """
-    init_output(outp::KineticForcesControl, dir_path::String)
+    write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
 
-Initialize output directory and open file handles.
+Write all KineticForces results to the "kinetic_forces" group in gpec.h5.
 
 # Arguments
-- `outp::KineticForcesControl`: Output configuration
-- `dir_path::String`: Working directory path
+- `h5file::HDF5.File`: Open HDF5 file handle
+- `state::KineticForcesState`: Accumulated computation results
 """
-function init_output(ctrl::KineticForcesControl, dir_path::String)
+function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
+    g = create_group(h5file, "kinetic_forces")
 
-    # Create output directory if it doesn't exist
-    if !ispath(dir_path)
-        mkpath(dir_path)
-    end
+    for (method_name, result) in state.method_results
+        mg = create_group(g, method_name)
+        mg["nn"] = result.nn
+        mg["psi"] = result.psi_grid
+        mg["torque_real"] = real.(result.torque_vs_psi)
+        mg["torque_imag"] = imag.(result.torque_vs_psi)
+        mg["energy_real"] = real.(result.energy_vs_psi)
+        mg["energy_imag"] = imag.(result.energy_vs_psi)
+        mg["total_torque"] = [real(result.total_torque), imag(result.total_torque)]
+        mg["total_energy"] = [real(result.total_energy), imag(result.total_energy)]
 
-    return dir_path
-end
-
-
-"""
-    write_torque_ascii(outp::KineticForcesControl, nn::Int, method::String, 
-                       psi::Vector{Float64}, torque::Vector{ComplexF64})
-
-Write torque calculation results to ASCII file.
-
-# Arguments
-- `outp::KineticForcesControl`: Output configuration
-- `nn::Int`: Toroidal mode number
-- `method::String`: Calculation method name
-- `psi::Vector{Float64}`: Poloidal flux values
-- `torque::Vector{ComplexF64}`: Computed torque values
-"""
-function write_torque_ascii(ctrl::KineticForcesControl, intr::KineticForcesInternal, nn::Int, method::String,
-                           psi::Vector{Float64}, torque::Vector{ComplexF64})
-
-    if !ctrl.output_torque || !ctrl.output_ascii
-        return
-    end
-
-    nstring = @sprintf("%4d", nn)
-    fname = joinpath(intr.dir_path, "pentrc_torque_$(method)_n$(strip(nstring)).out")
-    
-    open(fname, "w") do f
-        println(f, "PENTRC TORQUE CALCULATION")
-        println(f, "Method: $method")
-        println(f, "Toroidal mode number: $nn")
-        println(f)
-        @printf(f, "%16s %20s %20s\n", "psi", "Re(Torque)", "Im(Energy)")
-        
-        for i in eachindex(psi)
-            @printf(f, "%16.8e %20.12e %20.12e\n", 
-                    psi[i], real(torque[i]), imag(torque[i]))
+        if !isempty(result.records)
+            write_integration_records!(mg, result.records)
         end
     end
 end
 
-
 """
-    write_orbit_ascii(outp::KineticForcesControl, nn::Int, psi::Float64, 
-                      theta::Vector{Float64}, orbit::Vector{ComplexF64})
+    write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
 
-Write orbit/equilibrium data to ASCII file.
+Write variable-length ODE trajectory records using offset-indexed concatenated arrays.
+This is the standard HDF5 ragged array pattern for storing variable-length data.
 
 # Arguments
-- `outp::KineticForcesControl`: Output configuration
-- `nn::Int`: Toroidal mode number
-- `psi::Float64`: Poloidal flux value
-- `theta::Vector{Float64}`: Poloidal angle array
-- `orbit::Vector{ComplexF64}`: Orbit data
+- `mg::HDF5.Group`: HDF5 group for this method
+- `records::Vector{EnergyIntegrationResult}`: Integration records to write
 """
-function write_orbit_ascii(ctrl::KineticForcesControl, intr::KineticForcesInternal, nn::Int, psi::Float64,
-                          theta::Vector{Float64}, orbit::Vector{ComplexF64})
+function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
+    rg = create_group(mg, "records")
+    n = length(records)
 
-    if !ctrl.output_orbit || !ctrl.output_ascii
-        return
-    end
+    # Scalar fields per record
+    rg["psi"] = [r.psi for r in records]
+    rg["lambda"] = [r.lambda for r in records]
+    rg["ell"] = [r.ell for r in records]
+    rg["leff"] = [r.leff for r in records]
+    rg["torque_real"] = [real(r.torque) for r in records]
+    rg["torque_imag"] = [imag(r.torque) for r in records]
+    rg["kinetic_energy_real"] = [real(r.kinetic_energy) for r in records]
+    rg["kinetic_energy_imag"] = [imag(r.kinetic_energy) for r in records]
 
-    nstring = @sprintf("%4d", nn)
-    pstring = @sprintf("%.4f", psi)
-    fname = joinpath(intr.dir_path, "pentrc_orbit_n$(strip(nstring))_psi$(strip(pstring)).out")
-    
-    open(fname, "w") do f
-        println(f, "PENTRC ORBIT DATA")
-        println(f, "Toroidal mode: $nn, psi = $psi")
-        println(f)
-        @printf(f, "%16s %20s %20s\n", "theta", "Re(Data)", "Im(Data)")
-        
-        for i in eachindex(theta)
-            @printf(f, "%16.8e %20.12e %20.12e\n",
-                    theta[i], real(orbit[i]), imag(orbit[i]))
-        end
+    # Variable-length trajectories: concatenate all, store offsets for indexing
+    lengths = [length(r.x_trajectory) for r in records]
+    offsets = cumsum([0; lengths])
+    rg["trajectory_offsets"] = offsets
+
+    if sum(lengths) > 0
+        rg["x_all"] = vcat([r.x_trajectory for r in records]...)
+        rg["integrand_real_all"] = vcat([real.(r.integrand_trajectory) for r in records]...)
+        rg["integrand_imag_all"] = vcat([imag.(r.integrand_trajectory) for r in records]...)
+        rg["integral_real_all"] = vcat([real.(r.integral_trajectory) for r in records]...)
+        rg["integral_imag_all"] = vcat([imag.(r.integral_trajectory) for r in records]...)
     end
 end
 
 
 """
-    write_energy_ascii(outp::KineticForcesControl, nn::Int, psi::Float64,
-                       xlmda::Vector{Float64}, energy::Vector{Float64})
+    print_summary(state::KineticForcesState; verbose::Bool=false)
 
-Write kinetic energy data to ASCII file.
+Print a summary of KineticForces results to stdout.
 
 # Arguments
-- `outp::KineticForcesControl`: Output configuration
-- `nn::Int`: Toroidal mode number
-- `psi::Float64`: Poloidal flux value
-- `xlmda::Vector{Float64}`: Pitch angle array
-- `energy::Vector{Float64}`: Energy values
+- `state::KineticForcesState`: Accumulated computation results
+- `verbose::Bool`: Print detailed per-surface results
 """
-function write_energy_ascii(ctrl::KineticForcesControl, intr::KineticForcesInternal, nn::Int, psi::Float64,
-                           xlmda::Vector{Float64}, energy::Vector{Float64})
-
-    if !ctrl.output_ascii
-        return
-    end
-
-    nstring = @sprintf("%4d", nn)
-    pstring = @sprintf("%.4f", psi)
-    fname = joinpath(intr.dir_path, "pentrc_energy_n$(strip(nstring))_psi$(strip(pstring)).out")
-    
-    open(fname, "w") do f
-        println(f, "PENTRC KINETIC ENERGY")
-        println(f, "Toroidal mode: $nn, psi = $psi")
-        println(f)
-        @printf(f, "%16s %20s\n", "pitch angle", "energy")
-        
-        for i in eachindex(xlmda)
-            @printf(f, "%16.8e %20.12e\n", xlmda[i], energy[i])
+function print_summary(state::KineticForcesState; verbose::Bool=false)
+    for (method_name, result) in state.method_results
+        @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
+                method_name, real(result.total_torque), imag(result.total_torque))
+        if verbose && !isempty(result.psi_grid)
+            for i in eachindex(result.psi_grid)
+                @printf("  psi = %8.5f  T = %11.3e + %11.3e i\n",
+                        result.psi_grid[i],
+                        real(result.torque_vs_psi[i]),
+                        imag(result.torque_vs_psi[i]))
+            end
         end
     end
-end
-
-
-"""
-    print_summary(intr::KineticForcesInternal, ctrl::KineticForcesControl)
-
-Print summary information about computation to stdout.
-
-# Arguments
-- `intr::KineticForcesInternal`: Computation results
-- `ctrl::KineticForcesControl`: Control parameters
-"""
-function print_summary(intr::KineticForcesInternal, ctrl::KineticForcesControl)
-    
-    if !ctrl.verbose
-        return
-    end
-    
-    println()
-    println("=" * 60)
-    println("PENTRC SUMMARY")
-    println("=" * 60)
-    
-    println("Method: $(intr.method)")
-    println("Toroidal mode: $(ctrl.nn)")
-    println("Bounce harmonic range: $(ctrl.nl)")
-    println()
-    
-    println("Results:")
-    if ctrl.dynamic_grid
-        @printf("  Total torque (dynamic): %12.4e\n", real(intr.tphi))
-        @printf("  Total energy (dynamic): %12.4e\n", imag(intr.tphi)/(2*ctrl.nn))
-    end
-    
-    if ctrl.equil_grid || ctrl.input_grid
-        @printf("  Total torque (grid): %12.4e\n", real(intr.teq))
-        @printf("  Total energy (grid): %12.4e\n", imag(intr.teq)/(2*ctrl.nn))
-    end
-    
-    println()
-    println("=" * 60)
-    println()
 end

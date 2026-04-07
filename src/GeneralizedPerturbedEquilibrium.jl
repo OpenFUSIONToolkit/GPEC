@@ -334,7 +334,15 @@ function main(args::Vector{String}=String[])
         )
         kf_intr = KineticForces.KineticForcesInternal(; dir_path=intr.dir_path)
         KineticForces.initialize_from_equilibrium!(kf_intr, equil)
-        KineticForces.compute_torque_all_methods!(kf_intr, kf_ctrl, equil)
+
+        kf_state = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil)
+
+        if kf_ctrl.write_outputs_to_HDF5
+            h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                KineticForces.write_to_hdf5!(h5file, kf_state)
+            end
+        end
 
         @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
     end

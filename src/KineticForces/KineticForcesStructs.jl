@@ -33,11 +33,6 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     trmm_flag::Bool = false         # Trapped MXM E-L torque matrix norm
     prmm_flag::Bool = false         # Passing MXM E-L torque matrix norm
 
-    # Grid integration flags
-    equil_grid::Bool = true         # Integrate on equilibrium grid
-    input_grid::Bool = false        # Integrate on input grid
-    dynamic_grid::Bool = true       # Dynamic LSODE integration
-
     # Plasma species parameters
     zi::Int = 1                     # Ion charge (fundamental units)
     mi::Int = 2                     # Ion mass (proton masses)
@@ -78,9 +73,7 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     # Output configuration
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    output_ascii::Bool = false
-    output_torque::Bool = true
-    output_orbit::Bool = false
+    save_records::Bool = false      # Save detailed ODE integration trajectories
 
     # Input files (relative to dir_path)
     kinetic_file::String = "kinetic.dat"
@@ -172,4 +165,54 @@ Fields replacing former module-level globals:
         "Passing MXM Euler–Lagrange torque matrix norm calculation"]
 
     verbose::Bool = false
+end
+
+
+# ============================================================================
+# Result Structs
+# ============================================================================
+
+"""
+    EnergyIntegrationResult
+
+Results from a single energy-space ODE integration at one (ψ, λ, ℓ) point.
+Trajectory fields are only populated when `ctrl.save_records=true`.
+"""
+@kwdef struct EnergyIntegrationResult
+    psi::Float64 = 0.0
+    lambda::Float64 = 0.0
+    ell::Int = 0
+    leff::Float64 = 0.0
+    torque::ComplexF64 = 0.0 + 0.0im
+    kinetic_energy::ComplexF64 = 0.0 + 0.0im
+    x_trajectory::Vector{Float64} = Float64[]
+    integrand_trajectory::Vector{ComplexF64} = ComplexF64[]
+    integral_trajectory::Vector{ComplexF64} = ComplexF64[]
+end
+
+"""
+    MethodResult
+
+Results for one NTV computation method across all flux surfaces.
+"""
+@kwdef mutable struct MethodResult
+    method::String = ""
+    nn::Int = 0
+    psi_grid::Vector{Float64} = Float64[]
+    torque_vs_psi::Vector{ComplexF64} = ComplexF64[]
+    energy_vs_psi::Vector{ComplexF64} = ComplexF64[]
+    total_torque::ComplexF64 = 0.0 + 0.0im
+    total_energy::ComplexF64 = 0.0 + 0.0im
+    records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
+end
+
+"""
+    KineticForcesState
+
+Accumulated results from all KineticForces computations.
+Written to gpec.h5 under the "kinetic_forces" group.
+"""
+@kwdef mutable struct KineticForcesState
+    method_results::Dict{String, MethodResult} = Dict{String, MethodResult}()
+    completed::Bool = false
 end

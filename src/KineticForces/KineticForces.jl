@@ -24,7 +24,6 @@ to MHD stability through torque and energy deposition calculations.
 - `Input.jl`: Configuration reading and parsing
 - `Output.jl`: HDF5 output
 - `Grid.jl`: Grid management
-- `Utils.jl`: Common utilities
 """
 
 using LinearAlgebra
