@@ -57,10 +57,6 @@ include("PitchIntegration.jl")
 # High-level computation functions
 include("Compute.jl")
 
-# Standalone program entry point
-include("Main.jl")
-
-# ============================================================================
 # Global constants
 # ============================================================================
 const mp = 1.672_614e-27      # proton mass (kg)

@@ -1,183 +1,16 @@
 """
     Input
 
-Input reading and parsing for PENTRC module.
-Handles namelists, TOML files, and equilibrium data.
+Input reading and parsing for the KineticForces module.
 """
 
 using TOML
 using DelimitedFiles
 
 """
-    read_pentrc_config(config_path::String)::KineticForcesControl
-
-Read PENTRC configuration from TOML file and return KineticForcesControl structure.
-Provides sensible defaults for missing parameters.
-
-# Arguments
-- `config_path::String`: Path to pentrc.toml configuration file
-
-# Returns
-- `KineticForcesControl`: Control structure with all parameters
-"""
-function read_pentrc_config(config_path::String)::KineticForcesControl
-    
-    # Load TOML file
-    if !isfile(config_path)
-        error("Configuration file not found: $config_path")
-    end
-    cfg = TOML.parsefile(config_path)
-    
-    # Get PENTRC section or use whole file
-    pentrc_cfg = get(cfg, "PENTRC", cfg)
-    
-    # Helper function for safe extraction with defaults
-    function get_cfg(key::String, default)
-        return get(pentrc_cfg, key, default)
-    end
-    
-    # Moment type
-    moment = get_cfg("moment", "pressure")
-    qt = moment == "heat"
-    
-    # Method flags
-    fgar_flag = get_cfg("fgar_flag", true)
-    tgar_flag = get_cfg("tgar_flag", false)
-    pgar_flag = get_cfg("pgar_flag", false)
-    rlar_flag = get_cfg("rlar_flag", false)
-    clar_flag = get_cfg("clar_flag", false)
-    fcgl_flag = get_cfg("fcgl_flag", false)
-    wxyz_flag = get_cfg("wxyz_flag", false)
-    fkmm_flag = get_cfg("fkmm_flag", false)
-    tkmm_flag = get_cfg("tkmm_flag", false)
-    pkmm_flag = get_cfg("pkmm_flag", false)
-    frmm_flag = get_cfg("frmm_flag", false)
-    trmm_flag = get_cfg("trmm_flag", false)
-    prmm_flag = get_cfg("prmm_flag", false)
-    fwmm_flag = get_cfg("fwmm_flag", false)
-    twmm_flag = get_cfg("twmm_flag", false)
-    pwmm_flag = get_cfg("pwmm_flag", false)
-    ftmm_flag = get_cfg("ftmm_flag", false)
-    ttmm_flag = get_cfg("ttmm_flag", false)
-    ptmm_flag = get_cfg("ptmm_flag", false)
-    
-    # Output flags
-    eq_out = get_cfg("eq_out", false)
-    theta_out = get_cfg("theta_out", false)
-    xlmda_out = get_cfg("xlmda_out", false)
-    eqpsi_out = get_cfg("eqpsi_out", false)
-    output_ascii = get_cfg("output_ascii", true)
-    output_netcdf = get_cfg("output_netcdf", false)
-    output_orbit = get_cfg("output_orbit", false)
-    output_ffuns = get_cfg("output_ffuns", false)
-    output_torque = get_cfg("output_torque", true)
-    
-    # Grid flags
-    equil_grid = get_cfg("equil_grid", false)
-    input_grid = get_cfg("input_grid", false)
-    dynamic_grid = get_cfg("dynamic_grid", true)
-    
-    # Diagnostic flags
-    fnml_flag = get_cfg("fnml_flag", false)
-    ellip_flag = get_cfg("ellip_flag", false)
-    diag_flag = get_cfg("diag_flag", false)
-    term_flag = get_cfg("term_flag", false)
-    force_xialpha = get_cfg("force_xialpha", false)
-    clean = get_cfg("clean", true)
-    
-    # Plasma species
-    zi = Int(get_cfg("zi", 1))
-    mi = Int(get_cfg("mi", 2))
-    zimp = Int(get_cfg("zimp", 6))
-    mimp = Int(get_cfg("mimp", 12))
-    electron = get_cfg("electron", false)
-    
-    # Mode numbers
-    nl = Int(get_cfg("nl", 0))
-    nn = Int(get_cfg("nn", 1))
-    
-    # Grid parameters
-    tmag_in = Int(get_cfg("tmag_in", 1))
-    jsurf_in = Int(get_cfg("jsurf_in", 0))
-    power_bin = Int(get_cfg("power_bin", -1))
-    power_bpin = Int(get_cfg("power_bpin", -1))
-    power_rin = Int(get_cfg("power_rin", -1))
-    power_rcin = Int(get_cfg("power_rcin", -1))
-    
-    # Thread control
-    pentrc_threads = Int(get_cfg("pentrc_threads", 0))
-    openmp_threads = Int(get_cfg("openmp_threads", 0))
-    
-    # Tolerances
-    atol_xlmda = Float64(get_cfg("atol_xlmda", 1e-6))
-    rtol_xlmda = Float64(get_cfg("rtol_xlmda", 1e-3))
-    
-    # Scaling factors
-    nfac = Float64(get_cfg("nfac", 1.0))
-    tfac = Float64(get_cfg("tfac", 1.0))
-    wefac = Float64(get_cfg("wefac", 1.0))
-    wdfac = Float64(get_cfg("wdfac", 1.0))
-    wpfac = Float64(get_cfg("wpfac", 1.0))
-    nufac = Float64(get_cfg("nufac", 1.0))
-    divxfac = Float64(get_cfg("divxfac", 1.0))
-    
-    # Diagnostic parameters
-    diag_psi = Float64(get_cfg("diag_psi", 0.7))
-    psi_out_raw = get_cfg("psi_out", fill(-1.0, 30))
-    psi_out = isa(psi_out_raw, Vector) ? Float64.(psi_out_raw) : [Float64(psi_out_raw)]
-    psilims = Float64.(get_cfg("psilims", [0.0, 1.0]))
-    
-    # Set default psi_out if user didn't specify
-    if all(psi_out .== -1)
-        psi_out = collect(1:30) ./ 30.6
-    end
-    
-    # File and path parameters
-    data_dir = get_cfg("data_dir", ".")
-    nutype = get_cfg("nutype", "harmonic")
-    f0type = get_cfg("f0type", "maxwellian")
-    jac_in = get_cfg("jac_in", "default")
-    
-    idconfile = get_cfg("idconfile", "euler.bin")
-    kinetic_file = get_cfg("kinetic_file", "kin.dat")
-    gpec_file = get_cfg("gpec_file", "gpec_order1_n1.bin")
-    peq_file = get_cfg("peq_file", "")
-    pmodb_file = get_cfg("pmodb_file", "none")
-    
-    # Debugging
-    verbose = get_cfg("verbose", false)
-    indebug = get_cfg("indebug", false)
-    
-    # Create and return control structure
-    return KineticForcesControl(
-        moment, qt,
-        fgar_flag, tgar_flag, pgar_flag, rlar_flag, clar_flag, fcgl_flag, wxyz_flag,
-        fkmm_flag, tkmm_flag, pkmm_flag, frmm_flag, trmm_flag, prmm_flag,
-        fwmm_flag, twmm_flag, pwmm_flag, ftmm_flag, ttmm_flag, ptmm_flag,
-        eq_out, theta_out, xlmda_out, eqpsi_out,
-        output_ascii, output_netcdf, output_orbit, output_ffuns, output_torque,
-        equil_grid, input_grid, dynamic_grid,
-        fnml_flag, ellip_flag, diag_flag, term_flag, force_xialpha, clean,
-        zi, mi, zimp, mimp, electron,
-        nl, nn,
-        tmag_in, jsurf_in, power_bin, power_bpin, power_rin, power_rcin,
-        pentrc_threads, openmp_threads,
-        atol_xlmda, rtol_xlmda,
-        nfac, tfac, wefac, wdfac, wpfac, nufac, divxfac,
-        diag_psi, psi_out, psilims,
-        data_dir, nutype, f0type, jac_in,
-        idconfile, kinetic_file, gpec_file, peq_file, pmodb_file,
-        verbose, indebug
-    )
-end
-
-"""
     get_method_flags(ctrl::KineticForcesControl)::Vector{Bool}
 
 Extract method flags from control structure in correct order.
-
-# Returns
-- `Vector{Bool}`: Flags in order [fgar, tgar, ..., prmm]
 """
 function get_method_flags(ctrl::KineticForcesControl)::Vector{Bool}
     return [
@@ -188,42 +21,6 @@ function get_method_flags(ctrl::KineticForcesControl)::Vector{Bool}
         ctrl.fkmm_flag, ctrl.tkmm_flag, ctrl.pkmm_flag,
         ctrl.frmm_flag, ctrl.trmm_flag, ctrl.prmm_flag
     ]
-end
-
-
-# ============================================================================
-# Initialization functions (PENTRC setup)
-# ============================================================================
-
-"""
-    initialize_pentrc(ctrl::KineticForcesControl, equil)
-
-Initialize PENTRC with equilibrium and kinetic data.
-Called both when PENTRC runs standalone and when ForceFreeStates kinetic_flag=true.
-
-# Arguments
-- `ctrl::KineticForcesControl`: Configuration from config file
-- `equil`: Equilibrium structure from ForceFreeStates
-
-# Side effects
-- Loads kinetic profiles
-- Sets up equilibrium splines
-- Initializes perturbation data
-"""
-function initialize_pentrc(ctrl::KineticForcesControl, equil)
-    
-    # TODO: Implement full initialization
-    # 1. Read kinetic profiles (read_kin)
-    # 2. Set up equilibrium (set_eq)
-    # 3. Read perturbations (read_peq, set_peq)
-    # 4. Validate all data
-    
-    if ctrl.verbose
-        println("Initializing PENTRC...")
-    end
-    
-    # Stub implementation - will be expanded
-    return nothing
 end
 
 
