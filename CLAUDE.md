@@ -95,9 +95,9 @@ GPEC will eventually implement resistive MHD stability analysis based on:
   - Published: Physics of Plasmas **27**, 122509 (2020)
   - Describes: Asymptotic matching for resistive plasma response
 
-### PENTRC Module (Future Work)
+### KineticForces Module (NTV)
 
-GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality from the Fortran GPEC suite. This is described in:
+The KineticForces module (formerly PENTRC) implements neoclassical toroidal viscosity calculations. Based on:
 
 - **Logan & Park (2013)**: "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry"
   - Location: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturbed_equilibria_with_general_tokamak_geometry.pdf`
@@ -107,7 +107,7 @@ GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 - **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
   - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
   - Published: PhD Thesis, Princeton University (2015)
-  - Describes: Complete PENTRC theory and implementation
+  - Describes: Complete NTV theory and implementation
 
 ### Additional References
 

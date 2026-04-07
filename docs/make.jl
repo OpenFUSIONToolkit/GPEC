@@ -31,7 +31,7 @@ makedocs(;
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
             "Analysis" => "analysis.md",
-            "PENTRC" => "pentrc.md"
+            "KineticForces" => "kinetic_forces.md"
         ],
         "Citations" => "citations.md",
     ],

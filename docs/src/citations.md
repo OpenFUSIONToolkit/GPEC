@@ -104,7 +104,7 @@ Local PDF: `docs/resources/2011-Park-Physics_of_Plasmas_Kinetic_energy_principle
 > J.-K. Park et al., "Self-consistent perturbed equilibrium with neoclassical toroidal torque in tokamaks,"
 > *Physics of Plasmas* **24**, 032505 (2017).
 
-Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV). Provides the theoretical foundation for the PENTRC functionality (future work in GPEC).
+Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV). Provides the theoretical foundation for the KineticForces module (NTV calculations).
 
 Local PDF: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_neoclassical_toroidal_torque_in_toka.pdf`
 
@@ -147,16 +147,16 @@ Local PDF: `docs/resources/2020-Wang-Modeling of resistive plasma response in to
 
 ---
 
-## Future Work — PENTRC / Neoclassical Toroidal Viscosity
+## KineticForces / Neoclassical Toroidal Viscosity
 
-The following papers describe the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality to be ported from the Fortran GPEC suite.
+The following papers describe the KineticForces module (formerly PENTRC — Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code).
 
 ### Logan & Park (2013)
 
 > N. C. Logan and J.-K. Park, "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry,"
 > *Physics of Plasmas* **20**, 122507 (2013).
 
-Derives the neoclassical toroidal viscosity (NTV) torque in perturbed equilibria for general tokamak geometry, providing the theoretical basis for PENTRC.
+Derives the neoclassical toroidal viscosity (NTV) torque in perturbed equilibria for general tokamak geometry, providing the theoretical basis for the KineticForces module.
 
 Local PDF: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturbed_equilibria_with_general_tokamak_geometry.pdf`
 
@@ -167,7 +167,7 @@ Local PDF: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturb
 > N. C. Logan, "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries,"
 > PhD Thesis, Princeton University (2015).
 
-Provides the complete PENTRC theory and implementation details, including NTV in the presence of finite collisionality and general magnetic geometry.
+Provides the complete theory and implementation details, including NTV in the presence of finite collisionality and general magnetic geometry.
 
 Local PDF: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
 

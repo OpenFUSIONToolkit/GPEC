@@ -27,9 +27,9 @@ end
 """
     read_equil(equil; verbose=false)
 
-Initialize PENTRC equilibrium data from a PlasmaEquilibrium.
+Initialize KineticForces equilibrium data from a PlasmaEquilibrium.
 In the Julia implementation, equilibrium data is passed directly in memory
-rather than read from binary files as in the Fortran PENTRC.
+rather than read from binary files as in the Fortran KineticForces.
 
 # Arguments
 - `equil`: PlasmaEquilibrium from Equilibrium module
@@ -37,9 +37,9 @@ rather than read from binary files as in the Fortran PENTRC.
 """
 function read_equil(equil; verbose=false)
     if verbose
-        println("Initializing PENTRC equilibrium from PlasmaEquilibrium")
+        println("Initializing KineticForces equilibrium from PlasmaEquilibrium")
     end
-    # TODO: Extract PENTRC-specific profiles (sq, geom, kin) from equil
+    # TODO: Extract KineticForces-specific profiles (sq, geom, kin) from equil
     return nothing
 end
 
@@ -251,7 +251,7 @@ end
     set_eq(equil)
 
 Set up equilibrium from equilibrium structure.
-Initializes all equilibrium splines and parameters needed for PENTRC.
+Initializes all equilibrium splines and parameters needed for KineticForces.
 
 # Arguments
 - `equil`: Equilibrium structure (typically from ForceFreeStates)

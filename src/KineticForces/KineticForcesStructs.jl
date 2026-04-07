@@ -96,7 +96,7 @@ end
 """
     KineticForcesInternal
 
-Internal working state for PENTRC calculations.
+Internal working state for KineticForces calculations.
 Holds equilibrium-derived quantities, profile interpolants, and integration results.
 
 Fields replacing former module-level globals:
