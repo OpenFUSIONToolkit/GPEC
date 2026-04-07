@@ -285,6 +285,11 @@ end
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
+    # Ideal A,B,C splines preserved before kinetic overwrite (for mat_flag output)
+    amats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
     # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
     kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
     # Kinetic torque matrix splines: 6 components

@@ -18,7 +18,7 @@ example_path = length(ARGS) > 0 ? ARGS[1] : joinpath(@__DIR__, "../examples/DIII
 config_path = joinpath(example_path, "gpec.toml")
 output_dir = @__DIR__
 
-sigma_values = [0.0, 1e-12, 1e-9, 1e-6, 1e-3, 1.0]
+sigma_values = [1e-9, 1e-6, 1e-3]
 
 """
 Run GPEC with kinetic dummy matrices at the given σ. Returns (et, psi, xi_psi, nstep_total)
@@ -31,6 +31,7 @@ function run_kinetic(config_path::String, sigma::Float64)
     raw["ForceFreeStates"]["con_flag"] = true
     raw["ForceFreeStates"]["kin_source"] = "dummy"
     raw["ForceFreeStates"]["kin_dummy_sigma"] = sigma
+    raw["ForceFreeStates"]["save_interval"] = 1
     raw["ForceFreeStates"]["verbose"] = false
 
     mktempdir() do tmpdir
@@ -61,6 +62,7 @@ end
 function run_ideal(config_path::String)
     example_dir = dirname(config_path)
     raw = TOML.parsefile(config_path)
+    raw["ForceFreeStates"]["save_interval"] = 1
     raw["ForceFreeStates"]["verbose"] = false
 
     mktempdir() do tmpdir
@@ -95,7 +97,8 @@ run_ideal(config_path)
 println("\nRunning ideal reference...")
 ideal = run_ideal(config_path)
 if ideal !== nothing
-    @printf("  Ideal: et[1] = %+.6f %+.6fi, steps = %d\n", real(ideal.et[1]), imag(ideal.et[1]), ideal.nstep_total)
+    @printf("  Ideal: et[1] = %+.6f %+.6fi, steps = %d, saved = %d\n",
+        real(ideal.et[1]), imag(ideal.et[1]), ideal.nstep_total, length(ideal.psi))
 end
 
 # ---- Run kinetic sigma scan ----
@@ -106,7 +109,8 @@ for sigma in sigma_values
     result = run_kinetic(config_path, sigma)
     if result !== nothing
         results[sigma] = result
-        @printf("et[1] = %+.6f %+.6fi, steps = %d\n", real(result.et[1]), imag(result.et[1]), result.nstep_total)
+        @printf("et[1] = %+.6f %+.6fi, steps = %d, saved = %d\n",
+            real(result.et[1]), imag(result.et[1]), result.nstep_total, length(result.psi))
     else
         println("FAILED")
     end
@@ -118,24 +122,18 @@ sigmas_plot = Float64[]
 et_real = Float64[]
 et_imag = Float64[]
 for sigma in sigma_values
-    sigma == 0.0 && continue  # skip zero for log scale
     haskey(results, sigma) || continue
     push!(sigmas_plot, sigma)
     push!(et_real, real(results[sigma].et[1]))
     push!(et_imag, imag(results[sigma].et[1]))
 end
 
-# Clip y-axis to physically interesting range around ideal value
-ideal_re = ideal !== nothing ? real(ideal.et[1]) : 1.0
-ylim_range = max(30.0, 3 * abs(ideal_re))
-
-p1 = plot(sigmas_plot, clamp.(et_real, -ylim_range, ylim_range);
+p1 = plot(sigmas_plot, et_real;
     xscale=:log10, label="Re(et[1])", marker=:circle, lw=2,
     xlabel="σ (dummy kinetic scaling)", ylabel="et[1]",
     title="Kinetic Damping: Eigenvalue vs σ",
-    legend=:topleft, left_margin=12Plots.mm, bottom_margin=6Plots.mm,
-    ylims=(-ylim_range, ylim_range))
-plot!(p1, sigmas_plot, clamp.(et_imag, -ylim_range, ylim_range);
+    legend=:topleft, left_margin=12Plots.mm, bottom_margin=6Plots.mm)
+plot!(p1, sigmas_plot, et_imag;
     label="Im(et[1])", marker=:diamond, lw=2, ls=:dash)
 if ideal !== nothing
     hline!(p1, [real(ideal.et[1])]; label="Ideal Re(et[1])", ls=:dot, color=:gray, lw=1)
@@ -166,11 +164,12 @@ for (im, m) in enumerate(m_values)
     # Plot ideal reference first
     if ideal !== nothing
         if 1 <= m_idx <= size(ideal.xi_psi, 1)
-            # xi_psi is (numpert_total, numpert_total, nstep) — take norm across solution vectors
-            profile = [sqrt(sum(abs2, ideal.xi_psi[m_idx, :, istep])) for istep in 1:length(ideal.psi)]
+            # xi_psi is (numpert_total, numpert_total, nstep) — first column is leading eigenvector
+            profile = abs.(ideal.xi_psi[m_idx, 1, :])
             ideal_ymax = maximum(profile)
             plot!(p2, ideal.psi, profile;
-                subplot=im, label=(im == 1 ? "Ideal" : ""), color=:black, lw=2, ls=:dash)
+                subplot=im, label=(im == 1 ? "Ideal" : ""), color=:black, lw=2, ls=:dash,
+                marker=:circle, markersize=1, markerstrokewidth=0)
         end
     end
 
@@ -179,10 +178,11 @@ for (im, m) in enumerate(m_values)
         haskey(results, sigma) || continue
         r = results[sigma]
         if 1 <= m_idx <= size(r.xi_psi, 1)
-            profile = [sqrt(sum(abs2, r.xi_psi[m_idx, :, istep])) for istep in 1:length(r.psi)]
+            profile = abs.(r.xi_psi[m_idx, 1, :])
             lbl = (im == 1) ? @sprintf("σ=%.0e", sigma) : ""
             plot!(p2, r.psi, profile;
-                subplot=im, label=lbl, color=sigma_colors[isig], lw=1.5)
+                subplot=im, label=lbl, color=sigma_colors[isig], lw=1.5,
+                marker=:circle, markersize=1, markerstrokewidth=0)
         end
     end
 

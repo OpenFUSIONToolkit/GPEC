@@ -33,22 +33,23 @@ function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=
 end
 
 """
-    dummy_kinetic_matrices(mpert, mpsi, sigma, mlow)
+    dummy_kinetic_matrices(mpert, mpsi, sigma, mlow, ffit, xs)
 
 Build X-shaped dummy kinetic energy matrices for testing all 6 components.
 
 Populates all 6 components of the W (energy) matrices with X-shaped patterns
-scaled by `sigma`. Components have physically motivated Hermiticity properties
-matching the real kinetic matrices (Logan 2015 thesis, Eqs 7.30-7.35):
+scaled by `sigma` **relative to the Frobenius norm of the corresponding ideal
+matrix** at each ψ. This makes σ a dimensionless perturbation strength that is
+portable across equilibria:
 
-| Component | Matrix | Coupling | Hermitian | Scale |
-|:--------- |:------ |:-------- |:--------- |:----- |
-| 1         | Ak     | W*z·Wz   | Yes       | σ     |
-| 2         | Bk     | W*z·Wx   | No        | σ     |
-| 3         | Ck     | W*z·Wy   | Yes       | 0.5σ  |
-| 4         | Dk     | W*x·Wx   | No        | 0.3σ  |
-| 5         | Ek     | W*x·Wy   | No        | 0.2σ  |
-| 6         | Hk     | W*y·Wy   | Yes       | 0.1σ  |
+| Component | Matrix | Coupling | Hermitian | Relative to |
+|:--------- |:------ |:-------- |:--------- |:----------- |
+| 1         | Ak     | W*z·Wz   | Yes       | ‖A(ψ)‖_F    |
+| 2         | Bk     | W*z·Wx   | No        | ‖B(ψ)‖_F    |
+| 3         | Ck     | W*z·Wy   | Yes       | ‖C(ψ)‖_F    |
+| 4         | Dk     | W*x·Wx   | No        | ‖D(ψ)‖_F    |
+| 5         | Ek     | W*x·Wy   | No        | ‖E(ψ)‖_F    |
+| 6         | Hk     | W*y·Wy   | Yes       | ‖H(ψ)‖_F    |
 
 Hermitian components use imaginary anti-diagonal entries (i·sign(m)·σ);
 non-Hermitian components use real anti-diagonal entries (sign(m)·σ).
@@ -57,26 +58,40 @@ Torque matrices (T) are all zero (torque requires finite rotation frequency).
 
 Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
 """
-function dummy_kinetic_matrices(mpert::Int, mpsi::Int, sigma::Float64, mlow::Int)
-    kw_flat = zeros(ComplexF64, mpsi, mpert^2, 6)
-    kt_flat = zeros(ComplexF64, mpsi, mpert^2, 6)
+function dummy_kinetic_matrices(
+    mpert::Int, mpsi::Int, sigma::Float64, mlow::Int,
+    ffit::FourFitVars, xs::Vector{Float64}
+)
+    np = ffit.numpert_total
+    kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
+    kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
 
-    # Component scaling factors and Hermiticity properties
-    # (component_index, scale_factor, is_hermitian)
-    component_specs = [
-        (1, 1.0, true),   # Ak: Hermitian, full scale
-        (2, 1.0, false),  # Bk: non-Hermitian, full scale (drives resonance shift P)
-        (3, 0.5, true),   # Ck: Hermitian, half scale
-        (4, 0.3, false),  # Dk: non-Hermitian (enters f0mat)
-        (5, 0.2, false),  # Ek: non-Hermitian (enters K matrix)
-        (6, 0.1, true)   # Hk: Hermitian, small (enters G only)
-    ]
+    # Map component index → ideal matrix spline and Hermiticity
+    # (component_index, ideal_spline, is_hermitian)
+    ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats, ffit.emats, ffit.hmats]
+    is_hermitian = [true, false, true, false, false, true]
 
-    for (ic, scale, is_herm) in component_specs
-        W = _build_x_matrix(mpert, mlow, sigma * scale; hermitian=is_herm)
-        w_flat = vec(W)
-        for ipsi in 1:mpsi
-            kw_flat[ipsi, :, ic] .= w_flat
+    # Build unit X-pattern matrices (Hermitian and non-Hermitian variants)
+    X_herm = _build_x_matrix(mpert, mlow, 1.0; hermitian=true)
+    X_nonherm = _build_x_matrix(mpert, mlow, 1.0; hermitian=false)
+
+    hint = Ref(1)
+    for ipsi in 1:mpsi
+        psi = xs[ipsi]
+        for ic in 1:6
+            ideal_mat = reshape(ideal_splines[ic](psi; hint=hint), np, np)
+            norm_ideal = norm(ideal_mat)  # Frobenius norm
+
+            X = is_hermitian[ic] ? X_herm : X_nonherm
+            # Scale: σ × ‖ideal(ψ)‖_F × unit X-pattern
+            # For multi-n, tile the mpert×mpert X-pattern into the np×np block
+            W = zeros(ComplexF64, np, np)
+            for jn in 0:(ffit.numpert_total÷mpert-1)
+                offset = jn * mpert
+                W[(offset+1):(offset+mpert), (offset+1):(offset+mpert)] .= X
+            end
+            W .*= sigma * norm_ideal
+            kw_flat[ipsi, :, ic] .= vec(W)
         end
     end
 
@@ -114,7 +129,7 @@ function make_kinetic_matrix(
 
     # Get raw kinetic matrices
     if ctrl.kin_source == "dummy"
-        kw_flat, kt_flat = dummy_kinetic_matrices(intr.mpert, mpsi, ctrl.kin_dummy_sigma, intr.mlow)
+        kw_flat, kt_flat = dummy_kinetic_matrices(intr.mpert, mpsi, ctrl.kin_dummy_sigma, intr.mlow, ffit, xs)
     elseif ctrl.kin_source == "file"
         error("kin_source=\"file\" not yet implemented — requires PENTRC output files")
     elseif ctrl.kin_source == "pentrc"
@@ -306,6 +321,11 @@ function _compute_fkg_matrices!(
     ffit.r2mats = cubic_interp(xs, r2_flat; ffit.itp_opts...)
     ffit.r3mats = cubic_interp(xs, r3_flat; ffit.itp_opts...)
     ffit.gaats = cubic_interp(xs, ga_flat; ffit.itp_opts...)
+
+    # Preserve ideal A/B/C splines before overwrite (for mat_flag output)
+    ffit.amats_ideal = ffit.amats
+    ffit.bmats_ideal = ffit.bmats
+    ffit.cmats_ideal = ffit.cmats
 
     # Overwrite ideal A/B/C splines with kinetic-modified versions
     # sing_der! loads these when fkg_kmats_flag=true

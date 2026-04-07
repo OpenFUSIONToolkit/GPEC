@@ -39,7 +39,7 @@ using FastInterpolations
 import AdaptiveArrayPools: @with_pool
 
 # Import ForceFreeStates types and functions needed for main
-using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState
+using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
@@ -273,7 +273,7 @@ function main(args::Vector{String}=String[])
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, git_version)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -355,6 +355,7 @@ function write_outputs_to_HDF5(
     intr::ForceFreeStatesInternal,
     odet::OdeState,
     vac_data::Union{VacuumData,Nothing},
+    ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown"
 )
 
@@ -481,6 +482,58 @@ function write_outputs_to_HDF5(
             out_h5["kinetic/kinfac1"] = ctrl.kinfac1
             out_h5["kinetic/kinfac2"] = ctrl.kinfac2
             out_h5["kinetic/fkg_kmats_flag"] = intr.fkg_kmats_flag
+        end
+
+        # Write fundamental matrices on the ψ grid when mat_flag is enabled
+        if ctrl.mat_flag && ffit !== nothing
+            xs = equil.rzphi_xs
+            npsi = length(xs)
+            np = intr.numpert_total
+
+            # Helper: evaluate a matrix spline on the psi grid → (npsi, np, np) array
+            function _eval_mat_spline(spline)
+                arr = zeros(ComplexF64, npsi, np, np)
+                hint = Ref(1)
+                for i in 1:npsi
+                    arr[i, :, :] .= reshape(spline(xs[i]; hint=hint), np, np)
+                end
+                return arr
+            end
+
+            out_h5["matrices/psi"] = xs
+            # Ideal primitive matrices (A, B, C, D, E, H)
+            # When kin_flag=true, amats/bmats/cmats hold kinetic-modified values,
+            # so we write those as the "effective" matrices and save raw kinetic
+            # components separately below.
+            # Ideal primitive matrices (A, B, C, D, E, H)
+            if ctrl.kin_flag
+                # Use preserved ideal copies (before kinetic overwrite)
+                out_h5["matrices/ideal/A"] = _eval_mat_spline(ffit.amats_ideal)
+                out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats_ideal)
+                out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats_ideal)
+            else
+                out_h5["matrices/ideal/A"] = _eval_mat_spline(ffit.amats)
+                out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats)
+                out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats)
+            end
+            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats)
+            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats)
+            out_h5["matrices/ideal/H"] = _eval_mat_spline(ffit.hmats)
+
+            # Ideal derived matrices (F, K, G)
+            out_h5["matrices/ideal/F"] = _eval_mat_spline(ffit.fmats_lower)
+            out_h5["matrices/ideal/K"] = _eval_mat_spline(ffit.kmats)
+            out_h5["matrices/ideal/G"] = _eval_mat_spline(ffit.gmats)
+
+            # Kinetic-modified matrices
+            if ctrl.kin_flag
+                out_h5["matrices/kinetic/A"] = _eval_mat_spline(ffit.amats)
+                out_h5["matrices/kinetic/B"] = _eval_mat_spline(ffit.bmats)
+                out_h5["matrices/kinetic/C"] = _eval_mat_spline(ffit.cmats)
+                out_h5["matrices/kinetic/f0"] = _eval_mat_spline(ffit.f0mats)
+                out_h5["matrices/kinetic/K"] = _eval_mat_spline(ffit.kkmats)
+                out_h5["matrices/kinetic/G"] = _eval_mat_spline(ffit.gaats)
+            end
         end
     end
 end
