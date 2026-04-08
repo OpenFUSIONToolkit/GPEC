@@ -73,7 +73,7 @@ Returns the worktree path.
 """
 function create_worktree(commit_hash::String, repo_root::String)::String
     short = commit_hash[1:min(8, length(commit_hash))]
-    worktree_path = joinpath(tempdir(), "gpec_regress_$(short)_$(getpid())")
+    worktree_path = tempname() * "_gpec_$(short)"
     try
         run(`git -C $repo_root worktree add --detach $worktree_path $commit_hash`)
     catch e

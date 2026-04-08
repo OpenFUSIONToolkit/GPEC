@@ -96,7 +96,7 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
     catch e
         err_msg = if e isa ProcessFailedException
             stderr_str = String(take!(stderr_buf))
-            isempty(stderr_str) ? "Subprocess failed (no stderr captured)" : stderr_str
+            isempty(stderr_str) ? "Subprocess failed (stderr was printed to terminal in verbose mode)" : stderr_str
         else
             sprint(showerror, e)
         end
@@ -200,7 +200,7 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
     catch e
         err_msg = if e isa ProcessFailedException
             stderr_str = String(take!(stderr_buf))
-            isempty(stderr_str) ? "Subprocess failed (no stderr captured)" : stderr_str
+            isempty(stderr_str) ? "Subprocess failed (stderr was printed to terminal in verbose mode)" : stderr_str
         else
             sprint(showerror, e)
         end

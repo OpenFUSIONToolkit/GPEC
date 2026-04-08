@@ -21,4 +21,6 @@ anaconda_projects/
 modovmc
 pestotv
 *.csv
-regression-harness/.regress_cache.sqlite
+regression-harness/*.sqlite
+regression-harness/*.sqlite-shm
+regression-harness/*.sqlite-wal

@@ -16,21 +16,6 @@ include("src/runner.jl")
 include("src/reporter.jl")
 
 function parse_args(args)
-    opts = CLIOptions(
-        String[],       # cases
-        String[],       # refs
-        nothing,        # ref_range
-        false,          # force
-        false,          # list_cases
-        nothing,        # show_qty
-        nothing,        # show_case
-        nothing,        # db_path
-        false,          # verbose
-        false,          # no_instantiate
-        false,          # help
-    )
-
-    # CLIOptions is immutable, so collect into mutable containers and build at end
     cases = String[]
     refs = String[]
     ref_range = nothing
