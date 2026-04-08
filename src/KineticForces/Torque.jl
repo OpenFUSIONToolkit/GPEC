@@ -187,10 +187,27 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     elseif method in ["fgar", "tgar", "pgar", "fwmm", "twmm", "pwmm",
                       "ftmm", "ttmm", "ptmm", "fkmm", "tkmm", "pkmm",
                       "frmm", "trmm", "prmm"]
+        # Evaluate geometric matrices at current ψ if matrix path
+        smat_f = nothing
+        tmat_f = nothing
+        xmat_f = nothing
+        ymat_f = nothing
+        zmat_f = nothing
+        if !isnothing(op_wmats) && !isnothing(intr.smats)
+            smat_f = reshape(intr.smats(psi), intr.mpert, intr.mpert)
+            tmat_f = reshape(intr.tmats(psi), intr.mpert, intr.mpert)
+            xmat_f = reshape(intr.xmats(psi), intr.mpert, intr.mpert)
+            ymat_f = reshape(intr.ymats(psi), intr.mpert, intr.mpert)
+            zmat_f = reshape(intr.zmats(psi), intr.mpert, intr.mpert)
+        end
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
                                    nuk, intr.bo, bmax, bmin, kin_f, s, mass, chrg,
                                    tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
-                                   method, op_wmats)
+                                   method, op_wmats;
+                                   chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
+                                   mpert=intr.mpert, ibmax=ibmax, theta_bmax=theta_bmax,
+                                   smat=smat_f, tmat=tmat_f, xmat=xmat_f,
+                                   ymat=ymat_f, zmat=zmat_f)
     else
         error("ERROR: torque - unknown method")
     end
@@ -329,63 +346,158 @@ end
 """
     calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo, bmax,
                   bmin, kin_f, s, mass, chrg, tspl, dbob_m_f, divx_m_f,
-                  divxfac, wdfac, method, op_wmats)::ComplexF64
+                  divxfac, wdfac, method, op_wmats; kwargs...)::ComplexF64
 
 Calculate GAR (General Aspect Ratio) torque.
 Fully general method without aspect ratio expansion.
 Handles variants: FGAR (full), TGAR (trapped), PGAR (passing).
-Can compute torque (TMM), energy (WMM), or matrix elements (KMM/RMM).
+Can compute torque (*TMM), energy (*WMM), or matrix elements (*KMM/*RMM).
 
-Status: Partially implemented (stub for full calculation)
+Ports Fortran torque.F90 GAR branch (lines 529-932).
+
+# Steps
+1. Compute bounce-averaged quantities via `compute_bounce_data()`
+2. Build fbnce interpolant over λ, normalize for ODE stability
+3. Integrate over pitch angle via `integrate_pitch_gar()`
+4. Apply torque normalization (Eq. 19, Logan et al. 2013)
+5. If matrix path: assemble and normalize kinetic matrices
+
+Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
 function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        bmax, bmin, kin_f, s, mass, chrg, tspl, dbob_m_f,
-                       divx_m_f, divxfac, wdfac, method, op_wmats)::ComplexF64
+                       divx_m_f, divxfac, wdfac, method, op_wmats;
+                       chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
+                       ibmax::Int, theta_bmax::Float64,
+                       smat=nothing, tmat=nothing, xmat=nothing,
+                       ymat=nothing, zmat=nothing,
+                       nlmda::Int=64, ntheta::Int=128,
+                       nutype::String="harmonic", f0type::String="maxwellian",
+                       nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+                       energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
+                       pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9)::ComplexF64
 
-    @warn "GAR method not yet fully implemented, returning zero" maxlog=1
-    return ComplexF64(0.0, 0.0)
+    # 1. Compute bounce-averaged quantities
+    bounce = compute_bounce_data(
+        psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
+        tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
+        mass, chrg, kin_f, s, method;
+        nlmda, ntheta, smat, tmat, xmat, ymat, zmat)
+
+    if bounce.nlmda == 0
+        return ComplexF64(0.0, 0.0)
+    end
+
+    # 2. Build fbnce interpolant: [wb, wd, f₁, f₂, ...]
+    # Number of flux quantities: 1 (scalar dJdJ) + optional mpert²×6 (matrix elements)
+    do_matrices = !isnothing(op_wmats) && !isnothing(bounce.wmats_vs_lambda)
+    if do_matrices
+        nqty = 1 + mpert^2 * 6
+    else
+        nqty = 1
+    end
+
+    # Pack all quantities into a matrix for interpolation
+    fbnce_data = zeros(Float64, bounce.nlmda, 2 + nqty)
+    fbnce_data[:, 1] .= bounce.wb
+    fbnce_data[:, 2] .= bounce.wd
+    fbnce_data[:, 3] .= bounce.dJdJ
+
+    if do_matrices
+        for ilmda in 1:bounce.nlmda
+            iqty = 4
+            for k in 1:6
+                for j in 1:mpert
+                    for i in 1:mpert
+                        fbnce_data[ilmda, iqty] = real(bounce.wmats_vs_lambda[i, j, k, ilmda])
+                        iqty += 1
+                    end
+                end
+            end
+        end
+    end
+
+    # Build CubicSeriesInterpolant
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=NaturalBC())
+
+    # Normalize flux quantities by 1/median for ODE stability (Fortran lines 819-823)
+    fbnce_norm = ones(Float64, nqty)
+    for i in 1:nqty
+        col = fbnce_data[:, i + 2]
+        med = median(abs.(col))
+        if med > 0
+            fbnce_norm[i] = 1.0 / med
+            # Apply normalization to the interpolant data
+            fbnce_data[:, i + 2] .*= fbnce_norm[i]
+        end
+    end
+    # Rebuild interpolant with normalized data
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=NaturalBC())
+
+    # 3. Set rex/imx multipliers (Fortran lines 839-847)
+    rex = 1.0
+    imx = 1.0
+    wtwnorm = 1.0
+    method_suffix = length(method) >= 4 ? method[2:4] : ""
+    if method_suffix in ["wmm", "kmm"]
+        rex = 0.0  # energy only
+    elseif method_suffix in ["tmm", "rmm"]
+        imx = 0.0  # torque only
+        wtwnorm = -1.0
+    end
+
+    # 4. Pitch angle ODE integration
+    lxint = integrate_pitch_gar(
+        wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
+        fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
+        nutype, f0type, nufac, ximag, qt,
+        energy_atol, energy_rtol, pitch_atol, pitch_rtol)
+
+    # 5. Compute scalar torque (Fortran lines 852-854)
+    # Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013)
+    tnorm = (-2 * n^2 / sqrt(π)) * (ro / bo) * kin_f[s] * kin_f[s+2] *
+            (chi1 / twopi)  # unit conversion from ψ to ψ_n, θ_n to θ
+    tpsi_val = tnorm * (lxint[1] / fbnce_norm[1])
+
+    # 6. Kinetic matrix assembly (Fortran lines 858-923)
+    if do_matrices
+        op_wmats .= 0
+        iqty = 2  # lxint index (1 is scalar torque)
+        for k in 1:6
+            for j in 1:mpert
+                for i in 1:mpert
+                    op_wmats[i, j, k] = complex(lxint[iqty] / fbnce_norm[iqty - 1]) *
+                        tnorm * (1 / (2 * im * n))  # convert torque → energy
+                    iqty += 1
+                end
+            end
+        end
+
+        # DCON normalization (Fortran lines 874-876)
+        op_wmats .*= 2 * μ₀
+        op_wmats[:, :, 1:3] ./= chi1
+        op_wmats[:, :, 1] ./= chi1
+
+        # Method-specific output
+        if method_suffix in ["kmm", "rmm"]
+            # Matrix norms independent of ξ (Fortran lines 878-897)
+            tpsi_val = ComplexF64(0.0)
+            for k in 1:6
+                # Spectral norm via SVD
+                mat = op_wmats[:, :, k]
+                sv = svdvals(mat' * mat)
+                tpsi_val += maximum(real.(sv))
+            end
+            tpsi_val = complex(rex + imx * im) * sqrt(abs(tpsi_val))
+
+        elseif method_suffix in ["wmm", "tmm", "pmm"]
+            # Mode-coupled dW contraction with displacement vectors (Fortran lines 898-914)
+            # TODO: Requires xs_m displacement interpolants from PerturbedEquilibriumState
+            # For now, store matrices and return scalar torque
+        end
+    end
+
+    return tpsi_val
 end
 
 
-"""
-    kappaintgrl(n::Int, l::Int, q::Float64, mfac::Int,
-                dbob_m_f::Vector{ComplexF64}, fnml)::Float64
-
-Compute bounce-averaged kappa (field curvature) integral.
-Evaluates the effect of m-mode coupling in the perturbation field.
-
-∫ (δB/B)_m * F^m_nql(κ) dθ
-
-Reference: [Park, Boozer, Menard, PRL 2009, Eq. 13]
-"""
-function kappaintgrl(n::Int, l::Int, q::Float64, mfac::Int,
-                    dbob_m_f::Vector{ComplexF64}, fnml=nothing)::Float64
-
-    # Current implementation: RMS field perturbation scaling
-    rms_dbob = sqrt(mean(abs.(dbob_m_f).^2))
-
-    # Include q-dependence and mode-dependence
-    q_factor = abs(q)^0.5
-    mode_factor = 1.0 / (1.0 + abs(n * q - mfac))  # Avoid resonance singularity
-
-    return rms_dbob * q_factor * mode_factor
-end
-
-
-"""
-    kappadjsum(kappa::Float64, n::Int, l::Int, q::Float64, mfac::Int,
-              dbob_m_f::Vector{ComplexF64}, fnml=nothing)::Float64
-
-Compute bounce-averaged action integral (dJ/dJ element).
-Used for matrix element calculations in stability analysis.
-
-∫ |δB|² / B * dθ (bounce-averaged)
-"""
-function kappadjsum(kappa::Float64, n::Int, l::Int, q::Float64, mfac::Int,
-                   dbob_m_f::Vector{ComplexF64}, fnml=nothing)::Float64
-
-    rms_dbob = sqrt(mean(abs.(dbob_m_f).^2))
-
-    # Scale by kappa and include aspect-ratio dependence
-    return kappa * rms_dbob^2
-end

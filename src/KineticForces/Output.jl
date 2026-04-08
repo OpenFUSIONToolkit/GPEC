@@ -21,16 +21,19 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
     for (method_name, result) in state.method_results
         mg = create_group(g, method_name)
         mg["nn"] = result.nn
-        mg["psi"] = result.psi_grid
-        mg["torque_real"] = real.(result.torque_vs_psi)
-        mg["torque_imag"] = imag.(result.torque_vs_psi)
-        mg["energy_real"] = real.(result.energy_vs_psi)
-        mg["energy_imag"] = imag.(result.energy_vs_psi)
         mg["total_torque"] = [real(result.total_torque), imag(result.total_torque)]
         mg["total_energy"] = [real(result.total_energy), imag(result.total_energy)]
 
         if !isempty(result.records)
             write_integration_records!(mg, result.records)
+        end
+    end
+
+    # Write kinetic matrices if present
+    for (method_name, mat) in state.kinetic_matrices
+        mat_g = create_group(g, "matrices_$method_name")
+        for k in 1:6
+            mat_g["matrix_$k"] = mat[:, :, k]
         end
     end
 end
@@ -47,7 +50,6 @@ This is the standard HDF5 ragged array pattern for storing variable-length data.
 """
 function write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
     rg = create_group(mg, "records")
-    n = length(records)
 
     # Scalar fields per record
     rg["psi"] = [r.psi for r in records]
@@ -87,13 +89,10 @@ function print_summary(state::KineticForcesState; verbose::Bool=false)
     for (method_name, result) in state.method_results
         @printf("%-8s  T_phi = %11.3e   2n*dW_k = %11.3e\n",
                 method_name, real(result.total_torque), imag(result.total_torque))
-        if verbose && !isempty(result.psi_grid)
-            for i in eachindex(result.psi_grid)
-                @printf("  psi = %8.5f  T = %11.3e + %11.3e i\n",
-                        result.psi_grid[i],
-                        real(result.torque_vs_psi[i]),
-                        imag(result.torque_vs_psi[i]))
-            end
+    end
+    if verbose
+        for (method_name, _) in state.kinetic_matrices
+            println("  Kinetic matrices stored for: $method_name")
         end
     end
 end

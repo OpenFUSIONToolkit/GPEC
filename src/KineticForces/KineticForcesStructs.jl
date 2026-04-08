@@ -111,23 +111,38 @@ Fields replacing former module-level globals:
     bo::Float64 = 0.0              # Toroidal field on axis [T]
     chi1::Float64 = 0.0            # 2π * ψ_o (flux normalization)
     mthsurf::Int = 0               # Number of poloidal grid points
-    mfac::Vector{Int} = Int[]      # Poloidal mode numbers
-    nn::Int = 0                    # Toroidal mode number
+    mfac::Vector{Int} = Int[]      # Poloidal mode numbers [mlow:mhigh]
+    # Multi-n mode indexing (matching ForceFreeStatesInternal)
+    nlow::Int = 0                  # Lowest toroidal mode number
+    nhigh::Int = 0                 # Highest toroidal mode number
+    npert::Int = 0                 # Number of toroidal modes
+    mlow::Int = 0                  # Lowest poloidal mode number
+    mhigh::Int = 0                 # Highest poloidal mode number
+    mpert::Int = 0                 # Number of poloidal modes
+    numpert_total::Int = 0         # Total modes: mpert × npert
 
     # Profile interpolants (populated from PlasmaEquilibrium)
     sq::Any = nothing              # Safety factor + flux profiles
     kin::Any = nothing             # Kinetic profiles (n, T per species)
     geom::Any = nothing            # Geometric profiles
-    dbob_m::Any = nothing          # δB/B perturbation modes
-    divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes
+    dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
+    divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
+
+    # Raw geometric matrices for kinetic W vector construction
+    # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
+    smats::Any = nothing           # CubicSeriesInterpolant, mpert² series over ψ
+    tmats::Any = nothing
+    xmats::Any = nothing
+    ymats::Any = nothing
+    zmats::Any = nothing
+
+    # Clebsch displacement vectors for mode-coupled dW contraction
+    xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ_ψ, ξ_+, ξ_-]
 
     # Integration results
     tphi::ComplexF64 = 0.0 + 0.0im    # Total torque/energy
     tsurf::ComplexF64 = 0.0 + 0.0im   # Surface torque/energy
     teq::ComplexF64 = 0.0 + 0.0im     # Equilibrium grid result
-
-    # Grid
-    psi_grid::Vector{Float64} = Float64[]
 
     # Method tracking
     method::String = ""
@@ -183,9 +198,17 @@ Perturbation interpolants (dbob_m, divx_m) will be built from
 PerturbedEquilibriumState once the full pipeline is connected.
 """
 function set_perturbation_data!(kf_intr::KineticForcesInternal, pe_state, ffs_intr)
+    kf_intr.mlow = ffs_intr.mlow
+    kf_intr.mhigh = ffs_intr.mhigh
+    kf_intr.mpert = ffs_intr.mpert
+    kf_intr.nlow = ffs_intr.nlow
+    kf_intr.nhigh = ffs_intr.nhigh
+    kf_intr.npert = ffs_intr.npert
+    kf_intr.numpert_total = ffs_intr.numpert_total
     kf_intr.mfac = collect(ffs_intr.mlow:ffs_intr.mhigh)
-    kf_intr.nn = ffs_intr.nlow
     # TODO: Build dbob_m and divx_m interpolants from pe_state.b_modes / pe_state.xi_modes
+    # TODO: Build xs_m from pe_state displacement vectors
+    # smats/tmats/xmats/ymats/zmats built separately in build_kinetic_metric_matrices!()
 end
 
 
@@ -219,9 +242,7 @@ Results for one NTV computation method across all flux surfaces.
 @kwdef mutable struct MethodResult
     method::String = ""
     nn::Int = 0
-    psi_grid::Vector{Float64} = Float64[]
-    torque_vs_psi::Vector{ComplexF64} = ComplexF64[]
-    energy_vs_psi::Vector{ComplexF64} = ComplexF64[]
+    torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ODE trajectory
     total_torque::ComplexF64 = 0.0 + 0.0im
     total_energy::ComplexF64 = 0.0 + 0.0im
     records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
@@ -235,5 +256,7 @@ Written to gpec.h5 under the "kinetic_forces" group.
 """
 @kwdef mutable struct KineticForcesState
     method_results::Dict{String, MethodResult} = Dict{String, MethodResult}()
+    # Block-diagonal kinetic matrices: key=method, value=(numpert_total, numpert_total, 6)
+    kinetic_matrices::Dict{String, Array{ComplexF64,3}} = Dict{String, Array{ComplexF64,3}}()
     completed::Bool = false
 end

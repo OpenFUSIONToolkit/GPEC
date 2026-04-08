@@ -42,6 +42,7 @@ include("KineticForcesStructs.jl")
 include("Output.jl")
 
 # Core library functions
+include("BounceAveraging.jl")
 include("Torque.jl")
 include("EnergyIntegration.jl")
 include("PitchIntegration.jl")
