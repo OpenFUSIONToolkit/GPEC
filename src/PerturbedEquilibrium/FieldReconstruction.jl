@@ -41,34 +41,35 @@ All fields are returned in mode space [npsi, mpert] rather than real space.
 
 # Process (following GPEC)
 
-1. Sum weighted eigenmode contributions → ξ_ψ(ψ, m)
-2. Compute contravariant field from ideal MHD → b^ψ, b^θ, b^ζ
-3. Return mode-space fields (can convert to real space later if needed)
+ 1. Sum weighted eigenmode contributions → ξ_ψ(ψ, m)
+ 2. Compute contravariant field from ideal MHD → b^ψ, b^θ, b^ζ
+ 3. Return mode-space fields (can convert to real space later if needed)
 
 # Arguments
 
-- `response_vector::Vector{ComplexF64}`: Response coefficients [numpert_total]
-- `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store eigenmodes
-- `equil::Equilibrium.PlasmaEquilibrium`: Equilibrium data
-- `ffs_intr::ForceFreeStatesInternal`: Mode information (m, n ranges)
-- `intr::PerturbedEquilibriumInternal`: Internal state
+  - `response_vector::Vector{ComplexF64}`: Response coefficients [numpert_total]
+  - `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store eigenmodes
+  - `equil::Equilibrium.PlasmaEquilibrium`: Equilibrium data
+  - `ffs_intr::ForceFreeStatesInternal`: Mode information (m, n ranges)
+  - `intr::PerturbedEquilibriumInternal`: Internal state
 
 # Returns
 
 Tuple of (xi_modes, b_modes) where each is a NamedTuple:
-- `xi_modes.psi`: ξ_ψ component [npsi, mpert] (covariant)
-- `b_modes.psi`: b^ψ component [npsi, mpert] (contravariant)
-- `b_modes.theta`: b^θ component [npsi, mpert] (contravariant)
-- `b_modes.zeta`: b^ζ component [npsi, mpert] (contravariant)
+
+  - `xi_modes.psi`: ξ_ψ component [npsi, mpert] (covariant)
+  - `b_modes.psi`: b^ψ component [npsi, mpert] (contravariant)
+  - `b_modes.theta`: b^θ component [npsi, mpert] (contravariant)
+  - `b_modes.zeta`: b^ζ component [npsi, mpert] (contravariant)
 
 All in mode space, matching GPEC output format.
 
 # Notes
 
-- Uses ForceFreeStates radial grid (not equilibrium grid)
-- Works entirely in mode space - no Fourier transforms
-- Follows GPEC gpeq_sol, gpeq_contra formulation
-- Field from ideal MHD: b^ψ = i*χ₁*(m-n*q)*ξ_ψ
+  - Uses ForceFreeStates radial grid (not equilibrium grid)
+  - Works entirely in mode space - no Fourier transforms
+  - Follows GPEC gpeq_sol, gpeq_contra formulation
+  - Field from ideal MHD: b^ψ = i*χ₁*(m-n*q)*ξ_ψ
 """
 function reconstruct_physical_fields(
     response_vector::Vector{ComplexF64},
@@ -100,15 +101,15 @@ function reconstruct_physical_fields(
 
     # Package outputs in NamedTuples for clarity
     xi_modes = (
-        psi = xi_psi_modes,      # [npsi, mpert] - covariant radial displacement
-        theta = zeros(ComplexF64, npsi, mpert),  # Placeholder - not computed from ForceFreeStates
-        zeta = zeros(ComplexF64, npsi, mpert)    # Placeholder - not computed from ForceFreeStates
+        psi=xi_psi_modes,      # [npsi, mpert] - covariant radial displacement
+        theta=zeros(ComplexF64, npsi, mpert),  # Placeholder - not computed from ForceFreeStates
+        zeta=zeros(ComplexF64, npsi, mpert)    # Placeholder - not computed from ForceFreeStates
     )
 
     b_modes = (
-        psi = b_psi_modes,       # [npsi, mpert] - contravariant radial field
-        theta = b_theta_modes,   # [npsi, mpert] - contravariant poloidal field
-        zeta = b_zeta_modes      # [npsi, mpert] - contravariant toroidal field
+        psi=b_psi_modes,       # [npsi, mpert] - contravariant radial field
+        theta=b_theta_modes,   # [npsi, mpert] - contravariant poloidal field
+        zeta=b_zeta_modes      # [npsi, mpert] - contravariant toroidal field
     )
 
     return xi_modes, b_modes
@@ -132,20 +133,20 @@ plasma response to external forcing.
 
 # Arguments
 
-- `response_vector::Vector{ComplexF64}`: Response coefficient for each eigenmode [numpert_total]
-- `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store containing eigenmodes
-- `ffs_intr::ForceFreeStatesInternal`: Mode information (mpert, etc.)
+  - `response_vector::Vector{ComplexF64}`: Response coefficient for each eigenmode [numpert_total]
+  - `ForceFreeStates_results::OdeState`: ForceFreeStates results with u_store containing eigenmodes
+  - `ffs_intr::ForceFreeStatesInternal`: Mode information (mpert, etc.)
 
 # Returns
 
-- `xi_psi_modes::Matrix{ComplexF64}`: Covariant radial displacement ξ_ψ(ψ, m) [npsi, mpert]
+  - `xi_psi_modes::Matrix{ComplexF64}`: Covariant radial displacement ξ_ψ(ψ, m) [npsi, mpert]
 
 # Notes
 
-- In ForceFreeStates formulation, u_store[:, :, 1, :] contains ξ_ψ (covariant radial displacement)
-- The response vector is ordered as [mode1_mode1, mode1_mode2, ..., mode2_mode1, ...]
-- We sum over all (i,j) eigenmode pairs to get the total response for each mode i
-- This corresponds to xsp_mn in GPEC notation
+  - In ForceFreeStates formulation, u_store[:, :, 1, :] contains ξ_ψ (covariant radial displacement)
+  - The response vector is ordered as [mode1_mode1, mode1_mode2, ..., mode2_mode1, ...]
+  - We sum over all (i,j) eigenmode pairs to get the total response for each mode i
+  - This corresponds to xsp_mn in GPEC notation
 """
 function sum_eigenmode_contributions(
     response_vector::Vector{ComplexF64},
@@ -211,33 +212,35 @@ bwz_mn = -(chi1*(q1*xsp_mn + sq%f(4)*xsp1_mn) + twopi*ifac*mfac*xss_mn) ! b^ζ
 ```
 
 where:
-- xsp_mn = ξ_ψ (covariant radial displacement)
-- xsp1_mn = ∂ξ_ψ/∂ψ (radial derivative)
-- xss_mn = ξ_ζ (covariant toroidal displacement)
-- singfac = m - n*q (resonance factor)
-- chi1 = 2π*Ψ₀ (flux normalization)
-- ifac = i (imaginary unit)
+
+  - xsp_mn = ξ_ψ (covariant radial displacement)
+  - xsp1_mn = ∂ξ_ψ/∂ψ (radial derivative)
+  - xss_mn = ξ_ζ (covariant toroidal displacement)
+  - singfac = m - n*q (resonance factor)
+  - chi1 = 2π*Ψ₀ (flux normalization)
+  - ifac = i (imaginary unit)
 
 # Arguments
 
-- `xi_psi_modes::Matrix{ComplexF64}`: Covariant radial displacement ξ_ψ(ψ,m) [npsi, mpert]
-- `ForceFreeStates_results::OdeState`: ForceFreeStates results with psi_store for radial grid
-- `equil::Equilibrium.PlasmaEquilibrium`: Equilibrium with q(ψ), q'(ψ), Ψ₀
-- `ffs_intr::ForceFreeStatesInternal`: Mode numbers (mlow, mhigh, n)
+  - `xi_psi_modes::Matrix{ComplexF64}`: Covariant radial displacement ξ_ψ(ψ,m) [npsi, mpert]
+  - `ForceFreeStates_results::OdeState`: ForceFreeStates results with psi_store for radial grid
+  - `equil::Equilibrium.PlasmaEquilibrium`: Equilibrium with q(ψ), q'(ψ), Ψ₀
+  - `ffs_intr::ForceFreeStatesInternal`: Mode numbers (mlow, mhigh, n)
 
 # Returns
 
 Tuple of three matrices, all [npsi, mpert]:
-- `b_psi_modes::Matrix{ComplexF64}`: Contravariant radial field b^ψ(ψ,m)
-- `b_theta_modes::Matrix{ComplexF64}`: Contravariant poloidal field b^θ(ψ,m)
-- `b_zeta_modes::Matrix{ComplexF64}`: Contravariant toroidal field b^ζ(ψ,m)
+
+  - `b_psi_modes::Matrix{ComplexF64}`: Contravariant radial field b^ψ(ψ,m)
+  - `b_theta_modes::Matrix{ComplexF64}`: Contravariant poloidal field b^θ(ψ,m)
+  - `b_zeta_modes::Matrix{ComplexF64}`: Contravariant toroidal field b^ζ(ψ,m)
 
 # Notes
 
-- This is a simplified version assuming ξ_ζ = 0 (no toroidal displacement)
-- Radial derivatives ∂ξ_ψ/∂ψ are computed using finite differences
-- All calculations done in mode space (no Fourier transforms)
-- Matches GPEC formulation exactly for consistency
+  - This is a simplified version assuming ξ_ζ = 0 (no toroidal displacement)
+  - Radial derivatives ∂ξ_ψ/∂ψ are computed using finite differences
+  - All calculations done in mode space (no Fourier transforms)
+  - Matches GPEC formulation exactly for consistency
 """
 function compute_perturbed_field_modes(
     xi_psi_modes::Matrix{ComplexF64},
@@ -265,7 +268,7 @@ function compute_perturbed_field_modes(
     # ∂ξ_ψ/∂ψ (xsp1_mn in GPEC)
     xi_psi1_modes = zeros(ComplexF64, npsi, mpert)
     for ipert in 1:mpert
-        for ipsi in 2:npsi-1
+        for ipsi in 2:(npsi-1)
             # Centered difference
             dpsi = ForceFreeStates_results.psi_store[ipsi+1] - ForceFreeStates_results.psi_store[ipsi-1]
             xi_psi1_modes[ipsi, ipert] = (xi_psi_modes[ipsi+1, ipert] - xi_psi_modes[ipsi-1, ipert]) / dpsi

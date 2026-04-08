@@ -12,6 +12,7 @@ User-facing control parameters from TOML [ForcingTerms] section.
 ## Fields
 
 Forcing Data:
+
   - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
   - `forcing_data_format::String` - Format of forcing data: "ascii" or "hdf5" (default: "ascii")
 
@@ -48,12 +49,14 @@ end
 Load forcing data from ASCII or HDF5 file.
 
 ASCII format: Three or four columns (n, m, real amplitude, [optional] imag amplitude)
-- Column 1: Toroidal mode number (n)
-- Column 2: Poloidal mode number (m)
-- Column 3: Complex amplitude (real part)
-- Column 4: Complex amplitude (imaginary part) [optional, assumes 0 if not present]
+
+  - Column 1: Toroidal mode number (n)
+  - Column 2: Poloidal mode number (m)
+  - Column 3: Complex amplitude (real part)
+  - Column 4: Complex amplitude (imaginary part) [optional, assumes 0 if not present]
 
 Example ASCII file:
+
 ```
 1  2  0.5  0.1
 1  3  0.3  -0.2
@@ -61,10 +64,11 @@ Example ASCII file:
 ```
 
 HDF5 format:
-- Dataset "n": Integer array of toroidal mode numbers
-- Dataset "m": Integer array of poloidal mode numbers
-- Dataset "amplitude_real": Real parts of amplitudes
-- Dataset "amplitude_imag": Imaginary parts of amplitudes
+
+  - Dataset "n": Integer array of toroidal mode numbers
+  - Dataset "m": Integer array of poloidal mode numbers
+  - Dataset "amplitude_real": Real parts of amplitudes
+  - Dataset "amplitude_imag": Imaginary parts of amplitudes
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},
@@ -106,7 +110,7 @@ function load_forcing_ascii!(
         error("Forcing data file not found: $filepath")
     end
 
-    data = readdlm(filepath, comments=true, comment_char='#')
+    data = readdlm(filepath; comments=true, comment_char='#')
     nrows = size(data, 1)
     ncols = size(data, 2)
 
@@ -123,7 +127,7 @@ function load_forcing_ascii!(
         real_part = Float64(data[i, 3])
         imag_part = ncols >= 4 ? Float64(data[i, 4]) : 0.0
 
-        push!(forcing_modes, ForcingMode(
+        push!(forcing_modes, ForcingMode(;
             n=n,
             m=m,
             amplitude=complex(real_part, imag_part)
@@ -159,7 +163,7 @@ function load_forcing_hdf5!(
         empty!(forcing_modes)
 
         for i in eachindex(n_array)
-            push!(forcing_modes, ForcingMode(
+            push!(forcing_modes, ForcingMode(;
                 n=Int(n_array[i]),
                 m=Int(m_array[i]),
                 amplitude=complex(amp_real[i], amp_imag[i])
