@@ -33,7 +33,7 @@ println("  mlow = $mlow (lowest mode: m ∈ [$mlow, $(mlow+mpert-1)])")
 println("\nBasis functions: cos(m*θ), sin(m*θ) with m = $mlow:$(mlow+mpert-1)")
 
 # Create test data: a simple function in theta space
-theta = range(0, 2π, length=mtheta+1)[1:end-1]
+theta = range(0, 2π; length=mtheta+1)[1:(end-1)]
 f_theta = sin.(5 .* theta) .+ 0.5 .* cos.(8 .* theta)
 
 # Forward transform: theta → modes

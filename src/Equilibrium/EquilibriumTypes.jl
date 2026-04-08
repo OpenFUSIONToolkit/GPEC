@@ -139,7 +139,7 @@ end
 
 """
 Outer constructor for EquilibriumConfig that enables a toml file
-    interface for specifying the configuration settings
+interface for specifying the configuration settings
 
 DEPRECATED: Use [Equilibrium] section in gpec.toml instead
 """
@@ -535,28 +535,27 @@ This object provides a complete representation of the processed plasma equilibri
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
-
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
+
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
       + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
-
   - **Geometric quantities (rzphi, 4 interpolants):**
     2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
+
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
       + `rzphi_rsquared::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
       + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
       + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
       + `rzphi_jac::CubicInterpolantND`: Jacobian
-
   - **Physics quantities (eqfun, 3 interpolants):**
     2D cubic interpolants storing local physics and geometric quantities.
+
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle θₙₑw
       + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
       + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
       + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
-
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
