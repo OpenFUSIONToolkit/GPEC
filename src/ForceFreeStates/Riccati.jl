@@ -391,8 +391,8 @@ function riccati_integrator_callback!(integrator)
 
     ctrl, _, _, intr, odet, chunk = integrator.p
 
-    # Update integration tolerances (same logic as integrator_callback!)
-    integrator.opts.reltol = compute_tols(ctrl, intr, odet, chunk.ising)
+    # Use unified tolerance (matches integrate_el_region! on develop)
+    integrator.opts.reltol = ctrl.eulerlagrange_tolerance
 
     # Renormalize when norms exceed ucrit (analogous to Gaussian reduction in integrator_callback!)
     # During sing_der! integration: u[:,:,1]=U₁ (grows), u[:,:,2]=U₂ (grows).
@@ -437,7 +437,7 @@ function riccati_integrate_chunk!(
     ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk
 )
     cb = DiscreteCallback((u, t, integrator) -> true, riccati_integrator_callback!)
-    rtol = compute_tols(ctrl, intr, odet, chunk.ising)
+    rtol = ctrl.eulerlagrange_tolerance
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end),
                       (ctrl, equil, ffit, intr, odet, chunk))
     sol = solve(prob, BS5(); reltol=rtol, callback=cb, save_everystep=false, save_end=true)
@@ -734,7 +734,7 @@ function integrate_propagator_chunk!(
     tspan = chunk.direction == 1 ?
         (chunk.psi_start, chunk.psi_end) :
         (chunk.psi_end,   chunk.psi_start)
-    rtol = chunk.ising > 0 ? ctrl.tol_r : ctrl.tol_nr
+    rtol = ctrl.eulerlagrange_tolerance
     params = (ctrl, equil, ffit, intr, odet_proxy, chunk)
 
     # Upper block IC: U₁ = I, U₂ = 0
