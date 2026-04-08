@@ -12,8 +12,9 @@ avoiding repeated index arithmetic throughout the code.
 ## Mode Indexing Convention
 
 For linear index i ∈ [1, numpert_total]:
-- m_modes[i] = (i-1) % mpert + mlow
-- n_modes[i] = (i-1) ÷ mpert + nlow
+
+  - m_modes[i] = (i-1) % mpert + mlow
+  - n_modes[i] = (i-1) ÷ mpert + nlow
 
 This matches the convention used in ForceFreeStates where modes are ordered as:
 (m1,n1), (m2,n1), ..., (mpert,n1), (m1,n2), (m2,n2), ..., (mpert,npert)

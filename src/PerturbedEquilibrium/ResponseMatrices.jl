@@ -24,30 +24,35 @@ plasma surface from ForceFreeStates eigenmode solutions.
 
 ## What's extracted:
 
-1. **Boundary displacement**: ξ_ψ from `u_store[:, :, 1, end]`
-   - This is the radial (normal) component of the eigenmode displacement
-   - At the last radial integration point (plasma edge)
-   - Dimensions: [numpert_total, numpert_total]
+ 1. **Boundary displacement**: ξ_ψ from `u_store[:, :, 1, end]`
 
-2. **Flux surface spacing**: dΨ/dρ at boundary
-   - From equilibrium bicubic spline evaluation
-   - Needed to convert displacement to magnetic field
+      + This is the radial (normal) component of the eigenmode displacement
+      + At the last radial integration point (plasma edge)
+      + Dimensions: [numpert_total, numpert_total]
 
-3. **Safety factor**: q at boundary
-   - Used to compute singular factors (m - n*q)
-   - Identifies resonant surfaces
+ 2. **Flux surface spacing**: dΨ/dρ at boundary
+
+      + From equilibrium bicubic spline evaluation
+      + Needed to convert displacement to magnetic field
+ 3. **Safety factor**: q at boundary
+
+      + Used to compute singular factors (m - n*q)
+      + Identifies resonant surfaces
 
 ## Arguments
-- `equil`: Equilibrium solution containing flux surfaces and q-profile
-- `ForceFreeStates_results`: ODE integration results containing u_store with eigenmodes
-- `intr`: ForceFreeStates internal state with boundary location (psilim)
+
+  - `equil`: Equilibrium solution containing flux surfaces and q-profile
+  - `ForceFreeStates_results`: ODE integration results containing u_store with eigenmodes
+  - `intr`: ForceFreeStates internal state with boundary location (psilim)
 
 ## Returns
+
 Named tuple with:
-- `ξ_psi_boundary`: Boundary displacement [numpert_total, numpert_total]
-- `dPsi_drho`: Flux surface spacing at boundary (scalar)
-- `q_boundary`: Safety factor at boundary (scalar)
-- `psi_boundary`: Normalized flux at boundary (scalar)
+
+  - `ξ_psi_boundary`: Boundary displacement [numpert_total, numpert_total]
+  - `dPsi_drho`: Flux surface spacing at boundary (scalar)
+  - `q_boundary`: Safety factor at boundary (scalar)
+  - `psi_boundary`: Normalized flux at boundary (scalar)
 """
 function extract_boundary_displacements(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -77,10 +82,10 @@ function extract_boundary_displacements(
     dPsi_drho = equil.psio * 2.0 * sqrt(psi_boundary)
 
     return (
-        ξ_psi_boundary = ξ_psi_boundary,
-        dPsi_drho = dPsi_drho,
-        q_boundary = q_boundary,
-        psi_boundary = psi_boundary
+        ξ_psi_boundary=ξ_psi_boundary,
+        dPsi_drho=dPsi_drho,
+        q_boundary=q_boundary,
+        psi_boundary=psi_boundary
     )
 end
 
@@ -100,22 +105,27 @@ at the plasma surface. From the ideal MHD constraint [Park Phys. Plasmas 2009 05
 where ξ_ψ is the radial displacement eigenfunction.
 
 ## Physical Interpretation [Park Phys. Plasmas 2007 052110 Section II]:
-- ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
-- singfac[i] = m[i] - n*q: Singular factor measuring distance from rational surface
-- dΨ/dρ: Converts displacement to flux perturbation (poloidal flux gradient)
-- Factor of i: Phase relationship for oscillating fields in complex representation
+
+  - ξ_ψ[i,j]: Displacement of mode i due to eigenmode j
+  - singfac[i] = m[i] - n*q: Singular factor measuring distance from rational surface
+  - dΨ/dρ: Converts displacement to flux perturbation (poloidal flux gradient)
+  - Factor of i: Phase relationship for oscillating fields in complex representation
 
 ## Arguments
-- `boundary_data`: Output from extract_boundary_displacements()
-  - ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
-  - dPsi_drho: Flux surface spacing at boundary (scalar)
-  - q_boundary: Safety factor at boundary (scalar)
-  - psi_boundary: Normalized flux at boundary (scalar)
-- `intr`: ForceFreeStates internal state with mode arrays (mlow, mhigh, nlow, etc.)
+
+  - `boundary_data`: Output from extract_boundary_displacements()
+
+      + ξ_psi_boundary: Boundary displacement [numpert_total, numpert_total]
+      + dPsi_drho: Flux surface spacing at boundary (scalar)
+      + q_boundary: Safety factor at boundary (scalar)
+      + psi_boundary: Normalized flux at boundary (scalar)
+
+  - `intr`: ForceFreeStates internal state with mode arrays (mlow, mhigh, nlow, etc.)
 
 ## Returns
-- `bwp_mn[numpert_total, numpert_total]`: Normal magnetic field matrix where bwp_mn[i,j]
-  is the normal field of Fourier mode i in response to eigenmode j
+
+  - `bwp_mn[numpert_total, numpert_total]`: Normal magnetic field matrix where bwp_mn[i,j]
+    is the normal field of Fourier mode i in response to eigenmode j
 """
 function compute_normal_magnetic_field(
     boundary_data::NamedTuple,
@@ -167,19 +177,22 @@ In GPEC, this comes from `bwp_mn` (boundary normal field) computed from eigenmod
 displacements.
 
 The flux matrix relates eigenmode displacements to vacuum poloidal flux:
-1. Extract eigenmode displacement at plasma boundary from u_store
-2. Compute normal magnetic field: B_ψ = i×(dΨ/dρ)×(m - n×q)×ξ_ψ
-3. Result is flux[mode_i, eigenmode_j] = bwp_mn[i,j]
+
+ 1. Extract eigenmode displacement at plasma boundary from u_store
+ 2. Compute normal magnetic field: B_ψ = i×(dΨ/dρ)×(m - n×q)×ξ_ψ
+ 3. Result is flux[mode_i, eigenmode_j] = bwp_mn[i,j]
 
 ## Arguments
-- `equil`: Equilibrium solution containing flux surfaces and q-profile
-- `ForceFreeStates_results`: ForceFreeStates ODE integration results containing eigenmodes
-- `vac_data`: Vacuum response data from free boundary calculation
-- `intr`: ForceFreeStates internal state with mode information
+
+  - `equil`: Equilibrium solution containing flux surfaces and q-profile
+  - `ForceFreeStates_results`: ForceFreeStates ODE integration results containing eigenmodes
+  - `vac_data`: Vacuum response data from free boundary calculation
+  - `intr`: ForceFreeStates internal state with mode information
 
 ## Returns
-- `flxmats[numpert_total, numpert_total]`: Complex flux matrix where flxmats[i,j] is the
-  vacuum flux of mode i in response to eigenmode j
+
+  - `flxmats[numpert_total, numpert_total]`: Complex flux matrix where flxmats[i,j] is the
+    vacuum flux of mode i in response to eigenmode j
 """
 function build_flux_matrix(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -208,16 +221,19 @@ end
 Calculate plasma inductance matrix using energy-based formula (resp_index=0).
 
 Formula from gpresp.f lines 214-226:
+
 ```
 L[i,j] = Σ_k flux[i,k] * conj(flux[j,k]) / (et[k] * 2)
 ```
 
 ## Arguments
-- `flux_matrix`: Vacuum flux matrix from build_flux_matrix
-- `energy_vector`: Total energy for each eigenmode (vac_data.et)
+
+  - `flux_matrix`: Vacuum flux matrix from build_flux_matrix
+  - `energy_vector`: Total energy for each eigenmode (vac_data.et)
 
 ## Returns
-- Plasma inductance matrix [mpert, mpert]
+
+  - Plasma inductance matrix [mpert, mpert]
 """
 function calc_plasma_inductance(
     flux_matrix::Matrix{ComplexF64},
@@ -231,7 +247,7 @@ function calc_plasma_inductance(
         for j in 1:mpert
             for k in 1:mpert
                 if abs(energy_vector[k]) > 1e-10  # Avoid division by zero
-                    L[i,j] += flux_matrix[i,k] * conj(flux_matrix[j,k]) / (energy_vector[k] * 2.0)
+                    L[i, j] += flux_matrix[i, k] * conj(flux_matrix[j, k]) / (energy_vector[k] * 2.0)
                 end
             end
         end
@@ -248,10 +264,12 @@ Pack complex mode coefficients into real/imaginary pairs for Green's function ap
 Converts [a+bi, c+di, ...] to [a, b, c, d, ...]
 
 ## Arguments
-- `modes`: Complex Fourier mode coefficients [mpert]
+
+  - `modes`: Complex Fourier mode coefficients [mpert]
 
 ## Returns
-- Packed real/imaginary array [2*mpert]
+
+  - Packed real/imaginary array [2*mpert]
 """
 function pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
     mpert = length(modes)
@@ -262,7 +280,7 @@ end
 function pack_complex_to_realimag!(packed::AbstractVector{Float64}, modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
     mpert = length(modes)
     for i in 1:mpert
-        packed[2*i - 1] = real(modes[i])
+        packed[2*i-1] = real(modes[i])
         packed[2*i] = imag(modes[i])
     end
     return packed
@@ -276,16 +294,18 @@ Unpack real/imaginary pairs back to complex coefficients.
 Converts [a, b, c, d, ...] to [a+bi, c+di, ...]
 
 ## Arguments
-- `packed`: Real/imaginary pairs [2*mpert]
+
+  - `packed`: Real/imaginary pairs [2*mpert]
 
 ## Returns
-- Complex mode coefficients [mpert]
+
+  - Complex mode coefficients [mpert]
 """
 function unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
     mpert = length(packed) ÷ 2
     modes = zeros(ComplexF64, mpert)
     for i in 1:mpert
-        modes[i] = packed[2*i - 1] + 1im * packed[2*i]
+        modes[i] = packed[2*i-1] + 1im * packed[2*i]
     end
     return modes
 end
@@ -299,21 +319,24 @@ end
 Apply Green's function to Fourier mode coefficients to get potential in theta space.
 
 The Green's function matrix maps Fourier coefficients to theta-space values:
-    χ(θ) = G * b_fourier
+χ(θ) = G * b_fourier
 
 ## Green's Function Structure
 
 From ForceFreeStates vacuum calculation, `green` is a real matrix [2*mtheta, 2*mpert] where:
-- Rows 1:mtheta correspond to plasma surface theta points
-- Rows mtheta+1:2*mtheta correspond to wall surface theta points (if wall present)
-- Columns are packed as [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
+
+  - Rows 1:mtheta correspond to plasma surface theta points
+  - Rows mtheta+1:2*mtheta correspond to wall surface theta points (if wall present)
+  - Columns are packed as [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
 
 ## Arguments
-- `green`: Green's function matrix [2*mtheta, 2*mpert]
-- `mode_coeffs`: Complex Fourier mode coefficients [mpert]
+
+  - `green`: Green's function matrix [2*mtheta, 2*mpert]
+  - `mode_coeffs`: Complex Fourier mode coefficients [mpert]
 
 ## Returns
-- Potential values in theta space [mtheta] at plasma surface (real-valued)
+
+  - Potential values in theta space [mtheta] at plasma surface (real-valued)
 """
 function apply_green_function(
     green::Matrix{Float64},
@@ -350,35 +373,41 @@ end
         grre::Matrix{Float64},
         flux_matrix::Matrix{ComplexF64},
         intr::ForceFreeStatesInternal
+
 )::Matrix{ComplexF64}
 
 Calculate surface/vacuum inductance matrix from Green's functions using GPEC algorithm.
 
 Uses BOTH Green's function matrices computed during ForceFreeStates vacuum calculation:
-- grri: Interior potential (kernelsign=-1)
-- grre: Exterior potential (kernelsign=+1)
+
+  - grri: Interior potential (kernelsign=-1)
+  - grre: Exterior potential (kernelsign=+1)
 
 ## GPEC Algorithm:
-1. For each eigenmode, apply Green's functions to flux matrix (bwp_mn)
-2. Compute interior potential: chi_mn = grri * bwp_mn
-3. Compute exterior potential: che_mn = grre * bwp_mn
-4. Calculate surface current: kax_mn = (chi_mn - che_mn) / μ₀
-5. Transform back to mode space using Fourier transform
-6. Solve: surf_indmats = hermitianize(flxmats * inv(kaxmats))
+
+ 1. For each eigenmode, apply Green's functions to flux matrix (bwp_mn)
+ 2. Compute interior potential: chi_mn = grri * bwp_mn
+ 3. Compute exterior potential: che_mn = grre * bwp_mn
+ 4. Calculate surface current: kax_mn = (chi_mn - che_mn) / μ₀
+ 5. Transform back to mode space using Fourier transform
+ 6. Solve: surf_indmats = hermitianize(flxmats * inv(kaxmats))
 
 Green's function structure from ForceFreeStates:
-- Dimensions: [2*mtheta, 2*mpert]
-- Complex numbers stored as adjacent real/imaginary pairs
-- Maps Fourier coefficients to theta-space potential values
+
+  - Dimensions: [2*mtheta, 2*mpert]
+  - Complex numbers stored as adjacent real/imaginary pairs
+  - Maps Fourier coefficients to theta-space potential values
 
 ## Arguments
-- `grri`: Interior Green's function matrix (kernelsign=-1)
-- `grre`: Exterior Green's function matrix (kernelsign=+1)
-- `flux_matrix`: Normal magnetic field matrix (bwp_mn) [numpert_total, numpert_total]
-- `intr`: ForceFreeStates internal state with mode information
+
+  - `grri`: Interior Green's function matrix (kernelsign=-1)
+  - `grre`: Exterior Green's function matrix (kernelsign=+1)
+  - `flux_matrix`: Normal magnetic field matrix (bwp_mn) [numpert_total, numpert_total]
+  - `intr`: ForceFreeStates internal state with mode information
 
 ## Returns
-- Surface inductance matrix [numpert_total, numpert_total]
+
+  - Surface inductance matrix [numpert_total, numpert_total]
 """
 function calc_surface_inductance(
     grri::Matrix{Float64},
@@ -488,11 +517,13 @@ Formula: μ = L_plasma^(-1) * L_surface
 This gives the linear response of the plasma to external perturbations.
 
 ## Arguments
-- `plasma_inductance`: Plasma inductance matrix
-- `surface_inductance`: Surface inductance matrix
+
+  - `plasma_inductance`: Plasma inductance matrix
+  - `surface_inductance`: Surface inductance matrix
 
 ## Returns
-- Permeability matrix [mpert, mpert]
+
+  - Permeability matrix [mpert, mpert]
 """
 function calc_permeability(
     plasma_inductance::Matrix{ComplexF64},
@@ -525,11 +556,13 @@ Matches forcing mode numbers (n,m) to the eigenmode basis used in ForceFreeState
 and creates a forcing vector in that basis.
 
 ## Arguments
-- `forcing_modes`: External forcing modes from input file
-- `intr`: ForceFreeStates internal state with mode arrays
+
+  - `forcing_modes`: External forcing modes from input file
+  - `intr`: ForceFreeStates internal state with mode arrays
 
 ## Returns
-- Forcing vector in eigenmode basis [mpert]
+
+  - Forcing vector in eigenmode basis [mpert]
 """
 function map_forcing_to_eigenmodes(
     forcing_modes::Vector{ForcingMode},
@@ -571,11 +604,13 @@ Compute plasma response to external forcing.
 Response = Permeability * Forcing
 
 ## Arguments
-- `permeability`: Permeability matrix
-- `forcing_vector`: External forcing in eigenmode basis
+
+  - `permeability`: Permeability matrix
+  - `forcing_vector`: External forcing in eigenmode basis
 
 ## Returns
-- Plasma response vector in eigenmode basis
+
+  - Plasma response vector in eigenmode basis
 """
 function compute_plasma_response_vector(
     permeability::Matrix{ComplexF64},
