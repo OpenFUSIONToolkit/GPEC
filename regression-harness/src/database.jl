@@ -67,11 +67,7 @@ function is_cached(db::SQLite.DB, commit_hash::String, case_name::String)::Bool
 end
 
 function delete_cached(db::SQLite.DB, commit_hash::String, case_name::String)
-    rows = query_rows(db, "SELECT id FROM runs WHERE commit_hash = ? AND case_name = ?",
-                      (commit_hash, case_name))
-    for row in rows
-        DBInterface.execute(db, "DELETE FROM quantities WHERE run_id = ?", (row.id,))
-    end
+    # ON DELETE CASCADE handles quantities cleanup automatically
     DBInterface.execute(db, "DELETE FROM runs WHERE commit_hash = ? AND case_name = ?",
                         (commit_hash, case_name))
 end
@@ -83,24 +79,26 @@ function store_run(db::SQLite.DB, commit_hash::AbstractString, commit_short::Abs
                    success::Bool=true, error_msg::AbstractString="")
     ran_at = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
 
-    delete_cached(db, String(commit_hash), String(case_name))
+    SQLite.transaction(db) do
+        delete_cached(db, String(commit_hash), String(case_name))
 
-    DBInterface.execute(db,
-        """INSERT INTO runs
-           (commit_hash, commit_short, commit_date, commit_msg, case_name, ran_at, runtime_s, success, error_msg)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (String(commit_hash), String(commit_short), String(commit_date), String(commit_msg),
-         String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg)))
-
-    run_id = SQLite.last_insert_rowid(db)
-
-    for eq in extracted
         DBInterface.execute(db,
-            """INSERT INTO quantities
-               (run_id, qty_name, qty_label, value_real, value_int, value_text, value_type, noise_threshold)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (run_id, eq.name, eq.label, eq.value_real, eq.value_int, eq.value_text,
-             eq.value_type, eq.noise_threshold))
+            """INSERT INTO runs
+               (commit_hash, commit_short, commit_date, commit_msg, case_name, ran_at, runtime_s, success, error_msg)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (String(commit_hash), String(commit_short), String(commit_date), String(commit_msg),
+             String(case_name), ran_at, runtime_s, success ? 1 : 0, String(error_msg)))
+
+        run_id = SQLite.last_insert_rowid(db)
+
+        for eq in extracted
+            DBInterface.execute(db,
+                """INSERT INTO quantities
+                   (run_id, qty_name, qty_label, value_real, value_int, value_text, value_type, noise_threshold)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (run_id, eq.name, eq.label, eq.value_real, eq.value_int, eq.value_text,
+                 eq.value_type, eq.noise_threshold))
+        end
     end
 end
 

@@ -93,7 +93,8 @@ function remove_worktree(worktree_path::String, repo_root::String)
         try
             rm(worktree_path; recursive=true, force=true)
             run(`git -C $repo_root worktree prune`)
-        catch
+        catch e
+            @warn "Failed to clean up worktree at $worktree_path: $e"
         end
     end
 end

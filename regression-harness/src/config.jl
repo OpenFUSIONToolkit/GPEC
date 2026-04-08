@@ -24,9 +24,6 @@ function load_case(filepath::String)::CaseSpec
         end
     end
 
-    # Sort quantities by name for consistent ordering
-    sort!(quantities, by=q -> q.name)
-
     return CaseSpec(name, description, example_dir, quantities)
 end
 
