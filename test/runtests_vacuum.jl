@@ -2,17 +2,19 @@
 
     @testset "Vacuum.jl (2D)" begin
 
-        # -------------------------------------------------------------------------
         @testset "VacuumInput" begin
             @testset "default constructor" begin
                 vac = VacuumInput()
-                @test vac.r == Float64[]
+                @test vac.x == Float64[]
+                @test vac.y == Float64[]
                 @test vac.z == Float64[]
                 @test vac.ν == Float64[]
-                @test vac.mlow == 0
-                @test vac.mpert == 0
-                @test vac.nlow == 0
-                @test vac.npert == 0
+                @test vac.mtheta_in == 0
+                @test vac.nzeta_in == 1
+                @test vac.mlow == 1
+                @test vac.mpert == 1
+                @test vac.nlow == 1
+                @test vac.npert == 1
                 @test vac.mtheta == 1
                 @test vac.nzeta == 1
                 @test vac.force_wv_symmetry == true
@@ -29,7 +31,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "WallShapeSettings" begin
             @testset "default constructor" begin
                 w = WallShapeSettings()
@@ -46,11 +47,12 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "PlasmaGeometry" begin
             @testset "from VacuumInput" begin
                 inputs = VacuumInput(
-                    r=[1.0, 1.1, 1.2, 1.1, 1.0],
+                    mtheta_in=5,
+                    nzeta_in=1,
+                    x=[1.0, 1.1, 1.2, 1.1, 1.0],
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
                     ν=zeros(5),
                     mtheta=5,
@@ -72,8 +74,10 @@
             @testset "edge: mtheta larger than input length" begin
                 # Periodic spline requires at least 4 points
                 inputs = VacuumInput(
-                    r=[1.0, 1.1, 1.2, 1.1, 1.0],
+                    x=[1.0, 1.1, 1.2, 1.1, 1.0],
                     z=[0.0, 0.1, 0.0, -0.1, 0.0],
+                    mtheta_in=5,
+                    nzeta_in=1,
                     ν=zeros(5),
                     mtheta=8,
                     mpert=1,
@@ -89,10 +93,11 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "WallGeometry" begin
             _circle_inputs(mtheta) = VacuumInput(
-                r=1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta)),
+                mtheta_in=mtheta,
+                nzeta_in=1,
+                x=1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta)),
                 z=0.3 .* sin.(range(0, 2π, length=mtheta)),
                 ν=zeros(mtheta),
                 mtheta=mtheta,
@@ -149,7 +154,9 @@
                 inputs = _circle_inputs(16)
                 plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
                     VacuumInput(
-                        r=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
+                        mtheta_in=16,
+                        nzeta_in=1,
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
                         z=0.03 .* sin.(range(0, 2π, length=16)),
                         ν=zeros(16),
                         mtheta=16,
@@ -170,7 +177,9 @@
                 inputs = _circle_inputs(16)
                 plasma_surf_near_zero = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(
                     VacuumInput(
-                        r=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
+                        mtheta_in=16,
+                        nzeta_in=1,
+                        x=0.05 .+ 0.03 .* cos.(range(0, 2π, length=16)),
                         z=0.03 .* sin.(range(0, 2π, length=16)),
                         ν=zeros(16),
                         mtheta=16,
@@ -185,7 +194,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "distribute_to_equal_arc_grid" begin
             @testset "unit circle" begin
                 theta = range(0, step=2π/10, length=10)
@@ -212,7 +220,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "elliptic_integral_k" begin
             @testset "domain errors" begin
                 @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_k(-0.1)
@@ -227,7 +234,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "elliptic_integral_e" begin
             @testset "domain errors" begin
                 @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_e(-0.1)
@@ -242,7 +248,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "Pn_minus_half_1997" begin
             @testset "length and finite" begin
                 # Returns P^0 through P^{n+1}, so length n+2
@@ -262,7 +267,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "Pn_minus_half_2007" begin
             @testset "length and finite" begin
                 # Returns P^0 through P^{n+1}, so length n+2
@@ -312,7 +316,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "elliptic_integrals_bulirsch" begin
             @testset "convergence and output" begin
                 K, E, conv, iters = GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integrals_bulirsch(0.5)
@@ -330,7 +333,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "green" begin
             @testset "basic output structure" begin
                 G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1)
@@ -357,10 +359,11 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "compute_vacuum_response" begin
             _make_inputs(; mtheta=128, mtheta_eq=17, mpert=2, nlow=1, npert=1) = VacuumInput(
-                r=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
+                mtheta_in=mtheta_eq,
+                nzeta_in=1,
+                x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
                 z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
                 ν=zeros(mtheta_eq),
                 mlow=1,
@@ -432,12 +435,13 @@
         end
     end
 
-    # -------------------------------------------------------------------------
     # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
     # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
     @testset "Vacuum.jl (3D)" begin
         _make_3d_inputs(; mtheta=32, mtheta_eq=17, mpert=2, nlow=0, npert=2, nzeta=32) = VacuumInput(
-            r=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
+            mtheta_in=mtheta_eq,
+            nzeta_in=1,
+            x=collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq))),
             z=collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq))),
             ν=zeros(mtheta_eq),
             mlow=1,
@@ -447,6 +451,43 @@
             nzeta=nzeta,
             mtheta=mtheta
         )
+
+        # Helper: simple nonaxisymmetric (3D) plasma boundary built from SFL-style (θ, ζ) coordinates.
+        _make_3d_nonaxis_inputs(; mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2) = begin
+            θ_in = range(0, 2π, length=mtheta_in)
+            ζ_in = range(0, 2π, length=nzeta_in)
+
+            X = zeros(mtheta_in, nzeta_in)
+            Y = zeros(mtheta_in, nzeta_in)
+            Z = zeros(mtheta_in, nzeta_in)
+
+            R0 = 1.7
+            a = 0.3
+            ε = 0.05
+
+            for (i, θ) in enumerate(θ_in), (j, ζ) in enumerate(ζ_in)
+                # Base circular cross‑section with a small toroidal corrugation
+                R = R0 + a * cos(θ) + ε * cos(2ζ) * cos(θ)
+                Z_ij = 0.3 * sin(θ) + ε * sin(2ζ) * sin(θ)
+                X[i, j] = R * cos(ζ)
+                Y[i, j] = R * sin(ζ)
+                Z[i, j] = Z_ij
+            end
+
+            VacuumInput(
+                x=vec(X),
+                y=vec(Y),
+                z=vec(Z),
+                mtheta_in=mtheta_in,
+                nzeta_in=nzeta_in,
+                mlow=1,
+                mpert=mpert,
+                nlow=nlow,
+                npert=npert,
+                mtheta=mtheta,
+                nzeta=nzeta
+            )
+        end
 
         @testset "VacuumInput nzeta > 1" begin
             vac = VacuumInput(mtheta=32, nzeta=24, mpert=2, npert=2)
@@ -471,14 +512,28 @@
             @test size(surf.dr_dθ) == (num_points, 3)
             @test size(surf.dr_dζ) == (num_points, 3)
             @test size(surf.normal) == (num_points, 3)
-            # ν is from 2D contour: one value per poloidal point (length mtheta)
-            @test length(surf.ν) == inputs.mtheta
             @test surf.normal_orient in (1, -1)
             @test all(isfinite, surf.r)
             @test all(isfinite, surf.normal)
             # Toroidal extrusion: first and (1+mtheta)th points differ only in (X,Y); Z same
             @test isapprox(surf.r[1, 3], surf.r[1+32, 3])
             @test !isapprox(surf.r[1, 1], surf.r[1+32, 1]) || !isapprox(surf.r[1, 2], surf.r[1+32, 2])
+        end
+
+        @testset "PlasmaGeometry3D nonaxisymmetric input" begin
+            inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12)
+            surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry3D(inputs)
+            num_points = inputs.mtheta * inputs.nzeta
+
+            @test surf.mtheta == 24
+            @test surf.nzeta == 24
+            @test size(surf.r) == (num_points, 3)
+            @test size(surf.normal) == (num_points, 3)
+            @test surf.normal_orient in (1, -1)
+            @test all(isfinite, surf.r)
+            @test all(isfinite, surf.normal)
+            # Nonaxisymmetric boundary should have genuine 3D structure (non‑trivial Y variation)
+            @test maximum(abs, surf.r[:, 2]) > 0
         end
 
         @testset "WallGeometry3D nowall" begin
@@ -523,6 +578,27 @@
             # 3D plasma_pts are (X,Y,Z) Cartesian
             @test isapprox(plasma_pts[1, 1]^2 + plasma_pts[1, 2]^2, (1.7 + 0.3)^2, rtol=0.1)
             @test isapprox(plasma_pts[1, 3], 0.0, atol=0.1)
+            @test isapprox(wv, wv', rtol=1e-12)
+        end
+
+        @testset "compute_vacuum_response 3D nonaxisymmetric boundary" begin
+            inputs = _make_3d_nonaxis_inputs(mtheta=24, nzeta=24, mtheta_in=12, nzeta_in=12, mpert=2, nlow=0, npert=2)
+            wall_settings = WallShapeSettings(shape="nowall")
+            wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+
+            numpoints = inputs.mtheta * inputs.nzeta
+            num_modes = inputs.mpert * inputs.npert
+
+            @test size(wv) == (num_modes, num_modes)
+            @test eltype(wv) == ComplexF64
+            @test all(isfinite, wv)
+            @test size(grri) == (2 * numpoints, 2 * num_modes)
+            @test size(grre) == (2 * numpoints, 2 * num_modes)
+            @test all(isfinite, grri)
+            @test all(isfinite, grre)
+            @test size(plasma_pts) == (numpoints, 3)
+            @test all(isfinite, plasma_pts)
+            @test size(wall_pts) == (numpoints, 3)
             @test isapprox(wv, wv', rtol=1e-12)
         end
 

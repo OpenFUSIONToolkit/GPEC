@@ -23,14 +23,17 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Setup" => "set_up.md",
+        "Workflow" => "workflow.md",
         "API Reference" => [
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
             "Stability Analysis" => "stability.md",
             "Utilities" => "utilities.md",
             "Forcing Terms" => "forcing_terms.md",
-            "Perturbed Equilibrium" => "perturbed_equilibrium.md"
-        ]
+            "Perturbed Equilibrium" => "perturbed_equilibrium.md",
+            "Analysis" => "analysis.md"
+        ],
+        "Citations" => "citations.md",
     ],
     checkdocs=:exports
 )
@@ -38,6 +41,6 @@ makedocs(;
 deploydocs(;
     repo="github.com/OpenFUSIONToolkit/GPEC.git",
     branch="gh-pages",
-    devbranch="main",
+    devbranch="develop",
     push_preview=true
 )

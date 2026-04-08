@@ -25,13 +25,16 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
+include("Analysis/Analysis.jl")
+import .Analysis as Analysis
+export Analysis
+
 # Additional imports for main function
 using TOML
 using Printf
 using HDF5
 
-# Import FastInterpolations functions and types needed in main
-import FastInterpolations: cubic_interp, CubicFit, ExtendExtrap
+using FastInterpolations
 
 import AdaptiveArrayPools: @with_pool
 
@@ -142,7 +145,7 @@ function main(args::Vector{String}=String[])
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
-    intr.locstab = cubic_interp(profiles_xs, locstab_fs; bc=CubicFit(), extrap=ExtendExtrap())
+    intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
 
     # Determine toroidal mode numbers (n >= 1 required; 0 means "not specified")
     if ctrl.nn_low == 0 && ctrl.nn_high == 0
@@ -430,6 +433,17 @@ function write_outputs_to_HDF5(
         out_h5["integration/dxi_psi"] = odet.ud_store[:, :, 1, :]
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
+
+        # Write edge stability scan data (only present when psiedge < psilim)
+        if !isempty(odet.edge_scan.psi)
+            es = odet.edge_scan
+            out_h5["edge_scan/psi"] = es.psi
+            out_h5["edge_scan/q"] = es.q
+            out_h5["edge_scan/total_energy"] = es.total_eigenvalue
+            out_h5["edge_scan/plasma_energy"] = es.plasma_energy
+            out_h5["edge_scan/vacuum_energy"] = es.vacuum_energy
+            out_h5["edge_scan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
+        end
 
         # Write singular surface data
         out_h5["singular/msing"] = intr.msing

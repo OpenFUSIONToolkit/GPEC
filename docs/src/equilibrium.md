@@ -22,6 +22,57 @@ The module exposes a small public API that covers setup, configuration,
 and common analyses used by other GPEC components (e.g. `ForceFreeStates`, vacuum
 interfaces).
 
+## EFIT solver strategies
+
+When `eq_type` is one of the EFIT-based options, three solver strategies are available:
+
+| `eq_type` | Method | Best for |
+|-----------|--------|----------|
+| `"efit"` | Geometric-angle field-line ODE | Default; fast and robust for standard cases |
+| `"efit_arclength"` | Arc-length field-line ODE | Near-separatrix surfaces where the geometric-angle ODE becomes singular |
+| `"efit_by_inversion"` | Contour.jl marching-squares → inverse solver | Highest geometric accuracy; avoids ODE singularities entirely |
+
+**`efit`** integrates field lines using the geometric angle η (polar angle from the
+magnetic axis, 0→2π) as the independent variable. Position at each step is computed as
+`R = R₀ + rfac·cos(η)`, so the RHS denominator is `Bz·cos(η) − Br·sin(η)` — the
+projection of B_pol onto the radial direction. Near an X-point where Bp → 0 this
+denominator passes through zero, causing a coordinate singularity: the ODE steps
+become extremely small or the solver fails to converge.
+
+**`efit_arclength`** uses arc length along the flux surface as the independent variable
+instead. The tangent direction `(dR/ds, dZ/ds) = ∇ψ⊥/|∇ψ|` has unit magnitude by
+construction, so the position equations have no denominator and remain well-behaved
+all the way to the separatrix. The 1/Bp factors in the accumulated integrals still
+diverge near X-points, but their solver tolerances are set large so they do not
+restrict the step size — only the position tracking drives adaptivity. The two methods
+produce identical results when both succeed; `efit_arclength` extends the reliable
+range of psihigh closer to 1.
+
+**`efit_by_inversion`** traces flux surface level sets directly from ψ(R,Z) using marching
+squares, resamples each closed curve to a uniform geometric-angle grid, and feeds the
+result into the inverse equilibrium solver (the same path used by CHEASE input).
+The Cartesian evaluation grid is clipped to the separatrix bounding box and its
+resolution is set adaptively from a bilinear interpolation error bound, so no manual
+tuning is needed.
+
+## Radial grid packing
+
+The default `grid_type = "log_asymptotic"` uses a three-region grid that respects
+the asymptotic behavior of q near both the magnetic axis and the separatrix:
+
+- **Core** (ψ < 0.15): geometric spacing in log(ψ) — handles the axis where profiles
+  behave as ψⁿ
+- **Middle** (0.15 ≤ ψ ≤ 0.95): uniform spacing — preserves resolution through the
+  pedestal region
+- **Edge** (ψ > 0.95): geometric spacing in log(1−ψ) — tracks the logarithmic
+  divergence q ~ −A·ln(1−ψ) near a diverted separatrix
+
+With `mpsi = 0` (the default), the number of radial knots is chosen automatically
+from the `psi_accuracy` parameter (target absolute error in q). Two probe field-line
+integrations near psihigh estimate the local log-slope A, and the knot count is set so
+the cubic spline error stays below `psi_accuracy` throughout the domain. The legacy
+`grid_type = "ldp"` (sin²-spaced) and explicit `mpsi` are still supported.
+
 ## API Reference
 
 ```@autodocs
@@ -86,26 +137,15 @@ pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(GeneralizedPe
 println("Built LAR equilibrium with a = ", lorcfg.lar_a)
 ```
 
-Notes:
-
-- The `EquilibriumConfig(path::String)` constructor parses TOML and
-	expects `[EQUIL_CONTROL]` to contain at minimum `eq_filename` and
-	`eq_type` fields. Paths that are not absolute are resolved relative
-	to the TOML file location.
-
 ## Notes and Caveats
 
-- Many routines rely on spline representations; the `Splines` module is
-	used heavily and should be initialized where appropriate.
-- The Equilibrium module contains several reader routines for external
-	formats (EFIT/CHEASE). Ensure required data files are present for these input formats.
-- For programmatic usage, prefer constructing `EquilibriumConfig` from a
-	TOML file to ensure all path resolution and defaults are handled.
+- `EquilibriumConfig` is constructed from the `[Equilibrium]` section of `gpec.toml`.
+  Paths that are not absolute are resolved relative to the TOML file location.
+- The Equilibrium module contains readers for EFIT and CHEASE formats. Ensure the
+  required data files are present and paths are set correctly in `gpec.toml`.
 
 ## See also
 
 - `docs/src/stability.md` — ideal MHD stability analysis built on top of the equilibrium
 - `docs/src/splines.md` — spline helpers used by equilibrium routines
 - `docs/src/vacuum.md` — coupling between equilibrium and vacuum solvers
-
-```

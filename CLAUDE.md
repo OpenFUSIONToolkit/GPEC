@@ -76,7 +76,7 @@ The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calc
   - Published: Physics of Plasmas **24**, 032505 (2017)
   - Describes: Self-consistent coupling with neoclassical effects
 
-### Resistive DCON Module (Future Work)
+### Resistive MHD Stability Analysis (Future Work)
 
 GPEC will eventually implement resistive MHD stability analysis based on:
 
@@ -403,12 +403,51 @@ GeneralizedPerturbedEquilibrium
 
 ## Git Workflow
 
-This project uses GitFlow:
+This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model):
 
 - Two permanent branches: `main` and `develop`
-- `main` branch updated only at release-ready stages
-- `develop` branch for integration of features
-- Feature branches off `develop`, merged back with `--no-ff`
+- `main` is updated only at release-ready stages via pull request from `develop`
+- `develop` is the integration branch — all feature branches merge here
+
+**IMPORTANT**: All development must be done on feature branches. No commits should be made directly to `develop` or `main`. Always create a branch from `develop`, do all work there, and open a pull request back into `develop`.
+
+### Branch Naming
+
+Branches use a typed prefix and a lowercase hyphen-separated description:
+
+| Prefix | Purpose | Branches from | Merges into |
+|---|---|---|---|
+| `feature/` | New functionality | `develop` | `develop` |
+| `bugfix/` | Non-critical bug fixes | `develop` | `develop` |
+| `hotfix/` | Critical production fix | `main` | `main` + `develop` |
+| `performance/` | Performance improvements | `develop` | `develop` |
+| `refactor/` | Refactoring without behavior change | `develop` | `develop` |
+| `docs/` | Documentation only | `develop` | `develop` |
+| `test/` | Test additions/improvements | `develop` | `develop` |
+| `experiment/` | Exploratory work, may not merge | `develop` | — |
+
+Examples: `bugfix/sing-lim-bounds-error`, `feature/kinetic-damping`, `performance/green-function-prefactor`
+
+Author-named branches (e.g. `jmh/`, `nlogan/`) are not used — git history already records authorship on every commit.
+
+### Hotfix Workflow
+
+Hotfixes address critical bugs in production (`main`) that cannot wait for the next release cycle:
+
+1. Branch `hotfix/description` from the current tagged `main` commit
+2. Fix the bug with one or more commits
+3. Merge into `main` via pull request; tag the merge commit with a new patch version (e.g. `v0.1.1`)
+4. Merge the same branch into `develop` so the fix is not lost in the next release
+
+### Versioning
+
+This project uses semantic versioning: `v{major}.{minor}.{patch}`
+
+- **major**: breaking API or file-format changes
+- **minor**: new features, backward-compatible
+- **patch**: bug fixes (typically via hotfix branches)
+
+Tags are applied to merge commits on `main`.
 
 **Current Development**:
 - Active branch: `perturbed_equilibrium` - Major feature implementing GPEC-style perturbed equilibrium calculations
@@ -436,8 +475,11 @@ This format is used for compiling release notes, so tags should be human-readabl
 
 ### General
 - **Julia version**: 1.11 is the target version
+- **Never remove packages from Project.toml** - If a package fails to load or resolve, run `Pkg.add(...)` or `Pkg.instantiate()` to fix the local environment. Do NOT remove the package from `Project.toml`. The developer works across multiple branches and machines, so environment drift is expected — the right fix is always to update the environment to satisfy the toml, not to trim the toml to match the current environment state.
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
+- **Documentation coverage** - When adding a new module or submodule with public docstrings, add a corresponding `@autodocs` block in `docs/src/`. Documenter CI will fail with a `missing_docs` error if any exported docstring is not covered. The analysis submodule docs live in `docs/src/analysis.md`.
+- **Keep code comments concise** - A comment should be one line where possible. Do not write multi-line block comments explaining the current session's investigation, what was tried, what was wrong before, or why a specific file/path behaves differently. State what the code does and why at a general level. Example of too much detail: a 6-line block explaining that efit_by_inversion uses psilow>0 while CHEASE starts at 0, that the old code was removed, and that spline spikes result. Preferred: `# Replicate Fortran inverse.f: overwrite deta at axis (r²=0) by extrapolating from innermost surfaces.`
 
 ### Output Files
 - **Default output**: `gpec.h5` (previously `euler.h5` in older versions)
@@ -451,6 +493,11 @@ This format is used for compiling release notes, so tags should be human-readabl
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
 - Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
+
+## Figures and plots
+
+- Always print the full absolute path of any figure or plot file you save, so the user can open it directly without searching the filesystem.
+- Always check that axis labels are not clipped. In Plots.jl there is no `tight_layout()` equivalent; use explicit margins instead: `left_margin=12Plots.mm`, `bottom_margin=4Plots.mm`, etc. When in doubt, add a generous `left_margin` to prevent y-axis label cutoff.
 
 ## Git Merge conflict resolution policy
 

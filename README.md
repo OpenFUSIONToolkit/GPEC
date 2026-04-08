@@ -1,49 +1,44 @@
-# Perturbed Equilibrium
+# GPEC — Generalized Perturbed Equilibrium Code
 
-This is a work in progress juliafication of the Generalized Perturbed Equilibrium Code suite https://github.com/PrincetonUniversity/GPEC.
+GPEC is a Julia implementation of the [GPEC suite](https://github.com/PrincetonUniversity/GPEC) for magnetohydrodynamic (MHD) analysis of fusion plasmas. It performs a three-stage analysis pipeline:
 
-## Documentation Pages
+1. **Equilibrium reconstruction** from experimental data (EFIT, CHEASE) or analytical models — solves the Grad-Shafranov equation, computes flux surfaces, safety factor q(ψ), and builds field quantity splines.
+2. **Ideal MHD stability analysis** via Newcomb's criterion (DCON-style ODE integration) — identifies singular surfaces where q = m/n, computes force-free eigenfunctions ξ(ψ,θ), evaluates the tearing stability parameter Δ' at each rational surface, and checks fixed/free boundary stability.
+3. **Perturbed equilibrium** — quantifies the self-consistent plasma response to external magnetic perturbations (RMPs, error fields, correction coils). Key outputs include resonant flux, island half-widths, and the Chirikov overlap parameter — the principal diagnostics for ELM suppression, error field correction, and disruption avoidance.
 
-The WIP documentation can be found [here](https://openfusiontoolkit.github.io/GPEC/dev/).
+Full documentation: [https://openfusiontoolkit.github.io/GPEC/dev/](https://openfusiontoolkit.github.io/GPEC/dev/)
 
+## Quick Start
+
+GPEC is configured via a `gpec.toml` file. To run an analysis on a directory containing that file:
+
+```bash
+./gpec path/to/directory
+```
+
+To use GPEC programmatically from Julia:
+
+```julia
+using GeneralizedPerturbedEquilibrium
+GeneralizedPerturbedEquilibrium.main(["path/to/directory"])
+```
+
+See [Setup](https://openfusiontoolkit.github.io/GPEC/dev/set_up/) for full installation instructions.
 
 ## Developer Notes
 
-### GIT Workflow
+### Git Workflow
 
-All developers need to use Vincent Driessen's [GitFlow](http://nvie.com/posts/a-successful-git-branching-model) workflow when editing the GPEC package. PLEASE READ THE ENTIRE POST. It is short, very thorough, and good for both experienced and new git users.
+This project uses [GitFlow](http://nvie.com/posts/a-successful-git-branching-model):
 
-The highlights are,
-  - There are two permanent branches: main (the post uses "master") and develop
-  - The main branch is only updated for at release ready stages
-  - New features should be developed in short-lived (days) branches coming off of and merging back to the develop branch.
+- Two permanent branches: `main` and `develop`
+- `main` is updated only at release-ready stages
+- Feature branches should come off `develop` and merge back with `--no-ff`
 
-Specific instructions are given in the link above as to exactly how to branch and merge these various branches. For example, the --no-ff option should be used when merging in order to keep branch histories. Just follow the examples and you wont go wrong!
+### Commit Message Format
 
-#### Using github
-
-Please see [this link](https://docs.google.com/document/d/1XAOTz1IV8ErZAAk-iSuEuddNOLB5XcoVZsAbPKRUUuA/edit?usp=sharing) for a guide on how to discuss your code development using github.
-
-#### Commit messages
-
-To assist with the process of compiling release notes, please confirm to the commit message format:
 ```
 CODE - TAG - Detailed message
 ```
-where CODE is EQUIL, ForceFreeStates, VAC, etc. and TAGs are short descriptors of the type of commit. Example tags might be WIP (work in progress), MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, etc. Look through old commits for examples of what tags are commonly used.
 
-Again, this is currently used for the by-hand compilation of release notes. The tags thus need to be human readable but are not strictly inforced to be within some limited set. The objective is to allow a lead developer to skim through commits and pick out only the key new features / bug fixes / improvements to note in the release while not having to read all the work-in-progress or minor changes.
-
-### Julia Tips
-
-#### Revise
-
-When developing and recompiling code often, use Revise.jl to speed up the compile times by only recompiling what is impacted by the changed code. Integrate Revise.jl into your default Julia environment for use across projects, do not directly add it to the Project.toml of this particular project. To install Revise.jl in your global environment, open the Julia REPL using the `julia` command, enter the package manager by pressing `]`, and then `add Revise`:
-
-Code
-
-    $ julia
-    julia> ]
-    pkg> add Revise
-
-Now, in the top of each Jupyter notebook, you can call `using Revise` at the top of any Jupyter notebook to speed up compile times as you develop and test. Better yet, set up your environement to [use Revise by default](https://timholy.github.io/Revise.jl/stable/config/#Using-Revise-by-default)
+Where CODE is the module name (EQUIL, ForceFreeStates, VAC, PERTURBED EQUILIBRIUM, etc.) and TAG describes the type of change (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.). This format is used for compiling release notes — tags should be human-readable but are not enforced to a fixed set.

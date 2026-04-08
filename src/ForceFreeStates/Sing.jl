@@ -101,7 +101,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
-        jpsi = min(jpsi, equil.config.mpsi - 1)
+        jpsi = min(jpsi, length(profiles.xs) - 1)
 
         hint = Ref(jpsi)
         intr.psilim = find_zero(
@@ -260,21 +260,21 @@ Add a spline for F directly instead of the lower triangular factorization to avo
 
     # Evaluate fmats_lower and derivatives using series interpolants
     ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=1)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=2)
-    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=3)
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    ffit.fmats_lower(vec(@view(f_lower_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
 
     # Evaluate gmats and derivatives
     ffit.gmats(vec(@view(g_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=1)
-    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=2)
-    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=3)
+    ffit.gmats(vec(@view(g_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    ffit.gmats(vec(@view(g_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    ffit.gmats(vec(@view(g_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
 
     # Evaluate kmats and derivatives
     ffit.kmats(vec(@view(k_interp[:, :, 1])), singp.psifac; hint=ffit._hint)
-    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=1)
-    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=2)
-    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=3)
+    ffit.kmats(vec(@view(k_interp[:, :, 2])), singp.psifac; deriv=DerivOp(1))
+    ffit.kmats(vec(@view(k_interp[:, :, 3])), singp.psifac; deriv=DerivOp(2))
+    ffit.kmats(vec(@view(k_interp[:, :, 4])), singp.psifac; deriv=DerivOp(3))
 
     # Evaluate Taylor series coefficients for diagonal matrix Qᵢ = mᵢ - nᵢq(ψ) = [mᵢ - nᵢq, -nᵢq', -nᵢq'', -nᵢq''']
     singfac[:, 1] .= vec((intr.mlow:intr.mhigh) .- q[1] .* (intr.nlow:intr.nhigh)')
@@ -726,7 +726,7 @@ Implement kin_flag functionality
     psieval::Float64)
 
     # Unpack structs and initialize
-    # note the two items not used here are needed in the integrator params for use in the integrator_callbackcallback
+    # note the two items not used here are needed in the integrator params tuple
     _, equil, ffit, intr, odet, _ = params
 
     # Allocate temporary arrays from the pool
@@ -750,7 +750,7 @@ Implement kin_flag functionality
     du2 = @view(du[:, :, 2])
 
     # Compute singfac = 1 / (m - nq)
-    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential ODE integration
+    # Use shared hint for O(1) interval lookup during sequential ODE integration
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 

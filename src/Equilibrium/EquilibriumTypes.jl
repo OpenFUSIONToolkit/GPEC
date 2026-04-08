@@ -14,14 +14,16 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `eq_filename::String` - Path to equilibrium input file
   - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "other")
   - `power_bp::Int` - Poloidal field power exponent for Jacobian
-  - `power_b::Int` - Toroidal field power exponent for Jacobian
+  - `power_b::Int` - Total field power exponent for Jacobian
   - `power_r::Int` - Major radius power exponent for Jacobian
+  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
+  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
-  - `mpsi::Int` - Number of radial grid points
+  - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)
+  - `psi_accuracy::Float64` - Target absolute error in q for auto-mpsi (used when mpsi=0 and grid_type="log_asymptotic")
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
@@ -38,11 +40,13 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     power_bp::Int = 0
     power_b::Int = 0
     power_r::Int = 0
+    power_rc::Int = 0
 
-    grid_type::String = "ldp"
+    grid_type::String = "log_asymptotic"
     psilow::Float64 = 1e-2
     psihigh::Float64 = 0.994
-    mpsi::Int = 128
+    mpsi::Int = 0
+    psi_accuracy::Float64 = 0.001
     mtheta::Int = 256
 
     newq0::Int = 0
@@ -54,41 +58,48 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
-        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
         force_termination, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
-            power_b = 0
-            power_bp = 0
-            power_r = 0
+            power_b = 0; power_bp = 0; power_r = 0; power_rc = 0
         elseif jac_type == "pest"
             @info "Forcing pest coordinate jacobian exponents: power_*"
-            power_b = 0
-            power_bp = 0
-            power_r = 2
+            power_b = 0; power_bp = 0; power_r = 2; power_rc = 0
         elseif jac_type == "equal_arc"
             @info "Forcing equal_arc coordinate jacobian exponents: power_*"
-            power_b = 0
-            power_bp = 1
-            power_r = 0
+            power_b = 0; power_bp = 1; power_r = 0; power_rc = 0
         elseif jac_type == "boozer"
             @info "Forcing boozer coordinate jacobian exponents: power_*"
-            power_b = 2
-            power_bp = 0
-            power_r = 0
+            power_b = 2; power_bp = 0; power_r = 0; power_rc = 0
         elseif jac_type == "park"
             @info "Forcing park coordinate jacobian exponents: power_*"
-            power_b = 1
-            power_bp = 0
-            power_r = 0
+            power_b = 1; power_bp = 0; power_r = 0; power_rc = 0
         elseif jac_type == "other"
-            @info "Using manual jacobian exponents: power b, bp, r = $(power_b), $(power_bp), $(power_r)"
-        elseif jac_type != "other"
+            # Normalize to a named type when the powers match, so fast paths are taken.
+            if     power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "hamada";    @info "Recognized hamada jacobian from power exponents"
+            elseif power_b == 0 && power_bp == 0 && power_r == 2 && power_rc == 0
+                jac_type = "pest";      @info "Recognized pest jacobian from power exponents"
+            elseif power_b == 0 && power_bp == 1 && power_r == 0 && power_rc == 0
+                jac_type = "equal_arc"; @info "Recognized equal_arc jacobian from power exponents"
+            elseif power_b == 2 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "boozer";    @info "Recognized boozer jacobian from power exponents"
+            elseif power_b == 1 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "park";      @info "Recognized park jacobian from power exponents"
+            else
+                @info "Using manual jacobian exponents: power b, bp, r, rc = $(power_b), $(power_bp), $(power_r), $(power_rc)"
+            end
+        else
             error("Cannot recognize jac_type = $(jac_type)")
         end
-        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
-            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
+        if psihigh > 1.0
+            @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
+        end
+        psihigh = min(psihigh, 1.0)
+        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
             force_termination, use_galgrid)
     end
 end
@@ -488,11 +499,11 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(dVdpsi_vals) == npts
     @assert length(q_vals) == npts
 
-    # Create value interpolants with CubicFit BC and LinearBinary search for sequential psi access
-    F_spline = cubic_interp(xs, F_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    P_spline = cubic_interp(xs, P_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    q_spline = cubic_interp(xs, q_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    # Create value interpolants with CubicFit BC (default) for sequential psi access
+    F_spline = cubic_interp(xs, F_vals; extrap=extrap)
+    P_spline = cubic_interp(xs, P_vals; extrap=extrap)
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; extrap=extrap)
+    q_spline = cubic_interp(xs, q_vals; extrap=extrap)
 
     # Create derivative views (these share data with value interpolants, no extra storage)
     F_deriv = deriv1(F_spline)
