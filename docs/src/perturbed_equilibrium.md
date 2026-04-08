@@ -5,15 +5,14 @@ The `PerturbedEquilibrium` module computes the plasma response to external magne
 ## Types
 
 ```@docs
-JPEC.PerturbedEquilibrium.PerturbedEquilibriumControl
-JPEC.PerturbedEquilibrium.PerturbedEquilibriumInternal
-JPEC.PerturbedEquilibrium.ForcingMode
-JPEC.PerturbedEquilibrium.PerturbedEquilibriumState
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumControl
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumInternal
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.PerturbedEquilibriumState
 ```
 
 ## Functions
 
 ```@docs
-JPEC.PerturbedEquilibrium.compute_perturbed_equilibrium
-JPEC.PerturbedEquilibrium.write_outputs_to_HDF5
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.compute_perturbed_equilibrium
+GeneralizedPerturbedEquilibrium.PerturbedEquilibrium.write_outputs_to_HDF5
 ```

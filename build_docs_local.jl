@@ -5,9 +5,6 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 
-# Build the package
-Pkg.build()
-
 # Activate the docs environment
 Pkg.activate("docs")
 

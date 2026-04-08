@@ -1,27 +1,23 @@
-# Copilot instructions for JPEC
+# Copilot instructions for GPEC
 
 ## Project overview
-- JPEC is a Julia/Fortran hybrid port of GPEC for MHD equilibrium and stability analysis. Core modules live in [src](src): Splines, Equilibrium, Vacuum, DCON (see [CLAUDE.md](CLAUDE.md)).
+- GPEC is a Julia port of GPEC-style MHD equilibrium and stability analysis. Core modules live in [src](src): Utilities, Equilibrium, Vacuum, ForceFreeStates, ForcingTerms, PerturbedEquilibrium (see [CLAUDE.md](CLAUDE.md)).
 - Data flow: equilibrium setup → vacuum response → stability analysis (documented in [CLAUDE.md](CLAUDE.md)).
-- Vacuum is mid-conversion from Fortran to Julia; Fortran libraries are built and called via `ccall` (see [deps/build.jl](deps/build.jl)).
 
 ## Architecture and entry points
+- Main entry point: `GeneralizedPerturbedEquilibrium.main()` in [src/GeneralizedPerturbedEquilibrium.jl](src/GeneralizedPerturbedEquilibrium.jl).
 - Equilibrium: `setup_equilibrium(path|config)`; types in [src/Equilibrium](src/Equilibrium).
-- Vacuum: `compute_vacuum_response()` (Julia) and `mscvac()` (Fortran); code in [src/Vacuum](src/Vacuum) and [src/Vacuum/fortran](src/Vacuum/fortran).
-- DCON stability: entry points in [src/DCON/Main.jl](src/DCON/Main.jl).
-- Splines: Julia + Fortran implementations in [src/Splines](src/Splines).
+- Vacuum: `compute_vacuum_response()`; code in [src/Vacuum](src/Vacuum).
+- ForceFreeStates (ideal MHD stability): types and functions in [src/ForceFreeStates](src/ForceFreeStates).
+- PerturbedEquilibrium (plasma response): entry point in [src/PerturbedEquilibrium](src/PerturbedEquilibrium).
 
 ## Data flow and key structures
 - Equilibrium: TOML config → read equilibrium → solve → diagnostics (gse*.h5) when relevant.
 - Vacuum: initialize plasma/wall surfaces → compute response matrix → return wv, grri, xzpts.
 - Stability: equilibrium + vacuum response → integrate ODEs → compute energies.
-- Core types: `PlasmaEquilibrium` and `EquilibriumConfig` in [src/Equilibrium/EquilibriumTypes.jl](src/Equilibrium/EquilibriumTypes.jl); `DconControl` in [src/DCON/DconStructs.jl](src/DCON/DconStructs.jl).
+- Core types: `PlasmaEquilibrium` and `EquilibriumConfig` in [src/Equilibrium/EquilibriumTypes.jl](src/Equilibrium/EquilibriumTypes.jl); `ForceFreeStatesControl` and `ForceFreeStatesInternal` in [src/ForceFreeStates/ForceFreeStatesStructs.jl](src/ForceFreeStates/ForceFreeStatesStructs.jl).
 
-## Build, test, docs
-- Build Fortran libraries:
-  ```bash
-  julia --project=. -e 'using Pkg; Pkg.build()'
-  ```
+## Tests and docs
 - Run all tests:
   ```bash
   julia --project=. test/runtests.jl
@@ -40,15 +36,11 @@
 - GitFlow workflow; develop is the active integration branch (see [README.md](README.md)).
 - Commit message format: `CODE - TAG - Detailed message` (examples in [CLAUDE.md](CLAUDE.md)).
 - Avoid step numbering in comments; instructions should be unnumbered (see [CLAUDE.md](CLAUDE.md)).
-- Many routines use 0-based indexing to mirror Fortran conventions before converting to 1-based Julia (see [CLAUDE.md](CLAUDE.md)).
-
-## Fortran integration notes
-- Builds configured in [deps/build.jl](deps/build.jl) and [deps/build_helpers.jl](deps/build_helpers.jl); macOS uses Accelerate and Linux uses OpenBLAS.
-- `ccall` uses mangled names; see [src/Vacuum/Vacuum.jl](src/Vacuum/Vacuum.jl) and [src/Splines/CubicSpline.jl](src/Splines/CubicSpline.jl) for patterns.
-- Add new Fortran builds via `build_*_fortran()` in [deps/build_helpers.jl](deps/build_helpers.jl).
+- Many routines use 0-based indexing for historical consistency with the original GPEC Fortran code before converting to 1-based Julia indexing (see [CLAUDE.md](CLAUDE.md)).
 
 ## Configuration examples
-- TOML configs: `equil.toml` uses `[EQUIL_CONTROL]` and `[EQUIL_OUTPUT]`; `dcon.toml` uses `[DCON_CONTROL]` and `[WALL]`.
+- Unified configuration: `gpec.toml` uses `[Equilibrium]`, `[Wall]`, `[ForceFreeStates]`, `[PerturbedEquilibrium]`, and `[ForcingTerms]` sections.
+- Legacy configs (`equil.toml`, `dcon.toml`, `vac.in`) are deprecated.
 - Example configs in [examples/DIIID-like_ideal_example](examples/DIIID-like_ideal_example) and [examples/Solovev_ideal_example](examples/Solovev_ideal_example).
 
 ## Development tips

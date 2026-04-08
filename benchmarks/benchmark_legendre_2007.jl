@@ -10,12 +10,12 @@ Usage:
     julia --project=. benchmarks/benchmark_legendre_2007.jl
 """
 
-using JPEC
+using GeneralizedPerturbedEquilibrium
 using Printf
 using Statistics
 
 # Access the internal functions
-using JPEC.Vacuum: Pn_minus_half_1997, Pn_minus_half_2007
+using GeneralizedPerturbedEquilibrium.Vacuum: Pn_minus_half_1997, Pn_minus_half_2007
 
 println("="^80)
 println("Benchmark: Legendre Function Implementations (1997 vs 2007)")

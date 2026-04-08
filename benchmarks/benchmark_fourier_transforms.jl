@@ -11,8 +11,8 @@ The custom FourierTransform is designed for truncated Fourier series with
 arbitrary mode ranges (mlow:mhigh), while FFTW computes full DFT (modes 0:N-1).
 """
 
-using JPEC
-using JPEC.Utilities.FourierTransforms
+using GeneralizedPerturbedEquilibrium
+using GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms
 using FFTW
 using BenchmarkTools
 using Printf

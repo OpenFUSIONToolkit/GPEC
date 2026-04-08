@@ -37,13 +37,5 @@ jobs:
           cache-artifacts: true
           cache-registries: true
 
-      - name: Install Fortran compiler (for Fortran dependencies)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gfortran libopenblas-dev
-
-      - name: Build Julia project
-        run: julia --project="." -e "using Pkg; Pkg.build()"
-
       - name:  Instantiate Julia environment
         run: julia --project="." -e "using Pkg; Pkg.instantiate()"

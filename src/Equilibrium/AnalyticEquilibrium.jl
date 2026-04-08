@@ -141,16 +141,16 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 
     prob = ODEProblem(dydr, y0, tspan, p)
 
-    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=1e-6, abstol=1e-8, maxiters=10000)
+    sol = solve(prob, Rosenbrock23(; autodiff=false); reltol=equil_input.etol, abstol=1e-8, maxiters=10000, dense=false)
 
     r_arr = sol.t
-    y_mat = hcat(sol.u...)'
+    y_mat = reduce(hcat, sol.u)'
     steps = length(r_arr)
 
     temp = zeros(steps, 9)
     for i in 1:steps
         r = r_arr[i]
-        y = y_mat[i, :]
+        @views y = y_mat[i, :]
         x = r / lar_a
         xfac = 1 - x^2
         pval = p00 * xfac^lar_input.p_pres
@@ -158,12 +158,20 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
                 sigma0 * xfac^lar_input.p_sig :
                 sigma0 / (1 + x^(2 * lar_input.p_sig))^(1 + 1 / lar_input.p_sig)
         q = r^2 * y[2] / (lar_r0 * y[1])
-        temp[i, :] = [r; y; pval; sigma; q]
+        temp[i, 1] = r
+        temp[i, 2] = y[1]
+        temp[i, 3] = y[2]
+        temp[i, 4] = y[3]
+        temp[i, 5] = y[4]
+        temp[i, 6] = y[5]
+        temp[i, 7] = pval
+        temp[i, 8] = sigma
+        temp[i, 9] = q
     end
 
     xs_r = temp[:, 1]
     fs_r = temp[:, 2:9]
-    spl = cubic_interp(xs_r, fs_r; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
+    spl = cubic_interp(xs_r, Series(fs_r); extrap=ExtendExtrap())
     spl_deriv = deriv1(spl)
 
     dr = lar_a / (ma + 1)
@@ -173,7 +181,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     sq_xs = zeros(ma + 1)
     sq_fs = zeros(ma + 1, 3)
     r_nodes = zeros(ma + 1)
-    rzphi_y_nodes = range(0.0, 2π; length=mtau + 1)
+    rzphi_y_nodes = range(0.0, 1.0; length=mtau + 1)
     rzphi_fs_nodes = zeros(ma + 1, mtau + 1, 2)
 
     hint = Ref(1)
@@ -204,14 +212,14 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
         end
     end
 
-    sq_in = cubic_interp(sq_xs, sq_fs; bc=CubicFit(), search=LinearBinary(), extrap=:extension)
+    sq_in = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = r_nodes
     rz_in_ys = collect(rzphi_y_nodes)
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(:extension, :wrap))
+
+    itp_2d_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; itp_2d_opts...)
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
 
     # LAR equilibrium has midplane symmetry, so magnetic axis is at Z = 0
     return InverseRunInput(equil_input, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, lar_r0, 0.0, psio)
@@ -275,7 +283,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     sqfs[:, 1] .= f0 .* f0fac
     sqfs[:, 2] .= pfac .* (1 .* p0fac .- psis)
     sqfs[:, 3] .= 0.0
-    sq_in = cubic_interp(psis, sqfs; bc=CubicFit(), extrap=:extension)
+    sq_in = cubic_interp(psis, Series(sqfs); extrap=ExtendExtrap())
 
     # Compute 2D data and spline
     r = [rmin + i * (rmax - rmin) / mr for i in 0:mr]
@@ -288,14 +296,10 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     end
     psi_in_xs = r
     psi_in_ys = z
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; search=LinearBinary(),
-        bc=(CubicFit(), CubicFit()), extrap=(:extension, :extension))
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psifs; extrap=ExtendExtrap())
 
     # Print out equilibrium info
-    println("Generating Solovev equilibrium inputs with:")
-    println("   mr=$mr, mz=$mz, ma=$ma")
-    println("   e=$e, a=$a, r0=$r0")
-    println("   q0=$q0, p0fac=$p0fac, b0fac=$b0fac, f0fac=$f0fac")
+    @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
 
     return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
 end

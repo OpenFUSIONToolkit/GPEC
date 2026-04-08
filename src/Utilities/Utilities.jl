@@ -1,9 +1,9 @@
 """
     Utilities
 
-Shared mathematical and computational utilities for JPEC modules.
+Shared mathematical and computational utilities for GPEC modules.
 
-This module provides common functionality used across multiple JPEC modules,
+This module provides common functionality used across multiple GPEC modules,
 including efficient Fourier transforms, numerical integration, and other
 mathematical utilities.
 

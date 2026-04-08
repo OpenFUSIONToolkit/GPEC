@@ -62,12 +62,20 @@ perturbed_equilibrium/
 │   ├── amplitude_real # Real parts of forcing amplitudes
 │   └── amplitude_imag # Imaginary parts of forcing amplitudes
 ├── response/
-│   ├── xi_perturbed   # Displacement field
-│   └── b_perturbed    # Magnetic field perturbation
+│   ├── xi_psi_real/imag    # Radial displacement (real/imag parts)
+│   ├── b_psi_real/imag     # Normal field component
+│   ├── b_theta_real/imag   # Poloidal field component
+│   └── b_zeta_real/imag    # Toroidal field component
 ├── singular_coupling/
-│   ├── coupling_coefficient_real
-│   ├── coupling_coefficient_imag
-│   └── resonant_amplitude
+│   ├── coupling_coefficient_real/imag
+│   ├── resonant_amplitude
+│   ├── resonant_flux         # ComplexF64 [numpert_total × msing]
+│   ├── resonant_current      # ComplexF64 [numpert_total × msing]
+│   ├── island_width_sq       # ComplexF64 [numpert_total × msing]
+│   ├── penetrated_field      # ComplexF64 [numpert_total × msing]
+│   ├── delta_prime           # ComplexF64 [numpert_total × msing]; tearing stability Δ'
+│   ├── island_half_width     # Float64 [msing]; actual w/2
+│   └── chirikov_parameter    # Float64 [msing]; island overlap metric
 └── energies/
     ├── plasma_energy
     ├── vacuum_energy
@@ -80,10 +88,6 @@ function write_outputs_to_HDF5(
     ctrl::PerturbedEquilibriumControl,
     filename::String
 )
-    if ctrl.verbose
-        println("Writing perturbed equilibrium data to $filename")
-    end
-
     h5open(filename, "cw") do file  # "cw" = create or read/write
         # Create perturbed_equilibrium group
         pe_group = haskey(file, "perturbed_equilibrium") ? file["perturbed_equilibrium"] : create_group(file, "perturbed_equilibrium")
@@ -100,26 +104,31 @@ function write_outputs_to_HDF5(
         forcing_group["amplitude_real"] = amp_real
         forcing_group["amplitude_imag"] = amp_imag
 
-        # Write response fields (if computed)
-        if !isnothing(state.xi_modes)
-            response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
-            response_group["xi_psi_real"] = real.(state.xi_modes.psi)
-            response_group["xi_psi_imag"] = imag.(state.xi_modes.psi)
-            if !isnothing(state.b_modes)
-                response_group["b_psi_real"] = real.(state.b_modes.psi)
-                response_group["b_psi_imag"] = imag.(state.b_modes.psi)
-                response_group["b_theta_real"] = real.(state.b_modes.theta)
-                response_group["b_theta_imag"] = imag.(state.b_modes.theta)
-                response_group["b_zeta_real"] = real.(state.b_modes.zeta)
-                response_group["b_zeta_imag"] = imag.(state.b_modes.zeta)
-            end
-        end
+        # Write response fields; always write all entries, using empty arrays when not computed
+        response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
+        have_xi   = !isnothing(state.xi_modes)
+        have_b    = have_xi && !isnothing(state.b_modes)
+        response_group["xi_psi_real"]  = have_xi ? real.(state.xi_modes.psi)   : Float64[]
+        response_group["xi_psi_imag"]  = have_xi ? imag.(state.xi_modes.psi)   : Float64[]
+        response_group["b_psi_real"]   = have_b  ? real.(state.b_modes.psi)    : Float64[]
+        response_group["b_psi_imag"]   = have_b  ? imag.(state.b_modes.psi)    : Float64[]
+        response_group["b_theta_real"] = have_b  ? real.(state.b_modes.theta)  : Float64[]
+        response_group["b_theta_imag"] = have_b  ? imag.(state.b_modes.theta)  : Float64[]
+        response_group["b_zeta_real"]  = have_b  ? real.(state.b_modes.zeta)   : Float64[]
+        response_group["b_zeta_imag"]  = have_b  ? imag.(state.b_modes.zeta)   : Float64[]
 
         # Write singular coupling metrics
         coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")
         coupling_group["coupling_coefficient_real"] = real(state.coupling_coefficient)
         coupling_group["coupling_coefficient_imag"] = imag(state.coupling_coefficient)
         coupling_group["resonant_amplitude"] = state.resonant_amplitude
+        coupling_group["resonant_flux"]      = state.resonant_flux
+        coupling_group["resonant_current"]   = state.resonant_current
+        coupling_group["island_width_sq"]    = state.island_width_sq
+        coupling_group["penetrated_field"]   = state.penetrated_field
+        coupling_group["delta_prime"]        = state.delta_prime
+        coupling_group["island_half_width"]  = state.island_half_width
+        coupling_group["chirikov_parameter"] = state.chirikov_parameter
 
         # Write additional metrics
         for (key, val) in intr.singular_coupling_metrics
@@ -133,7 +142,4 @@ function write_outputs_to_HDF5(
         energy_group["total_energy"] = state.total_energy
     end
 
-    if ctrl.verbose
-        println("  Perturbed equilibrium output complete")
-    end
 end

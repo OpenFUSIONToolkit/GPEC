@@ -257,7 +257,7 @@ function calc_plasma_inductance(
 end
 
 """
-    pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+    pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
 
 Pack complex mode coefficients into real/imaginary pairs for Green's function application.
 
@@ -271,9 +271,14 @@ Converts [a+bi, c+di, ...] to [a, b, c, d, ...]
 
   - Packed real/imaginary array [2*mpert]
 """
-function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
+function pack_complex_to_realimag(modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
     mpert = length(modes)
     packed = zeros(Float64, 2 * mpert)
+    return pack_complex_to_realimag!(packed, modes)
+end
+
+function pack_complex_to_realimag!(packed::AbstractVector{Float64}, modes::AbstractVector{ComplexF64})::AbstractVector{Float64}
+    mpert = length(modes)
     for i in 1:mpert
         packed[2*i-1] = real(modes[i])
         packed[2*i] = imag(modes[i])
@@ -282,7 +287,7 @@ function pack_complex_to_realimag(modes::Vector{ComplexF64})::Vector{Float64}
 end
 
 """
-    unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+    unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
 
 Unpack real/imaginary pairs back to complex coefficients.
 
@@ -296,7 +301,7 @@ Converts [a, b, c, d, ...] to [a+bi, c+di, ...]
 
   - Complex mode coefficients [mpert]
 """
-function unpack_realimag_to_complex(packed::Vector{Float64})::Vector{ComplexF64}
+function unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
     mpert = length(packed) ÷ 2
     modes = zeros(ComplexF64, mpert)
     for i in 1:mpert
@@ -337,16 +342,27 @@ function apply_green_function(
     green::Matrix{Float64},
     mode_coeffs::Vector{ComplexF64}
 )::Vector{Float64}
+    mtheta = size(green, 1) ÷ 2
+    chi_theta = Vector{Float64}(undef, mtheta)
+    return apply_green_function!(chi_theta, green, mode_coeffs)
+end
+
+@with_pool pool function apply_green_function!(
+    chi_theta::AbstractVector{Float64},
+    green::Matrix{Float64},
+    mode_coeffs::AbstractVector{ComplexF64}
+)
     # Pack complex coefficients to real/imag format for Green's function
     # Format: [Re(mode_1), Im(mode_1), Re(mode_2), Im(mode_2), ...]
-    packed_coeffs = pack_complex_to_realimag(mode_coeffs)
+    mpert = length(mode_coeffs)
+    packed_coeffs = zeros!(pool, Float64, 2 * mpert) 
+    pack_complex_to_realimag!(packed_coeffs, mode_coeffs)
 
     # Apply Green's function: chi_theta = green * b_fourier
     # Extract only plasma surface rows (first mtheta rows)
     # Result is real-valued potential at theta points
-    mtheta = size(green, 1) ÷ 2
-    chi_theta = green[1:mtheta, :] * packed_coeffs
-
+    mtheta = length(chi_theta)
+    mul!(chi_theta, @view(green[1:mtheta, :]), packed_coeffs)
     return chi_theta
 end
 

@@ -4,19 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-JPEC (Julia Perturbed Equilibrium Code) is a comprehensive Julia implementation of GPEC-style (Generalized Perturbed Equilibrium Code) MHD analysis for fusion plasmas. The code performs equilibrium reconstruction, ideal MHD stability analysis, and perturbed equilibrium calculations including plasma response and singular surface coupling diagnostics.
+GPEC (Generalized Perturbed Equilibrium Code, Julia implementation) is a comprehensive Julia reimplementation of the GPEC suite for MHD analysis of fusion plasmas. The code performs equilibrium reconstruction, ideal MHD stability analysis, and perturbed equilibrium calculations including plasma response and singular surface coupling diagnostics.
 
-**Relationship to Fortran GPEC**: JPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "GPEC", "the Fortran code", or "the original GPEC", they are referring to this Fortran codebase. JPEC reimplements and extends GPEC's functionality in Julia with improved performance and maintainability.
+**Relationship to Fortran GPEC**: This Julia GPEC is an evolution of the Fortran GPEC code suite, available at https://github.com/PrincetonUniversity/GPEC. When users reference "the Fortran code", "the original GPEC", or "Fortran GPEC", they are referring to that Fortran codebase. This Julia implementation reimplements and extends GPEC's functionality with improved performance and maintainability.
 
 **Local GPEC Repository**: For code conversion or comparison with the original Fortran implementation, check for a local GPEC repository at `~/Code/gpec`. If not found at this location, ask the user for the correct path.
 
-JPEC is a hybrid Julia/Fortran implementation with active Julia development alongside legacy Fortran code called via ccall. The Fortran-to-Julia conversion is largely complete, with pure Julia implementations available for all major components.
+This codebase is implemented in Julia. References to “Fortran GPEC” or “legacy VACUUM” refer to the original upstream Fortran codebase, not a runtime dependency of this Julia implementation.
 
 **Current Development Focus**: The `perturbed_equilibrium` branch is implementing full GPEC-style perturbed equilibrium functionality, including singular coupling analysis, island formation diagnostics, and mode-space field reconstruction.
 
 ## Key References
 
-**IMPORTANT**: The papers in `docs/resources/` provide the theoretical foundation for JPEC's algorithms and should be referenced to understand what the code is doing. **Citing equations from these papers in code comments and annotations is strongly encouraged** to maintain traceability between theory and implementation.
+**IMPORTANT**: The papers in `docs/resources/` provide the theoretical foundation for GPEC's algorithms and should be referenced to understand what the code is doing. **Citing equations from these papers in code comments and annotations is strongly encouraged** to maintain traceability between theory and implementation.
 
 ### Vacuum Module
 
@@ -76,9 +76,9 @@ The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calc
   - Published: Physics of Plasmas **24**, 032505 (2017)
   - Describes: Self-consistent coupling with neoclassical effects
 
-### Resistive DCON Module (Future Work)
+### Resistive MHD Stability Analysis (Future Work)
 
-JPEC will eventually implement resistive MHD stability analysis based on:
+GPEC will eventually implement resistive MHD stability analysis based on:
 
 - **Glasser (2016)**: "Computation of resistive instabilities by matched asymptotic expansions"
   - Location: `docs/resources/2016-Glasser-Computation_of_resistive_instabilities_by_matched_asymptotic_expansions-compressed.pdf`
@@ -97,7 +97,7 @@ JPEC will eventually implement resistive MHD stability analysis based on:
 
 ### PENTRC Module (Future Work)
 
-JPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality from the Fortran GPEC suite. This is described in:
+GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality from the Fortran GPEC suite. This is described in:
 
 - **Logan & Park (2013)**: "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry"
   - Location: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturbed_equilibria_with_general_tokamak_geometry.pdf`
@@ -120,19 +120,14 @@ JPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 ### Building and Testing
 
 ```bash
-# Run all tests (includes building Fortran)
-julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.build(); Pkg.instantiate(); include("test/runtests.jl")'
-
-# Build Fortran libraries only
-julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.build()'
+# Run all tests
+julia --project=. -e 'using Pkg; Pkg.activate("."); Pkg.instantiate(); include("test/runtests.jl")'
 
 # Run specific test file
-julia --project=. test/runtests.jl test/runtests_spline.jl
+julia --project=. test/runtests.jl test/runtests_solovev.jl
 
 # Available test files:
-# - test/runtests_build.jl          # Fortran build verification
-# - test/runtests_spline.jl         # Spline interpolation
-# - test/runtests_vacuum_fortran.jl # Fortran vacuum module
+
 # - test/runtests_vacuum_julia.jl   # Julia vacuum module
 # - test/runtests_solovev.jl        # Analytical equilibrium
 # - test/runtests_ode.jl            # ODE integration
@@ -146,7 +141,7 @@ julia --project=. test/runtests.jl test/runtests_spline.jl
 # Build documentation locally
 julia --project=. build_docs_local.jl
 
-# Documentation hosted at: https://openfusiontoolkit.github.io/JPEC/dev/
+# Documentation hosted at: https://openfusiontoolkit.github.io/GPEC/dev/
 ```
 
 ### Development with Revise
@@ -155,7 +150,7 @@ For faster recompilation during development, use Revise.jl (installed in global 
 
 ```julia
 using Revise
-using JPEC
+using GeneralizedPerturbedEquilibrium
 ```
 
 ### Benchmarking
@@ -210,7 +205,7 @@ julia benchmarks/benchmark_git_branches.jl \
 
 ### Computational Workflow
 
-JPEC follows a three-stage analysis pipeline:
+GPEC follows a three-stage analysis pipeline:
 
 1. **Equilibrium** → Solve Grad-Shafranov equation, compute flux surfaces, safety factor q-profile
 2. **Stability Analysis** → Solve ideal MHD eigenvalue problem (DCON-style), identify singular surfaces
@@ -220,7 +215,7 @@ This workflow is reflected in the modular structure and data flow.
 
 ### Module Structure
 
-JPEC consists of **seven main modules** organized in `src/`:
+GPEC consists of **seven main modules** organized in `src/`:
 
 #### Foundation Modules
 
@@ -228,8 +223,7 @@ JPEC consists of **seven main modules** organized in `src/`:
    - `CubicSpline.jl` - 1D cubic spline interpolation
    - `BicubicSpline.jl` - 2D bicubic spline interpolation
    - `FourierSpline.jl` - Fourier-based spline interpolation
-   - Supports both pure Julia and Fortran implementations (via `fortran/` subdirectory)
-   - Status: Mature, both implementations maintained for validation
+   - Status: Mature, pure Julia implementation
 
 2. **Utilities** (`src/Utilities/`) - Shared computational tools
    - `FourierTransforms.jl` - Efficient Fourier transform utilities with pre-computed basis functions
@@ -258,12 +252,10 @@ JPEC consists of **seven main modules** organized in `src/`:
    - Calculates both **interior** (grri) and **exterior** (grre) Green's functions
    - Main functions:
      - `compute_vacuum_response()` - Pure Julia implementation
-     - `mscvac()` - Legacy Fortran interface via ccall
    - Key files:
      - `VacuumStructs.jl` - Data structures
      - `VacuumInternals.jl` - Core algorithms
      - `VacuumFromEquilibrium.jl` - Integration with equilibrium data
-   - Fortran code in `src/Vacuum/fortran/`
    - Status: **Pure Julia implementation complete and available**
 
 5. **ForceFreeStates** (`src/ForceFreeStates/`) - Ideal MHD stability analysis (DCON-style)
@@ -307,9 +299,9 @@ JPEC consists of **seven main modules** organized in `src/`:
 
 ### Configuration
 
-**Unified Configuration File**: `jpec.toml`
+**Unified Configuration File**: `gpec.toml`
 
-All JPEC modules are configured via a single TOML file with the following sections:
+All GPEC modules are configured via a single TOML file with the following sections:
 
 - `[Equilibrium]` - Equilibrium solver settings
 - `[Wall]` - Wall geometry and vacuum region
@@ -319,20 +311,20 @@ All JPEC modules are configured via a single TOML file with the following sectio
 
 Key parameters:
 - `force_termination` - Set to `true` to exit after equilibrium/stability (skip perturbed equilibrium)
-- `output_file` - Output filename (default: `jpec.h5`)
+- `output_file` - Output filename (default: `gpec.h5`)
 
 Example configuration files are provided in:
-- `examples/Solovev_ideal_example/jpec.toml`
-- `examples/DIIID-like_ideal_example/jpec.toml`
+- `examples/Solovev_ideal_example/gpec.toml`
+- `examples/DIIID-like_ideal_example/gpec.toml`
 
 **Note**: Legacy configuration files (`equil.toml`, `vac.in`) are deprecated.
 
 ### Data Flow
 
-The complete JPEC analysis pipeline:
+The complete GPEC analysis pipeline:
 
 1. **Equilibrium Setup**:
-   - `setup_equilibrium(config)` reads configuration from `jpec.toml`
+   - `setup_equilibrium(config)` reads configuration from `gpec.toml`
    - Parses equilibrium data (EFIT, CHEASE, or analytical)
    - Runs Grad-Shafranov solver (direct or inverse)
    - Computes global parameters: q-profile, pressure, current density, β
@@ -343,7 +335,7 @@ The complete JPEC analysis pipeline:
    - Initialize plasma and wall surfaces from equilibrium
    - Compute vacuum response matrices (wv, grri, grre)
    - Calculate both interior and exterior Green's functions
-   - Available in pure Julia or via Fortran interface
+   - Pure Julia implementation
 
 3. **Stability Analysis** (ForceFreeStates):
    - Solve ideal MHD Euler-Lagrange equations via ODE integration
@@ -365,7 +357,7 @@ The complete JPEC analysis pipeline:
    - Outputs: `PerturbedEquilibriumState` with response fields and diagnostics
 
 5. **Output**:
-   - All results saved to single HDF5 file (default: `jpec.h5`)
+   - All results saved to single HDF5 file (default: `gpec.h5`)
    - HDF5 groups: `input/`, `info/`, `equil/`, `splines/`, `locstab/`, `integration/`, `singular/`, `vacuum/`, and perturbed equilibrium data
 
 ### Key Data Structures
@@ -398,7 +390,7 @@ The complete JPEC analysis pipeline:
 ### Module Dependencies
 
 ```
-JPEC
+GeneralizedPerturbedEquilibrium
 ├── Splines (foundation)
 ├── Utilities (shared tools)
 │   └── FourierTransforms
@@ -409,34 +401,53 @@ JPEC
 └── PerturbedEquilibrium (uses ForceFreeStates, Vacuum, ForcingTerms, Utilities)
 ```
 
-### Fortran Integration
-
-The build system compiles Fortran code into shared libraries for performance-critical routines:
-
-- Build configuration in `deps/build.jl` and `deps/build_helpers.jl`
-- OS-specific compiler flags:
-  - macOS: Uses Accelerate framework
-  - Linux: Uses OpenBLAS
-- Current Fortran modules: Splines, Vacuum
-- Compiled libraries:
-  - `libspline.dylib` / `libspline.so`
-  - `libvac.dylib` / `libvac.so`
-- Platform support: **macOS and Linux only** (Windows unsupported, use WSL)
-- Add new Fortran builds by creating `build_*_fortran()` functions in `deps/build_helpers.jl`
-
-**Fortran-to-Julia Conversion Status**:
-- ✅ Vacuum module: Pure Julia implementation complete
-- ✅ Splines: Both implementations available for validation
-- 🔄 Both implementations maintained for testing and verification
-
 ## Git Workflow
 
-This project uses GitFlow:
+This project uses GitFlow (http://nvie.com/posts/a-successful-git-branching-model):
 
 - Two permanent branches: `main` and `develop`
-- `main` branch updated only at release-ready stages
-- `develop` branch for integration of features
-- Feature branches off `develop`, merged back with `--no-ff`
+- `main` is updated only at release-ready stages via pull request from `develop`
+- `develop` is the integration branch — all feature branches merge here
+
+**IMPORTANT**: All development must be done on feature branches. No commits should be made directly to `develop` or `main`. Always create a branch from `develop`, do all work there, and open a pull request back into `develop`.
+
+### Branch Naming
+
+Branches use a typed prefix and a lowercase hyphen-separated description:
+
+| Prefix | Purpose | Branches from | Merges into |
+|---|---|---|---|
+| `feature/` | New functionality | `develop` | `develop` |
+| `bugfix/` | Non-critical bug fixes | `develop` | `develop` |
+| `hotfix/` | Critical production fix | `main` | `main` + `develop` |
+| `performance/` | Performance improvements | `develop` | `develop` |
+| `refactor/` | Refactoring without behavior change | `develop` | `develop` |
+| `docs/` | Documentation only | `develop` | `develop` |
+| `test/` | Test additions/improvements | `develop` | `develop` |
+| `experiment/` | Exploratory work, may not merge | `develop` | — |
+
+Examples: `bugfix/sing-lim-bounds-error`, `feature/kinetic-damping`, `performance/green-function-prefactor`
+
+Author-named branches (e.g. `jmh/`, `nlogan/`) are not used — git history already records authorship on every commit.
+
+### Hotfix Workflow
+
+Hotfixes address critical bugs in production (`main`) that cannot wait for the next release cycle:
+
+1. Branch `hotfix/description` from the current tagged `main` commit
+2. Fix the bug with one or more commits
+3. Merge into `main` via pull request; tag the merge commit with a new patch version (e.g. `v0.1.1`)
+4. Merge the same branch into `develop` so the fix is not lost in the next release
+
+### Versioning
+
+This project uses semantic versioning: `v{major}.{minor}.{patch}`
+
+- **major**: breaking API or file-format changes
+- **minor**: new features, backward-compatible
+- **patch**: bug fixes (typically via hotfix branches)
+
+Tags are applied to merge commits on `main`.
 
 **Current Development**:
 - Active branch: `perturbed_equilibrium` - Major feature implementing GPEC-style perturbed equilibrium calculations
@@ -464,21 +475,29 @@ This format is used for compiling release notes, so tags should be human-readabl
 
 ### General
 - **Julia version**: 1.11 is the target version
+- **Never remove packages from Project.toml** - If a package fails to load or resolve, run `Pkg.add(...)` or `Pkg.instantiate()` to fix the local environment. Do NOT remove the package from `Project.toml`. The developer works across multiple branches and machines, so environment drift is expected — the right fix is always to update the environment to satisfy the toml, not to trim the toml to match the current environment state.
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
+- **Documentation coverage** - When adding a new module or submodule with public docstrings, add a corresponding `@autodocs` block in `docs/src/`. Documenter CI will fail with a `missing_docs` error if any exported docstring is not covered. The analysis submodule docs live in `docs/src/analysis.md`.
+- **Keep code comments concise** - A comment should be one line where possible. Do not write multi-line block comments explaining the current session's investigation, what was tried, what was wrong before, or why a specific file/path behaves differently. State what the code does and why at a general level. Example of too much detail: a 6-line block explaining that efit_by_inversion uses psilow>0 while CHEASE starts at 0, that the old code was removed, and that spline spikes result. Preferred: `# Replicate Fortran inverse.f: overwrite deta at axis (r²=0) by extrapolating from innermost surfaces.`
 
 ### Output Files
-- **Default output**: `jpec.h5` (previously `euler.h5` in older versions)
-- **Legacy diagnostic files**: When modifying equilibrium code, remember that older versions output `gsec.h5`, `gse.h5`, `gsei.h5` - these are now consolidated into `jpec.h5`
+- **Default output**: `gpec.h5` (previously `euler.h5` in older versions)
+- **Legacy diagnostic files**: When modifying equilibrium code, remember that older versions output `gsec.h5`, `gse.h5`, `gsei.h5` - these are now consolidated into `gpec.h5`
 
 ### Current Development Priorities
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
-- **Configuration**: All settings now in unified `jpec.toml` file
+- **Configuration**: All settings now in unified `gpec.toml` file
 
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
 - Pre-commit hooks are configured for notebook cleaning and Julia formatting (see `docs/src/set_up.md` for developer setup)
+
+## Figures and plots
+
+- Always print the full absolute path of any figure or plot file you save, so the user can open it directly without searching the filesystem.
+- Always check that axis labels are not clipped. In Plots.jl there is no `tight_layout()` equivalent; use explicit margins instead: `left_margin=12Plots.mm`, `bottom_margin=4Plots.mm`, etc. When in doubt, add a generous `left_margin` to prevent y-axis label cutoff.
 
 ## Git Merge conflict resolution policy
 
