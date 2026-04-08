@@ -71,6 +71,22 @@ function main(args::Vector{String}=String[])
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
+
+    # Migrate deprecated TOML keys (removed in PR #210)
+    if haskey(inputs, "ForceFreeStates")
+        ffs = inputs["ForceFreeStates"]
+        for k in ["con_flag", "kinfac1", "kinfac2", "kingridtype", "ktanh_flag", "passing_flag", "trapped_flag", "ion_flag", "electron_flag", "ktc", "ktw", "kin_dummy_sigma"]
+            if haskey(ffs, k)
+                delete!(ffs, k)
+                @warn "Deprecated TOML key '$k' ignored"
+            end
+        end
+        if get(ffs, "kin_source", "") == "dummy"
+            ffs["kin_source"] = "fixed"
+            @warn "kin_source=\"dummy\" renamed to \"fixed\""
+        end
+    end
+
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
@@ -226,10 +242,6 @@ function main(args::Vector{String}=String[])
         ffit = make_matrix(equil, intr, metric)
 
         if ctrl.kin_flag
-            if !ctrl.con_flag
-                @warn "kin_flag=true requires con_flag=true (continuous integration). Setting con_flag=true."
-                ctrl.con_flag = true
-            end
             if ctrl.verbose
                 @info "Computing kinetic matrices (source: $(ctrl.kin_source))"
             end
@@ -477,11 +489,7 @@ function write_outputs_to_HDF5(
         # Write kinetic parameters when kinetic mode is enabled
         if ctrl.kin_flag
             out_h5["kinetic/kin_source"] = ctrl.kin_source
-            out_h5["kinetic/kin_dummy_sigma"] = ctrl.kin_dummy_sigma
-            out_h5["kinetic/con_flag"] = ctrl.con_flag
-            out_h5["kinetic/kinfac1"] = ctrl.kinfac1
-            out_h5["kinetic/kinfac2"] = ctrl.kinfac2
-            out_h5["kinetic/fkg_kmats_flag"] = intr.fkg_kmats_flag
+            out_h5["kinetic/kinetic_matrix_factor"] = ctrl.kinetic_matrix_factor
         end
 
         # Write fundamental matrices on the ψ grid when mat_flag is enabled

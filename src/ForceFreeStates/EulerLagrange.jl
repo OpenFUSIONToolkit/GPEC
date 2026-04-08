@@ -51,9 +51,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
         # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
-            # Ideal singular surface crossings are used for both ideal and kinetic modes.
-            # Kinetic singular surfaces (from ksing_find) would use cross_kinetic_singular_surf!
-            # but that is handled separately when kinetic singular surfaces are present.
+            # Ideal surface crossings apply only in the ideal (non-kinetic) path.
             cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
         end
     end
@@ -122,8 +120,8 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
     # and kin_flag = true would also live here when implemented.
-    if ctrl.kin_flag && ctrl.con_flag
-        # No singular surface tracking needed for continuous kinetic integration
+    if ctrl.kin_flag
+        # No singular surface tracking needed — kinetic terms regularize singularities
         odet.ising_start = 0
     else
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
@@ -185,7 +183,7 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
     end
 
     # -------------------- Create chunks ------------------------
-    if ctrl.kin_flag && ctrl.con_flag
+    if ctrl.kin_flag
         # Single chunk from axis to edge. Kinetic contributions regularize the
         # F-matrix singularity at rational surfaces (Logan 2015 Eq 7.46), making
         # them integrable. The adaptive ODE solver handles stiffness automatically.
@@ -195,8 +193,6 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
             needs_crossing=false,
             ising=0
         ))
-    elseif ctrl.kin_flag
-        error("Discontinuous kinetic integration (con_flag=false) not yet implemented. Set con_flag=true.")
     else
         # Loop through singular surfaces to cross until edge is reached
         ising_current = find_next_resonant_surface!(ising_current, intr)
@@ -281,7 +277,7 @@ function cross_ideal_singular_surf!(
     # the solution vector we're zeroing corresponds to the same block as the resonant mode we
     # introduce. It is also needed when transforming u back to the full solution after integration.
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    if !ctrl.con_flag
+    if !ctrl.kin_flag
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
         for i in eachindex(sing_asymp.r1)
@@ -301,7 +297,7 @@ function cross_ideal_singular_surf!(
 
     # Apply asymptotic solution on other side of singular surface
     ua = sing_get_ua(sing_asymp, dpsi)
-    if !ctrl.con_flag
+    if !ctrl.kin_flag
         for i in eachindex(sing_asymp.r1)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
@@ -320,11 +316,6 @@ function cross_ideal_singular_surf!(
     odet.step += 1
 end
 
-# Example stub for kinetic crossing
-function cross_kinetic_singular_surf()
-    # Implement kinetic crossing logic here
-    return
-end
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)

@@ -107,7 +107,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
   - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
@@ -132,7 +131,6 @@ A mutable struct holding internal state variables for stability calculations.
     keq_out::Bool = false
     theta_out::Bool = false
     xlmda_out::Bool = false
-    fkg_kmats_flag::Bool = false
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
@@ -181,20 +179,9 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kin_flag::Bool` - Enable kinetic effects
-  - `kin_source::String` - Kinetic matrix source: "dummy" (σ*I test), "file" (load from PENTRC files), "pentrc" (compute via PENTRC)
-  - `kin_dummy_sigma::Float64` - Scaling factor σ for dummy kinetic matrices (only used when kin_source="dummy")
-  - `con_flag::Bool` - Continue integration through rationals without zeroing singular solutions
-  - `kinfac1::Float64` - Scaling factor applied to kinetic energy matrices (W)
-  - `kinfac2::Float64` - Scaling factor applied to kinetic torque matrices (T)
-  - `kingridtype::Int` - Type of kinetic grid (0=standard) (not yet implemented)
-  - `ktanh_flag::Bool` - Enable hyperbolic tangent profile (not yet implemented)
-  - `passing_flag::Bool` - Include passing particles (not yet implemented)
-  - `trapped_flag::Bool` - Include trapped particles (not yet implemented)
-  - `ion_flag::Bool` - Include ion kinetic effects (not yet implemented)
-  - `electron_flag::Bool` - Include electron kinetic effects (not yet implemented)
-  - `ktc::Float64` - Kinetic collision parameter (not yet implemented)
-  - `ktw::Float64` - Kinetic width parameter (not yet implemented)
+  - `kin_flag::Bool` - Enable kinetic effects. When true, integrates continuously through rational surfaces (no crossing logic).
+  - `kin_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_matrix_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
+  - `kinetic_matrix_factor::Float64` - Dimensionless scaling factor for kinetic matrices. When kin_source="fixed", scales X-shaped test matrices relative to ideal matrix norms. When kin_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
@@ -237,19 +224,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kin_flag::Bool = false
-    kin_source::String = "dummy"
-    kin_dummy_sigma::Float64 = 0.0
-    con_flag::Bool = false
-    kinfac1::Float64 = 1.0
-    kinfac2::Float64 = 1.0
-    kingridtype::Int = 0
-    ktanh_flag::Bool = false
-    passing_flag::Bool = false
-    trapped_flag::Bool = true
-    ion_flag::Bool = true
-    electron_flag::Bool = false
-    ktc::Float64 = 0.1
-    ktw::Float64 = 50.0
+    kin_source::String = "fixed"
+    kinetic_matrix_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
@@ -295,7 +271,7 @@ end
     # Kinetic torque matrix splines: 6 components
     ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
 
-    # Pre-computed FKG kinetic matrices (populated when fkg_kmats_flag=true)
+    # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
     f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)

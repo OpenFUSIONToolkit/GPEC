@@ -33,9 +33,9 @@ function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=
 end
 
 """
-    dummy_kinetic_matrices(mpert, mpsi, sigma, mlow, ffit, xs)
+    fixed_kinetic_matrices(mpert, mpsi, sigma, mlow, ffit, xs)
 
-Build X-shaped dummy kinetic energy matrices for testing all 6 components.
+Build X-shaped fixed kinetic energy matrices for testing all 6 components.
 
 Populates all 6 components of the W (energy) matrices with X-shaped patterns
 scaled by `sigma` **relative to the Frobenius norm of the corresponding ideal
@@ -58,7 +58,7 @@ Torque matrices (T) are all zero (torque requires finite rotation frequency).
 
 Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
 """
-function dummy_kinetic_matrices(
+function fixed_kinetic_matrices(
     mpert::Int, mpsi::Int, sigma::Float64, mlow::Int,
     ffit::FourFitVars, xs::Vector{Float64}
 )
@@ -105,21 +105,14 @@ end
 """
     make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
 
-Construct kinetic energy (W) and torque (T) matrices and store as splines in `ffit`.
+Construct kinetic energy (W) and torque (T) matrices, store as splines in `ffit`,
+and pre-compute the FKG derived matrices used by `sing_der!`.
 
 Dispatches on `ctrl.kin_source`:
 
-  - `"dummy"`: X-shaped Hermitian test matrices scaled by `ctrl.kin_dummy_sigma`
-  - `"file"`: Load from PENTRC output files (not yet implemented)
-  - `"pentrc"`: Compute via PENTRC (not yet implemented)
-
-After constructing raw matrices, applies:
-
-  - `kinfac1`/`kinfac2` scaling
-  - `ktanh_flag` core damping: `factor = 0.5*(1 + tanh((ψ - ktc)*ktw))`
-
-Then builds cubic spline interpolants and stores in `ffit.kwmats[1:6]`, `ffit.ktmats[1:6]`.
-If `intr.fkg_kmats_flag`, pre-computes the FKG derived matrices and stores those splines too.
+  - `"fixed"`: X-shaped test matrices scaled by `ctrl.kinetic_matrix_factor` relative to
+    ideal matrix Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck, Ek non-Hermitian)
+  - `"calculated"`: Compute via PENTRC (not yet implemented)
 """
 function make_kinetic_matrix(
     ctrl::ForceFreeStatesControl,
@@ -131,31 +124,13 @@ function make_kinetic_matrix(
     xs = metric.xs
     mpsi = length(xs)
 
-    # Get raw kinetic matrices
-    if ctrl.kin_source == "dummy"
-        kw_flat, kt_flat = dummy_kinetic_matrices(intr.mpert, mpsi, ctrl.kin_dummy_sigma, intr.mlow, ffit, xs)
-    elseif ctrl.kin_source == "file"
-        error("kin_source=\"file\" not yet implemented — requires PENTRC output files")
-    elseif ctrl.kin_source == "pentrc"
-        error("kin_source=\"pentrc\" not yet implemented — requires PENTRC module")
+    # Get raw kinetic matrices (scaling is baked into each source)
+    if ctrl.kin_source == "fixed"
+        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_matrix_factor, intr.mlow, ffit, xs)
+    elseif ctrl.kin_source == "calculated"
+        error("kin_source=\"calculated\" not yet implemented — requires PENTRC module")
     else
-        error("Unknown kin_source: $(ctrl.kin_source). Must be \"dummy\", \"file\", or \"pentrc\"")
-    end
-
-    # Apply scaling and optional core damping
-    for ipsi in 1:mpsi
-        psi = xs[ipsi]
-        factor1 = ctrl.kinfac1
-        factor2 = ctrl.kinfac2
-        if ctrl.ktanh_flag
-            tanh_factor = 0.5 * (1 + tanh((psi - ctrl.ktc) * ctrl.ktw))
-            factor1 *= tanh_factor
-            factor2 *= tanh_factor
-        end
-        for ic in 1:6
-            @views kw_flat[ipsi, :, ic] .*= factor1
-            @views kt_flat[ipsi, :, ic] .*= factor2
-        end
+        error("Unknown kin_source: $(ctrl.kin_source). Must be \"fixed\" or \"calculated\"")
     end
 
     # Build splines for each of the 6 components
@@ -164,8 +139,7 @@ function make_kinetic_matrix(
         ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
     end
 
-    # Pre-compute FKG derived matrices (default behavior, as in Fortran method=0)
-    intr.fkg_kmats_flag = true
+    # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
     _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
 
     return nothing
@@ -331,8 +305,7 @@ function _compute_fkg_matrices!(
     ffit.bmats_ideal = ffit.bmats
     ffit.cmats_ideal = ffit.cmats
 
-    # Overwrite ideal A/B/C splines with kinetic-modified versions
-    # sing_der! loads these when fkg_kmats_flag=true
+    # Overwrite ideal A/B/C splines with kinetic-modified versions for sing_der!
     ffit.amats = cubic_interp(xs, Series(ak_flat); ffit.itp_opts...)
     ffit.bmats = cubic_interp(xs, Series(bk_flat); ffit.itp_opts...)
     ffit.cmats = cubic_interp(xs, Series(ck_flat); ffit.itp_opts...)

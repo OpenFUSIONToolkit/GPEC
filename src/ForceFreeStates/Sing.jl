@@ -696,7 +696,7 @@ end
     )
 
 Evaluate the derivative of the Euler-Lagrange equations [Glasser Phys. Plasmas 2016 112506 eq. 24].
-This implements du/dψ for the ideal MHD eigenvalue problem.
+This implements du/dψ for both the ideal and kinetic MHD eigenvalue problems.
 
 This function performs the same role as `sing_der` in the Fortran code, with main differences
 coming from hiding LAPACK operations under the hood via Julia's LinearAlgebra package,
@@ -720,12 +720,8 @@ more simplistic code with similar performance.
 
   - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
-  - `params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState}`: Tuple of relevant structs
+  - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
-
-### TODOs
-
-Implement kin_flag functionality
 """
 @with_pool pool function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
@@ -763,7 +759,7 @@ Implement kin_flag functionality
 
     ctrl = params[1]
 
-    if ctrl.kin_flag && intr.fkg_kmats_flag
+    if ctrl.kin_flag
         # ---- Kinetic path with pre-computed FKG matrices ----
         # Load pre-computed kinetic matrices from splines
         # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
@@ -839,10 +835,6 @@ Implement kin_flag functionality
         mul!(tmp_mat, kaat_kin, du1)
         du2 .+= tmp_mat
 
-    elseif ctrl.kin_flag
-        # ---- Kinetic path without FKG precomputation (recompute per step) ----
-        error("Non-FKG kinetic path not yet implemented. Set fkg_kmats_flag=true.")
-
     else
         # ---- Ideal path ----
         # Evaluate matrix splines at the current psi value using shared hint
@@ -865,12 +857,12 @@ Implement kin_flag functionality
         du1 .-= tmp_mat
         ldiv!(LowerTriangular(fmat_lower), du1)
         ldiv!(UpperTriangular(fmat_lower'), du1)
-        # du[2] = G * u[1] + K̄^† * du[1]
+        # du[2] = G * u[1] + K̄^† * du[1] = G * u[1] - K̄^† * F̄⁻¹ * K̄ * u[1] + K̄^† * F̄⁻¹ * Q⁻¹ * u[2]
         mul!(tmp_mat, gmat, u1)
         du2 .= tmp_mat
         mul!(tmp_mat, adjoint(kmat), du1)
         du2 .+= tmp_mat
-        # du[1] *= Q⁻¹
+        # du[1] = - Q⁻¹ * F̄⁻¹ * K̄ * u[1] + Q⁻¹ * F̄⁻¹ * Q⁻¹ * u[2]
         du1 .*= singfac_vec
     end
 
