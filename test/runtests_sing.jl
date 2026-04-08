@@ -3,20 +3,9 @@ using TOML
 using Printf
 using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, ExtendExtrap
 
-#TODO: these take forever to run- can we optimize them up?
 @testset "Sing Tests" begin
 
     # minimal helpers
-
-    #=
-    function read_complex_fortran(fname)
-        data = readdlm(fname, Float64)
-        m, n = Int(data[1,1]), Int(data[1,2])
-        entries = data[2:end, :]
-        mat = reshape([Complex(entries[k,1], entries[k,2]) for k in 1:size(entries,1)], m, n)
-        return transpose(mat)
-    end
-    =#
 
     function read_complex_fortran(fname)
         lines = readlines(fname)
@@ -91,35 +80,6 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         return mmat
     end
 
-    # --------------------------
-    # Write output in Fortran-compatible format
-    # --------------------------
-    function write_sing_output(filename, psifac, q, mlow, nn, ud)
-        # ud is a 3D array: (mpert, msol, 2), ComplexF64
-        mpert, msol, _ = size(ud)
-
-        open(filename, "w") do io
-            # header
-            @printf(io, "psifac = %16.8f\n", psifac)
-            @printf(io, "q = %16.8f\n", q)
-            @printf(io, "mlow = %5d\n", mlow)
-            @printf(io, "nn = %3d\n", nn)
-
-            # solutions
-            for isol in 1:msol
-                @printf(io, "Solution index = %3d\n", isol)
-                for ipert in 1:mpert
-                    xr1 = real(ud[ipert, isol, 1])
-                    xi1 = imag(ud[ipert, isol, 1])
-                    xr2 = real(ud[ipert, isol, 2])
-                    xi2 = imag(ud[ipert, isol, 2])
-                    @printf(io, "%5d  %16.8e  %16.8e  %16.8e  %16.8e\n",
-                        ipert, xr1, xi1, xr2, xi2)
-                end
-            end
-        end
-    end
-
     function load_equilibrium_from_gpec(gpec_path::String)
         inputs = TOML.parsefile(gpec_path)
         eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dirname(gpec_path))
@@ -129,7 +89,6 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
     @testset "sing_der" begin
 
         equil = load_equilibrium_from_gpec(joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example", "gpec.toml"))
-        #equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(joinpath(@__DIR__, "../examples/Solovev_ideal_example/equil.toml"))
         ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl()
         intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal()
         intr.numpert_total = 32 # replacing mpert (we set equal to 32). This is the same as msol
@@ -182,20 +141,11 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_der!(du, odet.u, params, odet.psifac)
 
         du_fortran = read_solutions_3d(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_du.dat"))
-        write_sing_output(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_julia.dat"), odet.psifac, odet.q, intr.mlow, ctrl.nn_low, du) #TODO: should it be ctrl.nn_high or ctrl.nn_low?
 
-        @show size(du)
-        @show size(du_fortran)
-        @show maximum(abs.(du .- du_fortran))
-        @test isapprox(du[:, 1, 1], du_fortran[:, 1, 1]; rtol=1e-3) || true
-
-        for sol_idx in 1:1#odet.msol
-            #du_expected = du_fortran[sol_idx]
+        for sol_idx in 1:size(du_fortran, 2)
             @test isapprox(du[:, sol_idx, 1], du_fortran[:, sol_idx, 1]; rtol=1e-3)
             @test isapprox(du[:, sol_idx, 2], du_fortran[:, sol_idx, 2]; rtol=1e-3)
         end
-
-
     end
 
     @testset "sing_find" begin
