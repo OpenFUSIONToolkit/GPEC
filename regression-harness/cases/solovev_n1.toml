@@ -3,33 +3,55 @@ name = "solovev_n1"
 description = "Solovev analytical equilibrium, n=1, ideal stability"
 example_dir = "examples/Solovev_ideal_example"
 
-# Eigenvalues
+# Energies — leading eigenvalues
 [quantities.et_real]
 h5path = "vacuum/et"
 type = "complex_vector"
 extract = "real_first"
-label = "Re(et[1])"
+label = "total energy Re(et[1])"
 noise_threshold = 1e-10
 
 [quantities.et_imag]
 h5path = "vacuum/et"
 type = "complex_vector"
 extract = "imag_first"
-label = "Im(et[1])"
+label = "total energy Im(et[1])"
 noise_threshold = 1e-10
 
 [quantities.ep_real]
 h5path = "vacuum/ep"
 type = "complex_vector"
 extract = "real_first"
-label = "Re(ep[1])"
+label = "plasma energy Re(ep[1])"
 noise_threshold = 1e-10
 
 [quantities.ev_real]
 h5path = "vacuum/ev"
 type = "complex_vector"
 extract = "real_first"
-label = "Re(ev[1])"
+label = "vacuum energy Re(ev[1])"
+noise_threshold = 1e-10
+
+# Energies — full eigenvalue arrays
+[quantities.ep_all]
+h5path = "vacuum/ep"
+type = "complex_vector"
+extract = "all_complex"
+label = "plasma energy (all)"
+noise_threshold = 1e-10
+
+[quantities.ev_all]
+h5path = "vacuum/ev"
+type = "complex_vector"
+extract = "all_complex"
+label = "vacuum energy (all)"
+noise_threshold = 1e-10
+
+[quantities.et_all]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "all_complex"
+label = "total energy (all)"
 noise_threshold = 1e-10
 
 # Integration
