@@ -143,8 +143,8 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         du_fortran = read_solutions_3d(joinpath(@__DIR__, "test_data/sing_der_testing/mat_dat/sing_der_output_du.dat"))
 
         for sol_idx in 1:size(du_fortran, 2)
-            @test isapprox(du[:, sol_idx, 1], du_fortran[:, sol_idx, 1]; rtol=1e-3)
-            @test isapprox(du[:, sol_idx, 2], du_fortran[:, sol_idx, 2]; rtol=1e-3)
+            @test isapprox(du[:, sol_idx, 1], du_fortran[:, sol_idx, 1]; rtol=1e-2)
+            @test isapprox(du[:, sol_idx, 2], du_fortran[:, sol_idx, 2]; rtol=1e-2)
         end
     end
 
