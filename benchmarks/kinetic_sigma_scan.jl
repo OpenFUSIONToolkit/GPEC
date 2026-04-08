@@ -1,7 +1,7 @@
 """
 kinetic_sigma_scan.jl
 
-Scans the dummy kinetic matrix scaling parameter σ and plots:
+Scans the fixed kinetic matrix scaling parameter σ and plots:
   1. et[1] (least stable eigenvalue) vs σ — shows kinetic damping effect
   2. Eigenmode |ξ_ψ(ψ)| profiles for m=0..4 — shows kinetic modification near rational surfaces
 
@@ -21,7 +21,7 @@ output_dir = @__DIR__
 sigma_values = [1e-12, 1e-9, 1e-6]
 
 """
-Run GPEC with kinetic dummy matrices at the given σ. Returns (et, psi, xi_psi, nstep_total)
+Run GPEC with kinetic fixed matrices at the given σ. Returns (et, psi, xi_psi, nstep_total)
 or nothing on failure. Uses a temporary directory to avoid modifying the example.
 """
 function run_kinetic(config_path::String, sigma::Float64)
@@ -129,7 +129,7 @@ end
 
 p1 = plot(sigmas_plot, et_real;
     xscale=:log10, label="Re(et[1])", marker=:circle, lw=2,
-    xlabel="σ (dummy kinetic scaling)", ylabel="et[1]",
+    xlabel="σ (kinetic scaling)", ylabel="et[1]",
     title="Kinetic Damping: Eigenvalue vs σ",
     legend=:topleft, left_margin=12Plots.mm, bottom_margin=6Plots.mm)
 plot!(p1, sigmas_plot, et_imag;

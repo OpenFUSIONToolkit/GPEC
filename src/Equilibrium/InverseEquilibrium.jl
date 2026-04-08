@@ -144,9 +144,9 @@ function equilibrium_solver(input::InverseRunInput)
             ψ₂ = clamp(1.0 - 1.5ε, psilow + 0.01, 0.999)
             A = try
                 buf = zeros(size(sq_in.y, 2))
-                sq_in(buf, ψ₁);
+                sq_in(buf, ψ₁)
                 q1 = buf[3]
-                sq_in(buf, ψ₂);
+                sq_in(buf, ψ₂)
                 q2 = buf[3]
                 max(abs(q2 - q1) / log(2), 0.1)
             catch

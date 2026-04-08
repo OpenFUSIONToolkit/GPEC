@@ -269,21 +269,21 @@ end
 
 # sinh grid fine at left end a: x(v) = a + Δ·sinh(β·v)/sinh(β)
 function _sinh_left(a::Float64, b::Float64, n::Int, β::Float64)
-    Δ = b - a;
+    Δ = b - a
     s = sinh(β)
     [a + Δ * sinh(β * (k - 1) / (n - 1)) / s for k in 1:n]
 end
 
 # sinh grid fine at right end b: x(v) = b − Δ·sinh(β·(1−v))/sinh(β)
 function _sinh_right(a::Float64, b::Float64, n::Int, β::Float64)
-    Δ = b - a;
+    Δ = b - a
     s = sinh(β)
     [b - Δ * sinh(β * (1.0 - (k - 1) / (n - 1))) / s for k in 1:n]
 end
 
 # symmetric sinh fine at both ends a and b
 function _sinh_both_ends(a::Float64, b::Float64, n::Int, β::Float64)
-    Δ = b - a;
+    Δ = b - a
     s = sinh(β)
     grid = Vector{Float64}(undef, n)
     @inbounds for k in 1:n

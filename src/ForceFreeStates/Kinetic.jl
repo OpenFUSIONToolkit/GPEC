@@ -149,11 +149,13 @@ end
     _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
 
 Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and store as splines.
-This corresponds to `fourfit_kinetic_matrix` method=0 in the Fortran code.
+This corresponds to `fourfit_kinetic_matrix` method=0 in the Fortran code (Fortran `fourfit.F` lines 1170-1260).
 
-The matrices computed are: f0mat, pmat, paat, kkmat, kkaat, r1mat, r2mat, r3mat, gaat.
-These are combinations of ideal (A,B,C,D,E,H) and kinetic (W,T) matrices that appear
-in the non-Hermitian kinetic ODE system.
+The 9 matrices computed are the Schur complement reductions of ideal (A,B,C,D,E,H) and kinetic (W,T)
+primitives into the F, K, G sub-matrices of the non-Hermitian kinetic ODE system (Logan 2015 Appendix C,
+Eqs C.1-C.11). These sub-matrices absorb the singfac dependence so that the ODE RHS in `sing_der!`
+can be assembled with explicit (m-nq) factors rather than 1/(m-nq), avoiding numerical blow-up at
+rational surfaces.
 """
 function _compute_fkg_matrices!(
     ffit::FourFitVars,
@@ -169,7 +171,7 @@ function _compute_fkg_matrices!(
     mpert = intr.mpert
     mband = intr.mband
     profiles = equil.profiles
-    chi1 = 2π * equil.psio
+    intr.npert > 1 && error("FKG kinetic matrices not yet implemented for multi-n (npert=$(intr.npert))")
 
     # Allocate output arrays — kinetic-modified A/B/C stored for sing_der! FKG path
     ak_flat = zeros(ComplexF64, mpsi, np^2)
@@ -233,26 +235,27 @@ function _compute_fkg_matrices!(
         f0mat = fmat_prim .- dmat' * temp1
 
         # pmat [Fortran lines 1193-1200]
-        n = intr.nlow  # TODO: generalize for multi-n
-        bkmat = kwmat[:, :, 2] .+ ktmat[:, :, 2] .+ im * chi1 / (2π * n) .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
-        bkaat = kwmat[:, :, 2] .- ktmat[:, :, 2] .+ im * chi1 / (2π * n) .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
+        n = intr.nlow
+        psio_over_n = equil.psio / n  # chi1/(2πn) = psio/n — toroidal flux per mode number
+        bkmat = kwmat[:, :, 2] .+ ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
+        bkaat = kwmat[:, :, 2] .- ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
         temp2 = amat_lu \ bkmat
         pmat_val = b1mat' * temp2
 
         # paat [Fortran lines 1202-1207]
         temp2 = amat_lu \ b1mat
-        aamat = (amat_lu \ amat_kin)'  # close to identity
-        umat_diff = I - aamat
-        paat_val = (bkaat' * temp2 .- im * chi1 / (2π * n) .* umat_diff * b1mat)'
+        aamat = (amat_lu \ amat_kin)'  # A_kin⁻¹ A_kin = I analytically; kept for numerical consistency with Fortran fourfit.F line 1204
+        umat_diff = I - aamat  # ≈ 0; captures round-off from LU factorization
+        paat_val = (bkaat' * temp2 .- im * psio_over_n .* umat_diff * b1mat)'
 
         # r1mat [Fortran lines 1209-1217]
         temp1_r1 = kwmat[:, :, 1] .+ ktmat[:, :, 1]
         temp2 = amat_lu \ bkmat
         r1mat_val =
             kwmat[:, :, 4] .+ ktmat[:, :, 4] .-
-            (chi1 / (2π * n))^2 .* temp1_r1' .+
-            im * chi1 / (2π * n) .* bkaat' .-
-            im * chi1 / (2π * n) .* aamat * bkmat .-
+            psio_over_n^2 .* temp1_r1' .+
+            im * psio_over_n .* bkaat' .-
+            im * psio_over_n .* aamat * bkmat .-
             bkaat' * temp2
 
         # kkmat [Fortran lines 1220-1223]
@@ -264,12 +267,12 @@ function _compute_fkg_matrices!(
         kkaat_val = emat' .- caat' * temp1
 
         # r2mat [Fortran lines 1231-1237]
-        temp1_r2 = kwmat[:, :, 5] .+ ktmat[:, :, 5] .- im * chi1 / (2π * n) .* (kwmat[:, :, 3] .+ ktmat[:, :, 3])
+        temp1_r2 = kwmat[:, :, 5] .+ ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .+ ktmat[:, :, 3])
         temp2 = amat_lu \ cmat_kin
-        r2mat_val = temp1_r2 .+ im * chi1 / (2π * n) .* umat_diff * cmat_kin .- bkaat' * temp2
+        r2mat_val = temp1_r2 .+ im * psio_over_n .* umat_diff * cmat_kin .- bkaat' * temp2
 
         # r3mat [Fortran lines 1239-1245]
-        temp1_r3 = kwmat[:, :, 5] .- ktmat[:, :, 5] .- im * chi1 / (2π * n) .* (kwmat[:, :, 3] .- ktmat[:, :, 3])
+        temp1_r3 = kwmat[:, :, 5] .- ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .- ktmat[:, :, 3])
         temp2 = amat_lu \ bkmat
         r3mat_val = temp1_r3' .- caat' * temp2
 

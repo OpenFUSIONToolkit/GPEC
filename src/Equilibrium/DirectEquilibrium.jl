@@ -416,7 +416,7 @@ function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     buf = zeros(4)
     all_vals = [
         begin
-            sq_in(buf, ψ);
+            sq_in(buf, ψ)
             copy(buf)
         end for ψ in psi_samp
     ]

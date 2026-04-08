@@ -728,9 +728,8 @@ more simplistic code with similar performance.
         FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
 
-    # Unpack structs and initialize
-    # note the two items not used here are needed in the integrator params tuple
-    _, equil, ffit, intr, odet, _ = params
+    # Unpack structs
+    ctrl, equil, ffit, intr, odet, _ = params
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
@@ -756,8 +755,6 @@ more simplistic code with similar performance.
     # Use shared hint for O(1) interval lookup during sequential ODE integration
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
-
-    ctrl = params[1]
 
     if ctrl.kin_flag
         # ---- Kinetic path with pre-computed FKG matrices ----
@@ -794,12 +791,11 @@ more simplistic code with similar performance.
         LAPACK.getrs!('N', amat, ipiv, bmat)
         LAPACK.getrs!('N', amat, ipiv, cmat)
 
-        # Build singfac-dependent F, K, K†, G† matrices
-        # F(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1  [Fortran sing.f lines 1102-1105]
-        # K(i,j) = q1*KK + R2                        [lines 1106-1107]
-        # K†(i,j) = KK†*q2 + R3                      [lines 1108-1109]
-        # where q1 = singfac for row index m1, q2 = singfac for col index m2
-        # Note: singfac here is (m - n*q), NOT 1/(m-n*q) as in the ideal path
+        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11)
+        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1  [Fortran sing.f lines 1102-1105]
+        # K̄(i,j) = q1*KK + R2                        [lines 1106-1107]
+        # K̄†(i,j) = KK†*q2 + R3                      [lines 1108-1109]
+        # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
         singfac_direct = acquire!(pool, Float64, Npert)
         singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
         singfac_direct_mat .= (intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'
@@ -819,8 +815,8 @@ more simplistic code with similar performance.
         # gmat = gaat (already loaded)
         gmat .= gaat_kin
 
-        # Compute du (kinetic ODE: no explicit Q⁻¹ factors, absorbed into F/K/K†)
-        # du₁ = F⁻¹(u₂ - K·u₁)  [Fortran sing.f lines 1200-1215]
+        # Kinetic ODE (Logan 2015 Eq 7.46): singfac absorbed into F̄/K̄/K̄†, no explicit Q⁻¹
+        # du₁ = F̄⁻¹(u₂ - K̄·u₁)  [Fortran sing.f lines 1200-1215]
         du1 .= u2
         mul!(tmp_mat, kmat, u1)
         du1 .-= tmp_mat
@@ -829,7 +825,7 @@ more simplistic code with similar performance.
         LAPACK.getrf!(fmat_lower, ipiv2)
         LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
 
-        # du₂ = G†·u₁ + K†·du₁  [Fortran sing.f lines 1217-1222]
+        # du₂ = Ḡ†·u₁ + K̄†·du₁  [Fortran sing.f lines 1217-1222]
         mul!(tmp_mat, gmat, u1)
         du2 .= tmp_mat
         mul!(tmp_mat, kaat_kin, du1)

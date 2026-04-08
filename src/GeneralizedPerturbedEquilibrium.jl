@@ -75,11 +75,15 @@ function main(args::Vector{String}=String[])
     # Migrate deprecated TOML keys (removed in PR #210)
     if haskey(inputs, "ForceFreeStates")
         ffs = inputs["ForceFreeStates"]
+        deprecated_keys = String[]
         for k in ["con_flag", "kinfac1", "kinfac2", "kingridtype", "ktanh_flag", "passing_flag", "trapped_flag", "ion_flag", "electron_flag", "ktc", "ktw", "kin_dummy_sigma"]
             if haskey(ffs, k)
                 delete!(ffs, k)
-                @warn "Deprecated TOML key '$k' ignored"
+                push!(deprecated_keys, k)
             end
+        end
+        if !isempty(deprecated_keys)
+            @warn "Deprecated ForceFreeStates TOML keys ignored: $(join(deprecated_keys, ", "))"
         end
         if get(ffs, "kin_source", "") == "dummy"
             ffs["kin_source"] = "fixed"
