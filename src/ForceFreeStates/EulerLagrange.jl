@@ -13,7 +13,6 @@ which were previously done during integration in the Fortran code.
 
 ### TODOs
 
-Support for `kin_flag`
 restype functionality if we decide to do this
 
 ### Returns
@@ -94,7 +93,6 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 
 ### TODOs
 
-Support for `kin_flag`
 Move ising_start logic to chunk_el_integration_bounds?
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
@@ -157,10 +155,6 @@ making the integration flow more predictable and easier to parallelize (e.g., fo
 ### Returns
 
   - `Vector{IntegrationChunk}` - Array of integration chunks to process
-
-### TODOs
-
-Support for `kin_flag`
 """
 function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
     chunks = IntegrationChunk[]

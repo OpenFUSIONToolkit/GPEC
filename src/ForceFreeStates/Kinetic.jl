@@ -169,8 +169,6 @@ function _compute_fkg_matrices!(
     mpsi = length(xs)
     np = intr.numpert_total
     mpert = intr.mpert
-    mband = intr.mband
-    profiles = equil.profiles
     intr.npert > 1 && error("FKG kinetic matrices not yet implemented for multi-n (npert=$(intr.npert))")
 
     # Allocate output arrays — kinetic-modified A/B/C stored for sing_der! FKG path
