@@ -489,6 +489,25 @@ This format is used for compiling release notes, so tags should be human-readabl
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `gpec.toml` file
 
+### Code Formatting
+
+Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+
+The project's `.JuliaFormatter.toml` settings:
+- **Line width**: 180 characters max (`margin = 180`)
+- **`for` loops**: always use `in` (not `=` or `∈`)
+- **Keyword arguments**: no spaces around `=` in kwargs (`f(x; a=1)` not `f(x; a = 1)`)
+- **Keyword separator**: use semicolons to separate kwargs (`f(x; a=1, b=2)`)
+- **No trailing commas** in argument lists
+- **Docstrings**: formatted according to JuliaFormatter rules
+- **No extra blank line removal**: `remove_extra_newlines = false`
+- **Join short lines**: `join_lines_based_on_source = true` — don't arbitrarily split lines that fit within the margin
+
+Additional file hygiene (enforced by pre-commit hooks):
+- No trailing whitespace on any line
+- Files must end with exactly one newline
+- LF line endings only (no CRLF)
+
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran
 - Benchmarks available in `benchmark/` directory for Fourier transforms and vacuum calculations
