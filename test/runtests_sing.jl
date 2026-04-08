@@ -1,7 +1,7 @@
 using Test
 using TOML
 using Printf
-using FastInterpolations: cubic_interp, CubicFit, LinearBinary
+using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, ExtendExtrap
 
 #TODO: these take forever to run- can we optimize them up?
 @testset "Sing Tests" begin
@@ -169,12 +169,12 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinary
         odet.u[:, :, 2] .= umat_p2
 
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, mband=intr.mband, numpert_total=intr.numpert_total)
-        ffit.amats = cubic_interp(psifac_dummy, reshape(amats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
-        ffit.bmats = cubic_interp(psifac_dummy, reshape(bmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
-        ffit.cmats = cubic_interp(psifac_dummy, reshape(cmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
-        ffit.fmats_lower = cubic_interp(psifac_dummy, reshape(fmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
-        ffit.kmats = cubic_interp(psifac_dummy, reshape(kmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
-        ffit.gmats = cubic_interp(psifac_dummy, reshape(gmats, points, :); bc=CubicFit(), extrap=:extension, search=LinearBinary())
+        ffit.amats = cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); ffit.itp_opts...)
+        ffit.bmats = cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); ffit.itp_opts...)
+        ffit.cmats = cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); ffit.itp_opts...)
+        ffit.fmats_lower = cubic_interp(psifac_dummy, Series(reshape(fmats, points, :)); ffit.itp_opts...)
+        ffit.kmats = cubic_interp(psifac_dummy, Series(reshape(kmats, points, :)); ffit.itp_opts...)
+        ffit.gmats = cubic_interp(psifac_dummy, Series(reshape(gmats, points, :)); ffit.itp_opts...)
 
         du = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
         chunk = GeneralizedPerturbedEquilibrium.ForceFreeStates.IntegrationChunk(; psi_start=odet.psifac, psi_end=odet.psifac, needs_crossing=false)
