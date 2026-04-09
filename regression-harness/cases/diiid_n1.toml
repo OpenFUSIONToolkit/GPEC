@@ -164,6 +164,13 @@ extract = "norm"
 label = "||resonant flux||"
 noise_threshold = 1e-8
 
+[quantities.resonant_flux_all]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+type = "complex_vector"
+extract = "all_complex"
+label = "resonant flux Phi_res"
+noise_threshold = 1e-8
+
 # Perturbed equilibrium: energies
 [quantities.pe_total_energy]
 h5path = "perturbed_equilibrium/energies/total_energy"
