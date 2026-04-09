@@ -169,7 +169,7 @@ function _compute_fkg_matrices!(
     mpsi = length(xs)
     np = intr.numpert_total
     mpert = intr.mpert
-    intr.npert > 1 && error("FKG kinetic matrices not yet implemented for multi-n (npert=$(intr.npert))")
+    npert = intr.npert
 
     # Allocate output arrays — kinetic-modified A/B/C stored for sing_der! FKG path
     ak_flat = zeros(ComplexF64, mpsi, np^2)
@@ -190,104 +190,124 @@ function _compute_fkg_matrices!(
     for ipsi in 1:mpsi
         psi = xs[ipsi]
 
-        # Evaluate ideal matrices from splines
-        amat = reshape(ffit.amats(psi; hint=hint), np, np)
-        bmat = reshape(ffit.bmats(psi; hint=hint), np, np)
-        cmat = reshape(ffit.cmats(psi; hint=hint), np, np)
-        dmat = reshape(ffit.dmats(psi; hint=hint), np, np)
-        emat = reshape(ffit.emats(psi; hint=hint), np, np)
-        hmat = reshape(ffit.hmats(psi; hint=hint), np, np)
+        # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
+        amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
+        bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
+        cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
+        dmat_full = reshape(ffit.dmats(psi; hint=hint), np, np)
+        emat_full = reshape(ffit.emats(psi; hint=hint), np, np)
+        hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
+        fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
 
-        # Reshape kinetic matrices at this psi
-        kwmat = zeros(ComplexF64, np, np, 6)
-        ktmat = zeros(ComplexF64, np, np, 6)
+        kwmat_full = zeros(ComplexF64, np, np, 6)
+        ktmat_full = zeros(ComplexF64, np, np, 6)
         for ic in 1:6
-            kwmat[:, :, ic] .= reshape(@view(kw_flat[ipsi, :, ic]), np, np)
-            ktmat[:, :, ic] .= reshape(@view(kt_flat[ipsi, :, ic]), np, np)
+            kwmat_full[:, :, ic] .= reshape(@view(kw_flat[ipsi, :, ic]), np, np)
+            ktmat_full[:, :, ic] .= reshape(@view(kt_flat[ipsi, :, ic]), np, np)
         end
 
-        # Add kinetic contributions to ideal matrices [Fortran fourfit.F lines 1153-1158]
-        amat_kin = amat .+ kwmat[:, :, 1] .+ ktmat[:, :, 1]
-        bmat_kin = bmat .+ kwmat[:, :, 2] .+ ktmat[:, :, 2]
-        cmat_kin = cmat .+ kwmat[:, :, 3] .+ ktmat[:, :, 3]
-        hmat_kin = hmat .+ kwmat[:, :, 6] .+ ktmat[:, :, 6]
-        caat = cmat_kin .- 2 .* ktmat[:, :, 3]  # C† analog for non-Hermitian system
+        # Process each n-block independently (matrices are block-diagonal in n)
+        for in_idx in 1:npert
+            n = intr.nlow + in_idx - 1
+            rng = ((in_idx-1)*mpert+1):(in_idx*mpert)
 
-        # Store kinetic-modified A/B/C for sing_der! FKG path
-        ak_flat[ipsi, :] .= vec(amat_kin)
-        bk_flat[ipsi, :] .= vec(bmat_kin)
-        ck_flat[ipsi, :] .= vec(cmat_kin)
+            # Extract n-block slices
+            amat = amat_full[rng, rng]
+            bmat = bmat_full[rng, rng]
+            cmat = cmat_full[rng, rng]
+            dmat = dmat_full[rng, rng]
+            emat = emat_full[rng, rng]
+            hmat = hmat_full[rng, rng]
+            fmat_prim = fmat_prim_full[rng, rng]
+            kwmat = zeros(ComplexF64, mpert, mpert, 6)
+            ktmat = zeros(ComplexF64, mpert, mpert, 6)
+            for ic in 1:6
+                kwmat[:, :, ic] .= kwmat_full[rng, rng, ic]
+                ktmat[:, :, ic] .= ktmat_full[rng, rng, ic]
+            end
 
-        # In Fortran, dbat/ebat/fbat are the primitive D/E/F before Schur complement reduction.
-        # In Julia, dmats/emats store the primitive D/E, and fmats_prim stores the primitive F.
-        b1mat = im .* dmat  # b1mat = i*D (Fortran convention)
+            # Add kinetic contributions to ideal matrices [Fortran fourfit.F lines 1153-1158]
+            amat_kin = amat .+ kwmat[:, :, 1] .+ ktmat[:, :, 1]
+            bmat_kin = bmat .+ kwmat[:, :, 2] .+ ktmat[:, :, 2]
+            cmat_kin = cmat .+ kwmat[:, :, 3] .+ ktmat[:, :, 3]
+            hmat_kin = hmat .+ kwmat[:, :, 6] .+ ktmat[:, :, 6]
+            caat = cmat_kin .- 2 .* ktmat[:, :, 3]  # C† analog for non-Hermitian system
 
-        # Load primitive F directly (stored separately in make_matrix)
-        fmat_prim = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
+            # b1mat = i*D (Fortran convention)
+            b1mat = im .* dmat
 
-        # LU factorization of kinetic A matrix (non-Hermitian)
-        amat_lu = lu(amat_kin)
+            # LU factorization of kinetic A matrix (non-Hermitian)
+            amat_lu = lu(amat_kin)
 
-        # f0mat = F_prim - D†A_kin⁻¹D  [Fortran fourfit.F line 1184]
-        temp1 = amat_lu \ dmat
-        f0mat = fmat_prim .- dmat' * temp1
+            # f0mat = F_prim - D†A_kin⁻¹D  [Fortran fourfit.F line 1184]
+            temp1 = amat_lu \ dmat
+            f0mat = fmat_prim .- dmat' * temp1
 
-        # pmat [Fortran lines 1193-1200]
-        n = intr.nlow
-        psio_over_n = equil.psio / n  # chi1/(2πn) = psio/n — toroidal flux per mode number
-        bkmat = kwmat[:, :, 2] .+ ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
-        bkaat = kwmat[:, :, 2] .- ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
-        temp2 = amat_lu \ bkmat
-        pmat_val = b1mat' * temp2
+            # pmat [Fortran lines 1193-1200]
+            psio_over_n = equil.psio / n  # chi1/(2πn) = psio/n — toroidal flux per mode number
+            bkmat = kwmat[:, :, 2] .+ ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
+            bkaat = kwmat[:, :, 2] .- ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
+            temp2 = amat_lu \ bkmat
+            pmat_val = b1mat' * temp2
 
-        # paat [Fortran lines 1202-1207]
-        temp2 = amat_lu \ b1mat
-        aamat = (amat_lu \ amat_kin)'  # A_kin⁻¹ A_kin = I analytically; kept for numerical consistency with Fortran fourfit.F line 1204
-        umat_diff = I - aamat  # ≈ 0; captures round-off from LU factorization
-        paat_val = (bkaat' * temp2 .- im * psio_over_n .* umat_diff * b1mat)'
+            # paat [Fortran lines 1202-1207]
+            temp2 = amat_lu \ b1mat
+            aamat = (amat_lu \ amat_kin)'  # A_kin⁻¹ A_kin = I analytically; kept for numerical consistency with Fortran fourfit.F line 1204
+            umat_diff = I - aamat  # ≈ 0; captures round-off from LU factorization
+            paat_val = (bkaat' * temp2 .- im * psio_over_n .* umat_diff * b1mat)'
 
-        # r1mat [Fortran lines 1209-1217]
-        temp1_r1 = kwmat[:, :, 1] .+ ktmat[:, :, 1]
-        temp2 = amat_lu \ bkmat
-        r1mat_val =
-            kwmat[:, :, 4] .+ ktmat[:, :, 4] .-
-            psio_over_n^2 .* temp1_r1' .+
-            im * psio_over_n .* bkaat' .-
-            im * psio_over_n .* aamat * bkmat .-
-            bkaat' * temp2
+            # r1mat [Fortran lines 1209-1217]
+            temp1_r1 = kwmat[:, :, 1] .+ ktmat[:, :, 1]
+            temp2 = amat_lu \ bkmat
+            r1mat_val =
+                kwmat[:, :, 4] .+ ktmat[:, :, 4] .-
+                psio_over_n^2 .* temp1_r1' .+
+                im * psio_over_n .* bkaat' .-
+                im * psio_over_n .* aamat * bkmat .-
+                bkaat' * temp2
 
-        # kkmat [Fortran lines 1220-1223]
-        temp1 = amat_lu \ cmat_kin
-        kkmat_val = emat .- b1mat' * temp1
+            # kkmat [Fortran lines 1220-1223]
+            temp1 = amat_lu \ cmat_kin
+            kkmat_val = emat .- b1mat' * temp1
 
-        # kkaat [Fortran lines 1225-1229]
-        temp1 = amat_lu \ b1mat
-        kkaat_val = emat' .- caat' * temp1
+            # kkaat [Fortran lines 1225-1229]
+            temp1 = amat_lu \ b1mat
+            kkaat_val = emat' .- caat' * temp1
 
-        # r2mat [Fortran lines 1231-1237]
-        temp1_r2 = kwmat[:, :, 5] .+ ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .+ ktmat[:, :, 3])
-        temp2 = amat_lu \ cmat_kin
-        r2mat_val = temp1_r2 .+ im * psio_over_n .* umat_diff * cmat_kin .- bkaat' * temp2
+            # r2mat [Fortran lines 1231-1237]
+            temp1_r2 = kwmat[:, :, 5] .+ ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .+ ktmat[:, :, 3])
+            temp2 = amat_lu \ cmat_kin
+            r2mat_val = temp1_r2 .+ im * psio_over_n .* umat_diff * cmat_kin .- bkaat' * temp2
 
-        # r3mat [Fortran lines 1239-1245]
-        temp1_r3 = kwmat[:, :, 5] .- ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .- ktmat[:, :, 3])
-        temp2 = amat_lu \ bkmat
-        r3mat_val = temp1_r3' .- caat' * temp2
+            # r3mat [Fortran lines 1239-1245]
+            temp1_r3 = kwmat[:, :, 5] .- ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .- ktmat[:, :, 3])
+            temp2 = amat_lu \ bkmat
+            r3mat_val = temp1_r3' .- caat' * temp2
 
-        # gaat [Fortran lines 1248-1251]
-        temp2 = amat_lu \ cmat_kin
-        gaat_val = hmat_kin .- caat' * temp2
+            # gaat [Fortran lines 1248-1251]
+            temp2 = amat_lu \ cmat_kin
+            gaat_val = hmat_kin .- caat' * temp2
 
-        # Store flattened
-        f0_flat[ipsi, :] .= vec(f0mat)
-        p_flat[ipsi, :] .= vec(pmat_val)
-        pa_flat[ipsi, :] .= vec(paat_val)
-        kk_flat[ipsi, :] .= vec(kkmat_val)
-        kka_flat[ipsi, :] .= vec(kkaat_val)
-        r1_flat[ipsi, :] .= vec(r1mat_val)
-        r2_flat[ipsi, :] .= vec(r2mat_val)
-        r3_flat[ipsi, :] .= vec(r3mat_val)
-        ga_flat[ipsi, :] .= vec(gaat_val)
+            # Store n-block results into full flat arrays
+            for (j_local, j_global) in enumerate(rng)
+                col_offset = (j_global - 1) * np
+                for (i_local, i_global) in enumerate(rng)
+                    idx = i_global + col_offset
+                    ak_flat[ipsi, idx] = amat_kin[i_local, j_local]
+                    bk_flat[ipsi, idx] = bmat_kin[i_local, j_local]
+                    ck_flat[ipsi, idx] = cmat_kin[i_local, j_local]
+                    f0_flat[ipsi, idx] = f0mat[i_local, j_local]
+                    p_flat[ipsi, idx] = pmat_val[i_local, j_local]
+                    pa_flat[ipsi, idx] = paat_val[i_local, j_local]
+                    kk_flat[ipsi, idx] = kkmat_val[i_local, j_local]
+                    kka_flat[ipsi, idx] = kkaat_val[i_local, j_local]
+                    r1_flat[ipsi, idx] = r1mat_val[i_local, j_local]
+                    r2_flat[ipsi, idx] = r2mat_val[i_local, j_local]
+                    r3_flat[ipsi, idx] = r3mat_val[i_local, j_local]
+                    ga_flat[ipsi, idx] = gaat_val[i_local, j_local]
+                end
+            end
+        end
     end
 
     # Build FKG splines

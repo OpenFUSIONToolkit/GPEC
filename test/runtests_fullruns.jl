@@ -29,4 +29,17 @@ using HDF5
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true
     end
+
+    ex4 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_multi_n")
+    @info "Running Solovev kinetic multi-n example (kin_flag=true, nn_low=1, nn_high=2, σ=1e-9)"
+    @test begin
+        GeneralizedPerturbedEquilibrium.main([ex4])
+        h5open(joinpath(ex4, "gpec.h5"), "r") do h5
+            et = read(h5["vacuum/et"])
+            @test isfinite(real(et[1]))
+            @test real(et[1]) ≈ -0.1997 rtol = 0.01
+        end
+        rm(joinpath(ex4, "gpec.h5"); force=true)
+        true
+    end
 end
