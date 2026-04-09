@@ -112,7 +112,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     end
 
     # Top and bottom separatrix Z extrema via bracketed Brent on ∂z/∂θ = 0.
-    # iside=1 → bottom (θ ∈ [0.5, 1.0]),  iside=2 → top (θ ∈ [0.0, 0.5]).
+    # iside=1 → top (θ ∈ [0.0, 0.5]),  iside=2 → bottom (θ ∈ [0.5, 1.0]).
+    # Matches Fortran convention so (r|z)ext[1] / zsep[1] refer to the top extremum
+    # and (r|z)ext[2] / zsep[2] to the bottom (see equil_out.f::equil_out_sep_find).
     # Splines use PeriodicBC + WrapExtrap, so θ outside [0,1] is valid.
     zsep = zeros(2)
     rext = zeros(2)
@@ -145,8 +147,8 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             return rfac_local * phase1 * cos_phase_local + rfac1 * sin_phase
         end
 
-        theta_lo, theta_hi = (iside == 1) ? (0.5, 1.0) : (0.0, 0.5)
-        side_label = (iside == 1) ? "bottom" : "top"
+        theta_lo, theta_hi = (iside == 1) ? (0.0, 0.5) : (0.5, 1.0)
+        side_label = (iside == 1) ? "top" : "bottom"
         theta = try
             find_zero(z_deriv, (theta_lo, theta_hi), Roots.Brent();
                 atol=1e-12, rtol=1e-12)
@@ -184,7 +186,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     rmean = (rsep[2] + rsep[1]) / 2
     amean = (rsep[2] - rsep[1]) / 2
     aratio = rmean / amean
-    kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
+    kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
     dpsi = 1.0 - pe.rzphi_xs[mpsi+1]

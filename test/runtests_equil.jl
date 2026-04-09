@@ -355,10 +355,11 @@
         # Build a full Solovev equilibrium at sufficient resolution for the
         # separatrix finder (equilibrium_separatrix_find!) to run.
         #
-        # rsep[1] = outboard midplane R,  rsep[2] = inboard midplane R
-        # zsep[1] = bottom extremum Z,    zsep[2] = top extremum Z
-        # rext    = R at top/bottom extrema,  zext = zsep (identical)
-        # kappa   = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])  (elongation)
+        # Index convention matches Fortran (equil_out.f::equil_out_sep_find):
+        #   rsep[1] = outboard midplane R,  rsep[2] = inboard midplane R
+        #   zsep[1] = top extremum Z (>0),  zsep[2] = bottom extremum Z (<0)
+        #   rext    = R at top/bottom extrema,  zext = zsep (identical)
+        #   kappa   = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])  (elongation)
 
         Eq = GeneralizedPerturbedEquilibrium.Equilibrium
 
@@ -391,15 +392,15 @@
             # rsep should be on the midplane (Z ≈ 0)
             # (verified indirectly: R at η=0 and η=0.5 are midplane by definition)
 
-            # zsep[1] = bottom (negative Z), zsep[2] = top (positive Z)
-            @test zsep[1] < 0.0
-            @test zsep[2] > 0.0
-            @test zsep[1] < zsep[2]
+            # zsep[1] = top (positive Z), zsep[2] = bottom (negative Z)
+            @test zsep[1] > 0.0
+            @test zsep[2] < 0.0
+            @test zsep[1] > zsep[2]
 
             # zext identical to zsep
             @test zext ≈ zsep
 
-            # Up-down symmetry of Solovev: |zsep_bottom| ≈ |zsep_top|
+            # Up-down symmetry of Solovev: |zsep_top| ≈ |zsep_bottom|
             @test abs(zsep[1]) ≈ abs(zsep[2]) rtol=0.01
 
             # Extremum R should be near the magnetic axis
@@ -407,7 +408,7 @@
             @test abs(rext[2] - pe.ro) < 0.2 * (rsep[1] - rsep[2])
 
             # kappa ≈ elongation
-            kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
+            kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
             @test kappa > 0
             @test kappa ≈ 1.6 rtol=0.02
         end
@@ -420,14 +421,14 @@
             @test rsep[2] < pe.ro
             @test rsep[1] > rsep[2]
 
-            @test zsep[1] < 0.0
-            @test zsep[2] > 0.0
-            @test zsep[1] < zsep[2]
+            @test zsep[1] > 0.0
+            @test zsep[2] < 0.0
+            @test zsep[1] > zsep[2]
 
             # For circular cross-section, rext[1] ≈ rext[2] (top/bottom at same R)
             @test rext[1] ≈ rext[2] rtol=0.01
 
-            kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
+            kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
             @test kappa > 0
             @test kappa ≈ 1.0 rtol=0.02
         end
@@ -438,7 +439,7 @@
 
             @test pe.params.kappa > 0
             @test pe.params.kappa ≈ 1.6 rtol=0.02
-            @test pe.params.zsep[1] < pe.params.zsep[2]
+            @test pe.params.zsep[1] > pe.params.zsep[2]
             @test pe.params.rsep[1] > pe.params.rsep[2]
         end
     end
