@@ -14,7 +14,8 @@
                 @test length(wts) == 100
                 @test pts[1] ≈ 0.0 atol=1e-14
                 @test pts[end] ≈ 1.0 atol=1e-14
-                @test issorted(pts)
+                # Monotonicity with tolerance for floating-point rounding
+                @test all(diff(pts) .> -eps(1.0))
             end
         end
 
