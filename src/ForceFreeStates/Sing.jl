@@ -786,8 +786,7 @@ more simplistic code with similar performance.
         ffit.gaats(vec(gaat_kin), psieval; hint=ffit._hint)
 
         # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
-        ipiv = acquire!(pool, Int64, Npert)
-        LAPACK.getrf!(amat, ipiv)
+        _, ipiv, _ = LAPACK.getrf!(amat)
         LAPACK.getrs!('N', amat, ipiv, bmat)
         LAPACK.getrs!('N', amat, ipiv, cmat)
 
@@ -821,8 +820,7 @@ more simplistic code with similar performance.
         mul!(tmp_mat, kmat, u1)
         du1 .-= tmp_mat
         # LU factorize F (non-Hermitian, non-symmetric)
-        ipiv2 = acquire!(pool, Int64, Npert)
-        LAPACK.getrf!(fmat_lower, ipiv2)
+        _, ipiv2, _ = LAPACK.getrf!(fmat_lower)
         LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
 
         # du₂ = Ḡ†·u₁ + K̄†·du₁  [Fortran sing.f lines 1217-1222]
