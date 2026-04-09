@@ -72,43 +72,6 @@ function main(args::Vector{String}=String[])
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
 
-    # Migrate deprecated TOML keys (removed in PR #210)
-    if haskey(inputs, "ForceFreeStates")
-        ffs = inputs["ForceFreeStates"]
-        deprecated_keys = String[]
-        for k in ["con_flag", "kinfac1", "kinfac2", "kingridtype", "ktanh_flag", "passing_flag", "trapped_flag", "ion_flag", "electron_flag", "ktc", "ktw", "kin_dummy_sigma"]
-            if haskey(ffs, k)
-                delete!(ffs, k)
-                push!(deprecated_keys, k)
-            end
-        end
-        if !isempty(deprecated_keys)
-            @warn "Deprecated ForceFreeStates TOML keys ignored: $(join(deprecated_keys, ", "))"
-        end
-        # Rename migrations for keys that were renamed (PR #210)
-        renamed_keys = Pair{String,String}[]
-        for (old_key, new_key) in ("kin_source" => "kinetic_source", "kinetic_matrix_factor" => "kinetic_factor")
-            if haskey(ffs, old_key) && !haskey(ffs, new_key)
-                ffs[new_key] = pop!(ffs, old_key)
-                push!(renamed_keys, old_key => new_key)
-            end
-        end
-        if !isempty(renamed_keys)
-            @warn "Renamed ForceFreeStates TOML keys: $(join(["$o → $n" for (o, n) in renamed_keys], ", "))"
-        end
-        # kinetic_flag (and its legacy alias kin_flag) merged into kinetic_factor: any positive factor enables kinetic mode
-        for old_flag_key in ("kin_flag", "kinetic_flag")
-            if haskey(ffs, old_flag_key)
-                delete!(ffs, old_flag_key)
-                @warn "$old_flag_key is deprecated and ignored: kinetic mode is now controlled by kinetic_factor (> 0 enables)"
-            end
-        end
-        if get(ffs, "kinetic_source", "") == "dummy"
-            ffs["kinetic_source"] = "fixed"
-            @warn "kinetic_source=\"dummy\" renamed to \"fixed\""
-        end
-    end
-
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
