@@ -183,8 +183,8 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
 
-    rmean = (rsep[2] + rsep[1]) / 2
-    amean = (rsep[2] - rsep[1]) / 2
+    rmean = (rsep[1] + rsep[2]) / 2
+    amean = (rsep[1] - rsep[2]) / 2
     aratio = rmean / amean
     kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
     delta1 = (rmean - rext[1]) / amean
