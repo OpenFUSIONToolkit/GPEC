@@ -107,7 +107,7 @@ GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 - **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
   - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
   - Published: PhD Thesis, Princeton University (2015)
-  - Describes: Complete PENTRC theory and implementation
+  - Describes: Complete PENTRC theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
 
 ### Additional References
 
@@ -586,6 +586,25 @@ This format is used for compiling release notes, so tags should be human-readabl
 ### Current Development Priorities
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `gpec.toml` file
+
+### Code Formatting
+
+Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+
+The project's `.JuliaFormatter.toml` settings:
+- **Line width**: 180 characters max (`margin = 180`)
+- **`for` loops**: always use `in` (not `=` or `∈`)
+- **Keyword arguments**: no spaces around `=` in kwargs (`f(x; a=1)` not `f(x; a = 1)`)
+- **Keyword separator**: use semicolons to separate kwargs (`f(x; a=1, b=2)`)
+- **No trailing commas** in argument lists
+- **Docstrings**: formatted according to JuliaFormatter rules
+- **No extra blank line removal**: `remove_extra_newlines = false`
+- **Join short lines**: `join_lines_based_on_source = true` — don't arbitrarily split lines that fit within the margin
+
+Additional file hygiene (enforced by pre-commit hooks):
+- No trailing whitespace on any line
+- Files must end with exactly one newline
+- LF line endings only (no CRLF)
 
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran

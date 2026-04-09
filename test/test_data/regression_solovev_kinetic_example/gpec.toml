@@ -8,15 +8,25 @@ power_r = 0                             # Major radius power exponent for Jacobi
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
 psihigh = 0.99999                       # Upper limit of normalized flux coordinate
-mpsi = 128                              # Number of radial grid points
+mpsi = 16                               # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
+[Wall]
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+a = 0.2415                              # Distance from plasma (conformal) or shape parameter
+aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
+bw = 1.5                                # Elongation parameter for wall shapes
+cw = 0                                  # Offset of wall center from major radius
+dw = 0.5                                # Triangularity parameter for wall shapes
+tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
+equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
+
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
-mat_flag = true               # Construct coefficient matrices for diagnostic purposes
+mat_flag = false              # Construct coefficient matrices for diagnostic purposes
 ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
@@ -29,38 +39,16 @@ sing_start = 0                # Start integration at the sing_start'th rational 
 
 nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
-delta_mlow = 8                # Expands lower bound of Fourier harmonics
-delta_mhigh = 8               # Expands upper bound of Fourier harmonics
+delta_mlow = 0                # Expands lower bound of Fourier harmonics
+delta_mhigh = 0               # Expands upper bound of Fourier harmonics
 delta_mband = 0               # Integration keeps only this wide a band...
-mthvac = 96                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
-nzvac = 64
+mthvac = 64                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "fixed"      # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
-kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
+kinetic_factor = 1e-9         # Small perturbation to verify kinetic path without altering physics (>0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
-save_interval = 3            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
-
-[Wall]
-shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a = 0.2415                              # Distance from plasma (conformal) or shape parameter
-aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
-bw = 1.5                                # Elongation parameter for wall shapes
-cw = 0                                  # Offset of wall center from major radius
-dw = 0.5                                # Triangularity parameter for wall shapes
-tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
-equal_arc_wall = false                   # Equal arc length distribution of nodes on wall
-
-# [PerturbedEquilibrium]
-# # Uncomment this section to enable perturbed equilibrium calculations
-# forcing_data_file = "forcing.dat"      # Path to forcing data (n, m, real, imag)
-# forcing_data_format = "ascii"          # "ascii" or "hdf5"
-# fixed_boundary = false                 # Fixed boundary flag
-# output_eigenmodes = true               # Output mode fields as b-fields
-# compute_response = true                # Compute plasma response
-# compute_singular_coupling = true       # Compute singular coupling metrics
-# verbose = true                         # Enable verbose logging
-# write_outputs_to_HDF5 = true           # Write outputs to HDF5
+write_outputs_to_HDF5 = true
+verbose = false

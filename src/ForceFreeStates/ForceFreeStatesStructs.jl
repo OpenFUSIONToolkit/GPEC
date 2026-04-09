@@ -107,7 +107,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
   - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
@@ -132,7 +131,6 @@ A mutable struct holding internal state variables for stability calculations.
     keq_out::Bool = false
     theta_out::Bool = false
     xlmda_out::Bool = false
-    fkg_kmats_flag::Bool = false
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
@@ -181,18 +179,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kin_flag::Bool` - Enable kinetic effects
-  - `con_flag::Bool` - Continue integration through rationals without zeroing singular solutions
-  - `kinfac1::Float64` - First kinetic scaling factor (not yet implemented)
-  - `kinfac2::Float64` - Second kinetic scaling factor (not yet implemented)
-  - `kingridtype::Int` - Type of kinetic grid (0=standard) (not yet implemented)
-  - `ktanh_flag::Bool` - Enable hyperbolic tangent profile (not yet implemented)
-  - `passing_flag::Bool` - Include passing particles (not yet implemented)
-  - `trapped_flag::Bool` - Include trapped particles (not yet implemented)
-  - `ion_flag::Bool` - Include ion kinetic effects (not yet implemented)
-  - `electron_flag::Bool` - Include electron kinetic effects (not yet implemented)
-  - `ktc::Float64` - Kinetic collision parameter (not yet implemented)
-  - `ktw::Float64` - Kinetic width parameter (not yet implemented)
+  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
+  - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
@@ -234,18 +222,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     dmlim::Float64 = 0.2
     sing_order::Int = 2
     qhigh::Float64 = 1e3
-    kin_flag::Bool = false
-    con_flag::Bool = false
-    kinfac1::Float64 = 1.0
-    kinfac2::Float64 = 1.0
-    kingridtype::Int = 0
-    ktanh_flag::Bool = false
-    passing_flag::Bool = false
-    trapped_flag::Bool = true
-    ion_flag::Bool = true
-    electron_flag::Bool = false
-    ktc::Float64 = 0.1
-    ktw::Float64 = 50.0
+    kinetic_source::String = "fixed"
+    kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0
@@ -277,8 +255,30 @@ end
     emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Ideal A,B,C splines preserved before kinetic overwrite (for mat_flag output)
+    amats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
+    kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+    # Kinetic torque matrix splines: 6 components
+    ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+
+    # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
+    f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r1mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -467,6 +467,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
     zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
+
+    # Kinetic workspace arrays: evaluated from kwmats/ktmats splines at current psi
+    kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+    ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups

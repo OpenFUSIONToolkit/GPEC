@@ -84,7 +84,7 @@ function clamp_psihigh_to_separatrix(raw_profile::DirectRunInput)
     has_closed_contour(ψ_high) = any(
         _is_closed_curve,
         Ctr.lines(Ctr.contour(raw_profile.psi_in_xs, raw_profile.psi_in_ys,
-                              ψ_coarse, raw_profile.psio * (1.0 - ψ_high)))
+            ψ_coarse, raw_profile.psio * (1.0 - ψ_high)))
     )
 
     has_closed_contour(psihigh) && return (psihigh, false)
@@ -128,26 +128,26 @@ function resample_contour_to_theta_grid!(
     end
 
     # Compute geometric angle η and log-radius logρ in one pass
-    η_buf   = Vector{Float64}(undef, nv)
+    η_buf = Vector{Float64}(undef, nv)
     logρ_buf = Vector{Float64}(undef, nv)
     @inbounds for i in 1:nv
         r, z = verts[i]
-        η_buf[i]   = mod(atan(z - zo, r - ro), 2π)
+        η_buf[i] = mod(atan(z - zo, r - ro), 2π)
         logρ_buf[i] = log(sqrt((r - ro)^2 + (z - zo)^2))
     end
 
     idx = sortperm(η_buf)
 
     # Build extended (nv+1) sorted arrays with periodic wrap appended
-    n_ext   = nv + 1
-    η_ext   = Vector{Float64}(undef, n_ext)
+    n_ext = nv + 1
+    η_ext = Vector{Float64}(undef, n_ext)
     logρ_ext = Vector{Float64}(undef, n_ext)
     @inbounds for i in 1:nv
         k = idx[i]
-        η_ext[i]   = η_buf[k]
+        η_ext[i] = η_buf[k]
         logρ_ext[i] = logρ_buf[k]
     end
-    η_ext[n_ext]   = η_ext[1] + 2π
+    η_ext[n_ext] = η_ext[1] + 2π
     logρ_ext[n_ext] = logρ_ext[1]
 
     logρ_spl = cubic_interp(η_ext, logρ_ext; bc=PeriodicBC())
@@ -172,7 +172,7 @@ by evaluating ψ on the (R, Z) grid and finding the minimum in each Z half-domai
 An x-point is detected when the minimum ψ in a half-domain falls below `xpt_threshold * psio`.
 """
 function classify_topology(raw_profile::DirectRunInput, psio::Float64;
-                           xpt_threshold::Float64=0.05)
+    xpt_threshold::Float64=0.05)
     R_grid = raw_profile.psi_in_xs
     Z_grid = raw_profile.psi_in_ys
     nZ = length(Z_grid)
@@ -218,8 +218,9 @@ end
 Build a 1D grid of length `n` on `[lo, hi]` with sinh-stretching toward each point in
 `centers`. The domain is split at each interior concentration point; each resulting
 sub-interval uses:
-- symmetric (double-ended) sinh when both endpoints are concentration points
-- one-sided sinh fine at the concentration-point end otherwise
+
+  - symmetric (double-ended) sinh when both endpoints are concentration points
+  - one-sided sinh fine at the concentration-point end otherwise
 
 Domain boundaries (`lo`, `hi`) are treated as concentration points only if they appear in
 `centers`. This produces a grid that is simultaneously fine near the magnetic axis (an
@@ -227,13 +228,13 @@ interior concentration point) and near x-points (which lie at domain boundaries 
 the clipped plasma bounding box). Returns a uniform grid if `β ≤ 0`.
 """
 function make_multi_stretched_grid(lo::Float64, hi::Float64,
-                                    centers::Vector{Float64}, n::Int, β::Float64)
+    centers::Vector{Float64}, n::Int, β::Float64)
     β ≤ 0.0 && return collect(range(lo, hi; length=n))
     lo_is_conc = any(c -> abs(c - lo) < 1e-12, centers)
     hi_is_conc = any(c -> abs(c - hi) < 1e-12, centers)
-    interior   = sort!(unique!(filter(c -> lo < c < hi, copy(centers))))
-    nodes      = [lo; interior; hi]
-    n_segs     = length(nodes) - 1
+    interior = sort!(unique!(filter(c -> lo < c < hi, copy(centers))))
+    nodes = [lo; interior; hi]
+    n_segs = length(nodes) - 1
     n_segs == 0 && return collect(range(lo, hi; length=n))
 
     total_len = hi - lo
@@ -241,7 +242,7 @@ function make_multi_stretched_grid(lo::Float64, hi::Float64,
     # so concatenation (dropping n_segs-1 shared endpoints) gives exactly n total points.
     n_segi = Vector{Int}(undef, n_segs)
     allocated = 0
-    for k in 1:(n_segs - 1)
+    for k in 1:(n_segs-1)
         n_segi[k] = max(2, round(Int, n * (nodes[k+1] - nodes[k]) / total_len))
         allocated += n_segi[k]
     end
@@ -250,7 +251,7 @@ function make_multi_stretched_grid(lo::Float64, hi::Float64,
     result = Float64[]
     for k in 1:n_segs
         a, b = nodes[k], nodes[k+1]
-        left_fine  = k > 1 || lo_is_conc
+        left_fine = k > 1 || lo_is_conc
         right_fine = k < n_segs || hi_is_conc
         sub = if left_fine && right_fine
             _sinh_both_ends(a, b, n_segi[k], β)
@@ -268,24 +269,27 @@ end
 
 # sinh grid fine at left end a: x(v) = a + Δ·sinh(β·v)/sinh(β)
 function _sinh_left(a::Float64, b::Float64, n::Int, β::Float64)
-    Δ = b - a; s = sinh(β)
+    Δ = b - a
+    s = sinh(β)
     [a + Δ * sinh(β * (k - 1) / (n - 1)) / s for k in 1:n]
 end
 
 # sinh grid fine at right end b: x(v) = b − Δ·sinh(β·(1−v))/sinh(β)
 function _sinh_right(a::Float64, b::Float64, n::Int, β::Float64)
-    Δ = b - a; s = sinh(β)
+    Δ = b - a
+    s = sinh(β)
     [b - Δ * sinh(β * (1.0 - (k - 1) / (n - 1))) / s for k in 1:n]
 end
 
 # symmetric sinh fine at both ends a and b
 function _sinh_both_ends(a::Float64, b::Float64, n::Int, β::Float64)
-    Δ = b - a; s = sinh(β)
+    Δ = b - a
+    s = sinh(β)
     grid = Vector{Float64}(undef, n)
     @inbounds for k in 1:n
         v = (k - 1) / (n - 1)
         grid[k] = v ≤ 0.5 ? (a + 0.5Δ * sinh(β * 2v) / s) :
-                             (b - 0.5Δ * sinh(β * 2(1.0 - v)) / s)
+                  (b - 0.5Δ * sinh(β * 2(1.0 - v)) / s)
     end
     return grid
 end
@@ -308,7 +312,7 @@ near each x-point boundary (at `z_lo` for `:sn_lower`/`:double_null`, at `z_hi` 
 `:sn_upper`/`:double_null`). Thin wrapper around `make_multi_stretched_grid`.
 """
 function make_stretched_z_grid(z_lo::Float64, z_hi::Float64, zo::Float64, nz::Int,
-                                topology::Symbol, β_z::Float64)
+    topology::Symbol, β_z::Float64)
     centers = Float64[zo]
     topology ∈ (:sn_lower, :double_null) && push!(centers, z_lo)
     topology ∈ (:sn_upper, :double_null) && push!(centers, z_hi)
@@ -322,7 +326,7 @@ end
 Physics-based Cartesian grid sizing for contour-tracing equilibrium reconstruction.
 
 Computes required cell widths from the bilinear interpolation error bound
-  δψ ≈ (dR²·|ψ_RR| + dZ²·|ψ_ZZ|)/8 ≤ Δψ  →  dR_req = √(8Δψ/|ψ_RR|)
+δψ ≈ (dR²·|ψ_RR| + dZ²·|ψ_ZZ|)/8 ≤ Δψ  →  dR_req = √(8Δψ/|ψ_RR|)
 sampled at each LCFS vertex (reusing `bbox_curve`), plus an axis constraint ensuring
 the innermost surface (psilow) has ≥ 5 cells per semi-axis on the global grid.
 
@@ -394,10 +398,10 @@ Select via `eq_type = "efit_by_inversion"` in `gpec.toml`.
 """
 function equilibrium_solver_by_inversion(
     raw_profile::DirectRunInput;
-    resolution_factor::Float64 = 4.0,
-    refine::Union{Nothing,Int} = nothing,
-    β_r::Union{Nothing,Float64} = nothing,
-    β_z::Union{Nothing,Float64} = nothing
+    resolution_factor::Float64=4.0,
+    refine::Union{Nothing,Int}=nothing,
+    β_r::Union{Nothing,Float64}=nothing,
+    β_z::Union{Nothing,Float64}=nothing
 )
     equil_params = raw_profile.config
     psio = raw_profile.psio
@@ -465,8 +469,8 @@ function equilibrium_solver_by_inversion(
 
     iro = clamp(searchsortedfirst(r_fine, ro), 2, length(r_fine))
     izo = clamp(searchsortedfirst(z_grid, zo), 2, length(z_grid))
-    dR_axis = r_fine[iro] - r_fine[iro - 1]
-    dZ_axis = z_grid[izo] - z_grid[izo - 1]
+    dR_axis = r_fine[iro] - r_fine[iro-1]
+    dZ_axis = z_grid[izo] - z_grid[izo-1]
 
     # Near-axis threshold: surfaces spanning fewer than n_min_cells global-grid cells per
     # semi-axis are re-traced by the zoomed core grid.
@@ -534,12 +538,14 @@ function equilibrium_solver_by_inversion(
     for ipsi in 1:(mpsi+1)
         if surface_status[ipsi] == -1
             psifac = psi_nodes[ipsi]
-            error("efit_by_inversion: No closed flux surface found at psifac = $(@sprintf("%.4f", psifac)) " *
-                "— psihigh likely exceeds the separatrix or is outside the EFIT domain.")
+            error(
+                "efit_by_inversion: No closed flux surface found at psifac = $(@sprintf("%.4f", psifac)) " *
+                "— psihigh likely exceeds the separatrix or is outside the EFIT domain."
+            )
         end
     end
     n_contour_success = count(==(0), surface_status)
-    n_near_axis_fill  = count(==(1), surface_status)
+    n_near_axis_fill = count(==(1), surface_status)
 
     # Zoomed core pass: re-trace near-axis surfaces on a dedicated axis-centered grid.
     # Extended to zoom_extend_factor × threshold so global and zoomed grids overlap smoothly.
@@ -567,8 +573,8 @@ function equilibrium_solver_by_inversion(
 
         iro_z = clamp(searchsortedfirst(r_zoom_grid, ro), 2, length(r_zoom_grid))
         izo_z = clamp(searchsortedfirst(z_zoom_grid, zo), 2, length(z_zoom_grid))
-        dR_zoom = r_zoom_grid[iro_z] - r_zoom_grid[iro_z - 1]
-        dZ_zoom = z_zoom_grid[izo_z] - z_zoom_grid[izo_z - 1]
+        dR_zoom = r_zoom_grid[iro_z] - r_zoom_grid[iro_z-1]
+        dZ_zoom = z_zoom_grid[izo_z] - z_zoom_grid[izo_z-1]
         @info "efit_by_inversion: zoomed core grid $(nr_zoom)×$(nz_zoom) covering [ro±$(@sprintf("%.0f", a_zoom_r*1000)) mm, zo±$(@sprintf("%.0f", a_zoom_z*1000)) mm]; dR=$(@sprintf("%.2f", dR_zoom*1000)) mm, dZ=$(@sprintf("%.2f", dZ_zoom*1000)) mm (target ≤ $(@sprintf("%.2f", a_low/n_min_cells*1000)) mm); tracing $n_zoom_surfaces surfaces (threshold=$n_near_axis_fill + $zoom_extend_factor× overlap)"
 
         ψ_zoom = Matrix{Float64}(undef, nr_zoom, nz_zoom)
@@ -601,8 +607,10 @@ function equilibrium_solver_by_inversion(
         for ipsi in 1:n_zoom_surfaces
             if surface_status[ipsi] == -1
                 psifac = psi_nodes[ipsi]
-                error("efit_by_inversion: Zoomed core grid failed to find flux surface at ψ = $(@sprintf("%.4f", psifac)). " *
-                    "Try increasing psilow or reducing the zoom bbox margin.")
+                error(
+                    "efit_by_inversion: Zoomed core grid failed to find flux surface at ψ = $(@sprintf("%.4f", psifac)). " *
+                    "Try increasing psilow or reducing the zoom bbox margin."
+                )
             end
         end
         @info "efit_by_inversion: $(mpsi + 1 - n_zoom_surfaces) surfaces traced by global grid, $n_zoom_surfaces by zoomed core grid ($n_near_axis_fill below threshold + $(n_zoom_surfaces - n_near_axis_fill) overlap)"
@@ -623,7 +631,7 @@ function equilibrium_solver_by_inversion(
     # and would double-count any violation there.
     @inbounds for k in 1:mtheta
         ρ_prev = sqrt((R_table[1, k] - ro)^2 + (Z_table[1, k] - zo)^2)
-        for ipsi in 2:(mpsi + 1)
+        for ipsi in 2:(mpsi+1)
             ρ = sqrt((R_table[ipsi, k] - ro)^2 + (Z_table[ipsi, k] - zo)^2)
             if ρ < ρ_prev
                 n_violations += 1
@@ -667,12 +675,12 @@ function equilibrium_solver_by_inversion(
     max_rt_err = 0.0
     for ψ_check in (pe.rzphi_xs[end], pe.rzphi_xs[max(1, length(pe.rzphi_xs) * 3 ÷ 4)])
         for θ_check in (0.0, 0.25, 0.5, 0.75)
-            r2  = pe.rzphi_rsquared((ψ_check, θ_check))
+            r2 = pe.rzphi_rsquared((ψ_check, θ_check))
             off = pe.rzphi_offset((ψ_check, θ_check))
             rfac = sqrt(max(r2, 0.0))
-            η    = 2π * (θ_check + off)
-            R    = pe.ro + rfac * cos(η)
-            Z    = pe.zo + rfac * sin(η)
+            η = 2π * (θ_check + off)
+            R = pe.ro + rfac * cos(η)
+            Z = pe.zo + rfac * sin(η)
             ψ_rt = 1.0 - raw_profile.psi_in((R, Z)) / psio
             max_rt_err = max(max_rt_err, abs(ψ_rt - ψ_check))
         end
@@ -685,4 +693,3 @@ function equilibrium_solver_by_inversion(
 
     return pe
 end
-
