@@ -21,6 +21,9 @@ Output Settings:
 Medium Priority (defer for MWE):
   - `filter_modes::Bool` - Enable mode filtering (default: false)
   - `singular_point_method::String` - Method for singular point treatment (default: "standard")
+
+Regularization:
+  - `reg_spot::Float64` - Regularization width for singular surface smoothing (default: 0.05). Set to 0 to disable. Must be ≥ 0.
 """
 @kwdef mutable struct PerturbedEquilibriumControl
     # High Priority (MWE)
@@ -37,6 +40,10 @@ Medium Priority (defer for MWE):
     # Medium Priority (include but simple for MWE)
     filter_modes::Bool = false
     singular_point_method::String = "standard"
+
+    # Regularization width for singular surface smoothing (matches Fortran gpec.f reg_spot).
+    # Set to 0 to disable regularization. Must be non-negative.
+    reg_spot::Float64 = 5e-2
 end
 
 """
@@ -71,7 +78,7 @@ Results from perturbed equilibrium calculations.
 
 Response fields (mode space):
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, Jbgradpsi=b^ψ/<J·|∇ψ|>_θ (Fortran Jbgradpsi convention), theta=b^θ, zeta=b^ζ [npsi, mpert]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, psi_area=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, mpert]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, mpert]
 

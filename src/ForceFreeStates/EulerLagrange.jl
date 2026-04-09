@@ -368,7 +368,7 @@ function integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equi
         near_start = abs(odet.q - q_start) < near_q_frac * q_range || steps_in_segment[] == 1
         near_end   = abs(odet.q - q_end)   < near_q_frac * q_range
 
-        if near_start || near_end || (odet.step % ctrl.save_interval == 0)
+        if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0)
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end

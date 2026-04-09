@@ -59,8 +59,9 @@ perturbed_equilibrium/
 │   ├── m              # Poloidal mode numbers
 │   └── amplitude      # ComplexF64 forcing amplitudes
 ├── response/
-│   ├── xi_psi         # Covariant radial displacement ξ_ψ (ComplexF64 [npsi, mpert])
-│   ├── Jbgradpsi      # J×b^ψ Jacobian-weighted contravariant field (ComplexF64 [npsi, mpert])
+│   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
+│   ├── xi_psi_J       # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
+│   ├── psi_area       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, mpert])
 │   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, mpert])
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
@@ -117,12 +118,56 @@ function write_outputs_to_HDF5(
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
-        response_group["xi_psi"]    = have_xi ? state.xi_modes.psi        : ComplexF64[]
-        response_group["Jbgradpsi"] = have_b  ? state.b_modes.Jbgradpsi : ComplexF64[]  # J×b^ψ (Hamada Jac × b^ψ)
-        response_group["b_theta"]   = have_b  ? state.b_modes.theta  : ComplexF64[]
-        response_group["b_zeta"]    = have_b  ? state.b_modes.zeta   : ComplexF64[]
+        response_group["xi_psi"]    = have_xi ? state.xi_modes.psi      : ComplexF64[]
+        response_group["psi_area"]  = have_b  ? state.b_modes.psi_area : ComplexF64[]
+        response_group["b_theta"]   = have_b  ? state.b_modes.theta    : ComplexF64[]
+        response_group["b_zeta"]    = have_b  ? state.b_modes.zeta     : ComplexF64[]
         response_group["b_n"]       = !isnothing(state.b_n_modes)  ? state.b_n_modes  : ComplexF64[]
         response_group["xi_n"]      = !isnothing(state.xi_n_modes) ? state.xi_n_modes : ComplexF64[]
+
+        # Clebsch displacements for PENTRC (matches Fortran gpout_xclebsch)
+        if have_xi
+            response_group["clebsch_psi"]   = state.xi_modes.clebsch_psi
+            response_group["clebsch_psi1"]  = state.xi_modes.clebsch_psi1
+            response_group["clebsch_alpha"] = state.xi_modes.clebsch_alpha
+        end
+
+        # Contravariant displacement (from gpeq_contra, all J-weighted)
+        if have_xi
+            response_group["xi_psi_J"] = state.xi_modes.psi_J
+            response_group["xi_theta"] = state.xi_modes.theta
+            response_group["xi_zeta"]  = state.xi_modes.zeta
+        end
+
+        # Covariant components (from gpeq_cova)
+        if have_xi
+            response_group["xi_cova_psi"]   = state.xi_modes.cova_psi
+            response_group["xi_cova_theta"] = state.xi_modes.cova_theta
+            response_group["xi_cova_zeta"]  = state.xi_modes.cova_zeta
+        end
+        if have_xi
+            response_group["xi_theta_reg"] = state.xi_modes.theta_reg
+            response_group["xi_zeta_reg"]  = state.xi_modes.zeta_reg
+        end
+        if have_b
+            response_group["b_theta_reg"] = state.b_modes.theta_reg
+            response_group["b_zeta_reg"]  = state.b_modes.zeta_reg
+            response_group["b_cova_psi"]   = state.b_modes.cova_psi
+            response_group["b_cova_theta"] = state.b_modes.cova_theta
+            response_group["b_cova_zeta"]  = state.b_modes.cova_zeta
+        end
+
+        # R,Z,φ cylindrical components (from gpeq_rzphi)
+        if have_xi
+            response_group["xi_R"]   = state.xi_modes.R
+            response_group["xi_Z"]   = state.xi_modes.Z
+            response_group["xi_phi"] = state.xi_modes.phi
+        end
+        if have_b
+            response_group["b_R"]   = state.b_modes.R
+            response_group["b_Z"]   = state.b_modes.Z
+            response_group["b_phi"] = state.b_modes.phi
+        end
 
         # Singular coupling
         coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")

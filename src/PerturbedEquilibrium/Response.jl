@@ -1,22 +1,17 @@
 """
     compute_plasma_response!(
-        state::PerturbedEquilibriumState,
-        equil::Equilibrium.PlasmaEquilibrium,
-        ForceFreeStates_results::OdeState,
-        vac_data::VacuumData,
-        ffs_intr::ForceFreeStatesInternal,
-        intr::PerturbedEquilibriumInternal,
-        ctrl::PerturbedEquilibriumControl
+        state, equil, ForceFreeStates_results, vac_data, ffs_intr,
+        intr, ctrl, metric, ffit
     )
 
 Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
 
-Implements resp_index=0 calculation from gpresp.f:
-1. Build flux matrix from eigenmodes
-2. Calculate plasma inductance Lambda (wt0-based, resp_induct_flag=TRUE)
-3. Calculate surface inductance L from Green's function
-4. Compute permeability P = Lambda * L^{-1}
-5. Apply forcing to get response: Phi_tot = P * Phi_x
+Implements resp_index=0 calculation from Fortran gpresp:
+- Build flux matrix from eigenmodes
+- Calculate plasma inductance Lambda (wt0-based, resp_induct_flag=TRUE)
+- Calculate surface inductance L from Green's function
+- Compute permeability P = Lambda * L^{-1}
+- Apply forcing to get response: Phi_tot = P * Phi_x
 """
 function compute_plasma_response!(
     state::PerturbedEquilibriumState,
@@ -25,7 +20,9 @@ function compute_plasma_response!(
     vac_data::VacuumData,
     ffs_intr::ForceFreeStatesInternal,
     intr::PerturbedEquilibriumInternal,
-    ctrl::PerturbedEquilibriumControl
+    ctrl::PerturbedEquilibriumControl,
+    metric::MetricData,
+    ffit::FourFitVars
 )
     if ctrl.verbose
         @info "Computing plasma response (wt0-based inductance)"
@@ -73,14 +70,15 @@ function compute_plasma_response!(
     state.response_vec = response_vector
 
     xi_modes, b_modes = reconstruct_physical_fields(
-        response_vector, flux_matrix, ForceFreeStates_results, equil, ffs_intr, intr
+        response_vector, flux_matrix, ForceFreeStates_results, equil, ffs_intr, intr,
+        metric, ffit, ctrl
     )
 
     state.xi_modes = xi_modes
     state.b_modes  = b_modes
 
     b_n_modes, xi_n_modes = compute_b_n_xi_n_modes(
-        xi_modes.psi, b_modes.psi, ForceFreeStates_results, equil, ffs_intr
+        xi_modes.psi_J, b_modes.psi, ForceFreeStates_results, equil, ffs_intr
     )
     state.b_n_modes  = b_n_modes
     state.xi_n_modes = xi_n_modes

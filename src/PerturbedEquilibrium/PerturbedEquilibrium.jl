@@ -10,7 +10,7 @@ using AdaptiveArrayPools
 # Import parent modules
 import ..Equilibrium
 import ..ForceFreeStates
-import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal
+import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal, FourFitVars, MetricData
 import ..Vacuum
 import ..ForcingTerms
 import ..ForcingTerms: ForcingMode, load_forcing_data!, convert_forcing_normalization!
@@ -38,13 +38,8 @@ export write_outputs_to_HDF5
 
 """
     compute_perturbed_equilibrium(
-        equil::Equilibrium.PlasmaEquilibrium,
-        ForceFreeStates_results::OdeState,
-        vac_data::Union{VacuumData, Nothing},
-        ffs_intr::ForceFreeStatesInternal,
-        ft_ctrl::ForcingTerms.ForcingTermsControl,
-        ctrl::PerturbedEquilibriumControl,
-        intr::PerturbedEquilibriumInternal
+        equil, ForceFreeStates_results, vac_data, ffs_intr,
+        ft_ctrl, ctrl, intr, metric, ffit
     )::PerturbedEquilibriumState
 
 Main entry point for perturbed equilibrium calculations.
@@ -61,17 +56,12 @@ coupling metrics.
   - `ft_ctrl`: Forcing terms control parameters from [ForcingTerms] section
   - `ctrl`: Control parameters from [PerturbedEquilibrium] section
   - `intr`: Internal state variables
+  - `metric`: Metric tensor data with Fourier coefficients for Jacobian convolution
+  - `ffit`: FourFitVars with stability matrix interpolants (A, B, C) for regularization
 
 ## Returns
 
   - `PerturbedEquilibriumState`: Calculation results
-
-## Workflow
-
- 1. Load forcing data from file
- 2. Compute plasma response (if enabled)
- 3. Calculate singular coupling metrics (if enabled)
- 4. Output eigenmode fields (if enabled)
 """
 function compute_perturbed_equilibrium(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -80,7 +70,9 @@ function compute_perturbed_equilibrium(
     ffs_intr::ForceFreeStates.ForceFreeStatesInternal,
     ft_ctrl::ForcingTerms.ForcingTermsControl,
     ctrl::PerturbedEquilibriumControl,
-    intr::PerturbedEquilibriumInternal
+    intr::PerturbedEquilibriumInternal,
+    metric::MetricData,
+    ffit::FourFitVars
 )::PerturbedEquilibriumState
 
     state = PerturbedEquilibriumState()
@@ -118,7 +110,7 @@ function compute_perturbed_equilibrium(
         if vac_data === nothing
             @warn "Vacuum data not available. Skipping plasma response calculation. Set vac_flag=true in [ForceFreeStates] section."
         else
-            compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl)
+            compute_plasma_response!(state, equil, ForceFreeStates_results, vac_data, ffs_intr, intr, ctrl, metric, ffit)
         end
     end
 

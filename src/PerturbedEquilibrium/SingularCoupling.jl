@@ -680,7 +680,7 @@ Surface inductance matrix [mpert × mpert]
         kax_re_corr = kax_re .* cos_nν .- kax_im .* sin_nν
         kax_im_corr = kax_re .* sin_nν .+ kax_im .* cos_nν
 
-        current_matrix[:, i] = (ft(kax_re_corr) .- im .* ft(kax_im_corr)) ./ mtheta
+        current_matrix[:, i] = ft(kax_re_corr) .- im .* ft(kax_im_corr)
     end
 
     # Compute surface inductance: L_surf = flux * inv(current) = inv(current)

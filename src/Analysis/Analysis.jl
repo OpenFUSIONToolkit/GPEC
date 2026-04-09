@@ -13,5 +13,6 @@ module Analysis
 include("ForceFreeStates.jl")
 include("Equilibrium.jl")
 include("CoilForcing.jl")
+include("PerturbedEquilibrium.jl")
 
 end # module Analysis

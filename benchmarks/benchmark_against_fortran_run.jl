@@ -50,6 +50,7 @@ using Statistics
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.Equilibrium
+import GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumAnalysis
 
 # ─── Argument parsing ────────────────────────────────────────────────────────
 
@@ -245,6 +246,20 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
         fort["xigradpsi"] = complex.(xigp_raw[:, :, 1], xigp_raw[:, :, 2])
         xi_n_raw_f = Float64.(ds["xi_n"][:, :, :])
         fort["xi_n"] = complex.(xi_n_raw_f[:, :, 1], xi_n_raw_f[:, :, 2])
+
+        # Clebsch displacement profiles (for PENTRC benchmark)
+        if haskey(ds, "xigradpsi_dpsi")
+            xigp1_raw = Float64.(ds["xigradpsi_dpsi"][:, :, :])
+            fort["xigradpsi_dpsi"] = complex.(xigp1_raw[:, :, 1], xigp1_raw[:, :, 2])
+        else
+            fort["xigradpsi_dpsi"] = Matrix{ComplexF64}(undef, 0, 0)
+        end
+        if haskey(ds, "xigradalpha")
+            xiga_raw = Float64.(ds["xigradalpha"][:, :, :])
+            fort["xigradalpha"] = complex.(xiga_raw[:, :, 1], xiga_raw[:, :, 2])
+        else
+            fort["xigradalpha"] = Matrix{ComplexF64}(undef, 0, 0)
+        end
     end
 
     NCDataset(control_file, "r") do ds
@@ -270,6 +285,19 @@ function load_fortran_outputs(fortran_dir::String, nn::Int)
                 fort[key] = complex.(raw[:, :, 1], raw[:, :, 2])
             else
                 fort[key] = Matrix{ComplexF64}(undef, 0, 0)
+            end
+        end
+    end
+
+    # R,Z,φ profile data — store as theta-space complex arrays (from gpout_xbrzphifun)
+    # Fortran outputs (psi, theta+1, 2) where dim 3 = (real, imag) in machine φ
+    NCDataset(profile_file, "r") do ds
+        if haskey(ds, "xi_r")
+            ntheta = length(ds["theta_dcon"]) - 1  # drop duplicate endpoint
+            for (key, nc_var) in [("xi_r_fun", "xi_r"), ("xi_z_fun", "xi_z"), ("xi_phi_fun", "xi_phi"),
+                                  ("b_r_fun",  "b_r"),  ("b_z_fun",  "b_z"),  ("b_phi_fun",  "b_phi")]
+                raw = Float64.(ds[nc_var][:, :, :])  # (psi, theta+1, 2)
+                fort[key] = complex.(raw[:, 1:ntheta, 1], raw[:, 1:ntheta, 2])
             end
         end
     end
@@ -309,10 +337,15 @@ function load_julia_outputs(h5_path::String)
         julia["forcing_vec"]  = haskey(f, "$pe/forcing_vec")  ? read(f, "$pe/forcing_vec")  : ComplexF64[]
         julia["response_vec"] = haskey(f, "$pe/response_vec") ? read(f, "$pe/response_vec") : ComplexF64[]
         julia["b_n"]          = haskey(f, "$pe/response/b_n")        ? read(f, "$pe/response/b_n")        : Matrix{ComplexF64}(undef, 0, 0)
-        julia["Jbgradpsi"]    = haskey(f, "$pe/response/Jbgradpsi")  ? read(f, "$pe/response/Jbgradpsi")  : Matrix{ComplexF64}(undef, 0, 0)
+        julia["Jbgradpsi"]    = haskey(f, "$pe/response/psi_area")    ? read(f, "$pe/response/psi_area")    : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_psi"]       = haskey(f, "$pe/response/xi_psi")     ? read(f, "$pe/response/xi_psi")     : Matrix{ComplexF64}(undef, 0, 0)
         julia["xi_n"]         = haskey(f, "$pe/response/xi_n")       ? read(f, "$pe/response/xi_n")       : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_psi1"] = haskey(f, "$pe/response/clebsch_psi1")  ? read(f, "$pe/response/clebsch_psi1")  : Matrix{ComplexF64}(undef, 0, 0)
+        julia["clebsch_alpha"]= haskey(f, "$pe/response/clebsch_alpha") ? read(f, "$pe/response/clebsch_alpha") : Matrix{ComplexF64}(undef, 0, 0)
         julia["psi_grid"]     = haskey(f, "integration/psi")    ? read(f, "integration/psi")    : Float64[]
+
+        # R,Z,φ: loaded via modes_to_theta helper below (not raw modes)
+        julia["h5_path"] = h5_path  # stash for modes_to_theta
         # mn_index[:, 1] = m values, mn_index[:, 2] = n values for each mode index
         julia["m_modes"]      = haskey(f, "info/mn_index") ? Int.(read(f, "info/mn_index")[:, 1]) : Int[]
 
@@ -1064,14 +1097,128 @@ function generate_plots(fort, julia, bench_dir, nn)
         push!(xin_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
     end
 
-    layout = @layout [a b c d e; f g h i j; k l m n; o p q r; s t u v; w x y z]
-    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, jbgp_panels..., bn_panels..., xigp_panels..., xin_panels...;
-        layout=layout, size=(2600, 2900),
+    # Row 7: Clebsch ∂ξ^ψ/∂ψ (regularized) profiles
+    xigp1_panels = []
+    j_xigp1 = julia["clebsch_psi1"]
+    f_xigp1 = fort["xigradpsi_dpsi"]
+    for m_res in res_m_vals[1:min(end, 4)]
+        f_midx = findfirst(==(m_res), f_m_out)
+        j_midx = findfirst(==(m_res), j_mmodes)
+        fp = (!isnothing(f_midx) && !isempty(f_xigp1)) ? f_xigp1[:, f_midx] : ComplexF64[]
+        jp = (!isnothing(j_midx) && !isempty(j_xigp1)) ? j_xigp1[:, j_midx] : ComplexF64[]
+        push!(xigp1_panels, _profile_panel(
+            "|∂ξ^ψ/∂ψ| (norm.)", "xigradpsi_dpsi  m=$m_res (n=$nn)",
+            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+    end
+    while length(xigp1_panels) < 4
+        push!(xigp1_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
+    end
+
+    # Row 8: Clebsch ξ^α (regularized) profiles
+    xiga_panels = []
+    j_xiga = julia["clebsch_alpha"]
+    f_xiga = fort["xigradalpha"]
+    for m_res in res_m_vals[1:min(end, 4)]
+        f_midx = findfirst(==(m_res), f_m_out)
+        j_midx = findfirst(==(m_res), j_mmodes)
+        fp = (!isnothing(f_midx) && !isempty(f_xiga)) ? f_xiga[:, f_midx] : ComplexF64[]
+        jp = (!isnothing(j_midx) && !isempty(j_xiga)) ? j_xiga[:, j_midx] : ComplexF64[]
+        push!(xiga_panels, _profile_panel(
+            "|ξ^α| (norm.)", "xigradalpha  m=$m_res (n=$nn)",
+            isempty(fp) ? Float64[] : f_psi_prof, fp, "Fortran",
+            isempty(jp) ? Float64[] : j_psi_grid, jp, "Julia"))
+    end
+    while length(xiga_panels) < 4
+        push!(xiga_panels, plot(; title="(no data)", legend=false, axis=false, border=:none))
+    end
+
+    # Pad all profile rows to 5 panels for uniform grid layout
+    _empty_panel() = plot(; title="", legend=false, axis=false, grid=false, border=:none)
+    for panels in [jbgp_panels, bn_panels, xigp_panels, xin_panels, xigp1_panels, xiga_panels]
+        while length(panels) < 5
+            push!(panels, _empty_panel())
+        end
+    end
+
+    p = plot(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10,
+        jbgp_panels..., bn_panels..., xigp_panels..., xin_panels...,
+        xigp1_panels..., xiga_panels...;
+        layout=(8, 5), size=(2600, 3600),
         left_margin=20Plots.mm, right_margin=5Plots.mm, bottom_margin=8Plots.mm, top_margin=5Plots.mm)
     outfile = joinpath(bench_dir, "comparison_plots.png")
     savefig(p, outfile)
     println("Plots saved to: ", abspath(outfile))
+
+    # ─── R,Z,φ profile comparison figure ──────────────────────────────────────
+    # Compare θ=0 radial profiles (real & imag) in machine coordinates.
+    # Julia modes are converted to machine theta-space via modes_to_theta with
+    # keep_sfl_phi=false (applies exp(i*n*ν) toroidal phase, matching Fortran
+    # gpout_xbrzphifun). Fortran data is already in machine theta-space.
+    h5_path = julia["h5_path"]
+    rzphi_panels = []
+    for (comp_label, f_key, h5_var) in [
+            ("ξ_R",  "xi_r_fun",   "perturbed_equilibrium/response/xi_R"),
+            ("ξ_Z",  "xi_z_fun",   "perturbed_equilibrium/response/xi_Z"),
+            ("ξ_φ",  "xi_phi_fun", "perturbed_equilibrium/response/xi_phi"),
+            ("b_R",  "b_r_fun",    "perturbed_equilibrium/response/b_R"),
+            ("b_Z",  "b_z_fun",    "perturbed_equilibrium/response/b_Z"),
+            ("b_φ",  "b_phi_fun",  "perturbed_equilibrium/response/b_phi")]
+        f_fun = get(fort, f_key, Matrix{ComplexF64}(undef, 0, 0))
+
+        # Convert Julia SFL modes → machine theta-space
+        j_fun = Matrix{ComplexF64}(undef, 0, 0)
+        if isfile(h5_path)
+            try
+                j_theta_data, _, _ = PerturbedEquilibriumAnalysis.modes_to_theta(
+                    h5_path, h5_var; keep_sfl_phi=false)
+                j_fun = j_theta_data[:, :, 1]  # first (only) n
+            catch e
+                @warn "modes_to_theta failed for $h5_var" exception=e
+            end
+        end
+
+        # Extract θ=0 (first column) real and imaginary profiles vs ψ
+        f_re = isempty(f_fun) ? Float64[] : real.(f_fun[:, 1])
+        f_im = isempty(f_fun) ? Float64[] : imag.(f_fun[:, 1])
+        j_re = isempty(j_fun) ? Float64[] : real.(j_fun[:, 1])
+        j_im = isempty(j_fun) ? Float64[] : imag.(j_fun[:, 1])
+
+        # Y-axis limits from 2-98 percentiles to avoid spikes
+        function _percentile_ylims(arrs...)
+            all_vals = vcat([v for v in arrs if !isempty(v)]...)
+            isempty(all_vals) && return (-1, 1)
+            lo = quantile(all_vals, 0.02)
+            hi = quantile(all_vals, 0.98)
+            margin = 0.1 * max(hi - lo, eps())
+            return (lo - margin, hi + margin)
+        end
+
+        # Real part panel
+        yl_re = _percentile_ylims(f_re, j_re)
+        p_re = plot(; xlabel="ψ_n", ylabel="Re($comp_label)", title="Re($comp_label) θ=0 (n=$nn)",
+                      legend=:topright, ylims=yl_re)
+        !isempty(f_re) && plot!(p_re, f_psi_prof, f_re; lw=2.5, color=:steelblue, label="Fortran")
+        !isempty(j_re) && plot!(p_re, j_psi_grid, j_re; lw=1.0, color=:orange, label="Julia")
+        push!(rzphi_panels, p_re)
+
+        # Imaginary part panel
+        yl_im = _percentile_ylims(f_im, j_im)
+        p_im = plot(; xlabel="ψ_n", ylabel="Im($comp_label)", title="Im($comp_label) θ=0 (n=$nn)",
+                      legend=:topright, ylims=yl_im)
+        !isempty(f_im) && plot!(p_im, f_psi_prof, f_im; lw=2.5, color=:steelblue, label="Fortran")
+        !isempty(j_im) && plot!(p_im, j_psi_grid, j_im; lw=1.0, color=:orange, label="Julia")
+        push!(rzphi_panels, p_im)
+    end
+
+    p_rzphi = plot(rzphi_panels...;
+        layout=(6, 2), size=(1200, 2700),
+        left_margin=20Plots.mm, right_margin=5Plots.mm, bottom_margin=8Plots.mm, top_margin=5Plots.mm)
+    outfile_rzphi = joinpath(bench_dir, "rzphi_comparison.png")
+    savefig(p_rzphi, outfile_rzphi)
+    println("R,Z,φ profile plots saved to: ", abspath(outfile_rzphi))
 end
+
 
 # ─── Matrix heatmap figure ───────────────────────────────────────────────────
 

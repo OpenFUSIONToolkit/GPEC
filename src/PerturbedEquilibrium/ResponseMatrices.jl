@@ -433,12 +433,8 @@ function calc_surface_inductance(
         # Surface current: kax = (chi + che_raw) / μ₀  [che sign absorbed from Fortran's negation]
         kax_theta = (chi_theta .+ che_theta) ./ μ₀
 
-        # Transform to mode space, matching Fortran iscdftf normalization:
-        # iscdftf: funcm(i) = (1/fs) * Σⱼ func(j) * exp(-2πi*m*j/fs)
-        # The reversal in Fortran + exp(-im) convention = exp(+im) without reversal
-        # so: kax_mn_fortran = (1/mtheta) * Σᵢ kax_fun[i] * exp(+2πim*i/N)
-        # Julia FourierTransform has no 1/N factor, so divide here to match.
-        kax_modes = ft(kax_theta) ./ mtheta
+        # Transform to mode space (forward DFT has 1/N normalization, matching Fortran iscdftf)
+        kax_modes = ft(kax_theta)
 
         # Store in kax_matrix for this eigenmode
         kax_matrix[mode_start:mode_end, j] = kax_modes
