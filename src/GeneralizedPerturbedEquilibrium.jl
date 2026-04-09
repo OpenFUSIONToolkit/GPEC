@@ -234,7 +234,11 @@ function main(args::Vector{String}=String[])
             if ctrl.verbose
                 @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
             end
-            make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
+            # Inject the KineticForces callback so the "calculated" source can
+            # invoke compute_calculated_kinetic_matrices without ForceFreeStates
+            # importing KineticForces (which would invert the load order).
+            make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+                calculated_source = KineticForces.compute_calculated_kinetic_matrices)
         end
 
         # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during

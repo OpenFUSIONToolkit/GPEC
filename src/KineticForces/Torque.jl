@@ -56,9 +56,21 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         s = 1
     end
 
-    # Get perturbations (CubicSeriesInterpolant callable syntax)
-    dbob_m_f = intr.dbob_m(psi)
-    divx_m_f = intr.divx_m(psi)
+    # Get perturbations (CubicSeriesInterpolant callable syntax).
+    # Matrix-only calls (op_wmats provided for an "mm" method) build a linear
+    # operator from the smats/tmats/xmats/ymats/zmats geometric coefficients;
+    # dbob_m / divx_m only feed the scalar dJdJ normalisation in calculate_gar
+    # which is irrelevant when rex_override / imx_override are set. Gate the
+    # dereference so a caller can pass `dbob_m === nothing` (the default) and
+    # still drive the matrix path.
+    is_matrix_only = occursin("mm", method) && !isnothing(op_wmats)
+    if is_matrix_only && isnothing(intr.dbob_m)
+        dbob_m_f = zeros(ComplexF64, intr.mpert)
+        divx_m_f = zeros(ComplexF64, intr.mpert)
+    else
+        dbob_m_f = intr.dbob_m(psi)
+        divx_m_f = intr.divx_m(psi)
+    end
 
     # Sample poloidal quantities on theta grid
     mthsurf_local = intr.mthsurf

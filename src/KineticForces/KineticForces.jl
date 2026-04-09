@@ -16,8 +16,9 @@ to MHD stability through torque and energy deposition calculations.
 ### High-level Computation
 - `Compute.jl`: Orchestration routines
   - compute_torque_all_methods!()
-  - compute_matrix_calculation!()
-  - compute_kinetic_contribution() ← Called by ForceFreeStates when kinetic_flag=true
+- `CalculatedKineticMatrices.jl`: compute_calculated_kinetic_matrices()
+  ← Callback registered with ForceFreeStates.make_kinetic_matrix when
+  kinetic_source="calculated"
 
 ### Supporting Functions
 - `KineticForcesStructs.jl`: Data structures (KineticForcesControl, KineticForcesInternal)
@@ -49,6 +50,7 @@ include("PitchIntegration.jl")
 
 # High-level computation functions
 include("Compute.jl")
+include("CalculatedKineticMatrices.jl")
 
 # Global constants
 # ============================================================================

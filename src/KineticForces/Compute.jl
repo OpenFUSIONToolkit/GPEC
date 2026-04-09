@@ -289,39 +289,3 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
 end
 
 
-"""
-    compute_kinetic_contribution(ctrl::KineticForcesControl, equil,
-                                 intr::KineticForcesInternal, ffit)::Dict
-
-Compute kinetic contributions for ForceFreeStates when kinetic_flag=true.
-Called from ForceFreeStates for kinetic Euler-Lagrange calculations.
-
-Contracts the kinetic matrices (A,B,C,D,E,H) with Clebsch displacement
-vectors following Fortran torque.F90 lines 898-914.
-
-# Arguments
-- `ctrl::KineticForcesControl`: Control parameters
-- `equil`: Equilibrium structure from ForceFreeStates
-- `intr::KineticForcesInternal`: Internal state with profile interpolants
-- `ffit`: Fourier-fitted variables from ForceFreeStates
-
-# Returns
-- `Dict`: Kinetic matrix contributions (:fmat_kin, :gmat_kin, :kmat_kin)
-"""
-function compute_kinetic_contribution(ctrl::KineticForcesControl, equil,
-                                      intr::KineticForcesInternal, ffit)
-
-    @warn "compute_kinetic_contribution is a stub — returning zero matrices. " *
-          "Kinetic matrix wiring into ForceFreeStates make_matrix() is not yet implemented." maxlog=1
-
-    kinetic_results = Dict(
-        :fmat_kin => zeros(ComplexF64, size(ffit.fmat)),
-        :gmat_kin => zeros(ComplexF64, size(ffit.gmat)),
-        :kmat_kin => zeros(ComplexF64, size(ffit.kmat))
-    )
-
-    # TODO: Run matrix calculation to get op_wmats, then contract with
-    # Clebsch displacements ξ_ψ, ξ_+, ξ_- from xs_m interpolants.
-    # Requires: build_kinetic_metric_matrices! in Fourfit.jl
-    return kinetic_results
-end
