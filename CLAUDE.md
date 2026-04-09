@@ -107,7 +107,7 @@ The KineticForces module (formerly PENTRC) implements neoclassical toroidal visc
 - **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
   - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
   - Published: PhD Thesis, Princeton University (2015)
-  - Describes: Complete NTV theory and implementation
+  - Describes: Complete NTV theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
 
 ### Additional References
 
@@ -200,6 +200,104 @@ julia benchmarks/benchmark_git_branches.jl \
 - Tool requires HDF5.jl for reading euler.h5 output
 - Each benchmark run takes several minutes per branch (includes compilation + warm runs)
 
+### Regression Harness
+
+***This should be used at least once every single pull request before merging into develop. This test harness is what tracks values as they evolve across changes to the code, and must be both kept up to date and used consistently. Do not forget this and make sure to suggest any new regression cases or updates to existing ones as needed. Remind the user of its existence and report back the output regression report you get when modifying the code significantly. This is extremely important, do not forget this tidbit.***
+
+Set up an alias for convenience (optional):
+```bash
+alias regress='julia --project=regression-harness regression-harness/regress.jl'
+```
+
+**List available cases:**
+```bash
+regress --list-cases
+```
+```
+Available regression cases:
+----------------------------------------------------------------
+  diiid_n1                 DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
+                           dir: examples/DIIID-like_ideal_example  (24 quantities)
+  solovev_multi_n          Solovev analytical equilibrium, multi-n, ideal stability
+                           dir: examples/Solovev_ideal_example_multi_n  (12 quantities)
+  solovev_n1               Solovev analytical equilibrium, n=1, ideal stability
+                           dir: examples/Solovev_ideal_example  (18 quantities)
+```
+
+**Compare two branches/commits:**
+```bash
+regress --cases diiid_n1 --refs develop,feature/kinetic-damping
+```
+```
+================================================================
+Case: diiid_n1 — DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium
+================================================================
+[ Info: Cached: diiid_n1 @ 0a905a7d (2026-04-06T23:41:50+09:00)
+[ Info: Cached: diiid_n1 @ 44b2494f (2026-04-08T18:30:46+09:00)
+
+Regression Report: diiid_n1
+==================================================================================================================
+Ref 1: develop  @ 0a905a7d (2026-04-06)
+Ref 2: feature/kinetic-damping  @ 44b2494f (2026-04-08)
+------------------------------------------------------------------------------------------------------------------
+Quantity                     develop                  feature/kinetic-damping  Diff                  Status
+------------------------------------------------------------------------------------------------------------------
+beta_n                       -1.376214e+00            -1.376214e+00            0.0e+00               OK
+beta_t                       1.322850e-02             1.322850e-02             0.0e+00               OK
+Chirikov parameter           [4 elements]             [4 elements]             0.0e+00               OK
+delta prime                  [4 elements]             [4 elements]             0.0e+00               OK
+plasma energy Re(ep[1])      -8.809610e-01            -8.809610e-01            0.0e+00               OK
+total energy Im(et[1])       6.175834e-05             6.175834e-05             0.0e+00               OK
+total energy Re(et[1])       1.199597e+00             1.199597e+00             0.0e+00               OK
+vacuum energy Re(ev[1])      2.080558e+00             2.080558e+00             0.0e+00               OK
+island half-widths           [4 elements]             [4 elements]             0.0e+00               OK
+mpert                        34                       34                       0.0e+00               OK
+# singular surfaces          4                        4                        0.0e+00               OK
+npert                        1                        1                        0.0e+00               OK
+ODE steps (saved)            740                      740                      0.0e+00               OK
+ODE steps (total)            1348                     1348                     0.0e+00               OK
+PE plasma energy             0.000000e+00             0.000000e+00             0.0e+00               OK
+PE total energy              0.000000e+00             0.000000e+00             0.0e+00               OK
+pressure profile (checksum)  657ad2329d7b...          657ad2329d7b...          identical             OK
+q0                           1.209710e+00             1.209710e+00             0.0e+00               OK
+q95                          4.505007e+00             4.505007e+00             0.0e+00               OK
+q profile (checksum)         75912afcc351...          75912afcc351...          identical             OK
+||resonant flux||            4.523707e+02             4.523707e+02             0.0e+00               OK
+Runtime (s)                  50.9s                    52.0s                                          --
+singular psi locations       [4 elements]             [4 elements]             0.0e+00               OK
+singular q values            [4 elements]             [4 elements]             0.0e+00               OK
+==================================================================================================================
+Summary: 23 unchanged, 3 missing/N/A
+```
+
+**Compare your uncommitted working tree against develop:**
+```bash
+regress --cases solovev_n1 --refs develop,local
+```
+
+**Track a specific quantity across cached commits:**
+```bash
+regress --show et_real --case solovev_n1
+```
+```
+History: et_real — solovev_n1
+================================================================================
+Commit      Date          Value                 Δ from prev           Status
+--------------------------------------------------------------------------------
+edff6e86    2026-04-02    -4.624928e-01         --                    --
+0a905a7d    2026-04-06    -4.624928e-01         0.0e+00               OK
+================================================================================
+```
+
+**Scan across a range of commits (git-bisect style):**
+```bash
+regress --cases solovev_n1 --ref-range develop~10..develop
+```
+
+**Other useful flags:**
+- `--force` — re-run even if cached
+- `--verbose` — print GPEC subprocess output
+- `--no-instantiate` — skip `Pkg.instantiate()` (faster if deps are already resolved)
 
 ## Architecture
 
@@ -488,6 +586,25 @@ This format is used for compiling release notes, so tags should be human-readabl
 ### Current Development Priorities
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `gpec.toml` file
+
+### Code Formatting
+
+Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.
+
+The project's `.JuliaFormatter.toml` settings:
+- **Line width**: 180 characters max (`margin = 180`)
+- **`for` loops**: always use `in` (not `=` or `∈`)
+- **Keyword arguments**: no spaces around `=` in kwargs (`f(x; a=1)` not `f(x; a = 1)`)
+- **Keyword separator**: use semicolons to separate kwargs (`f(x; a=1, b=2)`)
+- **No trailing commas** in argument lists
+- **Docstrings**: formatted according to JuliaFormatter rules
+- **No extra blank line removal**: `remove_extra_newlines = false`
+- **Join short lines**: `join_lines_based_on_source = true` — don't arbitrarily split lines that fit within the margin
+
+Additional file hygiene (enforced by pre-commit hooks):
+- No trailing whitespace on any line
+- Files must end with exactly one newline
+- LF line endings only (no CRLF)
 
 ### Performance
 - Pure Julia implementations are available for all major components and offer comparable or better performance than Fortran

@@ -12,11 +12,12 @@
 Compute plasma response to external forcing using ForceFreeStates eigenmode solutions.
 
 Implements resp_index=0 calculation from gpresp.f:
-1. Build flux matrix from eigenmodes
-2. Calculate plasma inductance (energy-based)
-3. Calculate surface inductance from Green's function
-4. Compute permeability matrix
-5. Apply forcing to get response
+
+ 1. Build flux matrix from eigenmodes
+ 2. Calculate plasma inductance (energy-based)
+ 3. Calculate surface inductance from Green's function
+ 4. Compute permeability matrix
+ 5. Apply forcing to get response
 """
 function compute_plasma_response!(
     state::PerturbedEquilibriumState,

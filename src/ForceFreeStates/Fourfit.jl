@@ -53,7 +53,7 @@ The metric coefficients stored in `metric.fs` include:
 
 ### TODOs
 
-Add kinetic metric tensor components for kin_flag = true
+Add kinetic metric tensor components for kinetic mode
 Remove mband if we decide to fully deprecate banded matrices
 """
 function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
@@ -345,7 +345,7 @@ and does not affect the actual matrix sizes, they are all dense.
 
 ### TODOs
 
-Add kinetic metric tensor components for kin_flag = true
+Add kinetic metric tensor components for kinetic mode
 Set powers if necessary
 """
 function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)
@@ -363,6 +363,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     emats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     hmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
+    fmats_prim_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)  # primitive F before Schur complement (for kinetic)
     gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     g11 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
@@ -484,6 +485,9 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         # TODO: Fortran threw an error if factorization fails for A/F due to small matrix bandwidth,
         # Add this check back in if we implement banded matrices
 
+        # Save primitive F for kinetic matrix construction (before Schur complement)
+        @views fmats_prim_flat[ipsi, :] .= fmats_lower_flatview
+
         # Schur complement reduction [Glasser Phys. Plasmas 2016 112506 eq. A5-A7]
         amat_fact = cholesky(Hermitian(amat, :L))
         ldiv!(a_inv_dmat_temp, amat_fact, dmat)         # A⁻¹D
@@ -512,6 +516,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     ffit.emats = cubic_interp(metric.xs, Series(emats_flat); ffit.itp_opts...)
     ffit.hmats = cubic_interp(metric.xs, Series(hmats_flat); ffit.itp_opts...)
     ffit.fmats_lower = cubic_interp(metric.xs, Series(fmats_lower_flat); ffit.itp_opts...)
+    ffit.fmats_prim = cubic_interp(metric.xs, Series(fmats_prim_flat); ffit.itp_opts...)
     ffit.gmats = cubic_interp(metric.xs, Series(gmats_flat); ffit.itp_opts...)
     ffit.kmats = cubic_interp(metric.xs, Series(kmats_flat); ffit.itp_opts...)
 
