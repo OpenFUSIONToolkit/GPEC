@@ -57,7 +57,8 @@ delta_mband = 0               # Integration keeps only this wide a band...
 mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
-kin_flag = false              # Kinetic EL equation (default: false)
+kinetic_source = "fixed"      # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
+kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized

@@ -5,7 +5,7 @@ Scans the fixed kinetic matrix scaling parameter σ and plots:
   1. et[1] (least stable eigenvalue) vs σ — shows kinetic damping effect
   2. Eigenmode |ξ_ψ(ψ)| profiles for m=0..4 — shows kinetic modification near rational surfaces
 
-Uses the continuous one-chunk integration path (kin_flag=true).
+Uses the continuous one-chunk integration path (kinetic_factor > 0 enables kinetic mode).
 
 Usage:
   julia --project=. benchmarks/kinetic_sigma_scan.jl [example_path]
@@ -27,9 +27,8 @@ or nothing on failure. Uses a temporary directory to avoid modifying the example
 function run_kinetic(config_path::String, sigma::Float64)
     example_dir = dirname(config_path)
     raw = TOML.parsefile(config_path)
-    raw["ForceFreeStates"]["kin_flag"] = true
-    raw["ForceFreeStates"]["kin_source"] = "fixed"
-    raw["ForceFreeStates"]["kinetic_matrix_factor"] = sigma
+    raw["ForceFreeStates"]["kinetic_source"] = "fixed"
+    raw["ForceFreeStates"]["kinetic_factor"] = sigma
     raw["ForceFreeStates"]["save_interval"] = 1
     raw["ForceFreeStates"]["verbose"] = false
 
@@ -57,10 +56,11 @@ function run_kinetic(config_path::String, sigma::Float64)
     end
 end
 
-# Also run ideal reference (kin_flag=false)
+# Also run ideal reference (kinetic_factor=0)
 function run_ideal(config_path::String)
     example_dir = dirname(config_path)
     raw = TOML.parsefile(config_path)
+    raw["ForceFreeStates"]["kinetic_factor"] = 0.0
     raw["ForceFreeStates"]["save_interval"] = 1
     raw["ForceFreeStates"]["verbose"] = false
 

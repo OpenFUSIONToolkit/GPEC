@@ -108,9 +108,9 @@ end
 Construct kinetic energy (W) and torque (T) matrices, store as splines in `ffit`,
 and pre-compute the FKG derived matrices used by `sing_der!`.
 
-Dispatches on `ctrl.kin_source`:
+Dispatches on `ctrl.kinetic_source`:
 
-  - `"fixed"`: X-shaped test matrices scaled by `ctrl.kinetic_matrix_factor` relative to
+  - `"fixed"`: X-shaped test matrices scaled by `ctrl.kinetic_factor` relative to
     ideal matrix Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck, Ek non-Hermitian)
   - `"calculated"`: Compute via PENTRC (not yet implemented)
 """
@@ -125,12 +125,12 @@ function make_kinetic_matrix(
     mpsi = length(xs)
 
     # Get raw kinetic matrices (scaling is baked into each source)
-    if ctrl.kin_source == "fixed"
-        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_matrix_factor, intr.mlow, ffit, xs)
-    elseif ctrl.kin_source == "calculated"
-        error("kin_source=\"calculated\" not yet implemented — requires PENTRC module")
+    if ctrl.kinetic_source == "fixed"
+        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_factor, intr.mlow, ffit, xs)
+    elseif ctrl.kinetic_source == "calculated"
+        error("kinetic_source=\"calculated\" not yet implemented — requires PENTRC module")
     else
-        error("Unknown kin_source: $(ctrl.kin_source). Must be \"fixed\" or \"calculated\"")
+        error("Unknown kinetic_source: $(ctrl.kinetic_source). Must be \"fixed\" or \"calculated\"")
     end
 
     # Build splines for each of the 6 components

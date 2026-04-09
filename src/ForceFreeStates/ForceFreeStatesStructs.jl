@@ -179,9 +179,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kin_flag::Bool` - Enable kinetic effects. When true, integrates continuously through rational surfaces (no crossing logic).
-  - `kin_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_matrix_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
-  - `kinetic_matrix_factor::Float64` - Dimensionless scaling factor for kinetic matrices. When kin_source="fixed", scales X-shaped test matrices relative to ideal matrix norms. When kin_source="calculated", applied as uniform post-hoc multiplier to W and T components.
+  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
+  - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
@@ -223,9 +222,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     dmlim::Float64 = 0.2
     sing_order::Int = 2
     qhigh::Float64 = 1e3
-    kin_flag::Bool = false
-    kin_source::String = "fixed"
-    kinetic_matrix_factor::Float64 = 0.0
+    kinetic_source::String = "fixed"
+    kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 1.0

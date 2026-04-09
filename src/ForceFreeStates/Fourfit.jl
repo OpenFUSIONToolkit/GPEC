@@ -53,7 +53,7 @@ The metric coefficients stored in `metric.fs` include:
 
 ### TODOs
 
-Add kinetic metric tensor components for kin_flag = true
+Add kinetic metric tensor components for kinetic mode
 Remove mband if we decide to fully deprecate banded matrices
 """
 function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
@@ -156,7 +156,7 @@ and does not affect the actual matrix sizes, they are all dense.
 
 ### TODOs
 
-Add kinetic metric tensor components for kin_flag = true
+Add kinetic metric tensor components for kinetic mode
 Set powers if necessary
 """
 function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, metric::MetricData)

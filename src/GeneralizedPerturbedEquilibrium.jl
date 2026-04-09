@@ -85,9 +85,27 @@ function main(args::Vector{String}=String[])
         if !isempty(deprecated_keys)
             @warn "Deprecated ForceFreeStates TOML keys ignored: $(join(deprecated_keys, ", "))"
         end
-        if get(ffs, "kin_source", "") == "dummy"
-            ffs["kin_source"] = "fixed"
-            @warn "kin_source=\"dummy\" renamed to \"fixed\""
+        # Rename migrations for keys that were renamed (PR #210)
+        renamed_keys = Pair{String,String}[]
+        for (old_key, new_key) in ("kin_source" => "kinetic_source", "kinetic_matrix_factor" => "kinetic_factor")
+            if haskey(ffs, old_key) && !haskey(ffs, new_key)
+                ffs[new_key] = pop!(ffs, old_key)
+                push!(renamed_keys, old_key => new_key)
+            end
+        end
+        if !isempty(renamed_keys)
+            @warn "Renamed ForceFreeStates TOML keys: $(join(["$o → $n" for (o, n) in renamed_keys], ", "))"
+        end
+        # kinetic_flag (and its legacy alias kin_flag) merged into kinetic_factor: any positive factor enables kinetic mode
+        for old_flag_key in ("kin_flag", "kinetic_flag")
+            if haskey(ffs, old_flag_key)
+                delete!(ffs, old_flag_key)
+                @warn "$old_flag_key is deprecated and ignored: kinetic mode is now controlled by kinetic_factor (> 0 enables)"
+            end
+        end
+        if get(ffs, "kinetic_source", "") == "dummy"
+            ffs["kinetic_source"] = "fixed"
+            @warn "kinetic_source=\"dummy\" renamed to \"fixed\""
         end
     end
 
@@ -245,9 +263,9 @@ function main(args::Vector{String}=String[])
         # Compute matrices and populate FourFitVars struct
         ffit = make_matrix(equil, intr, metric)
 
-        if ctrl.kin_flag
+        if ctrl.kinetic_factor > 0
             if ctrl.verbose
-                @info "Computing kinetic matrices (source: $(ctrl.kin_source))"
+                @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
             end
             make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
         end
@@ -491,9 +509,9 @@ function write_outputs_to_HDF5(
         out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
 
         # Write kinetic parameters when kinetic mode is enabled
-        if ctrl.kin_flag
-            out_h5["kinetic/kin_source"] = ctrl.kin_source
-            out_h5["kinetic/kinetic_matrix_factor"] = ctrl.kinetic_matrix_factor
+        if ctrl.kinetic_factor > 0
+            out_h5["kinetic/kinetic_source"] = ctrl.kinetic_source
+            out_h5["kinetic/kinetic_factor"] = ctrl.kinetic_factor
         end
 
         # Write fundamental matrices on the ψ grid when mat_flag is enabled
@@ -514,11 +532,11 @@ function write_outputs_to_HDF5(
 
             out_h5["matrices/psi"] = xs
             # Ideal primitive matrices (A, B, C, D, E, H)
-            # When kin_flag=true, amats/bmats/cmats hold kinetic-modified values,
+            # When kinetic mode is on, amats/bmats/cmats hold kinetic-modified values,
             # so we write those as the "effective" matrices and save raw kinetic
             # components separately below.
             # Ideal primitive matrices (A, B, C, D, E, H)
-            if ctrl.kin_flag
+            if ctrl.kinetic_factor > 0
                 # Use preserved ideal copies (before kinetic overwrite)
                 out_h5["matrices/ideal/A"] = _eval_mat_spline(ffit.amats_ideal)
                 out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats_ideal)
@@ -538,7 +556,7 @@ function write_outputs_to_HDF5(
             out_h5["matrices/ideal/G"] = _eval_mat_spline(ffit.gmats)
 
             # Kinetic-modified matrices
-            if ctrl.kin_flag
+            if ctrl.kinetic_factor > 0
                 out_h5["matrices/kinetic/A"] = _eval_mat_spline(ffit.amats)
                 out_h5["matrices/kinetic/B"] = _eval_mat_spline(ffit.bmats)
                 out_h5["matrices/kinetic/C"] = _eval_mat_spline(ffit.cmats)

@@ -17,7 +17,7 @@ using HDF5
     end
 
     ex3 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_example")
-    @info "Running Solovev kinetic example (kin_flag=true, kin_source=fixed, σ=1e-9)"
+    @info "Running Solovev kinetic example (kinetic_source=fixed, kinetic_factor=1e-9)"
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex3])
         h5open(joinpath(ex3, "gpec.h5"), "r") do h5
@@ -31,7 +31,7 @@ using HDF5
     end
 
     ex4 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_multi_n")
-    @info "Running Solovev kinetic multi-n example (kin_flag=true, nn_low=1, nn_high=2, σ=1e-9)"
+    @info "Running Solovev kinetic multi-n example (kinetic_factor=1e-9, nn_low=1, nn_high=2)"
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex4])
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5

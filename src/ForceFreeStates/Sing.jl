@@ -756,7 +756,7 @@ more simplistic code with similar performance.
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
-    if ctrl.kin_flag
+    if ctrl.kinetic_factor > 0
         # ---- Kinetic path with pre-computed FKG matrices ----
         # Load pre-computed kinetic matrices from splines
         # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
@@ -786,6 +786,7 @@ more simplistic code with similar performance.
         ffit.gaats(vec(gaat_kin), psieval; hint=ffit._hint)
 
         # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
+        # Direct LAPACK to avoid the ipiv allocation that lu!/ldiv! would do in this hot loop
         _, ipiv, _ = LAPACK.getrf!(amat)
         LAPACK.getrs!('N', amat, ipiv, bmat)
         LAPACK.getrs!('N', amat, ipiv, cmat)
@@ -819,7 +820,7 @@ more simplistic code with similar performance.
         du1 .= u2
         mul!(tmp_mat, kmat, u1)
         du1 .-= tmp_mat
-        # LU factorize F (non-Hermitian, non-symmetric)
+        # LU factorize F (non-Hermitian, non-symmetric); direct LAPACK for the same hot-loop reason
         _, ipiv2, _ = LAPACK.getrf!(fmat_lower)
         LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
 
