@@ -12,7 +12,7 @@ suitable for the perturbed equilibrium pipeline.
 - `compute_coil_forcing_modes!` — top-level entry point combining all steps
 """
 
-using FastInterpolations: cubic_interp, PeriodicBC, LinearBinary
+using FastInterpolations: cubic_interp, PeriodicBC, DerivOp
 
 # Default toroidal points per period when nzeta_coil is not specified
 const NZETA_POINTS_PER_PERIOD = 32
@@ -80,17 +80,16 @@ function sample_boundary_grid(equil::Equilibrium.PlasmaEquilibrium, mtheta::Int,
 
     # Compute dR/dθ_norm and dZ/dθ_norm via periodic cubic splines on the boundary contour.
     # Use unit-norm θ_norm ∈ [0,1] as the spline x-axis (matches equilibrium convention).
-    # LinearBinary search is optimal: evaluation points are the same monotone grid.
-    spline_R = cubic_interp(theta_grid, R_arr; bc=PeriodicBC(; endpoint=:exclusive, period=1.0), search=LinearBinary())
-    spline_Z = cubic_interp(theta_grid, Z_arr; bc=PeriodicBC(; endpoint=:exclusive, period=1.0), search=LinearBinary())
+    spline_R = cubic_interp(theta_grid, R_arr; bc=PeriodicBC(; endpoint=:exclusive, period=1.0))
+    spline_Z = cubic_interp(theta_grid, Z_arr; bc=PeriodicBC(; endpoint=:exclusive, period=1.0))
 
     dR_dθ = zeros(mtheta)
     dZ_dθ = zeros(mtheta)
     hint_R = Ref(1)
     hint_Z = Ref(1)
     for i in 1:mtheta
-        dR_dθ[i] = spline_R(theta_grid[i]; deriv=1, hint=hint_R)   # dR/dθ_norm
-        dZ_dθ[i] = spline_Z(theta_grid[i]; deriv=1, hint=hint_Z)   # dZ/dθ_norm
+        dR_dθ[i] = spline_R(theta_grid[i]; deriv=DerivOp(1), hint=hint_R)   # dR/dθ_norm
+        dZ_dθ[i] = spline_Z(theta_grid[i]; deriv=DerivOp(1), hint=hint_Z)   # dZ/dθ_norm
     end
 
     # Helicity sets the direction of the toroidal angle grid to match Fortran convention:

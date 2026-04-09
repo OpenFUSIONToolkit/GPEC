@@ -16,6 +16,7 @@ User-facing control parameters from TOML [ForcingTerms] section.
 ## Fields
 
 Forcing Data:
+
   - `forcing_data_file::String` - Path to forcing data file (n, m, complex amplitude)
   - `forcing_data_format::String` - Format: "ascii", "hdf5", or "coil"
 
@@ -144,7 +145,7 @@ function load_forcing_ascii!(
         end
     end
 
-    data = readdlm(filepath, comments=true, comment_char='#')
+    data = readdlm(filepath; comments=true, comment_char='#')
     nrows = size(data, 1)
     ncols = size(data, 2)
 
@@ -160,7 +161,7 @@ function load_forcing_ascii!(
         real_part = Float64(data[i, 3])
         imag_part = ncols >= 4 ? Float64(data[i, 4]) : 0.0
 
-        push!(forcing_modes, ForcingMode(
+        push!(forcing_modes, ForcingMode(;
             n=n,
             m=m,
             amplitude=complex(real_part, imag_part)
@@ -202,7 +203,7 @@ function load_forcing_hdf5!(
         empty!(forcing_modes)
 
         for i in eachindex(n_array)
-            push!(forcing_modes, ForcingMode(
+            push!(forcing_modes, ForcingMode(;
                 n=Int(n_array[i]),
                 m=Int(m_array[i]),
                 amplitude=complex(amp_real[i], amp_imag[i])

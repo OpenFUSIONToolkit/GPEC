@@ -276,28 +276,6 @@ function pack_complex_grouped!(packed::AbstractVector{Float64}, modes::AbstractV
 end
 
 """
-    unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
-
-Unpack real/imaginary pairs back to complex coefficients.
-
-Converts [a, b, c, d, ...] to [a+bi, c+di, ...]
-
-## Arguments
-- `packed`: Real/imaginary pairs [2*mpert]
-
-## Returns
-- Complex mode coefficients [mpert]
-"""
-function unpack_realimag_to_complex(packed::AbstractVector{Float64})::Vector{ComplexF64}
-    mpert = length(packed) ÷ 2
-    modes = zeros(ComplexF64, mpert)
-    for i in 1:mpert
-        modes[i] = packed[2*i - 1] + 1im * packed[2*i]
-    end
-    return modes
-end
-
-"""
     apply_green_function_complex(
         green::Matrix{Float64},
         mode_coeffs::Vector{ComplexF64}
@@ -460,10 +438,10 @@ function calc_surface_inductance(
                 correlation = 0.0 + 0.0im
                 for k in 1:mtheta
                     # Simple correlation of Green's function differences
-                    chi_i = grri[k, 2*i-1] + 1im * grri[k, 2*i]
-                    che_i = grre[k, 2*i-1] + 1im * grre[k, 2*i]
-                    chi_j = grri[k, 2*j-1] + 1im * grri[k, 2*j]
-                    che_j = grre[k, 2*j-1] + 1im * grre[k, 2*j]
+                    chi_i = grri[k, i] + 1im * grri[k, i + mpert]
+                    che_i = grre[k, i] + 1im * grre[k, i + mpert]
+                    chi_j = grri[k, j] + 1im * grri[k, j + mpert]
+                    che_j = grre[k, j] + 1im * grre[k, j + mpert]
                     jump_i = chi_i - che_i
                     jump_j = chi_j - che_j
                     correlation += jump_i * conj(jump_j)

@@ -52,7 +52,7 @@ eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
-save_interval = 10            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
+save_interval = 3            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
 [Wall]
 shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)

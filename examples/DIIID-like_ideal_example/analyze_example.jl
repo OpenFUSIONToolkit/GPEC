@@ -1,10 +1,16 @@
 using Pkg;
 Pkg.activate(joinpath(@__DIR__, "../.."))
-using GeneralizedPerturbedEquilibrium, Plots, PlotlyJS
+using GeneralizedPerturbedEquilibrium, Plots
 using GeneralizedPerturbedEquilibrium: Analysis
-plotlyjs()
+isinteractive() ? plotlyjs() : gr()
 
 h5path = joinpath(@__DIR__, "gpec.h5")
-p_modes = Analysis.ForceFreeStates.plot_mode_displacement(h5path; modes=1:5)
-p_eigen = Analysis.ForceFreeStates.plot_eigenmode_summary(h5path)
-p_stab = Analysis.ForceFreeStates.plot_stability_criterion(h5path)
+
+# Summary plots
+p_eq = Analysis.Equilibrium.plot_equilibrium_summary(h5path)
+p_ffs = Analysis.ForceFreeStates.plot_ffs_summary(h5path)
+p_pe  = Analysis.PerturbedEquilibrium.plot_perturbed_equilibrium_summary(h5path)
+
+display(p_eq);  Plots.savefig(p_eq,  joinpath(@__DIR__, "equilibrium_summary.png"))
+display(p_ffs); Plots.savefig(p_ffs, joinpath(@__DIR__, "ffs_summary.png"))
+display(p_pe);  Plots.savefig(p_pe,  joinpath(@__DIR__, "pe_summary.png"))

@@ -50,7 +50,7 @@ using Statistics
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium.ForcingTerms
 using GeneralizedPerturbedEquilibrium.Equilibrium
-import GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumAnalysis
+import GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumModes
 
 # ─── Argument parsing ────────────────────────────────────────────────────────
 
@@ -1170,7 +1170,7 @@ function generate_plots(fort, julia, bench_dir, nn)
         j_fun = Matrix{ComplexF64}(undef, 0, 0)
         if isfile(h5_path)
             try
-                j_theta_data, _, _ = PerturbedEquilibriumAnalysis.modes_to_theta(
+                j_theta_data, _, _ = PerturbedEquilibriumModes.modes_to_theta(
                     h5_path, h5_var; keep_sfl_phi=false)
                 j_fun = j_theta_data[:, :, 1]  # first (only) n
             catch e

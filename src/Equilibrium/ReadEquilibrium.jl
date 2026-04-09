@@ -97,7 +97,7 @@ function read_efit(config::EquilibriumConfig)
         sqrt.(psi_norm_grid)
     )
     sq_xs = collect(psi_norm_grid)
-    sq_in = cubic_interp(sq_xs, sq_fs_nodes; bc=CubicFit(), extrap=ExtendExtrap())
+    sq_in = cubic_interp(sq_xs, Series(sq_fs_nodes); extrap=ExtendExtrap())
 
     # --- Process and Normalize 2D Psi Data ---
     psio_signed = sibry - simag
@@ -116,8 +116,7 @@ function read_efit(config::EquilibriumConfig)
 
     psi_in_xs = collect(r_grid)
     psi_in_ys = collect(z_grid)
-    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; search=LinearBinary(),
-        bc=CubicFit(), extrap=ExtendExtrap())
+    psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; extrap=ExtendExtrap())
 
     # --- Bundle everything for the solver ---
     return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign)
@@ -173,13 +172,13 @@ function read_chease_binary(config::EquilibriumConfig)
         fs[:, 3] .= zq
 
         # Compute cumulative integral of pressure column for normalization using FastInterpolations
-        itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
+        itp_pressure = cubic_interp(xs, fs[:, 2])
         fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
         # Make a writable copy and normalize pressure integral
         fs_copy = copy(fs)
         fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
         # Create final spline with modified data
-        sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
+        sq_in = cubic_interp(xs, Series(fs_copy); extrap=ExtendExtrap())
 
         # --- 2D Geometry ---
         mtau = ntnova + 1  # Same with ASCII
@@ -211,10 +210,8 @@ function read_chease_binary(config::EquilibriumConfig)
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
         rz_in_ys = range(0, 1; length=mtau) |> collect
-        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; search=LinearBinary(),
-            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; search=LinearBinary(),
-            bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
         @info "Finished reading CHEASE equilibrium (Binary)"
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
@@ -354,13 +351,13 @@ function read_chease_ascii(config::EquilibriumConfig)
     fs[:, 3] .= zq # q profile
     # Fit spline with extrapolation boundary condition (bctype = 3)
     # Compute cumulative integral of pressure column for normalization using FastInterpolations
-    itp_pressure = cubic_interp(xs, fs[:, 2]; bc=CubicFit())
+    itp_pressure = cubic_interp(xs, fs[:, 2])
     fsi_pressure = FastInterpolations.cumulative_integrate(itp_pressure)
     # Make a writable copy and normalize pressure integral
     fs_copy = copy(fs)
     fs_copy[:, 2] .= (fsi_pressure .- fsi_pressure[ma]) .* psio
     # Create final spline with modified data
-    sq_in = cubic_interp(xs, fs_copy; bc=CubicFit(), extrap=ExtendExtrap())
+    sq_in = cubic_interp(xs, Series(fs_copy); extrap=ExtendExtrap())
 
     # --- Copy 2D geometry arrays ---
     mtau = ntnova + 1
@@ -375,10 +372,10 @@ function read_chease_ascii(config::EquilibriumConfig)
 
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
-    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
-    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; search=LinearBinary(),
-        bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; opts2d...)
+    rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; opts2d...)
     @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
     return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
 end
