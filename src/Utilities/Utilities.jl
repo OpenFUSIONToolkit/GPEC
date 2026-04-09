@@ -9,7 +9,7 @@ mathematical utilities.
 
 # Submodules
 
-- `FourierTransforms`: Efficient Fourier transforms with pre-computed basis functions
+  - `FourierTransforms`: Efficient Fourier transforms with pre-computed basis functions
 """
 module Utilities
 
