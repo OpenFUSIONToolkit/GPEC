@@ -57,7 +57,6 @@ const me = 9.109_1e-31        # electron mass (kg)
 const e  = 1.602_191_7e-19    # elementary charge (C)
 const eV = e                  # joules per electron-volt
 
-const π     = 3.141_592_653_589_793
 const twopi = 2π
 const μ₀    = 4e-7 * π
 const rad2deg = 180 / π

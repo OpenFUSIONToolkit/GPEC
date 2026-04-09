@@ -311,6 +311,9 @@ vectors following Fortran torque.F90 lines 898-914.
 function compute_kinetic_contribution(ctrl::KineticForcesControl, equil,
                                       intr::KineticForcesInternal, ffit)
 
+    @warn "compute_kinetic_contribution is a stub — returning zero matrices. " *
+          "Kinetic matrix wiring into ForceFreeStates make_matrix() is not yet implemented." maxlog=1
+
     kinetic_results = Dict(
         :fmat_kin => zeros(ComplexF64, size(ffit.fmat)),
         :gmat_kin => zeros(ComplexF64, size(ffit.gmat)),
@@ -319,6 +322,6 @@ function compute_kinetic_contribution(ctrl::KineticForcesControl, equil,
 
     # TODO: Run matrix calculation to get op_wmats, then contract with
     # Clebsch displacements ξ_ψ, ξ_+, ξ_- from xs_m interpolants.
-    # Requires: build_kinetic_metric_matrices! in Fourfit.jl (step 6 of plan)
+    # Requires: build_kinetic_metric_matrices! in Fourfit.jl
     return kinetic_results
 end

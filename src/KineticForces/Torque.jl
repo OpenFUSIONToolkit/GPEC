@@ -29,7 +29,9 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
               electron::Bool, method::String, equil, intr::KineticForcesInternal;
-              op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing)
+              op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
+              rex_override::Union{Nothing,Float64}=nothing,
+              imx_override::Union{Nothing,Float64}=nothing)
 
     if intr.verbose
         println("torque - tpsi function, psi = ", psi)
@@ -207,7 +209,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
                                    mpert=intr.mpert, ibmax=ibmax, theta_bmax=theta_bmax,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
-                                   ymat=ymat_f, zmat=zmat_f)
+                                   ymat=ymat_f, zmat=zmat_f,
+                                   rex_override=rex_override, imx_override=imx_override)
     else
         error("ERROR: torque - unknown method")
     end
@@ -362,6 +365,13 @@ Ports Fortran torque.F90 GAR branch (lines 529-932).
 4. Apply torque normalization (Eq. 19, Logan et al. 2013)
 5. If matrix path: assemble and normalize kinetic matrices
 
+# Keyword Arguments (rex/imx override)
+- `rex_override::Union{Nothing,Float64}`: Override real-part multiplier for resonance
+  operator. When both overrides are provided, bypasses method-string derivation.
+- `imx_override::Union{Nothing,Float64}`: Override imaginary-part multiplier.
+  Use `rex_override=1.0, imx_override=1.0` to get full complex result for
+  simultaneous kwmat/ktmat extraction via `compute_kinetic_matrices_at_psi!`.
+
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
 function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
@@ -375,7 +385,9 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        nutype::String="harmonic", f0type::String="maxwellian",
                        nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
                        energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
-                       pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9)::ComplexF64
+                       pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9,
+                       rex_override::Union{Nothing,Float64}=nothing,
+                       imx_override::Union{Nothing,Float64}=nothing)::ComplexF64
 
     # 1. Compute bounce-averaged quantities
     bounce = compute_bounce_data(
@@ -435,15 +447,18 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=NaturalBC())
 
     # 3. Set rex/imx multipliers (Fortran lines 839-847)
-    rex = 1.0
-    imx = 1.0
-    wtwnorm = 1.0
     method_suffix = length(method) >= 4 ? method[2:4] : ""
-    if method_suffix in ["wmm", "kmm"]
-        rex = 0.0  # energy only
-    elseif method_suffix in ["tmm", "rmm"]
-        imx = 0.0  # torque only
-        wtwnorm = -1.0
+    if !isnothing(rex_override) && !isnothing(imx_override)
+        rex = rex_override
+        imx = imx_override
+    else
+        rex = 1.0
+        imx = 1.0
+        if method_suffix in ["wmm", "kmm"]
+            rex = 0.0  # energy only
+        elseif method_suffix in ["tmm", "rmm"]
+            imx = 0.0  # torque only
+        end
     end
 
     # 4. Pitch angle ODE integration
@@ -498,6 +513,61 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     end
 
     return tpsi_val
+end
+
+
+"""
+    compute_kinetic_matrices_at_psi!(kwmat, ktmat, psi, n, l, zi, mi,
+        wdfac, divxfac, electron, equil, intr)
+
+Compute both kinetic energy (`kwmat`) and torque (`ktmat`) matrices at a
+single flux surface in one pass. Replaces the Fortran pattern of calling
+`tpsi` twice (once with "fwmm", once with "ftmm").
+
+The bounce averaging, pitch-angle ODE, and energy-space ODE are identical
+for both paths — only the final resonance operator decomposition differs
+(Fortran torque.F90 lines 839-847, Julia `PitchIntegration.jl:243`):
+  - wmm: keeps imaginary part (`rex=0, imx=1`) → kinetic energy
+  - tmm: keeps real part (`rex=1, imx=0`) → torque
+
+By running with `rex=1, imx=1` we get the full complex result and split:
+  - `kwmat[i,j,k] = complex(0, imag(full[i,j,k]))` (energy)
+  - `ktmat[i,j,k] = complex(real(full[i,j,k]), 0)` (torque)
+
+# Arguments
+- `kwmat::Array{ComplexF64,3}`: Output energy matrices (mpert×mpert×6), zeroed on entry
+- `ktmat::Array{ComplexF64,3}`: Output torque matrices (mpert×mpert×6), zeroed on entry
+- `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!`
+- `equil`: PlasmaEquilibrium
+- `intr::KineticForcesInternal`: Internal state with profile and geometry interpolants
+
+Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
+"""
+function compute_kinetic_matrices_at_psi!(
+    kwmat::Array{ComplexF64,3},
+    ktmat::Array{ComplexF64,3},
+    psi::Float64, n::Int, l::Int,
+    zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
+    electron::Bool, equil, intr::KineticForcesInternal)
+
+    mpert = intr.mpert
+
+    # Full complex matrices (rex=1, imx=1)
+    full_wmats = zeros(ComplexF64, mpert, mpert, 6)
+    tpsi_val = Ref{ComplexF64}(0.0 + 0.0im)
+
+    # Call tpsi! with "fwmm" method but override rex/imx to get full complex result
+    tpsi!(tpsi_val, psi, n, l, zi, mi, wdfac, divxfac,
+          electron, "fwmm", equil, intr;
+          op_wmats=full_wmats,
+          rex_override=1.0, imx_override=1.0)
+
+    # Split into energy (imaginary) and torque (real)
+    for k in 1:6, j in 1:mpert, i in 1:mpert
+        val = full_wmats[i, j, k]
+        kwmat[i, j, k] = complex(0.0, imag(val))
+        ktmat[i, j, k] = complex(real(val), 0.0)
+    end
 end
 
 
