@@ -433,14 +433,51 @@
             @test kappa ≈ 1.0 rtol=0.02
         end
 
-        @testset "kappa via equilibrium_global_parameters!" begin
+        @testset "Global scalars via equilibrium_global_parameters!" begin
             pe = build_solovev_equilibrium(e=1.6)
             Eq.equilibrium_global_parameters!(pe)
 
-            @test pe.params.kappa > 0
-            @test pe.params.kappa ≈ 1.6 rtol=0.02
-            @test pe.params.zsep[1] > pe.params.zsep[2]
+            # Separatrix convention: rsep[1]=outboard, rsep[2]=inboard,
+            # zsep[1]=top, zsep[2]=bottom (matches Fortran equil_out_sep_find).
             @test pe.params.rsep[1] > pe.params.rsep[2]
+            @test pe.params.zsep[1] > pe.params.zsep[2]
+
+            # Shape parameters — all physically positive quantities.
+            @test pe.params.amean  > 0
+            @test pe.params.rmean  > 0
+            @test pe.params.aratio > 0
+            @test pe.params.kappa  > 0
+            @test pe.params.kappa  ≈ 1.6 rtol=0.02
+
+            # For Solovev (e=1.6, a=0.33, r0=1.0) the shape is approximately
+            # recovered (Shafranov shift loosens the match).
+            @test pe.params.amean ≈ 0.33 rtol=0.15
+            @test pe.params.rmean ≈ 1.0  rtol=0.15
+
+            # Consistency with separatrix formulae.
+            @test pe.params.rmean ≈ (pe.params.rsep[1] + pe.params.rsep[2]) / 2
+            @test pe.params.amean ≈ (pe.params.rsep[1] - pe.params.rsep[2]) / 2
+
+            # Beta and field quantities — all physically positive.
+            @test pe.params.bt0   > 0
+            @test pe.params.crnt  > 0
+            @test pe.params.bwall > 0
+            @test pe.params.betat > 0
+            @test pe.params.betan > 0
+            @test pe.params.betaj > 0
+            @test pe.params.betap1 > 0
+            @test pe.params.betap2 > 0
+            @test pe.params.betap3 > 0
+            @test pe.params.volume > 0
+
+            # Normalized beta consistency: betan = 100 * amean * bt0 * betat / crnt
+            @test pe.params.betan ≈ 100 * pe.params.amean * pe.params.bt0 *
+                                    pe.params.betat / pe.params.crnt
+
+            # Internal inductance definitions — all physically positive.
+            @test pe.params.li1 > 0
+            @test pe.params.li2 > 0
+            @test pe.params.li3 > 0
         end
     end
 end
