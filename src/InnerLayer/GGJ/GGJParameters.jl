@@ -95,7 +95,7 @@ q0(p::GGJParameters) = x0(p) / p.taua
 """
     inner_Q(p::GGJParameters, γ::Number) -> ComplexF64
 
-Dimensionless inner-layer growth rate `Q = γ / Q₀` used by the inps Wasow
+Dimensionless scaled inner-layer growth rate `Q = γ / Q₀` used by the inps Wasow
 basis (deltac_run line 151). The argument `γ` may be real or complex; the
 result is always complex.
 """
