@@ -17,6 +17,10 @@ include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
 
+include("InnerLayer/InnerLayer.jl")
+import .InnerLayer as InnerLayer
+export InnerLayer
+
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
 export ForcingTerms
