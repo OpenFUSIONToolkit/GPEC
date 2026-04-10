@@ -157,26 +157,47 @@ function _xmax_3level(params::GGJParameters, Q::ComplexF64;
                      kmax::Int=8, xfac::Float64=1.0,
                      eps_vec::NTuple{3,Float64}=(1e-2, 5e-7, 1e-7))
     cache = build_asymptotics(params, Q; kmax=kmax)
+
+    # Bisection-based root finder: find the exact x where max(residual) = eps,
+    # for each of the 3 tolerance levels. First do a coarse sweep to bracket,
+    # then bisect to machine precision.
     dxfac = 10.0^0.01
     xmax_vals = zeros(Float64, 3)
+    brackets = Vector{Tuple{Float64,Float64}}(undef, 3)
     set = [true, true, true]
-    x = 0.1
+    x_prev = 0.1
+    delta_prev = maximum(asymptotic_residual(cache, x_prev))
+    x = x_prev * dxfac
     for _ in 1:1000
-        delta = asymptotic_residual(cache, x)
-        dmax = maximum(delta)
+        dmax = maximum(asymptotic_residual(cache, x))
         for i in 1:3
-            if dmax < eps_vec[i] && set[i]
-                xmax_vals[i] = x
+            if delta_prev >= eps_vec[i] && dmax < eps_vec[i] && set[i]
+                brackets[i] = (x_prev, x)
                 set[i] = false
             end
         end
         if !any(set)
             break
         end
+        x_prev = x; delta_prev = dmax
         x *= dxfac
     end
-    any(set) && error("_xmax_3level: failed to find all xmax levels")
-    # Fortran 0-indexed: inps_xmaxx(1) → Julia xmax_vals[2], inps_xmaxx(2) → xmax_vals[3]
+    any(set) && error("_xmax_3level: failed to bracket all xmax levels")
+
+    # Bisect each bracket to find smooth xmax
+    for i in 1:3
+        lo, hi = brackets[i]
+        for _ in 1:60  # 60 bisections ≈ machine precision
+            mid = (lo + hi) / 2
+            if maximum(asymptotic_residual(cache, mid)) < eps_vec[i]
+                hi = mid
+            else
+                lo = mid
+            end
+        end
+        xmax_vals[i] = (lo + hi) / 2
+    end
+
     xmax_vals[2] *= xfac
     xmax_vals[3] *= xfac
     xmax = xmax_vals[3]
@@ -638,18 +659,30 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         end
     end
 
-    # Solve for each parity
+    # Solve for each parity using LAPACK banded LU (zgbtrf + zgbtrs)
+    n = ws.ndim; kl = ws.kl; ku = kl; ldab = 2kl + ku + 1
+    ipiv = Vector{LinearAlgebra.BlasInt}(undef, n)
     for isol in 1:2
-        ws.sol[:, isol] .= ws.rhs[:, isol]
-        band_mat = @view ws.mat[:, :, isol]
-        # Convert banded to dense for LU solve
-        A = zeros(ComplexF64, ws.ndim, ws.ndim)
-        for j in 1:ws.ndim
-            for ii in max(1, j - ws.kl):min(ws.ndim, j + ws.kl)
-                A[ii, j] = band_mat[offset + ii - j, j]
-            end
-        end
-        ws.sol[:, isol] .= A \ ws.rhs[:, isol]
+        ab = copy(ws.mat[:, :, isol])
+        rhs_col = copy(ws.rhs[:, isol])
+        info = Ref{LinearAlgebra.BlasInt}(0)
+        ccall((LinearAlgebra.LAPACK.@blasfunc(zgbtrf_), LinearAlgebra.LAPACK.liblapack), Cvoid,
+              (Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
+               Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
+               Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
+               Ptr{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}),
+              n, n, kl, ku, ab, ldab, ipiv, info)
+        info[] != 0 && error("zgbtrf failed: info=$(info[])")
+        nrhs = Ref{LinearAlgebra.BlasInt}(1)
+        ccall((LinearAlgebra.LAPACK.@blasfunc(zgbtrs_), LinearAlgebra.LAPACK.liblapack), Cvoid,
+              (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
+               Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
+               Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
+               Ptr{LinearAlgebra.BlasInt}, Ptr{ComplexF64},
+               Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}),
+              UInt8('N'), n, kl, ku, nrhs, ab, ldab, ipiv, rhs_col, n, info)
+        info[] != 0 && error("zgbtrs failed: info=$(info[])")
+        ws.sol[:, isol] .= rhs_col
     end
 end
 
@@ -659,7 +692,7 @@ end
 
 """
     solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-                kmax::Int=8, nx::Int=128, nq::Int=4, pfac::Float64=1.0,
+                kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
                 cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
                 -> SVector{2,ComplexF64}
 
@@ -671,7 +704,7 @@ Returns `(Δ₁, Δ₂)` with rescaling applied. The ordering matches deltac.f's
 output convention (swapped relative to deltar.f).
 """
 function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
-                     kmax::Int=8, nx::Int=128, nq::Int=4, pfac::Float64=1.0,
+                     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
                      cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
     Q = inner_Q(params, γ)
 
