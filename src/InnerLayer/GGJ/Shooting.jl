@@ -210,10 +210,13 @@ function _build_infinity_arrays(p::GGJParameters, Q::ComplexF64,
     return (; d1, pexp, bl1, tmax)
 end
 
-# -----------------------------------------------------------------------
-# Public builder.
-# -----------------------------------------------------------------------
+"""
+    _build_shooting_system(p::GGJParameters, Q::ComplexF64; nps=8, rtol=1e-6, fmax=1.0)
 
+Construct a [`GGJShootingSystem`](@ref) for the given parameters `p` and
+complex frequency `Q`, precomputing the origin and infinity asymptotic arrays
+used by the forward/backward shoots.
+"""
 function _build_shooting_system(p::GGJParameters, Q::ComplexF64;
                                 nps::Int=8, rtol::Float64=1e-6, fmax::Float64=1.0)
     o = _build_origin_arrays(p, Q; nps=nps, rtol=rtol)
