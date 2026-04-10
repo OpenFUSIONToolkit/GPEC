@@ -89,8 +89,12 @@ function compute_perturbed_equilibrium(
     # Step 0: Initialize mode arrays for convenient indexing
     initialize_mode_arrays!(intr, ffs_intr)
 
-    # Step 1: Load forcing data
-    load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
+    # Step 1: Load forcing data. Skip the file read when the caller has already
+    # populated `intr.forcing_modes` (used by the gpec.h5 replay path, which
+    # hands us modes pulled from `input/raw_inputs/forcing_terms/`).
+    if isempty(intr.forcing_modes)
+        load_forcing_data!(intr.forcing_modes, intr.dir_path, ft_ctrl.forcing_data_file, ft_ctrl.forcing_data_format, ctrl.verbose)
+    end
 
     # Step 2: Compute plasma response
     if ctrl.compute_response

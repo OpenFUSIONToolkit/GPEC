@@ -37,7 +37,25 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
 
     eq_type = eq_config.eq_type
 
-    if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
+    # Rerun path: caller (e.g. main_from_h5) already rebuilt the solver input from
+    # the stored raw arrays. Bind it onto the current config and skip the reader.
+    if additional_input isa DirectRunInput
+        eq_input = additional_input
+        eq_input.config = eq_config
+        # Re-run the separatrix clamp for efit-family replays so an overridden
+        # psihigh from the rerun TOML is re-validated against the closed flux region.
+        if eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
+            psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
+            if adjusted
+                @warn "psihigh=$(eq_input.config.psihigh) has no closed flux surface in EFIT grid; " *
+                      "clamped to $(round(psihigh_safe; sigdigits=7))"
+                eq_input.config.psihigh = psihigh_safe
+            end
+        end
+    elseif additional_input isa InverseRunInput
+        eq_input = additional_input
+        eq_input.config = eq_config
+    elseif eq_type in ["efit", "efit_arclength", "efit_by_inversion"]
         eq_input = read_efit(eq_config)
         psihigh_safe, adjusted = clamp_psihigh_to_separatrix(eq_input)
         if adjusted
@@ -60,7 +78,7 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
         end
         eq_input = sol_run(eq_config, additional_input)
     else
-        error("Equilibrium type $(equil_in.eq_type) is not implemented")
+        error("Equilibrium type $(eq_type) is not implemented")
     end
 
     if eq_type == "efit_by_inversion"
@@ -70,6 +88,9 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
     else
         plasma_equilibrium = equilibrium_solver(eq_input)
     end
+
+    # Forward raw ingest arrays so the gpec.h5 writer can snapshot them.
+    plasma_equilibrium.raw_inputs = eq_input.raw_data
 
     equilibrium_global_parameters!(plasma_equilibrium)
     equilibrium_qfind!(plasma_equilibrium)

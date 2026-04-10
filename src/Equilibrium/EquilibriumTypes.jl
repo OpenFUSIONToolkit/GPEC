@@ -298,7 +298,12 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
+    raw_data::Dict{String,Any}  # Raw arrays used to build the splines (for gpec.h5 snapshot/replay)
 end
+
+# Outer constructor: pre-rerun call sites pass 10 positional args; raw_data defaults to empty.
+DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio) =
+    DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, Dict{String,Any}())
 
 """
     InverseRunInput(...)
@@ -327,7 +332,12 @@ mutable struct InverseRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<
     ro::Float64                 # R axis location
     zo::Float64                 # Z axis location
     psio::Float64               # Total flux difference |psi_axis - psi_boundary|
+    raw_data::Dict{String,Any}  # Raw arrays used to build the splines (for gpec.h5 snapshot/replay)
 end
+
+# Outer constructor: pre-rerun call sites pass 9 positional args; raw_data defaults to empty.
+InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio) =
+    InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio, Dict{String,Any}())
 
 """
     EquilibriumParameters
@@ -583,4 +593,16 @@ mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.Cubic
     ro::Float64
     zo::Float64
     psio::Float64
+
+    # Raw ingest data forwarded from DirectRunInput/InverseRunInput for gpec.h5 snapshot/replay.
+    # Keys depend on equilibrium kind: "direct", "inverse", or "analytic".
+    raw_inputs::Dict{String,Any}
 end
+
+# Outer constructor: pre-rerun call sites pass 16 positional args; raw_inputs defaults to empty.
+PlasmaEquilibrium(config, params, profiles, rzphi_xs, rzphi_ys,
+    rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
+    eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio) =
+    PlasmaEquilibrium(config, params, profiles, rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
+        eqfun_B, eqfun_metric1, eqfun_metric2, ro, zo, psio, Dict{String,Any}())

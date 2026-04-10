@@ -48,9 +48,21 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
+# Rerun snapshot/replay helpers. Depends on the module-level imports above
+# (HDF5, TOML, Equilibrium, ForcingTerms) and the `_BANNER` constant, so this
+# include has to come after them but before `main`, which dispatches into
+# `main_from_h5` on .h5 inputs.
+include("Rerun.jl")
+
 function main(args::Vector{String}=String[])
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
+
+    # Rerun dispatch: when the first positional argument is an HDF5 file, treat it as
+    # a stored snapshot and hand off to the replay entry point.
+    if !isempty(args) && endswith(lowercase(args[1]), ".h5")
+        return main_from_h5(args)
+    end
 
     # Capture git version for reproducibility
     git_version = try
@@ -60,6 +72,53 @@ function main(args::Vector{String}=String[])
     end
 
     @info "\n$_BANNER\n  GPEC - Generalized Perturbed Equilibrium Code  [$git_version]\n$_BANNER"
+
+    # Read input TOML from the working directory and set up the equilibrium. The
+    # rest of the pipeline is shared with `main_with_inputs` (used by the rerun
+    # path), which accepts a prebuilt `inputs` dict and equilibrium config.
+    inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
+
+    if "Equilibrium" in keys(inputs)
+        eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
+    elseif isfile(joinpath(path, "equil.toml"))
+        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
+        eq_config = Equilibrium.EquilibriumConfig(joinpath(path, "equil.toml"))
+    else
+        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
+    end
+
+    # LAR/Solovev carry their parameters in a separate auxiliary TOML referenced
+    # by eq_filename. Merge those parameters into the in-memory `inputs` dict so
+    # the snapshot writer emits a self-contained TOML blob.
+    merge_auxiliary_eq_toml!(inputs, eq_config)
+
+    return main_with_inputs(inputs, eq_config, nothing, path, git_version)
+end
+
+"""
+    main_with_inputs(inputs, eq_config, additional_input, path, git_version;
+                     preloaded_forcing_modes=nothing)
+
+Shared pipeline body used by both the TOML entry point (`main`) and the rerun
+entry point (`main_from_h5`). The caller is responsible for producing a fully
+merged `inputs::Dict` and an `EquilibriumConfig`; `additional_input` is forwarded
+to `setup_equilibrium` (it may be a prebuilt `DirectRunInput`/`InverseRunInput`
+or a `LargeAspectRatioConfig`/`SolovevConfig`, or nothing for the normal path).
+
+`preloaded_forcing_modes` lets the rerun path inject a `Vector{ForcingMode}`
+already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
+does not have to touch the original `forcing.dat` path. When `nothing`, the
+ForcingTerms data is loaded from disk at snapshot time (if PerturbedEquilibrium
+is enabled) so it still ends up in `input/raw_inputs/forcing_terms/`.
+"""
+function main_with_inputs(
+    inputs::Dict{String,Any},
+    eq_config::Equilibrium.EquilibriumConfig,
+    additional_input,
+    path::String,
+    git_version::String;
+    preloaded_forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+)
     total_start = time()
 
     # ----------------------------------------------------------------
@@ -68,22 +127,10 @@ function main(args::Vector{String}=String[])
     @info "\n  Equilibrium\n$_SECTION"
     equil_start = time()
 
-    # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
-    inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
-
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
-    if "Equilibrium" in keys(inputs)
-        eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        equil = Equilibrium.setup_equilibrium(eq_config)
-    elseif isfile(joinpath(intr.dir_path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
-        equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
-    else
-        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
-    end
+    equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
 
     @info "Equilibrium construction completed in $(@sprintf("%.3f", time() - equil_start)) s"
 
@@ -103,6 +150,29 @@ function main(args::Vector{String}=String[])
         intr.debug_settings = DebugSettings(; (Symbol(k) => v for (k, v) in inputs["DEBUG"])...)
     else
         intr.debug_settings = DebugSettings()
+    end
+
+    # Forcing-data snapshot: when PerturbedEquilibrium is enabled, load forcing
+    # modes early so they can be written into `input/raw_inputs/forcing_terms/`
+    # alongside the TOML blob. On the rerun path the caller passes the modes in
+    # directly via `preloaded_forcing_modes`, bypassing the original file.
+    forcing_modes_snapshot = preloaded_forcing_modes
+    if forcing_modes_snapshot === nothing && "PerturbedEquilibrium" in keys(inputs)
+        ft_ctrl_snapshot = if "ForcingTerms" in keys(inputs)
+            ForcingTerms.ForcingTermsControl(;
+                (Symbol(k) => v for (k, v) in inputs["ForcingTerms"])...
+            )
+        else
+            ForcingTerms.ForcingTermsControl()
+        end
+        forcing_modes_snapshot = ForcingTerms.ForcingMode[]
+        ForcingTerms.load_forcing_data!(
+            forcing_modes_snapshot,
+            path,
+            ft_ctrl_snapshot.forcing_data_file,
+            ft_ctrl_snapshot.forcing_data_format,
+            ctrl.verbose,
+        )
     end
 
     # ----------------------------------------------------------------
@@ -270,7 +340,7 @@ function main(args::Vector{String}=String[])
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, inputs, forcing_modes_snapshot)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -303,6 +373,14 @@ function main(args::Vector{String}=String[])
             (Symbol(k) => v for (k, v) in inputs["PerturbedEquilibrium"])...
         )
         pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
+
+        # Reuse the forcing modes loaded at snapshot time (or injected by
+        # `main_from_h5`) so the PE compute step never re-reads the original
+        # forcing file. `compute_perturbed_equilibrium` short-circuits
+        # `load_forcing_data!` when `pe_intr.forcing_modes` is non-empty.
+        if forcing_modes_snapshot !== nothing
+            pe_intr.forcing_modes = copy(forcing_modes_snapshot)
+        end
 
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
@@ -353,7 +431,9 @@ function write_outputs_to_HDF5(
     odet::OdeState,
     vac_data::Union{VacuumData,Nothing},
     ffit::Union{FourFitVars,Nothing}=nothing,
-    git_version::String="unknown"
+    git_version::String="unknown",
+    inputs::Union{Nothing,Dict{String,Any}}=nothing,
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -361,18 +441,18 @@ function write_outputs_to_HDF5(
         # Store git version for reproducibility
         out_h5["info/git_version"] = git_version
 
-        # Store input parameters
-        for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
-            out_h5["input/ForceFreeStates/$key"] = val
+        # Self-contained run snapshot: the full merged TOML (so a rerun can
+        # reconstruct every ForceFreeStates/Equilibrium/Wall/PE control struct),
+        # plus raw equilibrium arrays so the rerun never needs the original
+        # g-file / CHEASE / auxiliary TOML files.
+        if inputs !== nothing
+            out_h5["input/gpec_toml_raw"] = sprint(TOML.print, inputs)
         end
-        for (key, val) in zip(fieldnames(Equilibrium.EquilibriumConfig), getfield.(Ref(equil.config), fieldnames(Equilibrium.EquilibriumConfig)))
-            out_h5["input/EQUIL_CONTROL/$key"] = val
+        write_equilibrium_raw_inputs!(out_h5, equil)
+        if forcing_modes !== nothing
+            forcing_group = create_group(out_h5, "input/raw_inputs/forcing_terms")
+            ForcingTerms.save_forcing_to_h5(forcing_modes, forcing_group)
         end
-        # TODO: assuming EQUIL_OUTPUT is going to be deprecated
-        # TODO: should we store the equilibrium? difficult since it could be a gfile, sol.in, etc.
-        # TODO: if we do one input file, can just pass that in instead and loop easily since its parsed
-        # as a dict already (for (k, v) in inputs["ForceFreeStates"]...). We have to do this since custom structs
-        # don't inherently have an iterator by default
 
         # Write derived run parameters
         out_h5["info/mpert"] = intr.mpert

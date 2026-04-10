@@ -172,6 +172,56 @@ function load_forcing_hdf5!(
     end
 end
 
-export ForcingTermsControl, ForcingMode, load_forcing_data!
+"""
+    save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
+
+Write forcing modes to an open HDF5 group using the same layout that
+`load_forcing_hdf5!` consumes: datasets `n`, `m`, `amplitude_real`,
+`amplitude_imag`. Used by the gpec.h5 snapshot writer so the replay path can
+re-read forcing data from the output file with no reference to the original
+ASCII/HDF5 ingest file.
+"""
+function save_forcing_to_h5(forcing_modes::Vector{ForcingMode}, group)
+    n_arr = Int[mode.n for mode in forcing_modes]
+    m_arr = Int[mode.m for mode in forcing_modes]
+    re_arr = Float64[real(mode.amplitude) for mode in forcing_modes]
+    im_arr = Float64[imag(mode.amplitude) for mode in forcing_modes]
+    group["n"] = n_arr
+    group["m"] = m_arr
+    group["amplitude_real"] = re_arr
+    group["amplitude_imag"] = im_arr
+    return nothing
+end
+
+"""
+    load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+
+Populate `forcing_modes` from an already-open HDF5 group with datasets `n`,
+`m`, `amplitude_real`, `amplitude_imag`. Mirror of `save_forcing_to_h5` for the
+rerun path — deliberately accepts an open group rather than a file path so
+the snapshot data can live inside `gpec.h5/input/raw_inputs/forcing_terms/`.
+"""
+function load_forcing_from_h5_group!(forcing_modes::Vector{ForcingMode}, group)
+    n_array = read(group, "n")
+    m_array = read(group, "m")
+    amp_real = read(group, "amplitude_real")
+    amp_imag = haskey(group, "amplitude_imag") ? read(group, "amplitude_imag") : zeros(length(n_array))
+
+    if length(n_array) != length(m_array) || length(n_array) != length(amp_real)
+        error("Inconsistent array lengths in HDF5 forcing group")
+    end
+
+    empty!(forcing_modes)
+    for i in eachindex(n_array)
+        push!(forcing_modes, ForcingMode(;
+            n=Int(n_array[i]),
+            m=Int(m_array[i]),
+            amplitude=complex(amp_real[i], amp_imag[i])
+        ))
+    end
+    return forcing_modes
+end
+
+export ForcingTermsControl, ForcingMode, load_forcing_data!, save_forcing_to_h5, load_forcing_from_h5_group!
 
 end # module ForcingTerms
