@@ -111,7 +111,7 @@ function equilibrium_solver(input::InverseRunInput)
     # the innermost non-zero surfaces. Only applies when the grid includes the axis (rz_in_xs[1]=0).
     me = 3
     if rz_in_xs[1] == 0.0
-        deta[1, :] .= inverse_extrap(r2[2:me+1, :], deta[2:me+1, :], 0.0)
+        deta[1, :] .= inverse_extrap(r2[2:(me+1), :], deta[2:(me+1), :], 0.0)
     end
 
     # Ensure periodicity: copy first theta column to last
@@ -144,8 +144,10 @@ function equilibrium_solver(input::InverseRunInput)
             ψ₂ = clamp(1.0 - 1.5ε, psilow + 0.01, 0.999)
             A = try
                 buf = zeros(size(sq_in.y, 2))
-                sq_in(buf, ψ₁); q1 = buf[3]
-                sq_in(buf, ψ₂); q2 = buf[3]
+                sq_in(buf, ψ₁)
+                q1 = buf[3]
+                sq_in(buf, ψ₂)
+                q2 = buf[3]
                 max(abs(q2 - q1) / log(2), 0.1)
             catch
                 @warn "Could not estimate log slope from q profile, using default A=2.0"
@@ -160,12 +162,12 @@ function equilibrium_solver(input::InverseRunInput)
             make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...)
         else
             log_core = log(0.03 / psilow)
-            log_mid  = log(0.98 / 0.03)
+            log_mid = log(0.98 / 0.03)
             log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
             log_total = log_core + log_mid + log_edge
             N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
             N_core = round(Int, mpsi * log_core / log_total)
-            N_mid  = mpsi - N_edge - N_core
+            N_mid = mpsi - N_edge - N_core
             make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
         end
     elseif grid_type == "ldp"

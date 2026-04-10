@@ -414,12 +414,17 @@ function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     h_samp = step(psi_samp)
     h_min = Inf
     buf = zeros(4)
-    all_vals = [begin sq_in(buf, ψ); copy(buf) end for ψ in psi_samp]
+    all_vals = [
+        begin
+            sq_in(buf, ψ)
+            copy(buf)
+        end for ψ in psi_samp
+    ]
     for k in 1:4
         vals = [all_vals[i][k] for i in 1:n_samp]
         f_scale = max(maximum(abs.(vals)), 1e-12)
         d2_max = 0.0
-        for i in 2:n_samp-1
+        for i in 2:(n_samp-1)
             d2 = abs(vals[i+1] - 2vals[i] + vals[i-1]) / (h_samp^2 * f_scale)
             d2_max = max(d2_max, d2)
         end
@@ -437,7 +442,7 @@ given the separatrix log slope A. Three-region geometric grid: core, pedestal, f
 The middle-region spacing is driven by profile curvature (P, F, dV/dψ, q) via sq_in.
 """
 function make_optimal_mpsi(psilow, psihigh, A, sq_in;
-        tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
+    tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
     dlog = (13.0 * tau / A)^(1/4)
     N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
     h_mid = _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
@@ -456,7 +461,7 @@ directly as provided — core and edge are geometric in log(ψ) and log(1−ψ) 
 middle is uniform in ψ.
 """
 function make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge;
-        psi_split_core=0.03, psi_split_edge=0.98)
+    psi_split_core=0.03, psi_split_edge=0.98)
     # Core: [psilow, psi_split_core], geometric in log(ψ)
     core_pts = [psilow * (psi_split_core / psilow)^(i / N_core) for i in 0:N_core]
     # Middle: [psi_split_core, psi_split_edge], uniform (skip first to avoid duplicate)
@@ -489,16 +494,16 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
 
     psi_nodes = if equil_params.grid_type == "log_asymptotic"
         if n_core_mid_edge !== nothing
-            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...; )
+            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...;)
         else
             # Fixed mpsi specified: distribute by log-weights
             log_core = log(0.03 / psilow)
-            log_mid  = log(0.98 / 0.03)
+            log_mid = log(0.98 / 0.03)
             log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
             log_total = log_core + log_mid + log_edge
             N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
             N_core = round(Int, mpsi * log_core / log_total)
-            N_mid  = mpsi - N_edge - N_core
+            N_mid = mpsi - N_edge - N_core
             make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
         end
     elseif equil_params.grid_type == "ldp"

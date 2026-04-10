@@ -165,13 +165,13 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
 @with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
     Npert = intr.numpert_total
-    wp          = zeros!(pool, ComplexF64, Npert, Npert)
+    wp = zeros!(pool, ComplexF64, Npert, Npert)
     eigenvalues = zeros!(pool, ComplexF64, Npert)
-    wt          = zeros!(pool, ComplexF64, Npert, Npert)
-    wv          = zeros!(pool, ComplexF64, Npert, Npert)
-    eindex      = zeros!(pool, Int, Npert)
-    evals_real  = zeros!(pool, Float64, Npert)
-    tmp_v       = zeros!(pool, ComplexF64, Npert)
+    wt = zeros!(pool, ComplexF64, Npert, Npert)
+    wv = zeros!(pool, ComplexF64, Npert, Npert)
+    eindex = zeros!(pool, Int, Npert)
+    evals_real = zeros!(pool, Float64, Npert)
+    tmp_v = zeros!(pool, ComplexF64, Npert)
 
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
