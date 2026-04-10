@@ -36,6 +36,7 @@ include("GGJParameters.jl")
 include("InnerAsymptotics.jl")
 include("Reference.jl")
 include("Shooting.jl")
+include("Galerkin.jl")
 
 export GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
