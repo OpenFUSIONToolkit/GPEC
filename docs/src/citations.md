@@ -110,11 +110,9 @@ Local PDF: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_
 
 ---
 
-## Future Work — Resistive MHD Stability
+## InnerLayer Module
 
-The following papers describe the resistive stability analysis (Δ' calculation via matched asymptotic expansions) that GPEC will implement in a future development phase.
-
-### Glasser (2016) — Resistive Instabilities {#glasser-2016-resistive}
+### Glasser et al. (2016) — Resistive Instabilities {#glasser-2016-resistive}
 
 > A. H. Glasser, "Computation of resistive instabilities by matched asymptotic expansions,"
 > *Physics of Plasmas* **23**, 072505 (2016).
@@ -136,6 +134,17 @@ Local PDF: `docs/resources/2018-Glasser-A robust solution for the resistive MHD 
 
 ---
 
+### Glasser and Wang (2020) - Asymptotic solutions and convergence studies of the resistive inner region equations {#glasser-2020-inps}
+
+> A. H. Glasser and Z. Wang, "Asymptotic solutions and convergence studies of the resistive inner region equations,"
+> *Physics of Plasmas* **27**, 012506 (2020).
+
+Showcases a different basis that significantly aids convergence of the Galerkin solver used in the GGJ InnerLayer module.
+
+Local PDF: `docs/resources/2020 - Glasser - Asymptotic solutions and convergence studies of the resistive inner region equations.pdf`
+
+---
+
 ### Wang et al. (2020)
 
 > X. Wang et al., "Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach,"
@@ -144,6 +153,30 @@ Local PDF: `docs/resources/2018-Glasser-A robust solution for the resistive MHD 
 Demonstrates asymptotic matching for resistive plasma response in realistic toroidal geometry, bridging the outer ideal MHD solution to the inner resistive layer solution.
 
 Local PDF: `docs/resources/2020-Wang-Modeling of resistive plasma response in toroidal geometry using an asymptotic matching approach.pdf`
+
+---
+
+### Yet to be implemented:
+
+## Park (2022) Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes {#park-2022-parametric-dependencies}
+
+> J.-K. Park, "Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes,"
+> *Physics of Plasmas* **29**, 072506 (2022).
+
+The basis for the presently implemented in fortran SLAYER code which computes the inner layer response in a two-fluid slab layer model.
+
+Local PDF: `docs/resources/2022-Park-Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes.pdf`
+
+---
+
+## Burgess et al. (2026) — Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer {#burgess-2026-tearing-stability-prediction}
+
+> A. Burgess et al., "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer,"
+> Preprint (2026).
+
+TODO: Add once published.
+
+Local PDF: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf`
 
 ---
 
