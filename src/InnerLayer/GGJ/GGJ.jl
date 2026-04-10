@@ -30,7 +30,7 @@ the parity-projected matching data.
 """
 struct GGJModel{S} <: InnerLayerModel end
 
-GGJModel(; solver::Symbol=:shooting) = GGJModel{solver}()
+GGJModel(; solver::Symbol=:galerkin) = GGJModel{solver}()
 
 include("GGJParameters.jl")
 include("InnerAsymptotics.jl")

@@ -9,7 +9,8 @@
 
 D-shaped aspect-ratio-2, q = 2 surface from Glasser & Wang, Phys. Plasmas
 **27**, 012506 (2020), Eq. 55. This is the primary benchmark case for
-validating the inps Wasow basis convergence (their Figs. 1–4).
+validating the inps Wasow basis convergence (their Figs. 1–4). This is useful
+only for benchmarking the galerkin solver and comparing to published results.
 
 Timescale parameters (taua, taur, v1) are set to canonical normalization;
 callers should override them for physical cases.
