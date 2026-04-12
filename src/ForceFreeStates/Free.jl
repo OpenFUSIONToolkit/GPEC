@@ -37,6 +37,9 @@ and data dumping.
         @views vac_data.wv[:, ipert] .*= singfac[ipert]
     end
 
+    # Least stable eigenvalue of the vacuum matrix alone (should be PSD; clamp numerical noise to zero)
+    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv)))))
+
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
     vac_data.wt0 .= vac_data.wt

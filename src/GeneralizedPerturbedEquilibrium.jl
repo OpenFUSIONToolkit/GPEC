@@ -117,11 +117,6 @@ function main(args::Vector{String}=String[])
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
-    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
-        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
-            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
-        ctrl.psiedge = 1.0
-    end
 
     # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
@@ -464,6 +459,7 @@ function write_outputs_to_HDF5(
         out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
         out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["vacuum/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
         out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
         out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
         out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
