@@ -148,3 +148,188 @@ function energy_integrand!(ydot, y, p::EnergyParams, x)
     ydot[2] = imag(fx)
     return nothing
 end
+
+
+# ============================================================================
+# QuadGK-based energy integration
+# ============================================================================
+
+"""
+    find_resonance_energies(leff, wb, n, we, wd) → Vector{Float64}
+
+Find real positive energy roots x_res where the resonance denominator vanishes:
+    leff·wb·√x + n·(we + wd·x) = 0
+
+Substituting u = √x gives a quadratic in u:
+    n·wd·u² + leff·wb·u + n·we = 0
+
+Returns only real positive x = u² values.
+"""
+function find_resonance_energies(leff::Float64, wb::Float64, n::Int, we::Float64, wd::Float64)::Vector{Float64}
+    a = n * wd
+    b = leff * wb
+    c = n * we
+
+    roots = Float64[]
+
+    if abs(a) < 1e-30
+        # Linear case: b*u + c = 0  →  u = -c/b
+        abs(b) < 1e-30 && return roots
+        u = -c / b
+        u > 0.0 && push!(roots, u^2)
+    else
+        disc = b^2 - 4 * a * c
+        disc < 0.0 && return roots
+        sd = sqrt(disc)
+        # Two roots via the standard quadratic formula
+        for u in ((-b + sd) / (2 * a), (-b - sd) / (2 * a))
+            u > 0.0 && push!(roots, u^2)
+        end
+    end
+
+    return roots
+end
+
+
+"""
+    collision_frequency(x, nuk, leff, nutype, nufac) → Float64
+
+Evaluate the collision frequency ν(x) at energy x, matching `energy_integrand!`.
+"""
+function collision_frequency(x::Float64, nuk::Float64, leff::Float64, nutype::String, nufac::Float64)::Float64
+    nux = if nutype == "zero"
+        0.0
+    elseif nutype == "small"
+        1e-5
+    elseif nutype == "krook"
+        nuk
+    elseif nutype == "harmonic"
+        x <= 0.0 ? floatmax(Float64) : nuk * (1 + 0.25 * leff^2) * x^(-1.5)
+    else
+        error("nutype must be zero, small, krook, or harmonic")
+    end
+    return nufac * nux
+end
+
+
+"""
+    energy_numerator(x, wn, wt, we, n, f0type, qt) → ComplexF64
+
+Evaluate the numerator N(x) of the energy integrand (without the resonance denominator
+or Maxwellian weight exp(-x)). Under the u-substitution u = 1-exp(-x), the factor
+exp(-x)·dx is absorbed into du, so N(x) = (drift frequency terms) × x^2.5 × (optional qt).
+
+For CGL, the integrand has no resonance denominator: N_cgl = x^2.5 / (i·n).
+"""
+function energy_numerator(x::Float64, wn::Float64, wt::Float64, we::Float64, n::Int, f0type::String, qt::Bool)::ComplexF64
+    fx = if f0type == "maxwellian"
+        (we + wn + wt * (x - 1.5)) * x^2.5
+    elseif f0type == "jkp"
+        (we + wn + wt * 2) * x^2.5
+    elseif f0type == "cgl"
+        x^2.5 / (im * n)
+    else
+        error("f0type must be maxwellian, jkp, or cgl")
+    end
+    qt && (fx *= (x - 2.5))
+    return ComplexF64(fx)
+end
+
+
+"""
+    integrate_energy_quadgk(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
+                            nutype, f0type, nufac, qt, atol, rtol) → ComplexF64
+
+Integrate the kinetic resonance operator over energy using QuadGK adaptive quadrature
+with the u-substitution u = 1 - exp(-x) mapping [0,∞) → [0,1).
+
+Resonance poles are handled analytically via Sokhotski-Plemelj decomposition:
+the singular part is subtracted from the integrand and its contribution computed
+via the complex logarithm formula, which handles both ν > 0 and ν → 0 correctly.
+
+See plan section 2d for mathematical details.
+"""
+function integrate_energy_quadgk(wn::Float64, wt::Float64, we::Float64, wd::Float64,
+                                 wb::Float64, nuk::Float64, ell::Int, leff::Float64,
+                                 n::Int, psi::Float64, lambda::Float64, method::String;
+                                 nutype::String="harmonic", f0type::String="maxwellian",
+                                 nufac::Float64=1.0, qt::Bool=false,
+                                 atol::Float64=1e-12, rtol::Float64=1e-9)::ComplexF64
+    # CGL has no resonance denominator — integrate directly
+    if f0type == "cgl"
+        integrand_cgl = u -> begin
+            u >= 1.0 && return ComplexF64(0.0)
+            x = -log(1.0 - u)
+            return energy_numerator(x, wn, wt, we, n, "cgl", qt)
+        end
+        val, _ = quadgk(integrand_cgl, 0.0, 1.0; atol, rtol)
+        return val
+    end
+
+    # Find resonance locations
+    x_res_list = find_resonance_energies(leff, wb, n, we, wd)
+
+    # Build residue data for Sokhotski-Plemelj subtraction
+    u_breaks = Float64[]
+    residues_u = ComplexF64[]
+    pole_contributions = ComplexF64[]
+
+    for xr in x_res_list
+        xr <= 0.0 && continue
+
+        # Ω'(x_res) = d/dx[leff*wb*√x + n*(we + wd*x)] at x=xr
+        omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
+        abs(omega_prime) < 1e-30 && continue
+
+        ur = 1.0 - exp(-xr)
+        push!(u_breaks, ur)
+
+        # Numerator at resonance (no exp(-x) weight — absorbed by substitution)
+        N_res = energy_numerator(xr, wn, wt, we, n, f0type, qt)
+
+        # Residue in u-space: R_u = N(x_res) * (1-u_res) / (i*Ω')
+        # The (1-u_res) = exp(-x_res) factor comes from dx/du = 1/(1-u)
+        R_u = N_res * (1.0 - ur) / (im * omega_prime)
+        push!(residues_u, R_u)
+
+        # Pole location in u-space (complex for ν > 0, real for ν = 0)
+        nux_res = collision_frequency(xr, nuk, leff, nutype, nufac)
+        # x_pole = x_res + i*ν/(Ω') — the pole of 1/(i*Ω - ν) moves off real axis
+        x_pole = xr + im * nux_res / omega_prime
+        u_pole = 1.0 - exp(-x_pole)
+
+        # Analytical integral of R_u/(u - u_pole) over [0, 1):
+        # ∫₀¹ R_u/(u - u_pole) du = R_u * [log(1 - u_pole) - log(-u_pole)]
+        push!(pole_contributions, R_u * (log(1.0 - u_pole) - log(-u_pole)))
+    end
+
+    n_poles = length(u_breaks)
+
+    # Smooth integrand with poles subtracted
+    integrand_u = u -> begin
+        u >= 1.0 && return ComplexF64(0.0)
+        x = -log(1.0 - u)
+
+        # Collision frequency at this x
+        nux = collision_frequency(x, nuk, leff, nutype, nufac)
+
+        # Full resonance denominator
+        denom = im * (leff * wb * sqrt(x) + n * (we + wd * x)) - nux
+
+        # Full integrand value (numerator / denominator, no exp(-x) weight)
+        val = energy_numerator(x, wn, wt, we, n, f0type, qt) / denom
+
+        # Subtract singular parts at each resonance
+        for k in 1:n_poles
+            val -= residues_u[k] / (u - u_breaks[k])
+        end
+
+        return val
+    end
+
+    # QuadGK with resonance locations as breakpoints
+    breaks = sort(u_breaks)
+    smooth_val, _ = quadgk(integrand_u, 0.0, breaks..., 1.0; atol, rtol)
+
+    return smooth_val + sum(pole_contributions; init=ComplexF64(0.0))
+end

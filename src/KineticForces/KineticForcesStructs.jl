@@ -60,6 +60,9 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     # Energy integration parameters
     nutype::String = "harmonic"     # Collision operator: "zero", "small", "krook", "harmonic"
     f0type::String = "maxwellian"   # Distribution function: "maxwellian", "jkp", "cgl"
+    integration_method::String = "quadgk"  # "quadgk" (adaptive quadrature) or "ode" (ODE accumulation)
+    xmax::Float64 = 72.0           # Energy upper bound (ODE mode only)
+    ximag::Float64 = 0.0           # Complex contour offset (ODE mode only)
 
     # Diagnostic parameters
     psilims::Vector{Float64} = [0.0, 1.0]  # Integration limits in psi

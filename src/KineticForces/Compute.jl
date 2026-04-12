@@ -133,6 +133,58 @@ function integrate_psi_ode(
 end
 
 
+# ============================================================================
+# QuadGK-based ψ integration (scalar torque methods only)
+# ============================================================================
+
+"""
+    integrate_psi_quadgk(n, nl, zi, mi, wdfac, divxfac, electron, method,
+                         equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
+
+Integrate scalar torque over ψ using QuadGK adaptive quadrature.
+At each ψ, sums tpsi!() over bounce harmonics ℓ ∈ {-nl, ..., nl}.
+
+Matrix methods (containing "mm") are not supported — use `integrate_psi_ode` for those.
+
+# Returns
+NamedTuple with:
+- `total::ComplexF64`: Total integrated torque
+- `torque_profile`: nothing (QuadGK does not expose evaluation points)
+- `matrix_integrated`: nothing
+"""
+function integrate_psi_quadgk(
+    n::Int, nl::Int, zi::Int, mi::Int,
+    wdfac::Float64, divxfac::Float64, electron::Bool,
+    method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl,
+    kinetic_profiles::Equilibrium.KineticProfileSplines;
+    psi_min::Float64=0.0, psi_max::Float64=1.0
+)
+    x0 = max(psi_min, 1e-6)
+    xout = min(psi_max, 1.0 - 1e-6)
+
+    if x0 >= xout
+        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing)
+    end
+
+    tpsi_val = Ref{ComplexF64}(0.0 + 0.0im)
+
+    integrand = psi -> begin
+        total = ComplexF64(0.0)
+        for ell_idx in 1:(1 + 2 * nl)
+            l = ell_idx - 1 - nl
+            tpsi!(tpsi_val, psi, n, l, zi, mi, wdfac, divxfac,
+                  electron, method, equil, intr, kinetic_profiles;
+                  op_wmats=nothing, integration_method="quadgk")
+            total += tpsi_val[]
+        end
+        return total
+    end
+
+    total, _ = quadgk(integrand, x0, xout; atol=ctrl.atol_xlmda, rtol=ctrl.rtol_xlmda)
+    return (total=total, torque_profile=nothing, matrix_integrated=nothing)
+end
+
+
 """
     psi_integrand!(dy, y, p::PsiIntegrationParams, psi)
 
@@ -247,12 +299,20 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                 n = ctrl.nn  # fallback to control parameter for single-n
             end
 
-            # Dynamic ODE integration over ψ
-            result = integrate_psi_ode(
-                n, ctrl.nl, ctrl.zi, ctrl.mi,
-                ctrl.wdfac, ctrl.divxfac, ctrl.electron,
-                method, equil, intr, ctrl, kinetic_profiles;
-                psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
+            # Integrate over ψ: QuadGK for scalar methods, ODE for matrix methods
+            if ctrl.integration_method == "quadgk" && !is_matrix_method
+                result = integrate_psi_quadgk(
+                    n, ctrl.nl, ctrl.zi, ctrl.mi,
+                    ctrl.wdfac, ctrl.divxfac, ctrl.electron,
+                    method, equil, intr, ctrl, kinetic_profiles;
+                    psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
+            else
+                result = integrate_psi_ode(
+                    n, ctrl.nl, ctrl.zi, ctrl.mi,
+                    ctrl.wdfac, ctrl.divxfac, ctrl.electron,
+                    method, equil, intr, ctrl, kinetic_profiles;
+                    psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
+            end
 
             total_torque += result.total
 

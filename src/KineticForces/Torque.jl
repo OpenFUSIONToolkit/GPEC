@@ -34,7 +34,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               kinetic_profiles::Equilibrium.KineticProfileSplines;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
-              imx_override::Union{Nothing,Float64}=nothing)
+              imx_override::Union{Nothing,Float64}=nothing,
+              integration_method::String="ode")
 
     if intr.verbose
         println("torque - tpsi function, psi = ", psi)
@@ -241,7 +242,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    mpert=intr.mpert, ibmax=ibmax, theta_bmax=theta_bmax,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
                                    ymat=ymat_f, zmat=zmat_f,
-                                   rex_override=rex_override, imx_override=imx_override)
+                                   rex_override=rex_override, imx_override=imx_override,
+                                   integration_method=integration_method)
     else
         error("ERROR: torque - unknown method")
     end
@@ -424,7 +426,8 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
                        pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9,
                        rex_override::Union{Nothing,Float64}=nothing,
-                       imx_override::Union{Nothing,Float64}=nothing)::ComplexF64
+                       imx_override::Union{Nothing,Float64}=nothing,
+                       integration_method::String="ode")::ComplexF64
 
     # 1. Compute bounce-averaged quantities
     bounce = compute_bounce_data(
@@ -498,12 +501,20 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # 4. Pitch angle ODE integration
-    lxint = integrate_pitch_gar(
-        wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
-        fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
-        nutype, f0type, nufac, ximag, qt,
-        energy_atol, energy_rtol, pitch_atol, pitch_rtol)
+    # 4. Pitch angle integration
+    if integration_method == "quadgk"
+        lxint = integrate_pitch_gar_quadgk(
+            wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
+            fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
+            nutype, f0type, nufac, qt,
+            energy_atol, energy_rtol, pitch_atol, pitch_rtol)
+    else
+        lxint = integrate_pitch_gar(
+            wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
+            fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
+            nutype, f0type, nufac, ximag, qt,
+            energy_atol, energy_rtol, pitch_atol, pitch_rtol)
+    end
 
     # 5. Compute scalar torque (Fortran lines 852-854)
     # Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013)

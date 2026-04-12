@@ -29,6 +29,7 @@ using LinearAlgebra
 using LinearAlgebra.LAPACK
 using FFTW
 using OrdinaryDiffEq
+using QuadGK
 using HDF5
 using Printf
 using Statistics

@@ -307,3 +307,130 @@ function pitch_integrand!(dy, _, p::PitchParams, lambda)
 
     return nothing
 end
+
+
+# ============================================================================
+# QuadGK-based pitch integration
+# ============================================================================
+
+"""
+    integrate_pitch_gar_quadgk(wn, wt, we, nuk, bobmax, epsr, q,
+                               fbnce, fbnce_norm, nqty, ell, n,
+                               rex, imx, psi, method; kwargs...) → Vector{ComplexF64}
+
+GAR pitch-angle integration using QuadGK adaptive quadrature.
+The trapped-passing boundary at λ = bobmax is passed as a breakpoint to handle
+the discontinuity in leff and nueff.
+"""
+function integrate_pitch_gar_quadgk(
+    wn::Float64, wt::Float64, we::Float64, nuk::Float64,
+    bobmax::Float64, epsr::Float64, q::Float64,
+    fbnce, fbnce_norm::Vector{Float64},
+    nqty::Int, ell::Int, n::Int,
+    rex::Float64, imx::Float64, psi::Float64, method::String;
+    nutype::String="harmonic", f0type::String="maxwellian",
+    nufac::Float64=1.0, qt::Bool=false,
+    energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
+    pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9
+)
+    lambda_min = first(fbnce.cache.x)
+    lambda_max = last(fbnce.cache.x)
+
+    integrand = lambda -> begin
+        fvals = fbnce(lambda)
+        wb = fvals[1]
+        wd = fvals[2]
+
+        is_circulating = lambda <= bobmax
+        leff = is_circulating ? Float64(ell) + n * q : Float64(ell)
+        nueff = is_circulating ? nuk : nuk / (2 * epsr)
+
+        # Inner energy integration
+        if is_circulating
+            xint_co = integrate_energy_quadgk(wn, wt, we, wd, wb, nueff,
+                                               ell, leff, n, psi, lambda, method;
+                                               nutype, f0type, nufac, qt,
+                                               atol=energy_atol, rtol=energy_rtol)
+            xint_counter = integrate_energy_quadgk(wn, wt, we, wd, -wb, nueff,
+                                                    ell, leff, n, psi, lambda, method;
+                                                    nutype, f0type, nufac, qt,
+                                                    atol=energy_atol, rtol=energy_rtol)
+            xint = xint_co + xint_counter
+        else
+            xint = integrate_energy_quadgk(wn, wt, we, wd, wb, nueff,
+                                            ell, leff, n, psi, lambda, method;
+                                            nutype, f0type, nufac, qt,
+                                            atol=energy_atol, rtol=energy_rtol)
+        end
+
+        # Apply rex/imx decomposition (Fortran torque.F90 lines 842-847)
+        xint_decomposed = complex(rex * real(xint), imx * imag(xint))
+
+        # Multiply by each flux function
+        return [fvals[i + 2] * xint_decomposed for i in 1:nqty]
+    end
+
+    # Breakpoints: trapped-passing boundary
+    breaks = Float64[]
+    lambda_min < bobmax < lambda_max && push!(breaks, bobmax)
+
+    val, _ = quadgk(integrand, lambda_min, breaks..., lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    return val
+end
+
+
+"""
+    integrate_pitch_quadgk(wn, wt, we, nuk, bobmax, epsr, q,
+                           wb_interp, wd_interp, flux_interps,
+                           ell, n, psi, method; kwargs...) → Vector{ComplexF64}
+
+Non-GAR pitch-angle integration using QuadGK adaptive quadrature.
+Uses separate wb, wd, and flux function interpolants.
+"""
+function integrate_pitch_quadgk(
+    wn::Float64, wt::Float64, we::Float64, nuk::Float64,
+    bobmax::Float64, epsr::Float64, q::Float64,
+    wb_interp, wd_interp, flux_interps::Vector,
+    ell::Int, n::Int, psi::Float64, method::String;
+    lambda_min::Float64=0.0, lambda_max::Float64=1.0,
+    nutype::String="harmonic", f0type::String="maxwellian",
+    nufac::Float64=1.0, qt::Bool=false,
+    energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
+    pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9
+)
+    nqty = length(flux_interps)
+
+    integrand = lambda -> begin
+        wb = wb_interp(lambda)
+        wd = wd_interp(lambda)
+
+        is_circulating = lambda <= bobmax
+        leff = is_circulating ? Float64(ell) + n * q : Float64(ell)
+        nueff = is_circulating ? nuk : nuk / (2 * epsr)
+
+        if is_circulating
+            xint_co = integrate_energy_quadgk(wn, wt, we, wd, wb, nueff,
+                                               ell, leff, n, psi, lambda, method;
+                                               nutype, f0type, nufac, qt,
+                                               atol=energy_atol, rtol=energy_rtol)
+            xint_counter = integrate_energy_quadgk(wn, wt, we, wd, -wb, nueff,
+                                                    ell, leff, n, psi, lambda, method;
+                                                    nutype, f0type, nufac, qt,
+                                                    atol=energy_atol, rtol=energy_rtol)
+            xint = xint_co + xint_counter
+        else
+            xint = integrate_energy_quadgk(wn, wt, we, wd, wb, nueff,
+                                            ell, leff, n, psi, lambda, method;
+                                            nutype, f0type, nufac, qt,
+                                            atol=energy_atol, rtol=energy_rtol)
+        end
+
+        return [flux_interps[i](lambda) * xint for i in 1:nqty]
+    end
+
+    breaks = Float64[]
+    lambda_min < bobmax < lambda_max && push!(breaks, bobmax)
+
+    val, _ = quadgk(integrand, lambda_min, breaks..., lambda_max; atol=pitch_atol, rtol=pitch_rtol)
+    return val
+end
