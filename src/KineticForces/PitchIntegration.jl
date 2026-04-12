@@ -182,8 +182,8 @@ function integrate_pitch_gar(
         rex, imx, nqty, fbnce, fbnce_norm)
 
     # Integration bounds: full λ range of fbnce
-    lambda_min = fbnce.xs[1]
-    lambda_max = fbnce.xs[end]
+    lambda_min = first(fbnce.cache.x)
+    lambda_max = last(fbnce.cache.x)
 
     y0 = zeros(neq)
     prob = ODEProblem(pitch_gar_integrand!, y0, (lambda_min, lambda_max), params)

@@ -29,6 +29,7 @@ mutable struct PsiIntegrationParams
     equil::Any
     intr::KineticForcesInternal
     ctrl::KineticForcesControl
+    kinetic_profiles::Equilibrium.KineticProfileSplines
     # Mutable storage for kinetic matrix accumulation across ℓ harmonics
     elems::Union{Nothing, Array{ComplexF64,3}}
     # Growing storage for (ψ, dT/dψ, elems) at each ODE step
@@ -44,7 +45,7 @@ end
 
 """
     integrate_psi_ode(n, nl, zi, mi, wdfac, divxfac, electron, method,
-                      equil, intr, ctrl; psi_min, psi_max) → NamedTuple
+                      equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
 
 Integrate torque over ψ using adaptive ODE solver.
 Ports Fortran `tintgrl_lsode` from torque.F90 lines 1163-1348.
@@ -61,7 +62,8 @@ NamedTuple with:
 function integrate_psi_ode(
     n::Int, nl::Int, zi::Int, mi::Int,
     wdfac::Float64, divxfac::Float64, electron::Bool,
-    method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl;
+    method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl,
+    kinetic_profiles::Equilibrium.KineticProfileSplines;
     psi_min::Float64=0.0, psi_max::Float64=1.0
 )
     is_matrix_method = occursin("mm", method)
@@ -75,7 +77,7 @@ function integrate_psi_ode(
 
     params = PsiIntegrationParams(
         n, nl, zi, mi, wdfac, divxfac, electron, method,
-        equil, intr, ctrl,
+        equil, intr, ctrl, kinetic_profiles,
         elems,
         Float64[], ComplexF64[], matrix_history)
 
@@ -156,7 +158,7 @@ function psi_integrand!(dy, _, p::PsiIntegrationParams, psi)
         l = ell_idx - 1 - p.nl  # ℓ from -nl to nl
 
         tpsi!(tpsi_val, psi, p.n, l, p.zi, p.mi, p.wdfac, p.divxfac,
-              p.electron, p.method, p.equil, p.intr;
+              p.electron, p.method, p.equil, p.intr, p.kinetic_profiles;
               op_wmats=wtw_l)
 
         # Pack real/imag into ODE state
@@ -188,7 +190,7 @@ end
 
 """
     compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
-                                ctrl::KineticForcesControl, equil)
+                                ctrl::KineticForcesControl, equil, kinetic_profiles)
 
 Calculate torque/energy for all enabled methods using ODE integration.
 For each method, integrates over flux surfaces using adaptive ODE solver
@@ -201,9 +203,11 @@ block-diagonal kinetic matrices.
 - `intr::KineticForcesInternal`: Internal state with equilibrium data
 - `ctrl::KineticForcesControl`: Control parameters specifying which methods to run
 - `equil`: PlasmaEquilibrium with 2D interpolants
+- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
 """
 function compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
-                                     ctrl::KineticForcesControl, equil)
+                                     ctrl::KineticForcesControl, equil,
+                                     kinetic_profiles::Equilibrium.KineticProfileSplines)
 
     flags = [
         ctrl.fgar_flag, ctrl.tgar_flag, ctrl.pgar_flag,
@@ -247,7 +251,7 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             result = integrate_psi_ode(
                 n, ctrl.nl, ctrl.zi, ctrl.mi,
                 ctrl.wdfac, ctrl.divxfac, ctrl.electron,
-                method, equil, intr, ctrl;
+                method, equil, intr, ctrl, kinetic_profiles;
                 psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
 
             total_torque += result.total

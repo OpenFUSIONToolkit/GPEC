@@ -519,6 +519,134 @@ function ProfileSplines(xs::Vector{Float64},
 end
 
 """
+    GeometryProfileSplines
+
+Named 1D cubic spline interpolants for flux-surface-averaged geometric quantities.
+Built once during equilibrium construction so they are available to every downstream
+module without per-caller recomputation.
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared ψ axis (matches `rzphi_xs`)
+  - `area_spline`: Flux-surface area ∫ dA(ψ) [m²]
+  - `avg_r_spline`: Surface-average minor radius ⟨r⟩(ψ) [m]
+  - `avg_R_spline`: Surface-average major radius ⟨R⟩(ψ) [m]
+"""
+struct GeometryProfileSplines{S}
+    xs::Vector{Float64}
+    npts::Int
+    npts_minus_1::Int
+    area_spline::S
+    avg_r_spline::S
+    avg_R_spline::S
+end
+
+"""
+    GeometryProfileSplines(xs, area_vals, avg_r_vals, avg_R_vals; extrap=ExtendExtrap())
+
+Construct `GeometryProfileSplines` from arrays of surface-averaged values defined
+on the shared ψ grid `xs`. Uses CubicFit boundary conditions to match `ProfileSplines`.
+"""
+function GeometryProfileSplines(xs::Vector{Float64},
+    area_vals::Vector{Float64},
+    avg_r_vals::Vector{Float64},
+    avg_R_vals::Vector{Float64};
+    extrap::AbstractExtrap=ExtendExtrap())
+    npts = length(xs)
+    @assert length(area_vals) == npts
+    @assert length(avg_r_vals) == npts
+    @assert length(avg_R_vals) == npts
+
+    area_spline = cubic_interp(xs, area_vals; extrap=extrap)
+    avg_r_spline = cubic_interp(xs, avg_r_vals; extrap=extrap)
+    avg_R_spline = cubic_interp(xs, avg_R_vals; extrap=extrap)
+
+    GeometryProfileSplines{typeof(area_spline)}(
+        xs, npts, npts - 1,
+        area_spline, avg_r_spline, avg_R_spline,
+    )
+end
+
+"""
+    KineticProfileSplines
+
+Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures,
+ExB rotation, collisional diagnostics) loaded from an external `kinetic.dat`
+file. Mirrors the `ProfileSplines` pattern: each quantity is its own named
+spline plus a paired derivative view for the species the NTV kernel needs
+(densities and temperatures, used by `wdian`/`wdiat` in `KineticForces/Torque.jl`).
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared ψ axis (the regular kinetic grid)
+  - `ni_spline`, `ne_spline`: Ion / electron number densities [m⁻³]
+  - `Ti_spline`, `Te_spline`: Ion / electron temperatures [J]
+  - `omegaE_spline`: ExB rotation ω_E [rad/s]
+  - `loglam_spline`: Coulomb logarithm
+  - `nui_spline`, `nue_spline`: Krook collision frequencies [s⁻¹]
+  - `zeff_spline`: Effective charge Z_eff
+  - `ni_deriv`, `ne_deriv`, `Ti_deriv`, `Te_deriv`: Derivative views for ψ-derivative access
+"""
+struct KineticProfileSplines{S,D}
+    xs::Vector{Float64}
+    npts::Int
+    npts_minus_1::Int
+    ni_spline::S
+    ne_spline::S
+    Ti_spline::S
+    Te_spline::S
+    omegaE_spline::S
+    loglam_spline::S
+    nui_spline::S
+    nue_spline::S
+    zeff_spline::S
+    ni_deriv::D
+    ne_deriv::D
+    Ti_deriv::D
+    Te_deriv::D
+end
+
+"""
+    KineticProfileSplines(xs, ni, ne, Ti, Te, omegaE, loglam, nui, nue, zeff;
+                          extrap=ExtendExtrap())
+
+Build the kinetic profile splines from arrays of values defined on the shared
+ψ grid `xs`. Uses CubicFit boundary conditions to match `ProfileSplines`.
+Temperatures must already be in Joules.
+"""
+function KineticProfileSplines(xs::Vector{Float64},
+    ni::Vector{Float64}, ne::Vector{Float64},
+    Ti::Vector{Float64}, Te::Vector{Float64},
+    omegaE::Vector{Float64}, loglam::Vector{Float64},
+    nui::Vector{Float64}, nue::Vector{Float64}, zeff::Vector{Float64};
+    extrap::AbstractExtrap=ExtendExtrap())
+    npts = length(xs)
+    @assert all(length(v) == npts for v in (ni, ne, Ti, Te, omegaE, loglam, nui, nue, zeff))
+
+    ni_spline = cubic_interp(xs, ni; extrap=extrap)
+    ne_spline = cubic_interp(xs, ne; extrap=extrap)
+    Ti_spline = cubic_interp(xs, Ti; extrap=extrap)
+    Te_spline = cubic_interp(xs, Te; extrap=extrap)
+    omegaE_spline = cubic_interp(xs, omegaE; extrap=extrap)
+    loglam_spline = cubic_interp(xs, loglam; extrap=extrap)
+    nui_spline = cubic_interp(xs, nui; extrap=extrap)
+    nue_spline = cubic_interp(xs, nue; extrap=extrap)
+    zeff_spline = cubic_interp(xs, zeff; extrap=extrap)
+
+    ni_deriv = deriv1(ni_spline)
+    ne_deriv = deriv1(ne_spline)
+    Ti_deriv = deriv1(Ti_spline)
+    Te_deriv = deriv1(Te_spline)
+
+    KineticProfileSplines{typeof(ni_spline),typeof(ni_deriv)}(
+        xs, npts, npts - 1,
+        ni_spline, ne_spline, Ti_spline, Te_spline,
+        omegaE_spline, loglam_spline, nui_spline, nue_spline, zeff_spline,
+        ni_deriv, ne_deriv, Ti_deriv, Te_deriv,
+    )
+end
+
+"""
     PlasmaEquilibrium(...)
 
 The final, self-contained result of the equilibrium reconstruction.
@@ -535,6 +663,9 @@ This object provides a complete representation of the processed plasma equilibri
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
+  - `geometry::GeometryProfileSplines`:
+    Named 1D splines for flux-surface-averaged geometry (area, ⟨r⟩, ⟨R⟩),
+    populated automatically by `compute_geometry_profiles` during construction.
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
 
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
@@ -560,10 +691,11 @@ This object provides a complete representation of the processed plasma equilibri
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
+    geometry::G
 
     # Grid coordinates (shared by all 2D interpolants)
     rzphi_xs::Vector{Float64}

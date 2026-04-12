@@ -1,6 +1,6 @@
 """
-    tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method, equil, intr;
-         op_wmats=nothing)
+    tpsi!(tpsi_var, psi, n, l, zi, mi, wdfac, divxfac, electron, method, equil, intr,
+          kinetic_profiles; op_wmats=nothing)
 
 Toroidal torque resulting from nonambipolar transport in perturbed equilibrium.
 Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
@@ -17,8 +17,10 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 - `electron::Bool`: Calculate quantities for electrons (zi,mi ignored)
 - `method::String`: Integration method (RLAR, CLAR, *GAR, *TMM, *WMM, *KMM)
     where * = F,T,P for full,trapped,passing
-- `equil`: PlasmaEquilibrium with 2D interpolants
-- `intr::KineticForcesInternal`: Internal state with profile interpolants and geometry
+- `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
+- `intr::KineticForcesInternal`: Internal state with mode indexing and perturbation splines
+- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
+    (n_i, n_e, T_i, T_e, ω_E, ν_i, ν_e) loaded from `kinetic.dat`
 
 # Optional Arguments
 - `op_wmats::Array{ComplexF64,3}`: Store ForceFreeStates matrix elements
@@ -28,7 +30,8 @@ Imaginary component is proportional to the kinetic energy Im(T) = 2*n*dW_k.
 """
 function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
-              electron::Bool, method::String, equil, intr::KineticForcesInternal;
+              electron::Bool, method::String, equil, intr::KineticForcesInternal,
+              kinetic_profiles::Equilibrium.KineticProfileSplines;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
               imx_override::Union{Nothing,Float64}=nothing)
@@ -142,20 +145,33 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         end
     end
 
-    # Get flux function variables (CubicSeriesInterpolant callable syntax)
-    sq_s_f = intr.sq(psi)
-    kin_f = intr.kin(psi)
-    kin_f1 = intr.kin(psi; deriv=1)
-    geom_f = intr.geom(psi)
+    # Flux-function quantities — read directly from named splines on the
+    # PlasmaEquilibrium and the externally-loaded KineticProfileSplines.
+    q       = equil.profiles.q_spline(psi)
+    dVdpsi  = equil.profiles.dVdpsi_spline(psi)
+    if electron
+        n_s       = kinetic_profiles.ne_spline(psi)
+        T_s       = kinetic_profiles.Te_spline(psi)
+        dn_s_dpsi = kinetic_profiles.ne_deriv(psi)
+        dT_s_dpsi = kinetic_profiles.Te_deriv(psi)
+        nu_s      = kinetic_profiles.nue_spline(psi)
+    else
+        n_s       = kinetic_profiles.ni_spline(psi)
+        T_s       = kinetic_profiles.Ti_spline(psi)
+        dn_s_dpsi = kinetic_profiles.ni_deriv(psi)
+        dT_s_dpsi = kinetic_profiles.Ti_deriv(psi)
+        nu_s      = kinetic_profiles.nui_spline(psi)
+    end
+    welec = kinetic_profiles.omegaE_spline(psi)
 
-    q = sq_s_f[4]
-    welec = kin_f[5]
-    wdian = -twopi * kin_f[s+2] * kin_f1[s] / (chrg * intr.chi1 * kin_f[s])
-    wdiat = -twopi * kin_f1[s+2] / (chrg * intr.chi1)
-    wphi = welec + wdian + wdiat
-    wtran = sqrt(2 * kin_f[s+2] / mass) / (q * intr.ro)
+    # Diamagnetic frequencies (Logan & Park 2013, Eq. 7) computed at evaluation
+    # time from the kinetic-profile derivatives — no longer baked into the loader.
+    wdian = -twopi * T_s * dn_s_dpsi / (chrg * intr.chi1 * n_s)
+    wdiat = -twopi * dT_s_dpsi / (chrg * intr.chi1)
+    wphi  = welec + wdian + wdiat
+    wtran = sqrt(2 * T_s / mass) / (q * intr.ro)
     wgyro = chrg * intr.bo / mass
-    nuk = kin_f[s+6]
+    nuk   = nu_s
 
     rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
     if rsquared_bmin <= 0
@@ -170,10 +186,12 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         error("ERROR: torque - minor radius is negative")
     end
 
-    epsr = geom_f[2] / geom_f[3]
+    avg_r = equil.geometry.avg_r_spline(psi)
+    avg_R = equil.geometry.avg_R_spline(psi)
+    epsr  = avg_r / avg_R
     wbhat = (π / 4) * sqrt(epsr / 2) * wtran
     wdhat = q^3 * wtran^2 / (4 * epsr * wgyro) * wdfac
-    nueff = kin_f[s+6] / (2 * epsr)
+    nueff = nu_s / (2 * epsr)
 
     if intr.verbose
         @printf("   eq values = %.1e %.1e %.1e %.1e %.1e %.1e %.1f %d\n",
@@ -186,16 +204,17 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
 
     # Method selection
     if method == "fcgl"
-        tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr)
+        tpsi_var[] = calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac,
+                                    n_s, T_s, equil, intr)
 
     elseif method == "rlar"
         tpsi_var[] = calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                    wdhat, wbhat, nueff, sq_s_f, kin_f, s,
+                                    wdhat, wbhat, nueff, dVdpsi, n_s, T_s,
                                     dbob_m_f, intr.bo, bmin)
 
     elseif method == "clar"
         tpsi_var[] = calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                    nuk, intr.bo, bmax, bmin, kin_f, s, mass, chrg,
+                                    nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
                                     tspl, dbob_m_f, divx_m_f, divxfac, wdfac)
 
     elseif method in ["fgar", "tgar", "pgar", "fwmm", "twmm", "pwmm",
@@ -215,7 +234,7 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
             zmat_f = reshape(intr.zmats(psi), intr.mpert, intr.mpert)
         end
         tpsi_var[] = calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                                   nuk, intr.bo, bmax, bmin, kin_f, s, mass, chrg,
+                                   nuk, intr.bo, bmax, bmin, n_s, T_s, mass, chrg,
                                    tspl, dbob_m_f, divx_m_f, divxfac, wdfac,
                                    method, op_wmats;
                                    chi1=intr.chi1, ro=intr.ro, mfac=intr.mfac,
@@ -240,7 +259,8 @@ end
 # ============================================================================
 
 """
-    calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr)::ComplexF64
+    calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac, n_s, T_s,
+                   equil, intr)::ComplexF64
 
 Calculate FCGL (Full Circular Gyrokinetic Landau) torque.
 Implements simplified energy balance equation.
@@ -248,7 +268,9 @@ Only valid for bounce harmonic l=0.
 
 Based on: [Logan et al., Phys. Plasmas 2013]
 """
-function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, intr::KineticForcesInternal)::ComplexF64
+function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
+                        n_s::Float64, T_s::Float64, equil,
+                        intr::KineticForcesInternal)::ComplexF64
 
     # Only implemented for l=0
     if l != 0
@@ -289,8 +311,8 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, kin_f, s, equil, in
         integral_2 += (cglspl[2, i-1] + cglspl[2, i]) / 2 * dtheta
     end
 
-    # Calculate torque: T = 2*n*i*n_i*T_i * [weighted integral]
-    result = 2.0 * n * im * kin_f[s] * kin_f[s+2] *
+    # Calculate torque: T = 2*n*i*n_s*T_s * [weighted integral]
+    result = 2.0 * n * im * n_s * T_s *
         (0.5 * (5.0/3.0) * integral_1 +
          0.5 * (1.0/3.0) * integral_2)
 
@@ -300,7 +322,7 @@ end
 
 """
     calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec, wdhat, wbhat,
-                   nueff, sq_s_f, kin_f, s, dbob_m_f, bmin)::ComplexF64
+                   nueff, dVdpsi, n_s, T_s, dbob_m_f, bo, bmin)::ComplexF64
 
 Calculate RLAR (Reduced Large Aspect Ratio) torque.
 Uses energy space integration with pitch angle averaging.
@@ -309,7 +331,9 @@ Valid for low aspect ratio tokamaks (ε << 1).
 Reference: [Logan et al., Phys. Plasmas, 2013]
 """
 function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
-                        wdhat, wbhat, nueff, sq_s_f, kin_f, s, dbob_m_f, bo, bmin=0.5)::ComplexF64
+                        wdhat, wbhat, nueff, dVdpsi::Float64,
+                        n_s::Float64, T_s::Float64,
+                        dbob_m_f, bo, bmin=0.5)::ComplexF64
 
     # Setup parameters for energy integration
     lnq = Float64(l)  # Resonant mode for trapped particles
@@ -326,11 +350,11 @@ function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
     # Placeholder: simplified estimate
     kappaint_val = sqrt(mean(abs.(dbob_m_f).^2))
 
-    # dψ/dpsi gradient term from magnetic geometry
-    psi_factor = sq_s_f[3]  # From Clebsch coordinate Jacobian
+    # dV/dpsi gradient term from Clebsch coordinate Jacobian
+    psi_factor = dVdpsi
 
-    # Normalization: √(ε/(2π³)) * n² * n_i * T_i
-    norm = sqrt(epsr / (2.0 * π^3)) * Float64(n)^2 * kin_f[s] * kin_f[s+2]
+    # Normalization: √(ε/(2π³)) * n² * n_s * T_s
+    norm = sqrt(epsr / (2.0 * π^3)) * Float64(n)^2 * n_s * T_s
 
     # Result: dT/dpsi = -(dψ/dpsi) * κ_int * x_int * norm
     result = psi_factor * kappaint_val * 0.5 * (-xint) * norm
@@ -341,7 +365,8 @@ end
 
 """
     calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-                   bmax, bmin, kin_f, s, mass, chrg, tspl, dbob_m_f, divx_m_f, divxfac, wdfac)::ComplexF64
+                   bmax, bmin, n_s, T_s, mass, chrg, tspl, dbob_m_f, divx_m_f,
+                   divxfac, wdfac)::ComplexF64
 
 Calculate CLAR (Circular Large Aspect Ratio) torque.
 Uses pitch-angle resolved calculations for trapped and passing particles.
@@ -350,8 +375,8 @@ Includes bounce-averaged integrals over lambda (pitch angle).
 Status: Partially implemented (stub for full calculation)
 """
 function calculate_clar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-                        bmax, bmin, kin_f, s, mass, chrg, tspl, dbob_m_f,
-                        divx_m_f, divxfac, wdfac)::ComplexF64
+                        bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
+                        dbob_m_f, divx_m_f, divxfac, wdfac)::ComplexF64
 
     @warn "CLAR method not yet fully implemented, returning zero" maxlog=1
     return ComplexF64(0.0, 0.0)
@@ -360,7 +385,7 @@ end
 
 """
     calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo, bmax,
-                  bmin, kin_f, s, mass, chrg, tspl, dbob_m_f, divx_m_f,
+                  bmin, n_s, T_s, mass, chrg, tspl, dbob_m_f, divx_m_f,
                   divxfac, wdfac, method, op_wmats; kwargs...)::ComplexF64
 
 Calculate GAR (General Aspect Ratio) torque.
@@ -387,8 +412,8 @@ Ports Fortran torque.F90 GAR branch (lines 529-932).
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
 function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
-                       bmax, bmin, kin_f, s, mass, chrg, tspl, dbob_m_f,
-                       divx_m_f, divxfac, wdfac, method, op_wmats;
+                       bmax, bmin, n_s::Float64, T_s::Float64, mass, chrg, tspl,
+                       dbob_m_f, divx_m_f, divxfac, wdfac, method, op_wmats;
                        chi1::Float64, ro::Float64, mfac::Vector{Int}, mpert::Int,
                        ibmax::Int, theta_bmax::Float64,
                        smat=nothing, tmat=nothing, xmat=nothing,
@@ -405,7 +430,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     bounce = compute_bounce_data(
         psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
         tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, divxfac, wdfac,
-        mass, chrg, kin_f, s, method;
+        mass, chrg, T_s, method;
         nlmda, ntheta, smat, tmat, xmat, ymat, zmat)
 
     if bounce.nlmda == 0
@@ -442,7 +467,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     end
 
     # Build CubicSeriesInterpolant
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=NaturalBC())
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
 
     # Normalize flux quantities by 1/median for ODE stability (Fortran lines 819-823)
     fbnce_norm = ones(Float64, nqty)
@@ -456,7 +481,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
     # Rebuild interpolant with normalized data
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=NaturalBC())
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
 
     # 3. Set rex/imx multipliers (Fortran lines 839-847)
     method_suffix = length(method) >= 4 ? method[2:4] : ""
@@ -482,7 +507,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
 
     # 5. Compute scalar torque (Fortran lines 852-854)
     # Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013)
-    tnorm = (-2 * n^2 / sqrt(π)) * (ro / bo) * kin_f[s] * kin_f[s+2] *
+    tnorm = (-2 * n^2 / sqrt(π)) * (ro / bo) * n_s * T_s *
             (chi1 / twopi)  # unit conversion from ψ to ψ_n, θ_n to θ
     tpsi_val = tnorm * (lxint[1] / fbnce_norm[1])
 
@@ -530,7 +555,7 @@ end
 
 """
     compute_kinetic_matrices_at_psi!(kwmat, ktmat, psi, n, l, zi, mi,
-        wdfac, divxfac, electron, equil, intr)
+        wdfac, divxfac, electron, equil, intr, kinetic_profiles)
 
 Compute both kinetic energy (`kwmat`) and torque (`ktmat`) matrices at a
 single flux surface in one pass. Replaces the Fortran pattern of calling
@@ -551,7 +576,8 @@ By running with `rex=1, imx=1` we get the full complex result and split:
 - `ktmat::Array{ComplexF64,3}`: Output torque matrices (mpert×mpert×6), zeroed on entry
 - `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!`
 - `equil`: PlasmaEquilibrium
-- `intr::KineticForcesInternal`: Internal state with profile and geometry interpolants
+- `intr::KineticForcesInternal`: Internal state with mode indexing and perturbation splines
+- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
 
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
 """
@@ -560,7 +586,8 @@ function compute_kinetic_matrices_at_psi!(
     ktmat::Array{ComplexF64,3},
     psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
-    electron::Bool, equil, intr::KineticForcesInternal)
+    electron::Bool, equil, intr::KineticForcesInternal,
+    kinetic_profiles::Equilibrium.KineticProfileSplines)
 
     mpert = intr.mpert
 
@@ -570,7 +597,7 @@ function compute_kinetic_matrices_at_psi!(
 
     # Call tpsi! with "fwmm" method but override rex/imx to get full complex result
     tpsi!(tpsi_val, psi, n, l, zi, mi, wdfac, divxfac,
-          electron, "fwmm", equil, intr;
+          electron, "fwmm", equil, intr, kinetic_profiles;
           op_wmats=full_wmats,
           rex_override=1.0, imx_override=1.0)
 

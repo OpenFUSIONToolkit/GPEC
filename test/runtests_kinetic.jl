@@ -188,7 +188,7 @@
         @test intr.mpert == 0
         @test length(intr.methods) == 18
         @test length(intr.docs) == 18
-        @test intr.sq === nothing
+        @test intr.chi1 == 0.0
     end
 
     @testset "KineticForcesState" begin

@@ -379,10 +379,14 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[:, 4]   # q values
     )
 
+    geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
+
     return PlasmaEquilibrium(
         input.config,
         EquilibriumParameters(),
         profiles,
+        geometry,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,

@@ -102,8 +102,12 @@ Holds equilibrium-derived quantities, profile interpolants, and integration resu
 Fields replacing former module-level globals:
 - `ro`, `bo`, `chi1`: Equilibrium geometry parameters
 - `mthsurf`, `mfac`: Poloidal grid info
-- `sq`, `kin`, `geom`: Profile interpolants
 - `dbob_m`, `divx_m`: Perturbation mode interpolants
+
+Equilibrium and kinetic profile data are read directly from the
+`PlasmaEquilibrium` (`equil.profiles`, `equil.geometry`) and the
+externally-loaded `KineticProfileSplines` — no shadow copies are kept on
+this struct.
 """
 @kwdef mutable struct KineticForcesInternal
     # Equilibrium-derived quantities
@@ -121,10 +125,7 @@ Fields replacing former module-level globals:
     mpert::Int = 0                 # Number of poloidal modes
     numpert_total::Int = 0         # Total modes: mpert × npert
 
-    # Profile interpolants (populated from PlasmaEquilibrium)
-    sq::Any = nothing              # Safety factor + flux profiles
-    kin::Any = nothing             # Kinetic profiles (n, T per species)
-    geom::Any = nothing            # Geometric profiles
+    # Perturbation mode interpolants (populated from PerturbedEquilibriumState)
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 

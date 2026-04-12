@@ -127,7 +127,7 @@ end
 """
     compute_bounce_data(psi, n, l, q, bo, bmax, bmin, ibmax, theta_bmax,
                         tspl, mfac, chi1, ro, dbob_m_f, divx_m_f,
-                        divxfac, wdfac, mass, chrg, kin_f, s, method;
+                        divxfac, wdfac, mass, chrg, T_s, method;
                         nlmda=64, ntheta=128,
                         smat=nothing, tmat=nothing, xmat=nothing,
                         ymat=nothing, zmat=nothing) → BounceData
@@ -156,8 +156,7 @@ Ports Fortran torque.F90 lines 530-816 (GAR branch).
 - `divxfac, wdfac`: Scaling factors
 - `mass`: Particle mass [kg]
 - `chrg`: Particle charge [C]
-- `kin_f`: Kinetic profiles at this ψ
-- `s`: Species index (1=ion, 2=electron)
+- `T_s`: Species temperature at this ψ [J]
 - `method`: Method string (first char: f/t/p determines λ range)
 
 # Keyword Arguments
@@ -173,7 +172,7 @@ function compute_bounce_data(
     dbob_m_f::Vector{ComplexF64}, divx_m_f::Vector{ComplexF64},
     divxfac::Float64, wdfac::Float64,
     mass::Float64, chrg::Float64,
-    kin_f, s::Int, method::String;
+    T_s::Float64, method::String;
     nlmda::Int=64, ntheta::Int=128,
     smat::Union{Nothing,Matrix{ComplexF64}}=nothing,
     tmat::Union{Nothing,Matrix{ComplexF64}}=nothing,
@@ -200,8 +199,8 @@ function compute_bounce_data(
     wmats_arr = do_matrices ? zeros(ComplexF64, mpert, mpert, 6, nlmda) : nothing
 
     # Thermal speed and drift normalization
-    bhat = sqrt(2 * kin_f[s+2] / mass) / ro
-    dhat = (kin_f[s+2] / chrg) / (bo * ro^2)
+    bhat = sqrt(2 * T_s / mass) / ro
+    dhat = (T_s / chrg) / (bo * ro^2)
 
     for ilmda in 1:nlmda
         lmda = lambda[ilmda]

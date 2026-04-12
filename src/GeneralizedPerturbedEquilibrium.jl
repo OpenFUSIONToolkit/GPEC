@@ -209,6 +209,28 @@ function main(args::Vector{String}=String[])
     intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
+    # Build KineticForces control and load kinetic profiles once — reused by
+    # both the stability kinetic callback (via `calculated_cb` below) and the
+    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in
+    # stability does not need kinetic_profiles, but the post-PE block always
+    # does, so we load whenever a [KineticForces] section is present or the
+    # stability path requests the calculated source.
+    kf_ctrl = haskey(inputs, "KineticForces") ?
+        KineticForces.KineticForcesControl(;
+            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+        KineticForces.KineticForcesControl()
+
+    kinetic_profiles = nothing
+    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
+        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+    if needs_kinetic_profiles
+        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
+        kinetic_profiles = Equilibrium.load_kinetic_profiles(
+            kinetic_file;
+            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp)
+    end
+
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
@@ -237,8 +259,12 @@ function main(args::Vector{String}=String[])
             # Inject the KineticForces callback so the "calculated" source can
             # invoke compute_calculated_kinetic_matrices without ForceFreeStates
             # importing KineticForces (which would invert the load order).
+            calculated_cb = (c, e, i, m, f) ->
+                KineticForces.compute_calculated_kinetic_matrices(
+                    c, e, i, m, f;
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
             make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-                calculated_source = KineticForces.compute_calculated_kinetic_matrices)
+                calculated_source=calculated_cb)
         end
 
         # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
@@ -337,16 +363,14 @@ function main(args::Vector{String}=String[])
         @info "\n  KineticForces\n$_SECTION"
         kf_start = time()
 
-        kf_ctrl = KineticForces.KineticForcesControl(;
-            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...
-        )
+        # kf_ctrl and kinetic_profiles were loaded once above the stability block.
         kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
         if @isdefined(pe_state)
             KineticForces.set_perturbation_data!(kf_intr, pe_state, intr)
         end
 
         kf_state = KineticForces.KineticForcesState()
-        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil)
+        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
 
         if kf_ctrl.write_outputs_to_HDF5
             h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file

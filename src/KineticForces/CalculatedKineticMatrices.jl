@@ -9,7 +9,8 @@ injected from `GeneralizedPerturbedEquilibrium.main`).
 
 """
     compute_calculated_kinetic_matrices(ffs_ctrl, equil, ffs_intr, metric, ffit;
-                                        kf_ctrl=KineticForcesControl())
+                                        kf_ctrl=KineticForcesControl(),
+                                        kinetic_profiles)
         → (kw_flat, kt_flat)
 
 Drive the KineticForces matrix kernel over the ψ grid stored in `metric.xs` and
@@ -21,18 +22,17 @@ The arrays carry the six bounce-averaged kinetic energy / torque matrices
 block-diagonal matrices over toroidal mode number n ∈ [nlow, nhigh] and
 flattened to `(np = mpert·npert)²`.
 
-The current implementation returns zero matrices and emits a warning: the
-plumbing for `kf_intr.sq / kin / geom` (kinetic profile interpolants pulled
-from the equilibrium and `kinetic.dat`) and the `dbob_m / divx_m` perturbation
-modes is tracked as follow-up work — see plan
-`.claude/plans/validated-exploring-clarke.md` "Out of scope" section. Even
-though the returned matrices are zero, this routine still wires the dispatch
-path end-to-end so that `sing_der!`, `_compute_fkg_matrices!`, and the
-single-chunk integration in `EulerLagrange.jl` exercise the kinetic code path.
+This routine reads equilibrium-derived profiles (q, dV/dψ, ⟨r⟩, ⟨R⟩) directly
+from named splines on `equil.profiles` and `equil.geometry`, and kinetic
+profiles (n, T, ω_E, ν) from the `kinetic_profiles` argument, avoiding the
+former shadow-copy pattern in KineticForcesInternal. The perturbation-mode
+interpolants (`kf_intr.dbob_m`, `kf_intr.divx_m`) remain unwired and are
+tracked as follow-up work blocked on PR #196 — see the plan's "Out of scope"
+section.
 
 # Arguments
 - `ffs_ctrl`: ForceFreeStatesControl (carries `kinetic_factor`, `kinetic_source`)
-- `equil`: PlasmaEquilibrium with 2D interpolants
+- `equil`: PlasmaEquilibrium with 2D interpolants and named profile/geometry splines
 - `ffs_intr`: ForceFreeStatesInternal (mode indexing)
 - `metric`: MetricData (provides ψ grid via `metric.xs`)
 - `ffit`: FourFitVars (used only for `numpert_total` cross-check)
@@ -41,6 +41,8 @@ single-chunk integration in `EulerLagrange.jl` exercise the kinetic code path.
 - `kf_ctrl`: KineticForcesControl, defaults to `KineticForcesControl()`. Used to
   carry NTV-specific knobs (nl, zi, mi, wdfac, divxfac, electron) that the
   KineticForces kernel needs but ForceFreeStatesControl does not expose.
+- `kinetic_profiles::Equilibrium.KineticProfileSplines`: Required. Named kinetic-
+  profile splines loaded via `Equilibrium.load_kinetic_profiles`.
 
 # Returns
 - `kw_flat::Array{ComplexF64,3}`: Energy matrices, shape `(mpsi, np^2, 6)`
@@ -53,6 +55,7 @@ function compute_calculated_kinetic_matrices(
     metric,
     ffit;
     kf_ctrl::KineticForcesControl = KineticForcesControl(),
+    kinetic_profiles::Equilibrium.KineticProfileSplines,
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -84,23 +87,8 @@ function compute_calculated_kinetic_matrices(
     kf_intr.ymats = geom_mats.ymats
     kf_intr.zmats = geom_mats.zmats
 
-    # Population of kf_intr.sq / kf_intr.kin / kf_intr.geom (q-profile, kinetic
-    # profiles, geometric profiles) and the perturbation modes kf_intr.dbob_m /
-    # kf_intr.divx_m is not yet wired (see plan "Out of scope"). Without these,
-    # `tpsi!` cannot evaluate bounce frequencies or the resonance kernel, so we
-    # short-circuit to zeros and warn loudly. The dispatch path through
-    # `make_kinetic_matrix → _compute_fkg_matrices! → sing_der!` is still
-    # exercised end-to-end with these zero-valued kinetic matrices.
-    if isnothing(kf_intr.sq) || isnothing(kf_intr.kin) || isnothing(kf_intr.geom)
-        @warn "compute_calculated_kinetic_matrices: kinetic profile interpolants " *
-              "(sq/kin/geom) are not populated yet — returning zero kinetic matrices. " *
-              "The dispatcher and FKG/sing_der! plumbing still runs, but the kinetic " *
-              "physics contribution is null until profile wiring is implemented." maxlog=1
-        return kw_flat, kt_flat
-    end
-
-    # Once profiles are wired in, the loop below will populate kw_flat / kt_flat
-    # for each (ψ, n, ℓ) by accumulating bounce harmonics into per-n blocks.
+    # Loop over flux surfaces and n-blocks, accumulating bounce harmonics into
+    # per-n blocks placed on the diagonal of the full np×np block-diagonal matrix.
     nl = kf_ctrl.nl
     full_w = zeros(ComplexF64, mpert, mpert, 6)
     full_t = zeros(ComplexF64, mpert, mpert, 6)
@@ -119,7 +107,7 @@ function compute_calculated_kinetic_matrices(
                 compute_kinetic_matrices_at_psi!(
                     block_w, block_t, psi, n, ell,
                     kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
-                    kf_ctrl.electron, equil, kf_intr,
+                    kf_ctrl.electron, equil, kf_intr, kinetic_profiles,
                 )
                 full_w .+= block_w
                 full_t .+= block_t
