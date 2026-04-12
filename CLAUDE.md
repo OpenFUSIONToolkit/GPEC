@@ -200,6 +200,11 @@ julia benchmarks/benchmark_git_branches.jl \
 - Tool requires HDF5.jl for reading euler.h5 output
 - Each benchmark run takes several minutes per branch (includes compilation + warm runs)
 
+**Benchmark script conventions:**
+- Benchmark scripts must reference input data from `examples/` (e.g., `joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")`). Never duplicate example inputs into `benchmarks/`.
+- If a benchmark needs modified TOML settings or a parameter scan, copy inputs to a temporary local directory at runtime — do not commit these copies.
+- All outputs (figures, CSVs, HDF5 files) must be saved into `benchmarks/` itself (or a self-described subdirectory within it, e.g., `benchmarks/coil_scan_results/`). Output files are not committed.
+
 ### Regression Harness
 
 ***This should be used at least once every single pull request before merging into develop. This test harness is what tracks values as they evolve across changes to the code, and must be both kept up to date and used consistently. Do not forget this and make sure to suggest any new regression cases or updates to existing ones as needed. Remind the user of its existence and report back the output regression report you get when modifying the code significantly. This is extremely important, do not forget this tidbit.***
@@ -586,6 +591,19 @@ This format is used for compiling release notes, so tags should be human-readabl
 ### Current Development Priorities
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `gpec.toml` file
+
+### Plotting
+- **Spectrum plots** (any plot with discrete mode numbers m or n on the x-axis) must use `seriestype=:steppre` with a `step_series` helper that pads zeros on both ends. Pattern from `benchmarks/benchmark_coil_ForcingTerms_against_fortran.jl`:
+  ```julia
+  function step_series(m_vals, amps)
+      m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
+      amp_ext = [0.0; amps; 0.0]
+      return m_ext, amp_ext
+  end
+  # Usage:
+  m_ext, a_ext = step_series(m_vals, amplitudes)
+  plot!(p, m_ext, a_ext; seriestype=:steppre, lw=2, label="...")
+  ```
 
 ### Code Formatting
 

@@ -1,7 +1,7 @@
 """
 Singular surface coupling and field calculations.
 
-Implements GPEC's singular surface analysis (gpout.f lines 585-665, 1700-1810):
+Implements GPEC's singular surface analysis (Fortran `gpout_resp` / `gpout_respinfo`):
 - Delta' (tearing stability parameter)
 - Resonant currents
 - Island half-widths
@@ -14,6 +14,30 @@ References:
 - [Glasser Phys. Plasmas 2016 072505] - Resistive Δ' calculation
 """
 
+# Find bracketing indices and linear interpolation weight for psi in psi_store[1:nstep].
+function _psi_bracket(psi_store::AbstractVector, psi::Float64, nstep::Int)
+    idx_r = findfirst(p -> p >= psi, @view(psi_store[1:nstep]))
+    if isnothing(idx_r) || idx_r >= nstep
+        il, ir = nstep - 1, nstep
+    elseif idx_r == 1
+        il, ir = 1, 2
+    else
+        il, ir = idx_r - 1, idx_r
+    end
+    wt = (psi - psi_store[il]) / (psi_store[ir] - psi_store[il])
+    return il, ir, wt
+end
+
+
+# Cubic Hermite interpolant value at psi given endpoint values and derivatives.
+function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
+    h = psi_b - psi_a
+    t = (psi - psi_a) / h
+    h00 = 2t^3 - 3t^2 + 1;  h10 = t^3 - 2t^2 + t
+    h01 = -2t^3 + 3t^2;     h11 = t^3 - t^2
+    return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
+end
+
 """
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
@@ -25,39 +49,24 @@ References:
         ctrl::PerturbedEquilibriumControl
     )
 
-Compute singular layer coupling metrics and island diagnostics.
+Compute singular layer coupling matrices and applied resonant vectors.
 
-Calculates the coupling between forcing modes and resonant surfaces, which determines
-the effectiveness of external perturbations at rational surfaces where q = m/n.
+Matching Fortran GPEC output: `C_f_x_out` (coupling matrix) and `Phi_res`, `w_isl`, etc. (applied vectors).
 [Park Phys. Plasmas 2009 056115]
-
-Implements GPEC algorithm from gpout.f:
-
- 1. For each forcing mode, apply unit field and compute plasma response
- 2. For each singular surface, evaluate field jump and compute coupling quantities
- 3. Calculate diagnostic island widths and overlap parameters
-
-## Arguments
-
-  - `state`: Output state structure to store results
-  - `equil`: Equilibrium solution with q-profile and flux surfaces
-  - `ForceFreeStates_results`: ForceFreeStates stability calculation results
-  - `vac_data`: Vacuum response data including Green's functions
-  - `ffs_intr`: ForceFreeStates internal state with singular surface data
-  - `intr`: PerturbedEquilibrium internal state with permeability matrix
-  - `ctrl`: Control parameters
 
 ## Modifies
 
-Populates the following fields in `state`:
+Populates `state` with:
 
-  - `resonant_flux[npert, msing]`: Normalized resonant flux Φ_r/A, indexed by (n-index, surface)
-  - `resonant_current[npert, msing]`: Resonant current density
-  - `island_width_sq[npert, msing]`: Square of island half-width (w/2)²
-  - `penetrated_field[npert, msing]`: Normal field at resonant surface
-  - `delta_prime[npert, msing]`: Tearing stability parameter Δ'
-  - `island_half_width[msing]`: Dimensional island half-width (maximum over all n)
-  - `chirikov_parameter[msing]`: Island overlap metric
+  Coupling matrices `[n_rational × numpert_total]` — C[row, j] = coupling when forcing mode j has unit amplitude:
+  - `C_resonant_flux`, `C_resonant_current`, `C_island_width_sq`, `C_penetrated_field`, `C_delta_prime`
+
+  Applied resonant vectors `[n_rational]` = C · amp_vec:
+  - `resonant_flux`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
+
+  Diagnostics `[n_rational]`: `island_half_width`, `chirikov_parameter`
+
+  Metadata `[n_rational]`: `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 """
 function compute_singular_coupling_metrics!(
     state::PerturbedEquilibriumState,
@@ -68,171 +77,204 @@ function compute_singular_coupling_metrics!(
     intr::PerturbedEquilibriumInternal,
     ctrl::PerturbedEquilibriumControl
 )
-    if ctrl.verbose
-        @info "Computing singular coupling metrics (GPEC method)"
-    end
+    ctrl.verbose && @info "Computing singular coupling metrics (GPEC method)"
 
-    # Extract dimensions
     msing = ffs_intr.msing
     mpert = ffs_intr.mpert
-    npert = ffs_intr.npert
     numpert_total = ffs_intr.numpert_total
 
     if msing == 0
-        if ctrl.verbose
-            @info "No singular surfaces found. Skipping singular coupling calculation."
-        end
+        ctrl.verbose && @info "No singular surfaces found. Skipping singular coupling calculation."
         return
     end
 
-    # Initialize output arrays [npert, msing]
-    # For single n: these collapse to [msing] vectors
-    # For multiple n: [npert, msing] matrices with zeros for non-resonant combinations
-    state.resonant_flux = zeros(ComplexF64, npert, msing)
-    state.resonant_current = zeros(ComplexF64, npert, msing)
-    state.island_width_sq = zeros(ComplexF64, npert, msing)
-    state.penetrated_field = zeros(ComplexF64, npert, msing)
-    state.delta_prime = zeros(ComplexF64, npert, msing)
-    state.island_half_width = zeros(Float64, msing)
-    state.chirikov_parameter = zeros(Float64, msing)
-
-    # Physical constants
-    chi1 = 2π * equil.psio  # Flux normalization
-    twopi = 2π
-    μ₀ = 4π * 1e-7
-
-    # Get permeability matrix from internal state
-    permeability = intr.plasma_response
-    if size(permeability, 1) == 0
+    if size(intr.plasma_response, 1) == 0
         @warn "Permeability matrix not computed. Skipping singular coupling."
         return
     end
 
-    # Get vacuum calculation parameters
-    mtheta = vac_data.mthvac  # Vacuum poloidal grid size
+    chi1 = 2π * equil.psio
+    twopi = 2π
+    mtheta = vac_data.mthvac
     mlow = ffs_intr.mlow
     nlow = ffs_intr.nlow
     nhigh = ffs_intr.nhigh
-
-    # Perturbed equilibrium calculations always use nowall
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
-    if ctrl.verbose
-        nstr = nlow == nhigh ? "$nlow" : "$nlow:$nhigh"
-        @info "Computing surface Green's functions at $msing resonant surfaces (n = $nstr, no wall)"
-    end
-
-    # Main loop: Process each toroidal mode number separately
+    # Phase 1: Collect all resonant (surface, n) pairs in psi order
+    resonant_pairs = Tuple{Int,Int}[]
     for nn in nlow:nhigh
-        n_idx = nn - nlow + 1  # Index for storing in [npert, msing] arrays
-
-        if ctrl.verbose && npert > 1
-            @info "Computing metrics for n = $nn"
-        end
-
-        # For each singular surface, compute Green's functions for this n
-        # and calculate metrics if surface is resonant
         for s in 1:msing
-            sing_surf = ffs_intr.sing[s]
-
-            # Check if this surface is resonant for this n
-            # m_res = round(q * n) must be an integer and within our m range
-            m_res_float = sing_surf.q * nn
+            m_res_float = ffs_intr.sing[s].q * nn
             m_res = round(Int, m_res_float)
-
-            # Check if m/n is truly integer (within tolerance)
-            if abs(m_res_float - m_res) > 1e-6
-                # Not resonant for this n, leave metrics as zero
-                continue
-            end
-
-            # Check if resonant mode is within our m range
-            if m_res < ffs_intr.mlow || m_res > ffs_intr.mhigh
-                continue
-            end
-
-            # Compute Green's functions at this surface for this n
-            # TODO: This assumes an initial 2D equilibrum, getting 2D Green's functions for independent n
-            vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
-            _, grri, grre, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
-
-            # Store in singular surface struct (overwrites for each n)
-            ffs_intr.sing[s].grri = grri
-            ffs_intr.sing[s].grre = grre
-
-            # Find the linear index for the resonant mode (m_res, nn)
-            resnum = findfirst(j -> intr.m_modes[j] == m_res && intr.n_modes[j] == nn, 1:numpert_total)
-            if resnum === nothing
-                @warn "Could not find index for resonant mode (m=$m_res, n=$nn)" maxlog=1
-                continue
-            end
-
-            # Evaluate field derivative jump across surface
-            respsi = sing_surf.psifac
-            if size(ForceFreeStates_results.ca_l, 4) >= s && size(ForceFreeStates_results.ca_r, 4) >= s
-                # Use asymptotic coefficients from ideal MHD solution
-                # resnum is the resonant mode index, and we evaluate at forcing mode resnum
-                lbwp1 = ForceFreeStates_results.ca_l[resnum, resnum, 2, s]
-                rbwp1 = ForceFreeStates_results.ca_r[resnum, resnum, 2, s]
-            else
-                # Fallback: finite difference
-                spot = 1e-6
-                lpsi = respsi - spot / (abs(nn) * abs(sing_surf.q1))
-                rpsi = respsi + spot / (abs(nn) * abs(sing_surf.q1))
-                lbwp1 = interpolate_field_derivative(ForceFreeStates_results, lpsi, resnum, resnum)
-                rbwp1 = interpolate_field_derivative(ForceFreeStates_results, rpsi, resnum, resnum)
-            end
-
-            # Compute Delta' (tearing stability parameter)
-            delta_prime_val = (rbwp1 - lbwp1) / (twopi * chi1)
-            state.delta_prime[n_idx, s] = delta_prime_val
-
-            # Compute resonant current
-            j_c = compute_current_density(equil, sing_surf.psifac)
-            delcurs = (rbwp1 - lbwp1) * j_c * im / (twopi * m_res)
-            resonant_current_val = -delcurs / im
-            state.resonant_current[n_idx, s] = resonant_current_val
-
-            # Compute singular flux from current using surface inductance
-            singflx_mn = compute_singular_flux(
-                resonant_current_val,
-                vac_data,
-                ffs_intr,
-                intr,
-                sing_surf,
-                resnum,
-                nn
-            )
-
-            # Compute island half-width squared
-            shear = sing_surf.q1 * sing_surf.psifac / sing_surf.q
-            if abs(shear) > 1e-10
-                state.island_width_sq[n_idx, s] = 4.0 * singflx_mn / (twopi * shear * sing_surf.q * chi1)
-            else
-                state.island_width_sq[n_idx, s] = 0.0 + 0.0im
-            end
-
-            # Get interpolated field at resonant surface
-            interpbwn = interpolate_field_at_surface(ForceFreeStates_results, respsi, resnum, resnum, equil, m_res, nn)
-
-            # Normalize by surface area
-            area = compute_surface_area(equil, sing_surf.psifac)
-            state.penetrated_field[n_idx, s] = interpbwn / area
-            state.resonant_flux[n_idx, s] = singflx_mn / area
-
-            if ctrl.verbose && n_idx == 1 && s == 1
-                @info "Surface 1: q = $(@sprintf("%.3f", sing_surf.q)), ψ = $(@sprintf("%.3f", sing_surf.psifac)), m = $m_res, n = $nn, Δ' = $(@sprintf("%.3e", real(delta_prime_val)))"
-            end
+            abs(m_res_float - m_res) > 1e-6 && continue
+            (m_res < ffs_intr.mlow || m_res > ffs_intr.mhigh) && continue
+            push!(resonant_pairs, (s, nn))
         end
     end
 
-    # Post-processing: Compute diagnostic quantities
-    compute_island_diagnostics!(state, ffs_intr, equil, chi1, twopi)
+    n_rational = length(resonant_pairs)
+    if n_rational == 0
+        ctrl.verbose && @info "No resonant surfaces found. Skipping singular coupling."
+        return
+    end
+
+    ctrl.verbose && @info "Found $n_rational resonant (surface, n) pairs"
+
+    # Phase 2: Allocate output arrays
+    state.C_resonant_flux      = zeros(ComplexF64, n_rational, numpert_total)
+    state.C_resonant_current   = zeros(ComplexF64, n_rational, numpert_total)
+    state.C_island_width_sq    = zeros(ComplexF64, n_rational, numpert_total)
+    state.C_penetrated_field   = zeros(ComplexF64, n_rational, numpert_total)
+    state.C_delta_prime        = zeros(ComplexF64, n_rational, numpert_total)
+    state.rational_psi         = zeros(Float64, n_rational)
+    state.rational_q           = zeros(Float64, n_rational)
+    state.rational_m_res       = zeros(Int, n_rational)
+    state.rational_n           = zeros(Int, n_rational)
+    state.rational_surface_idx = zeros(Int, n_rational)
+
+    # Precompute ODE coefficient matrix C_coeffs for all PE forcing modes.
+    # For each forcing mode k: c_k = u_bnd⁻¹ × edge_mn_k
+    # where edge_mn_k[j] = plasma_response[j,k] / (chi1·singfac_lim[j]·2πi)
+    # Matches Fortran gpout_resp: edge_mn = foutmn/(chi1·singfac·twopi·ifac)
+    psi_lim = ForceFreeStates_results.psi_store[ForceFreeStates_results.step]
+    q_lim   = equil.profiles.q_spline(psi_lim)
+    singfac_lim = [intr.m_modes[j] - intr.n_modes[j] * q_lim for j in 1:numpert_total]
+    u_bnd   = ForceFreeStates_results.u_store[:, :, 1, ForceFreeStates_results.step]
+    # Divide each row j by singfac_lim[j] — reshape to column vector so Julia broadcasts row-wise, not column-wise.
+    edge_mn = intr.plasma_response ./ (chi1 * 2π * im .* reshape(singfac_lim, :, 1))
+    C_coeffs = u_bnd \ edge_mn  # mpert × numpert_total
+
+    # Phase 3: Compute full coupling matrix rows
+    psi_store_all = ForceFreeStates_results.psi_store
+    nstep = ForceFreeStates_results.step
+    for (row, (s, nn)) in enumerate(resonant_pairs)
+        sing_surf = ffs_intr.sing[s]
+        m_res = round(Int, sing_surf.q * nn)
+
+        resnum = findfirst(j -> intr.m_modes[j] == m_res && intr.n_modes[j] == nn, 1:numpert_total)
+        if resnum === nothing
+            @warn "Could not find index for resonant mode (m=$m_res, n=$nn)" maxlog=1
+            continue
+        end
+
+        # Compute Green's functions at this surface for this n (once per pair)
+        vac_input = Vacuum.VacuumInput(equil, sing_surf.psifac, mtheta, 1, mpert, mlow, 1, nn)
+        _, grri_raw, grre_raw, _, _ = Vacuum.compute_vacuum_response(vac_input, wall_settings; green_only=true)
+        grri = Matrix{Float64}(grri_raw)
+        grre = Matrix{Float64}(grre_raw)
+        ffs_intr.sing[s].grri = grri
+        ffs_intr.sing[s].grre = grre
+
+        # Get ν on the vacuum theta grid (same ν used in the vacuum Fourier basis computation)
+        ν_vac = Vacuum.PlasmaGeometry(vac_input).ν
+
+        # Precompute L_surf; only the (m_res, m_res) diagonal element is needed for singflx
+        L_surf = compute_surface_inductance_from_greens(grri, grre, ffs_intr, nn, ν_vac)
+        m_idx = m_res - mlow + 1
+        L_mm = L_surf[m_idx, m_idx]
+
+        j_c   = compute_current_density(equil, sing_surf.psifac)
+        area  = compute_surface_area(equil, sing_surf.psifac)
+        # Matches Fortran gpout_resp: shear = m*dq/dψ / q² = n*dq/dψ / q (since m=n*q).
+        # Uses abs(nn) because island_half_width = sqrt(abs(island_width_sq)), so the sign
+        # of shear only affects the sign of C_island_width_sq, not the physical island width.
+        shear = abs(nn) * sing_surf.q1 / sing_surf.q
+
+        # Evaluate bwp1_mn = ∂b^ψ/∂ψ at lpsi and rpsi using permeability-weighted eigenstates.
+        # Matches Fortran gpout_resp: evaluate bwp1_mn at lpsi/rpsi via gpeq_sol
+        # spot = 5e-4 matches Fortran default singfac_min
+        spot_psi = 5e-4 / (abs(nn) * abs(sing_surf.q1))
+        lpsi = sing_surf.psifac - spot_psi
+        rpsi = sing_surf.psifac + spot_psi
+
+        # Interpolate u and du/dψ at lpsi and rpsi using stored ODE solution.
+        # Value (u): Hermite cubic using ud_store for smoother interpolation than linear.
+        # Derivative (ud): chord slope from u_store only — see comment below.
+        il_l, ir_l, _ = _psi_bracket(psi_store_all, lpsi, nstep)
+        il_r, ir_r, _ = _psi_bracket(psi_store_all, rpsi, nstep)
+
+        u_node  = ForceFreeStates_results.u_store
+        ud_node = ForceFreeStates_results.ud_store
+        ua_l = u_node[ resnum, :, 1, il_l];  ub_l = u_node[ resnum, :, 1, ir_l]
+        ua_r = u_node[ resnum, :, 1, il_r];  ub_r = u_node[ resnum, :, 1, ir_r]
+        dua_l = ud_node[resnum, :, 1, il_l]; dub_l = ud_node[resnum, :, 1, ir_l]
+        dua_r = ud_node[resnum, :, 1, il_r]; dub_r = ud_node[resnum, :, 1, ir_r]
+
+        psi_il_l = psi_store_all[il_l];  psi_ir_l = psi_store_all[ir_l]
+        psi_il_r = psi_store_all[il_r];  psi_ir_r = psi_store_all[ir_r]
+
+        u_l  = _hermite_cubic_val(ua_l, ub_l, dua_l, dub_l, psi_il_l, psi_ir_l, lpsi)
+        u_r  = _hermite_cubic_val(ua_r, ub_r, dua_r, dub_r, psi_il_r, psi_ir_r, rpsi)
+        # Derivative (ud): chord slope from u_store only — ud_store can be systematically off near
+        # outer surfaces (q=4/5) where the ODE solution varies rapidly; near-cancellation in bwp1
+        # then amplifies even a ~10% ud_store error into a large Delta' error. Chord slope avoids
+        # this by using only u values, which are accurately stored by the ODE integrator.
+        ud_l = (ub_l .- ua_l) ./ (psi_ir_l - psi_il_l)
+        ud_r = (ub_r .- ua_r) ./ (psi_ir_r - psi_il_r)
+
+        q_l = equil.profiles.q_spline(lpsi);  q1_l = equil.profiles.q_deriv(lpsi)
+        q_r = equil.profiles.q_spline(rpsi);  q1_r = equil.profiles.q_deriv(rpsi)
+        singfac_l = m_res - nn * q_l
+        singfac_r = m_res - nn * q_r
+
+        jump_vec = Vector{ComplexF64}(undef, numpert_total)
+        for k in 1:numpert_total
+            ck    = @view C_coeffs[:, k]
+            xsp_l  = dot(u_l,  ck);  xsp1_l = dot(ud_l, ck)
+            xsp_r  = dot(u_r,  ck);  xsp1_r = dot(ud_r, ck)
+            bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
+            bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
+            jump_vec[k] = bwp1_r - bwp1_l
+            # C_penetrated_field: midpoint of b^ψ at lpsi/rpsi divided by area.
+            # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi
+            b_l = chi1 * singfac_l * 2π * im * xsp_l
+            b_r = chi1 * singfac_r * 2π * im * xsp_r
+            state.C_penetrated_field[row, k] = (b_l + b_r) / 2 / area
+        end
+
+        state.C_delta_prime[row, :]      = jump_vec ./ (twopi * chi1)
+        state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
+        # Matches Fortran gpout_resp: singflx = L·fkaxmn, singbnoflxs = singflx/area,
+        # islandhwids = 4·singflx/(2π·shear·q·chi1)
+        singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
+        state.C_resonant_flux[row, :] = singflx_pre ./ area
+        if abs(shear) > 1e-10
+            state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
+        end
+
+        state.rational_psi[row]          = sing_surf.psifac
+        state.rational_q[row]            = sing_surf.q
+        state.rational_m_res[row]        = m_res
+        state.rational_n[row]            = nn
+        state.rational_surface_idx[row]  = s
+
+        if ctrl.verbose
+            dp_diag = real(state.C_delta_prime[row, resnum])
+            @info "Row $row: q=$(@sprintf("%.3f", sing_surf.q)), ψ=$(@sprintf("%.3f", sing_surf.psifac)), m=$m_res, n=$nn, Δ'(diag)=$(@sprintf("%.3e", dp_diag))"
+        end
+    end
+
+    # Phase 4: Apply forcing amplitudes → R = C · amp_vec
+    amp_vec = zeros(ComplexF64, numpert_total)
+    for mode in intr.forcing_modes
+        j = findfirst(k -> intr.m_modes[k] == mode.m && intr.n_modes[k] == mode.n, 1:numpert_total)
+        isnothing(j) || (amp_vec[j] = mode.amplitude)
+    end
+
+    state.resonant_flux    = state.C_resonant_flux    * amp_vec
+    state.resonant_current = state.C_resonant_current * amp_vec
+    state.island_width_sq  = state.C_island_width_sq  * amp_vec
+    state.penetrated_field = state.C_penetrated_field * amp_vec
+    state.delta_prime      = state.C_delta_prime      * amp_vec
+
+    # Phase 5: Island diagnostics from applied resonant vectors
+    compute_island_diagnostics!(state, n_rational)
 
     if ctrl.verbose
-        max_island_width = maximum(abs.(state.island_half_width))
-        max_delta_prime = maximum(abs.(real.(state.delta_prime)))
-        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island_width)), max Δ' = $(@sprintf("%.3e", max_delta_prime))"
+        max_island = isempty(state.island_half_width) ? 0.0 : maximum(state.island_half_width)
+        max_dp     = isempty(state.delta_prime)       ? 0.0 : maximum(abs.(real.(state.delta_prime)))
+        @info "Singular coupling complete. Max island half-width = $(@sprintf("%.3e", max_island)), max |Δ'| = $(@sprintf("%.3e", max_dp))"
     end
 end
 
@@ -334,13 +376,78 @@ function interpolate_field_at_surface(
     q = equil.profiles.q_spline(psi)
 
     # Convert displacement to field using ideal MHD relation
-    # b^ψ = i * χ₁ * (m - n*q) * ξ_ψ (from FieldReconstruction.jl line 304)
+    # b^ψ = χ₁·(m - n·q)·2πi·ξ_ψ [Park 2007 eq. 8]
     chi1 = 2π * equil.psio
     twopi = 2π
     singfac = m_mode - n_mode * q
     b_psi = chi1 * singfac * twopi * im * xi_psi
 
     return b_psi
+end
+
+"""
+    compute_bwp1_mn(
+        ForceFreeStates_results::OdeState,
+        psi::Float64,
+        mode_idx::Int,
+        forcing_idx::Int,
+        equil::Equilibrium.PlasmaEquilibrium,
+        n_mode::Int,
+        m_mode::Int
+    )::ComplexF64
+
+Compute `∂b^ψ/∂ψ` at arbitrary flux surface for a given mode.
+
+Implements Fortran GPEC's `bwp1_mn` formula from `gpeq_sol`:
+
+    bwp1_mn = 2πi·χ₁·(singfac·∂ξ_ψ/∂ψ − n·q'·ξ_ψ)
+
+where:
+- `ξ_ψ` = displacement (u_store[:, :, 1, :])
+- `∂ξ_ψ/∂ψ` = displacement derivative (ud_store[:, :, 1, :])
+- `singfac = m − n·q(ψ)`
+- `q'` = dq/dψ
+
+This is used in the delta-prime calculation: the jump
+`bwp1_mn(rpsi) - bwp1_mn(lpsi)` normalized by `2π·χ₁` gives Δ'.
+"""
+function compute_bwp1_mn(
+    ForceFreeStates_results::OdeState,
+    psi::Float64,
+    mode_idx::Int,
+    forcing_idx::Int,
+    equil::Equilibrium.PlasmaEquilibrium,
+    n_mode::Int,
+    m_mode::Int
+)::ComplexF64
+    psi_store = ForceFreeStates_results.psi_store[1:ForceFreeStates_results.step]
+    idx_right = findfirst(p -> p >= psi, psi_store)
+
+    if idx_right === nothing
+        idx_left  = ForceFreeStates_results.step - 1
+        idx_right = ForceFreeStates_results.step
+    elseif idx_right == 1
+        idx_left  = 1
+        idx_right = 2
+    else
+        idx_left = idx_right - 1
+    end
+
+    psi_left  = psi_store[idx_left]
+    psi_right = psi_store[idx_right]
+    weight    = (psi - psi_left) / (psi_right - psi_left)
+
+    xsp  = (1.0 - weight) * ForceFreeStates_results.u_store[ mode_idx, forcing_idx, 1, idx_left] +
+                   weight  * ForceFreeStates_results.u_store[ mode_idx, forcing_idx, 1, idx_right]
+    xsp1 = (1.0 - weight) * ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_left] +
+                   weight  * ForceFreeStates_results.ud_store[mode_idx, forcing_idx, 1, idx_right]
+
+    chi1    = 2π * equil.psio
+    q       = equil.profiles.q_spline(psi)
+    q1      = equil.profiles.q_deriv(psi)
+    singfac = m_mode - n_mode * q
+
+    return 2π * im * chi1 * (singfac * xsp1 - n_mode * q1 * xsp)
 end
 
 """
@@ -351,7 +458,7 @@ end
 
 Compute effective current density coefficient at given flux surface.
 
-Implements GPEC's j_c calculation (gpout.f line 560-578):
+Implements GPEC's j_c calculation (Fortran `gpout_respinfo`):
 j_c = χ₁² * q / (μ₀ * integral)
 
 where the integral is computed via flux surface integration:
@@ -382,7 +489,7 @@ from the equilibrium bicubic spline (rzphi). The integrand includes:
 
   - jac: Jacobian of flux coordinates
   - |∇ψ|: Flux gradient magnitude (delpsi)
-  - sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)²
+  - sqreqb: Magnetic field quantity (F² + χ₁²|∇ψ|²)/(2πR)² where F = R·B_tor
 """
 function compute_current_density(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -394,16 +501,14 @@ function compute_current_density(
     twopi = 2π
 
     # Get equilibrium quantities at this surface
-    F_tor = equil.profiles.F_spline(psi)  # Toroidal field function F = R*B_tor times 2π
+    F_tor = equil.profiles.F_spline(psi)  # Toroidal field function (2π·R·B_tor in GPEC convention)
     q = equil.profiles.q_spline(psi)      # Safety factor
 
-    # Magnetic axis location
     ro = equil.ro
-    zo = equil.zo
 
     # Number of theta points for integration
     # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
-    mthsurf = length(equil.rzphi_xs) - 1
+    mthsurf = length(equil.rzphi_ys) - 1
 
     # Integrate around flux surface using trapezoidal rule
     integral = 0.0
@@ -442,8 +547,7 @@ function compute_current_density(
         # Flux gradient magnitude |∇ψ|
         delpsi = sqrt(w11^2 + w12^2)
 
-        # Magnetic field quantity: sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²
-        # F is toroidal field function (already includes factor of 2π from sq)
+        # sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²  where F = R·B_tor (Fortran sq%f(1))
         sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * r)^2
 
         # Integrand function
@@ -513,119 +617,93 @@ end
         grri::Matrix{Float64},
         grre::Matrix{Float64},
         ffs_intr::ForceFreeStatesInternal,
-        intr::PerturbedEquilibriumInternal
+        nn::Int,
+        ν::Vector{Float64}
     )::Matrix{ComplexF64}
 
 Compute surface inductance matrix from Green's functions at flux surface.
 
-This implements the full GPEC gpvacuum_flxsurf algorithm (gpvacuum.f line 299-331):
+Implements the GPEC `gpvacuum_flxsurf` algorithm.
 
- 1. For each mode, apply Green's functions to unit flux
- 2. Compute surface current from potential jump: kax = (chi - che) / μ₀
- 3. Fourier transform to mode space
- 4. Return inductance: L_surf = flux * inv(current)
+The Julia vacuum code uses SFL Fourier basis `cos(m*θ - n*ν)` in the column transform,
+so the row DFT must apply the matching toroidal phase correction `exp(-i*n*ν)` before
+the DFT (matching Fortran `gpvacuum_flxsurf`'s `EXP(-ifac*nn*dphi)` phase correction).
 
 ## Arguments
 
-  - `grri`: Interior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
-  - `grre`: Exterior Green's function [2*mtheta, 2*mpert] (stored in sing_surf)
+  - `grri`: Interior Green's function [2*mtheta, 2*mpert] (GROUPED: cos cols 1:mpert, sin cols mpert+1:2*mpert)
+  - `grre`: Exterior Green's function [2*mtheta, 2*mpert]
   - `ffs_intr`: ForceFreeStates internal state
-  - `intr`: PerturbedEquilibrium internal state with mode arrays
+  - `nn`: Toroidal mode number
+  - `ν`: Toroidal angle offset on the vacuum theta grid [mtheta]
 
 ## Returns
 
-Surface inductance matrix [numpert_total, numpert_total]
-
-## GPEC Reference
-
-```fortran
-DO i=1,mpert
-   vbwp_mn=0; vbwp_mn(i)=1.0
-   chi_fun = grri * vbwp_mn
-   che_fun = grre * vbwp_mn
-   kax_fun = (chi_fun - che_fun) / mu0
-   CALL iscdftf(mfac, mpert, kax_fun, mthsurf, fkaxmats(:,i))
-ENDDO
-fsurf_indmats = fflxmats * inv(fkaxmats)
-```
+Surface inductance matrix [mpert × mpert]
 """
 @with_pool pool function compute_surface_inductance_from_greens(
     grri::Matrix{Float64},
     grre::Matrix{Float64},
     ffs_intr::ForceFreeStatesInternal,
-    intr::PerturbedEquilibriumInternal
+    nn::Int,
+    ν::Vector{Float64},
 )::Matrix{ComplexF64}
     mpert = ffs_intr.mpert
     mtheta = size(grri, 1) ÷ 2
-
-    # Physical constant
     μ₀ = 4π * 1e-7
 
-    # Create Fourier transform object
     ft = FourierTransforms.FourierTransform(mtheta, mpert, ffs_intr.mlow)
 
-    # Initialize matrices (mpert x mpert for single toroidal mode number)
-    # Green's functions are computed for a specific n, so inductance is only over poloidal modes
-    flux_matrix = zeros!(pool, ComplexF64, mpert, mpert)
+    flux_matrix    = zeros!(pool, ComplexF64, mpert, mpert)
     current_matrix = zeros!(pool, ComplexF64, mpert, mpert)
 
-    # Pre-allocate loop buffers from pool
-    vbwp_mn = zeros!(pool, ComplexF64, mpert)
-    chi_theta = zeros!(pool, Float64, mtheta)
-    che_theta = zeros!(pool, Float64, mtheta)
-    kax_theta = zeros!(pool, Float64, mtheta)
+    grri_surf = @view grri[1:mtheta, :]
+    grre_surf = @view grre[1:mtheta, :]
 
-    # For each poloidal mode, compute surface current from Green's functions
+    kax_re = zeros!(pool, Float64, mtheta)
+    kax_im = zeros!(pool, Float64, mtheta)
+
+    # Toroidal phase correction: exp(-i*n*ν) matching Fortran gpvacuum_flxsurf
+    # EXP(-ifac*nn*dphi). Precompute since it's the same for all modes.
+    cos_nν = cos.(nn .* ν)
+    sin_nν = sin.(nn .* ν)
+
     for i in 1:mpert
-        # Unit flux for mode i
-        vbwp_mn .= 0.0
-        vbwp_mn[i] = 1.0
+        flux_matrix[i, i] = 1.0
 
-        # Apply Green's functions using same approach as ResponseMatrices.jl
-        apply_green_function!(chi_theta, grri, vbwp_mn)
-        apply_green_function!(che_theta, grre, vbwp_mn)
+        for k in 1:mtheta
+            kax_re[k] = (grri_surf[k, i]        + grre_surf[k, i])        / (μ₀ * (2π)^2)
+            kax_im[k] = (grri_surf[k, mpert+i]  + grre_surf[k, mpert+i])  / (μ₀ * (2π)^2)
+        end
 
-        # Surface current from potential jump
-        @. kax_theta = (chi_theta - che_theta) / μ₀
+        # Apply exp(-i*n*ν): (kax_re - i*kax_im)*(cos(nν) - i*sin(nν))
+        kax_re_corr = kax_re .* cos_nν .- kax_im .* sin_nν
+        kax_im_corr = kax_re .* sin_nν .+ kax_im .* cos_nν
 
-        # Transform back to Fourier mode space
-        kax_modes = ft(kax_theta)
-
-        # Store in matrices
-        flux_matrix[:, i] = vbwp_mn
-        current_matrix[:, i] = kax_modes
+        current_matrix[:, i] = ft(kax_re_corr) .- im .* ft(kax_im_corr)
     end
 
-    # Compute surface inductance: L_surf = flux * inv(current)
-    # Initialize L_surf outside try-catch for scoping
+    # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
     L_surf = zeros(ComplexF64, mpert, mpert)
 
-    # Check matrix condition before inversion
     current_mag = maximum(abs.(current_matrix))
-    current_min = minimum(abs.(current_matrix[abs.(current_matrix) .> 1e-15]))
 
     if current_mag < 1e-15
         @warn "Current matrix is all zeros! Cannot compute surface inductance." maxlog=1
-        @warn "  This indicates grri and grre are identical or Green's functions failed." maxlog=1
-        # Fallback: diagonal approximation
         for i in 1:mpert
             L_surf[i, i] = μ₀ * 1e-6
         end
     else
         try
-            # Regularization for numerical stability
             regularization = 1e-12 * current_mag
             current_reg = current_matrix + regularization * I
 
             L_surf = flux_matrix * inv(current_reg)
 
-            # Hermitianize
+            # Hermitianize (matches Fortran: temp1 = 0.5*(temp1 + CONJG(TRANSPOSE(temp1))))
             L_surf = 0.5 * (L_surf + L_surf')
         catch e
             @warn "Surface inductance inversion failed: $e" maxlog=1
-            @warn "  Current matrix magnitude: $current_mag, min non-zero: $current_min" maxlog=1
-            @warn "  Check if Green's functions are computed correctly." maxlog=1
-            # Fallback: diagonal approximation
             for i in 1:mpert
                 L_surf[i, i] = μ₀ * 1e-6
             end
@@ -636,79 +714,6 @@ fsurf_indmats = fflxmats * inv(fkaxmats)
 end
 
 """
-    compute_singular_flux(
-        current::ComplexF64,
-        vac_data::VacuumData,
-        ffs_intr::ForceFreeStatesInternal,
-        intr::PerturbedEquilibriumInternal,
-        sing_surf::ForceFreeStates.SingType,
-        mode_idx::Int,
-        nn::Int
-    )::ComplexF64
-
-Compute singular flux from resonant current using surface inductance.
-
-Uses surface inductance matrix at the singular surface:
-Φ = L_surf * I
-
-where L_surf is computed from Green's functions stored in sing_surf.
-
-## GPEC Formula
-
-```fortran
-fkaxmn(resnum) = singcurs(ising,i) / (twopi*nn)
-singflx_mn = MATMUL(fsurfindmats(ising,:,:), fkaxmn)
-```
-
-## Implementation
-
-Uses surface inductance matrix computed from pre-stored Green's functions.
-The Green's functions (grri, grre) are calculated at each singular surface
-during initialization and stored in the sing_surf struct for efficiency.
-"""
-function compute_singular_flux(
-    current::ComplexF64,
-    vac_data::VacuumData,
-    ffs_intr::ForceFreeStatesInternal,
-    intr::PerturbedEquilibriumInternal,
-    sing_surf::ForceFreeStates.SingType,
-    mode_idx::Int,
-    nn::Int
-)::ComplexF64
-    if abs(nn) == 0
-        return 0.0 + 0.0im
-    end
-
-    # Get mode numbers for this index
-    mpert = ffs_intr.mpert
-    mlow = ffs_intr.mlow
-    m_mode = intr.m_modes[mode_idx]
-
-    # Poloidal mode index within mpert range
-    m_idx = m_mode - mlow + 1
-
-    # Build current vector (size mpert for single toroidal mode)
-    # L_surf is mpert x mpert since Green's functions are for single n
-    current_vector = zeros(ComplexF64, mpert)
-    current_vector[m_idx] = current / (2π * nn)
-
-    # Compute surface inductance from stored Green's functions
-    # These were pre-computed at the singular surface location
-    L_surf = compute_surface_inductance_from_greens(
-        sing_surf.grri,
-        sing_surf.grre,
-        ffs_intr,
-        intr
-    )
-
-    # Compute flux: Φ = L * I
-    flux_vector = L_surf * current_vector
-
-    # Return flux at resonant mode
-    return flux_vector[m_idx]
-end
-
-"""
     compute_surface_area(
         equil::Equilibrium.PlasmaEquilibrium,
         psi::Float64
@@ -716,7 +721,7 @@ end
 
 Compute flux surface area at given ψ.
 
-Implements GPEC's area calculation (gpout.f line 568):
+Implements GPEC's area calculation (Fortran `gpout_respinfo`):
 area = ∫ jac * |∇ψ| dθ
 
 where the integral is computed around the flux surface.
@@ -752,10 +757,9 @@ function compute_surface_area(
 
     # Magnetic axis location
     ro = equil.ro
-    zo = equil.zo
 
     # Number of theta points for integration
-    mthsurf = length(equil.rzphi_xs) - 1
+    mthsurf = length(equil.rzphi_ys) - 1
 
     # Integrate around flux surface using trapezoidal rule
     area = 0.0
@@ -809,60 +813,31 @@ function compute_surface_area(
 end
 
 """
-    compute_island_diagnostics!(
-        state::PerturbedEquilibriumState,
-        ffs_intr::ForceFreeStatesInternal,
-        equil::Equilibrium.PlasmaEquilibrium,
-        chi1::Float64,
-        twopi::Float64
-    )
+    compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rational::Int)
 
-Compute island half-width and Chirikov parameter for each singular surface.
+Compute island half-width and Chirikov parameter from applied resonant vectors.
 
-Uses the resonant flux and island_width_sq from singular coupling calculation.
+  - `island_half_width[row]` = √|island_width_sq[row]|
+  - `chirikov_parameter[row]` = half-width / (half-distance to nearest neighbor in rational_psi)
 """
-function compute_island_diagnostics!(
-    state::PerturbedEquilibriumState,
-    ffs_intr::ForceFreeStatesInternal,
-    equil::Equilibrium.PlasmaEquilibrium,
-    chi1::Float64,
-    twopi::Float64
-)
-    msing = ffs_intr.msing
+function compute_island_diagnostics!(state::PerturbedEquilibriumState, n_rational::Int)
+    state.island_half_width  = sqrt.(abs.(state.island_width_sq))
+    state.chirikov_parameter = zeros(Float64, n_rational)
 
-    # Compute island half-width for each singular surface
-    # Take maximum over all toroidal modes n
-    for s in 1:msing
-        sing_surf = ffs_intr.sing[s]
+    n_rational <= 1 && return
 
-        # Island half-width: w/2 = √|island_width_sq|
-        # Array is [npert, msing], so index with [:, s] to get all n for this surface
-        max_island_sq = maximum(abs.(state.island_width_sq[:, s]))
-        state.island_half_width[s] = sqrt(abs(max_island_sq))
-
-        # Compute Chirikov parameter: overlap = w/2 / distance_to_nearest_surface
-        # Find distance to nearest singular surface
-        if msing > 1
-            distances = Float64[]
-            for s2 in 1:msing
-                if s2 != s
-                    dist = abs(ffs_intr.sing[s].psifac - ffs_intr.sing[s2].psifac)
-                    push!(distances, dist)
-                end
-            end
-
-            if !isempty(distances)
-                hdist = minimum(distances) / 2.0  # Half-distance
-                if hdist > 1e-10
-                    state.chirikov_parameter[s] = state.island_half_width[s] / hdist
-                else
-                    state.chirikov_parameter[s] = Inf
-                end
-            else
-                state.chirikov_parameter[s] = 0.0
-            end
+    for row in 1:n_rational
+        psi_row  = state.rational_psi[row]
+        min_dist = Inf
+        for row2 in 1:n_rational
+            row2 == row && continue
+            dist = abs(state.rational_psi[row2] - psi_row)
+            min_dist = min(min_dist, dist)
+        end
+        if min_dist > 1e-10
+            state.chirikov_parameter[row] = state.island_half_width[row] / (min_dist / 2.0)
         else
-            state.chirikov_parameter[s] = 0.0
+            state.chirikov_parameter[row] = Inf
         end
     end
 end

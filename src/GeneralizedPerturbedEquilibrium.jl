@@ -326,9 +326,15 @@ function main(args::Vector{String}=String[])
     if "PerturbedEquilibrium" in keys(inputs)
         # Read ForcingTerms control parameters
         if "ForcingTerms" in keys(inputs)
+            forcing_raw = inputs["ForcingTerms"]
+            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
+            # kwarg splatting and handled separately via coil_sets_raw field
+            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
             ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForcingTerms"])...
+                (Symbol(k) => v for (k, v) in scalar_forcing)...
             )
+            ft_ctrl.coil_sets_raw = coil_sets_raw
         else
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end
@@ -341,14 +347,15 @@ function main(args::Vector{String}=String[])
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr
+            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
+            metric, ffit
         )
 
         # Write perturbed equilibrium outputs to same HDF5 file
         if pe_ctrl.write_outputs_to_HDF5
             output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
             PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
+                pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
             @info "Results written to $output_file"
         end

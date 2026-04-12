@@ -79,6 +79,7 @@ function read_efit(config::EquilibriumConfig)
     end
 
     fpol_data = parse_block(nw)
+    fpol_sign = Int(sign(fpol_data[end]))  # sign of toroidal field (before abs is applied below)
     pres_data = parse_block(nw)
     ffprime_data = parse_block(nw)
     pprime_data = parse_block(nw)
@@ -118,7 +119,7 @@ function read_efit(config::EquilibriumConfig)
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; extrap=ExtendExtrap())
 
     # --- Bundle everything for the solver ---
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign)
 end
 
 

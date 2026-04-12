@@ -302,6 +302,11 @@ function cross_ideal_singular_surf!(
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
+    # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
+    # The previous sing_der! calls (lines above) computed du from the pre-trapezoidal,
+    # pre-asymptotic u, leaving odet.ud stale after the u modifications.
+    sing_der!(du1, odet.u, params, odet.psifac)
+
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
     odet.q_store[odet.step] = odet.q
@@ -358,6 +363,7 @@ function integrate_el_region!(
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
+    du_buffer = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
     function segment_callback!(integrator)
         ctrl, _, _, intr, odet, chunk = integrator.p
@@ -367,6 +373,12 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
+        # If Gaussian reduction modified u, recompute ud to keep it consistent.
+        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
+        if odet.new
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+        end
+
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -375,7 +387,7 @@ function integrate_el_region!(
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
-        if near_start || near_end || (odet.step % ctrl.save_interval == 0) || in_edge_scan
+        if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end

@@ -704,7 +704,9 @@ robustness.
     geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
 
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles, geometry,
+    params = EquilibriumParameters()
+    params.bt_sign = raw_profile.bt_sign
+    return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,

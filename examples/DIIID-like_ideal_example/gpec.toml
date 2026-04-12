@@ -65,6 +65,7 @@ compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
 
 # [KineticForces]
 # fgar_flag = true                      # Full general-aspect-ratio NTV calculation
