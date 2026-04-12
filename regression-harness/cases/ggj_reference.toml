@@ -10,6 +10,7 @@ type = "real_scalar"
 extract = "value"
 label = "Re(Δ_odd)"
 noise_threshold = 1e-10
+order = 10
 
 [quantities.delta_odd_imag]
 h5path = "ggj/delta_odd_imag"
@@ -17,6 +18,7 @@ type = "real_scalar"
 extract = "value"
 label = "Im(Δ_odd)"
 noise_threshold = 1e-10
+order = 11
 
 [quantities.delta_even_real]
 h5path = "ggj/delta_even_real"
@@ -24,6 +26,7 @@ type = "real_scalar"
 extract = "value"
 label = "Re(Δ_even)"
 noise_threshold = 1e-10
+order = 12
 
 [quantities.delta_even_imag]
 h5path = "ggj/delta_even_imag"
@@ -31,6 +34,7 @@ type = "real_scalar"
 extract = "value"
 label = "Im(Δ_even)"
 noise_threshold = 1e-10
+order = 13
 
 [quantities.runtime]
 h5path = ""
@@ -38,3 +42,4 @@ type = "runtime"
 extract = "value"
 label = "Runtime (s)"
 noise_threshold = 0.0
+order = 90

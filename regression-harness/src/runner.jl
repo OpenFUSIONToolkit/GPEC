@@ -144,7 +144,10 @@ function run_computed_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::Strin
         else
             sprint(showerror, e)
         end
-        err_msg_short = length(err_msg) > 2000 ? err_msg[1:2000] * "..." : err_msg
+        # Keep the tail of the message: Julia errors usually appear at the end
+        # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
+        # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
+        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed (local computed): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
                          err_msg_short)
@@ -191,7 +194,10 @@ function run_computed_at_commit(db::SQLite.DB, commit_hash::String, ref_name::St
         else
             sprint(showerror, e)
         end
-        err_msg_short = length(err_msg) > 2000 ? err_msg[1:2000] * "..." : err_msg
+        # Keep the tail of the message: Julia errors usually appear at the end
+        # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
+        # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
+        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed (computed) for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
                          commit_info.msg, case_spec.name, err_msg_short)
@@ -263,7 +269,10 @@ function run_local(db::SQLite.DB, case_spec::CaseSpec, repo_root::String;
         else
             sprint(showerror, e)
         end
-        err_msg_short = length(err_msg) > 2000 ? err_msg[1:2000] * "..." : err_msg
+        # Keep the tail of the message: Julia errors usually appear at the end
+        # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
+        # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
+        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed (local): $(first(err_msg_short, 200))"
         store_failed_run(db, LOCAL_REF, "local", date, "working tree", case_spec.name,
                          err_msg_short)
@@ -368,7 +377,10 @@ function run_at_commit(db::SQLite.DB, commit_hash::String, ref_name::String,
             sprint(showerror, e)
         end
         # Truncate for display and storage
-        err_msg_short = length(err_msg) > 2000 ? err_msg[1:2000] * "..." : err_msg
+        # Keep the tail of the message: Julia errors usually appear at the end
+        # of the subprocess output, not the start (Pkg.instantiate output dominates the head).
+        # `last` is unicode-safe and won't split a multibyte char like `err_msg[end-N:end]` could.
+        err_msg_short = length(err_msg) > 2000 ? "..." * last(err_msg, 2000) : err_msg
         @warn "Run failed for $(commit_info.short): $(first(err_msg_short, 200))"
         store_failed_run(db, commit_hash, commit_info.short, commit_info.date,
                          commit_info.msg, case_spec.name, err_msg_short)
