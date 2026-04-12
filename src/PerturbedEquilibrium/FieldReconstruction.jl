@@ -205,7 +205,7 @@ fields from eigenmode solutions in u_store/ud_store, first project to eigenmode 
 
 Then sum eigenmode contributions at each radial point (matches Fortran gpeq_sol):
     xi_psi[ipsi, :]  = u_store[:, :, 1, ipsi]  * alpha   # Ξ_ψ
-    xi_psi1[ipsi, :] = finite_diff(xi_psi, psi)           # dΞ_ψ/dψ (centered FD)
+    xi_psi1[ipsi, :] = ud_store[:, :, 1, ipsi] * alpha   # dΞ_ψ/dψ
     xi_s[ipsi, :]    = ud_store[:, :, 2, ipsi] * alpha   # Ξ_s (toroidal, Glasser 2016 eq. 18)
 
 # Returns
@@ -228,32 +228,22 @@ function sum_eigenmode_contributions(
     alpha = flux_matrix \ response_vector   # [mpert]
 
     xi_psi_modes  = zeros(ComplexF64, npsi, mpert)
+    xi_psi1_modes = zeros(ComplexF64, npsi, mpert)
     xi_s_modes    = zeros(ComplexF64, npsi, mpert)
     for ipsi in 1:npsi
         # u_store[:,:,1] = Ξ_ψ (radial displacement)
         mul!(view(xi_psi_modes, ipsi, :),
              ForceFreeStates_results.u_store[:, :, 1, ipsi],
              alpha)
+        # ud_store[:,:,1] = dΞ_ψ/dψ (radial derivative)
+        mul!(view(xi_psi1_modes, ipsi, :),
+             ForceFreeStates_results.ud_store[:, :, 1, ipsi],
+             alpha)
         # ud_store[:,:,2] = Ξ_s = -A⁻¹(B·Ξ'_ψ + C·Ξ_ψ) (toroidal displacement, Glasser 2016 eq. 18)
         mul!(view(xi_s_modes, ipsi, :),
              ForceFreeStates_results.ud_store[:, :, 2, ipsi],
              alpha)
     end
-
-    # Compute dΞ_ψ/dψ via finite differences of xi_psi_modes instead of using
-    # ud_store[:,:,1] (BS5 cached derivative), which has isolated single-point
-    # spikes from stale FSAL derivative caching.
-    psi = ForceFreeStates_results.psi_store
-    xi_psi1_modes = zeros(ComplexF64, npsi, mpert)
-    # Forward difference at first point
-    xi_psi1_modes[1, :] .= (xi_psi_modes[2, :] .- xi_psi_modes[1, :]) ./ (psi[2] - psi[1])
-    # Centered differences for interior points
-    for i in 2:npsi-1
-        dp = psi[i+1] - psi[i-1]
-        xi_psi1_modes[i, :] .= (xi_psi_modes[i+1, :] .- xi_psi_modes[i-1, :]) ./ dp
-    end
-    # Backward difference at last point
-    xi_psi1_modes[npsi, :] .= (xi_psi_modes[npsi, :] .- xi_psi_modes[npsi-1, :]) ./ (psi[npsi] - psi[npsi-1])
 
     return xi_psi_modes, xi_psi1_modes, xi_s_modes
 end
