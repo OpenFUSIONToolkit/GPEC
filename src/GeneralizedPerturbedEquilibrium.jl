@@ -117,11 +117,6 @@ function main(args::Vector{String}=String[])
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
-    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
-        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
-            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
-        ctrl.psiedge = 1.0
-    end
 
     # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim

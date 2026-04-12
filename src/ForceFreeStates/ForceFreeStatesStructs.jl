@@ -175,8 +175,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim
-  - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
@@ -218,15 +216,13 @@ A mutable struct containing control parameters for stability analysis, set by th
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
-    set_psilim_via_dmlim::Bool = false
-    dmlim::Float64 = 0.2
     sing_order::Int = 2
     qhigh::Float64 = 1e3
     kinetic_source::String = "fixed"
     kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
-    psiedge::Float64 = 1.0
+    psiedge::Float64 = 0.99
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
