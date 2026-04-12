@@ -158,7 +158,7 @@ Local PDF: `docs/resources/2020-Wang-Modeling of resistive plasma response in to
 
 ### Yet to be implemented:
 
-## Park (2022) Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes {#park-2022-parametric-dependencies}
+### Park (2022) Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes {#park-2022-parametric-dependencies}
 
 > J.-K. Park, "Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes,"
 > *Physics of Plasmas* **29**, 072506 (2022).
@@ -169,7 +169,7 @@ Local PDF: `docs/resources/2022-Park-Parametric dependencies of resonant layer r
 
 ---
 
-## Burgess et al. (2026) — Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer {#burgess-2026-tearing-stability-prediction}
+### Burgess et al. (2026) — Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer {#burgess-2026-tearing-stability-prediction}
 
 > A. Burgess et al., "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer,"
 > Preprint (2026).

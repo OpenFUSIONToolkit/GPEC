@@ -8,7 +8,8 @@ function load_case(filepath::String)::CaseSpec
     case_section = data["case"]
     name = case_section["name"]
     description = get(case_section, "description", "")
-    example_dir = case_section["example_dir"]
+    kind = get(case_section, "kind", "gpec_run")
+    example_dir = get(case_section, "example_dir", "")
 
     quantities = QuantitySpec[]
     if haskey(data, "quantities")
@@ -24,7 +25,7 @@ function load_case(filepath::String)::CaseSpec
         end
     end
 
-    return CaseSpec(name, description, example_dir, quantities)
+    return CaseSpec(name, description, example_dir, quantities, kind)
 end
 
 function load_all_cases(cases_dir::String)::Dict{String, CaseSpec}
@@ -54,6 +55,7 @@ function print_cases(cases::Dict{String, CaseSpec})
         c = cases[name]
         nqty = length(c.quantities)
         println("  $(rpad(c.name, 24)) $(rpad(c.description, 40))")
-        println("  $(rpad("", 24)) dir: $(c.example_dir)  ($nqty quantities)")
+        loc = c.kind == "computed" ? "kind: computed" : "dir: $(c.example_dir)"
+        println("  $(rpad("", 24)) $loc  ($nqty quantities)")
     end
 end

@@ -326,7 +326,7 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     ndim = imap  # noexp → ndim = imap (only emap[1] ≤ ndim)
 
     # Bandwidth
-    kl = mpert * (np + 1) + 1 - 1  # resonant method with noexp
+    kl = mpert * (np + 1) + 1 - 1  # resonant method with noexp; +1-1 kept for agreement with Fortran indexing
     ku = kl
     ldab = 2kl + ku + 1
 
@@ -659,29 +659,13 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         end
     end
 
-    # Solve for each parity using LAPACK banded LU (zgbtrf + zgbtrs)
-    n = ws.ndim; kl = ws.kl; ku = kl; ldab = 2kl + ku + 1
-    ipiv = Vector{LinearAlgebra.BlasInt}(undef, n)
+    # Solve for each parity using LAPACK banded LU (gbtrf! + gbtrs!)
+    n = ws.ndim; kl = ws.kl; ku = kl
     for isol in 1:2
         ab = copy(ws.mat[:, :, isol])
         rhs_col = copy(ws.rhs[:, isol])
-        info = Ref{LinearAlgebra.BlasInt}(0)
-        ccall((LinearAlgebra.LAPACK.@blasfunc(zgbtrf_), LinearAlgebra.LAPACK.liblapack), Cvoid,
-              (Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
-               Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
-               Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
-               Ptr{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}),
-              n, n, kl, ku, ab, ldab, ipiv, info)
-        info[] != 0 && error("zgbtrf failed: info=$(info[])")
-        nrhs = Ref{LinearAlgebra.BlasInt}(1)
-        ccall((LinearAlgebra.LAPACK.@blasfunc(zgbtrs_), LinearAlgebra.LAPACK.liblapack), Cvoid,
-              (Ref{UInt8}, Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
-               Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt},
-               Ptr{ComplexF64}, Ref{LinearAlgebra.BlasInt},
-               Ptr{LinearAlgebra.BlasInt}, Ptr{ComplexF64},
-               Ref{LinearAlgebra.BlasInt}, Ref{LinearAlgebra.BlasInt}),
-              UInt8('N'), n, kl, ku, nrhs, ab, ldab, ipiv, rhs_col, n, info)
-        info[] != 0 && error("zgbtrs failed: info=$(info[])")
+        ab, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ab)
+        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ab, ipiv, rhs_col)
         ws.sol[:, isol] .= rhs_col
     end
 end

@@ -16,12 +16,19 @@ end
 
 """
 Specification for a test case: what to run and what to extract.
+
+`kind` selects the runner backend:
+  - "gpec_run"  (default) — run GPEC end-to-end on `example_dir`, extract from `gpec.h5`
+  - "computed"  — run a self-contained Julia computation that writes a small h5
+                  (no `example_dir` required); used for analytic/reference cases
+                  like the GGJ inner-layer benchmark.
 """
 struct CaseSpec
     name::String
     description::String
-    example_dir::String     # Relative to repo root
+    example_dir::String     # Relative to repo root; empty for kind="computed"
     quantities::Vector{QuantitySpec}
+    kind::String
 end
 
 """

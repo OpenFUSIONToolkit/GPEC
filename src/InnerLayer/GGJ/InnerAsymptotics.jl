@@ -144,6 +144,7 @@ function _build_tjmat(p::GGJParameters, Q::ComplexF64)
     A2[5, 1] = h / q2
     A2[6, 1] = -h * k * q
 
+    # Freeze A_i and build J_i = T^{-1} A_i T.
     A0s = SMatrix{6,6,ComplexF64}(A0)
     A1s = SMatrix{6,6,ComplexF64}(A1)
     A2s = SMatrix{6,6,ComplexF64}(A2)
@@ -584,9 +585,6 @@ function asymptotic_residual(cache::InnerAsymptoticsCache, x::Real)
     if cache.kmax > 1
         M = M + xfac * xfac * cache.J[3]
     end
-
-    rhs = x * (M * U)            # 6×2
-    residual = dU + rhs          # dU - (-rhs) ... actually dU - x*M*U; here matvec[2] = -x*M*ua, sum
 
     # Match the Fortran convention: matvec(:,:,1) = dU; matvec(:,:,2) = -x*M*U;
     # matvec(:,:,0) = sum. delta(j) = ||matvec(:,j,0)||∞ / max(||matvec(:,j,1)||∞, ||matvec(:,j,2)||∞).

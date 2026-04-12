@@ -23,8 +23,8 @@ import ..InnerLayerModel, ..solve_inner
     GGJModel{S} <: InnerLayerModel
 
 Glasser–Greene–Johnson resistive inner-layer model. The type parameter `S`
-selects the solver: `:shooting` (default) for the backward stable-shoot
-solver and `:galerkin` for the Hermite-cubic finite element solver. Both
+selects the solver: `:galerkin` (default) for the Hermite-cubic finite element 
+solver and `:shooting` for the backward stable-shoot solver. Both
 implementations consume the same `inps` asymptotic-basis kernel and return
 the parity-projected matching data.
 """

@@ -1,0 +1,40 @@
+[case]
+name = "ggj_reference"
+description = "GGJ inner-layer Galerkin solver, Glasser & Wang 2020 Eq. 55, γ = 1+i"
+kind = "computed"
+
+# Δ_odd / Δ_even from solve_inner(GGJModel(:galerkin), glasser_wang_2020_eq55(), 1+1im)
+[quantities.delta_odd_real]
+h5path = "ggj/delta_odd_real"
+type = "real_scalar"
+extract = "value"
+label = "Re(Δ_odd)"
+noise_threshold = 1e-10
+
+[quantities.delta_odd_imag]
+h5path = "ggj/delta_odd_imag"
+type = "real_scalar"
+extract = "value"
+label = "Im(Δ_odd)"
+noise_threshold = 1e-10
+
+[quantities.delta_even_real]
+h5path = "ggj/delta_even_real"
+type = "real_scalar"
+extract = "value"
+label = "Re(Δ_even)"
+noise_threshold = 1e-10
+
+[quantities.delta_even_imag]
+h5path = "ggj/delta_even_imag"
+type = "real_scalar"
+extract = "value"
+label = "Im(Δ_even)"
+noise_threshold = 1e-10
+
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0

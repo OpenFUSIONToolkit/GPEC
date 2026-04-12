@@ -324,7 +324,7 @@ end
     solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
                 reltol::Float64=1e-6, abstol::Float64=1e-6,
                 rtol_origin::Float64=1e-6, nps::Int=8,
-                fmax::Float64=1.0, solver=Rodas5P()) -> SVector{2,ComplexF64}
+                fmax::Float64=1.0, solver=Tsit5()) -> SVector{2,ComplexF64}
 
 Solve the GGJ inner-layer matching problem by stable backward shooting in
 the origin-diagonalized 4×4 basis. Direct port of the rmatch `deltar.f`
