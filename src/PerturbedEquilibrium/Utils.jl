@@ -157,7 +157,7 @@ function write_outputs_to_HDF5(
             response_group["b_cova_zeta"]  = state.b_modes.cova_zeta
         end
 
-        # R,Z,φ cylindrical components (from gpeq_rzphi)
+        # R,Z,φ cylindrical components in mode-space (from gpeq_rzphi)
         if have_xi
             response_group["xi_R"]   = state.xi_modes.R
             response_group["xi_Z"]   = state.xi_modes.Z

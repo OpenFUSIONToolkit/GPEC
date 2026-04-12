@@ -152,14 +152,11 @@ function reconstruct_physical_fields(
     # R,Z,φ cylindrical components (Fortran gpeq_rzphi)
     # ξ: uses J-weighted psi (xwp from gpeq_contra) and regularized theta (xmt)
     # b: uses raw psi (bwp from gpeq_sol, no Jacobian convolution) and regularized theta (bmt)
-    @warn "R,Z,φ cylindrical field components are in BETA: expect up to ~20% " *
-          "discrepancies with Fortran GPEC (gpeq_rzphi). The ξ^ψ, ξ^θ, ξ^ζ and " *
-          "corresponding b components in SFL coordinates remain well-benchmarked." maxlog=1
     mlow = ffs_intr.mlow
-    xi_R, xi_Z, xi_phi = _compute_rzphi_modes(equil, psi_grid, mlow, size(xi_psi_modes, 2),
-        xwp_modes, xmt_modes, xvz_modes)
-    b_R, b_Z, b_phi = _compute_rzphi_modes(equil, psi_grid, mlow, size(b_psi_modes, 2),
-        b_psi_modes, b_theta_reg, bvz_modes)
+    xi_R, xi_Z, xi_phi = _compute_rzphi_modes(
+        equil, psi_grid, mlow, size(xi_psi_modes, 2), xwp_modes, xmt_modes, xvz_modes)
+    b_R, b_Z, b_phi = _compute_rzphi_modes(
+        equil, psi_grid, mlow, size(b_psi_modes, 2), b_psi_modes, b_theta_reg, bvz_modes)
 
     xi_modes = (
         psi   = xi_psi_modes,
@@ -174,7 +171,7 @@ function reconstruct_physical_fields(
         cova_psi   = xvp_modes,   # covariant ξ_ψ (from gpeq_cova)
         cova_theta = xvt_modes,   # covariant ξ_θ (from gpeq_cova)
         cova_zeta  = xvz_modes,   # covariant ξ_ζ (from gpeq_cova)
-        R = xi_R, Z = xi_Z, phi = xi_phi,  # cylindrical (from gpeq_rzphi)
+        R = xi_R, Z = xi_Z, phi = xi_phi
     )
     b_modes = (
         psi       = b_psi_modes,      # b^ψ (no Jacobian) — used for b_n normal projection
@@ -186,7 +183,7 @@ function reconstruct_physical_fields(
         cova_psi   = bvp_modes,       # covariant b_ψ (from gpeq_cova)
         cova_theta = bvt_modes,       # covariant b_θ (from gpeq_cova)
         cova_zeta  = bvz_modes,       # covariant b_ζ (from gpeq_cova)
-        R = b_R, Z = b_Z, phi = b_phi,  # cylindrical (from gpeq_rzphi)
+        R = b_R, Z = b_Z, phi = b_phi
     )
 
     return xi_modes, b_modes
@@ -483,20 +480,23 @@ function compute_contra_displacements(
     jmat  = Vector{ComplexF64}(undef, 2 * mband + 1)
     jmat1 = Vector{ComplexF64}(undef, 2 * mband + 1)
 
-    # Find closest metric psi grid index for Fourier coefficient lookup
-    metric_xs = metric.xs
+    # Build cubic spline interpolants for Jacobian Fourier coefficients (quantities 7, 8).
+    # Matches Fortran cspline_eval(metric%cs, psi, 0) which interpolates smoothly.
+    jmat_interp  = _build_metric_interp(fc, 7)
+    jmat1_interp = _build_metric_interp(fc, 8)
+    jmat_hint  = Ref(1)
+    jmat1_hint = Ref(1)
 
     for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
 
-        # Find closest metric grid point for Fourier coefficient extraction
-        ipsi_metric = _find_closest_index(metric_xs, psi_norm)
-
-        # Extract Jacobian Fourier coefficients at this psi
+        # Interpolate Jacobian Fourier coefficients at this psi
+        jmat_vals  = jmat_interp(psi_norm; hint=jmat_hint)
+        jmat1_vals = jmat1_interp(psi_norm; hint=jmat1_hint)
         for m in 0:mband
-            jmat[mid-m]  = Utilities.get_complex_coeff(fc, ipsi_metric, m, 7)
-            jmat1[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 8)
+            jmat[mid-m]  = jmat_vals[m+1]
+            jmat1[mid-m] = jmat1_vals[m+1]
         end
         for k in 1:mband
             jmat[mid+k]  = conj(jmat[mid-k])
@@ -592,7 +592,6 @@ function compute_cova_components(
     mband = ffs_intr.mband
     mid = mband + 1
     fc = metric.fourier_coeffs
-    metric_xs = metric.xs
 
     xvp_modes = zeros(ComplexF64, npsi, mpert)
     xvt_modes = zeros(ComplexF64, npsi, mpert)
@@ -609,18 +608,23 @@ function compute_cova_components(
     g31 = Vector{ComplexF64}(undef, 2 * mband + 1)
     g12 = Vector{ComplexF64}(undef, 2 * mband + 1)
 
+    # Build cubic spline interpolants for metric tensor Fourier coefficients (quantities 1-6).
+    # Matches Fortran cspline_eval(metric%cs, psi, 0) which interpolates smoothly.
+    g_interps = [_build_metric_interp(fc, qty) for qty in 1:6]
+    g_hints = [Ref(1) for _ in 1:6]
+
     for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
-        ipsi_metric = _find_closest_index(metric_xs, psi_norm)
 
-        # Extract metric tensor Fourier coefficients (g^ij·J)
+        # Interpolate metric tensor Fourier coefficients at this psi
+        g_vals = [g_interps[qty](psi_norm; hint=g_hints[qty]) for qty in 1:6]
         for m in 0:mband
-            g11[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 1)
-            g22[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 2)
-            g33[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 3)
-            g23[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 4)
-            g31[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 5)
-            g12[mid-m] = Utilities.get_complex_coeff(fc, ipsi_metric, m, 6)
+            g11[mid-m] = g_vals[1][m+1]
+            g22[mid-m] = g_vals[2][m+1]
+            g33[mid-m] = g_vals[3][m+1]
+            g23[mid-m] = g_vals[4][m+1]
+            g31[mid-m] = g_vals[5][m+1]
+            g12[mid-m] = g_vals[6][m+1]
         end
         for k in 1:mband
             g11[mid+k] = conj(g11[mid-k])
@@ -664,19 +668,25 @@ function compute_cova_components(
 end
 
 """
-    _find_closest_index(xs, x) -> Int
+    _build_metric_interp(fc, qty) -> CubicSeriesInterpolant
 
-Find index of closest value in sorted array `xs` to target `x`.
+Build a cubic spline interpolant for all Fourier modes of a metric quantity as
+a function of ψ. Returns a callable that evaluates all (mband+1) complex
+coefficients at arbitrary ψ: `interp(psi) -> Vector{ComplexF64}`.
+
+Matches Fortran behaviour where `cspline_eval(metric%cs, psi, 0)` interpolates
+the coefficients smoothly, rather than snapping to the nearest grid point.
 """
-function _find_closest_index(xs::AbstractVector{Float64}, x::Float64)
-    idx = searchsortedfirst(xs, x)
-    if idx > length(xs)
-        return length(xs)
-    elseif idx == 1
-        return 1
-    else
-        return abs(xs[idx] - x) < abs(xs[idx-1] - x) ? idx : idx - 1
+function _build_metric_interp(fc::Utilities.FourierCoefficients, qty::Int)
+    npsi = length(fc.xs)
+    nmodes = fc.mband + 1
+    coeffs = Matrix{ComplexF64}(undef, npsi, nmodes)
+    for ipsi in 1:npsi
+        for m in 0:fc.mband
+            coeffs[ipsi, m+1] = Utilities.get_complex_coeff(fc, ipsi, m, qty)
+        end
     end
+    return cubic_interp(collect(fc.xs), Series(coeffs); bc=CubicFit(), extrap=ExtendExtrap())
 end
 
 """
@@ -774,16 +784,15 @@ end
 Convert mode-space perturbation from flux coordinates (ψ,θ,ζ) to cylindrical (R,Z,φ).
 
 Implements Fortran `gpeq_rzphi` (gpeq.f:439-501):
-    R(m)   = DFT[ (t11·psi_input + t12·theta_input) / J ]
-    Z(m)   = DFT[ (t21·psi_input + t22·theta_input) / J ]
-    φ(m)   = DFT[ t33 · cova_zeta_input ]
+    R(θ)   = (t11·psi_input + t12·theta_input) / J
+    Z(θ)   = (t21·psi_input + t22·theta_input) / J
+    φ(θ)   = t33 · cova_zeta_input
+
+Returns mode-space arrays (npsi × mpert) in SFL coordinates. The pointwise product with
+geometry generates harmonics beyond mpert; users needing fuller resolution should increase
+the mode count or use `Analysis.PerturbedEquilibriumModes.modes_to_theta` post-hoc.
 
 The caller passes different inputs for ξ vs b (see `reconstruct_physical_fields`).
-
-!!! warning "Beta"
-    The R,Z,φ cylindrical components are in beta and currently show up to ~20%
-    discrepancies vs Fortran GPEC. The underlying SFL-coordinate quantities
-    (ξ^ψ, ξ^θ, ξ^ζ and the corresponding b components) remain well-benchmarked.
 """
 function _compute_rzphi_modes(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -796,13 +805,16 @@ function _compute_rzphi_modes(
     npsi = length(psi_grid)
     R0 = equil.ro
 
-    # Theta grid for DFT
+    # Theta grid for DFT — matches Fortran mthsurf
     mtheta = max(2 * (abs(mlow) + mpert), 512)
     ft = Utilities.FourierTransforms.FourierTransform(mtheta, mpert, mlow)
 
     R_modes   = zeros(ComplexF64, npsi, mpert)
     Z_modes   = zeros(ComplexF64, npsi, mpert)
     phi_modes = zeros(ComplexF64, npsi, mpert)
+    R_fun     = zeros(ComplexF64, mtheta)
+    Z_fun     = zeros(ComplexF64, mtheta)
+    phi_fun   = zeros(ComplexF64, mtheta)
 
     # Pre-allocate theta-space buffers
     t11 = Vector{Float64}(undef, mtheta)
@@ -859,10 +871,6 @@ function _compute_rzphi_modes(
         zeta_fn  = Utilities.FourierTransforms.inverse(ft, view(cova_zeta_input, ipsi, :))
 
         # Pointwise transformation (Fortran gpeq_rzphi, gpeq.f:484-489)
-        R_fun   = Vector{ComplexF64}(undef, mtheta)
-        Z_fun   = Vector{ComplexF64}(undef, mtheta)
-        phi_fun = Vector{ComplexF64}(undef, mtheta)
-
         for itheta in 1:mtheta
             J = J_theta[itheta]
             xwp = psi_fun[itheta]
@@ -879,7 +887,7 @@ function _compute_rzphi_modes(
             phi_fun[itheta] = t33[itheta] * xvz
         end
 
-        # Forward DFT: theta-space → modes (round-trip = 1 with 1/N forward normalization)
+        # Forward DFT: theta-space → modes
         R_modes[ipsi, :]   .= ft(R_fun)
         Z_modes[ipsi, :]   .= ft(Z_fun)
         phi_modes[ipsi, :] .= ft(phi_fun)

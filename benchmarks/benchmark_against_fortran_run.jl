@@ -1152,9 +1152,9 @@ function generate_plots(fort, julia, bench_dir, nn)
 
     # ─── R,Z,φ profile comparison figure ──────────────────────────────────────
     # Compare θ=0 radial profiles (real & imag) in machine coordinates.
-    # Julia modes are converted to machine theta-space via modes_to_theta with
-    # keep_sfl_phi=false (applies exp(i*n*ν) toroidal phase, matching Fortran
-    # gpout_xbrzphifun). Fortran data is already in machine theta-space.
+    # Julia stores R,Z,φ in mode-space; use modes_to_theta to reconstruct
+    # theta-space with ν phase + helicity correction for comparison with
+    # Fortran gpout_xbrzphifun output.
     h5_path = julia["h5_path"]
     rzphi_panels = []
     for (comp_label, f_key, h5_var) in [
@@ -1166,13 +1166,12 @@ function generate_plots(fort, julia, bench_dir, nn)
             ("b_φ",  "b_phi_fun",  "perturbed_equilibrium/response/b_phi")]
         f_fun = get(fort, f_key, Matrix{ComplexF64}(undef, 0, 0))
 
-        # Convert Julia SFL modes → machine theta-space
+        # Reconstruct theta-space from mode-space via modes_to_theta (applies ν phase + helicity)
         j_fun = Matrix{ComplexF64}(undef, 0, 0)
         if isfile(h5_path)
             try
-                j_theta_data, _, _ = PerturbedEquilibriumModes.modes_to_theta(
-                    h5_path, h5_var; keep_sfl_phi=false)
-                j_fun = j_theta_data[:, :, 1]  # first (only) n
+                j_theta_data, _, _ = PerturbedEquilibriumModes.modes_to_theta(h5_path, h5_var; keep_sfl_phi=false)
+                j_fun = j_theta_data[:, :, 1]  # (npsi, ntheta) for n=1
             catch e
                 @warn "modes_to_theta failed for $h5_var" exception=e
             end
