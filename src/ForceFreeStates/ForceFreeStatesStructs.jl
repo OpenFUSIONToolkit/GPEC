@@ -335,6 +335,12 @@ Populated in `Free.jl`.
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+
+    # Power-normalized flux eigenvalues (Jacobian-invariant)
+    pn_et::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    pn_ep::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    pn_ev::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
@@ -353,8 +359,11 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
 
   - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
   - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
+  - `sqrtamat_spline` - Precomputed √A convolution matrix + surface area spline for power-norm eigenvalues.
+  - `sqrtamat_hint::Base.RefValue{Int}` - Search hint for sqrtamat spline.
   - `psi, q` - ψ and q values at each edge scan step.
   - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step (NaN for failed steps).
+  - `pn_total_eigenvalue, pn_plasma_energy, pn_vacuum_energy` - Power-normalized flux eigenvalues (Jacobian-invariant; NaN for failed/singular steps).
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
@@ -364,6 +373,10 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     wv_hint::Base.RefValue{Int} = Ref(1)
 
+    # Power-norm sqrtamat + jarea spline (mpert^2 + 1 series: flattened sqrtamat then jarea)
+    sqrtamat_spline::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2 + 1)
+    sqrtamat_hint::Base.RefValue{Int} = Ref(1)
+
     # Scan results (written to HDF5 under edge_scan/; NaN where free_compute_total raised SingularException)
     psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
     q::Vector{Float64} = Vector{Float64}(undef, N_edge)
@@ -371,6 +384,11 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
+
+    # Power-normalized flux eigenvalues (Jacobian-invariant)
+    pn_total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    pn_plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    pn_vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)

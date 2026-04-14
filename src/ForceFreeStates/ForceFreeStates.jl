@@ -28,6 +28,7 @@ include("Fourfit.jl")
 include("Kinetic.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
+include("PowerNorm.jl")
 include("Free.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates

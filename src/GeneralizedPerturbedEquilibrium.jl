@@ -443,6 +443,9 @@ function write_outputs_to_HDF5(
             out_h5["edge_scan/plasma_energy"] = es.plasma_energy
             out_h5["edge_scan/vacuum_energy"] = es.vacuum_energy
             out_h5["edge_scan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
+            out_h5["edge_scan/pn_total_energy"] = es.pn_total_eigenvalue
+            out_h5["edge_scan/pn_plasma_energy"] = es.pn_plasma_energy
+            out_h5["edge_scan/pn_vacuum_energy"] = es.pn_vacuum_energy
         end
 
         # Write singular surface data
@@ -459,6 +462,9 @@ function write_outputs_to_HDF5(
         out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
         out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["vacuum/pn_ep"] = ctrl.vac_flag ? vac_data.pn_ep : ComplexF64[]
+        out_h5["vacuum/pn_ev"] = ctrl.vac_flag ? vac_data.pn_ev : ComplexF64[]
+        out_h5["vacuum/pn_et"] = ctrl.vac_flag ? vac_data.pn_et : ComplexF64[]
         out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
         out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
         out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
