@@ -76,14 +76,14 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         divx_m_f = intr.divx_m(psi; hint=intr.divx_m_hint)
     end
 
-    # Sample poloidal quantities on theta grid
+    # Sample poloidal quantities on theta grid (buffers pre-allocated on intr).
     mthsurf_local = intr.mthsurf
-    xs = collect(range(0.0, 1.0, length=mthsurf_local + 1))
-    B_vals = Vector{Float64}(undef, mthsurf_local + 1)
-    dBdpsi_vals = Vector{Float64}(undef, mthsurf_local + 1)
-    dBdtheta_vals = Vector{Float64}(undef, mthsurf_local + 1)
-    jac_vals = Vector{Float64}(undef, mthsurf_local + 1)
-    djdpsi_vals = Vector{Float64}(undef, mthsurf_local + 1)
+    xs            = intr.tpsi_xs
+    B_vals        = intr.tpsi_B
+    dBdpsi_vals   = intr.tpsi_dBdpsi
+    dBdtheta_vals = intr.tpsi_dBdtheta
+    jac_vals      = intr.tpsi_jac
+    djdpsi_vals   = intr.tpsi_djdpsi
 
     hB = intr.hint2d_eqfun_B
     hJ = intr.hint2d_rzphi_jac
@@ -473,21 +473,21 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # Build CubicSeriesInterpolant
-    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
-
-    # Normalize flux quantities by 1/median for ODE stability (Fortran lines 819-823)
+    # Normalize flux quantities by 1/median for ODE stability (Fortran lines 819-823).
+    # Compute medians from the unscaled data and rescale in place BEFORE building
+    # the interpolant — the pre-normalization build was dead work (allocates a
+    # CubicSeriesInterpolant that was immediately overwritten).
     fbnce_norm = ones(Float64, nqty)
     for i in 1:nqty
-        col = fbnce_data[:, i + 2]
+        col = view(fbnce_data, :, i + 2)
         med = median(abs.(col))
         if med > 0
             fbnce_norm[i] = 1.0 / med
-            # Apply normalization to the interpolant data
-            fbnce_data[:, i + 2] .*= fbnce_norm[i]
+            col .*= fbnce_norm[i]
         end
     end
-    # Rebuild interpolant with normalized data
+
+    # Build CubicSeriesInterpolant on normalized data (single build)
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
 
     # 3. Set rex/imx multipliers (Fortran lines 839-847)

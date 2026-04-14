@@ -152,6 +152,14 @@ this struct.
     # beyond diverges. The outer ψ ODE clips to this to match Fortran PENTRC.
     psilim::Float64 = 1.0
 
+    # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per ψ ODE step.
+    tpsi_xs::Vector{Float64} = Float64[]
+    tpsi_B::Vector{Float64} = Float64[]
+    tpsi_dBdpsi::Vector{Float64} = Float64[]
+    tpsi_dBdtheta::Vector{Float64} = Float64[]
+    tpsi_jac::Vector{Float64} = Float64[]
+    tpsi_djdpsi::Vector{Float64} = Float64[]
+
     # Raw geometric matrices for kinetic W vector construction
     # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
     smats::Any = nothing           # CubicSeriesInterpolant, mpert² series over ψ
@@ -205,11 +213,19 @@ Construct KineticForcesInternal from a PlasmaEquilibrium, extracting
 the equilibrium geometry parameters needed for NTV calculations.
 """
 function KineticForcesInternal(equil; verbose::Bool=false)
+    mthsurf = length(equil.rzphi_ys) - 1
+    nth = mthsurf + 1
     KineticForcesInternal(;
         ro      = equil.ro,
         bo      = equil.params.b0,
         chi1    = 2π * equil.psio,
-        mthsurf = length(equil.rzphi_ys) - 1,
+        mthsurf,
+        tpsi_xs       = collect(range(0.0, 1.0, length=nth)),
+        tpsi_B        = Vector{Float64}(undef, nth),
+        tpsi_dBdpsi   = Vector{Float64}(undef, nth),
+        tpsi_dBdtheta = Vector{Float64}(undef, nth),
+        tpsi_jac      = Vector{Float64}(undef, nth),
+        tpsi_djdpsi   = Vector{Float64}(undef, nth),
         verbose,
     )
 end
