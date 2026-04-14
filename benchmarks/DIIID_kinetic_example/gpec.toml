@@ -1,0 +1,57 @@
+# DIIID Kinetic Benchmark — matches Fortran DIIID_ideal_example PENTRC run
+# Reference: /Users/nlogan/Code/gpec/docs/examples/DIIID_ideal_example/
+
+[Equilibrium]
+eq_filename = "g147131.02300_DIIID_KEFIT"
+eq_type = "efit"
+jac_type = "hamada"
+power_bp = 0
+power_b = 0
+power_r = 0
+grid_type = "ldp"
+psilow = 1e-4
+psihigh = 0.993
+mpsi = 128
+mtheta = 256
+newq0 = 0
+etol = 1e-7
+
+[Wall]
+shape = "nowall"
+a = 0.2415
+aw = 0.05
+bw = 1.5
+cw = 0
+dw = 0.5
+tw = 0.05
+equal_arc_wall = true
+
+[ForceFreeStates]
+bal_flag = false
+mat_flag = true
+ode_flag = true
+vac_flag = true
+mer_flag = true
+force_termination = false
+
+set_psilim_via_dmlim = true
+dmlim = 0.2
+psiedge = 1.00
+qlow = 1.02
+qhigh = 1e3
+sing_start = 0
+
+nn_low = 1
+nn_high = 1
+delta_mlow = 8
+delta_mhigh = 8
+delta_mband = 0
+mthvac = 512
+thmax0 = 1
+
+kinetic_source = "fixed"
+kinetic_factor = 0.0
+eulerlagrange_tolerance = 1e-7
+save_interval = 3
+singfac_min = 1e-4
+ucrit = 1e4

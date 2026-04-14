@@ -373,7 +373,7 @@ function main(args::Vector{String}=String[])
         # kf_ctrl and kinetic_profiles were loaded once above the stability block.
         kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
         if @isdefined(pe_state)
-            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr)
+            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
         end
 
         kf_state = KineticForces.KineticForcesState()

@@ -34,7 +34,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
               kinetic_profiles::Equilibrium.KineticProfileSplines;
               op_wmats::Union{Nothing,Array{ComplexF64,3}}=nothing,
               rex_override::Union{Nothing,Float64}=nothing,
-              imx_override::Union{Nothing,Float64}=nothing)
+              imx_override::Union{Nothing,Float64}=nothing,
+              atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
     if intr.verbose
         println("torque - tpsi function, psi = ", psi)
@@ -241,6 +242,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
                                    mpert=intr.mpert, ibmax=ibmax, theta_bmax=theta_bmax,
                                    smat=smat_f, tmat=tmat_f, xmat=xmat_f,
                                    ymat=ymat_f, zmat=zmat_f,
+                                   energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
+                                   pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda,
                                    rex_override=rex_override, imx_override=imx_override)
     else
         error("ERROR: torque - unknown method")
@@ -421,8 +424,8 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
                        nlmda::Int=64, ntheta::Int=128,
                        nutype::String="harmonic", f0type::String="maxwellian",
                        nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
-                       energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
-                       pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9,
+                       energy_atol::Float64=1e-7, energy_rtol::Float64=1e-5,
+                       pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
                        rex_override::Union{Nothing,Float64}=nothing,
                        imx_override::Union{Nothing,Float64}=nothing)::ComplexF64
 

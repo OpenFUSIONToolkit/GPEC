@@ -95,13 +95,14 @@ filtering out non-numeric header rows. Returns six independent column views.
 function _read_kinetic_table(kinetic_file::AbstractString)
     table = DelimitedFiles.readdlm(kinetic_file)
 
-    table_clean = Float64[]
-    for row in eachrow(table)
-        if all(x -> isa(x, Number), row)
-            push!(table_clean, vec(row)...)
-        end
+    # Keep numeric rows only (drops text headers). Build row-major by rebuilding
+    # the matrix as a stack of rows — reshape(:, 6) is column-major and scrambles
+    # columns.
+    numeric_rows = [collect(row) for row in eachrow(table) if all(x -> isa(x, Number), row)]
+    if isempty(numeric_rows)
+        error("No numeric data rows found in kinetic file: $kinetic_file")
     end
-    table = reshape(table_clean, :, 6)
+    table = reduce(vcat, (reshape(Float64.(r), 1, 6) for r in numeric_rows))
 
     psi_input = collect(table[:, 1])
     n_i_input = collect(table[:, 2])

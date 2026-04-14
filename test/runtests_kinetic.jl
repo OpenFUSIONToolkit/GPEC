@@ -85,55 +85,46 @@
     # =========================================================================
     # Energy integrand analytical limits
     # =========================================================================
-    @testset "energy_integrand!" begin
+    @testset "energy_integrand_scalar" begin
         @testset "CGL limit" begin
             # In CGL mode, fx = cx^2.5 * exp(-cx) / (i*n) — no resonance denominator
             p = KF.EnergyParams(
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1,
-                "zero", "cgl", 1.0, 0.0, false, false
+                "zero", "cgl", 1.0, 0.0, false
             )
-            ydot = zeros(2)
-            y = zeros(2)
             x = 1.0
-            KF.energy_integrand!(ydot, y, p, x)
+            val = KF.energy_integrand_scalar(x, p)
             # Expected: x^2.5 * exp(-x) / (i*1) = exp(-1) / i = -i*exp(-1)
-            expected = -exp(-1.0)
-            @test ydot[1] ≈ 0.0 atol=1e-14         # real part zero
-            @test ydot[2] ≈ expected atol=1e-12      # imag part = -exp(-1)
+            @test real(val) ≈ 0.0 atol=1e-14
+            @test imag(val) ≈ -exp(-1.0) atol=1e-12
         end
 
         @testset "collisionless Maxwellian at large x" begin
             # At large x, the integrand should decay exponentially
             p = KF.EnergyParams(
                 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1,
-                "zero", "maxwellian", 1.0, 0.0, false, false
+                "zero", "maxwellian", 1.0, 0.0, false
             )
-            ydot_small = zeros(2)
-            ydot_large = zeros(2)
-            KF.energy_integrand!(ydot_small, zeros(2), p, 5.0)
-            KF.energy_integrand!(ydot_large, zeros(2), p, 50.0)
+            val_large = KF.energy_integrand_scalar(50.0, p)
             # At x=50, exp(-50) ≈ 1.9e-22, so integrand should be negligible
-            @test abs(ydot_large[1]) + abs(ydot_large[2]) < 1e-15
+            @test abs(val_large) < 1e-15
         end
 
         @testset "heat flux mode" begin
             # With qt=true, integrand is multiplied by (x - 2.5)
             p_no_qt = KF.EnergyParams(
                 1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 1,
-                "zero", "maxwellian", 1.0, 0.0, false, false
+                "zero", "maxwellian", 1.0, 0.0, false
             )
             p_qt = KF.EnergyParams(
                 1.0, 0.0, 1.0, 0.5, 0.5, 0.0, 1.0, 1,
-                "zero", "maxwellian", 1.0, 0.0, true, false
+                "zero", "maxwellian", 1.0, 0.0, true
             )
-            ydot_no = zeros(2)
-            ydot_qt = zeros(2)
             x = 3.0
-            KF.energy_integrand!(ydot_no, zeros(2), p_no_qt, x)
-            KF.energy_integrand!(ydot_qt, zeros(2), p_qt, x)
+            val_no = KF.energy_integrand_scalar(x, p_no_qt)
+            val_qt = KF.energy_integrand_scalar(x, p_qt)
             # qt multiplies by (x - 2.5) = 0.5
-            @test ydot_qt[1] ≈ (x - 2.5) * ydot_no[1] atol=1e-14
-            @test ydot_qt[2] ≈ (x - 2.5) * ydot_no[2] atol=1e-14
+            @test val_qt ≈ (x - 2.5) * val_no atol=1e-14
         end
     end
 

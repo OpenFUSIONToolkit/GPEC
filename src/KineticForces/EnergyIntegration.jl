@@ -1,20 +1,20 @@
 """
     EnergyIntegration
 
-Energy-space ODE integration for the kinetic resonance operator.
+Energy-space integration for the kinetic resonance operator.
 Implements the energy integrand from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
+
+Uses QuadGK adaptive Gauss-Kronrod quadrature (the integrand is independent of the
+state variable, so this is pure quadrature — not an ODE).
 """
 
-using OrdinaryDiffEq
-
 # Integration defaults
-const ENERGY_XMAX = 72.0
-const ENERGY_MAXITERS = 10000
+const ENERGY_XMAX = 128.0
 
 """
     EnergyParams
 
-Parameters passed to the energy ODE integrand via the ODE problem's `p` field.
+Parameters for the energy integrand evaluation.
 """
 struct EnergyParams
     wn::Float64       # density gradient diamagnetic drift frequency
@@ -30,86 +30,16 @@ struct EnergyParams
     nufac::Float64    # collisionality scaling factor
     ximag::Float64    # imaginary contour offset
     qt::Bool          # heat flux calculation flag
-    imag_axis::Bool   # true when integrating along imaginary axis
 end
 
 """
-    integrate_energy_ode(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
-                         nutype="harmonic", f0type="maxwellian", nufac=1.0,
-                         ximag=0.0, qt=false,
-                         atol=1e-12, rtol=1e-9)::ComplexF64
+    energy_integrand_scalar(x, p::EnergyParams; imag_axis=false) → ComplexF64
 
-Integrate the kinetic resonance operator over normalized energy x = E/T.
-Uses OrdinaryDiffEq/Tsit5 adaptive ODE solver.
-
-The integration path optionally steps off the real axis (0 → i*ximag)
-then integrates along (0 → xmax + i*ximag) to handle poles.
-
-Collision operator types (`nutype`):
-- `"zero"`: collisionless
-- `"small"`: 1e-5 * we
-- `"krook"`: unmodified Krook operator
-- `"harmonic"`: (1 + (l/2)^2) * krook * x^(-3/2)
-
-Distribution function types (`f0type`):
-- `"maxwellian"`: standard Maxwellian, Eq. (8) of [Logan, Park, et al., 2013]
-- `"jkp"`: Jong-Kyu Park approximation [Park, Boozer, Menard, PRL 2009]
-- `"cgl"`: Chew-Goldberger-Low limit
-
-# Returns
-- `ComplexF64`: energy integral value
+Evaluate the energy integrand at normalized energy x = E/T.
+Implements [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 """
-function integrate_energy_ode(wn::Float64, wt::Float64, we::Float64, wd::Float64,
-                              wb::Float64, nuk::Float64, ell::Int, leff::Float64,
-                              n::Int, psi::Float64, lambda::Float64, method::String;
-                              nutype::String="harmonic", f0type::String="maxwellian",
-                              nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
-                              atol::Float64=1e-12, rtol::Float64=1e-9)::ComplexF64
-
-    y = [0.0, 0.0]    # [real, imag] parts of integral
-    yi = [0.0, 0.0]   # Integration along imaginary axis
-
-    # Optionally step off real axis to avoid poles
-    if ximag != 0.0
-        p_imag = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-                              nutype, f0type, nufac, ximag, qt, true)
-        prob = ODEProblem(energy_integrand!, yi, (1e-15, ximag), p_imag)
-        sol = solve(prob, Tsit5(); abstol=atol, reltol=rtol, maxiters=ENERGY_MAXITERS)
-        yi = sol.u[end]
-
-        if sol.retcode != :Success
-            @warn "Integration along imaginary axis may have issues"
-        end
-    end
-
-    # Integration along real axis to xmax
-    p_real = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
-                          nutype, f0type, nufac, ximag, qt, false)
-    prob = ODEProblem(energy_integrand!, y, (1e-15, ENERGY_XMAX), p_real)
-    sol = solve(prob, Tsit5(); abstol=atol, reltol=rtol, maxiters=ENERGY_MAXITERS)
-    y = sol.u[end]
-
-    if sol.retcode != :Success
-        @warn "integrate_energy_ode failed at psi=$psi, lambda=$lambda, leff=$leff. Consider complex contour (ximag>0)."
-    end
-
-    return ComplexF64(y[1] + yi[1], y[2] + yi[2])
-end
-
-"""
-    energy_integrand!(ydot, y, p::EnergyParams, x)
-
-Energy integrand as a function of normalized energy x = E/T.
-Implements the resonance operator from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
-
-# Arguments
-- `ydot`: output derivative [real(f), imag(f)]
-- `y`: current state (unused by the integrand, integral accumulates via ODE solver)
-- `p::EnergyParams`: physical parameters and integration mode
-- `x`: normalized energy E/T
-"""
-function energy_integrand!(ydot, y, p::EnergyParams, x)
-    cx = p.imag_axis ? im * x : x + im * p.ximag
+function energy_integrand_scalar(x::Float64, p::EnergyParams; imag_axis::Bool=false)::ComplexF64
+    cx = imag_axis ? im * x : x + im * p.ximag
 
     # Collision frequency
     nux = if p.nutype == "zero"
@@ -144,7 +74,58 @@ function energy_integrand!(ydot, y, p::EnergyParams, x)
         fx = (cx - 2.5) * fx
     end
 
-    ydot[1] = real(fx)
-    ydot[2] = imag(fx)
-    return nothing
+    return fx
+end
+
+"""
+    integrate_energy_ode(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
+                         nutype="harmonic", f0type="maxwellian", nufac=1.0,
+                         ximag=0.0, qt=false,
+                         atol=1e-12, rtol=1e-9)::ComplexF64
+
+Integrate the kinetic resonance operator over normalized energy x = E/T.
+Uses QuadGK adaptive Gauss-Kronrod quadrature.
+
+The integration path optionally steps off the real axis (0 → i*ximag)
+then integrates along (0 → xmax + i*ximag) to handle poles.
+
+Collision operator types (`nutype`):
+- `"zero"`: collisionless
+- `"small"`: 1e-5 * we
+- `"krook"`: unmodified Krook operator
+- `"harmonic"`: (1 + (l/2)^2) * krook * x^(-3/2)
+
+Distribution function types (`f0type`):
+- `"maxwellian"`: standard Maxwellian, Eq. (8) of [Logan, Park, et al., 2013]
+- `"jkp"`: Jong-Kyu Park approximation [Park, Boozer, Menard, PRL 2009]
+- `"cgl"`: Chew-Goldberger-Low limit
+
+# Returns
+- `ComplexF64`: energy integral value
+"""
+function integrate_energy_ode(wn::Float64, wt::Float64, we::Float64, wd::Float64,
+                              wb::Float64, nuk::Float64, ell::Int, leff::Float64,
+                              n::Int, psi::Float64, lambda::Float64, method::String;
+                              nutype::String="harmonic", f0type::String="maxwellian",
+                              nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
+                              atol::Float64=1e-7, rtol::Float64=1e-5)::ComplexF64
+
+    p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
+                     nutype, f0type, nufac, ximag, qt)
+
+    result = ComplexF64(0.0)
+
+    # Optionally step off real axis to avoid poles
+    if ximag != 0.0
+        val, _ = quadgk(x -> energy_integrand_scalar(x, p; imag_axis=true),
+                         1e-15, ximag; atol=atol, rtol=rtol)
+        result += val
+    end
+
+    # Main integration along real axis to xmax
+    val, _ = quadgk(x -> energy_integrand_scalar(x, p; imag_axis=false),
+                     1e-15, ENERGY_XMAX; atol=atol, rtol=rtol)
+    result += val
+
+    return result
 end

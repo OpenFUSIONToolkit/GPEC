@@ -170,8 +170,8 @@ function integrate_pitch_gar(
     rex::Float64, imx::Float64, psi::Float64, method::String;
     nutype::String="harmonic", f0type::String="maxwellian",
     nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false,
-    energy_atol::Float64=1e-12, energy_rtol::Float64=1e-9,
-    pitch_atol::Float64=1e-12, pitch_rtol::Float64=1e-9
+    energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
+    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6
 )
     neq = 2 * nqty
 

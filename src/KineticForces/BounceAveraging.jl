@@ -482,9 +482,13 @@ function _bounce_integrate(
         end
     end
 
-    # Total bounce integrals
-    total_wb = cum_wb
-    total_wd = cum_wd
+    # Total bounce integrals — Fortran splines over bspl%xs = linspace(0,1,ntheta)
+    # and integrates via spline_int, which is ≈ (1/(ntheta-1)) × Σ f_i. The tdt(2,i)
+    # weights contain dθ/dx so Σ tdt·f is raw Riemann; divide by (ntheta-1) to get
+    # the integral over the unit linear space [0,1] that Fortran produces.
+    nrm = 1.0 / (ntheta - 1)
+    total_wb = cum_wb * nrm
+    total_wd = cum_wd * nrm
 
     if total_wb ≈ 0.0
         # Degenerate case — return zeros
@@ -496,17 +500,18 @@ function _bounce_integrate(
     wdbar = ro^2 * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
 
     # Phase factor (Fortran line 750)
-    # Using wb-based phase (electric precession dominates)
-    pl = [exp(-twopi * im * lnq * cum_wb_arr[i] / ((2 - sigma) * total_wb)) for i in 1:ntheta]
+    # Ratio cum_wb_arr[i]/total_wb is dimensionless — (ntheta-1) cancels, no scaling.
+    pl = [exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / ((2 - sigma) * total_wb)) for i in 1:ntheta]
 
     # Bounce-averaged action (Fortran line 752)
     bjspl = [conj(jvtheta[i]) * (pl[i] + (1 - sigma) / (pl[i] + 1e-30)) for i in 1:ntheta]
 
-    # Cumulative trapezoidal integration of bjspl
+    # Riemann integration over the unit linear space [0,1] (matches spline_int)
     bj_integral = ComplexF64(0.0)
     for i in 2:ntheta
-        bj_integral += bjspl[i]  # weights already in jvtheta via dt
+        bj_integral += bjspl[i]
     end
+    bj_integral *= nrm
 
     # |δJ|² (Fortran line 756) — division by 2 corrects quadratic form
     dJdJ_val = wbbar * abs(bj_integral)^2 / 2.0 / ro^2
@@ -514,7 +519,8 @@ function _bounce_integrate(
     # Matrix path: bounce-average W vectors and form outer products (Fortran lines 759-793)
     wmats_lmda = nothing
     if do_matrices
-        # Bounce-average W_μ and W_E vectors
+        # Bounce-average W_μ and W_E vectors — divide by (ntheta-1) to match
+        # Fortran spline_int normalization over bspl%xs = linspace(0,1,ntheta).
         wmu_ba = zeros(ComplexF64, mpert)
         wen_ba = zeros(ComplexF64, mpert)
         for i in 2:ntheta-1
@@ -524,6 +530,8 @@ function _bounce_integrate(
             wmu_ba .+= conj.(wmu_mt[:, i]) .* factor
             wen_ba .+= conj.(wen_mt[:, i]) .* factor
         end
+        wmu_ba .*= nrm
+        wen_ba .*= nrm
 
         # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
         wmmt = reshape(wmu_ba, 1, mpert)

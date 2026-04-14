@@ -29,6 +29,7 @@ using LinearAlgebra
 using LinearAlgebra.LAPACK
 using FFTW
 using OrdinaryDiffEq
+using QuadGK
 using HDF5
 using Printf
 using Statistics
@@ -37,6 +38,7 @@ using FastInterpolations
 using Roots
 import ..ForceFreeStates
 import ..Equilibrium
+import ..Utilities
 
 # Supporting data structures and utilities
 include("KineticForcesStructs.jl")

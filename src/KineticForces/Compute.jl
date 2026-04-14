@@ -83,8 +83,13 @@ function integrate_psi_ode(
 
     # Clip integration bounds to equilibrium data range
     # (Fortran line 1239-1241: clip to sq and xs_m ranges)
-    x0 = max(psi_min, 1e-6)  # avoid axis singularity
-    xout = min(psi_max, 1.0 - 1e-6)
+    # Equilibrium splines are unreliable near the magnetic axis (epsr→0, J→0);
+    # start at psilow to avoid degenerate bounce/drift frequencies.
+    # Cap upper bound at intr.psilim (DCON's integration limit): the perturbation
+    # interpolants only have data below this, and extrapolation near the q=qlim
+    # boundary blows up — matches Fortran PENTRC behavior.
+    x0 = max(psi_min, equil.config.psilow)
+    xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
     if x0 >= xout
         return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing)
@@ -95,7 +100,7 @@ function integrate_psi_ode(
 
     # Use Tsit5 (non-stiff) matching Fortran mf=10
     sol = solve(prob, Tsit5();
-        reltol=ctrl.rtol_xlmda, abstol=ctrl.atol_xlmda,
+        reltol=ctrl.rtol_psi, abstol=ctrl.atol_psi,
         maxiters=10000,
         # Save at each internal step to capture torque profile
         save_everystep=true)
@@ -159,7 +164,8 @@ function psi_integrand!(dy, _, p::PsiIntegrationParams, psi)
 
         tpsi!(tpsi_val, psi, p.n, l, p.zi, p.mi, p.wdfac, p.divxfac,
               p.electron, p.method, p.equil, p.intr, p.kinetic_profiles;
-              op_wmats=wtw_l)
+              op_wmats=wtw_l,
+              atol_xlmda=p.ctrl.atol_xlmda, rtol_xlmda=p.ctrl.rtol_xlmda)
 
         # Pack real/imag into ODE state
         dy[2*(ell_idx-1)+1] = real(tpsi_val[])
@@ -264,7 +270,9 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             end
         end
 
-        total_energy = complex(0.0, imag(total_torque) / (2 * ctrl.nn))
+        # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k, both real quantities.
+        # Store δW in Re slot so downstream code uses real(total_energy).
+        total_energy = complex(imag(total_torque) / (2 * ctrl.nn), 0.0)
 
         result_entry = MethodResult(;
             method=method,
