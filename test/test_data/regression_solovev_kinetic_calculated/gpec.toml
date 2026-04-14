@@ -46,7 +46,7 @@ mthvac = 64                   # Number of points used in splines over poloidal a
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "calculated" # Kinetic matrix source — exercises KineticForces.compute_calculated_kinetic_matrices callback with real physics
-kinetic_factor = 1e-9         # Small perturbation to verify kinetic path without materially altering the ideal eigenvalue
+kinetic_factor = 1.0          # Full-strength kinetic matrices (the "calculated" path is the real physics; no perturbation scaling)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized

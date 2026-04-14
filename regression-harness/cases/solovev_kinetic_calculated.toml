@@ -1,6 +1,6 @@
 [case]
 name = "solovev_kinetic_calculated"
-description = "Solovev analytical equilibrium, n=1, kinetic_source=calculated, kinetic_factor=1e-9"
+description = "Solovev analytical equilibrium, n=1, kinetic_source=calculated, kinetic_factor=1.0"
 example_dir = "test/test_data/regression_solovev_kinetic_calculated"
 
 # Energies — leading eigenvalues
