@@ -22,20 +22,31 @@ const JACOBIANS = ["hamada", "pest", "park", "boozer"]
 const EXAMPLE_DIR = "examples/DIIID-like_ideal_example"
 const COLORS = Dict("hamada" => :blue, "pest" => :red, "park" => :green, "boozer" => :orange)
 
+# Toroidal mode number for this comparison — embedded into output filenames
+# so artefacts from different n can be kept side by side.
+const NN = 1
+
 function run_with_jacobian(jac_type::String, base_dir::String, work_dir::String)
     # Copy example to temp directory
     cp(base_dir, work_dir; force=true)
 
-    # Read and modify TOML
+    # Read and modify TOML — settings chosen for apples-to-apples Jacobian comparison:
+    #   psihigh=0.994, mtheta=1024: match the proven-invariant regime in
+    #     scripts/test_power_norm_invariance.jl (floor ~6.9e-7).
+    #   delta_mlow/delta_mhigh=32: give a generous auto-expanded m-band. q(ψ) is a
+    #     flux-surface invariant, so qmin/qmax are identical across jacs — the
+    #     auto-computed [mlow, mhigh] should match as well, which the mpert print
+    #     in main() verifies.
     toml_path = joinpath(work_dir, "gpec.toml")
     config = TOML.parsefile(toml_path)
     config["Equilibrium"]["jac_type"] = jac_type
-    config["Equilibrium"]["psihigh"] = 0.997
-    config["ForceFreeStates"]["nn_low"] = 3
-    config["ForceFreeStates"]["nn_high"] = 3
+    config["Equilibrium"]["psihigh"] = 0.994
+    config["Equilibrium"]["mtheta"] = 1024
+    config["ForceFreeStates"]["nn_low"] = NN
+    config["ForceFreeStates"]["nn_high"] = NN
     config["ForceFreeStates"]["psiedge"] = 0.98
-    config["ForceFreeStates"]["delta_mlow"] = 16
-    config["ForceFreeStates"]["delta_mhigh"] = 16
+    config["ForceFreeStates"]["delta_mlow"] = 32
+    config["ForceFreeStates"]["delta_mhigh"] = 32
     config["ForceFreeStates"]["force_termination"] = true
     open(toml_path, "w") do io
         TOML.print(io, config)
@@ -55,12 +66,32 @@ function main()
         work_dir = joinpath(tmpdir, jac)
         h5_path = run_with_jacobian(jac, EXAMPLE_DIR, work_dir)
         h5open(h5_path, "r") do f
+            mpert_here = haskey(f, "info/mpert") ? read(f, "info/mpert") : -1
+            mlow_here = haskey(f, "info/mlow") ? read(f, "info/mlow") : 0
+            mhigh_here = haskey(f, "info/mhigh") ? read(f, "info/mhigh") : 0
             results[jac] = Dict(
                 "psi" => read(f, "edge_scan/psi"),
                 "et" => real.(read(f, "edge_scan/total_energy")),
-                "pn_et" => real.(read(f, "edge_scan/pn_total_energy"))
+                "ep" => real.(read(f, "edge_scan/plasma_energy")),
+                "ev" => real.(read(f, "edge_scan/vacuum_energy")),
+                "pn_et" => real.(read(f, "edge_scan/pn_total_energy")),
+                "pn_ep" => real.(read(f, "edge_scan/pn_plasma_energy")),
+                "pn_ev" => real.(read(f, "edge_scan/pn_vacuum_energy")),
+                "mpert" => mpert_here,
+                "mlow" => mlow_here,
+                "mhigh" => mhigh_here
             )
         end
+    end
+
+    # Apples-to-apples diagnostic: report mlow/mhigh/mpert per jac. Because q(ψ) is
+    # a flux-surface invariant, qmin/qmax and thus the auto-computed m-range should
+    # match across jacs. A mismatch here would invalidate the comparison.
+    println("\n--- m-range per Jacobian (should all match — q is a flux-surface invariant) ---")
+    @Printf.printf("  %-7s  %6s  %6s  %6s\n", "jac", "mlow", "mhigh", "mpert")
+    for jac in JACOBIANS
+        r = results[jac]
+        @Printf.printf("  %-7s  %6d  %6d  %6d\n", jac, r["mlow"], r["mhigh"], r["mpert"])
     end
 
     # Symmetric ylims keyed on 3× median |value| — a robust trend scale that ignores
@@ -98,9 +129,32 @@ function main()
 
     fig = plot(p1, p2; layout=(2, 1), size=(1600, 1000), left_margin=12Plots.mm, bottom_margin=4Plots.mm)
 
-    outfile = joinpath(EXAMPLE_DIR, "jacobian_comparison.png")
+    outfile = joinpath(EXAMPLE_DIR, "jacobian_comparison_n$(NN).png")
     savefig(fig, outfile)
     println("Saved: $(abspath(outfile))")
+
+    # Edge-scan eigenvalue plot for the hamada run — same content as
+    # scripts/compare_eigenvalues_edge_scan.jl, inlined here so we don't need to
+    # preserve the (multi-GB) tmpdir h5 after the script exits.
+    r_h = results["hamada"]
+    valid_h = .!isnan.(r_h["et"]) .& .!isnan.(r_h["pn_et"])
+    p3 = plot(r_h["psi"][valid_h], r_h["et"][valid_h]; label="total (et)", lw=2, xlabel="ψ",
+        ylabel="δW (ξ-space)", title="ξ-space eigenvalues (hamada)", ylims=(-1.0, 1.0))
+    plot!(p3, r_h["psi"][valid_h], r_h["ep"][valid_h]; label="plasma (ep)", lw=1.5, ls=:dash)
+    plot!(p3, r_h["psi"][valid_h], r_h["ev"][valid_h]; label="vacuum (ev)", lw=1.5, ls=:dash)
+    hline!(p3, [0.0]; label="", color=:black, ls=:dot, alpha=0.5)
+
+    pn_ylims_h = symmetric_ylims([r_h["pn_et"][valid_h], r_h["pn_ep"][valid_h], r_h["pn_ev"][valid_h]])
+    p4 = plot(r_h["psi"][valid_h], r_h["pn_et"][valid_h]; label="total (pn_et)", lw=2, xlabel="ψ",
+        ylabel="δW (power-norm flux)", title="Power-norm flux eigenvalues (hamada)", ylims=pn_ylims_h)
+    plot!(p4, r_h["psi"][valid_h], r_h["pn_ep"][valid_h]; label="plasma (pn_ep)", lw=1.5, ls=:dash)
+    plot!(p4, r_h["psi"][valid_h], r_h["pn_ev"][valid_h]; label="vacuum (pn_ev)", lw=1.5, ls=:dash)
+    hline!(p4, [0.0]; label="", color=:black, ls=:dot, alpha=0.5)
+
+    fig_edge = plot(p3, p4; layout=(2, 1), size=(1200, 900), left_margin=12Plots.mm, bottom_margin=4Plots.mm)
+    edge_out = joinpath(EXAMPLE_DIR, "gpec_edge_eigenvalues_n$(NN).png")
+    savefig(fig_edge, edge_out)
+    println("Saved: $(abspath(edge_out))")
 
     # Compare pn_et across Jacobians at matched ψ values (interpolated to a common grid).
     # Each Jacobian has its own edge-scan truncation, so "last point" lands at different ψ
@@ -110,6 +164,8 @@ function main()
     psi_probes = range(psi_min_common, psi_max_common; length=5)
 
     println("\n--- Eigenvalue comparison at matched ψ (linear interp of valid points) ---")
+    println("(test_power_norm_invariance.jl floor on these surfaces is ~6.9e-7; spreads of that")
+    println("order indicate full-stack invariance matches the unit-level operator test.)")
     println("ψ           | hamada         | pest           | park           | boozer")
     println("----------- | -------------- | -------------- | -------------- | --------------")
     function interp_at(r, psi_q)
