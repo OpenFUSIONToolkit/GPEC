@@ -14,13 +14,13 @@ Phi_x spectrum comparison is included in the printout before the PE comparison.
 
 ```bash
 # Full run with coil forcing (default)
-julia --project=benchmarks benchmarks/benchmark_fortran.jl /path/to/DIIID_ideal_example --plot
+julia --project=. benchmarks/benchmark_against_fortran_run.jl /path/to/DIIID_ideal_example --plot
 
 # Use Fortran Phi_coil directly as forcing (easier test)
-julia --project=benchmarks benchmarks/benchmark_fortran.jl /path/to/DIIID_ideal_example --use-file-forcing
+julia --project=. benchmarks/benchmark_against_fortran_run.jl /path/to/DIIID_ideal_example --use-file-forcing
 
 # Skip Julia re-run (use existing gpec.h5 in bench dir)
-julia --project=benchmarks benchmarks/benchmark_fortran.jl /path/to/DIIID_ideal_example --skip-run
+julia --project=. benchmarks/benchmark_against_fortran_run.jl /path/to/DIIID_ideal_example --skip-run
 ```
 
 # Arguments
