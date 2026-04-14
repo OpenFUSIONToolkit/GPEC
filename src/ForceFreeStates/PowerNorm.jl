@@ -207,8 +207,10 @@ function compute_power_norm_eigenvalues(
     if any(abs.(singfac) .< 1e-6)
         if all_eigenvalues
             nan_vec = fill(complex(NaN), Npert)
+            nan_mat = fill(complex(NaN), Npert, Npert)
             return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
-                pn_vacuum_eigenvalue=NaN, pn_et_all=nan_vec, pn_ep_all=nan_vec, pn_ev_all=nan_vec)
+                pn_vacuum_eigenvalue=NaN, pn_et_all=nan_vec, pn_ep_all=nan_vec, pn_ev_all=nan_vec,
+                wt_pn=nan_mat, wp_pn=nan_mat, wv_pn=nan_mat)
         else
             return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
                 pn_vacuum_eigenvalue=NaN)
@@ -275,7 +277,8 @@ function compute_power_norm_eigenvalues(
 
         return (pn_total_eigenvalue=pn_et_all[1], pn_plasma_energy=pn_ep_all[1], pn_vacuum_energy=pn_ev_all[1],
             pn_vacuum_eigenvalue=pn_vacuum_eigenvalue,
-            pn_et_all=pn_et_all, pn_ep_all=pn_ep_all, pn_ev_all=pn_ev_all)
+            pn_et_all=pn_et_all, pn_ep_all=pn_ep_all, pn_ev_all=pn_ev_all,
+            wt_pn=wt_pn, wp_pn=wp_pn, wv_pn=wv_pn)
     else
         idx = eindex[Npert]
         v = vectors[:, idx]
