@@ -133,6 +133,20 @@ this struct.
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 
+    # Sticky bracket-search hints for per-call-site amortization in the outer
+    # ψ ODE RHS (`tpsi!`). Reset or reused across a single outer solve; the ψ
+    # ODE steps can be non-monotonic so FastInterpolations falls back to a
+    # broader search when the hint is stale — still a net win over a cold
+    # bracket search on every call.
+    dbob_m_hint::Base.RefValue{Int} = Ref(1)
+    divx_m_hint::Base.RefValue{Int} = Ref(1)
+    # 2D hints for `equil.eqfun_B` and `equil.rzphi_jac` evaluated on the
+    # (ψ,θ) grid inside the θ loops of `tpsi!` / `calculate_fcgl`. Each call
+    # site gets its own hint tuple so the ψ index is sticky across the ODE
+    # step while the θ index updates monotonically within each θ loop.
+    hint2d_eqfun_B::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
+    hint2d_rzphi_jac::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
+
     # Upper ψ bound set by DCON/FFS (from ForceFreeStatesInternal.psilim).
     # The perturbation interpolants are only valid on [0, psilim]; extrapolation
     # beyond diverges. The outer ψ ODE clips to this to match Fortran PENTRC.

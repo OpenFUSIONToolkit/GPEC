@@ -72,8 +72,8 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
         dbob_m_f = zeros(ComplexF64, intr.mpert)
         divx_m_f = zeros(ComplexF64, intr.mpert)
     else
-        dbob_m_f = intr.dbob_m(psi)
-        divx_m_f = intr.divx_m(psi)
+        dbob_m_f = intr.dbob_m(psi; hint=intr.dbob_m_hint)
+        divx_m_f = intr.divx_m(psi; hint=intr.divx_m_hint)
     end
 
     # Sample poloidal quantities on theta grid
@@ -85,15 +85,17 @@ function tpsi!(tpsi_var::Ref{ComplexF64}, psi::Float64, n::Int, l::Int,
     jac_vals = Vector{Float64}(undef, mthsurf_local + 1)
     djdpsi_vals = Vector{Float64}(undef, mthsurf_local + 1)
 
+    hB = intr.hint2d_eqfun_B
+    hJ = intr.hint2d_rzphi_jac
     for i in 0:mthsurf_local
         theta = i / mthsurf_local
         pt = (psi, theta)
 
-        B_vals[i+1] = equil.eqfun_B(pt)
-        dBdpsi_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(1, 0)) / intr.chi1
-        dBdtheta_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(0, 1))
-        jac_vals[i+1] = equil.rzphi_jac(pt) / intr.chi1
-        djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0)) / intr.chi1^2
+        B_vals[i+1] = equil.eqfun_B(pt; hint=hB)
+        dBdpsi_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(1, 0), hint=hB) / intr.chi1
+        dBdtheta_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(0, 1), hint=hB)
+        jac_vals[i+1] = equil.rzphi_jac(pt; hint=hJ) / intr.chi1
+        djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0), hint=hJ) / intr.chi1^2
     end
 
     # Create periodic interpolant for poloidal quantities
@@ -287,11 +289,13 @@ function calculate_fcgl(psi, n, l, tspl, dbob_m_f, divx_m_f, divxfac::Float64,
     theta_vals = range(0, 1, length=mthsurf_local + 1)
 
     # Evaluate poloidal functions and field perturbations
+    hB = intr.hint2d_eqfun_B
+    hJ = intr.hint2d_rzphi_jac
     for i in eachindex(theta_vals)
         theta = theta_vals[i]
 
-        B_val = equil.eqfun_B((psi, theta))
-        jac_val = equil.rzphi_jac((psi, theta))
+        B_val = equil.eqfun_B((psi, theta); hint=hB)
+        jac_val = equil.rzphi_jac((psi, theta); hint=hJ)
 
         # Fourier component of field perturbations
         expm = exp(im * twopi * intr.mfac * theta)

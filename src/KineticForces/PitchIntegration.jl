@@ -45,6 +45,11 @@ struct PitchParams
     wb_interp::Any     # bounce frequency ωb(λ)
     wd_interp::Any     # magnetic precession ωd(λ)
     flux_interps::Vector{Any}  # pitch-angle flux function interpolants f_i(λ)
+    # Sticky bracket-search hints (one per interpolant). The pitch ODE marches
+    # monotonically in λ so consecutive calls bracket-search from the previous idx.
+    wb_hint::Base.RefValue{Int}
+    wd_hint::Base.RefValue{Int}
+    flux_hints::Vector{Base.RefValue{Int}}
 end
 
 """
@@ -95,7 +100,9 @@ function integrate_pitch_ode(wn::Float64, wt::Float64, we::Float64, nuk::Float64
     params = PitchParams(wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
                          nutype, f0type, nufac, ximag, qt,
                          energy_atol, energy_rtol,
-                         wb_interp, wd_interp, flux_interps)
+                         wb_interp, wd_interp, flux_interps,
+                         Ref(1), Ref(1),
+                         [Ref(1) for _ in 1:length(flux_interps)])
 
     y0 = zeros(neq)
     prob = ODEProblem(pitch_integrand!, y0, (lambda_min, lambda_max), params)
@@ -142,6 +149,7 @@ struct PitchGARParams
     nqty::Int          # number of flux quantities to integrate
     fbnce::Any         # CubicSeriesInterpolant: fbnce(λ) → [wb, wd, f₁, ...]
     fbnce_norm::Vector{Float64}  # normalization factors (1/median)
+    fbnce_hint::Base.RefValue{Int}  # sticky bracket-search hint for fbnce(λ)
 end
 
 
@@ -179,7 +187,7 @@ function integrate_pitch_gar(
         wn, wt, we, nuk, bobmax, epsr, q, ell, n, psi, method,
         nutype, f0type, nufac, ximag, qt,
         energy_atol, energy_rtol,
-        rex, imx, nqty, fbnce, fbnce_norm)
+        rex, imx, nqty, fbnce, fbnce_norm, Ref(1))
 
     # Integration bounds: full λ range of fbnce
     lambda_min = first(fbnce.cache.x)
@@ -209,7 +217,7 @@ Ports Fortran `lintgrnd` logic used by `lambdaintgrl_lsode`.
 """
 function pitch_gar_integrand!(dy, _, p::PitchGARParams, lambda)
     # Evaluate fbnce at this λ: [wb, wd, f1, f2, ...]
-    fvals = p.fbnce(lambda)
+    fvals = p.fbnce(lambda; hint=p.fbnce_hint)
     wb = fvals[1]
     wd = fvals[2]
 
@@ -264,8 +272,8 @@ For circulating particles (λ ≤ bobmax): sum co-passing (ωb > 0) and counter-
 For trapped particles (λ > bobmax): single bounce contribution
 """
 function pitch_integrand!(dy, _, p::PitchParams, lambda)
-    wb = p.wb_interp(lambda)
-    wd = p.wd_interp(lambda)
+    wb = p.wb_interp(lambda; hint=p.wb_hint)
+    wd = p.wd_interp(lambda; hint=p.wd_hint)
 
     # Effective bounce harmonic: ℓ + nq for circulating, ℓ for trapped
     is_circulating = lambda <= p.bobmax
@@ -300,7 +308,7 @@ function pitch_integrand!(dy, _, p::PitchParams, lambda)
     # Multiply by pitch-angle flux functions
     nqty = length(p.flux_interps)
     for i in 1:nqty
-        fres = p.flux_interps[i](lambda) * xint
+        fres = p.flux_interps[i](lambda; hint=p.flux_hints[i]) * xint
         dy[2*(i-1)+1] = real(fres)
         dy[2*(i-1)+2] = imag(fres)
     end
