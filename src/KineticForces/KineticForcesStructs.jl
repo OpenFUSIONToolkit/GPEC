@@ -392,6 +392,11 @@ Results for one NTV computation method across all flux surfaces.
     total_torque::ComplexF64 = 0.0 + 0.0im
     total_energy::ComplexF64 = 0.0 + 0.0im
     records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
+    # Per-step ψ profile from outer ODE (accepted steps only)
+    psi_grid::Vector{Float64} = Float64[]
+    dtdpsi::Vector{ComplexF64} = ComplexF64[]
+    t_cumulative::Vector{ComplexF64} = ComplexF64[]
+    psi_nsteps::Int = 0
 end
 
 """

@@ -425,12 +425,18 @@ function _bounce_integrate(
     wmu_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
     wen_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
 
+    # Pre-allocated scratch for hot-loop tspl evaluation + Fourier-basis buffer
+    # (avoids Vector{Float64}(5) + Vector{ComplexF64}(mpert) allocation per θ
+    # sub-grid point — previously ~256 allocs × 126 inner iters per call).
+    tspl_f = Vector{Float64}(undef, 5)
+    expm = Vector{ComplexF64}(undef, mpert)
+
     for i in 2:ntheta-1  # Edge weights are 0 from powspace
         θ = tdt_pts[i]
         dt = tdt_wts[i]
         θmod = mod(θ, 1.0)
 
-        tspl_f = tspl(θmod)
+        tspl(tspl_f, θmod)
         B_val = tspl_f[1]
         dBdpsi = tspl_f[2]
         # dBdtheta = tspl_f[3]  # not needed here
@@ -462,10 +468,20 @@ function _bounce_integrate(
         cum_wb_arr[i] = cum_wb
         cum_wd_arr[i] = cum_wd
 
-        # Fourier modes at this θ (Fortran lines 702-708)
-        expm = [exp(im * twopi * m * θ) for m in mfac]
-        dbob = sum(dbob_m_f .* expm)
-        divx = sum(divx_m_f .* expm) * divxfac
+        # Fourier modes at this θ (Fortran lines 702-708) — write into pre-allocated
+        # expm buffer using the ORIGINAL expression order to preserve bit-level parity.
+        @inbounds for mi in 1:mpert
+            expm[mi] = exp(im * twopi * mfac[mi] * θ)
+        end
+        # Replaces `sum(dbob_m_f .* expm)` / `sum(divx_m_f .* expm) * divxfac`
+        # with direct accumulators; same evaluation order as the broadcast + sum.
+        dbob = ComplexF64(0.0)
+        divx = ComplexF64(0.0)
+        @inbounds for mi in 1:mpert
+            dbob += dbob_m_f[mi] * expm[mi]
+            divx += divx_m_f[mi] * expm[mi]
+        end
+        divx *= divxfac
 
         # Action integrand (Fortran line 706-708)
         phase = exp(-twopi * im * n * q * (θ - theta0))
@@ -473,12 +489,16 @@ function _bounce_integrate(
             (divx * sqrt_vpar + dbob * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar) *
             phase
 
-        # W vectors for matrix path (Fortran lines 722-727)
+        # W vectors for matrix path (Fortran lines 722-727). Element-by-element
+        # write preserving original broadcast evaluation order exactly to keep
+        # bit-level parity (matters because downstream ODE is tolerance-sensitive).
         if do_matrices
-            wmu_mt[:, i] .= dt .* (lmda / bo) .* expm ./ sqrt_vpar .*
-                phase ./ (2 * chi1)
-            wen_mt[:, i] .= dt .* expm ./ (B_val * sqrt_vpar) .*
-                phase ./ (2 * chi1)
+            wmu_pre = dt * (lmda / bo)
+            wen_pre = dt
+            @inbounds for mi in 1:mpert
+                wmu_mt[mi, i] = wmu_pre * expm[mi] / sqrt_vpar * phase / (2 * chi1)
+                wen_mt[mi, i] = wen_pre * expm[mi] / (B_val * sqrt_vpar) * phase / (2 * chi1)
+            end
         end
     end
 
@@ -499,17 +519,28 @@ function _bounce_integrate(
     wbbar = ro * twopi / ((2 - sigma) * total_wb)
     wdbar = ro^2 * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
 
-    # Phase factor (Fortran line 750)
-    # Ratio cum_wb_arr[i]/total_wb is dimensionless — (ntheta-1) cancels, no scaling.
-    pl = [exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / ((2 - sigma) * total_wb)) for i in 1:ntheta]
-
-    # Bounce-averaged action (Fortran line 752)
-    bjspl = [conj(jvtheta[i]) * (pl[i] + (1 - sigma) / (pl[i] + 1e-30)) for i in 1:ntheta]
-
-    # Riemann integration over the unit linear space [0,1] (matches spline_int)
+    # Phase factor (Fortran line 750). Ratio cum_wb_arr[i]/total_wb is dimensionless —
+    # (ntheta-1) cancels, no scaling. For do_matrices we keep `pl` as a Vector because
+    # it is referenced below; otherwise we fuse pl + bjspl → bj_integral in a single
+    # pass, avoiding two Vector{ComplexF64}(ntheta) allocations.
+    # Expression order below matches the original list comprehension exactly.
+    pl_denom = (2 - sigma) * total_wb
+    one_minus_sigma = 1 - sigma
     bj_integral = ComplexF64(0.0)
-    for i in 2:ntheta
-        bj_integral += bjspl[i]
+    if do_matrices
+        pl = Vector{ComplexF64}(undef, ntheta)
+        @inbounds for i in 1:ntheta
+            pl[i] = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
+        end
+        @inbounds for i in 2:ntheta
+            bj_integral += conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
+        end
+    else
+        pl = nothing
+        @inbounds for i in 2:ntheta
+            pli = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
+            bj_integral += conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + 1e-30))
+        end
     end
     bj_integral *= nrm
 

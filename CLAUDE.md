@@ -606,6 +606,19 @@ This format is used for compiling release notes, so tags should be human-readabl
   plot!(p, m_ext, a_ext; seriestype=:steppre, lw=2, label="...")
   ```
 
+### Subagent Consultations
+
+When delegating to specialized agents (julia-performance-optimizer, fast-interpolations-optimizer, fortran-physics-reviewer, clean-code-reviewer, etc.), every prompt **must include an explicit budget** because runaway agents silently consume the user's daily token quota. A single consultation that explores instead of editing has been measured at 167 tool calls / 55 minutes / no return — that is a session-killer. Defaults:
+
+- **Hard cap: ≤ 30 tool uses and ≤ 10 minutes wall time per consultation.** State both numbers in the prompt verbatim ("Budget: ≤30 tool uses, ≤10 min").
+- **Single concrete deliverable.** One file, one function, or one named hotspot list. Not "audit the module."
+- **No exploration phase.** The prompt must hand the agent the file paths and line numbers; the agent's job is to edit, not to map the codebase.
+- **Require an interim status if the work might exceed budget.** Tell the agent: "If you cannot finish within budget, stop and report what was changed and what remains."
+- **Prefer two short focused agents over one open-ended one.** If an investigation needs both performance and interpolation review, run them sequentially with separate ≤30-tool budgets — don't chain them in one long prompt.
+- **Never re-launch a runaway agent.** If an agent hits the API rate limit before returning, do not retry; report the partial state to the user and switch to hand-implementation.
+
+These rules apply to **every** Agent tool invocation, not just performance work.
+
 ### Code Formatting
 
 Pre-commit hooks enforce formatting via JuliaFormatter (v1.0.62) and general file hygiene. **All code you write or modify must already conform to these standards before committing**, so the hooks have nothing to fix. Failing to do this creates noisy diffs in PRs where formatting changes leak into unrelated files.

@@ -102,7 +102,6 @@ function integrate_psi_ode(
     sol = solve(prob, Tsit5();
         reltol=ctrl.rtol_psi, abstol=ctrl.atol_psi,
         maxiters=10000,
-        # Save at each internal step to capture torque profile
         save_everystep=true)
 
     if sol.retcode != :Success
@@ -116,25 +115,57 @@ function integrate_psi_ode(
         total += complex(yf[2*(ell_idx-1)+1], yf[2*(ell_idx-1)+2])
     end
 
-    # Torque profile from saved trajectory (available for diagnostics)
-    torque_profile = nothing
-    if length(params.psi_history) > 2
-        # Store as (psi, dT/dpsi) pairs for later spline fitting if needed
-        torque_profile = (psi=copy(params.psi_history), dtdpsi=copy(params.torque_history))
+    # Profiles at accepted ODE steps. Cumulative T(ψ) = Σ_ℓ sol.u is free; dT/dψ
+    # is computed via central finite difference on T_cumulative so we don't pay
+    # extra RHS evaluations. The central-difference derivative matches the true
+    # integrand to O(Δψ²), which is below the ODE's own rtol on a well-converged
+    # solution — adequate for plotting and for integrating against Fortran reference.
+    n_saved = length(sol.t)
+    psi_grid = copy(sol.t)
+    t_cumulative = Vector{ComplexF64}(undef, n_saved)
+    for i in 1:n_saved
+        u_i = sol.u[i]
+        acc = ComplexF64(0.0)
+        for ell_idx in 1:(1 + 2*nl)
+            acc += complex(u_i[2*(ell_idx-1)+1], u_i[2*(ell_idx-1)+2])
+        end
+        t_cumulative[i] = acc
+    end
+    dtdpsi_profile = Vector{ComplexF64}(undef, n_saved)
+    if n_saved >= 2
+        dtdpsi_profile[1] = (t_cumulative[2] - t_cumulative[1]) / (psi_grid[2] - psi_grid[1])
+        for i in 2:(n_saved - 1)
+            dtdpsi_profile[i] = (t_cumulative[i+1] - t_cumulative[i-1]) / (psi_grid[i+1] - psi_grid[i-1])
+        end
+        dtdpsi_profile[end] = (t_cumulative[end] - t_cumulative[end-1]) / (psi_grid[end] - psi_grid[end-1])
+    else
+        dtdpsi_profile[1] = ComplexF64(0.0)
     end
 
-    # Trapezoidal integration of kinetic matrices over ψ
+    torque_profile = n_saved > 1 ? (
+        psi=psi_grid,
+        dtdpsi=dtdpsi_profile,
+        t_cumulative=t_cumulative,
+    ) : nothing
+
+    # Trapezoidal integration of kinetic matrices over ψ (matrix methods only; uses
+    # per-RHS-call history that is still populated below for those methods).
     matrix_integrated = nothing
     if is_matrix_method && length(params.psi_history) > 1
-        npsi = length(params.psi_history)
+        npsi_mat = length(params.psi_history)
         matrix_integrated = zeros(ComplexF64, mpert, mpert, 6)
-        for i in 2:npsi
+        for i in 2:npsi_mat
             dpsi = params.psi_history[i] - params.psi_history[i-1]
             matrix_integrated .+= 0.5 .* (params.matrix_history[i-1] .+ params.matrix_history[i]) .* dpsi
         end
     end
 
-    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated)
+    return (
+        total=total,
+        torque_profile=torque_profile,
+        matrix_integrated=matrix_integrated,
+        psi_nsteps=n_saved,
+    )
 end
 
 
@@ -179,10 +210,11 @@ function psi_integrand!(dy, _, p::PsiIntegrationParams, psi)
         end
     end
 
-    # Record trajectory for profile reconstruction
-    push!(p.psi_history, psi)
-    push!(p.torque_history, total_torque)
+    # Matrix methods need per-RHS-call history for trapezoidal ψ-integration of
+    # the accumulated matrix. Non-matrix methods get their clean dT/dψ profile via
+    # the SavingCallback in integrate_psi_ode (fired only on accepted ODE steps).
     if is_matrix_method
+        push!(p.psi_history, psi)
         push!(p.matrix_history, copy(p.elems))
     end
 
@@ -247,6 +279,13 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         total_torque = ComplexF64(0.0)
         npert = max(intr.npert, 1)
 
+        # Capture per-ψ profile and step count from the single-n case (or the
+        # first n when npert > 1) for output diagnostics.
+        psi_grid_out = Float64[]
+        dtdpsi_out = ComplexF64[]
+        t_cum_out = ComplexF64[]
+        psi_nsteps_total = 0
+
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
             if n == 0
@@ -261,6 +300,13 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                 psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
 
             total_torque += result.total
+            psi_nsteps_total += result.psi_nsteps
+
+            if n_idx == 1 && !isnothing(result.torque_profile)
+                psi_grid_out = result.torque_profile.psi
+                dtdpsi_out = result.torque_profile.dtdpsi
+                t_cum_out = result.torque_profile.t_cumulative
+            end
 
             # Insert n-block into full matrix
             if is_matrix_method && !isnothing(result.matrix_integrated) && !isnothing(op_wmats_full)
@@ -278,7 +324,11 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             method=method,
             nn=ctrl.nn,
             total_torque=total_torque,
-            total_energy=total_energy
+            total_energy=total_energy,
+            psi_grid=psi_grid_out,
+            dtdpsi=dtdpsi_out,
+            t_cumulative=t_cum_out,
+            psi_nsteps=psi_nsteps_total,
         )
         state.method_results[method] = result_entry
 

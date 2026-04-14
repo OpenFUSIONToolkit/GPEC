@@ -16,6 +16,8 @@ Fortran reference values (pentrc_output_n1.nc global attributes):
 """
 
 using Printf
+using NCDatasets
+using Plots
 
 # Load GPEC
 using GeneralizedPerturbedEquilibrium
@@ -161,8 +163,12 @@ function run_benchmark()
     )
 
     # KF configuration matching Fortran pentrc.in.
+    # tgar defaults off during perf iteration (same kernels as fgar; see
+    # memory/feedback_kf_fgar_subsumes_tgar.md). Set BENCHMARK_TGAR=1 to enable
+    # for the final full-validation run.
+    tgar_enabled = get(ENV, "BENCHMARK_TGAR", "0") == "1"
     kf_ctrl = KF.KineticForcesControl(;
-        fgar_flag=true, tgar_flag=true, nn=1, nl=4,
+        fgar_flag=true, tgar_flag=tgar_enabled, nn=1, nl=4,
         mi=2, zi=1, nutype="harmonic", f0type="maxwellian",
         nufac=1, psilims=[0.0, 1.0], kinetic_file="kinetic.dat",
         verbose=false)
@@ -200,7 +206,14 @@ function run_benchmark()
     kf_state = KF.KineticForcesState()
     KF.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
 
-    _pf("  Torque integration completed in %.1f s\n", time() - t2)
+    kf_runtime = time() - t2
+    _pf("  Torque integration completed in %.1f s\n", kf_runtime)
+
+    # ψ-step count per method — a key KPI for outer-ODE tolerance tuning.
+    _p("\n  ψ-step counts (outer Tsit5 accepted steps per method):")
+    for (method_key, mr) in kf_state.method_results
+        _pf("    %-5s: %5d accepted ψ-steps\n", method_key, mr.psi_nsteps)
+    end
 
     # =========================================================================
     # Step 5: Compare results
@@ -252,8 +265,117 @@ function run_benchmark()
         _p("  Some methods exceed 5% threshold")
     end
 
+    # =========================================================================
+    # Step 6: Plot dT/dψ and T(ψ) overlay vs Fortran PENTRC reference
+    # =========================================================================
+    _p("\n" * "=" ^ 70)
+    _p("  Plotting dT/dψ and T(ψ) overlay vs Fortran")
+    _p("=" ^ 70)
+
+    pentrc_nc = joinpath(FORTRAN_DIR, "pentrc_output_n1.nc")
+    if !isfile(pentrc_nc)
+        @warn "Fortran pentrc NetCDF not found; skipping overlay plot" path=pentrc_nc
+        return results
+    end
+
+    # Read Fortran reference profiles. PENTRC writes NetCDF in Fortran order
+    # `dTdpsi_<method>(i, ell, psi)` with i∈{1,2}={real,imag}; NCDatasets
+    # preserves that order in the Julia array, so we slice [1, :, :] for real
+    # and sum over ell (dim 1 of the resulting 2D array).
+    fortran_profiles = Dict{String,NamedTuple}()
+    NCDatasets.Dataset(pentrc_nc, "r") do ds
+        for method_key in keys(results)
+            psi_var = "psi_$method_key"
+            dt_var  = "dTdpsi_$method_key"
+            T_var   = "T_$method_key"
+            if !(haskey(ds, psi_var) && haskey(ds, dt_var) && haskey(ds, T_var))
+                @warn "Fortran NetCDF missing variables for method" method=method_key
+                continue
+            end
+            psi_f    = Array(ds[psi_var][:])
+            dTdpsi_f = Array(ds[dt_var][:, :, :])    # (i, ell, psi)
+            T_f      = Array(ds[T_var][:, :, :])
+            # Take real slice (i=1), sum over ell (dim 1 of the 2D real slice → (psi,))
+            dT_re_f = dropdims(sum(dTdpsi_f[1, :, :]; dims=1); dims=1)
+            T_re_f  = dropdims(sum(T_f[1, :, :];      dims=1); dims=1)
+            fortran_profiles[method_key] = (; psi=psi_f, dTdpsi=dT_re_f, T=T_re_f)
+            _pf("  Fortran %-5s: %d ψ points, T_final = %.6f N·m\n",
+                method_key, length(psi_f), T_re_f[end])
+        end
+    end
+
+    # Plot per method: two panels (dT/dψ, cumulative T) saved as separate PNGs.
+    # Separate files avoid a GR-backend rendering bug that surfaced when
+    # stacking panels into a layout=(2,N) figure with Float64 arrays of
+    # different lengths. Simpler is also easier to regenerate outside the full
+    # benchmark: the raw arrays are dumped to `.dat` so a standalone plot
+    # script can re-draw without a 5-minute rerun.
+    method_keys = sort(collect(intersect(keys(results), keys(fortran_profiles))))
+    if isempty(method_keys)
+        @warn "No overlapping methods between Julia and Fortran; skipping plot"
+        return results
+    end
+
+    for mkey in method_keys
+        mr = kf_state.method_results[mkey]
+        fp = fortran_profiles[mkey]
+
+        _pf("  %s: Julia psi_grid=%d, dtdpsi=%d, t_cum=%d | Fortran psi=%d, dTdpsi=%d, T=%d\n",
+            mkey, length(mr.psi_grid), length(mr.dtdpsi), length(mr.t_cumulative),
+            length(fp.psi), length(fp.dTdpsi), length(fp.T))
+
+        # Dump raw arrays so the plot can be regenerated without rerunning.
+        open(joinpath(@__DIR__, "kf_$(mkey)_profiles.dat"), "w") do io
+            println(io, "# psi_julia  dTdpsi_julia_re  T_julia_re")
+            for i in eachindex(mr.psi_grid)
+                @printf(io, "%.8e  %.8e  %.8e\n",
+                        mr.psi_grid[i], real(mr.dtdpsi[i]), real(mr.t_cumulative[i]))
+            end
+            println(io, "# --- fortran ---")
+            println(io, "# psi_fortran  dTdpsi_fortran  T_fortran")
+            for i in eachindex(fp.psi)
+                @printf(io, "%.8e  %.8e  %.8e\n", fp.psi[i], fp.dTdpsi[i], fp.T[i])
+            end
+        end
+
+        # dT/dψ panel
+        p1 = plot(; xlabel="ψ_n", ylabel="dT/dψ [N·m]",
+                    title="$(uppercase(mkey)): dT/dψ", legend=:topleft,
+                    left_margin=12Plots.mm, bottom_margin=4Plots.mm, size=(900, 500))
+        plot!(p1, Float64.(fp.psi), Float64.(fp.dTdpsi);
+              label="Fortran", lw=2, color=:black, linestyle=:dash)
+        plot!(p1, Float64.(mr.psi_grid), Float64.(real.(mr.dtdpsi));
+              label="Julia", lw=1.5, color=:crimson)
+        path1 = joinpath(@__DIR__, "kf_$(mkey)_dTdpsi_vs_fortran.png")
+        try
+            savefig(p1, path1)
+            _p("  Saved dT/dψ panel → $path1")
+        catch err
+            @warn "dT/dψ panel savefig failed" method=mkey err
+        end
+
+        # Cumulative T panel
+        p2 = plot(; xlabel="ψ_n", ylabel="T [N·m]",
+                    title="$(uppercase(mkey)): cumulative T", legend=:topleft,
+                    left_margin=12Plots.mm, bottom_margin=4Plots.mm, size=(900, 500))
+        plot!(p2, Float64.(fp.psi), Float64.(fp.T);
+              label="Fortran", lw=2, color=:black, linestyle=:dash)
+        plot!(p2, Float64.(mr.psi_grid), Float64.(real.(mr.t_cumulative));
+              label="Julia", lw=1.5, color=:crimson)
+        path2 = joinpath(@__DIR__, "kf_$(mkey)_T_vs_fortran.png")
+        try
+            savefig(p2, path2)
+            _p("  Saved cumulative T panel → $path2")
+        catch err
+            @warn "cumulative T panel savefig failed" method=mkey err
+        end
+    end
+
     return results
 end
 
-# Run
-results = run_benchmark()
+# Run only when invoked as a script (so other benchmarks can `include()` this
+# file to reuse `load_fortran_xclebsch` without triggering the full run).
+if abspath(PROGRAM_FILE) == @__FILE__
+    results = run_benchmark()
+end

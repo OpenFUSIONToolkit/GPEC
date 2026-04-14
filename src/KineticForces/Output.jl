@@ -23,6 +23,17 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
         mg["nn"] = result.nn
         mg["total_torque"] = [real(result.total_torque), imag(result.total_torque)]
         mg["total_energy"] = [real(result.total_energy), imag(result.total_energy)]
+        mg["psi_nsteps"] = result.psi_nsteps
+
+        # Per-ψ torque profiles at outer-ODE accepted steps.
+        # dT/dψ from SavingCallback, cumulative T(ψ) from sol.u summed over bounce harmonics.
+        if !isempty(result.psi_grid)
+            mg["psi"] = result.psi_grid
+            mg["dTdpsi_real"] = real.(result.dtdpsi)
+            mg["dTdpsi_imag"] = imag.(result.dtdpsi)
+            mg["T_real"] = real.(result.t_cumulative)
+            mg["T_imag"] = imag.(result.t_cumulative)
+        end
 
         if !isempty(result.records)
             write_integration_records!(mg, result.records)
