@@ -318,6 +318,7 @@ Populated in `Free.jl`.
   - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total). **ξ-space.**
   - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total). **ξ-space.**
   - `pn_wt0, pn_wp, pn_wv::Array{ComplexF64,2}` - Power-normalized flux (Φ-space) counterparts of `wt0`, `wp`, `wv` at the plasma edge (see PowerNorm.jl). Jacobian-invariant up to the M†·W·M transform.
+  - `pn_wt::Array{ComplexF64,2}` - Φ-space eigenvector matrix of `pn_wt0` (columns sorted most-unstable first, phase-normalized so each column's largest-magnitude entry is real-positive).
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
@@ -348,6 +349,7 @@ Populated in `Free.jl`.
     pn_wt0::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
     pn_wp::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
     pn_wv::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    pn_wt::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
 
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)

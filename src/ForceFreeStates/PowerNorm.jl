@@ -210,7 +210,7 @@ function compute_power_norm_eigenvalues(
             nan_mat = fill(complex(NaN), Npert, Npert)
             return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
                 pn_vacuum_eigenvalue=NaN, pn_et_all=nan_vec, pn_ep_all=nan_vec, pn_ev_all=nan_vec,
-                wt_pn=nan_mat, wp_pn=nan_mat, wv_pn=nan_mat)
+                wt_pn=nan_mat, wp_pn=nan_mat, wv_pn=nan_mat, pn_eigenvectors=nan_mat)
         else
             return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
                 pn_vacuum_eigenvalue=NaN)
@@ -267,18 +267,29 @@ function compute_power_norm_eigenvalues(
         pn_et_all = Vector{ComplexF64}(undef, Npert)
         pn_ep_all = Vector{ComplexF64}(undef, Npert)
         pn_ev_all = Vector{ComplexF64}(undef, Npert)
+        pn_eigenvectors = Matrix{ComplexF64}(undef, Npert, Npert)
 
         for i in 1:Npert
             v = vectors[:, eindex[Npert+1-i]]
+            pn_eigenvectors[:, i] .= v
             pn_et_all[i] = eigenvalues[eindex[Npert+1-i]]
             pn_ep_all[i] = dot(v, wp_pn * v)
             pn_ev_all[i] = dot(v, wv_pn * v)
         end
 
+        # Phase convention: rotate each column so its largest-magnitude entry is real-positive
+        # (matches the ξ-space convention in free_run!). Magnitudes are preserved since the
+        # eigenvectors come from Julia's `eigen` with ‖v‖₂ = 1, the natural Φ-space norm.
+        for isol in 1:Npert
+            imax = argmax(abs.(@view pn_eigenvectors[:, isol]))
+            phase = abs(pn_eigenvectors[imax, isol]) / pn_eigenvectors[imax, isol]
+            @view(pn_eigenvectors[:, isol]) .*= phase
+        end
+
         return (pn_total_eigenvalue=pn_et_all[1], pn_plasma_energy=pn_ep_all[1], pn_vacuum_energy=pn_ev_all[1],
             pn_vacuum_eigenvalue=pn_vacuum_eigenvalue,
             pn_et_all=pn_et_all, pn_ep_all=pn_ep_all, pn_ev_all=pn_ev_all,
-            wt_pn=wt_pn, wp_pn=wp_pn, wv_pn=wv_pn)
+            wt_pn=wt_pn, wp_pn=wp_pn, wv_pn=wv_pn, pn_eigenvectors=pn_eigenvectors)
     else
         idx = eindex[Npert]
         v = vectors[:, idx]

@@ -463,18 +463,20 @@ function write_outputs_to_HDF5(
         # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
-        # W_freeboundary_eigenmodes is the ξ-space eigenvector matrix of wt0 and is
-        # Jacobian-dependent by construction; it has no Φ-space analogue.
+        # W_freeboundary_eigenmodes holds the eigenvector matrix of W_freeboundary with
+        # columns sorted most-unstable first; the same phase normalization is applied in
+        # both spaces (largest-magnitude entry made real-positive).
         out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.pn_wt0 : ComplexF64[]
         out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.pn_wp : ComplexF64[]
         out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.pn_wv : ComplexF64[]
-        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.pn_wt : ComplexF64[]
         out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.pn_et : ComplexF64[]
         out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.pn_ep : ComplexF64[]
         out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.pn_ev : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/XiNorm/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]

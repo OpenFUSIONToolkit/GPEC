@@ -99,6 +99,7 @@ and data dumping.
     vac_data.pn_wt0 .= pn_result.wt_pn
     vac_data.pn_wp .= pn_result.wp_pn
     vac_data.pn_wv .= pn_result.wv_pn
+    vac_data.pn_wt .= pn_result.pn_eigenvectors
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
