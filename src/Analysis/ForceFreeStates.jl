@@ -32,7 +32,7 @@ A `Plots.jl` plot object.
 function plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
     mlow, xi_psi, psi, et = h5open(h5path, "r") do fid
         read(fid["info/mlow"]), read(fid["integration/xi_psi"]),
-        read(fid["integration/psi"]), read(fid["vacuum/et"])
+        read(fid["integration/psi"]), read(fid["FreeBoundaryStability/eigenmode_energies"])
     end
 
     mpert = size(xi_psi, 1)
@@ -104,7 +104,8 @@ end
 Heatmap of energy eigenvector magnitudes vs (m, mode index).
 
 Only `matrix_type=:total` is supported (the total energy eigenvector matrix `Wₜ` is stored in
-`vacuum/wt`). Plasma and vacuum eigenvectors are not stored separately in the HDF5 output.
+`FreeBoundaryStability/W_freeboundary_eigenmodes`). Plasma and vacuum eigenvectors are not
+stored separately in the HDF5 output.
 
 Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC conventions.
 
@@ -126,7 +127,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["vacuum/wt"]), read(fid["equil/psio"]), read(fid["info/mlow"])
+        read(fid["FreeBoundaryStability/W_freeboundary_eigenmodes"]), read(fid["equil/psio"]), read(fid["info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -184,19 +185,19 @@ A horizontal dashed line at zero marks the stability boundary. A vertical dashed
 
 ### Returns
 
-A `Plots.jl` plot object, or `nothing` if no `edge_scan/` group is present in the file.
+A `Plots.jl` plot object, or `nothing` if no `EdgeScan/` group is present in the file.
 """
 function plot_edge_stability_scan(h5path; save_path=nothing, ylims=(-2, 3), kwargs...)
     has_scan, q, et, ep, ev, evonly, qlim = h5open(h5path, "r") do fid
-        if !haskey(fid, "edge_scan/psi")
+        if !haskey(fid, "EdgeScan/psi")
             return false, Float64[], ComplexF64[], ComplexF64[], ComplexF64[], Float64[], NaN
         end
         true,
-        read(fid["edge_scan/q"]),
-        read(fid["edge_scan/total_energy"]),
-        read(fid["edge_scan/plasma_energy"]),
-        read(fid["edge_scan/vacuum_energy"]),
-        read(fid["edge_scan/vacuum_eigenvalue"]),
+        read(fid["EdgeScan/q"]),
+        read(fid["EdgeScan/total_energy"]),
+        read(fid["EdgeScan/plasma_energy"]),
+        read(fid["EdgeScan/vacuum_energy"]),
+        read(fid["EdgeScan/vacuum_eigenvalue"]),
         read(fid["info/qlim"])
     end
 
@@ -260,7 +261,11 @@ or green (stable, Re < 0), with a dashed reference line at zero.
 A `Plots.jl` plot object.
 """
 function plot_eigenvalues(h5path; matrix_type=:total, save_path=nothing)
-    dataset = Dict(:total => "vacuum/et", :plasma => "vacuum/ep", :vacuum => "vacuum/ev")
+    dataset = Dict(
+        :total => "FreeBoundaryStability/eigenmode_energies",
+        :plasma => "FreeBoundaryStability/eigenmode_plasma_energies",
+        :vacuum => "FreeBoundaryStability/eigenmode_vacuum_energies"
+    )
     haskey(dataset, matrix_type) || error("matrix_type must be :total, :plasma, or :vacuum")
 
     et = h5open(h5path, "r") do fid
@@ -388,7 +393,8 @@ A `Plots.jl` plot object.
 """
 function plot_ffs_summary(h5path; save_path=nothing)
     has_vac = h5open(h5path, "r") do fid
-        haskey(fid, "vacuum/wt") && !isempty(read(fid["vacuum/wt"]))
+        haskey(fid, "FreeBoundaryStability/W_freeboundary_eigenmodes") &&
+            !isempty(read(fid["FreeBoundaryStability/W_freeboundary_eigenmodes"]))
     end
 
     p_crit = plot_fixed_boundary_stability_criterion(h5path)

@@ -562,6 +562,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
             es.pn_total_eigenvalue[j] = result.pn_total_eigenvalue
             es.pn_plasma_energy[j] = result.pn_plasma_energy
             es.pn_vacuum_energy[j] = result.pn_vacuum_energy
+            es.pn_vacuum_eigenvalue[j] = result.pn_vacuum_eigenvalue
         catch e
             e isa LinearAlgebra.SingularException || rethrow()
         end

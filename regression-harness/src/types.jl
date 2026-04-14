@@ -7,7 +7,7 @@ Specification for a single quantity to extract from gpec.h5.
 """
 struct QuantitySpec
     name::String
-    h5path::String          # HDF5 dataset path (e.g. "vacuum/et"), empty for runtime
+    h5path::String          # HDF5 dataset path (e.g. "FreeBoundaryStability/eigenmode_energies"), empty for runtime
     type::String            # "complex_vector", "real_vector", "real_scalar", "int_scalar", "real_matrix", "runtime"
     extract::String         # "value", "real_first", "imag_first", "abs_first", "norm", "all_real", "all_complex", "checksum"
     label::String           # Human-readable label for reports

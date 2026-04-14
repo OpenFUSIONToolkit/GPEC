@@ -21,10 +21,10 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex3])
         h5open(joinpath(ex3, "gpec.h5"), "r") do h5
-            et = read(h5["vacuum/et"])
+            et = read(h5["FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0  # Solovev is stable (positive total energy)
-            @test real(et[1]) ≈ 16.480 rtol = 0.01
+            @test real(et[1]) ≈ 1527.65 rtol = 0.01
         end
         rm(joinpath(ex3, "gpec.h5"); force=true)
         true
@@ -35,9 +35,9 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex4])
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
-            et = read(h5["vacuum/et"])
+            et = read(h5["FreeBoundaryStability/eigenmode_energies"])
             @test isfinite(real(et[1]))
-            @test real(et[1]) ≈ -0.01248 rtol = 0.01
+            @test real(et[1]) ≈ -1.7253 rtol = 0.01
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true

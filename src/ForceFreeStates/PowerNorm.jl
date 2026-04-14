@@ -179,6 +179,8 @@ spectrally invariant because Wp + Wv = Wt.
 
 Returns the standard eigenvalues of W_Φ sorted ascending (most negative/unstable
 first), matching the ξ-space convention in `free_run!` and `free_compute_total`.
+Also returns `pn_vacuum_eigenvalue = max(0, λ_min(Hermitian(wv_Φ)))` — the Φ-space
+counterpart of the ξ-space `vacuum_eigenvalue` diagnostic.
 Returns NaN when any singfac ≈ 0 (rational surface crossing makes T singular).
 """
 function compute_power_norm_eigenvalues(
@@ -206,9 +208,10 @@ function compute_power_norm_eigenvalues(
         if all_eigenvalues
             nan_vec = fill(complex(NaN), Npert)
             return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
-                pn_et_all=nan_vec, pn_ep_all=nan_vec, pn_ev_all=nan_vec)
+                pn_vacuum_eigenvalue=NaN, pn_et_all=nan_vec, pn_ep_all=nan_vec, pn_ev_all=nan_vec)
         else
-            return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN))
+            return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
+                pn_vacuum_eigenvalue=NaN)
         end
     end
 
@@ -242,6 +245,11 @@ function compute_power_norm_eigenvalues(
     wp_pn = M' * wp * M
     wv_pn = M' * wv * M
 
+    # Smallest eigenvalue of the vacuum matrix alone in Φ-space, clamped to zero.
+    # wv_pn should be PSD by congruence of the PSD ξ-space wv; numerical noise
+    # can make the smallest eigenvalue slightly negative.
+    pn_vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv_pn))))))
+
     # Eigendecompose the total energy in power-norm space. Only the eigenspectrum
     # is Jacobian-invariant; the eigenvectors are coordinate-dependent.
     Ev = eigen(wt_pn)
@@ -266,6 +274,7 @@ function compute_power_norm_eigenvalues(
         end
 
         return (pn_total_eigenvalue=pn_et_all[1], pn_plasma_energy=pn_ep_all[1], pn_vacuum_energy=pn_ev_all[1],
+            pn_vacuum_eigenvalue=pn_vacuum_eigenvalue,
             pn_et_all=pn_et_all, pn_ep_all=pn_ep_all, pn_ev_all=pn_ev_all)
     else
         idx = eindex[Npert]
@@ -274,7 +283,8 @@ function compute_power_norm_eigenvalues(
         pn_plasma = ComplexF64(dot(v, wp_pn * v))
         pn_vacuum = ComplexF64(dot(v, wv_pn * v))
 
-        return (pn_total_eigenvalue=pn_total, pn_plasma_energy=pn_plasma, pn_vacuum_energy=pn_vacuum)
+        return (pn_total_eigenvalue=pn_total, pn_plasma_energy=pn_plasma, pn_vacuum_energy=pn_vacuum,
+            pn_vacuum_eigenvalue=pn_vacuum_eigenvalue)
     end
 end
 

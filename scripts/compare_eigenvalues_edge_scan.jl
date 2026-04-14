@@ -18,22 +18,22 @@ if !isfile(h5_path)
 end
 
 h5open(h5_path, "r") do f
-    if !haskey(f, "edge_scan/psi")
-        error("No edge_scan data in $h5_path")
+    if !haskey(f, "EdgeScan/psi")
+        error("No EdgeScan data in $h5_path")
     end
 
-    psi = read(f, "edge_scan/psi")
-    q = read(f, "edge_scan/q")
+    psi = read(f, "EdgeScan/psi")
+    q = read(f, "EdgeScan/q")
 
-    # ξ-space eigenvalues
-    et = real.(read(f, "edge_scan/total_energy"))
-    ep = real.(read(f, "edge_scan/plasma_energy"))
-    ev = real.(read(f, "edge_scan/vacuum_energy"))
+    # ξ-space eigenvalues (benchmarking-only subgroup)
+    et = real.(read(f, "EdgeScan/XiNorm/total_energy"))
+    ep = real.(read(f, "EdgeScan/XiNorm/plasma_energy"))
+    ev = real.(read(f, "EdgeScan/XiNorm/vacuum_energy"))
 
-    # Power-normalized flux eigenvalues
-    pn_et = real.(read(f, "edge_scan/pn_total_energy"))
-    pn_ep = real.(read(f, "edge_scan/pn_plasma_energy"))
-    pn_ev = real.(read(f, "edge_scan/pn_vacuum_energy"))
+    # Power-normalized flux eigenvalues (default)
+    pn_et = real.(read(f, "EdgeScan/total_energy"))
+    pn_ep = real.(read(f, "EdgeScan/plasma_energy"))
+    pn_ev = real.(read(f, "EdgeScan/vacuum_energy"))
 
     # Filter NaN
     valid = .!isnan.(et) .& .!isnan.(pn_et)

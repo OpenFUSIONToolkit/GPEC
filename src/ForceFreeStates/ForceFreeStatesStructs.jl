@@ -313,9 +313,10 @@ Populated in `Free.jl`.
   - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
-  - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
-  - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
-  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+  - `wt::Array{ComplexF64, 2}` - Free-boundary eigenvector matrix after diagonalising W (numpert_total × numpert_total). Columns are the eigenmodes sorted most-unstable first.
+  - `wt0::Array{ComplexF64, 2}` - Free-boundary total-energy matrix W = wp + wv before diagonalisation (numpert_total × numpert_total).
+  - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total).
+  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total).
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
@@ -331,6 +332,7 @@ Populated in `Free.jl`.
 
     wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wt0::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
+    wp::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wv::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
@@ -353,7 +355,8 @@ VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpo
 EdgeScanState
 
 Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
-Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `edge_scan/`.
+Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`
+(power-norm values) and `EdgeScan/XiNorm/` (ξ-space values, for benchmarking).
 
 ## Fields
 
@@ -362,8 +365,8 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
   - `sqrtamat_spline` - Precomputed √A convolution matrix + surface area spline for power-norm eigenvalues.
   - `sqrtamat_hint::Base.RefValue{Int}` - Search hint for sqrtamat spline.
   - `psi, q` - ψ and q values at each edge scan step.
-  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step (NaN for failed steps).
-  - `pn_total_eigenvalue, pn_plasma_energy, pn_vacuum_energy` - Power-normalized flux eigenvalues (Jacobian-invariant; NaN for failed/singular steps).
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - ξ-space energy components at each step (NaN for failed steps). Kept for Fortran benchmarking.
+  - `pn_total_eigenvalue, pn_plasma_energy, pn_vacuum_energy, pn_vacuum_eigenvalue` - Power-normalized flux (Φ-space) energies (Jacobian-invariant; NaN for failed/singular steps). These are the values written to `EdgeScan/` by default.
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
@@ -377,7 +380,7 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     sqrtamat_spline::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2 + 1)
     sqrtamat_hint::Base.RefValue{Int} = Ref(1)
 
-    # Scan results (written to HDF5 under edge_scan/; NaN where free_compute_total raised SingularException)
+    # Scan results (written to HDF5 under EdgeScan/; NaN where free_compute_total raised SingularException)
     psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
     q::Vector{Float64} = Vector{Float64}(undef, N_edge)
     total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
@@ -389,6 +392,7 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     pn_total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     pn_plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     pn_vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    pn_vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)

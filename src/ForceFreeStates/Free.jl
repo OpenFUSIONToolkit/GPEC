@@ -37,6 +37,9 @@ and data dumping.
         @views vac_data.wv[:, ipert] .*= singfac[ipert]
     end
 
+    # Preserve wp in vac_data so it can be written to HDF5 as W_plasma
+    vac_data.wp .= wp
+
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
     vac_data.wt0 .= vac_data.wt
@@ -257,5 +260,6 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     pn_result = compute_power_norm_eigenvalues(wt_saved, wp, wv, sqrtamat_local, jarea_local, equil, odet.psifac, intr)
 
     return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue,
-        pn_total_eigenvalue=pn_result.pn_total_eigenvalue, pn_plasma_energy=pn_result.pn_plasma_energy, pn_vacuum_energy=pn_result.pn_vacuum_energy)
+        pn_total_eigenvalue=pn_result.pn_total_eigenvalue, pn_plasma_energy=pn_result.pn_plasma_energy, pn_vacuum_energy=pn_result.pn_vacuum_energy,
+        pn_vacuum_eigenvalue=pn_result.pn_vacuum_eigenvalue)
 end

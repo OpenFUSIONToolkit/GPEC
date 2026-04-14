@@ -434,18 +434,22 @@ function write_outputs_to_HDF5(
         out_h5["integration/xi_s"] = odet.ud_store[:, :, 2, :]
         out_h5["integration/crit"] = odet.crit_store
 
-        # Write edge stability scan data (only present when psiedge < psilim)
+        # Write edge stability scan data (only present when psiedge < psilim).
+        # Power-normalized flux (Φ-space) energies are the default — they are Jacobian-
+        # invariant. The ξ-space values sit under EdgeScan/XiNorm/ and are retained for
+        # benchmarking against the Fortran GPEC lineage.
         if !isempty(odet.edge_scan.psi)
             es = odet.edge_scan
-            out_h5["edge_scan/psi"] = es.psi
-            out_h5["edge_scan/q"] = es.q
-            out_h5["edge_scan/total_energy"] = es.total_eigenvalue
-            out_h5["edge_scan/plasma_energy"] = es.plasma_energy
-            out_h5["edge_scan/vacuum_energy"] = es.vacuum_energy
-            out_h5["edge_scan/vacuum_eigenvalue"] = es.vacuum_eigenvalue
-            out_h5["edge_scan/pn_total_energy"] = es.pn_total_eigenvalue
-            out_h5["edge_scan/pn_plasma_energy"] = es.pn_plasma_energy
-            out_h5["edge_scan/pn_vacuum_energy"] = es.pn_vacuum_energy
+            out_h5["EdgeScan/psi"] = es.psi
+            out_h5["EdgeScan/q"] = es.q
+            out_h5["EdgeScan/total_energy"] = es.pn_total_eigenvalue
+            out_h5["EdgeScan/plasma_energy"] = es.pn_plasma_energy
+            out_h5["EdgeScan/vacuum_energy"] = es.pn_vacuum_energy
+            out_h5["EdgeScan/vacuum_eigenvalue"] = es.pn_vacuum_eigenvalue
+            out_h5["EdgeScan/XiNorm/total_energy"] = es.total_eigenvalue
+            out_h5["EdgeScan/XiNorm/plasma_energy"] = es.plasma_energy
+            out_h5["EdgeScan/XiNorm/vacuum_energy"] = es.vacuum_energy
+            out_h5["EdgeScan/XiNorm/vacuum_eigenvalue"] = es.vacuum_eigenvalue
         end
 
         # Write singular surface data
@@ -456,21 +460,29 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
-        # Write vacuum data; always write all entries, using empty arrays when not computed
-        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
-        out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
-        out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
-        out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
-        out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
-        out_h5["vacuum/pn_ep"] = ctrl.vac_flag ? vac_data.pn_ep : ComplexF64[]
-        out_h5["vacuum/pn_ev"] = ctrl.vac_flag ? vac_data.pn_ev : ComplexF64[]
-        out_h5["vacuum/pn_et"] = ctrl.vac_flag ? vac_data.pn_et : ComplexF64[]
-        out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
-        out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
-        out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
-        out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
-        out_h5["vacuum/y_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
-        out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
+        # Write free-boundary stability data. Power-normalized flux (Φ-space) eigenmode
+        # energies are the default — they are Jacobian-invariant. ξ-space values sit
+        # under FreeBoundaryStability/XiNorm/ and are retained for Fortran benchmarking.
+        # The W_* matrices are ξ-space at the plasma edge.
+        out_h5["FreeBoundaryStability/W_freeboundary"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_plasma"] = ctrl.vac_flag ? vac_data.wp : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_vacuum"] = ctrl.vac_flag ? vac_data.wv : ComplexF64[]
+        out_h5["FreeBoundaryStability/W_freeboundary_eigenmodes"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_energies"] = ctrl.vac_flag ? vac_data.pn_et : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.pn_ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.pn_ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/XiNorm/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["FreeBoundaryStability/XiNorm/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
+        out_h5["FreeBoundaryStability/XiNorm/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+
+        # Cartesian surface point clouds used downstream for visualisation and
+        # perturbed-equilibrium plotting.
+        out_h5["SurfaceGeometries/Plasma/x"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/y"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Plasma/z"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
+        out_h5["SurfaceGeometries/Wall/x"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
+        out_h5["SurfaceGeometries/Wall/y"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
+        out_h5["SurfaceGeometries/Wall/z"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
 
         # Write kinetic parameters when kinetic mode is enabled
         if ctrl.kinetic_factor > 0
