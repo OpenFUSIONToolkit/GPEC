@@ -564,29 +564,266 @@ end
 
 
 """
+    _setup_surface_state(psi, n, l, zi, mi, wdfac, electron,
+                          equil, intr, kinetic_profiles) → NamedTuple
+
+Private helper for the calculated-matrix path. Reproduces the per-surface
+setup in `tpsi!` (theta-grid sampling, bounce-extremum finding, flux-function
+evaluation, diamagnetic/drift frequencies) without any of the perturbation-
+dependent bookkeeping or method dispatch.
+
+This keeps `compute_kinetic_matrices_at_psi!` structurally independent of
+`tpsi!` so the matrix-only path can be evolved (e.g. QuadGK pitch in Phase C)
+without perturbing the perturbative torque pipeline.
+"""
+function _setup_surface_state(
+    psi::Float64, zi::Int, mi::Int,
+    electron::Bool, equil, intr::KineticForcesInternal,
+    kinetic_profiles::Equilibrium.KineticProfileSplines,
+)
+    if electron
+        chrg = -1 * e
+        mass = me
+    else
+        chrg = zi * e
+        mass = mi * mp
+    end
+
+    mthsurf_local = intr.mthsurf
+    xs            = intr.tpsi_xs
+    B_vals        = intr.tpsi_B
+    dBdpsi_vals   = intr.tpsi_dBdpsi
+    dBdtheta_vals = intr.tpsi_dBdtheta
+    jac_vals      = intr.tpsi_jac
+    djdpsi_vals   = intr.tpsi_djdpsi
+
+    hB = intr.hint2d_eqfun_B
+    hJ = intr.hint2d_rzphi_jac
+    for i in 0:mthsurf_local
+        theta = i / mthsurf_local
+        pt = (psi, theta)
+        B_vals[i+1] = equil.eqfun_B(pt; hint=hB)
+        dBdpsi_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(1, 0), hint=hB) / intr.chi1
+        dBdtheta_vals[i+1] = equil.eqfun_B(pt; deriv=DerivOp(0, 1), hint=hB)
+        jac_vals[i+1] = equil.rzphi_jac(pt; hint=hJ) / intr.chi1
+        djdpsi_vals[i+1] = equil.rzphi_jac(pt; deriv=DerivOp(1, 0), hint=hJ) / intr.chi1^2
+    end
+
+    tspl = cubic_interp(xs, Series(hcat(B_vals, dBdpsi_vals, dBdtheta_vals, jac_vals, djdpsi_vals)); bc=PeriodicBC())
+
+    bmax = maximum(B_vals)
+    ibmax = argmax(B_vals)
+    bmax == B_vals[ibmax] ||
+        error("ERROR: _setup_surface_state - Equilibrium field maximum not consistent with index")
+
+    bmin = minimum(B_vals)
+    for _ in 2:4
+        mask = B_vals .> bmin
+        any(mask) || break
+        bmin = minimum(B_vals[mask])
+    end
+    inds = findall(B_vals .>= bmin)
+    isempty(inds) && error("ERROR: _setup_surface_state - could not find ibmin")
+    ibmin = inds[argmin(B_vals[inds])]
+    isapprox(bmin, B_vals[ibmin]; rtol=0, atol=0) ||
+        error("ERROR: _setup_surface_state - Equilibrium field minimum not consistent with index")
+
+    theta_bmin = xs[ibmin]
+    theta_bmax = xs[ibmax]
+
+    dBdtheta_interp = cubic_interp(xs, dBdtheta_vals; bc=PeriodicBC())
+    for i in 1:length(xs)-1
+        if dBdtheta_vals[i] * dBdtheta_vals[i+1] < 0
+            θ = find_zero(dBdtheta_interp, (xs[i], xs[i+1]), Roots.Brent())
+            θn = mod(θ, 1.0)
+            Bθ = tspl(θn)[1]
+            if Bθ < bmin
+                bmin = Bθ
+                theta_bmin = θn
+            end
+            if Bθ > bmax
+                bmax = Bθ
+                theta_bmax = θn
+            end
+        end
+    end
+
+    q = equil.profiles.q_spline(psi)
+    if electron
+        n_s       = kinetic_profiles.ne_spline(psi)
+        T_s       = kinetic_profiles.Te_spline(psi)
+        dn_s_dpsi = kinetic_profiles.ne_deriv(psi)
+        dT_s_dpsi = kinetic_profiles.Te_deriv(psi)
+        nu_s      = kinetic_profiles.nue_spline(psi)
+    else
+        n_s       = kinetic_profiles.ni_spline(psi)
+        T_s       = kinetic_profiles.Ti_spline(psi)
+        dn_s_dpsi = kinetic_profiles.ni_deriv(psi)
+        dT_s_dpsi = kinetic_profiles.Ti_deriv(psi)
+        nu_s      = kinetic_profiles.nui_spline(psi)
+    end
+    welec = kinetic_profiles.omegaE_spline(psi)
+
+    wdian = -twopi * T_s * dn_s_dpsi / (chrg * intr.chi1 * n_s)
+    wdiat = -twopi * dT_s_dpsi / (chrg * intr.chi1)
+    wtran = sqrt(2 * T_s / mass) / (q * intr.ro)
+    wgyro = chrg * intr.bo / mass
+    nuk   = nu_s
+
+    rsquared_bmin = equil.rzphi_rsquared((psi, theta_bmin))
+    rsquared_bmin > 0 ||
+        error("ERROR: _setup_surface_state - minor radius is negative at psi=$psi, theta_bmin=$theta_bmin")
+
+    avg_r = equil.geometry.avg_r_spline(psi)
+    avg_R = equil.geometry.avg_R_spline(psi)
+    epsr  = avg_r / avg_R
+
+    return (;
+        chrg, mass,
+        tspl, bmax, bmin, ibmax, theta_bmax,
+        q, n_s, T_s, welec,
+        wdian, wdiat, wtran, wgyro, nuk,
+        epsr,
+    )
+end
+
+
+"""
+    calculate_gar_matrices!(out_wmats, state, psi, n, l, wdfac, intr;
+                             kwargs...) → nothing
+
+Matrix-only GAR kernel. Computes the six full-complex kinetic matrices
+(Logan 2015 Eqs 7.30–7.35) at a single (ψ, n, ℓ) and writes them into the
+pre-allocated `out_wmats[mpert, mpert, 6]`.
+
+Parallel to the matrix branch of `calculate_gar`, but with no scalar
+torque slot in the pitch-angle buffer (`nqty = mpert²·6` instead of
+`1 + mpert²·6`). This removes a class of index-off-by-one bugs and makes
+the QuadGK-pitch alternative in Phase C trivial to wire.
+
+The resonance operator is evaluated with `rex = imx = 1` so the caller
+obtains the full complex result; energy and torque pieces are split by
+taking imaginary and real parts respectively.
+"""
+function calculate_gar_matrices!(
+    out_wmats::Array{ComplexF64,3},
+    state::NamedTuple,
+    psi::Float64, n::Int, l::Int, wdfac::Float64,
+    intr::KineticForcesInternal;
+    nlmda::Int=64, ntheta::Int=128,
+    nutype::String="harmonic", f0type::String="maxwellian",
+    nufac::Float64=1.0, ximag::Float64=0.0,
+    energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
+    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
+)
+    mpert = intr.mpert
+    mfac = intr.mfac
+    chi1 = intr.chi1
+    ro   = intr.ro
+    bo   = intr.bo
+
+    # Geometric matrices at this ψ (Fortran torque.F90 block matrices)
+    smat_f = reshape(intr.smats(psi), mpert, mpert)
+    tmat_f = reshape(intr.tmats(psi), mpert, mpert)
+    xmat_f = reshape(intr.xmats(psi), mpert, mpert)
+    ymat_f = reshape(intr.ymats(psi), mpert, mpert)
+    zmat_f = reshape(intr.zmats(psi), mpert, mpert)
+
+    # Matrix-only path: dbob/divx perturbation coefficients are not used
+    # (compute_bounce_data folds them into the scalar dJdJ we discard).
+    dbob_m_f = zeros(ComplexF64, mpert)
+    divx_m_f = zeros(ComplexF64, mpert)
+
+    bounce = compute_bounce_data(
+        psi, n, l, state.q, bo, state.bmax, state.bmin, state.ibmax, state.theta_bmax,
+        state.tspl, mfac, chi1, ro, dbob_m_f, divx_m_f, 1.0, wdfac,
+        state.mass, state.chrg, state.T_s, "fwmm";
+        nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
+
+    if bounce.nlmda == 0
+        out_wmats .= 0
+        return nothing
+    end
+
+    # Pack wb, wd, and mpert²·6 matrix elements into fbnce — NO scalar slot.
+    nqty = mpert^2 * 6
+    fbnce_data = zeros(Float64, bounce.nlmda, 2 + nqty)
+    fbnce_data[:, 1] .= bounce.wb
+    fbnce_data[:, 2] .= bounce.wd
+    for ilmda in 1:bounce.nlmda
+        iqty = 3
+        for k in 1:6, j in 1:mpert, i in 1:mpert
+            fbnce_data[ilmda, iqty] = real(bounce.wmats_vs_lambda[i, j, k, ilmda])
+            iqty += 1
+        end
+    end
+
+    # Column-wise median normalization for ODE stability (Fortran lines 819-823).
+    fbnce_norm = ones(Float64, nqty)
+    for i in 1:nqty
+        col = view(fbnce_data, :, i + 2)
+        med = median(abs.(col))
+        if med > 0
+            fbnce_norm[i] = 1.0 / med
+            col .*= fbnce_norm[i]
+        end
+    end
+
+    fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
+
+    # Full complex resonance operator (rex=1, imx=1) — caller splits into
+    # energy (imag) and torque (real) parts downstream.
+    lxint = integrate_pitch_gar(
+        state.wdian, state.wdiat, state.welec, state.nuk,
+        bo / state.bmax, state.epsr, state.q,
+        fbnce, fbnce_norm, nqty, l, n, 1.0, 1.0, psi, "fwmm";
+        nutype, f0type, nufac, ximag, qt=false,
+        energy_atol, energy_rtol, pitch_atol, pitch_rtol)
+
+    # Torque → energy normalization (Fortran torque.F90 lines 860-876).
+    # Eq. (19) of Logan et al., Phys. Plasmas 20, 122507 (2013).
+    tnorm = (-2 * n^2 / sqrt(π)) * (ro / bo) * state.n_s * state.T_s *
+            (chi1 / twopi)
+    energy_factor = tnorm * (1 / (2 * im * n))
+
+    iqty = 1
+    for k in 1:6, j in 1:mpert, i in 1:mpert
+        out_wmats[i, j, k] = complex(lxint[iqty] / fbnce_norm[iqty]) * energy_factor
+        iqty += 1
+    end
+
+    # DCON normalization (Fortran torque.F90 lines 874-876)
+    out_wmats .*= 2 * μ₀
+    out_wmats[:, :, 1:3] ./= chi1
+    out_wmats[:, :, 1] ./= chi1
+
+    return nothing
+end
+
+
+"""
     compute_kinetic_matrices_at_psi!(kwmat, ktmat, psi, n, l, zi, mi,
         wdfac, divxfac, electron, equil, intr, kinetic_profiles)
 
 Compute both kinetic energy (`kwmat`) and torque (`ktmat`) matrices at a
-single flux surface in one pass. Replaces the Fortran pattern of calling
-`tpsi` twice (once with "fwmm", once with "ftmm").
+single flux surface in one pass. Dedicated matrix-only path — does not
+delegate to `tpsi!` — so the pitch-angle buffer is sized exactly
+`mpert²·6` (no vestigial scalar torque slot).
 
-The bounce averaging, pitch-angle ODE, and energy-space ODE are identical
-for both paths — only the final resonance operator decomposition differs
-(Fortran torque.F90 lines 839-847, Julia `PitchIntegration.jl:243`):
-  - wmm: keeps imaginary part (`rex=0, imx=1`) → kinetic energy
-  - tmm: keeps real part (`rex=1, imx=0`) → torque
-
-By running with `rex=1, imx=1` we get the full complex result and split:
+The bounce averaging, pitch-angle ODE, and energy-space ODE share the
+same math as the perturbative torque pipeline in `tpsi!`, but the
+`rex = imx = 1` full-complex result is split locally:
   - `kwmat[i,j,k] = complex(0, imag(full[i,j,k]))` (energy)
   - `ktmat[i,j,k] = complex(real(full[i,j,k]), 0)` (torque)
 
 # Arguments
 - `kwmat::Array{ComplexF64,3}`: Output energy matrices (mpert×mpert×6), zeroed on entry
 - `ktmat::Array{ComplexF64,3}`: Output torque matrices (mpert×mpert×6), zeroed on entry
-- `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!`
+- `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!` (divxfac unused
+  on the matrix path — retained for call-site compatibility)
 - `equil`: PlasmaEquilibrium
-- `intr::KineticForcesInternal`: Internal state with mode indexing and perturbation splines
+- `intr::KineticForcesInternal`: Internal state with mode indexing, geometric
+  matrices (smats/tmats/xmats/ymats/zmats), and per-surface θ-grid buffers
 - `kinetic_profiles::Equilibrium.KineticProfileSplines`: Named kinetic-profile splines
 
 Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
@@ -595,28 +832,32 @@ function compute_kinetic_matrices_at_psi!(
     kwmat::Array{ComplexF64,3},
     ktmat::Array{ComplexF64,3},
     psi::Float64, n::Int, l::Int,
-    zi::Int, mi::Int, wdfac::Float64, divxfac::Float64,
+    zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
     electron::Bool, equil, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines)
 
     mpert = intr.mpert
 
-    # Full complex matrices (rex=1, imx=1)
+    # Bypass ψ > 1 (no kinetic contribution outside plasma)
+    if psi > 1
+        fill!(kwmat, 0)
+        fill!(ktmat, 0)
+        return nothing
+    end
+
+    state = _setup_surface_state(psi, zi, mi, electron,
+                                  equil, intr, kinetic_profiles)
+
     full_wmats = zeros(ComplexF64, mpert, mpert, 6)
-    tpsi_val = Ref{ComplexF64}(0.0 + 0.0im)
+    calculate_gar_matrices!(full_wmats, state, psi, n, l, wdfac, intr)
 
-    # Call tpsi! with "fwmm" method but override rex/imx to get full complex result
-    tpsi!(tpsi_val, psi, n, l, zi, mi, wdfac, divxfac,
-          electron, "fwmm", equil, intr, kinetic_profiles;
-          op_wmats=full_wmats,
-          rex_override=1.0, imx_override=1.0)
-
-    # Split into energy (imaginary) and torque (real)
     for k in 1:6, j in 1:mpert, i in 1:mpert
         val = full_wmats[i, j, k]
         kwmat[i, j, k] = complex(0.0, imag(val))
         ktmat[i, j, k] = complex(real(val), 0.0)
     end
+
+    return nothing
 end
 
 
