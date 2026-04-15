@@ -715,6 +715,7 @@ function calculate_gar_matrices!(
     nufac::Float64=1.0, ximag::Float64=0.0,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
     pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
+    pitch_integrator::Symbol=:ode,  # :ode (Tsit5) or :quadgk (adaptive Gauss-Kronrod)
 )
     mpert = intr.mpert
     mfac = intr.mfac
@@ -777,8 +778,11 @@ function calculate_gar_matrices!(
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
 
     # Full complex resonance operator (rex=1, imx=1) — caller splits into
-    # energy (imag) and torque (real) parts downstream.
-    lxint = integrate_pitch_gar(
+    # energy (imag) and torque (real) parts downstream. Dispatch on
+    # `pitch_integrator`: :ode uses the coupled Tsit5 path; :quadgk uses
+    # vector-valued adaptive Gauss-Kronrod with a trapped/passing split.
+    pitch_fn = pitch_integrator === :quadgk ? integrate_pitch_gar_quadgk : integrate_pitch_gar
+    lxint = pitch_fn(
         state.wdian, state.wdiat, state.welec, state.nuk,
         bo / state.bmax, state.epsr, state.q,
         fbnce, fbnce_norm, nqty, l, n, 1.0, 1.0, psi, "fwmm";
@@ -839,7 +843,8 @@ function compute_kinetic_matrices_at_psi!(
     psi::Float64, n::Int, l::Int,
     zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
     electron::Bool, equil, intr::KineticForcesInternal,
-    kinetic_profiles::Equilibrium.KineticProfileSplines)
+    kinetic_profiles::Equilibrium.KineticProfileSplines;
+    pitch_integrator::Symbol=:ode)
 
     mpert = intr.mpert
 
@@ -854,7 +859,7 @@ function compute_kinetic_matrices_at_psi!(
                                   equil, intr, kinetic_profiles)
 
     full_wmats = zeros(ComplexF64, mpert, mpert, 6)
-    calculate_gar_matrices!(full_wmats, state, psi, n, l, wdfac, intr)
+    calculate_gar_matrices!(full_wmats, state, psi, n, l, wdfac, intr; pitch_integrator)
 
     for k in 1:6, j in 1:mpert, i in 1:mpert
         val = full_wmats[i, j, k]
