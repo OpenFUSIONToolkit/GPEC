@@ -445,13 +445,11 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     end
 
     # 2. Build fbnce interpolant: [wb, wd, f₁, f₂, ...]
-    # Number of flux quantities: 1 (scalar dJdJ) + optional mpert²×6 (matrix elements)
+    # Number of flux quantities: 1 (scalar dJdJ) + optional packed matrix storage
+    # (Hermitian-triangle for A/D/H + full blocks for B/C/E; see `nqty_matrix`).
     do_matrices = !isnothing(op_wmats) && !isnothing(bounce.wmats_vs_lambda)
-    if do_matrices
-        nqty = 1 + mpert^2 * 6
-    else
-        nqty = 1
-    end
+    nqty_mat = do_matrices ? nqty_matrix(mpert) : 0
+    nqty = 1 + nqty_mat
 
     # Pack all quantities into a matrix for interpolation
     fbnce_data = zeros(Float64, bounce.nlmda, 2 + nqty)
@@ -460,16 +458,11 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     fbnce_data[:, 3] .= bounce.dJdJ
 
     if do_matrices
-        for ilmda in 1:bounce.nlmda
-            iqty = 4
-            for k in 1:6
-                for j in 1:mpert
-                    for i in 1:mpert
-                        fbnce_data[ilmda, iqty] = real(bounce.wmats_vs_lambda[i, j, k, ilmda])
-                        iqty += 1
-                    end
-                end
-            end
+        # Packed matrix block lives at columns 4:(3+nqty_mat). The real() wrap
+        # keeps the historical OLD-path behavior (torque pipeline uses only the
+        # real part of the outer products).
+        @inbounds for q in 1:nqty_mat, ilmda in 1:bounce.nlmda
+            fbnce_data[ilmda, 3 + q] = real(bounce.wmats_vs_lambda[ilmda, q])
         end
     end
 
@@ -521,18 +514,54 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     # 6. Kinetic matrix assembly (Fortran lines 858-923)
     if do_matrices
         op_wmats .= 0
-        iqty = 2  # lxint index (1 is scalar torque)
-        for k in 1:6
-            for j in 1:mpert
-                for i in 1:mpert
-                    # `lxint[iqty]` is the pitch integral of fbnce_data column iqty+1,
-                    # which was normalized by `fbnce_norm[iqty]` (not iqty-1); the
-                    # scalar dJdJ slot is fbnce_norm[1] — unrelated to matrix elements.
-                    op_wmats[i, j, k] = complex(lxint[iqty] / fbnce_norm[iqty]) *
-                        tnorm * (1 / (2 * im * n))  # convert torque → energy
-                    iqty += 1
-                end
+        energy_factor = tnorm * (1 / (2 * im * n))  # convert torque → energy
+        Mu = (mpert * (mpert + 1)) ÷ 2
+        base = 1  # lxint offset after scalar-torque slot (index 1)
+
+        # Helper: fetch normalized pitch integral at lxint[base+q] for q ∈ [1..nqty_mat].
+        @inline elem(q) = complex(lxint[base + q] / fbnce_norm[base + q]) * energy_factor
+
+        # A (Hermitian, k=1): upper triangle stored at q ∈ [1..Mu]; mirror to lower.
+        off = 0
+        @inbounds for j in 1:mpert, i in 1:j
+            v = elem(off + _tri_idx(i, j))
+            op_wmats[i, j, 1] = v
+            if i != j
+                op_wmats[j, i, 1] = conj(v)
             end
+        end
+        off += Mu
+        # D (Hermitian, k=4)
+        @inbounds for j in 1:mpert, i in 1:j
+            v = elem(off + _tri_idx(i, j))
+            op_wmats[i, j, 4] = v
+            if i != j
+                op_wmats[j, i, 4] = conj(v)
+            end
+        end
+        off += Mu
+        # H (Hermitian, k=6)
+        @inbounds for j in 1:mpert, i in 1:j
+            v = elem(off + _tri_idx(i, j))
+            op_wmats[i, j, 6] = v
+            if i != j
+                op_wmats[j, i, 6] = conj(v)
+            end
+        end
+        off += Mu
+        # B (full, k=2)
+        @inbounds for j in 1:mpert, i in 1:mpert
+            op_wmats[i, j, 2] = elem(off + _full_idx(i, j, mpert))
+        end
+        off += mpert^2
+        # C (full, k=3)
+        @inbounds for j in 1:mpert, i in 1:mpert
+            op_wmats[i, j, 3] = elem(off + _full_idx(i, j, mpert))
+        end
+        off += mpert^2
+        # E (full, k=5)
+        @inbounds for j in 1:mpert, i in 1:mpert
+            op_wmats[i, j, 5] = elem(off + _full_idx(i, j, mpert))
         end
 
         # DCON normalization (Fortran lines 874-876)
@@ -746,23 +775,21 @@ function calculate_gar_matrices!(
         return nothing
     end
 
-    # Pack wb, wd, and mpert²·6 matrix elements into fbnce — NO scalar slot.
+    # Pack wb, wd, and packed matrix block into fbnce — NO scalar slot.
     # fbnce is COMPLEX on this path to carry the full op_wmats phase (Fortran
     # torque.F90:789 writes `wbbar*op_wmats(i,j,k)/ro**2` into a complex cspline;
     # dropping the imag part zeros out off-Hermitian matrix structure — in
     # particular op_B = W_Z†W_X, op_C = W_Z†W_Y, op_E = W_X†W_Y whose
     # diagonals carry genuine phase. wb/wd slots are stored with zero imag.
-    nqty = mpert^2 * 6
+    # Matrix block is packed as 3 Hermitian upper-triangles + 3 full blocks;
+    # see `nqty_matrix` in BounceAveraging.jl.
+    nqty = nqty_matrix(mpert)
     fbnce_data = zeros(ComplexF64, bounce.nlmda, 2 + nqty)
     fbnce_data[:, 1] .= bounce.wb
     fbnce_data[:, 2] .= bounce.wd
-    for ilmda in 1:bounce.nlmda
-        iqty = 3
-        for k in 1:6, j in 1:mpert, i in 1:mpert
-            fbnce_data[ilmda, iqty] = bounce.wmats_vs_lambda[i, j, k, ilmda]
-            iqty += 1
-        end
-    end
+    # bounce.wmats_vs_lambda is already (nlmda, nqty) in the packed layout,
+    # so the matrix block is a direct copy.
+    fbnce_data[:, 3:end] .= bounce.wmats_vs_lambda
 
     # Column-wise median normalization for ODE stability (Fortran lines 819-823).
     fbnce_norm = ones(Float64, nqty)
@@ -795,10 +822,51 @@ function calculate_gar_matrices!(
             (chi1 / twopi)
     energy_factor = tnorm * (1 / (2 * im * n))
 
-    iqty = 1
-    for k in 1:6, j in 1:mpert, i in 1:mpert
-        out_wmats[i, j, k] = complex(lxint[iqty] / fbnce_norm[iqty]) * energy_factor
-        iqty += 1
+    Mu = (mpert * (mpert + 1)) ÷ 2
+    # Helper: fetch normalized pitch integral at lxint[q] for q ∈ [1..nqty].
+    @inline elem(q) = complex(lxint[q] / fbnce_norm[q]) * energy_factor
+
+    # A (Hermitian, k=1): upper triangle → full with Hermitian mirror.
+    off = 0
+    @inbounds for j in 1:mpert, i in 1:j
+        v = elem(off + _tri_idx(i, j))
+        out_wmats[i, j, 1] = v
+        if i != j
+            out_wmats[j, i, 1] = conj(v)
+        end
+    end
+    off += Mu
+    # D (Hermitian, k=4)
+    @inbounds for j in 1:mpert, i in 1:j
+        v = elem(off + _tri_idx(i, j))
+        out_wmats[i, j, 4] = v
+        if i != j
+            out_wmats[j, i, 4] = conj(v)
+        end
+    end
+    off += Mu
+    # H (Hermitian, k=6)
+    @inbounds for j in 1:mpert, i in 1:j
+        v = elem(off + _tri_idx(i, j))
+        out_wmats[i, j, 6] = v
+        if i != j
+            out_wmats[j, i, 6] = conj(v)
+        end
+    end
+    off += Mu
+    # B (full, k=2)
+    @inbounds for j in 1:mpert, i in 1:mpert
+        out_wmats[i, j, 2] = elem(off + _full_idx(i, j, mpert))
+    end
+    off += mpert^2
+    # C (full, k=3)
+    @inbounds for j in 1:mpert, i in 1:mpert
+        out_wmats[i, j, 3] = elem(off + _full_idx(i, j, mpert))
+    end
+    off += mpert^2
+    # E (full, k=5)
+    @inbounds for j in 1:mpert, i in 1:mpert
+        out_wmats[i, j, 5] = elem(off + _full_idx(i, j, mpert))
     end
 
     # DCON normalization (Fortran torque.F90 lines 874-876)

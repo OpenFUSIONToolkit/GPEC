@@ -28,9 +28,30 @@ struct BounceData
     wb::Vector{Float64}               # bounce frequency ωb(λ) [rad/s]
     wd::Vector{Float64}               # precession drift ωd(λ) [rad/s]
     dJdJ::Vector{Float64}             # ωb|δJ|²/ro² at each λ (real, for scalar torque)
-    # For matrix path (nothing if scalar-only):
-    wmats_vs_lambda::Union{Nothing, Array{ComplexF64,4}}  # (mpert, mpert, 6, nlmda)
+    # For matrix path (nothing if scalar-only): packed layout (nlmda, nqty_matrix(mpert)).
+    # Consumer fills into fbnce_data[:, 3:end] by direct copy. See `nqty_matrix` for
+    # the 3-Hermitian-triangle + 3-full-block packing (Logan 2015 Eqs 7.30–7.35).
+    wmats_vs_lambda::Union{Nothing, Matrix{ComplexF64}}
 end
+
+
+# ============================================================================
+# Packed layout for kinetic matrix per-λ storage
+# ============================================================================
+# Of the six Logan-2015 matrices (Eqs 7.30–7.35), A = W_Z†W_Z, D = W_X†W_X,
+# and H = W_Y†W_Y are Hermitian; B = W_Z†W_X, C = W_Z†W_Y, E = W_X†W_Y are not.
+# We store only the upper triangle (i ≤ j) for the three Hermitian blocks and
+# the full mpert² for the three non-Hermitian blocks. Block packing order:
+# A-tri, D-tri, H-tri, B-full, C-full, E-full.
+
+"""Number of packed complex entries per λ for the 6 kinetic matrices."""
+@inline nqty_matrix(mpert::Int) = 3 * (mpert * (mpert + 1)) ÷ 2 + 3 * mpert^2
+
+"""Upper-triangle index (1 ≤ i ≤ j ≤ mpert) within a triangular block."""
+@inline _tri_idx(i::Int, j::Int) = (j * (j - 1)) ÷ 2 + i
+
+"""Full-block index (column-major) within a non-Hermitian block."""
+@inline _full_idx(i::Int, j::Int, mpert::Int) = (j - 1) * mpert + i
 
 
 # ============================================================================
@@ -196,7 +217,7 @@ function compute_bounce_data(
     wd_arr = zeros(Float64, nlmda)
     dJdJ_arr = zeros(Float64, nlmda)
     sigma_arr = zeros(Int, nlmda)
-    wmats_arr = do_matrices ? zeros(ComplexF64, mpert, mpert, 6, nlmda) : nothing
+    wmats_arr = do_matrices ? zeros(ComplexF64, nlmda, nqty_matrix(mpert)) : nothing
 
     # Thermal speed and drift normalization
     bhat = sqrt(2 * T_s / mass) / ro
@@ -231,7 +252,9 @@ function compute_bounce_data(
         dJdJ_arr[ilmda] = dJdJ_val
 
         if do_matrices && !isnothing(wmats_lmda)
-            wmats_arr[:, :, :, ilmda] .= wmats_lmda
+            @inbounds for q in 1:length(wmats_lmda)
+                wmats_arr[ilmda, q] = wmats_lmda[q]
+            end
         end
     end
 
@@ -575,28 +598,46 @@ function _bounce_integrate(
         wymt = wmmt * (3 * smat + ymat) - 2.0 * wemt * smat
         wzmt = wmmt * (3 * tmat + zmat) - 2.0 * wemt * tmat
 
-        # Conjugate transpose for outer products
-        wxmc = conj.(transpose(wxmt))
-        wymc = conj.(transpose(wymt))
-        wzmc = conj.(transpose(wzmt))
-
-        # 6 outer products (Fortran lines 779-784)
-        wmats_lmda = zeros(ComplexF64, mpert, mpert, 6)
-        op_A = wzmc * wzmt  # A: W_Z† W_Z
-        op_B = wzmc * wxmt  # B: W_Z† W_X
-        op_C = wzmc * wymt  # C: W_Z† W_Y
-        op_D = wxmc * wxmt  # D: W_X† W_X
-        op_E = wxmc * wymt  # E: W_X† W_Y
-        op_H = wymc * wymt  # H: W_Y† W_Y
+        # Flatten the 1×mpert row vectors to mpert-vectors for outer-product loops.
+        wx = vec(wxmt)
+        wy = vec(wymt)
+        wz = vec(wzmt)
 
         # Scale by wbbar/ro² (Fortran line 789)
         scale = wbbar / ro^2
-        wmats_lmda[:, :, 1] .= op_A .* scale
-        wmats_lmda[:, :, 2] .= op_B .* scale
-        wmats_lmda[:, :, 3] .= op_C .* scale
-        wmats_lmda[:, :, 4] .= op_D .* scale
-        wmats_lmda[:, :, 5] .= op_E .* scale
-        wmats_lmda[:, :, 6] .= op_H .* scale
+        Mu = (mpert * (mpert + 1)) ÷ 2
+        wmats_lmda = Vector{ComplexF64}(undef, nqty_matrix(mpert))
+
+        # A (Hermitian): upper triangle of W_Z†W_Z, rank-1 → conj(wz[i])·wz[j].
+        off = 0
+        @inbounds for j in 1:mpert, i in 1:j
+            wmats_lmda[off + _tri_idx(i, j)] = conj(wz[i]) * wz[j] * scale
+        end
+        off += Mu
+        # D (Hermitian): upper triangle of W_X†W_X.
+        @inbounds for j in 1:mpert, i in 1:j
+            wmats_lmda[off + _tri_idx(i, j)] = conj(wx[i]) * wx[j] * scale
+        end
+        off += Mu
+        # H (Hermitian): upper triangle of W_Y†W_Y.
+        @inbounds for j in 1:mpert, i in 1:j
+            wmats_lmda[off + _tri_idx(i, j)] = conj(wy[i]) * wy[j] * scale
+        end
+        off += Mu
+        # B (full): W_Z†W_X.
+        @inbounds for j in 1:mpert, i in 1:mpert
+            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wz[i]) * wx[j] * scale
+        end
+        off += mpert^2
+        # C (full): W_Z†W_Y.
+        @inbounds for j in 1:mpert, i in 1:mpert
+            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wz[i]) * wy[j] * scale
+        end
+        off += mpert^2
+        # E (full): W_X†W_Y.
+        @inbounds for j in 1:mpert, i in 1:mpert
+            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wx[i]) * wy[j] * scale
+        end
     end
 
     return wbbar, wdbar, dJdJ_val, wmats_lmda
