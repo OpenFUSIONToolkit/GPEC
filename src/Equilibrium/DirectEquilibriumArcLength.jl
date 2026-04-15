@@ -24,7 +24,7 @@ Near x-points where Bp → 0, the position integration (dy[1:2]) remains well-be
 because `grad_norm` never appears in the denominator alone. dy[3:5] use abstol=1e20
 so the solver never restricts step size for them.
 """
-@with_pool pool function arclength_fieldline_der!(dy, y, params::FieldLineDerivParams, _s)
+function arclength_fieldline_der!(dy, y, params::FieldLineDerivParams, _s)
     R, Z = y[1], y[2]
     direct_get_bfield!(params.bfield, R, Z, params.psi_in, params.sq_in, params.sq_in_deriv, params.psio; derivs=1)
 
@@ -73,7 +73,7 @@ Arc-length-parameterized flux surface integration. Drop-in replacement for
 The ODE is terminated by a `ContinuousCallback` that detects the return to the
 outboard midplane (Z = zo, R > ro) after a minimum arc-length guard.
 """
-@with_pool pool function arclength_fieldline_int(
+function arclength_fieldline_int(
     psifac::Float64, raw_profile::DirectRunInput, ro::Float64, zo::Float64, rs2::Float64
 )::Tuple{Matrix{Float64},DirectBField}
 

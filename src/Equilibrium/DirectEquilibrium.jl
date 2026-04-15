@@ -62,7 +62,7 @@ the Julia spline implementation.
   - `psio`: total toroidal flux
   - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
 """
-@with_pool pool function direct_get_bfield!(
+function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
@@ -92,8 +92,9 @@ the Julia spline implementation.
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    f_sq = acquire!(pool, eltype(sq_in.y), n_series(sq_in))
-    f1_sq = acquire!(pool, eltype(sq_in_deriv.parent.y), n_series(sq_in_deriv.parent))
+    n_s = n_series(sq_in)
+    f_sq = Vector{eltype(sq_in.y)}(undef, n_s)
+    f1_sq = Vector{eltype(sq_in_deriv.parent.y)}(undef, n_s)
     sq_in(f_sq, psi_norm)
     sq_in_deriv(f1_sq, psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
@@ -511,7 +512,168 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
 end
 
 """
-    equilibrium_solver(raw_profile)
+    _equilibrium_fill_one_flux_surface!(ipsi, psi_nodes, rzphi_nodes, sq_nodes, mtheta, theta_nodes, raw_profile, ro, zo, rs2, psio, fieldline_int)
+
+Integrate one flux surface and write `rzphi_nodes[ipsi, :, :]` and `sq_nodes[ipsi, :]`.
+Safe for `Threads.@threads` when each thread uses a distinct `ipsi`.
+"""
+function _equilibrium_fill_one_flux_surface!(
+    ipsi::Int,
+    psi_nodes::Vector{Float64},
+    rzphi_nodes::Array{Float64,3},
+    sq_nodes::Matrix{Float64},
+    mtheta::Int,
+    theta_nodes,
+    raw_profile::DirectRunInput,
+    ro::Float64,
+    zo::Float64,
+    rs2::Float64,
+    psio::Float64,
+    fieldline_int,
+)::Nothing
+    y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
+    nrows = size(y_out, 1)
+    ff_x_nodes = Vector{Float64}(undef, nrows)
+    @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+    ff_fs_nodes = Matrix{Float64}(undef, nrows, 4)
+    @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+    @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+    @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+    @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+    ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]
+    ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
+    ff_deriv = deriv1(ff_interp)
+    ff_val = Vector{Float64}(undef, 4)
+    ff_deriv_val = Vector{Float64}(undef, 4)
+    for itheta in 1:(mtheta + 1)
+        theta = theta_nodes[itheta]
+        ff_interp(ff_val, theta)
+        ff_deriv(ff_deriv_val, theta)
+        rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+        rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+        rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+        rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+    end
+    sq_nodes[ipsi, 1] = bfield.f * 2π
+    sq_nodes[ipsi, 2] = bfield.p
+    sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
+    sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
+    return nothing
+end
+
+function _equilibrium_run_parallel_flux_surfaces!(
+    mpsi::Int,
+    psi_nodes::Vector{Float64},
+    rzphi_nodes::Array{Float64,3},
+    sq_nodes::Matrix{Float64},
+    mtheta::Int,
+    theta_nodes,
+    raw_profile::DirectRunInput,
+    ro::Float64,
+    zo::Float64,
+    rs2::Float64,
+    psio::Float64,
+    fieldline_int,
+)::Nothing
+    Threads.@threads for ipsi in 1:(mpsi + 1)
+        _equilibrium_fill_one_flux_surface!(
+            ipsi, psi_nodes, rzphi_nodes, sq_nodes, mtheta, theta_nodes,
+            raw_profile, ro, zo, rs2, psio, fieldline_int,
+        )
+    end
+    return nothing
+end
+
+function _equilibrium_fill_eqfun_for_ipsi!(
+    ipsi::Int,
+    mtheta::Int,
+    theta_nodes,
+    eqfun_fs_nodes::Array{Float64,3},
+    profiles::ProfileSplines,
+    rzphi_rsquared,
+    rzphi_offset,
+    rzphi_nu,
+    rzphi_jac,
+    ro::Float64,
+    psio::Float64,
+)::Nothing
+    v = zeros(Float64, 2, 3)
+    q = profiles.q_spline.y[ipsi]
+    f_val = profiles.F_spline.y[ipsi]
+    for itheta in 1:(mtheta + 1)
+        theta_norm = theta_nodes[itheta]
+        f = (
+            rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
+            rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
+            rzphi_nu.nodal_derivs.partials[1, ipsi, itheta],
+            rzphi_jac.nodal_derivs.partials[1, ipsi, itheta],
+        )
+        fx = (
+            rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta],
+            rzphi_offset.nodal_derivs.partials[2, ipsi, itheta],
+            rzphi_nu.nodal_derivs.partials[2, ipsi, itheta],
+            rzphi_jac.nodal_derivs.partials[2, ipsi, itheta],
+        )
+        fy = (
+            rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta],
+            rzphi_offset.nodal_derivs.partials[3, ipsi, itheta],
+            rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
+            rzphi_jac.nodal_derivs.partials[3, ipsi, itheta],
+        )
+        rfac = sqrt(max(0.0, f[1]))
+        eta = 2π * (theta_norm + f[2])
+        r = ro + rfac * cos(eta)
+        jacfac = f[4]
+        v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0
+        v[1, 2] = fx[2] * 2π * rfac
+        v[1, 3] = fx[3] * r
+        v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0
+        v[2, 2] = (1.0 + fy[2]) * 2π * rfac
+        v[2, 3] = fy[3] * r
+        v33 = 2π * r
+        w11 = (jacfac != 0) ? (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac : 0.0
+        w12 = (jacfac * rfac != 0) ? -fy[1] * π * r / (rfac * jacfac) : 0.0
+        delpsi_norm = sqrt(w11^2 + w12^2)
+        modB = sqrt(((2π * psio * delpsi_norm)^2 + f_val^2) / (2π * r)^2)
+        eqfun_fs_nodes[ipsi, itheta, 1] = modB
+        denom = jacfac * modB^2
+        if abs(denom) > 1e-20
+            numerator_2 = dot(view(v, 1, :), view(v, 2, :)) + q * v33 * v[1, 3]
+            eqfun_fs_nodes[ipsi, itheta, 2] = numerator_2 / denom
+            numerator_3 = v[2, 3] * v33 + q * v33^2
+            eqfun_fs_nodes[ipsi, itheta, 3] = numerator_3 / denom
+        else
+            eqfun_fs_nodes[ipsi, itheta, 2] = 0.0
+            eqfun_fs_nodes[ipsi, itheta, 3] = 0.0
+        end
+    end
+    return nothing
+end
+
+function _equilibrium_run_parallel_eqfun!(
+    mpsi::Int,
+    mtheta::Int,
+    theta_nodes,
+    eqfun_fs_nodes::Array{Float64,3},
+    profiles::ProfileSplines,
+    rzphi_rsquared,
+    rzphi_offset,
+    rzphi_nu,
+    rzphi_jac,
+    ro::Float64,
+    psio::Float64,
+)::Nothing
+    Threads.@threads for ipsi in 1:(mpsi + 1)
+        _equilibrium_fill_eqfun_for_ipsi!(
+            ipsi, mtheta, theta_nodes, eqfun_fs_nodes, profiles,
+            rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac, ro, psio,
+        )
+    end
+    return nothing
+end
+
+"""
+    equilibrium_solver(raw_profile, fieldline_int=direct_fieldline_int; benchmark=false)
 
 The main driver for the direct equilibrium reconstruction. It orchestrates the entire
 process from finding the magnetic axis to integrating along field lines and
@@ -519,10 +681,16 @@ constructing the final coordinate and physics quantity splines. This performs th
 overall function as the Fortran `direct_run` subroutine, with better checks for numerical
 robustness.
 
+Flux-surface field-line integration and eqfun grid assembly run in parallel over `ψ` using
+`Threads.@threads` (set `JULIA_NUM_THREADS` before starting Julia).
+
 ## Arguments:
 
   - `raw_profile`: A `DirectRunInput` object containing the initial splines (`psi_in`, `sq_in`)
     and run parameters (`equil_input`).
+  - `benchmark`: If `true`, log `@elapsed` wall times (single run each) for the parallel flux loop,
+    the parallel eqfun loop, and the full solver. For `BenchmarkTools.@btime` on the whole solver,
+    use the REPL, e.g. `@btime Equilibrium.equilibrium_solver(\$raw; benchmark=false)` with `\$raw` captured.
 
 ## Returns:
 
@@ -530,8 +698,13 @@ robustness.
     including the profile spline (`sq`), the coordinate mapping spline (`rzphi`), and
     the physics quantity spline (`eqfun`).
 """
-@with_pool pool function equilibrium_solver(raw_profile::DirectRunInput, fieldline_int=direct_fieldline_int)
+function equilibrium_solver(
+    raw_profile::DirectRunInput,
+    fieldline_int=direct_fieldline_int;
+    benchmark::Bool=false,
+)
 
+    t_wall0 = time()
     equil_params = raw_profile.config
     psio = raw_profile.psio
     mtheta = equil_params.mtheta
@@ -545,47 +718,15 @@ robustness.
     mpsi = length(psi_nodes) - 1
     theta_nodes = range(0.0, 1.0; length=mtheta + 1)
 
-    sq_nodes = zeros!(pool, Float64, mpsi + 1, 4)
-    rzphi_nodes = zeros!(pool, Float64, mpsi + 1, mtheta + 1, 4)
-    ff_val = zeros!(pool, Float64, 4)
-    ff_deriv_val = zeros!(pool, Float64, 4)
+    sq_nodes = zeros(Float64, mpsi + 1, 4)
+    rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
 
-    for ipsi in (mpsi+1):-1:1  # outermost to innermost
-        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
-        checkpoint!(pool, Float64)
-
-        # Fit data into temporary straight fieldline poloidal angle splines
-        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
-        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
-
-        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
-        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
-        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
-        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
-
-        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
-
-        ff_interp = cubic_interp(ff_x_nodes, ff_fs_nodes; bc=PeriodicBC())
-        ff_deriv = deriv1(ff_interp)
-
-        # Resample ff onto uniform theta grid
-        for itheta in 1:(mtheta+1)
-            theta = theta_nodes[itheta]
-            ff_interp(ff_val, theta)
-            ff_deriv(ff_deriv_val, theta)
-
-            rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
-            rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
-            rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
-            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
-        end
-
-        sq_nodes[ipsi, 1] = bfield.f * 2π
-        sq_nodes[ipsi, 2] = bfield.p
-        sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
-        sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
-        rewind!(pool, Float64)
+    t_flux = @elapsed _equilibrium_run_parallel_flux_surfaces!(
+        mpsi, psi_nodes, rzphi_nodes, sq_nodes, mtheta, theta_nodes,
+        raw_profile, ro, zo, rs2, psio, fieldline_int,
+    )
+    if benchmark
+        @info "equilibrium_solver: parallel flux-surface for-loop — @elapsed (1 run): $(@sprintf("%.6f", t_flux)) s"
     end
 
     # Temporary splines for q0 extrapolation and optional newq0 revision
@@ -636,66 +777,22 @@ robustness.
     rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
 
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
-    v = @MMatrix zeros(Float64, 2, 3)
-    for ipsi in 1:(mpsi+1)
-        q = profiles.q_spline.y[ipsi]
-        f_val = profiles.F_spline.y[ipsi]
-        for itheta in 1:(mtheta+1)
-            theta_norm = theta_nodes[itheta]
-            # Access nodal derivatives from the interpolants (grid points)
-            # partials indexing: [1,:,:] = f, [2,:,:] = ∂f/∂x, [3,:,:] = ∂f/∂y, [4,:,:] = ∂²f/∂x∂y
-            f = (
-                rzphi_rsquared.nodal_derivs.partials[1, ipsi, itheta],
-                rzphi_offset.nodal_derivs.partials[1, ipsi, itheta],
-                rzphi_nu.nodal_derivs.partials[1, ipsi, itheta],
-                rzphi_jac.nodal_derivs.partials[1, ipsi, itheta]
-            )
-            fx = (
-                rzphi_rsquared.nodal_derivs.partials[2, ipsi, itheta],
-                rzphi_offset.nodal_derivs.partials[2, ipsi, itheta],
-                rzphi_nu.nodal_derivs.partials[2, ipsi, itheta],
-                rzphi_jac.nodal_derivs.partials[2, ipsi, itheta]
-            )
-            fy = (
-                rzphi_rsquared.nodal_derivs.partials[3, ipsi, itheta],
-                rzphi_offset.nodal_derivs.partials[3, ipsi, itheta],
-                rzphi_nu.nodal_derivs.partials[3, ipsi, itheta],
-                rzphi_jac.nodal_derivs.partials[3, ipsi, itheta]
-            )
-            rfac = sqrt(max(0.0, f[1]))  # guard against spline overshoot near separatrix
-            eta = 2π * (theta_norm + f[2])
-            r = ro + rfac * cos(eta)
-            jacfac = f[4]
-
-            v[1, 1] = (rfac > 0) ? fx[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) * d(rfac)/d(psi_norm)
-            v[1, 2] = fx[2] * 2π * rfac                          # 2π*rfac * d(eta)/d(psi_norm)
-            v[1, 3] = fx[3] * r                                   # r * d(phi_s)/d(psi_norm)
-            v[2, 1] = (rfac > 0) ? fy[1] / (2.0 * rfac) : 0.0  # 1/(2rfac) d(rfac)/d(theta_new)
-            v[2, 2] = (1.0 + fy[2]) * 2π * rfac                  # 2π*rfac * d(eta)/d(theta_new)
-            v[2, 3] = fy[3] * r                                   # r * d(phi_s)/d(theta_new)
-            v33 = 2π * r
-            w11 = (jacfac != 0) ? (1.0 + fy[2]) * (2π)^2 * rfac * r / jacfac : 0.0
-            w12 = (jacfac * rfac != 0) ? -fy[1] * π * r / (rfac * jacfac) : 0.0
-            delpsi_norm = sqrt(w11^2 + w12^2)
-            modB = sqrt(((2π * psio * delpsi_norm)^2 + f_val^2) / (2π * r)^2)
-
-            eqfun_fs_nodes[ipsi, itheta, 1] = modB
-            denom = jacfac * modB^2
-            if abs(denom) > 1e-20
-                numerator_2 = dot(v[1, :], v[2, :]) + q * v33 * v[1, 3]  # gyrokinetic C1
-                eqfun_fs_nodes[ipsi, itheta, 2] = numerator_2 / denom
-                numerator_3 = v[2, 3] * v33 + q * v33^2                  # gyrokinetic C2
-                eqfun_fs_nodes[ipsi, itheta, 3] = numerator_3 / denom
-            else
-                eqfun_fs_nodes[ipsi, itheta, 2] = 0.0
-                eqfun_fs_nodes[ipsi, itheta, 3] = 0.0
-            end
-        end
+    t_eq = @elapsed _equilibrium_run_parallel_eqfun!(
+        mpsi, mtheta, theta_nodes, eqfun_fs_nodes, profiles,
+        rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac, ro, psio,
+    )
+    if benchmark
+        @info "equilibrium_solver: parallel eqfun for-loop — @elapsed (1 run): $(@sprintf("%.6f", t_eq)) s"
     end
 
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
+
+    if benchmark
+        t_wall = time() - t_wall0
+        @info "equilibrium_solver: total wall time (full direct equilibrium_solver): $(@sprintf("%.6f", t_wall)) s"
+    end
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
