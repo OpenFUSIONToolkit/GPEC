@@ -525,7 +525,10 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         for k in 1:6
             for j in 1:mpert
                 for i in 1:mpert
-                    op_wmats[i, j, k] = complex(lxint[iqty] / fbnce_norm[iqty - 1]) *
+                    # `lxint[iqty]` is the pitch integral of fbnce_data column iqty+1,
+                    # which was normalized by `fbnce_norm[iqty]` (not iqty-1); the
+                    # scalar dJdJ slot is fbnce_norm[1] — unrelated to matrix elements.
+                    op_wmats[i, j, k] = complex(lxint[iqty] / fbnce_norm[iqty]) *
                         tnorm * (1 / (2 * im * n))  # convert torque → energy
                     iqty += 1
                 end
