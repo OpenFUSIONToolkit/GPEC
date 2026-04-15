@@ -550,16 +550,18 @@ function _bounce_integrate(
     # Matrix path: bounce-average W vectors and form outer products (Fortran lines 759-793)
     wmats_lmda = nothing
     if do_matrices
-        # Bounce-average W_μ and W_E vectors — divide by (ntheta-1) to match
-        # Fortran spline_int normalization over bspl%xs = linspace(0,1,ntheta).
+        # Bounce-average W_μ and W_E vectors (Fortran lines 762-767).
+        # Factor `pl + (1-σ)/pl` must match the bj_integral path above — both
+        # come from the same Fortran `pl(:)+(1-sigma)/pl(:)` quadrature kernel.
+        # Sum range `2:ntheta` matches bj_integral and Fortran spline_int.
         wmu_ba = zeros(ComplexF64, mpert)
         wen_ba = zeros(ComplexF64, mpert)
-        for i in 2:ntheta-1
-            factor = conj(pl[i]) + (1 - sigma) / (pl[i] + 1e-30)
-            # Note: Fortran uses conj(wmu_mt) * (pl + (1-σ)/pl), then integrates
-            # The conjugate on W is because we want W† later
-            wmu_ba .+= conj.(wmu_mt[:, i]) .* factor
-            wen_ba .+= conj.(wen_mt[:, i]) .* factor
+        @inbounds for i in 2:ntheta
+            factor = pl[i] + one_minus_sigma / (pl[i] + 1e-30)
+            for mi in 1:mpert
+                wmu_ba[mi] += conj(wmu_mt[mi, i]) * factor
+                wen_ba[mi] += conj(wen_mt[mi, i]) * factor
+            end
         end
         wmu_ba .*= nrm
         wen_ba .*= nrm
