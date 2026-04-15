@@ -710,7 +710,7 @@ function calculate_gar_matrices!(
     state::NamedTuple,
     psi::Float64, n::Int, l::Int, wdfac::Float64,
     intr::KineticForcesInternal;
-    nlmda::Int=64, ntheta::Int=128,
+    nlmda::Int=128, ntheta::Int=128,
     nutype::String="harmonic", f0type::String="maxwellian",
     nufac::Float64=1.0, ximag::Float64=0.0,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
