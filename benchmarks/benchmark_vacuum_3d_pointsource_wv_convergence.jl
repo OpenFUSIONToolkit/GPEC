@@ -89,21 +89,20 @@ function project_modes_with_basis(
     return (conj(exp_mn_basis)' * f_vals) ./ num_pts
 end
 
-function run_wv_pointsource_benchmark(; R0::Float64=4.0, a_minor::Float64=3.0, mtheta_values::AbstractVector{<:Integer}=[16, 24, 32, 48, 64, 72]
+function run_wv_pointsource_benchmark(;
+    R0::Float64=4.0,
+    a_minor::Float64=3.0,
+    mtheta_values::AbstractVector{<:Integer}=[16, 24, 32, 48, 64, 96, 128],
+    oversampling::Int=3
 )
-    # Fourier modes
-    mlow = -4
-    mpert = 9
-    nlow = -10
-    npert = 21
 
-    # Observed aspect ratio of the grid
-    aspect_ratio_observed = 1.3
+    # Aspect ratio sets nzeta relative to mtheta
+    aspect_ratio_observed = 1.5
 
     wall_settings = Vacuum.WallShapeSettings(; shape="nowall")
 
-    results = Vector{NamedTuple{(:mtheta, :nzeta, :relerr),Tuple{Int,Int,Float64}}}()
-    mode_spectra = Vector{NamedTuple{(:mtheta, :nzeta, :chi_amp, :dchi_dn_amp),Tuple{Int,Int,Matrix{Float64},Matrix{Float64}}}}()
+    results = Vector{NamedTuple{(:mtheta, :nzeta, :mpert, :npert, :relerr, :t_wv),
+        Tuple{Int,Int,Int,Int,Float64,Float64}}}()
 
     # Compute the number of toroidal points based on the observed aspect ratio (keep it approximately 1)
     nzeta_for(mtheta::Int) = max(2, Int(round(mtheta * aspect_ratio_observed)))
@@ -111,8 +110,18 @@ function run_wv_pointsource_benchmark(; R0::Float64=4.0, a_minor::Float64=3.0, m
     mtheta_in = 1024
     x, z, ν = make_axisymmetric_circle_inputs(; mtheta_in=mtheta_in, R0=R0, a=a_minor)
 
-    for (ires, mtheta) in enumerate(mtheta_values)
+    # Storage for finest-resolution mode spectrum (for diagnostic plot)
+    last_spec = nothing
+
+    for mtheta in mtheta_values
         nzeta = nzeta_for(mtheta)
+
+        # Scale the Fourier basis with the grid, keeping a fixed oversampling ratio.
+        # This ensures both quadrature error and truncation error decrease together.
+        mpert = max(3, mtheta ÷ oversampling)
+        npert = max(3, nzeta ÷ oversampling)
+        mlow = -(mpert ÷ 2)
+        nlow = -(npert ÷ 2)
 
         vac_inputs = VacuumInput(;
             x=x, z=z, ν=ν,
@@ -135,34 +144,33 @@ function run_wv_pointsource_benchmark(; R0::Float64=4.0, a_minor::Float64=3.0, m
         chi_modes = project_modes_with_basis(chi_vals, mtheta, nzeta, mlow, mpert, nlow, npert)
         dchi_dn_modes = project_modes_with_basis(dchi_dn_vals, mtheta, nzeta, mlow, mpert, nlow, npert)
 
-        # Save amplitude spectra for diagnostics: shape is (mpert, npert)
+        # Vacuum.jl: wv = 4π² (K⁻¹G), so chi ≈ (wv / 4π²) * dchi/dn
+        chi_pred = (wv ./ FOUR_PI2) * dchi_dn_modes
+        relerr = norm(chi_pred .- chi_modes) / norm(chi_modes)
+        push!(results, (; mtheta, nzeta, mpert, npert, relerr, t_wv))
+        # Save mode spectrum for diagnostic heatmap
+        m_modes = mlow:(mlow+mpert-1)
+        n_modes = nlow:(nlow+npert-1)
+
         chi_amp = reshape(abs.(chi_modes), mpert, npert)
         dchi_dn_amp = reshape(abs.(dchi_dn_modes), mpert, npert)
-        push!(mode_spectra, (; mtheta, nzeta, chi_amp, dchi_dn_amp))
+        last_spec = (; mtheta, nzeta, mpert, npert, m_modes, n_modes, chi_amp, dchi_dn_amp)
 
-        # Vacuum.jl uses: wv = 4π² * (K⁻¹G) in mode space.
-        # With our Neumann convention: chi ≈ (wv / 4π²) * (dchi/dn̂)
-        chi_pred = (wv ./ FOUR_PI2) * dchi_dn_modes
-
-        # Compute relative error between analytic and predicted chi
-        relerr = norm(chi_pred .- chi_modes) / norm(chi_modes)
-        push!(results, (; mtheta=mtheta, nzeta=nzeta, relerr=relerr))
-
-        @printf("mtheta=%d nzeta=%d | wv %.2fs | relerr=%.3e\n",
-            mtheta, nzeta, t_wv, relerr)
+        @printf("mtheta=%-3d nzeta=%-3d  mpert=%-2d npert=%-2d | wv %.2fs | relerr=%.3e\n",
+            mtheta, nzeta, mpert, npert, t_wv, relerr)
     end
 
-    # Plot: error vs total grid points (mtheta * nzeta).
-    xvals = [r.mtheta * r.nzeta for r in results]
+    # Convergence plot: error vs number of Fourier modes
+    num_modes = [r.mpert * r.npert for r in results]
     yraw = [r.relerr for r in results]
 
-    plt = plot(xvals, yraw;
+    plt = plot(num_modes, yraw;
         xscale=:log10,
         yscale=:log10,
         lw=2, marker=:circle,
-        xlabel="Total grid points (mtheta * nzeta)",
-        ylabel="Relative error in chi",
-        title="3D Vacuum wv vs grid resolution",
+        xlabel="Number of Fourier modes (mpert × npert)",
+        ylabel="Relative error in χ",
+        title="3D Vacuum wv convergence (oversampling=$(oversampling)x)",
         label=nothing
     )
 
@@ -170,19 +178,15 @@ function run_wv_pointsource_benchmark(; R0::Float64=4.0, a_minor::Float64=3.0, m
     savefig(plt, outpath)
 
     # Diagnostic plot: Fourier mode amplitudes for chi and dchi/dn at finest resolution
-    spec = mode_spectra[end]
-    m_modes = mlow:(mlow+mpert-1)
-    n_modes = nlow:(nlow+npert-1)
+    spec = last_spec
     chi_plot = log10.(spec.chi_amp .+ eps(Float64))
     dchi_plot = log10.(spec.dchi_dn_amp .+ eps(Float64))
 
     amp_plot = plot(; layout=(1, 2), size=(1100, 400))
-    heatmap!(amp_plot[1], n_modes, m_modes, chi_plot;
-        xlabel="n mode", ylabel="m mode",
+    heatmap!(amp_plot[1], collect(spec.n_modes), collect(spec.m_modes), chi_plot; xlabel="n mode", ylabel="m mode",
         title="log10|chi| (mtheta=$(spec.mtheta), nzeta=$(spec.nzeta))",
         colorbar=true)
-    heatmap!(amp_plot[2], n_modes, m_modes, dchi_plot;
-        xlabel="n mode", ylabel="m mode",
+    heatmap!(amp_plot[2], collect(spec.n_modes), collect(spec.m_modes), dchi_plot; xlabel="n mode", ylabel="m mode",
         title="log10|dchi/dn| (mtheta=$(spec.mtheta), nzeta=$(spec.nzeta))",
         colorbar=true)
     amp_outpath = joinpath(@__DIR__, "vacuum_3d_pointsource_mode_amplitudes.png")

@@ -118,7 +118,7 @@ The key idea is:
 
     # Create kernel parameters structs used to dispatch to the correct kernel
     # Hardcode these values for now - can expose to the user in the future
-    PATCH_RAD = 11
+    PATCH_RAD = 7
     RAD_DIM = 20
     INTERP_ORDER = 5
     kparams = nzeta > 1 ? KernelParams3D(PATCH_RAD, RAD_DIM, INTERP_ORDER) : KernelParams2D(n_override)
