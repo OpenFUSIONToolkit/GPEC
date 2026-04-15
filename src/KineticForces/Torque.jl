@@ -746,14 +746,19 @@ function calculate_gar_matrices!(
     end
 
     # Pack wb, wd, and mpert²·6 matrix elements into fbnce — NO scalar slot.
+    # fbnce is COMPLEX on this path to carry the full op_wmats phase (Fortran
+    # torque.F90:789 writes `wbbar*op_wmats(i,j,k)/ro**2` into a complex cspline;
+    # dropping the imag part zeros out off-Hermitian matrix structure — in
+    # particular op_B = W_Z†W_X, op_C = W_Z†W_Y, op_E = W_X†W_Y whose
+    # diagonals carry genuine phase. wb/wd slots are stored with zero imag.
     nqty = mpert^2 * 6
-    fbnce_data = zeros(Float64, bounce.nlmda, 2 + nqty)
+    fbnce_data = zeros(ComplexF64, bounce.nlmda, 2 + nqty)
     fbnce_data[:, 1] .= bounce.wb
     fbnce_data[:, 2] .= bounce.wd
     for ilmda in 1:bounce.nlmda
         iqty = 3
         for k in 1:6, j in 1:mpert, i in 1:mpert
-            fbnce_data[ilmda, iqty] = real(bounce.wmats_vs_lambda[i, j, k, ilmda])
+            fbnce_data[ilmda, iqty] = bounce.wmats_vs_lambda[i, j, k, ilmda]
             iqty += 1
         end
     end

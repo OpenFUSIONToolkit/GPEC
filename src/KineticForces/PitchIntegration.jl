@@ -218,8 +218,12 @@ Ports Fortran `lintgrnd` logic used by `lambdaintgrl_lsode`.
 function pitch_gar_integrand!(dy, _, p::PitchGARParams, lambda)
     # Evaluate fbnce at this λ: [wb, wd, f1, f2, ...]
     fvals = p.fbnce(lambda; hint=p.fbnce_hint)
-    wb = fvals[1]
-    wd = fvals[2]
+    # fvals may be a Vector{ComplexF64} on the matrix-only path (fbnce stores
+    # full complex op_wmats elements — Fortran torque.F90:789 uses a complex
+    # cspline). wb/wd are always real bounce/precession frequencies, so strip
+    # any spurious zero imag before passing into the real-valued energy ODE.
+    wb = real(fvals[1])
+    wd = real(fvals[2])
 
     # Determine circulating/trapped
     is_circulating = lambda <= p.bobmax
