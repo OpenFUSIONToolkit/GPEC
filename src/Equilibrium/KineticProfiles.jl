@@ -55,11 +55,17 @@ function load_kinetic_profiles(kinetic_file::AbstractString;
     nkin = 100
     psi_reg = collect(0:nkin) ./ nkin
 
-    ni = _linear_interp_extrap(psi_input, ni_input, psi_reg)
-    ne = _linear_interp_extrap(psi_input, ne_input, psi_reg)
-    Ti = _linear_interp_extrap(psi_input, Ti_input_eV, psi_reg) .* eV_to_J
-    Te = _linear_interp_extrap(psi_input, Te_input_eV, psi_reg) .* eV_to_J
-    omegaE = _linear_interp_extrap(psi_input, omegaE_input, psi_reg)
+    # Match Fortran pentrc/inputs.f90:215-232 — cubic-spline-then-resample, NOT
+    # linear interp. Linear interp of the irregular .kin grid produces large
+    # errors wherever the profile has curvature, and is catastrophic where
+    # omegaE crosses zero (DIIID: ψ≈0.9 omegaE flips sign in one Δψ≈0.01 cell;
+    # linear interp misses sign and magnitude of welec → wrong resonance
+    # denominator). See feedback_kf_kin_profile_linear_interp.md.
+    ni = _cubic_resample(psi_input, ni_input, psi_reg)
+    ne = _cubic_resample(psi_input, ne_input, psi_reg)
+    Ti = _cubic_resample(psi_input, Ti_input_eV, psi_reg) .* eV_to_J
+    Te = _cubic_resample(psi_input, Te_input_eV, psi_reg) .* eV_to_J
+    omegaE = _cubic_resample(psi_input, omegaE_input, psi_reg)
 
     loglam = zeros(Float64, nkin + 1)
     nui = zeros(Float64, nkin + 1)
@@ -115,23 +121,12 @@ function _read_kinetic_table(kinetic_file::AbstractString)
 end
 
 """
-Linear interpolation with extrapolation beyond data range.
+Cubic-spline resample matching Fortran pentrc/inputs.f90:215-232:
+build a cubic spline on the (irregular) input grid, then evaluate at the
+regular psi_new grid. Out-of-range points use ExtendExtrap (smooth cubic
+extrapolation), matching Fortran's `spline_fit(...,"extrap")`.
 """
-function _linear_interp_extrap(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
-    y_new = similar(x_new, Float64)
-    for (i, xval) in enumerate(x_new)
-        if xval < x[1]
-            slope = (y[2] - y[1]) / (x[2] - x[1])
-            y_new[i] = y[1] + slope * (xval - x[1])
-        elseif xval > x[end]
-            slope = (y[end] - y[end - 1]) / (x[end] - x[end - 1])
-            y_new[i] = y[end] + slope * (xval - x[end])
-        else
-            idx = searchsortedlast(x, xval)
-            idx = clamp(idx, 1, length(x) - 1)
-            t = (xval - x[idx]) / (x[idx + 1] - x[idx])
-            y_new[i] = y[idx] * (1 - t) + y[idx + 1] * t
-        end
-    end
-    return y_new
+function _cubic_resample(x::AbstractVector, y::AbstractVector, x_new::AbstractVector)
+    spl = cubic_interp(collect(Float64, x), collect(Float64, y); extrap=ExtendExtrap())
+    return [spl(xv) for xv in x_new]
 end
