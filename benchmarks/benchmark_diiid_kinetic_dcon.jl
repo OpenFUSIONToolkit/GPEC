@@ -122,7 +122,7 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
         power_bp = 0
         power_b = 0
         power_r = 0
-        grid_type = "ldp"              # Fortran uses "pow1" (edge-packing); "ldp" is the closest supported Julia equivalent (sin² packs both ends)
+        grid_type = "pow1"             # Matches Fortran DIIID_kinetic_example (equil/grid.f90 powspace)
         psilow = 0.01
         psihigh = 0.993
         mpsi = 128
