@@ -103,8 +103,8 @@ end
 
 Heatmap of energy eigenvector magnitudes vs (m, mode index).
 
-Only `matrix_type=:total` is supported (the total energy eigenvector matrix `Wₜ` is stored in
-`vacuum/wt`). Plasma and vacuum eigenvectors are not stored separately in the HDF5 output.
+Only `matrix_type=:total` is supported (the total energy eigenvectors are stored in
+`vacuum/et_eigenvector`). Plasma and vacuum eigenvectors are not stored separately in the HDF5 output.
 
 Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC conventions.
 
@@ -126,7 +126,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["vacuum/wt"]), read(fid["equil/psio"]), read(fid["info/mlow"])
+        read(fid["vacuum/et_eigenvector"]), read(fid["equil/psio"]), read(fid["info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -388,7 +388,7 @@ A `Plots.jl` plot object.
 """
 function plot_ffs_summary(h5path; save_path=nothing)
     has_vac = h5open(h5path, "r") do fid
-        haskey(fid, "vacuum/wt") && !isempty(read(fid["vacuum/wt"]))
+        haskey(fid, "vacuum/et_eigenvector") && !isempty(read(fid["vacuum/et_eigenvector"]))
     end
 
     p_crit = plot_fixed_boundary_stability_criterion(h5path)

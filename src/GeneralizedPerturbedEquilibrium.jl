@@ -524,8 +524,10 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
-        # Write vacuum data; always write all entries, using empty arrays when not computed
-        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        # Write vacuum data; always write all entries, using empty arrays when not computed.
+        # `et_eigenvector[m, mode]` holds the normalized, phase-fixed total-energy
+        # eigenvectors (columns of the diagonalized `wt = wp + wv`); `wt0` is the raw wt.
+        out_h5["vacuum/et_eigenvector"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
         out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
         out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
