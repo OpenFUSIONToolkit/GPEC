@@ -100,9 +100,13 @@ function _compute_fkg_matrices!(
     r3_flat = zeros(ComplexF64, mpsi, np^2)
     ga_flat = zeros(ComplexF64, mpsi, np^2)
 
-    hint = Ref(1)
+    # ψ-loop is embarrassingly parallel: each iteration writes to a unique
+    # ipsi row of the *_flat output arrays. The only thread-shared mutable is
+    # the interpolant bracket-search hint; give each thread its own Ref.
+    thread_hints = [Ref(1) for _ in 1:Threads.maxthreadid()]
 
-    for ipsi in 1:mpsi
+    Threads.@threads for ipsi in 1:mpsi
+        hint = thread_hints[Threads.threadid()]
         psi = xs[ipsi]
 
         # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
