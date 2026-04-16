@@ -150,7 +150,7 @@ function energy_integrand_scalar(x::Float64, p::EnergyParams; imag_axis::Bool=fa
 end
 
 """
-    integrate_energy_ode(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
+    integrate_energy(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
                          nutype="harmonic", f0type="maxwellian", nufac=1.0,
                          ximag=0.0, qt=false,
                          atol=1e-12, rtol=1e-9)::ComplexF64
@@ -175,7 +175,7 @@ Distribution function types (`f0type`):
 # Returns
 - `ComplexF64`: energy integral value
 """
-function integrate_energy_ode(wn::Float64, wt::Float64, we::Float64, wd::Float64,
+function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
                               wb::Float64, nuk::Float64, ell::Int, leff::Float64,
                               n::Int, psi::Float64, lambda::Float64, method::String;
                               nutype::String="harmonic", f0type::String="maxwellian",
@@ -204,4 +204,33 @@ function integrate_energy_ode(wn::Float64, wt::Float64, we::Float64, wd::Float64
     result += val
 
     return result
+end
+
+
+"""
+    evaluate_energy_integrand(x_grid; wn, wt, we, wd, wb, nuk, leff, n,
+                               nutype="harmonic", f0type="maxwellian",
+                               nufac=1.0, ximag=0.0, qt=false) → Vector{ComplexF64}
+
+Diagnostic convenience: evaluate the energy integrand at specified x = E/T values.
+Returns the integrand value (not the integral) at each point in `x_grid`.
+Useful for plotting the energy integrand shape and verifying kinetic resonance
+resolution.
+
+# Example
+```julia
+x = 10 .^ range(-2, stop=2, length=500)
+f = KineticForces.evaluate_energy_integrand(x; wn=1e3, wt=2e3, we=5e4,
+        wd=1e2, wb=3e4, nuk=1e3, leff=1.0, n=1)
+plot(x, real.(f); xscale=:log10, xlabel="x = E/T", ylabel="Re(integrand)")
+```
+"""
+function evaluate_energy_integrand(x_grid::AbstractVector{Float64};
+                                    wn::Float64, wt::Float64, we::Float64,
+                                    wd::Float64, wb::Float64, nuk::Float64,
+                                    leff::Float64, n::Int,
+                                    nutype::String="harmonic", f0type::String="maxwellian",
+                                    nufac::Float64=1.0, ximag::Float64=0.0, qt::Bool=false)
+    p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n, nutype, f0type, nufac, ximag, qt)
+    return [energy_integrand_scalar(x, p) for x in x_grid]
 end

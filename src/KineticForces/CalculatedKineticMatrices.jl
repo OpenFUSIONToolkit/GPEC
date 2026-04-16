@@ -119,7 +119,8 @@ function compute_calculated_kinetic_matrices(
                 compute_kinetic_matrices_at_psi!(
                     block_w, block_t, psi, n, ell,
                     kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
-                    kf_ctrl.electron, equil, intr_t, kinetic_profiles,
+                    kf_ctrl.electron, equil, intr_t, kinetic_profiles;
+                    atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
                 )
                 full_w .+= block_w
                 full_t .+= block_t

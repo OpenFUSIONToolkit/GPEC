@@ -155,7 +155,7 @@ end
 
 Compute bounce-averaged quantities as functions of pitch angle λ.
 This is the core function that sets up all λ-dependent quantities
-needed by the pitch angle ODE integrator.
+needed by the pitch-angle quadrature.
 
 Ports Fortran torque.F90 lines 530-816 (GAR branch).
 
@@ -437,7 +437,9 @@ function _bounce_integrate(
     cum_wb = 0.0
     cum_wd = 0.0
 
-    # Arrays for cumulative integrals (for phase factor computation)
+    # θ-scratch arrays allocated fresh each call. Pool-based reuse was tried
+    # (AdaptiveArrayPools) but showed no speedup and introduced severe slowdowns
+    # at 2+ threads; plain allocations match Fortran baseline behavior.
     cum_wb_arr = zeros(Float64, ntheta)
     cum_wd_arr = zeros(Float64, ntheta)
 
@@ -514,7 +516,7 @@ function _bounce_integrate(
 
         # W vectors for matrix path (Fortran lines 722-727). Element-by-element
         # write preserving original broadcast evaluation order exactly to keep
-        # bit-level parity (matters because downstream ODE is tolerance-sensitive).
+        # bit-level parity (matters because downstream quadrature is tolerance-sensitive).
         if do_matrices
             wmu_pre = dt * (lmda / bo)
             wen_pre = dt

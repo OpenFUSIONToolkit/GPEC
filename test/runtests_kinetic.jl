@@ -131,11 +131,11 @@
     # =========================================================================
     # Energy ODE integration
     # =========================================================================
-    @testset "integrate_energy_ode" begin
+    @testset "integrate_energy" begin
         @testset "CGL integration" begin
             # CGL mode: integral of x^2.5*exp(-x)/(i*n) dx from 0 to 72
             # = Gamma(3.5)/(i*1) = (15/8)*sqrt(pi) / i
-            result = KF.integrate_energy_ode(
+            result = KF.integrate_energy(
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 1, 0.5, 0.5, "fcgl";
                 nutype="zero", f0type="cgl", nufac=1.0, ximag=0.0, qt=false
             )
@@ -147,7 +147,7 @@
         end
 
         @testset "collisionless returns finite" begin
-            result = KF.integrate_energy_ode(
+            result = KF.integrate_energy(
                 1.0, 1.0, 1.0, 0.5, 0.3, 0.0, 0, 1.0, 1, 0.5, 0.5, "fgar";
                 nutype="zero", f0type="maxwellian"
             )

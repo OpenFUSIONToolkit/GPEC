@@ -44,13 +44,15 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     nn::Int = 1                     # Toroidal mode number
     nl::Int = 1                     # Bounce harmonic number
 
-    # Tolerances — debug defaults looser than Fortran PENTRC since we mix Tsit5 + QuadGK.
+    # Tolerances — debug defaults looser than Fortran PENTRC.
     # *_xlmda: shared tolerances for inner λ (pitch) and x (energy) integrations
-    # *_psi:   tolerances for outer ψ ODE
+    # *_psi:   tolerances for outer ψ quadrature
     atol_xlmda::Float64 = 1e-8     # Absolute tolerance for inner pitch + energy integrations
     rtol_xlmda::Float64 = 1e-5     # Relative tolerance for inner pitch + energy integrations
-    atol_psi::Float64 = 1e-5       # Absolute tolerance for outer ψ ODE
-    rtol_psi::Float64 = 1e-5       # Relative tolerance for outer ψ ODE
+    # atol_psi=1e-2 N·m is small compared to typical tokamak torques (1-10 N·m) — one
+    # of the main benefits of QuadGK over ODE is that tolerances are physically intuitive.
+    atol_psi::Float64 = 1e-2       # Absolute tolerance for outer ψ quadrature
+    rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
 
     # Scaling factors
     nfac::Float64 = 1.0            # Density scaling
@@ -77,7 +79,7 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     # Output configuration
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
-    save_records::Bool = false      # Save detailed ODE integration trajectories
+    save_records::Bool = false      # Save detailed integration trajectories
 
     # Input files (relative to dir_path)
     kinetic_file::String = "kinetic.dat"
@@ -133,26 +135,25 @@ this struct.
     dbob_m::Any = nothing          # δB/B perturbation modes (CubicSeriesInterpolant)
     divx_m::Any = nothing          # ∇·ξ⊥ perturbation modes (CubicSeriesInterpolant)
 
-    # Sticky bracket-search hints for per-call-site amortization in the outer
-    # ψ ODE RHS (`tpsi!`). Reset or reused across a single outer solve; the ψ
-    # ODE steps can be non-monotonic so FastInterpolations falls back to a
-    # broader search when the hint is stale — still a net win over a cold
-    # bracket search on every call.
+    # Sticky bracket-search hints for amortized lookup in `tpsi!`. When the outer
+    # quadrature evaluates ψ non-monotonically, FastInterpolations falls back to a
+    # broader search when the hint is stale — still a net win over a cold bracket
+    # search on every call.
     dbob_m_hint::Base.RefValue{Int} = Ref(1)
     divx_m_hint::Base.RefValue{Int} = Ref(1)
     # 2D hints for `equil.eqfun_B` and `equil.rzphi_jac` evaluated on the
     # (ψ,θ) grid inside the θ loops of `tpsi!` / `calculate_fcgl`. Each call
-    # site gets its own hint tuple so the ψ index is sticky across the ODE
-    # step while the θ index updates monotonically within each θ loop.
+    # site gets its own hint tuple so the ψ index is sticky across the
+    # quadrature evaluation while the θ index updates monotonically within each θ loop.
     hint2d_eqfun_B::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
     hint2d_rzphi_jac::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 
     # Upper ψ bound set by DCON/FFS (from ForceFreeStatesInternal.psilim).
     # The perturbation interpolants are only valid on [0, psilim]; extrapolation
-    # beyond diverges. The outer ψ ODE clips to this to match Fortran PENTRC.
+    # beyond diverges. The outer ψ quadrature clips to this to match Fortran PENTRC.
     psilim::Float64 = 1.0
 
-    # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per ψ ODE step.
+    # Pre-allocated θ-grid buffers for `tpsi!` — length mthsurf+1, reused per evaluation.
     tpsi_xs::Vector{Float64} = Float64[]
     tpsi_B::Vector{Float64} = Float64[]
     tpsi_dBdpsi::Vector{Float64} = Float64[]
@@ -395,7 +396,7 @@ end
 """
     EnergyIntegrationResult
 
-Results from a single energy-space ODE integration at one (ψ, λ, ℓ) point.
+Results from a single energy-space integration at one (ψ, λ, ℓ) point.
 Trajectory fields are only populated when `ctrl.save_records=true`.
 """
 @kwdef struct EnergyIntegrationResult
@@ -418,11 +419,11 @@ Results for one NTV computation method across all flux surfaces.
 @kwdef mutable struct MethodResult
     method::String = ""
     nn::Int = 0
-    torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ODE trajectory
+    torque_profile::Any = nothing     # Interpolant of dT/dψ(ψ) from ψ integration
     total_torque::ComplexF64 = 0.0 + 0.0im
     total_energy::ComplexF64 = 0.0 + 0.0im
     records::Vector{EnergyIntegrationResult} = EnergyIntegrationResult[]
-    # Per-step ψ profile from outer ODE (accepted steps only)
+    # Per-step ψ profile from outer quadrature
     psi_grid::Vector{Float64} = Float64[]
     dtdpsi::Vector{ComplexF64} = ComplexF64[]
     t_cumulative::Vector{ComplexF64} = ComplexF64[]

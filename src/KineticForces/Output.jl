@@ -25,8 +25,8 @@ function write_to_hdf5!(h5file::HDF5.File, state::KineticForcesState)
         mg["total_energy"] = [real(result.total_energy), imag(result.total_energy)]
         mg["psi_nsteps"] = result.psi_nsteps
 
-        # Per-ψ torque profiles at outer-ODE accepted steps.
-        # dT/dψ from SavingCallback, cumulative T(ψ) from sol.u summed over bounce harmonics.
+        # Per-ψ torque profiles from quadrature evaluation points.
+        # dT/dψ integrand values and cumulative T(ψ) via trapezoidal integration.
         if !isempty(result.psi_grid)
             mg["psi"] = result.psi_grid
             mg["dTdpsi_real"] = real.(result.dtdpsi)
@@ -52,7 +52,7 @@ end
 """
     write_integration_records!(mg::HDF5.Group, records::Vector{EnergyIntegrationResult})
 
-Write variable-length ODE trajectory records using offset-indexed concatenated arrays.
+Write variable-length integration trajectory records using offset-indexed concatenated arrays.
 This is the standard HDF5 ragged array pattern for storing variable-length data.
 
 # Arguments

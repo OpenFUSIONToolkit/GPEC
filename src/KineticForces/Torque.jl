@@ -348,9 +348,9 @@ function calculate_rlar(psi, n, l, q, epsr, wdian, wdiat, welec,
     # Maximum pitch angle parameter (use safe estimate)
     lmdamax = min(1.0/(1-epsr), bo/bmin)
 
-    # Energy space ODE integration
+    # Energy-space quadrature
     # This computes ∫ K(x) dx where K is the resonance operator
-    xint = integrate_energy_ode(wdian, wdiat, welec, wdhat, wbhat, nueff,
+    xint = integrate_energy(wdian, wdiat, welec, wdhat, wbhat, nueff,
                          l, lnq, n, psi, lmdamax, "rlar")
 
     # Kappa/bounce averaging (effect of field perturbations)
@@ -404,8 +404,8 @@ Ports Fortran torque.F90 GAR branch (lines 529-932).
 
 # Steps
 1. Compute bounce-averaged quantities via `compute_bounce_data()`
-2. Build fbnce interpolant over λ, normalize for ODE stability
-3. Integrate over pitch angle via `integrate_pitch_gar()`
+2. Build fbnce interpolant over λ, normalize for numerical stability
+3. Integrate over pitch angle via `integrate_pitch_gar_quadgk()`
 4. Apply torque normalization (Eq. 19, Logan et al. 2013)
 5. If matrix path: assemble and normalize kinetic matrices
 
@@ -451,7 +451,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
     nqty_mat = do_matrices ? nqty_matrix(mpert) : 0
     nqty = 1 + nqty_mat
 
-    # Pack all quantities into a matrix for interpolation
+    # Pack all quantities into a matrix for interpolation.
     fbnce_data = zeros(Float64, bounce.nlmda, 2 + nqty)
     fbnce_data[:, 1] .= bounce.wb
     fbnce_data[:, 2] .= bounce.wd
@@ -466,7 +466,7 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # Normalize flux quantities by 1/median for ODE stability (Fortran lines 819-823).
+    # Normalize flux quantities by 1/median for numerical stability (Fortran lines 819-823).
     # Compute medians from the unscaled data and rescale in place BEFORE building
     # the interpolant — the pre-normalization build was dead work (allocates a
     # CubicSeriesInterpolant that was immediately overwritten).
@@ -498,8 +498,8 @@ function calculate_gar(psi, n, l, q, epsr, wdian, wdiat, welec, nuk, bo,
         end
     end
 
-    # 4. Pitch angle ODE integration
-    lxint = integrate_pitch_gar(
+    # 4. Pitch angle integration (adaptive Gauss-Kronrod over λ)
+    lxint = integrate_pitch_gar_quadgk(
         wdian, wdiat, welec, nuk, bo / bmax, epsr, q,
         fbnce, fbnce_norm, nqty, l, n, rex, imx, psi, method;
         nutype, f0type, nufac, ximag, qt,
@@ -727,8 +727,7 @@ pre-allocated `out_wmats[mpert, mpert, 6]`.
 
 Parallel to the matrix branch of `calculate_gar`, but with no scalar
 torque slot in the pitch-angle buffer (`nqty = mpert²·6` instead of
-`1 + mpert²·6`). This removes a class of index-off-by-one bugs and makes
-the QuadGK-pitch alternative in Phase C trivial to wire.
+`1 + mpert²·6`).
 
 The resonance operator is evaluated with `rex = imx = 1` so the caller
 obtains the full complex result; energy and torque pieces are split by
@@ -743,8 +742,7 @@ function calculate_gar_matrices!(
     nutype::String="harmonic", f0type::String="maxwellian",
     nufac::Float64=1.0, ximag::Float64=0.0,
     energy_atol::Float64=1e-9, energy_rtol::Float64=1e-6,
-    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6,
-    pitch_integrator::Symbol=:ode,  # :ode (Tsit5) or :quadgk (adaptive Gauss-Kronrod)
+    pitch_atol::Float64=1e-9, pitch_rtol::Float64=1e-6
 )
     mpert = intr.mpert
     mfac = intr.mfac
@@ -791,7 +789,7 @@ function calculate_gar_matrices!(
     # so the matrix block is a direct copy.
     fbnce_data[:, 3:end] .= bounce.wmats_vs_lambda
 
-    # Column-wise median normalization for ODE stability (Fortran lines 819-823).
+    # Column-wise median normalization for numerical stability (Fortran lines 819-823).
     fbnce_norm = ones(Float64, nqty)
     for i in 1:nqty
         col = view(fbnce_data, :, i + 2)
@@ -805,11 +803,8 @@ function calculate_gar_matrices!(
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
 
     # Full complex resonance operator (rex=1, imx=1) — caller splits into
-    # energy (imag) and torque (real) parts downstream. Dispatch on
-    # `pitch_integrator`: :ode uses the coupled Tsit5 path; :quadgk uses
-    # vector-valued adaptive Gauss-Kronrod with a trapped/passing split.
-    pitch_fn = pitch_integrator === :quadgk ? integrate_pitch_gar_quadgk : integrate_pitch_gar
-    lxint = pitch_fn(
+    # energy (imag) and torque (real) parts downstream.
+    lxint = integrate_pitch_gar_quadgk(
         state.wdian, state.wdiat, state.welec, state.nuk,
         bo / state.bmax, state.epsr, state.q,
         fbnce, fbnce_norm, nqty, l, n, 1.0, 1.0, psi, "fwmm";
@@ -887,7 +882,7 @@ single flux surface in one pass. Dedicated matrix-only path — does not
 delegate to `tpsi!` — so the pitch-angle buffer is sized exactly
 `mpert²·6` (no vestigial scalar torque slot).
 
-The bounce averaging, pitch-angle ODE, and energy-space ODE share the
+The bounce averaging, pitch-angle quadrature, and energy-space quadrature share the
 same math as the perturbative torque pipeline in `tpsi!`, but the
 `rex = imx = 1` full-complex result is split locally:
   - `kwmat[i,j,k] = complex(0, imag(full[i,j,k]))` (energy)
@@ -912,7 +907,7 @@ function compute_kinetic_matrices_at_psi!(
     zi::Int, mi::Int, wdfac::Float64, _divxfac::Float64,
     electron::Bool, equil, intr::KineticForcesInternal,
     kinetic_profiles::Equilibrium.KineticProfileSplines;
-    pitch_integrator::Symbol=:ode)
+    atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
     mpert = intr.mpert
 
@@ -927,7 +922,9 @@ function compute_kinetic_matrices_at_psi!(
                                   equil, intr, kinetic_profiles)
 
     full_wmats = zeros(ComplexF64, mpert, mpert, 6)
-    calculate_gar_matrices!(full_wmats, state, psi, n, l, wdfac, intr; pitch_integrator)
+    calculate_gar_matrices!(full_wmats, state, psi, n, l, wdfac, intr;
+                            energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
+                            pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
 
     for k in 1:6, j in 1:mpert, i in 1:mpert
         val = full_wmats[i, j, k]

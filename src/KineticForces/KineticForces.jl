@@ -10,8 +10,8 @@ to MHD stability through torque and energy deposition calculations.
 
 ### Core Library Functions
 - `Torque.jl`: tpsi!() - Core torque calculation at a single flux surface
-- `EnergyIntegration.jl`: ODE-based energy-space integration
-- `PitchIntegration.jl`: ODE-based pitch-angle integration
+- `EnergyIntegration.jl`: QuadGK energy-space integration
+- `PitchIntegration.jl`: QuadGK pitch-angle integration
 
 ### High-level Computation
 - `Compute.jl`: Orchestration routines
@@ -28,7 +28,6 @@ to MHD stability through torque and energy deposition calculations.
 using LinearAlgebra
 using LinearAlgebra.LAPACK
 using FFTW
-using OrdinaryDiffEq
 using QuadGK
 using HDF5
 using Printf
@@ -66,5 +65,8 @@ const μ₀    = 4e-7 * π
 const rad2deg = 180 / π
 const deg2rad = π / 180
 const iunit = 1im               # equivalent to Fortran's (0,1)
+
+# Diagnostic exports for interactive energy-integrand inspection
+export evaluate_energy_integrand, energy_integrand_scalar, EnergyParams
 
 end  # module KineticForces
