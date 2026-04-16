@@ -47,6 +47,7 @@ using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSe
 using .ForceFreeStates: sing_lim!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
+using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
 const _BANNER = "="^60
@@ -265,6 +266,13 @@ function main(args::Vector{String}=String[])
                     kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
             make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                 calculated_source=calculated_cb)
+
+            # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
+            # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
+            # singfac_min == 0 preserves single-chunk behavior.
+            if ctrl.ode_flag && ctrl.singfac_min > 0
+                find_kinetic_singular_surfaces!(ffit, equil, intr)
+            end
         end
 
         # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
@@ -523,6 +531,16 @@ function write_outputs_to_HDF5(
         out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
+
+        # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
+        # used to find them. Populated only when kinetic crossings were searched for.
+        out_h5["singular/kinetic/kmsing"] = intr.kmsing
+        out_h5["singular/kinetic/psi"] = [s.psifac for s in intr.kinsing]
+        out_h5["singular/kinetic/q"] = [s.q for s in intr.kinsing]
+        out_h5["singular/kinetic/q1"] = [s.q1 for s in intr.kinsing]
+        out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
+        out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
+        out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
 
         # Write vacuum data; always write all entries, using empty arrays when not computed.
         # `et_eigenvector[m, mode]` holds the normalized, phase-fixed total-energy

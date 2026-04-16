@@ -35,6 +35,8 @@ using NCDatasets
 using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 
+include(joinpath(@__DIR__, "_plot_cond_fbar.jl"))
+
 const DEFAULT_FORTRAN_DIR = expanduser("~/Code/gpec/docs/examples/DIIID_kinetic_example")
 
 """
@@ -243,6 +245,11 @@ function run_benchmark(fortran_dir::String=DEFAULT_FORTRAN_DIR)
         im_pass || _pf("    Im err %.2f%% > 20%%\n", im_err)
     end
     _p("=" ^ 70)
+
+    # cond(F̄) vs ψ diagnostic — shows whether kinetic singular surfaces
+    # (det(F̄)=0) were found and why peaks were/weren't accepted.
+    png_path = joinpath(@__DIR__, "diiid_kinetic_cond_fbar.png")
+    plot_cond_fbar_scan(h5path, png_path; title="DIIID kinetic-DCON cond(F̄) vs ψ")
 
     return (; julia_re, julia_im,
               fortran_re=ref.W_t_re, fortran_im=ref.W_t_im,

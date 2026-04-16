@@ -48,10 +48,13 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
-        # Cross a rational surface after integration if this chunk requires it
+        # Cross a singular surface after integration if this chunk requires it
         if chunk.needs_crossing
-            # Ideal surface crossings apply only in the ideal (non-kinetic) path.
-            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            if ctrl.kinetic_factor > 0
+                cross_kinetic_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            else
+                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            end
         end
     end
 
@@ -119,8 +122,8 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
     # and kinetic mode would also live here when implemented.
     if ctrl.kinetic_factor > 0
-        # No singular surface tracking needed — kinetic terms regularize singularities
-        odet.ising_start = 0
+        # Use kinetic singular surfaces (kinsing) for crossing points
+        odet.ising_start = searchsortedfirst(getfield.(intr.kinsing, :psifac), odet.psifac) - 1
     else
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
@@ -176,11 +179,68 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
         return ising
     end
 
+    # Wrapper to find next kinetic singular surface within integration limits
+    # Mirrors Fortran ode.f:185-191 filter: skip kinsing surfaces beyond psilim
+    # or whose resonant mode falls outside the truncation range [mlow, mhigh]
+    function find_next_kinsing!(ising::Int, intr::ForceFreeStatesInternal)
+        ising += 1
+        while ising <= intr.kmsing
+            if intr.psilim < intr.kinsing[ising].psifac
+                break
+            end
+            # Check resonance: n*q should fall within [mlow, mhigh]
+            nq = intr.kinsing[ising].q * minimum(intr.kinsing[ising].n)
+            if intr.mlow <= nq && nq <= intr.mhigh
+                break
+            end
+            ising += 1
+        end
+        return ising
+    end
+
     # -------------------- Create chunks ------------------------
-    if ctrl.kinetic_factor > 0
-        # Single chunk from axis to edge. Kinetic contributions regularize the
-        # F-matrix singularity at rational surfaces (Logan 2015 Eq 7.46), making
-        # them integrable. The adaptive ODE solver handles stiffness automatically.
+    if ctrl.kinetic_factor > 0 && intr.kmsing > 0 && ctrl.singfac_min > 0
+        # Kinetic mode with kinsing surfaces: chunk around each kinetically-displaced
+        # singular surface, mirroring Fortran ode.f:184-201 (kin_flag path).
+        # The ODE's F̄⁻¹ blows up at these locations; the trapezoidal crossing in
+        # cross_kinetic_singular_surf! steps over each singularity.
+        ising_current = find_next_kinsing!(ising_current, intr)
+        while ising_current <= intr.kmsing && intr.psilim >= intr.kinsing[ising_current].psifac && ctrl.singfac_min != 0
+            # Set integration limit to just before the next kinsing surface
+            # Fortran: psimax = kinsing(ising)%psifac - singfac_min / |nn * kinsing(ising)%q1|
+            psi_end = intr.kinsing[ising_current].psifac -
+                      ctrl.singfac_min / abs(minimum(intr.kinsing[ising_current].n) * intr.kinsing[ising_current].q1)
+
+            if psi_current >= psi_end
+                # Surface too close to current position — skip it
+                ising_current = find_next_kinsing!(ising_current, intr)
+                continue
+            end
+
+            push!(chunks, IntegrationChunk(;
+                psi_start=psi_current,
+                psi_end=psi_end,
+                needs_crossing=true,
+                ising=ising_current
+            ))
+
+            # After crossing, jump to the other side of the singular surface
+            dpsi = intr.kinsing[ising_current].psifac - psi_end
+            psi_current = psi_end + 2 * dpsi
+
+            ising_current = find_next_kinsing!(ising_current, intr)
+        end
+
+        # Final chunk to the edge
+        push!(chunks, IntegrationChunk(;
+            psi_start=psi_current,
+            psi_end=(intr.psilim * (1 - eps)),
+            needs_crossing=false,
+            ising=0
+        ))
+    elseif ctrl.kinetic_factor > 0
+        # Kinetic mode with no kinsing surfaces (or singfac_min==0): single chunk.
+        # Kinetic contributions are weak enough that F̄ stays well-conditioned.
         push!(chunks, IntegrationChunk(;
             psi_start=psi_current,
             psi_end=(intr.psilim * (1 - eps)),
@@ -308,6 +368,58 @@ function cross_ideal_singular_surf!(
     sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store values after crossing step and advance
+    odet.psi_store[odet.step] = odet.psifac
+    odet.q_store[odet.step] = odet.q
+    odet.u_store[:, :, :, odet.step] = odet.u
+    odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.step += 1
+end
+
+
+"""
+    cross_kinetic_singular_surf!(odet, ctrl, equil, ffit, intr, ising)
+
+Cross a kinetically-displaced singular surface using a simple trapezoidal step.
+Matches Fortran `ode_kin_cross` with `con_flag=true` (`ode.f:615-619`): evaluate
+the ODE RHS on both sides of the singularity and take a trapezoidal Euler step
+across. No asymptotic analysis, no Gaussian elimination — the kinetic FKG
+formulation absorbs the ideal singularity and the trapezoidal step handles
+the residual near-singularity.
+
+Much simpler than `cross_ideal_singular_surf!` which requires asymptotic
+power series and solution vector surgery.
+"""
+function cross_kinetic_singular_surf!(
+    odet::OdeState,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal,
+    ising::Int
+)
+    # Normalize solution at singular surface [Fortran: ode_unorm(.TRUE.)]
+    compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+
+    # Trapezoidal step across the kinsing surface [Fortran ode.f:616-619, con_flag=true]
+    ksurf = intr.kinsing[ising]
+    dpsi = ksurf.psifac - odet.psifac
+
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, 0))
+    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+
+    sing_der!(du1, odet.u, params, odet.psifac)
+    odet.psifac = ksurf.psifac + dpsi  # symmetric jump to other side
+    sing_der!(du2, odet.u, params, odet.psifac)
+    odet.u .+= (du1 .+ du2) .* dpsi
+
+    # Recompute ud for storage consistency
+    sing_der!(du1, odet.u, params, odet.psifac)
+
+    # Store crossing step
+    if odet.step >= size(odet.u_store, 4)
+        resize_storage!(odet)
+    end
     odet.psi_store[odet.step] = odet.psifac
     odet.q_store[odet.step] = odet.q
     odet.u_store[:, :, :, odet.step] = odet.u

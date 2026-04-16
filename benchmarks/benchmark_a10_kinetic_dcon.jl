@@ -36,6 +36,8 @@ using LinearAlgebra
 using GeneralizedPerturbedEquilibrium
 const GPE = GeneralizedPerturbedEquilibrium
 
+include(joinpath(@__DIR__, "_plot_cond_fbar.jl"))
+
 const DEFAULT_FORTRAN_KIN_DIR   = expanduser("~/Code/gpec/docs/examples/a10_kinetic_example")
 const DEFAULT_FORTRAN_IDEAL_DIR = expanduser("~/Code/gpec/docs/examples/a10_ideal_example")
 
@@ -280,6 +282,10 @@ function run_benchmark(fortran_kin_dir::String=DEFAULT_FORTRAN_KIN_DIR)
     end
     _p("=" ^ 70)
     _pf("  Wall time: %.1f s\n", wall)
+
+    # cond(F̄) vs ψ diagnostic.
+    png_path = joinpath(@__DIR__, "a10_kinetic_cond_fbar.png")
+    plot_cond_fbar_scan(h5path, png_path; title="a10 kinetic-DCON cond(F̄) vs ψ")
 
     return (; re_err, im_err, overlap, wall, julia_re, julia_im,
               fortran_re=ref.W_t_re, fortran_im=ref.W_t_im)
