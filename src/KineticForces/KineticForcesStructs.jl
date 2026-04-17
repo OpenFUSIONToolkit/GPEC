@@ -55,11 +55,12 @@ ctrl = KineticForcesControl(; (Symbol(k) => v for (k, v) in inputs["KineticForce
     rtol_psi::Float64 = 1e-2       # Relative tolerance for outer ψ quadrature
 
     # Scaling factors
-    nfac::Float64 = 1.0            # Density scaling
-    tfac::Float64 = 1.0            # Temperature scaling
-    wefac::Float64 = 1.0           # ExB rotation scaling
-    wdfac::Float64 = 1.0           # Magnetic drift scaling
-    wpfac::Float64 = 1.0           # Indirect rotation scaling
+    density_factor::Float64 = 1.0            # Density scaling (ni, ne)
+    temperature_factor::Float64 = 1.0        # Temperature scaling (Ti, Te)
+    ExB_rotation_factor::Float64 = 1.0       # ExB rotation scaling (omegaE)
+    wdfac::Float64 = 1.0                     # Magnetic drift scaling
+    toroidal_rotation_factor::Float64 = 1.0  # Total toroidal rotation scaling (wphi)
+
     nufac::Float64 = 1.0           # Collisionality scaling
     divxfac::Float64 = 1.0         # div(xi_perp) scaling
 

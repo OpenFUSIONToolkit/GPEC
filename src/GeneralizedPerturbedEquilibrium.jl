@@ -229,7 +229,10 @@ function main(args::Vector{String}=String[])
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
             kinetic_file;
             zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp)
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+            chi1=2π * equil.psio)
     end
 
     # Fit equilibrium quantities to Fourier-spline functions.
