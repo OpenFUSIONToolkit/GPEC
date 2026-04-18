@@ -229,7 +229,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
-  - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
+  - `psiedge::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [psiedge, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
+  - `truncate_at_dW_peak::Bool` - **Experimental / legacy.** When `true` and `psiedge < psilim`, the edge-dW scan's peak location is used to truncate the integration domain (psilim, qlim, and the outer-boundary solution state are moved to that peak). This reproduces the original ode_record_edge heuristic from Fortran STRIDE and is preserved so that future work can develop a more robust edge-mode filter on top of it. **In its current form it silently corrupts Δ' and δW**: the Δ' of the outermost rational shifts by tens of percent depending on where the peak happens to fall inside the band, and the ideal-limit approach of δW can be pulled arbitrarily toward or away from marginal stability. Leave at `false` (default) for any benchmark, validation, or production run.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
@@ -272,6 +273,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
+    truncate_at_dW_peak::Bool = false   # Legacy: edge-dW peak truncates psilim. Corrupts Δ' and δW; see docstring.
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
