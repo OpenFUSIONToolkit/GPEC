@@ -164,12 +164,17 @@ construction.
 
 ### Inter-surface Δ' matrix (`delta_prime_matrix`)
 
-`compute_delta_prime_matrix!` assembles the full ``2 m_\mathrm{sing} \times 2 m_\mathrm{sing}``
+`compute_delta_prime_matrix!` assembles an ``m_\mathrm{sing} \times m_\mathrm{sing}``
 inter-surface tearing matrix following the STRIDE global BVP [Glasser 2018b, Sec. III.B].
-The BVP unknowns are the plasma state at the left and right inner-layer boundaries of every
-rational surface; the driving terms are unit-amplitude asymptotic solutions at each boundary.
-The resulting matrix encodes the full plasma response between all pairs of surfaces and is
-required for resistive stability analysis of multi-surface configurations.
+Internally, the solver builds a raw ``2 m_\mathrm{sing} \times 2 m_\mathrm{sing}`` matrix
+whose rows/columns index the *left* and *right* inner-layer boundaries of every rational
+surface; the stored PEST3-convention ``\Delta'`` is the four-term combination
+``\text{dp\_raw}[2i, 2j] - \text{dp\_raw}[2i, 2j{-}1] - \text{dp\_raw}[2i{-}1, 2j] + \text{dp\_raw}[2i{-}1, 2j{-}1]``
+that folds the raw block into a per-surface response.  The BVP unknowns are the plasma
+state at the left and right inner-layer boundaries of every rational surface; the driving
+terms are unit-amplitude asymptotic solutions at each boundary.  The resulting matrix
+encodes the full plasma response between all pairs of surfaces and is required for
+resistive stability analysis of multi-surface configurations.
 
 The BVP is well-conditioned because it is formulated using the split ``(\Phi_R, \Phi_L)``
 propagator blocks from bidirectional integration rather than the monolithic forward product
@@ -253,10 +258,10 @@ intr.numpert_total = intr.mpert * intr.npert
 metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
 ffit   = FFS.make_matrix(equil, intr, metric)
 
-# Choose integration driver
-odet = ctrl.use_parallel ? FFS.parallel_eulerlagrange_integration(ctrl, equil, ffit, intr) :
-       ctrl.use_riccati  ? FFS.riccati_eulerlagrange_integration(ctrl, equil, ffit, intr) :
-                           FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+# Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
+# to the parallel or Riccati path based on ctrl.use_parallel / ctrl.use_riccati,
+# and always returns a 4-tuple (odet, propagators, chunks, S_at_surface_left).
+odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
 
 vac = FFS.free_run!(odet, ctrl, equil, ffit, intr)
 println("Energy eigenvalue et[1] = ", real(vac.et[1]))
@@ -275,13 +280,15 @@ end
 ### Access inter-surface Δ' matrix (parallel FM path)
 
 ```julia
-# intr.delta_prime_matrix is 2·msing × 2·msing after parallel_eulerlagrange_integration
+# intr.delta_prime_matrix is msing × msing after parallel_eulerlagrange_integration.
+# Internally the solver builds a 2·msing × 2·msing raw matrix; the stored Δ' is
+# the PEST3 four-term combination that folds the raw block into a per-surface
+# tearing parameter.
 dpm = intr.delta_prime_matrix
 println("Δ' matrix size: ", size(dpm))
-println("Diagonal (surface response to self-driving):")
+println("Diagonal (self-response Δ'):")
 for j in 1:intr.msing
-    println("  Surface $j left:  ", real(dpm[2j-1, 2j-1]))
-    println("  Surface $j right: ", real(dpm[2j,   2j  ]))
+    println("  Surface $j: ", real(dpm[j, j]))
 end
 ```
 
