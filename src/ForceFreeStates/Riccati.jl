@@ -330,7 +330,7 @@ function compute_delta_prime_matrix!(
     if msing_active < msing
         excluded = setdiff(1:msing, sing_indices)
         excluded_ms = [intr.sing[j].m for j in excluded]
-        @info "compute_delta_prime_matrix!: $msing singular surfaces, $msing_active crossed (excluded: m=$excluded_ms)"
+        @debug "compute_delta_prime_matrix!: $msing singular surfaces, $msing_active crossed (excluded: m=$excluded_ms)"
         msing = msing_active
     end
     msing == 0 && return
@@ -1084,14 +1084,16 @@ function riccati_cross_ideal_singular_surf!(
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
     sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
 
-    # Diagnostic: compare asymptotic quantities with Fortran
-    ipert_res_diag = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    N = intr.numpert_total
-    @info "  ising=$ising: psi_sing=$(@sprintf("%.10f", singp.psifac)), psi_eval=$(@sprintf("%.10f", odet.psifac)), dpsi=$(@sprintf("%.10e", dpsi))"
-    @info "  alpha_L = $(sing_asymp_left.alpha), alpha_R = $(sing_asymp_right.alpha)"
-    for ip in ipert_res_diag
-        @info "  vmatL[0] big: vmat[$ip,$ip,1,1]=$(@sprintf("%.8e", real(sing_asymp_left.vmat[ip,ip,1,1]))), vmat[$ip,$ip,2,1]=$(@sprintf("%.8e", real(sing_asymp_left.vmat[ip,ip,2,1])))"
-        @info "  vmatR[0] big: vmat[$ip,$ip,1,1]=$(@sprintf("%.8e", real(sing_asymp_right.vmat[ip,ip,1,1]))), vmat[$ip,$ip,2,1]=$(@sprintf("%.8e", real(sing_asymp_right.vmat[ip,ip,2,1])))"
+    # Asymptotic-quantity diagnostics (gated behind ctrl.verbose so they don't
+    # fire on every crossing).
+    if ctrl.verbose
+        ipert_res_diag = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+        @info "  ising=$ising: psi_sing=$(@sprintf("%.10f", singp.psifac)), psi_eval=$(@sprintf("%.10f", odet.psifac)), dpsi=$(@sprintf("%.10e", dpsi))"
+        @info "  alpha_L = $(sing_asymp_left.alpha), alpha_R = $(sing_asymp_right.alpha)"
+        for ip in ipert_res_diag
+            @info "  vmatL[0] big: vmat[$ip,$ip,1,1]=$(@sprintf("%.8e", real(sing_asymp_left.vmat[ip,ip,1,1]))), vmat[$ip,$ip,2,1]=$(@sprintf("%.8e", real(sing_asymp_left.vmat[ip,ip,2,1])))"
+            @info "  vmatR[0] big: vmat[$ip,$ip,1,1]=$(@sprintf("%.8e", real(sing_asymp_right.vmat[ip,ip,1,1]))), vmat[$ip,$ip,2,1]=$(@sprintf("%.8e", real(sing_asymp_right.vmat[ip,ip,2,1])))"
+        end
     end
 
     # Get asymptotic coefficients before crossing (LEFT side); save ua for Δ' BVP
@@ -1185,7 +1187,7 @@ Functionally identical to `eulerlagrange_integration` except:
    and renormalizes to (S_new, I) in one step
 3. Skips `transform_u!` — S is already the true solution, no Gaussian-reduction undo needed
 
-Enable via `use_riccati = true` in `[ForceFreeStates]` section of jpec.toml, or by
+Enable via `use_riccati = true` in `[ForceFreeStates]` section of gpec.toml, or by
 setting `ctrl.use_riccati = true` programmatically.
 """
 function riccati_eulerlagrange_integration(
@@ -1473,7 +1475,7 @@ concurrently using `Threads.@threads`, then re-integrating the outer plasma seri
    without renormalization); Riccati integration keeps matrices bounded and provides dense
    checkpoints for `findmax_dW_edge!`.
 
-Enable via `use_parallel = true` in `[ForceFreeStates]` of jpec.toml, or by setting
+Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml, or by setting
 `ctrl.use_parallel = true` programmatically. Requires `singfac_min != 0`.
 
 **Key differences from standard integration:**

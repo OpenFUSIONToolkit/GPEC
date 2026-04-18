@@ -275,15 +275,7 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
     # and kin_flag = true would also live here when implemented.
-    if false #(TODO: kin_flag)
-    # for ising = 1:kmsing
-    #     if kinsing[ising].psifac > psifac
-    #         break
-    #     end
-    # end
-    else
-        odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
-    end
+    odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
 
     # Initialize solutions with the identity matrix for U_22 [Glasser Phys. Plasmas 2016 112506 Section VI]
     for ipert in 1:intr.numpert_total
@@ -475,12 +467,6 @@ function cross_ideal_singular_surf!(
     odet.u_store[:, :, :, odet.step] = odet.u
     odet.ud_store[:, :, :, odet.step] = odet.ud
     odet.step += 1
-end
-
-# Example stub for kinetic crossing
-function cross_kinetic_singular_surf()
-    # Implement kinetic crossing logic here
-    return
 end
 
 """
@@ -716,15 +702,21 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
+    # Steps where free_compute_total hits a singular wp solve are left as NaN per
+    # the EdgeScanState contract (arrays initialized to NaN at construction).
     for j in 1:N_edge
         istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
-        result = free_compute_total(equil, ffit, intr, odet)
-        es.total_eigenvalue[j] = result.total_eigenvalue
-        es.plasma_energy[j] = result.plasma_energy
-        es.vacuum_energy[j] = result.vacuum_energy
-        es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+        try
+            result = free_compute_total(equil, ffit, intr, odet)
+            es.total_eigenvalue[j] = result.total_eigenvalue
+            es.plasma_energy[j] = result.plasma_energy
+            es.vacuum_energy[j] = result.vacuum_energy
+            es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+        catch e
+            e isa LinearAlgebra.SingularException || rethrow()
+        end
     end
 
     # Return the ODE step index at peak total_eigenvalue (NaN-safe; failed steps ignored)

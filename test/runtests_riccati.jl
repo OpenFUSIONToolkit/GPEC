@@ -119,9 +119,10 @@ end
     vac_ric = FFS.free_run!(odet_ric, ctrl, equil, ffit, intr_ric)
     et_ric  = real(vac_ric.et[1])
 
-    # Standard integration (needed only for energy comparison)
+    # Standard integration (needed only for energy comparison).  eulerlagrange_integration
+    # returns (odet, propagators, chunks, S_at_surface_left); only odet is used here.
     intr_std = make_solovev_intr(inputs, ctrl, equil, ex)
-    odet_std = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr_std)
+    odet_std, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr_std)
     vac_std  = FFS.free_run!(odet_std, ctrl, equil, ffit, intr_std)
     et_std   = real(vac_std.et[1])
 

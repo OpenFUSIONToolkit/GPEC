@@ -155,9 +155,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
-  - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
   - `sing::Vector{SingType}` - Vector of ideal singular surface data
-  - `kinsing::Vector{SingType}` - Vector of kinetic singular surface data (not yet implemented)
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
@@ -180,9 +178,7 @@ A mutable struct holding internal state variables for stability calculations.
     fkg_kmats_flag::Bool = false
     sol_base::Int = 50
     msing::Int = 0
-    kmsing::Int = 0
     sing::Vector{SingType} = SingType[]
-    kinsing::Vector{SingType} = SingType[]
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0

@@ -238,7 +238,7 @@ using TOML
             intr.numpert_total = intr.mpert * intr.npert
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-            odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
             return real(vac.et[1]), intr
         end
@@ -302,7 +302,7 @@ using TOML
             intr.numpert_total = intr.mpert * intr.npert
             metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-            odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
             return real(vac.et[1])
         end
@@ -383,17 +383,18 @@ using TOML
         msing = intr.msing
         dpm = intr.delta_prime_matrix
 
-        # Matrix is populated with correct shape (2·msing × 2·msing)
+        # Matrix is populated with correct shape (msing × msing): compute_delta_prime_matrix!
+        # applies the PEST3 four-term subtraction that folds the raw (2·msing × 2·msing) dp_raw
+        # into a per-surface Δ' matrix.
         @test !isempty(dpm)
-        @test size(dpm) == (2 * msing, 2 * msing)
+        @test size(dpm) == (msing, msing)
 
         # All elements are finite
         @test all(isfinite, dpm)
 
-        # Diagonal (self-response) elements are non-zero for each surface side
+        # Diagonal (self-response) elements are non-zero
         for j in 1:msing
-            @test abs(dpm[2j-1, 2j-1]) > 1e-10
-            @test abs(dpm[2j,   2j  ]) > 1e-10
+            @test abs(dpm[j, j]) > 1e-10
         end
     end
 
@@ -429,17 +430,17 @@ using TOML
         msing = intr.msing
         dpm = intr.delta_prime_matrix
 
-        # Matrix is populated with correct shape (2·msing × 2·msing)
+        # Matrix is populated with correct shape (msing × msing); see Solovev test above
+        # for why this is msing × msing rather than 2·msing × 2·msing.
         @test !isempty(dpm)
-        @test size(dpm) == (2 * msing, 2 * msing)
+        @test size(dpm) == (msing, msing)
 
         # All elements are finite
         @test all(isfinite, dpm)
 
-        # Diagonal (self-response) elements are non-zero for each surface side
+        # Diagonal (self-response) elements are non-zero
         for j in 1:msing
-            @test abs(dpm[2j-1, 2j-1]) > 1e-10
-            @test abs(dpm[2j,   2j  ]) > 1e-10
+            @test abs(dpm[j, j]) > 1e-10
         end
     end
 

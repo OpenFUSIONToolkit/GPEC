@@ -202,27 +202,31 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=sig)
     end
 
-    # Debug: dump m0mat and vmat to match Fortran sing_vmat output
-    side_str = sig > 0 ? "right" : "left"
-    ipert0 = r1[1]
-    N = intr.numpert_total
-    @info "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)"
-    @info @sprintf("  m0mat(1,1)= %+.12e %+.12ei", real(m0mat[1,1]), imag(m0mat[1,1]))
-    @info @sprintf("  m0mat(1,2)= %+.12e %+.12ei", real(m0mat[1,2]), imag(m0mat[1,2]))
-    @info @sprintf("  m0mat(2,1)= %+.12e %+.12ei", real(m0mat[2,1]), imag(m0mat[2,1]))
-    @info @sprintf("  m0mat(2,2)= %+.12e %+.12ei", real(m0mat[2,2]), imag(m0mat[2,2]))
-    di = m0mat[1,1]*m0mat[2,2] - m0mat[2,1]*m0mat[1,2]
-    @info @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei", real(di), real(alpha[1]), imag(alpha[1]))
-    @info @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d", singp.psifac, r1[1], ipert0)
-    @info @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
-    @info @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
-    for k in 0:(2*ctrl.sing_order)
-        @info @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei",
-            k, real(vmat[ipert0,ipert0,1,k+1]), imag(vmat[ipert0,ipert0,1,k+1]),
-            real(vmat[ipert0,ipert0,2,k+1]), imag(vmat[ipert0,ipert0,2,k+1]))
-        @info @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei",
-            k, real(vmat[ipert0,ipert0+N,1,k+1]), imag(vmat[ipert0,ipert0+N,1,k+1]),
-            real(vmat[ipert0,ipert0+N,2,k+1]), imag(vmat[ipert0,ipert0+N,2,k+1]))
+    # Debug dump of m0mat and vmat matching Fortran sing_vmat output.  Gated
+    # behind ctrl.verbose; without the guard this fired for every singular
+    # surface on every integration.
+    if ctrl.verbose
+        side_str = sig > 0 ? "right" : "left"
+        ipert0 = r1[1]
+        N = intr.numpert_total
+        @info "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)"
+        @info @sprintf("  m0mat(1,1)= %+.12e %+.12ei", real(m0mat[1,1]), imag(m0mat[1,1]))
+        @info @sprintf("  m0mat(1,2)= %+.12e %+.12ei", real(m0mat[1,2]), imag(m0mat[1,2]))
+        @info @sprintf("  m0mat(2,1)= %+.12e %+.12ei", real(m0mat[2,1]), imag(m0mat[2,1]))
+        @info @sprintf("  m0mat(2,2)= %+.12e %+.12ei", real(m0mat[2,2]), imag(m0mat[2,2]))
+        di = m0mat[1,1]*m0mat[2,2] - m0mat[2,1]*m0mat[1,2]
+        @info @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei", real(di), real(alpha[1]), imag(alpha[1]))
+        @info @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d", singp.psifac, r1[1], ipert0)
+        @info @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
+        @info @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
+        for k in 0:(2*ctrl.sing_order)
+            @info @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei",
+                k, real(vmat[ipert0,ipert0,1,k+1]), imag(vmat[ipert0,ipert0,1,k+1]),
+                real(vmat[ipert0,ipert0,2,k+1]), imag(vmat[ipert0,ipert0,2,k+1]))
+            @info @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei",
+                k, real(vmat[ipert0,ipert0+N,1,k+1]), imag(vmat[ipert0,ipert0+N,1,k+1]),
+                real(vmat[ipert0,ipert0+N,2,k+1]), imag(vmat[ipert0,ipert0+N,2,k+1]))
+        end
     end
 
     return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
