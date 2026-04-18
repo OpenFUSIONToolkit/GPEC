@@ -1235,19 +1235,32 @@ function riccati_eulerlagrange_integration(
         end
     end
 
-    # Find peak dW in edge region if applicable (uses free_compute_total which reads wp = I/S = P)
+    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
+    # See EulerLagrange.jl counterpart and ForceFreeStatesControl docstring for the
+    # diagnostic vs legacy-truncation semantics and reliability caveats on
+    # truncate_at_dW_peak=true.
+    odet.step -= 1
+    trim_storage!(odet)
     if ctrl.psiedge < intr.psilim
-        odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
-        trim_storage!(odet)
-        if ctrl.verbose
-            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
+        saved_psifac, saved_u = odet.psifac, copy(odet.u)
+        peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+        if ctrl.truncate_at_dW_peak
+            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
+            odet.step = peak_step
+            trim_storage!(odet)
+            intr.psilim = odet.psi_store[end]
+            intr.qlim = odet.q_store[end]
+            odet.u .= odet.u_store[:, :, :, end]
+            if ctrl.verbose
+                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
+            end
+        else
+            odet.psifac = saved_psifac
+            odet.u .= saved_u
+            if ctrl.verbose
+                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.2f" odet.psi_store[peak_step])),  q = $((@sprintf "%.2f" odet.q_store[peak_step])); integration domain unchanged"
+            end
         end
-        intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
-        odet.u .= odet.u_store[:, :, :, end]
-    else
-        odet.step -= 1
-        trim_storage!(odet)
     end
 
     # Evaluate fixed-boundary stability criterion
@@ -1631,22 +1644,35 @@ function parallel_eulerlagrange_integration(
     #   odet.u is in (S, I) form (renorm'd at end of integration)
     #   odet.step points to next empty slot; dense checkpoints stored for outer region
 
-    # Find peak dW in edge region (same as standard/Riccati path)
+    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
+    # See EulerLagrange.jl counterpart and ForceFreeStatesControl docstring for the
+    # diagnostic vs legacy-truncation semantics and reliability caveats on
+    # truncate_at_dW_peak=true.
+    odet.step -= 1
+    trim_storage!(odet)
+    # odet.u is already in (S, I) from riccati_integrate_chunk! above
     if ctrl.psiedge < intr.psilim
-        odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
-        trim_storage!(odet)
-        if ctrl.verbose
-            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
+        saved_psifac, saved_u = odet.psifac, copy(odet.u)
+        peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+        if ctrl.truncate_at_dW_peak
+            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
+            odet.step = peak_step
+            trim_storage!(odet)
+            intr.psilim = odet.psi_store[end]
+            intr.qlim = odet.q_store[end]
+            odet.u .= odet.u_store[:, :, :, end]
+            # Stored state may be a pre-renorm callback snapshot; renorm to (S, I) for free_run!
+            renormalize_riccati_inplace!(odet.u, N)
+            if ctrl.verbose
+                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
+            end
+        else
+            odet.psifac = saved_psifac
+            odet.u .= saved_u
+            if ctrl.verbose
+                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.2f" odet.psi_store[peak_step])),  q = $((@sprintf "%.2f" odet.q_store[peak_step])); integration domain unchanged"
+            end
         end
-        intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
-        odet.u .= odet.u_store[:, :, :, end]
-        # The stored state may be a pre-renorm callback snapshot; renorm to (S, I) for free_run!
-        renormalize_riccati_inplace!(odet.u, N)
-    else
-        odet.step -= 1
-        trim_storage!(odet)
-        # odet.u is already in (S, I) from riccati_integrate_chunk! above
     end
 
     # NOTE: compute_delta_prime_matrix! is called from the main pipeline (after free_run!)

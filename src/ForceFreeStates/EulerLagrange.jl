@@ -210,20 +210,36 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Deallocate unused storage of integration data.
     # `odet.step` was incremented one past the last filled index in integrate_el_region!.
     odet.step -= 1
-    if ctrl.psiedge < intr.psilim
-        # Find the peak dW in the edge region and truncate integration data there
-        odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
-        trim_storage!(odet)
-        if ctrl.verbose
-            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
-        end
+    trim_storage!(odet)
 
-        # Update u, psilim, and qlim for usage in determining wp and wt
-        intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
-        odet.u .= odet.u_store[:, :, :, end]
-    else
-        trim_storage!(odet)
+    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
+    # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
+    #
+    # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
+    # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
+    # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
+    # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
+    # work; see docstring in ForceFreeStatesStructs.jl for the reliability caveats.
+    if ctrl.psiedge < intr.psilim
+        saved_psifac, saved_u = odet.psifac, copy(odet.u)
+        peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+        if ctrl.truncate_at_dW_peak
+            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
+            odet.step = peak_step
+            trim_storage!(odet)
+            intr.psilim = odet.psi_store[end]
+            intr.qlim = odet.q_store[end]
+            odet.u .= odet.u_store[:, :, :, end]
+            if ctrl.verbose
+                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
+            end
+        else
+            odet.psifac = saved_psifac
+            odet.u .= saved_u
+            if ctrl.verbose
+                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
+            end
+        end
     end
 
     # Evaluate stability criterion (critical determinant) of saved solutions
