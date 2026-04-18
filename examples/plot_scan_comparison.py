@@ -21,16 +21,17 @@ import matplotlib.pyplot as plt
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 JULIA_ROOT = Path(__file__).resolve().parent
-FORTRAN_ROOT = Path.home() / 'Desktop' / 'plasma' / 'GPEC' / 'docs' / 'scans'
 OUTPUT_DIR = JULIA_ROOT / 'scan_comparison_plots'
 
 JULIA_CSV = {
     'beta':    JULIA_ROOT / 'LAR_beta_scan'    / 'outputs' / 'julia_beta_scan_summary.csv',
-    'epsilon': JULIA_ROOT / 'LAR_epsilon_scan'  / 'outputs' / 'julia_epsilon_scan_summary.csv',
+    'epsilon': JULIA_ROOT / 'LAR_epsilon_scan' / 'outputs' / 'julia_epsilon_scan_summary.csv',
 }
+# Fortran reference CSVs aggregated from STRIDE .nc outputs by
+# examples/aggregate_fortran_scans.py (run it once to populate):
 FORTRAN_CSV = {
-    'beta':    FORTRAN_ROOT / 'outputs' / 'beta_scan'    / 'pressure_factor_scan_summary.csv',
-    'epsilon': FORTRAN_ROOT / 'outputs' / 'epsilon_scan' / 'epsilon_scan_summary.csv',
+    'beta':    JULIA_ROOT / 'LAR_beta_scan'    / 'reference' / 'pressure_factor_scan_summary.csv',
+    'epsilon': JULIA_ROOT / 'LAR_epsilon_scan' / 'reference' / 'epsilon_scan_summary.csv',
 }
 
 PARAM_COL   = {'beta': 'pressure_factor', 'epsilon': 'epsilon'}
