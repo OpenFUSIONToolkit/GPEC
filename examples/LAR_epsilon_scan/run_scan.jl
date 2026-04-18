@@ -23,15 +23,16 @@ using Printf
 # Scan parameters (matching TJ benchmark)
 # ============================================================================
 
-const EPSILONS_FULL = [
-    0.125, 0.1499, 0.1748, 0.1997, 0.2246, 0.2495, 0.2744, 0.2993,
-    0.3242, 0.3491, 0.3574, 0.3740, 0.3906, 0.4072, 0.4238, 0.4404,
-    0.4570, 0.4736, 0.4902, 0.5005, 0.5151, 0.5317, 0.5428, 0.5510,
-    0.5548, 0.5593, 0.5648, 0.5703, 0.5758, 0.5813, 0.5868, 0.5923,
-    0.5978, 0.6033, 0.6088, 0.6143, 0.6198, 0.6225, 0.6253, 0.6280,
-    0.6308, 0.6335, 0.6363, 0.6390, 0.6418, 0.6445, 0.6473, 0.6500,
-    0.6513, 0.6538, 0.6550, 0.6563, 0.6575, 0.6588, 0.6600, 0.6613,
-]
+# Aspect-ratio scan: ε grid ends just before the ideal-kink pole at
+# ε ≈ 0.665 (where δW_t → 0 and Δ' diverges).  Grid is power-law warped so
+# spacing tightens smoothly as the pole is approached — the flat low-ε
+# region is covered with even cadence, and more points land in the final
+# few percent where Δ' rises by orders of magnitude.
+function _warped_grid(x_start::Float64, x_end::Float64, N::Int; p::Float64 = 2.0)
+    return [x_start + (x_end - x_start) * (1 - (1 - i / (N - 1))^p) for i in 0:N-1]
+end
+
+const EPSILONS_FULL = _warped_grid(0.125, 0.660, 56; p = 2.0)
 
 const EPSILONS_TEST = [0.2495, 0.4072, 0.5510]
 
@@ -64,6 +65,11 @@ function run_single(epsilon::Float64)
         open(joinpath(run_dir, "tj.toml"), "w") do io; TOML.print(io, tj_dict); end
 
         config = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
+        # Option B: use tj_direct (ψ(R,Z) grid + direct-GS solver) rather than
+        # the inverse pipeline.  Required to capture the ideal external-kink
+        # pole (δW_t → 0 as ε → ε_crit); the inverse path bypasses the
+        # line-integrated q and shows no such pole.
+        config["Equilibrium"]["eq_type"] = "tj_direct"
         config["Equilibrium"]["eq_filename"] = joinpath(run_dir, "tj.toml")
         config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end

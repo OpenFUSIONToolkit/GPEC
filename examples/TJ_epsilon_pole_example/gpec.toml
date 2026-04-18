@@ -1,13 +1,13 @@
-# gpec.toml for TJ analytic ε (inverse aspect ratio) scan.
+# gpec.toml — TJ analytic, ε = 0.66 (near the ideal-kink pole).
 #
-# eq_type is overridden by run_scan.jl to "tj_direct" so ψ(R,Z) is built
-# from the TJ analytic model and processed by the direct-GS pipeline.  The
-# "tj" value below is a fallback for ad-hoc invocations.  run_scan.jl also
-# writes a fresh tj.toml per scan point containing the (lar_r0, qc, qa, pc, …)
-# parameters that drive the analytic model.
+# Uses the Option B direct-GS pipeline: tj_run_direct builds ψ(R, Z) on a
+# 257×257 grid from the TJ analytic model and feeds it through the same
+# direct-GS solver used for TJ-geqdsk inputs.  This is the only path that
+# reproduces the external-kink pole approach (δW_t → 0, Δ' → ∞) for the
+# TJ benchmark parameter set.
 
 [Equilibrium]
-eq_type = "tj"
+eq_type = "tj_direct"
 eq_filename = "tj.toml"
 jac_type = "hamada"
 grid_type = "ldp"

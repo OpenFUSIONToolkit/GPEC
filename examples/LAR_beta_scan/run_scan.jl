@@ -23,16 +23,18 @@ using Printf
 # Scan parameters — TJ benchmark pressure factors
 # ============================================================================
 
-# Pressure scan range: pc = 0.001 to 0.105
-# All points in this range produce positive δW (ideal-MHD stable)
-# The ideal stability limit is at pc ≈ 0.108 for this geometry
-const PC_FULL = [
-    0.001, 0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045,
-    0.05, 0.055, 0.06, 0.065, 0.07, 0.075, 0.08, 0.085, 0.09, 0.095,
-    0.10, 0.102, 0.104, 0.105,
-]
+# Pressure scan: pc grid ends just before the ideal-kink pole at pc ≈ 0.174
+# (where δW_t → 0 and Δ' diverges).  Grid is power-law warped so the spacing
+# is approximately uniform over most of the range and smoothly tightens as
+# the pole is approached, giving an even visual cadence without wasting
+# points on the flat-slope region far from the pole.
+function _warped_grid(x_start::Float64, x_end::Float64, N::Int; p::Float64 = 2.0)
+    return [x_start + (x_end - x_start) * (1 - (1 - i / (N - 1))^p) for i in 0:N-1]
+end
 
-const PC_TEST = [0.001, 0.05, 0.1]
+const PC_FULL = _warped_grid(0.001, 0.1735, 40; p = 2.0)
+
+const PC_TEST = [0.001, 0.10, 0.17]
 
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "beta_scan.h5")
@@ -92,7 +94,7 @@ function extract_results(h5_path::String)
                 if m_val == 3; dp_31 = dp_mat[s, s]; end
             end
         end
-        return (dp_21=dp_21, dp_31=dp_31, pc=0.0,
+        return (dp_21=dp_21, dp_31=dp_31,
                 dW_plasma=real(ep[1]), dW_vacuum=real(ev[1]), dW_total=real(et[1]),
                 q0=q0, qmax=qmax, qlim=qlim, msing=msing, dp_matrix=dp_mat)
     end
