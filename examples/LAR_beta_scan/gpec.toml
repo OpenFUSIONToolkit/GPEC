@@ -42,8 +42,6 @@ singfac_min = 1e-4
 ucrit = 1e4
 sing_order = 6
 
-kin_flag = false
-con_flag = false
 
 use_parallel = true
 force_termination = true
