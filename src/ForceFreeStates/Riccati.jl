@@ -102,7 +102,7 @@ Each `ChunkPropagator` stores the 2N columns of Φ split into two N×N×2 blocks
 ```
 
 When `condition=true`, applies Gaussian reduction (`condition_propagator!`) after each
-multiplication step, following STRIDE's `ode_fixup` convention [ode.F:800-808]. This
+multiplication step, following STRIDE's `ode_fixup` convention. This
 prevents exponential growth of the accumulated product: without conditioning, products
 of K chunk propagators can reach cond ~ (cond_per_chunk)^K, causing catastrophic
 cancellation. With periodic conditioning, each step stays at O(cond_per_chunk) and
@@ -1079,7 +1079,7 @@ function riccati_cross_ideal_singular_surf!(
     dpsi = singp.psifac - odet.psifac  # ψ_res - ψ_current (positive)
 
     # Compute separate left-side (sig=-1) and right-side (sig=+1) asymptotics,
-    # matching Fortran's separate vmatl/vmatr [sing.F: sing_vmat].
+    # matching Fortran STRIDE's separate vmatl/vmatr (sing_vmat).
     # Alpha is computed from the right-side m0mat and shared with the left side.
     sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
     sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
@@ -1327,7 +1327,7 @@ end
                             backward=false) -> Matrix{ComplexF64}
 
 Re-integrate a span of chunks using ua (asymptotic solution) as initial conditions, matching
-Fortran STRIDE's uFM_sing_init behavior [ode.F:374-402]. Returns a 2N×2N fundamental matrix
+Fortran STRIDE's uFM_sing_init behavior. Returns a 2N×2N fundamental matrix
 where column j is the ODE solution at the span endpoint with IC = column j of T = [ua[:,:,1]; ua[:,:,2]].
 
 When `backward=false` (default): ua is the IC at psi_start, integrate forward to psi_end.
@@ -1548,7 +1548,7 @@ function parallel_eulerlagrange_integration(
     # FMs can have condition numbers up to (cond_per_chunk)^N, causing catastrophic
     # cancellation for large N (N ≳ 20). With renorm, each chunk is applied as a
     # Möbius transformation on the bounded S matrix, keeping errors at O(eps × cond_chunk)
-    # rather than O(eps × cond_chunk^N). [STRIDE ode.F: ode_fixup called after each uAxis step]
+    # rather than O(eps × cond_chunk^N). (Fortran STRIDE does the same ode_fixup after each uAxis step.)
     #
     # S_at_surface_left: save the Riccati matrix S = U₁·U₂⁻¹ at the left boundary
     # of each singular surface (just before crossing). These well-conditioned matrices

@@ -161,7 +161,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
     end
 
     # Alpha (Mercier index) — Fortran computes this ONCE from the RIGHT-SIDE m0mat
-    # and reuses it for both left and right vmat [sing.F lines 394-398].
+    # and reuses it for both left and right vmat (matching Fortran STRIDE).
     # When alpha_override is provided (for the left-side call), use that instead.
     # Fortran: di = m0(1,1)*m0(2,2) - m0(2,1)*m0(1,2); alpha = sqrt(-di)
     # This matches eigenvalues only when tr(m0mat_block) = 0.
@@ -185,7 +185,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
     end
 
     # Zeroth-order resonant solutions — Fortran sing_vmat uses sig*alpha in the
-    # initial conditions: v_big_ξ' = -(m0(1,1) + sig*α)/m0(1,2) [sing.F line 447].
+    # initial conditions: v_big_ξ' = -(m0(1,1) + sig*α)/m0(1,2) (matching Fortran STRIDE).
     for i in eachindex(r1)
         m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
         r1_i = r1[i]
@@ -197,7 +197,7 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         vmat[r1_i, r2_i, 2, 1] = -(m0mat_block[1, 1] - sig * alpha_i) / m0mat_block[1, 2]
     end
 
-    # Higher order solutions — sig propagates through the recursion [sing.F: sing_solve]
+    # Higher order solutions — sig propagates through the recursion (Fortran STRIDE sing_solve).
     for k in 1:(2*ctrl.sing_order)
         solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=sig)
     end
@@ -287,7 +287,7 @@ Add a spline for F directly instead of the lower triangular factorization to avo
     tmp_vec = acquire!(pool, ComplexF64, Npert)
 
     # Evaluate q spline and its derivatives, applying sig to odd derivatives.
-    # Fortran sing_mmat [sing.F line 546]: q(1)=sig*q', q(2)=q'', q(3)=sig*q'''
+    # Fortran STRIDE sing_mmat: q(1)=sig*q', q(2)=q'', q(3)=sig*q'''
     q = (q_spline(singp.psifac),
         sig * q_d1(singp.psifac),
         q_d2(singp.psifac),
@@ -646,7 +646,7 @@ end
 
 Compute the asymptotic series solution for a given singular surface.
 Uses direction-specific asymptotics (left: sig=-1, right: sig=+1) with positive dpsi.
-Matches Fortran `sing_get_ua` [sing.F lines 851-899].
+Matches Fortran STRIDE's `sing_get_ua`.
 
 ### Arguments
 
@@ -660,7 +660,7 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
 
     # dpsi = |ψ - ψ_res| is always positive. Direction is handled by the
     # SingAsymptotics (left vs right vmat built with sig=-1 or sig=+1).
-    # Matches Fortran sing_get_ua [sing.F line 851-899]: sqrtfac=SQRT(dpsi), always positive.
+    # Matches Fortran STRIDE sing_get_ua: sqrtfac=SQRT(dpsi), always positive.
     sqrtfac = sqrt(dpsi)
     pfac_base = dpsi  # used for dpsi^alpha below
 
@@ -670,7 +670,7 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
         ua .= ua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1]
     end
 
-    # Restore powers (unshear v→u) — matches Fortran sing_get_ua lines 891-894
+    # Restore powers (unshear v→u) — matches Fortran STRIDE sing_get_ua
     for i in eachindex(r1)
         pfac = pfac_base ^ sing_asymp.alpha[i]  # dpsi^α
         ua[:, r2[2*i-1], :] ./= pfac  # big solution column: /dpsi^α

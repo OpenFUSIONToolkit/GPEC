@@ -181,11 +181,11 @@ STRIDE already parallelizes by subdividing the ψ interval (Paper Eq. 40, Fig. 7
 
 ## 4. Key Fortran vs Julia Implementation Differences
 
-From detailed code comparison (stride/ode.F, stride/sing.F vs Riccati.jl):
+From detailed code comparison (Fortran STRIDE vs Riccati.jl):
 
 ### 4.1. Equilibrium Reformation
 
-**Fortran** (`stride.F:156-164`): FORCES `reform_eq_with_psilim=.TRUE.` on entry — re-solves and re-splines the equilibrium on the truncated domain [psilow, psilim]. This changes where all profile quantities are evaluated.
+**Fortran STRIDE**: FORCES `reform_eq_with_psilim=.TRUE.` on entry — re-solves and re-splines the equilibrium on the truncated domain [psilow, psilim]. This changes where all profile quantities are evaluated.
 
 **Julia**: No equilibrium reformation. Uses the original equilibrium splines.
 
@@ -211,9 +211,9 @@ If T is ill-conditioned (possible near Mercier-marginal surfaces where α → 0)
 
 ### 4.4. Vacuum Edge BC Sign Convention
 
-**Fortran** (`ode.F:1020`): `uEdge(mpert+1:m2, mpert+1:m2) = -wv * psio²`
+**Fortran STRIDE**: `uEdge(mpert+1:m2, mpert+1:m2) = -wv * psio²`
 
-**Julia** (`Riccati.jl:691`): `M[..., col_edge] .= wv .* psio²`
+**Julia** (`Riccati.jl`): `M[..., col_edge] .= wv .* psio²`
 
 The sign difference needs investigation — it may be absorbed by a different convention for the q/p ordering, or it could be an actual bug. Both codes produce similar (not identical) results, suggesting the sign is handled consistently overall but may introduce a subtle phase difference in Im(Δ').
 

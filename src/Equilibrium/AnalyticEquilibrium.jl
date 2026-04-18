@@ -233,7 +233,7 @@ end
 TJ's poloidal flux function f1(x) where x = r/a.
 Uses Taylor expansion near axis for numerical stability.
 
-Reference: R. Fitzpatrick, TJ code, LightEquilibrium.cpp
+Reference: R. Fitzpatrick, TJ code.
 """
 function tj_f1(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
@@ -298,9 +298,8 @@ function TJShapeParams(tj::TJConfig; rmin::Float64 = 1e-4)
 end
 
 """
-RHS for the TJ shape ODE (Equilibrium.cpp rhs_chooser=0 and rhs_chooser=1 dy[1]
-combined).  State: y[1]=ψ, y[2]=g₂, y[3]=H₁, y[4]=H₁', y[5]=f₃.  TJ writes
-derivatives in x=r/a; we advance in physical r=a·x so d/dr = (1/a)·d/dx.
+RHS for the TJ shape ODE.  State: y[1]=ψ, y[2]=g₂, y[3]=H₁, y[4]=H₁', y[5]=f₃.
+TJ writes derivatives in x=r/a; we advance in physical r=a·x so d/dr = (1/a)·d/dx.
 
 The params argument carries TJShapeParams fields plus the current `nu`.
 """
@@ -313,7 +312,7 @@ function tj_shape_rhs!(dy, y, params, r)
     p2px = -2 * mu * pc * x * xfac^(mu - 1)
 
     # TJ writes its physical ψ as εa²·B₀·R₀²·Psi_TJ_norm where
-    # dPsi_TJ_norm/dr_TJ = (f1 + εa²·f3)/r_TJ (Equilibrium.cpp rhs_chooser=1 dy[1]).
+    # dPsi_TJ_norm/dr_TJ = (f1 + εa²·f3)/r_TJ.
     # Converting to physical r = a·r_TJ gives dψ/dr = a²·B₀·(f1+εa²·f3)/r.
     f3_cur = y[5]
     dy[1] = B0 * (f1 + epsa2 * f3_cur) * a^2 / r
@@ -338,7 +337,7 @@ function tj_shape_rhs!(dy, y, params, r)
     return nothing
 end
 
-"""Initial conditions at x = x0 (TJ Equilibrium.cpp lines 438-442)."""
+"""Initial conditions at x = x0, matching TJ's near-axis expansion."""
 function tj_shape_initial(p::TJShapeParams, nu::Float64)
     f1_0 = tj_f1(p.x0, nu, p.qc)
     y0 = zeros(5)
@@ -411,8 +410,8 @@ configuration — flux surfaces are shifted circles
     R(r,θ) = R₀ + Δ(r) + α(r)·r·cos θ
     Z(r,θ) =            α(r)·r·sin θ
 
-where Δ and α come from the shaping ODE for (g₂, H₁, H₁') (Equilibrium.cpp
-rhs_chooser=0 in TJ):
+where Δ and α come from the shaping ODE for (g₂, H₁, H₁') (same equations
+as TJ's shape ODE):
 
     Δ(r)   = R₀·εa²·H₁(x)                             (Shafranov shift)
     α(r)   = 1 − εa²·(x²/8 − H₁/2)                    (from L(x) = x³/8 − x·H₁/2)
@@ -420,7 +419,7 @@ rhs_chooser=0 in TJ):
 
 The higher-order toroidal-flux correction g₂ enters the output F profile as
 F = R₀·B₀·(1 + εa²·g₂), and the higher-order poloidal flux f₃ enters the
-safety factor as q₂ = x²·(1 + εa²·g₂)·exp(−εa²·f₃/f1)/f1 (EFIT.cpp).
+safety factor as q₂ = x²·(1 + εa²·g₂)·exp(−εa²·f₃/f1)/f1.
 
 The (n ≥ 2) horizontal/vertical shaping harmonics Hₙ(r), Vₙ(r) are not yet
 included; they are zero in the TJ benchmark scans.
@@ -442,7 +441,7 @@ function tj_run(equil_input::EquilibriumConfig, tj::TJConfig)
     steps = length(r_arr)
 
     # Profile table: columns [r, F, P, q, ψ, g₂, H₁].  H₁' and f₃ are only
-    # needed inside the ODE; F, q folded via EFIT.cpp formulas.
+    # needed inside the ODE; F and q are folded from TJ's EFIT writer formulas.
     temp = zeros(steps, 7)
     for i in 1:steps
         r = r_arr[i]
@@ -548,16 +547,14 @@ harmonics Hₙ, Vₙ for n ≥ 2 are rescaled to zero; only the H₁ Shafranov s
 contributes.  ψ(R, Z) is constructed by:
 
   - for each grid point, iterating the map (R, Z) → (r, w) 10× per
-    TJ Equilibrium.cpp EFIT::CalculateEFIT (handles the εa²·H₁ shift of the
-    axis);
+    TJ's EFIT writer (handles the εa²·H₁ shift of the axis);
   - evaluating ψ_plasma(r) from the radial ψ-ODE when r < 1, TJ's analytic
     vacuum solution `GetPSIvac` when 1 ≤ r < rc, and the 1/r² far-field form
     when r ≥ rc.
 
-References (TJ code, Fitzpatrick, https://github.com/rfitzp/TJ):
-  - Equilibrium.cpp::CashKarp45Rhs (shape ODE, rhs_chooser = 0 and 1)
-  - Equilibrium.cpp::GetPSIvac, GetHHvac
-  - EFIT.cpp::CalculateEFIT
+Reference: R. Fitzpatrick, TJ code (https://github.com/rfitzp/TJ) — the shape
+ODE (g₂, H₁, H₁', f₃), the `GetPSIvac` / `GetHHvac` vacuum extension, and the
+EFIT-writer (R, Z) → (r, w) Newton inversion.
 """
 function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
                        nrbox::Int = 257, nzbox::Int = 257, rc::Float64 = 1.2)
@@ -598,22 +595,20 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
     # Psi scaling factor that matches TJ's EFIT writer: Psi_TJ_phys = εa²·B0·R0²·Psi_norm
     psi_scale = epsa2 * B0 * R0^2
 
-    # GetHHvac for n = 1 (Equilibrium.cpp line 1792).  Hₙ vacuum for n ≥ 2
-    # vanishes because H_n(1) = H_n'(1) = 0 after TJ's Hna/Vna rescaling.
+    # TJ's GetHHvac for n = 1.  Hₙ vacuum for n ≥ 2 vanishes because
+    # H_n(1) = H_n'(1) = 0 after TJ's Hna/Vna rescaling.
     function H1_vac(r::Float64)
         return H1a - 0.5 * r^2 * log(r) + 0.25 * (2 * H1ap + 1) * (r^2 - 1)
     end
 
-    # Getf_R, Getf_Z (Equilibrium.cpp lines 1915, 1965): full TJ shift of (R,Z)
-    # from the nominal shifted circle.  With Hn = Vn = 0 for n ≥ 2 the residual
-    # terms are:
+    # TJ's f_R, f_Z — the full shift of (R, Z) from the nominal shifted circle.
+    # With Hn = Vn = 0 for n ≥ 2 the residual terms are:
     #   f_R = εa²·H₁(r) + εa³·L(r)·cos(w)
     #   f_Z =          −εa³·L(r)·sin(w)
-    # L(r) = r³/8 − r·H₁(r)/2.  The εa³ terms were omitted in my first pass and
-    # shifted the pole location of the ε-scan to ε ≈ 0.41 instead of ε ≈ 0.66.
-    # Per TJ (Equilibrium.cpp lines 1917, 1967), freeze f_R, f_Z at r = rc and
-    # scale the inner value by r²/rc² for r ≥ rc to prevent the Newton iteration
-    # from diverging in the far vacuum.
+    # L(r) = r³/8 − r·H₁(r)/2.  The εa³ terms were omitted in the first pass
+    # and shifted the pole location of the ε-scan to ε ≈ 0.41 instead of 0.66.
+    # Per TJ, freeze f_R, f_Z at r = rc and scale the inner value by r²/rc² for
+    # r ≥ rc to prevent the Newton iteration from diverging in the far vacuum.
     function L_of(r::Float64)
         rr = (r >= rc) ? (rc - 1e-8) : r
         H1 = (rr < 1.0) ? H1_of_x(rr) : H1_vac(rr)
@@ -637,8 +632,8 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
         return -epsa2 * epsa * L * sin(w)
     end
 
-    # (R_norm, Z_norm) → (r, w) by TJ's 10-step fixed-point iteration
-    # (EFIT.cpp lines 213-228).  R_norm, Z_norm are normalized to R₀.
+    # (R_norm, Z_norm) → (r, w) by TJ's 10-step fixed-point iteration.
+    # R_norm, Z_norm are normalized to R₀.
     function find_rw(R_norm::Float64, Z_norm::Float64)
         r = sqrt((R_norm - 1.0)^2 + Z_norm^2) / epsa
         w = atan(Z_norm, 1.0 - R_norm)
@@ -651,9 +646,9 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
         return r, w
     end
 
-    # GetPSIvac (Equilibrium.cpp line 1867) with Hn = Vn = 0 for n ≥ 2.
-    # Returns the TJ-normalized vacuum ψ (in units where the plasma interior
-    # ψ-ODE ran); multiplied by psi_scale for physical units.
+    # TJ's GetPSIvac with Hn = Vn = 0 for n ≥ 2.  Returns the TJ-normalized
+    # vacuum ψ (same units as the plasma-interior ψ-ODE); multiplied by
+    # psi_scale outside to convert to physical units.
     function psi_vac(r::Float64)
         logr = log(r)
         sum1 = 1.0 - H1ap + H1ap^2

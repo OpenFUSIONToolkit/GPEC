@@ -228,9 +228,9 @@ The following files were modified to achieve the validated results:
 
 3. **`src/ForceFreeStates/Riccati.jl`** -- Moved the `col_left(j)` and
    `col_right(j)` closure definitions from inside the `use_S_axis` block to
-   function scope (line 438), preventing `UndefVarError` in the `dp_raw`
-   extraction code. Removed duplicate definitions that caused method
-   overwriting during precompilation.
+   function scope, preventing `UndefVarError` in the `dp_raw` extraction
+   code. Removed duplicate definitions that caused method overwriting during
+   precompilation.
 
 4. **`examples/LAR_beta_scan/run_scan.jl`** and
    **`examples/LAR_epsilon_scan/run_scan.jl`** -- Updated `extract_results`
