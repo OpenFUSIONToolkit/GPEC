@@ -1,0 +1,335 @@
+"""
+    _build_x_matrix(mpert, mlow, sigma; hermitian=true)
+
+Build an mpert×mpert X-shaped matrix with diagonal σ and anti-diagonal entries.
+
+If `hermitian=true`, anti-diagonal entries are imaginary: W[i,j] = i·sign(m_i)·σ,
+which preserves W = W† (Hermiticity). This is appropriate for components Ak, Dk, Hk
+which are self-adjoint (X†X form, Logan 2015 Eqs 7.30, 7.33, 7.35).
+
+If `hermitian=false`, anti-diagonal entries are real: W[i,j] = sign(m_i)·σ,
+which breaks Hermiticity (W ≠ W†). This is appropriate for cross-term components Bk, Ck, Ek
+(Eqs 7.31, 7.32, 7.34 of Logan 2015) which are not self-adjoint in general.
+"""
+function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=true)
+    W = zeros(ComplexF64, mpert, mpert)
+    for i in 1:mpert
+        m_i = mlow + i - 1
+        W[i, i] = sigma
+
+        # Anti-diagonal: find j such that m_j = -m_i
+        j = -m_i - mlow + 1
+        if 1 <= j <= mpert && i != j
+            if hermitian
+                # Imaginary: W[i,j] = i·sign(m_i)·σ preserves W = W†
+                W[i, j] = im * sign(m_i) * sigma
+            else
+                # Real: W[i,j] = sign(m_i)·σ breaks Hermiticity
+                W[i, j] = sign(m_i) * sigma
+            end
+        end
+    end
+    return W
+end
+
+"""
+    fixed_kinetic_matrices(mpert, mpsi, sigma, mlow, ffit, xs)
+
+Build X-shaped fixed kinetic energy matrices for testing all 6 components.
+
+Populates all 6 components of the W (energy) matrices with X-shaped patterns
+scaled by `sigma` **relative to the Frobenius norm of the corresponding ideal
+matrix** at each ψ. This makes σ a dimensionless perturbation strength that is
+portable across equilibria:
+
+| Component | Matrix | Coupling | Hermitian | Relative to |
+|:--------- |:------ |:-------- |:--------- |:----------- |
+| 1         | Ak     | Wz†·Wz   | Yes       | ‖A(ψ)‖_F    |
+| 2         | Bk     | Wz†·Wx   | No        | ‖B(ψ)‖_F    |
+| 3         | Ck     | Wz†·Wy   | No        | ‖C(ψ)‖_F    |
+| 4         | Dk     | Wx†·Wx   | Yes       | ‖D(ψ)‖_F    |
+| 5         | Ek     | Wx†·Wy   | No        | ‖E(ψ)‖_F    |
+| 6         | Hk     | Wy†·Wy   | Yes       | ‖H(ψ)‖_F    |
+
+Hermitian components use imaginary anti-diagonal entries (i·sign(m)·σ);
+non-Hermitian components use real anti-diagonal entries (sign(m)·σ).
+
+Torque matrices (T) are all zero (torque requires finite rotation frequency).
+
+Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
+"""
+function fixed_kinetic_matrices(
+    mpert::Int, mpsi::Int, sigma::Float64, mlow::Int,
+    ffit::FourFitVars, xs::Vector{Float64}
+)
+    np = ffit.numpert_total
+    kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
+    kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
+
+    # Map component index → ideal matrix spline and Hermiticity
+    # (component_index, ideal_spline, is_hermitian)
+    ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats, ffit.emats, ffit.hmats]
+    # Ak, Dk, Hk are Hermitian: X†X is trivially self-adjoint.
+    # The thesis (Logan 2015 p.169) lists "Ak, Ck, Hk" but this appears to be a typo
+    # for "Ak, Dk, Hk" — confirmed by inspecting Fortran PENTRC output where Ck ≠ Ck†.
+    # Bk, Ck, Ek are cross terms (X†Y) and not Hermitian in general.
+    is_hermitian = [true, false, false, true, false, true]
+
+    # Build unit X-pattern matrices (Hermitian and non-Hermitian variants)
+    X_herm = _build_x_matrix(mpert, mlow, 1.0; hermitian=true)
+    X_nonherm = _build_x_matrix(mpert, mlow, 1.0; hermitian=false)
+
+    hint = Ref(1)
+    for ipsi in 1:mpsi
+        psi = xs[ipsi]
+        for ic in 1:6
+            ideal_mat = reshape(ideal_splines[ic](psi; hint=hint), np, np)
+            norm_ideal = norm(ideal_mat)  # Frobenius norm
+
+            X = is_hermitian[ic] ? X_herm : X_nonherm
+            # Scale: σ × ‖ideal(ψ)‖_F × unit X-pattern
+            # For multi-n, tile the mpert×mpert X-pattern into the np×np block
+            W = zeros(ComplexF64, np, np)
+            for jn in 0:(ffit.numpert_total÷mpert-1)
+                offset = jn * mpert
+                W[(offset+1):(offset+mpert), (offset+1):(offset+mpert)] .= X
+            end
+            W .*= sigma * norm_ideal
+            kw_flat[ipsi, :, ic] .= vec(W)
+        end
+    end
+
+    return kw_flat, kt_flat
+end
+
+"""
+    make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
+
+Construct kinetic energy (W) and torque (T) matrices, store as splines in `ffit`,
+and pre-compute the FKG derived matrices used by `sing_der!`.
+
+Dispatches on `ctrl.kinetic_source`:
+
+  - `"fixed"`: X-shaped test matrices scaled by `ctrl.kinetic_factor` relative to
+    ideal matrix Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck, Ek non-Hermitian)
+  - `"calculated"`: Compute via PENTRC (not yet implemented)
+"""
+function make_kinetic_matrix(
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal,
+    metric::MetricData
+)
+    xs = metric.xs
+    mpsi = length(xs)
+
+    # Get raw kinetic matrices (scaling is baked into each source)
+    if ctrl.kinetic_source == "fixed"
+        kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_factor, intr.mlow, ffit, xs)
+    elseif ctrl.kinetic_source == "calculated"
+        error("kinetic_source=\"calculated\" not yet implemented — requires PENTRC module")
+    else
+        error("Unknown kinetic_source: $(ctrl.kinetic_source). Must be \"fixed\" or \"calculated\"")
+    end
+
+    # Build splines for each of the 6 components
+    for ic in 1:6
+        ffit.kwmats[ic] = cubic_interp(xs, Series(@view(kw_flat[:, :, ic])); ffit.itp_opts...)
+        ffit.ktmats[ic] = cubic_interp(xs, Series(@view(kt_flat[:, :, ic])); ffit.itp_opts...)
+    end
+
+    # Pre-compute FKG derived matrices (corresponds to Fortran method=0)
+    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
+
+    return nothing
+end
+
+"""
+    _compute_fkg_matrices!(ffit, equil, intr, metric, kw_flat, kt_flat)
+
+Pre-compute the derived F, K, G kinetic matrices at each ψ grid point and store as splines.
+This corresponds to `fourfit_kinetic_matrix` method=0 in the Fortran code (Fortran `fourfit.F` lines 1170-1260).
+
+The 9 matrices computed are the Schur complement reductions of ideal (A,B,C,D,E,H) and kinetic (W,T)
+primitives into the F, K, G sub-matrices of the non-Hermitian kinetic ODE system (Logan 2015 Appendix C,
+Eqs C.1-C.11). These sub-matrices absorb the singfac dependence so that the ODE RHS in `sing_der!`
+can be assembled with explicit (m-nq) factors rather than 1/(m-nq), avoiding numerical blow-up at
+rational surfaces.
+"""
+function _compute_fkg_matrices!(
+    ffit::FourFitVars,
+    equil::Equilibrium.PlasmaEquilibrium,
+    intr::ForceFreeStatesInternal,
+    metric::MetricData,
+    kw_flat::Array{ComplexF64,3},
+    kt_flat::Array{ComplexF64,3}
+)
+    xs = metric.xs
+    mpsi = length(xs)
+    np = intr.numpert_total
+    mpert = intr.mpert
+    npert = intr.npert
+
+    # Allocate output arrays — kinetic-modified A/B/C stored for sing_der! FKG path
+    ak_flat = zeros(ComplexF64, mpsi, np^2)
+    bk_flat = zeros(ComplexF64, mpsi, np^2)
+    ck_flat = zeros(ComplexF64, mpsi, np^2)
+    f0_flat = zeros(ComplexF64, mpsi, np^2)
+    p_flat = zeros(ComplexF64, mpsi, np^2)
+    pa_flat = zeros(ComplexF64, mpsi, np^2)
+    kk_flat = zeros(ComplexF64, mpsi, np^2)
+    kka_flat = zeros(ComplexF64, mpsi, np^2)
+    r1_flat = zeros(ComplexF64, mpsi, np^2)
+    r2_flat = zeros(ComplexF64, mpsi, np^2)
+    r3_flat = zeros(ComplexF64, mpsi, np^2)
+    ga_flat = zeros(ComplexF64, mpsi, np^2)
+
+    hint = Ref(1)
+
+    for ipsi in 1:mpsi
+        psi = xs[ipsi]
+
+        # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
+        amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
+        bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
+        cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
+        dmat_full = reshape(ffit.dmats(psi; hint=hint), np, np)
+        emat_full = reshape(ffit.emats(psi; hint=hint), np, np)
+        hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
+        fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
+
+        kwmat_full = zeros(ComplexF64, np, np, 6)
+        ktmat_full = zeros(ComplexF64, np, np, 6)
+        for ic in 1:6
+            kwmat_full[:, :, ic] .= reshape(@view(kw_flat[ipsi, :, ic]), np, np)
+            ktmat_full[:, :, ic] .= reshape(@view(kt_flat[ipsi, :, ic]), np, np)
+        end
+
+        # Process each n-block independently (matrices are block-diagonal in n)
+        for in_idx in 1:npert
+            n = intr.nlow + in_idx - 1
+            rng = ((in_idx-1)*mpert+1):(in_idx*mpert)
+
+            # Extract n-block slices
+            amat = amat_full[rng, rng]
+            bmat = bmat_full[rng, rng]
+            cmat = cmat_full[rng, rng]
+            dmat = dmat_full[rng, rng]
+            emat = emat_full[rng, rng]
+            hmat = hmat_full[rng, rng]
+            fmat_prim = fmat_prim_full[rng, rng]
+            kwmat = zeros(ComplexF64, mpert, mpert, 6)
+            ktmat = zeros(ComplexF64, mpert, mpert, 6)
+            for ic in 1:6
+                kwmat[:, :, ic] .= kwmat_full[rng, rng, ic]
+                ktmat[:, :, ic] .= ktmat_full[rng, rng, ic]
+            end
+
+            # Add kinetic contributions to ideal matrices [Fortran fourfit.F lines 1153-1158]
+            amat_kin = amat .+ kwmat[:, :, 1] .+ ktmat[:, :, 1]
+            bmat_kin = bmat .+ kwmat[:, :, 2] .+ ktmat[:, :, 2]
+            cmat_kin = cmat .+ kwmat[:, :, 3] .+ ktmat[:, :, 3]
+            hmat_kin = hmat .+ kwmat[:, :, 6] .+ ktmat[:, :, 6]
+            caat = cmat_kin .- 2 .* ktmat[:, :, 3]  # C† analog for non-Hermitian system
+
+            # b1mat = i*D (Fortran convention)
+            b1mat = im .* dmat
+
+            # LU factorization of kinetic A matrix (non-Hermitian)
+            amat_lu = lu(amat_kin)
+
+            # f0mat = F_prim - D†A_kin⁻¹D  [Fortran fourfit.F line 1184]
+            temp1 = amat_lu \ dmat
+            f0mat = fmat_prim .- dmat' * temp1
+
+            # pmat [Fortran lines 1193-1200]
+            psio_over_n = equil.psio / n  # chi1/(2πn) = psio/n — toroidal flux per mode number
+            bkmat = kwmat[:, :, 2] .+ ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
+            bkaat = kwmat[:, :, 2] .- ktmat[:, :, 2] .+ im * psio_over_n .* (kwmat[:, :, 1] .+ ktmat[:, :, 1])
+            temp2 = amat_lu \ bkmat
+            pmat_val = b1mat' * temp2
+
+            # paat [Fortran lines 1202-1207]
+            temp2 = amat_lu \ b1mat
+            aamat = (amat_lu \ amat_kin)'  # A_kin⁻¹ A_kin = I analytically; kept for numerical consistency with Fortran fourfit.F line 1204
+            umat_diff = I - aamat  # ≈ 0; captures round-off from LU factorization
+            paat_val = (bkaat' * temp2 .- im * psio_over_n .* umat_diff * b1mat)'
+
+            # r1mat [Fortran lines 1209-1217]
+            temp1_r1 = kwmat[:, :, 1] .+ ktmat[:, :, 1]
+            temp2 = amat_lu \ bkmat
+            r1mat_val =
+                kwmat[:, :, 4] .+ ktmat[:, :, 4] .-
+                psio_over_n^2 .* temp1_r1' .+
+                im * psio_over_n .* bkaat' .-
+                im * psio_over_n .* aamat * bkmat .-
+                bkaat' * temp2
+
+            # kkmat [Fortran lines 1220-1223]
+            temp1 = amat_lu \ cmat_kin
+            kkmat_val = emat .- b1mat' * temp1
+
+            # kkaat [Fortran lines 1225-1229]
+            temp1 = amat_lu \ b1mat
+            kkaat_val = emat' .- caat' * temp1
+
+            # r2mat [Fortran lines 1231-1237]
+            temp1_r2 = kwmat[:, :, 5] .+ ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .+ ktmat[:, :, 3])
+            temp2 = amat_lu \ cmat_kin
+            r2mat_val = temp1_r2 .+ im * psio_over_n .* umat_diff * cmat_kin .- bkaat' * temp2
+
+            # r3mat [Fortran lines 1239-1245]
+            temp1_r3 = kwmat[:, :, 5] .- ktmat[:, :, 5] .- im * psio_over_n .* (kwmat[:, :, 3] .- ktmat[:, :, 3])
+            temp2 = amat_lu \ bkmat
+            r3mat_val = temp1_r3' .- caat' * temp2
+
+            # gaat [Fortran lines 1248-1251]
+            temp2 = amat_lu \ cmat_kin
+            gaat_val = hmat_kin .- caat' * temp2
+
+            # Store n-block results into full flat arrays
+            for (j_local, j_global) in enumerate(rng)
+                col_offset = (j_global - 1) * np
+                for (i_local, i_global) in enumerate(rng)
+                    idx = i_global + col_offset
+                    ak_flat[ipsi, idx] = amat_kin[i_local, j_local]
+                    bk_flat[ipsi, idx] = bmat_kin[i_local, j_local]
+                    ck_flat[ipsi, idx] = cmat_kin[i_local, j_local]
+                    f0_flat[ipsi, idx] = f0mat[i_local, j_local]
+                    p_flat[ipsi, idx] = pmat_val[i_local, j_local]
+                    pa_flat[ipsi, idx] = paat_val[i_local, j_local]
+                    kk_flat[ipsi, idx] = kkmat_val[i_local, j_local]
+                    kka_flat[ipsi, idx] = kkaat_val[i_local, j_local]
+                    r1_flat[ipsi, idx] = r1mat_val[i_local, j_local]
+                    r2_flat[ipsi, idx] = r2mat_val[i_local, j_local]
+                    r3_flat[ipsi, idx] = r3mat_val[i_local, j_local]
+                    ga_flat[ipsi, idx] = gaat_val[i_local, j_local]
+                end
+            end
+        end
+    end
+
+    # Build FKG splines
+    ffit.f0mats = cubic_interp(xs, Series(f0_flat); ffit.itp_opts...)
+    ffit.pmats = cubic_interp(xs, Series(p_flat); ffit.itp_opts...)
+    ffit.paats = cubic_interp(xs, Series(pa_flat); ffit.itp_opts...)
+    ffit.kkmats = cubic_interp(xs, Series(kk_flat); ffit.itp_opts...)
+    ffit.kkaats = cubic_interp(xs, Series(kka_flat); ffit.itp_opts...)
+    ffit.r1mats = cubic_interp(xs, Series(r1_flat); ffit.itp_opts...)
+    ffit.r2mats = cubic_interp(xs, Series(r2_flat); ffit.itp_opts...)
+    ffit.r3mats = cubic_interp(xs, Series(r3_flat); ffit.itp_opts...)
+    ffit.gaats = cubic_interp(xs, Series(ga_flat); ffit.itp_opts...)
+
+    # Preserve ideal A/B/C splines before overwrite (for mat_flag output)
+    ffit.amats_ideal = ffit.amats
+    ffit.bmats_ideal = ffit.bmats
+    ffit.cmats_ideal = ffit.cmats
+
+    # Overwrite ideal A/B/C splines with kinetic-modified versions for sing_der!
+    ffit.amats = cubic_interp(xs, Series(ak_flat); ffit.itp_opts...)
+    ffit.bmats = cubic_interp(xs, Series(bk_flat); ffit.itp_opts...)
+    ffit.cmats = cubic_interp(xs, Series(ck_flat); ffit.itp_opts...)
+
+    return nothing
+end

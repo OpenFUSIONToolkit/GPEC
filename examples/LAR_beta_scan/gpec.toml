@@ -25,8 +25,6 @@ ode_flag = true
 vac_flag = true
 mer_flag = true
 
-set_psilim_via_dmlim = false
-dmlim = 0.2                  # Used when set_psilim_via_dmlim=true
 qlow = 1.02
 qhigh = 3.6
 sing_start = 0

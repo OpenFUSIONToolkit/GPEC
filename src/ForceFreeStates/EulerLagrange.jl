@@ -157,7 +157,6 @@ which were previously done during integration in the Fortran code.
 
 ### TODOs
 
-Support for `kin_flag`
 restype functionality if we decide to do this
 
 ### Returns
@@ -203,15 +202,14 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
         # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
-            if ctrl.kin_flag
-                error("kin_flag = true not implemented yet!")
-            else
-                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
-            end
+            # Ideal surface crossings apply only in the ideal (non-kinetic) path.
+            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
         end
     end
 
-    # Deallocate unused storage of integration data
+    # Deallocate unused storage of integration data.
+    # `odet.step` was incremented one past the last filled index in integrate_el_region!.
+    odet.step -= 1
     if ctrl.psiedge < intr.psilim
         # Find the peak dW in the edge region and truncate integration data there
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
@@ -225,7 +223,6 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         intr.qlim = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
-        odet.step -= 1 # step was incremented one extra time in integrate_el_region!
         trim_storage!(odet)
     end
 
@@ -249,7 +246,6 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 
 ### TODOs
 
-Support for `kin_flag`
 Move ising_start logic to chunk_el_integration_bounds?
 """
 function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
@@ -274,8 +270,13 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     # Find starting singular surface (where sing.psifac > psi(qlow/q0))
     # Note: This logic is kept in initialize_el_at_axis! rather than chunk_el_integration_bounds
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
-    # and kin_flag = true would also live here when implemented.
-    odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
+    # and kinetic mode would also live here when implemented.
+    if ctrl.kinetic_factor > 0
+        # No singular surface tracking needed — kinetic terms regularize singularities
+        odet.ising_start = 0
+    else
+        odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
+    end
 
     # Initialize solutions with the identity matrix for U_22 [Glasser Phys. Plasmas 2016 112506 Section VI]
     for ipert in 1:intr.numpert_total
@@ -307,10 +308,6 @@ making the integration flow more predictable and easier to parallelize (e.g., fo
 ### Returns
 
   - `Vector{IntegrationChunk}` - Array of integration chunks to process
-
-### TODOs
-
-Support for `kin_flag`
 """
 function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal; bidirectional::Bool=false)
     chunks = IntegrationChunk[]
@@ -333,8 +330,16 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
     end
 
     # -------------------- Create chunks ------------------------
-    if false  # TODO: kin_flag
-    # Kinetic not implemented yet, some of the below code might be able to be reused?
+    if ctrl.kinetic_factor > 0
+        # Single chunk from axis to edge. Kinetic contributions regularize the
+        # F-matrix singularity at rational surfaces (Logan 2015 Eq 7.46), making
+        # them integrable. The adaptive ODE solver handles stiffness automatically.
+        push!(chunks, IntegrationChunk(;
+            psi_start=psi_current,
+            psi_end=(intr.psilim * (1 - eps)),
+            needs_crossing=false,
+            ising=0
+        ))
     else
         # Loop through singular surfaces to cross until edge is reached
         ising_current = find_next_resonant_surface!(ising_current, intr)
@@ -381,7 +386,7 @@ end
 """
     cross_ideal_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-Handle the crossing of a rational surface during integration if `kin_flag` is false.
+Handle the crossing of a rational surface during integration if kinetic mode is disabled.
 Formerly `ode_ideal_cross!`. Performs the same function as `ode_ideal_cross` in the Fortran code.
 Differences mainly in integration data storage logic, but otherwise identical. It normalizes and
 reinitializes the solution vector at the singularity, and updates relevant state variables.
@@ -421,7 +426,7 @@ function cross_ideal_singular_surf!(
     # the solution vector we're zeroing corresponds to the same block as the resonant mode we
     # introduce. It is also needed when transforming u back to the full solution after integration.
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
-    if !ctrl.con_flag
+    if ctrl.kinetic_factor == 0
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
         for i in eachindex(sing_asymp_right.r1)
@@ -441,7 +446,7 @@ function cross_ideal_singular_surf!(
 
     # Apply asymptotic solution on other side of singular surface (right side)
     ua = sing_get_ua(sing_asymp_right, dpsi)
-    if !ctrl.con_flag
+    if ctrl.kinetic_factor == 0
         for i in eachindex(sing_asymp_right.r1)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
@@ -702,8 +707,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
-    # Steps where free_compute_total hits a singular wp solve are left as NaN per
-    # the EdgeScanState contract (arrays initialized to NaN at construction).
+    # Steps where free_compute_total hits a singular wp solve are left as NaN per the EdgeScanState contract.
     for j in 1:N_edge
         istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]

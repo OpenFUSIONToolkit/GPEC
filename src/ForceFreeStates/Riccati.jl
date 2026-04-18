@@ -1106,7 +1106,7 @@ function riccati_cross_ideal_singular_surf!(
     # Resonant perturbation indices (same formula as in cross_ideal_singular_surf!)
     ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
 
-    if !ctrl.con_flag
+    if ctrl.kinetic_factor == 0
         # Zero the resonant column of (S, I) using ipert_res directly (no GR sorting needed).
         # The zeroed column stays zero through the predictor step since both slices are zero.
         for i in eachindex(sing_asymp_right.r1)
@@ -1129,7 +1129,7 @@ function riccati_cross_ideal_singular_surf!(
     ua = sing_get_ua(sing_asymp_right, dpsi)
     singp.ua_right = copy(ua)
     singp.psi_ua_right = odet.psifac  # ψ where ua_right is evaluated (right inner-layer boundary)
-    if !ctrl.con_flag
+    if ctrl.kinetic_factor == 0
         for i in eachindex(sing_asymp_right.r1)
             # Zero the resonant row (removes large components at the resonant mode)
             odet.u[ipert_res[i], :, :] .= 0
@@ -1148,7 +1148,7 @@ function riccati_cross_ideal_singular_surf!(
 
     # Compute Δ' using ipert_res directly (no GR → perm_col = ipert_res, ca_r diagonal = 1).
     # Also compute the full column Δ' (all N modes) for the off-diagonal coupling.
-    if !ctrl.con_flag
+    if ctrl.kinetic_factor == 0
         denom = (2π)^2 * equil.psio
         n_res = length(sing_asymp_right.r1)
         N = intr.numpert_total
@@ -1226,8 +1226,8 @@ function riccati_eulerlagrange_integration(
 
         # Cross rational surface (Riccati crossing skips GR, uses ipert_res directly)
         if chunk.needs_crossing
-            if ctrl.kin_flag
-                error("kin_flag = true not implemented yet!")
+            if ctrl.kinetic_factor > 0
+                error("kinetic_factor > 0 not implemented yet in Riccati!")
             else
                 riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
                 # renormalize_riccati! is called inside riccati_cross_ideal_singular_surf!
@@ -1580,8 +1580,8 @@ function parallel_eulerlagrange_integration(
         end
 
         if chunk.needs_crossing
-            if ctrl.kin_flag
-                error("kin_flag = true not implemented yet!")
+            if ctrl.kinetic_factor > 0
+                error("kinetic_factor > 0 not implemented yet in Riccati!")
             else
                 # Save S at left boundary of this surface (before crossing).
                 # State is (S, I) from the renorm above; S is well-conditioned.
