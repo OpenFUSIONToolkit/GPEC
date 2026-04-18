@@ -1,0 +1,40 @@
+[Wall]
+shape = "conformal"
+a = 20.0
+
+[Equilibrium]
+mpsi = 128
+grid_type = "ldp"
+eq_filename = "/Users/danielburgess/Desktop/plasma/IDA_run/MSE_constraint/test_data/204441_4400_withEr/g204441.04409.geqdsk"
+psilow = 0.0001
+psihigh = 0.993
+mtheta = 256
+eq_type = "efit"
+jac_type = "hamada"
+
+[ForceFreeStates]
+mat_flag = true
+save_interval = 3
+eulerlagrange_tolerance = 1.0e-8
+qhigh = 1000.0
+delta_mlow = 8
+sing_start = 0
+force_termination = true
+thmax0 = 1
+ode_flag = true
+mthvac = 512
+HDF5_filename = "/Users/danielburgess/Desktop/plasma/julia_GPEC/examples/DIIID_stride_comparison/outputs/204441_n1/gpec.h5"
+sing_order = 6
+delta_mhigh = 8
+singfac_min = 0.0001
+verbose = false
+bal_flag = false
+vac_flag = true
+ucrit = 10000.0
+delta_mband = 0
+write_outputs_to_HDF5 = true
+nn_low = 1
+qlow = 1.02
+mer_flag = true
+use_parallel = true
+nn_high = 1

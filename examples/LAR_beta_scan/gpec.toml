@@ -1,25 +1,27 @@
-# gpec.toml for TJ analytic pressure-factor (β) scan.
+# gpec.toml for LAR beta (pressure factor) scan
 #
-# The scan uses the inverse pipeline (eq_type = "tj"); run_scan.jl writes a
-# fresh tj.toml per point containing the (lar_r0, qc, qa, pc, …) parameters
-# that drive the analytic model.
+# Matches Fortran STRIDE settings from GPEC/docs/scans/inputs/beta_scan/
+# Used with TJ benchmark geqdsk equilibria (TJ_betascan_*.geqdsk).
+#
+# eq_filename is a PLACEHOLDER — the scan runner overwrites it per point.
 
 [Equilibrium]
-eq_type = "tj"
-eq_filename = "tj.toml"
+eq_type = "efit"
+eq_filename = "PLACEHOLDER"
 jac_type = "hamada"
 grid_type = "ldp"
 psilow = 0.01
 psihigh = 0.995
 mpsi = 128
-mtheta = 512
+mtheta = 256
 
 [Wall]
 shape = "conformal"
-a = 20              # Effectively no wall
+a = 20              # Matches Fortran &shape a=20 (effectively nowall — wall at 20x minor radius)
+aw = 0.1            # Matches Fortran &vacdat aw=0.1 (not used for ishape=6 wall distance)
 
 [ForceFreeStates]
-bal_flag = false
+bal_flag = false               # Disabled: PeriodicBC error in Bal.jl with LAR geqdsk equilibria
 mat_flag = true
 ode_flag = true
 vac_flag = true
@@ -42,8 +44,6 @@ singfac_min = 1e-4
 ucrit = 1e4
 sing_order = 6
 
-kin_flag = false
-con_flag = false
 
 use_parallel = true
 force_termination = true

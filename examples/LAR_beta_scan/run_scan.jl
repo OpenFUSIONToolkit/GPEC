@@ -1,140 +1,308 @@
 #!/usr/bin/env julia
 """
-    run_scan.jl — TJ-model beta (pressure factor) scan
+    run_scan.jl — LAR pressure-factor (β) scan
 
-Fixed geometry (ε=0.2), varying pressure via pc parameter.
-Uses the built-in TJ analytic equilibrium model.
+Runs Julia GPEC on each TJ benchmark equilibrium, extracts Δ'(2/1), Δ'(3/1),
+and δW components, then compares against the Fortran STRIDE reference CSV.
 
 Usage:
-    julia --project=../.. run_scan.jl              # Full scan
+    julia --project=../.. run_scan.jl              # Full scan (42 points)
     julia --project=../.. run_scan.jl --test        # Quick test (3 points)
+    julia --project=../.. run_scan.jl --compare     # Plot comparison with Fortran
+    julia --project=../.. run_scan.jl --test --compare
 """
 
 using Pkg
 Pkg.activate(joinpath(@__DIR__, "../.."))
 
 using GeneralizedPerturbedEquilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: TJConfig, EquilibriumConfig, setup_equilibrium
 using HDF5
 using TOML
 using Printf
+using DelimitedFiles
+using Plots
 
 # ============================================================================
-# Scan parameters — TJ benchmark pressure factors
+# Scan parameters — matches Fortran run_stride_beta_scan.py
 # ============================================================================
 
-# Pressure scan: pc grid ends just before the ideal-kink pole at pc ≈ 0.174
-# (where δW_t → 0 and Δ' diverges).  Grid is power-law warped so the spacing
-# is approximately uniform over most of the range and smoothly tightens as
-# the pole is approached, giving an even visual cadence without wasting
-# points on the flat-slope region far from the pole.
-function _warped_grid(x_start::Float64, x_end::Float64, N::Int; p::Float64 = 2.0)
-    return [x_start + (x_end - x_start) * (1 - (1 - i / (N - 1))^p) for i in 0:N-1]
-end
+const PRESSURE_FACTORS = [
+    0.001, 0.005, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08,
+    0.1, 0.11, 0.12, 0.13, 0.14, 0.145, 0.15, 0.1525, 0.155, 0.1575,
+    0.16, 0.1625, 0.165, 0.16625, 0.1674, 0.1675, 0.17, 0.1725, 0.175,
+    0.1775, 0.18, 0.18225, 0.1825, 0.18275, 0.183, 0.18325, 0.1835,
+    0.18375, 0.18425, 0.1845, 0.18475, 0.185,
+]
 
-const PC_FULL = _warped_grid(0.001, 0.1735, 40; p = 2.0)
-
-const PC_TEST = [0.001, 0.10, 0.17]
+const PRESSURE_FACTORS_TEST = [0.1, 0.16, 0.175]
 
 const SCAN_DIR = @__DIR__
-const OUTPUT_H5 = joinpath(SCAN_DIR, "beta_scan.h5")
-
-# Fixed TJ parameters for beta scan (ε = 0.2, matching paper: R0=2m, a=0.4m)
-const LAR_R0 = 2.0    # Major radius [m]
-const LAR_A = 0.4      # Minor radius [m] → ε = 0.2
-const QC = 1.5
-const QA = 3.6
-const MU = 2.0
-const B0 = 12.0
+const EQUIL_DIR = joinpath(SCAN_DIR, "equilibria")
+const REF_DIR = joinpath(SCAN_DIR, "reference")
+const OUTPUT_DIR = joinpath(SCAN_DIR, "outputs")
 
 # ============================================================================
-# Run a single pressure point
+# Core scan logic
 # ============================================================================
 
-function run_single(pc::Float64)
-    run_dir = mktempdir(; prefix="gpec_tj_beta_")
+"""
+    run_single(pressure_factor; verbose=true) -> NamedTuple or nothing
+
+Run Julia GPEC for a single pressure factor value. Returns extracted results
+or nothing on failure.
+"""
+function run_single(pf::Float64; verbose::Bool=true)
+    geqdsk = joinpath(EQUIL_DIR, "TJ_betascan_$(pf).geqdsk")
+    if !isfile(geqdsk)
+        @warn "geqdsk not found for pressure_factor=$pf: $geqdsk"
+        return nothing
+    end
+
+    # Create a temporary working directory for this run
+    run_dir = mktempdir(; prefix="gpec_beta_$(pf)_")
+
     try
-        tj_dict = Dict("TJ_INPUT" => Dict(
-            "lar_r0" => LAR_R0, "lar_a" => LAR_A,
-            "qc" => QC, "qa" => QA, "pc" => pc,
-            "mu" => MU, "B0" => B0,
-            "ma" => 128, "mtau" => 128,
-        ))
-        open(joinpath(run_dir, "tj.toml"), "w") do io; TOML.print(io, tj_dict); end
-
+        # Copy and patch gpec.toml
         config = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
-        config["Equilibrium"]["eq_filename"] = joinpath(run_dir, "tj.toml")
+        config["Equilibrium"]["eq_filename"] = geqdsk
         config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
-        open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
+        # Write patched config
+        open(joinpath(run_dir, "gpec.toml"), "w") do io
+            TOML.print(io, config)
+        end
+
+        if verbose
+            @info "Running GPEC for pressure_factor=$pf"
+        end
+
+        # Run GPEC
         GeneralizedPerturbedEquilibrium.main([run_dir])
-        return extract_results(joinpath(run_dir, "gpec.h5"))
+
+        # Read results from HDF5
+        h5_path = joinpath(run_dir, "gpec.h5")
+        if !isfile(h5_path)
+            @warn "HDF5 output not found for pressure_factor=$pf"
+            return nothing
+        end
+
+        return extract_results(h5_path)
     catch e
-        @warn "Failed for pc=$pc" exception=(e, catch_backtrace())
+        @warn "GPEC failed for pressure_factor=$pf" exception=(e, catch_backtrace())
         return nothing
     finally
         rm(run_dir; force=true, recursive=true)
     end
 end
 
+"""
+    extract_results(h5_path) -> NamedTuple
+
+Extract Δ', δW, and q_edge from GPEC HDF5 output.
+
+Uses the STRIDE BVP `delta_prime_matrix` diagonal (matching Fortran STRIDE output)
+when available, falling back to the per-surface ca-based `delta_prime`.
+"""
 function extract_results(h5_path::String)
     h5open(h5_path, "r") do f
-        ep = read(f, "vacuum/ep"); ev = read(f, "vacuum/ev"); et = read(f, "vacuum/et")
-        msing = read(f, "singular/msing")
-        m_sing = read(f, "singular/m")
-        dp_mat = haskey(f, "singular/delta_prime_matrix") ? read(f, "singular/delta_prime_matrix") : nothing
-        qlim = haskey(f, "info/qlim") ? read(f, "info/qlim") : read(f, "equil/qmax")
-        q0 = read(f, "equil/q0"); qmax = read(f, "equil/qmax")
+        # Energy components
+        ep = read(f, "vacuum/ep")  # plasma energy
+        ev = read(f, "vacuum/ev")  # vacuum energy
+        et = read(f, "vacuum/et")  # total energy
 
-        dp_21 = NaN + NaN*im; dp_31 = NaN + NaN*im
-        if dp_mat !== nothing && msing > 0
-            for s in 1:min(msing, size(dp_mat, 1))
-                m_val = size(m_sing, 1) == msing ? m_sing[s, 1] : m_sing[1, s]
-                if m_val == 2; dp_21 = dp_mat[s, s]; end
-                if m_val == 3; dp_31 = dp_mat[s, s]; end
+        # Singular surface data
+        msing = read(f, "singular/msing")
+        m_sing = read(f, "singular/m")  # [msing, max_modes]
+
+        # STRIDE BVP Δ' matrix: [msing, msing] complex — diagonal = per-surface Δ'
+        dp_mat = haskey(f, "singular/delta_prime_matrix") ? read(f, "singular/delta_prime_matrix") : nothing
+
+        # Per-surface ca-based Δ': [msing, max_modes] complex (fallback)
+        dp_ca = haskey(f, "singular/delta_prime") ? read(f, "singular/delta_prime") : nothing
+
+        # q_edge from equilibrium parameters (qmax ≈ q_edge for monotonic q profiles)
+        # Use the truncated qlim (integration limit) to match Fortran's q_edge reporting
+        q_edge = haskey(f, "info/qlim") ? read(f, "info/qlim") : read(f, "equil/qmax")
+
+        # Extract Δ'(2/1) and Δ'(3/1) from singular surface data
+        dp_21_real = NaN
+        dp_21_imag = NaN
+        dp_31_real = NaN
+        dp_31_imag = NaN
+
+        if msing > 0
+            for s in 1:msing
+                m_val = m_sing[s, 1]
+                # Prefer STRIDE BVP matrix diagonal, fall back to ca-based
+                dp_val = if dp_mat !== nothing && s <= size(dp_mat, 1)
+                    dp_mat[s, s]
+                elseif dp_ca !== nothing
+                    dp_ca[s, 1]
+                else
+                    NaN + NaN*im
+                end
+                if m_val == 2
+                    dp_21_real = real(dp_val)
+                    dp_21_imag = imag(dp_val)
+                elseif m_val == 3
+                    dp_31_real = real(dp_val)
+                    dp_31_imag = imag(dp_val)
+                end
             end
         end
-        return (dp_21=dp_21, dp_31=dp_31,
-                dW_plasma=real(ep[1]), dW_vacuum=real(ev[1]), dW_total=real(et[1]),
-                q0=q0, qmax=qmax, qlim=qlim, msing=msing, dp_matrix=dp_mat)
+
+        return (
+            delta_prime_21_real = dp_21_real,
+            delta_prime_21_imag = dp_21_imag,
+            delta_prime_31_real = dp_31_real,
+            delta_prime_31_imag = dp_31_imag,
+            delta_W_plasma = real(ep[1]),
+            delta_W_vacuum = real(ev[1]),
+            delta_W_total = real(et[1]),
+            q_edge = q_edge,
+        )
     end
+end
+
+"""
+    run_scan(pressure_factors; verbose=true) -> Dict
+
+Run the full scan and collect results into arrays.
+"""
+function run_scan(pfs::Vector{Float64}; verbose::Bool=true)
+    n = length(pfs)
+    results = Dict{String,Vector{Float64}}(
+        "pressure_factor"     => copy(pfs),
+        "delta_prime_21_real" => fill(NaN, n),
+        "delta_prime_21_imag" => fill(NaN, n),
+        "delta_prime_31_real" => fill(NaN, n),
+        "delta_prime_31_imag" => fill(NaN, n),
+        "delta_W_plasma"      => fill(NaN, n),
+        "delta_W_vacuum"      => fill(NaN, n),
+        "delta_W_total"       => fill(NaN, n),
+        "q_edge"              => fill(NaN, n),
+    )
+
+    for (i, pf) in enumerate(pfs)
+        @info "[$(i)/$(n)] pressure_factor = $pf"
+        r = run_single(pf; verbose=verbose)
+        if r !== nothing
+            results["delta_prime_21_real"][i] = r.delta_prime_21_real
+            results["delta_prime_21_imag"][i] = r.delta_prime_21_imag
+            results["delta_prime_31_real"][i] = r.delta_prime_31_real
+            results["delta_prime_31_imag"][i] = r.delta_prime_31_imag
+            results["delta_W_plasma"][i]      = r.delta_W_plasma
+            results["delta_W_vacuum"][i]      = r.delta_W_vacuum
+            results["delta_W_total"][i]       = r.delta_W_total
+            results["q_edge"][i]              = r.q_edge
+        end
+    end
+
+    return results
+end
+
+# ============================================================================
+# I/O
+# ============================================================================
+
+function save_summary(results::Dict, output_path::String)
+    header = "pressure_factor,delta_prime_21_real,delta_prime_21_imag," *
+             "delta_prime_31_real,delta_prime_31_imag," *
+             "delta_W_plasma,delta_W_vacuum,delta_W_total,q_edge"
+    n = length(results["pressure_factor"])
+    data = hcat(
+        results["pressure_factor"],
+        results["delta_prime_21_real"],
+        results["delta_prime_21_imag"],
+        results["delta_prime_31_real"],
+        results["delta_prime_31_imag"],
+        results["delta_W_plasma"],
+        results["delta_W_vacuum"],
+        results["delta_W_total"],
+        results["q_edge"],
+    )
+    open(output_path, "w") do io
+        println(io, header)
+        for i in 1:n
+            println(io, join([@sprintf("%.10e", data[i, j]) for j in 1:9], ","))
+        end
+    end
+    @info "Summary saved to $output_path"
+end
+
+function load_reference()
+    ref_path = joinpath(REF_DIR, "pressure_factor_scan_summary.csv")
+    if !isfile(ref_path)
+        @warn "Reference CSV not found: $ref_path"
+        return nothing
+    end
+    data, header = readdlm(ref_path, ',', Float64; header=true)
+    cols = vec(header)
+    return Dict(cols[j] => data[:, j] for j in 1:length(cols))
+end
+
+# ============================================================================
+# Comparison plotting
+# ============================================================================
+
+function plot_comparison(julia_results::Dict, fortran_ref::Dict)
+    pf_j = julia_results["pressure_factor"]
+    pf_f = fortran_ref["pressure_factor"]
+
+    p1 = Plots.plot(pf_f, fortran_ref["delta_prime_21_real"];
+        label="Fortran Δ'(2/1)", lw=2, xlabel="pressure factor", ylabel="Δ'(2/1) real",
+        left_margin=12Plots.mm, bottom_margin=4Plots.mm)
+    Plots.scatter!(p1, pf_j, julia_results["delta_prime_21_real"];
+        label="Julia Δ'(2/1)", ms=4)
+
+    p2 = Plots.plot(pf_f, fortran_ref["delta_prime_31_real"];
+        label="Fortran Δ'(3/1)", lw=2, xlabel="pressure factor", ylabel="Δ'(3/1) real",
+        left_margin=12Plots.mm, bottom_margin=4Plots.mm)
+    Plots.scatter!(p2, pf_j, julia_results["delta_prime_31_real"];
+        label="Julia Δ'(3/1)", ms=4)
+
+    p3 = Plots.plot(pf_f, fortran_ref["delta_W_total"];
+        label="Fortran δW total", lw=2, xlabel="pressure factor", ylabel="δW",
+        left_margin=12Plots.mm, bottom_margin=4Plots.mm)
+    Plots.plot!(p3, pf_f, fortran_ref["delta_W_plasma"]; label="Fortran δW plasma", lw=1, ls=:dash)
+    Plots.plot!(p3, pf_f, fortran_ref["delta_W_vacuum"]; label="Fortran δW vacuum", lw=1, ls=:dash)
+    Plots.scatter!(p3, pf_j, julia_results["delta_W_total"]; label="Julia δW total", ms=4)
+    Plots.scatter!(p3, pf_j, julia_results["delta_W_plasma"]; label="Julia δW plasma", ms=3)
+    Plots.scatter!(p3, pf_j, julia_results["delta_W_vacuum"]; label="Julia δW vacuum", ms=3)
+
+    fig = Plots.plot(p1, p2, p3; layout=(3, 1), size=(800, 900),
+        plot_title="Beta Scan: Julia GPEC vs Fortran STRIDE")
+
+    fig_path = joinpath(OUTPUT_DIR, "beta_scan_comparison.png")
+    Plots.savefig(fig, fig_path)
+    @info "Comparison plot saved to $fig_path"
 end
 
 # ============================================================================
 # Main
 # ============================================================================
 
-function main()
+function main_scan()
     test_mode = "--test" in ARGS
-    pcs = test_mode ? PC_TEST : PC_FULL
+    compare_mode = "--compare" in ARGS
 
-    @info "TJ beta scan: $(length(pcs)) points, ε=$(LAR_A/LAR_R0), B0=$(B0)T, qc=$(QC), qa=$(QA)" *
-          (test_mode ? " (test mode)" : "")
+    pfs = test_mode ? PRESSURE_FACTORS_TEST : PRESSURE_FACTORS
 
-    isfile(OUTPUT_H5) && rm(OUTPUT_H5)
+    @info "LAR beta scan: $(length(pfs)) points" * (test_mode ? " (test mode)" : "")
 
-    for (i, pc) in enumerate(pcs)
-        @info "[$(i)/$(length(pcs))] pc=$pc"
-        result = run_single(pc)
-        if result !== nothing
-            h5open(OUTPUT_H5, isfile(OUTPUT_H5) ? "r+" : "w") do f
-                gname = @sprintf("pc_%.5f", pc)
-                haskey(f, gname) && delete_object(f, gname)
-                g = create_group(f, gname)
-                g["pressure_factor"] = pc
-                g["dp_21_real"] = real(result.dp_21); g["dp_21_imag"] = imag(result.dp_21)
-                g["dp_31_real"] = real(result.dp_31); g["dp_31_imag"] = imag(result.dp_31)
-                g["dW_plasma"] = result.dW_plasma; g["dW_vacuum"] = result.dW_vacuum; g["dW_total"] = result.dW_total
-                g["q0"] = result.q0; g["qmax"] = result.qmax; g["qlim"] = result.qlim; g["msing"] = result.msing
-                if result.dp_matrix !== nothing; g["dp_matrix"] = result.dp_matrix; end
-            end
-            @printf("  dp21=%+.4f%+.4fi  dp31=%+.4f%+.4fi  dW_t=%+.6f  qa=%.3f\n",
-                real(result.dp_21), imag(result.dp_21), real(result.dp_31), imag(result.dp_31),
-                result.dW_total, result.qmax)
+    mkpath(OUTPUT_DIR)
+
+    results = run_scan(pfs)
+    save_summary(results, joinpath(OUTPUT_DIR, "julia_beta_scan_summary.csv"))
+
+    if compare_mode
+        ref = load_reference()
+        if ref !== nothing
+            plot_comparison(results, ref)
         end
     end
 
-    @info "Results saved to $OUTPUT_H5"
+    @info "Done."
 end
 
-main()
+main_scan()
