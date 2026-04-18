@@ -1,0 +1,20 @@
+# LAR (Large Aspect Ratio) equilibrium parameters for epsilon scan
+#
+# Baseline parameters matching TJ benchmark:
+#   qc = 1.5 (on-axis q)
+#   qa ≈ 3.6 (edge q, controlled by p_sig with Wesson profiles)
+#   mu = 2.0 (pressure peaking)
+#   pc = 0.001 (very low beta)
+#
+# The scan runner overrides lar_r0 = 1.0/epsilon for each scan point.
+
+[LAR_INPUT]
+lar_r0 = 2.456      # R0 = a/epsilon (overridden by scan)
+lar_a = 1.0          # Minor radius [m] (fixed)
+beta0 = 1e-3         # Low beta (fixed for epsilon scan)
+q0 = 1.5             # On-axis safety factor
+p_pres = 2.0         # Pressure peaking: p(x) = p00*(1-x^2)^p_pres
+p_sig = 1.0          # Current peaking (tuned for qa ≈ 3.6 with Wesson)
+sigma_type = "wesson" # Wesson current profile
+ma = 128             # Radial grid points for LAR ODE
+mtau = 128           # Poloidal grid points for LAR geometry

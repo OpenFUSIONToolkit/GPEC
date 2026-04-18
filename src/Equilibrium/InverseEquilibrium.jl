@@ -276,7 +276,11 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
-        sq_fs[ipsi+1, 4] = spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
+        # Use the input q profile directly (from LAR ODE or CHEASE), matching Fortran
+        # inverse_chease4_run line 578: sq%fs(ipsi,4) = sq_in%f(3).
+        # The field-line-integration-based q formula (spl_fsi * F / (2*twopi*psio))
+        # is inaccurate for cylindrical LAR geometry.
+        sq_fs[ipsi+1, 4] = f_sq_in_buf[3]  # q from input profile
     end
 
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())

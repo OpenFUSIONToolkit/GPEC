@@ -16,6 +16,7 @@ import ..Equilibrium
 import ..Utilities
 import ..Vacuum
 using Printf
+using DoubleFloats
 import StaticArrays: @MMatrix
 
 # Include all necessary files

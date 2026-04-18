@@ -88,7 +88,13 @@ rational surface crossing still fires at the correct ψ in the serial assembly p
 """
 function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
     min_chunks = 2 * intr.msing + 3
-    target_n = max(min_chunks, 4 * Threads.nthreads())
+    # Ensure enough sub-chunks for BVP propagator conditioning: at least 5 non-crossing
+    # sub-chunks per segment (axis→surf₁, surfᵢ→surfᵢ₊₁, surfₙ→edge), plus crossing
+    # chunks. STRIDE uses 33 intervals for comparable problems. Without enough sub-chunks,
+    # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
+    # because single long-span propagators may already have cond ~ 10²⁴.
+    min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
+    target_n = max(min_chunks, 4 * Threads.nthreads(), min_bvp_intervals)
 
     result = collect(chunks)
 
@@ -160,11 +166,12 @@ An OdeState struct containing the final state of the ODE solver after integratio
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Dispatch to parallel or Riccati solver if requested
+    # Dispatch to parallel or Riccati solver if requested.
+    # Parallel path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
     if ctrl.use_parallel
         return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
     elseif ctrl.use_riccati
-        return riccati_eulerlagrange_integration(ctrl, equil, ffit, intr)
+        return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
     end
 
     # Initialization
@@ -231,7 +238,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Undo Gaussian reduction to get true solution vectors (for free_run! eigenvector use)
     transform_u!(odet, intr)
 
-    return odet
+    return (odet, nothing, nothing, nothing)
 end
 
 """
@@ -406,13 +413,14 @@ function cross_ideal_singular_surf!(
     # Fixup solution at singular surface
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
 
-    # Compute asymptotic power series for this singular surface
+    # Compute direction-specific asymptotic power series for this singular surface
     singp = intr.sing[ising]
-    sing_asymp = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr)
-    dpsi = singp.psifac - odet.psifac # ψ_res - ψ
+    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
+    dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
 
-    # Get asymptotic coefficients before crossing rational surface
-    ua = sing_get_ua(sing_asymp, -dpsi)
+    # Get asymptotic coefficients before crossing (left side)
+    ua = sing_get_ua(sing_asymp_left, dpsi)
     odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
     # Single n: remove largest solution and sub in asymptotics on the other side
@@ -424,7 +432,7 @@ function cross_ideal_singular_surf!(
     if !ctrl.con_flag
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
-        for i in eachindex(sing_asymp.r1)
+        for i in eachindex(sing_asymp_right.r1)
             push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
             odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
         end
@@ -439,10 +447,10 @@ function cross_ideal_singular_surf!(
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
 
-    # Apply asymptotic solution on other side of singular surface
-    ua = sing_get_ua(sing_asymp, dpsi)
+    # Apply asymptotic solution on other side of singular surface (right side)
+    ua = sing_get_ua(sing_asymp_right, dpsi)
     if !ctrl.con_flag
-        for i in eachindex(sing_asymp.r1)
+        for i in eachindex(sing_asymp_right.r1)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
@@ -553,7 +561,7 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,

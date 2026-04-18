@@ -28,7 +28,6 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
-  - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
 @kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
@@ -47,20 +46,19 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     psihigh::Float64 = 0.994
     mpsi::Int = 0
     psi_accuracy::Float64 = 0.001
-    mtheta::Int = 256
+    mtheta::Int = 512
 
     newq0::Int = 0
     etol::Float64 = 1e-7
 
     force_termination::Bool = false
-    use_galgrid::Bool = true
 
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination, use_galgrid)
+        force_termination)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0; power_bp = 0; power_r = 0; power_rc = 0
@@ -100,7 +98,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination, use_galgrid)
+            force_termination)
     end
 end
 
@@ -189,6 +187,8 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     lar_a::Float64 = 1.0
     beta0::Float64 = 1e-3
     q0::Float64 = 1.5
+    qa::Float64 = 3.6        # Edge safety factor (used by sigma_type="tj")
+    B0::Float64 = 1.0        # On-axis toroidal field [T] (scales F and P)
     p_pres::Float64 = 2.0
     p_sig::Float64 = 1.0
     sigma_type::String = "default"
@@ -205,6 +205,43 @@ function LargeAspectRatioConfig(path::String)
     raw = TOML.parsefile(path)
     input_data = get(raw, "LAR_INPUT", Dict())
     return LargeAspectRatioConfig(; symbolize_keys(input_data)...)
+end
+
+"""
+    TJConfig(...)
+
+Parameters for the TJ cylindrical equilibrium model, adapted from the TJ code
+by R. Fitzpatrick (https://github.com/rfitzp/TJ).
+
+The TJ model uses analytic profiles with exact control of both the on-axis
+and edge safety factors. The q profile is determined by:
+
+    f1(r) = [1 - (1-r²)^ν] / (ν·qc)
+    q(r)  = r² / f1(r)
+
+where ν = qa/qc is the current peaking parameter, qc is the axis q, and qa
+is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
+profile is p₂(r) = pc·(1-r²)^μ.
+
+Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
+"""
+@kwdef mutable struct TJConfig
+    lar_r0::Float64 = 10.0     # Major radius R₀ [m]
+    lar_a::Float64 = 1.0       # Minor radius a [m] (ε = a/R₀)
+    qc::Float64 = 1.5          # On-axis safety factor
+    qa::Float64 = 3.6          # Edge safety factor
+    pc::Float64 = 0.001        # Normalized on-axis pressure
+    mu::Float64 = 2.0          # Pressure peaking exponent: p₂ = pc·(1-r²)^μ
+    B0::Float64 = 12.0         # On-axis toroidal field [T]
+    ma::Int = 128              # Radial grid points
+    mtau::Int = 128            # Poloidal grid points
+    zeroth::Bool = false       # If true, suppress Shafranov shift
+end
+
+function TJConfig(path::String)
+    raw = TOML.parsefile(path)
+    input_data = get(raw, "TJ_INPUT", Dict())
+    return TJConfig(; symbolize_keys(input_data)...)
 end
 
 """

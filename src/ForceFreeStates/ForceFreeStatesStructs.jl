@@ -32,6 +32,10 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
     delta_prime::Vector{ComplexF64} = ComplexF64[]
     delta_prime_col::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    ua_left::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)   # asymptotic basis at left inner-layer boundary
+    ua_right::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)  # asymptotic basis at right inner-layer boundary
+    psi_ua_left::Float64 = 0.0   # ψ where ua_left was evaluated (left inner-layer boundary)
+    psi_ua_right::Float64 = 0.0  # ψ where ua_right was evaluated (right inner-layer boundary)
 end
 
 """
@@ -186,12 +190,10 @@ A mutable struct holding internal state variables for stability calculations.
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
     """
-    Inter-surface tearing stability matrix of shape (2*msing × 2*msing).
-    delta_prime_matrix[2j-1, 2k-1] = small-asymptotic amplitude at left of surface j
-                                       when left of surface k is driven with unit amplitude.
-    Populated by `compute_delta_prime_matrix!` (parallel FM path only).
-    Uses bidirectional propagators (backward crossing chunks + forward intermediate chunks)
-    for a well-conditioned BVP, improving accuracy for large N (N ≳ 20).
+    Inter-surface Δ' matrix of shape (msing × msing) in PEST3 convention.
+    Computed by `compute_delta_prime_matrix!` (parallel FM path only) using the STRIDE
+    global BVP with vacuum coupling. The deltap linear combination is applied to the
+    raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
@@ -309,6 +311,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
     use_riccati::Bool = false
     use_parallel::Bool = false
+    use_double64_bvp::Bool = true
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}

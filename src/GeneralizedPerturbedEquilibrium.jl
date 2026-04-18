@@ -177,6 +177,22 @@ function main(args::Vector{String}=String[])
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
+    # Filter out surfaces outside the integration domain [qlow, qlim].
+    # Fortran STRIDE excludes these at the integration level; we remove them
+    # from intr.sing so the Δ' BVP sees only crossable surfaces.
+    if intr.msing > 0
+        qmin_integration = max(ctrl.qlow, equil.params.qmin)
+        n_before = intr.msing
+        keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin_integration && intr.sing[j].psifac <= intr.psilim]
+        if length(keep) < n_before
+            excluded = setdiff(1:n_before, keep)
+            excluded_mq = [(intr.sing[j].m, intr.sing[j].q) for j in excluded]
+            @info "Filtered $(n_before - length(keep)) singular surface(s) outside integration domain: $(excluded_mq)"
+            intr.sing = intr.sing[keep]
+            intr.msing = length(keep)
+        end
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -241,7 +257,7 @@ function main(args::Vector{String}=String[])
         if ctrl.verbose
             @info "Integrating Euler-Lagrange equation"
         end
-        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
+        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             @warn "Fixed-boundary mode unstable for n = $nstring"
         end
@@ -262,6 +278,18 @@ function main(args::Vector{String}=String[])
             if ctrl.verbose
                 @info "All free-boundary modes stable for n = $nstring"
             end
+        end
+
+        # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
+        # Requires propagators from parallel FM path and wv from free_run!.
+        if !ctrl.con_flag && intr.msing > 0 && fm_propagators !== nothing
+            if ctrl.verbose
+                @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
+            end
+            ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
+                wv=vac_data.wv, psio=equil.psio, debug=ctrl.verbose,
+                S_at_surface_left=fm_S_left,
+                ctrl=ctrl, equil=equil, ffit=ffit)
         end
     end
 
@@ -495,7 +523,7 @@ function write_outputs_to_HDF5(
         end
 
         # Write inter-surface Δ' matrix if computed (parallel FM path only).
-        # Shape: [2·msing × 2·msing] where rows/columns index (surface, side) pairs.
+        # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
         if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
         end

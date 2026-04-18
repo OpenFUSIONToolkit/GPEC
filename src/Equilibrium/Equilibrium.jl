@@ -54,6 +54,20 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
             additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
         eq_input = lar_run(eq_config, additional_input)
+    elseif eq_type == "tj"
+        if additional_input === nothing
+            additional_input = TJConfig(eq_config.eq_filename)
+        end
+        eq_input = tj_run(eq_config, additional_input)
+    elseif eq_type == "tj_direct"
+        # Option B: TJ analytic model fed through direct-GS (builds ψ(R,Z) grid
+        # and delegates to the same solver as `efit`).  Reproduces the full
+        # geqdsk-path physics including higher-order geometric effects that the
+        # inverse solver misses.
+        if additional_input === nothing
+            additional_input = TJConfig(eq_config.eq_filename)
+        end
+        eq_input = tj_run_direct(eq_config, additional_input)
     elseif eq_type == "sol"
         if additional_input === nothing
             additional_input = SolovevConfig(eq_config.eq_filename)

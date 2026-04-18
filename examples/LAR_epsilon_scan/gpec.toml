@@ -1,0 +1,56 @@
+# gpec.toml for LAR epsilon (inverse aspect ratio) scan
+#
+# Uses the built-in LAR analytic equilibrium solver (eq_type = "lar")
+# instead of pre-generated geqdsk files.
+#
+# LAR parameters are in lar.toml (eq_filename).
+# The scan runner (run_scan.jl) generates a modified lar.toml per point.
+
+[Equilibrium]
+eq_type = "tj"
+eq_filename = "tj.toml"
+jac_type = "hamada"
+grid_type = "ldp"
+psilow = 0.01
+psihigh = 0.995
+mpsi = 128
+mtheta = 512
+
+[Wall]
+shape = "conformal"
+a = 20              # Effectively no wall
+
+[ForceFreeStates]
+bal_flag = false
+mat_flag = true
+ode_flag = true
+vac_flag = true
+mer_flag = true
+
+set_psilim_via_dmlim = false
+dmlim = 0.2
+qlow = 1.02
+qhigh = 3.6
+sing_start = 0
+
+nn_low = 1
+nn_high = 1
+delta_mlow = 8
+delta_mhigh = 8
+delta_mband = 0
+mthvac = 960
+thmax0 = 1
+
+eulerlagrange_tolerance = 1e-12
+singfac_min = 1e-4
+ucrit = 1e4
+sing_order = 6
+
+kin_flag = false
+con_flag = false
+
+use_parallel = true
+force_termination = true
+write_outputs_to_HDF5 = true
+HDF5_filename = "gpec.h5"
+save_interval = 3
