@@ -25,6 +25,10 @@ include("Dispersion/Dispersion.jl")
 import .Dispersion as Dispersion
 export Dispersion
 
+include("SLAYERRunner/SLAYERRunner.jl")
+import .SLAYERRunner as SLAYERRunner
+export SLAYERRunner
+
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
 export ForcingTerms
