@@ -1,4 +1,4 @@
-# SLAYERRunner.jl
+# Runner.jl
 #
 # Top-level orchestration module that ties together the building blocks
 # from InnerLayer, Dispersion, and Utilities into the user-facing SLAYER
@@ -8,7 +8,6 @@
 #                            │
 #   equilibrium + Δ'         │
 #          +  profiles   →   build_slayer_inputs   →   SLAYERParameters[]
-#          +  profiles
 #                            │
 #                            ▼
 #              SurfaceCoupling[] / MultiSurfaceCoupling
@@ -22,7 +21,7 @@
 #                            ▼
 #                      SLAYERResult  →  HDF5 (`slayer/` group)
 
-module SLAYERRunner
+module Runner
 
 using LinearAlgebra
 using HDF5
@@ -41,7 +40,7 @@ using ..Dispersion: SurfaceCoupling, surface_coupling,
 
 include("Control.jl")
 include("Result.jl")
-include("Runner.jl")
+include("run_slayer.jl")
 include("HDF5Output.jl")
 
 export SLAYERControl, slayer_control_from_toml, validate
@@ -49,4 +48,4 @@ export SLAYERResult, empty_slayer_result
 export run_slayer, run_slayer_from_inputs
 export write_slayer_hdf5!
 
-end # module SLAYERRunner
+end # module Runner

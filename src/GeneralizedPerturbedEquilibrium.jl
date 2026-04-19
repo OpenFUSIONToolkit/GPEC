@@ -17,17 +17,15 @@ include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
 
-include("InnerLayer/InnerLayer.jl")
-import .InnerLayer as InnerLayer
-export InnerLayer
-
-include("Dispersion/Dispersion.jl")
-import .Dispersion as Dispersion
-export Dispersion
-
-include("SLAYERRunner/SLAYERRunner.jl")
-import .SLAYERRunner as SLAYERRunner
-export SLAYERRunner
+include("Tearing/Tearing.jl")
+import .Tearing as Tearing
+export Tearing
+# Backward-compat top-level aliases so callers can still reach these
+# directly; the canonical nested path is `Tearing.{InnerLayer,Dispersion,Runner}`.
+import .Tearing.InnerLayer as InnerLayer
+import .Tearing.Dispersion as Dispersion
+import .Tearing.Runner     as Runner
+export InnerLayer, Dispersion, Runner
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
@@ -362,11 +360,11 @@ function main(args::Vector{String}=String[])
     # ----------------------------------------------------------------
     slayer_result = nothing
     if "SLAYER" in keys(inputs)
-        slayer_ctrl = SLAYERRunner.slayer_control_from_toml(inputs["SLAYER"])
+        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
         if slayer_ctrl.enabled
             @info "\n  SLAYER\n$_SECTION"
             slayer_start = time()
-            slayer_result = SLAYERRunner.run_slayer(
+            slayer_result = Runner.run_slayer(
                 equil, intr, slayer_ctrl, inputs["SLAYER"];
                 dir_path=intr.dir_path,
             )
@@ -383,7 +381,7 @@ function main(args::Vector{String}=String[])
             end
             h5_path = joinpath(intr.dir_path, h5_filename)
             HDF5.h5open(h5_path, "r+") do f
-                SLAYERRunner.write_slayer_hdf5!(f, slayer_result)
+                Runner.write_slayer_hdf5!(f, slayer_result)
             end
             @info "SLAYER results written to $h5_filename"
         end

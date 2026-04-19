@@ -1,8 +1,8 @@
-@testset "SLAYERRunner: Control + run_slayer + HDF5 output" begin
+@testset "Runner: Control + run_slayer + HDF5 output" begin
     using GeneralizedPerturbedEquilibrium
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.Dispersion
-    using GeneralizedPerturbedEquilibrium.SLAYERRunner
+    using GeneralizedPerturbedEquilibrium.Runner
     using HDF5
 
     # ------- Helper: build a synthetic SLAYERParameters with full control
@@ -30,17 +30,17 @@
         @test c.msing_max == 3
 
         # Validation catches bad symbols
-        @test_throws ArgumentError SLAYERRunner.validate(
+        @test_throws ArgumentError Runner.validate(
             SLAYERControl(; inner_model=:bogus))
-        @test_throws ArgumentError SLAYERRunner.validate(
+        @test_throws ArgumentError Runner.validate(
             SLAYERControl(; scan_mode=:bogus))
-        @test_throws ArgumentError SLAYERRunner.validate(
+        @test_throws ArgumentError Runner.validate(
             SLAYERControl(; coupling_mode=:bogus))
-        @test_throws ArgumentError SLAYERRunner.validate(
+        @test_throws ArgumentError Runner.validate(
             SLAYERControl(; dc_type=:bogus))
-        @test_throws ArgumentError SLAYERRunner.validate(
+        @test_throws ArgumentError Runner.validate(
             SLAYERControl(; msing_max=0))
-        @test_throws ArgumentError SLAYERRunner.validate(
+        @test_throws ArgumentError Runner.validate(
             SLAYERControl(; nre=1))
     end
 
