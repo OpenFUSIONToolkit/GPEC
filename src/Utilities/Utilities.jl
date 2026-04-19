@@ -17,6 +17,7 @@ module Utilities
 include("FourierTransforms.jl")
 include("FourierCoefficients.jl")
 include("PhysicalConstants.jl")
+include("KineticProfiles.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
@@ -28,5 +29,7 @@ export FourierCoefficients, empty_FourierCoefficients, get_complex_coeff, get_co
 using .PhysicalConstants
 export PhysicalConstants
 export MU_0, M_E, M_P, E_CHG, K_B, EPS_0
+
+export KineticProfiles, kinetic_profiles_from_toml, kinetic_profiles_from_h5
 
 end # module Utilities

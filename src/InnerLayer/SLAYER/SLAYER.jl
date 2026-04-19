@@ -40,8 +40,10 @@ SLAYERModel(; variant::Symbol=:fitzpatrick) = SLAYERModel{variant}()
 
 include("LayerParameters.jl")
 include("Riccati.jl")
+include("LayerInputs.jl")
 
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
+export surface_minor_radius, surface_da_dpsi, build_slayer_inputs
 
 end # module SLAYER
