@@ -33,5 +33,6 @@ else
     include("./runtests_dispersion_residual.jl")
     include("./runtests_dispersion_coupled.jl")
     include("./runtests_dispersion_scan.jl")
+    include("./runtests_dispersion_amr.jl")
     include("./runtests_fullruns.jl")
 end

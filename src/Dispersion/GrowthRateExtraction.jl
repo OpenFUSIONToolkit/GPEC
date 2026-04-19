@@ -22,6 +22,7 @@
 #   5. Return the highest-γ surviving root in physical units.
 
 using Contour
+using DelaunayTriangulation
 
 # ---------------------------------------------------------------------
 # Public result struct + main entry point.
@@ -94,6 +95,34 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
                                   pole_threshold=Float64(pole_threshold),
                                   filter_above_poles=filter_above_poles,
                                   filter_outside_re=filter_outside_re)
+end
+
+"""
+    find_growth_rates(amr::AMRResult, tauk::Real;
+                       re_target=0.0, im_target=0.0,
+                       pole_threshold=10.0,
+                       filter_above_poles=true,
+                       filter_outside_re=true) -> GrowthRateResult
+
+Extract tearing growth-rate eigenvalues from an AMR `AMRResult` via Delaunay
+triangulation + marching triangles on the scattered evaluation points. The
+pipeline after contour extraction (segment intersection, pole classification,
+outside-Re filter, physical-Hz conversion) is identical to the brute-force
+grid path — only the contour extractor changes. Hanging-node issues from the
+quadtree's mixed refinement levels are resolved by the triangulation
+respecting every evaluated point uniformly.
+"""
+function find_growth_rates(amr::AMRResult, tauk::Real;
+                           re_target::Real=0.0, im_target::Real=0.0,
+                           pole_threshold::Real=10.0,
+                           filter_above_poles::Bool=true,
+                           filter_outside_re::Bool=true)
+    return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
+                                      re_target=Float64(re_target),
+                                      im_target=Float64(im_target),
+                                      pole_threshold=Float64(pole_threshold),
+                                      filter_above_poles=filter_above_poles,
+                                      filter_outside_re=filter_outside_re)
 end
 
 # ---------------------------------------------------------------------
@@ -210,33 +239,21 @@ function _point_in_polygon(pt::ComplexF64, polygon::Vector{ComplexF64})
     return inside
 end
 
-# The actual analysis. Mirrors `analyze_amr_data` + `find_growthrates` from
-# find_growthrates.py, restricted to the regular-grid input case.
-function _extract_growth_rates(re_axis::Vector{Float64},
-                                im_axis::Vector{Float64},
-                                Δ_grid::Matrix{ComplexF64},
-                                tauk::Float64;
-                                re_target::Float64,
-                                im_target::Float64,
-                                pole_threshold::Float64,
-                                filter_above_poles::Bool,
-                                filter_outside_re::Bool)
-    re_field = real.(Δ_grid)
-    im_field = imag.(Δ_grid)
-
-    re_paths = _extract_contours(re_axis, im_axis, re_field, re_target)
-    im_paths = _extract_contours(re_axis, im_axis, im_field, im_target)
-
+# ---------------------------------------------------------------------
+# Shared analysis: intersections + pole classification + outside-Re filter.
+# Both the regular-grid path (_extract_growth_rates) and the AMR
+# triangulation path (_extract_growth_rates_amr) funnel through this.
+# ---------------------------------------------------------------------
+function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
+                        im_paths::Vector{Vector{ComplexF64}},
+                        im_re_vals::Vector{Vector{Float64}},
+                        tauk::Float64;
+                        pole_threshold::Float64,
+                        filter_above_poles::Bool,
+                        filter_outside_re::Bool)
     raw_intersections = _all_intersections(re_paths, im_paths)
 
-    # Pre-compute Re(Δ) values along each Im=0 contour vertex via bilinear
-    # interpolation from the grid.
-    im_re_vals = [Float64[_bilinear(re_axis, im_axis, re_field,
-                                     real(v), imag(v))
-                          for v in path]
-                  for path in im_paths]
-
-    poles = ComplexF64[]
+    poles      = ComplexF64[]
     candidates = Tuple{ComplexF64,Bool}[]    # (pt, on_top_half_re_flag)
 
     for pt in raw_intersections
@@ -260,8 +277,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
             continue
         end
 
-        # --- 2. determine the "+γ step inside Re contour" flag for the
-        # spurious-upper-branch filter.
+        # --- 2. "+γ step inside Re contour" flag for spurious-upper-branch filter
         on_top_half_re = false
         best_re_path_idx, _, _ = _closest_polyline_vertex(re_paths, pt)
         if best_im_path_idx > 0 && best_re_path_idx > 0
@@ -272,8 +288,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
             closure_gap = abs(re_path[1] - re_path[end])
 
             if contour_extent > 0 && closure_gap < 0.1 * contour_extent
-                # Re=0 contour is approximately closed → containment test
-                # makes sense.
+                # Re=0 contour is approximately closed → containment test applies
                 im_path = im_paths[best_im_path_idx]
                 n_im = length(im_path)
                 im_nearest = best_im_vert_idx
@@ -304,16 +319,15 @@ function _extract_growth_rates(re_axis::Vector{Float64},
         push!(candidates, (pt, on_top_half_re))
     end
 
-    # --- 3. apply pole / outside-Re filtering and pick highest-γ root
+    # --- 3. pole / outside-Re filtering and pick highest-γ root
     valid_roots    = ComplexF64[c[1] for c in candidates]
     filtered_roots = ComplexF64[]
     Q_root         = ComplexF64(NaN, NaN)
 
     if !isempty(valid_roots)
-        # Sort candidates by descending γ
         order = sortperm(valid_roots; by=q -> -imag(q))
-        sorted_pts  = valid_roots[order]
-        sorted_top  = Bool[c[2] for c in candidates][order]
+        sorted_pts = valid_roots[order]
+        sorted_top = Bool[c[2] for c in candidates][order]
 
         max_pole_gamma = isempty(poles) ? -Inf : maximum(imag, poles)
 
@@ -331,9 +345,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
             end
         end
 
-        if chosen_idx > 0
-            Q_root = sorted_pts[chosen_idx]
-        end
+        chosen_idx > 0 && (Q_root = sorted_pts[chosen_idx])
     end
 
     omega_Hz = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
@@ -342,4 +354,208 @@ function _extract_growth_rates(re_axis::Vector{Float64},
     return GrowthRateResult(Q_root, omega_Hz, gamma_Hz,
                              valid_roots, poles, filtered_roots,
                              re_paths, im_paths, pole_threshold)
+end
+
+# Regular-grid path: extract contours via Contour.jl, compute im_re_vals by
+# bilinear interpolation on the grid, then run the shared analysis.
+function _extract_growth_rates(re_axis::Vector{Float64},
+                                im_axis::Vector{Float64},
+                                Δ_grid::Matrix{ComplexF64},
+                                tauk::Float64;
+                                re_target::Float64,
+                                im_target::Float64,
+                                pole_threshold::Float64,
+                                filter_above_poles::Bool,
+                                filter_outside_re::Bool)
+    re_field = real.(Δ_grid)
+    im_field = imag.(Δ_grid)
+
+    re_paths = _extract_contours(re_axis, im_axis, re_field, re_target)
+    im_paths = _extract_contours(re_axis, im_axis, im_field, im_target)
+
+    im_re_vals = [Float64[_bilinear(re_axis, im_axis, re_field,
+                                     real(v), imag(v))
+                          for v in path]
+                  for path in im_paths]
+
+    return _run_analysis(re_paths, im_paths, im_re_vals, tauk;
+                          pole_threshold=pole_threshold,
+                          filter_above_poles=filter_above_poles,
+                          filter_outside_re=filter_outside_re)
+end
+
+# ---------------------------------------------------------------------
+# AMR path: Delaunay triangulation + marching triangles. Hanging nodes
+# from the quadtree's mixed refinement levels become first-class vertices
+# in the triangulation, so contour segments piece together without gaps.
+# ---------------------------------------------------------------------
+
+# Emit a Re=0 and Im=0 segment (if any) from a single triangle. Returns
+# `(re_seg, im_seg)` where each may be `nothing`. A segment is a
+# `@NamedTuple{p1::ComplexF64, p2::ComplexF64, a1::Float64, a2::Float64}`
+# where `a1`, `a2` carry the *complementary* field value at the endpoints
+# (Re-value for Im=0 segments, Im-value for Re=0 segments).
+function _march_triangle(p1::ComplexF64, p2::ComplexF64, p3::ComplexF64,
+                          v1::ComplexF64, v2::ComplexF64, v3::ComplexF64,
+                          re_target::Float64, im_target::Float64)
+    return (_march_single(p1, p2, p3, real(v1), real(v2), real(v3),
+                          imag(v1), imag(v2), imag(v3), re_target),
+            _march_single(p1, p2, p3, imag(v1), imag(v2), imag(v3),
+                          real(v1), real(v2), real(v3), im_target))
+end
+
+# Core marching step for one scalar field `f` with complementary field `g`.
+# Produces the contour segment at level=L (if any) along with the value of
+# `g` linearly interpolated at each endpoint.
+@inline function _march_single(p1::ComplexF64, p2::ComplexF64, p3::ComplexF64,
+                                f1::Float64, f2::Float64, f3::Float64,
+                                g1::Float64, g2::Float64, g3::Float64,
+                                L::Float64)
+    a1 = f1 >= L; a2 = f2 >= L; a3 = f3 >= L
+    count = Int(a1) + Int(a2) + Int(a3)
+    (count == 0 || count == 3) && return nothing
+
+    # Identify the "odd" vertex and produce crossings on the two edges
+    # incident to it.
+    if a1 != a2 && a1 != a3
+        pt_a, ga = _cross_edge(p1, p2, f1, f2, g1, g2, L)
+        pt_b, gb = _cross_edge(p1, p3, f1, f3, g1, g3, L)
+    elseif a2 != a1 && a2 != a3
+        pt_a, ga = _cross_edge(p2, p1, f2, f1, g2, g1, L)
+        pt_b, gb = _cross_edge(p2, p3, f2, f3, g2, g3, L)
+    else
+        pt_a, ga = _cross_edge(p3, p1, f3, f1, g3, g1, L)
+        pt_b, gb = _cross_edge(p3, p2, f3, f2, g3, g2, L)
+    end
+    return (p1=pt_a, p2=pt_b, a1=ga, a2=gb)
+end
+
+# Linear crossing on edge (pa, pb) for field `f` at level `L`, with
+# complementary value `g` interpolated at the same parameter.
+@inline function _cross_edge(pa::ComplexF64, pb::ComplexF64,
+                              fa::Float64, fb::Float64,
+                              ga::Float64, gb::Float64, L::Float64)
+    denom = fb - fa
+    t = denom == 0 ? 0.0 : (L - fa) / denom
+    t = clamp(t, 0.0, 1.0)
+    return (pa + t * (pb - pa), ga + t * (gb - ga))
+end
+
+# Chain segments into polylines by endpoint matching. Each segment endpoint
+# is a `ComplexF64` that is shared bit-exactly with any adjacent triangle's
+# crossing (both sides of a triangulation edge compute the same linear
+# crossing from identical endpoint values). Returns
+# `(paths::Vector{Vector{ComplexF64}}, aux::Vector{Vector{Float64}})`.
+function _chain_segments(segs::Vector{<:NamedTuple})
+    # Build an endpoint → list-of-segment-indices adjacency map.
+    adj = Dict{ComplexF64,Vector{Int}}()
+    for (i, s) in enumerate(segs)
+        push!(get!(adj, s.p1, Int[]), i)
+        push!(get!(adj, s.p2, Int[]), i)
+    end
+
+    used = falses(length(segs))
+    paths    = Vector{Vector{ComplexF64}}()
+    aux_vals = Vector{Vector{Float64}}()
+
+    # Walk a polyline starting from segment `start_seg` via endpoint
+    # `start_pt`; returns the path and aux values.
+    function _walk(start_seg::Int, start_pt::ComplexF64)
+        path = ComplexF64[start_pt]
+        aux  = Float64[]
+        # Emit the aux value for start_pt on the first segment
+        s0   = segs[start_seg]
+        push!(aux, start_pt == s0.p1 ? s0.a1 : s0.a2)
+
+        cur_seg = start_seg; cur_pt = start_pt
+        while true
+            used[cur_seg] = true
+            s = segs[cur_seg]
+            next_pt   = cur_pt == s.p1 ? s.p2 : s.p1
+            next_aux  = cur_pt == s.p1 ? s.a2 : s.a1
+            push!(path, next_pt)
+            push!(aux, next_aux)
+
+            nbrs = adj[next_pt]
+            nxt  = 0
+            for j in nbrs
+                if !used[j] && j != cur_seg
+                    nxt = j; break
+                end
+            end
+            nxt == 0 && break
+            cur_seg = nxt; cur_pt = next_pt
+        end
+        return path, aux
+    end
+
+    # Open polylines first: start from any endpoint touched by exactly
+    # one still-unused segment.
+    for (pt, nbrs) in adj
+        count = 0
+        start_seg = 0
+        for j in nbrs
+            if !used[j]
+                count += 1
+                start_seg = j
+            end
+        end
+        if count == 1
+            path, aux = _walk(start_seg, pt)
+            length(path) >= 2 && (push!(paths, path); push!(aux_vals, aux))
+        end
+    end
+
+    # Remaining segments form closed loops.
+    for i in eachindex(segs)
+        used[i] && continue
+        path, aux = _walk(i, segs[i].p1)
+        length(path) >= 2 && (push!(paths, path); push!(aux_vals, aux))
+    end
+
+    return paths, aux_vals
+end
+
+# AMR entry point: triangulate the scattered (Q, Δ) points, march triangles
+# to extract Re=0 and Im=0 contour segments with complementary-field values
+# at endpoints, chain into polylines, then run the shared analysis.
+function _extract_growth_rates_amr(Q::Vector{ComplexF64},
+                                     Δ::Vector{ComplexF64},
+                                     tauk::Float64;
+                                     re_target::Float64,
+                                     im_target::Float64,
+                                     pole_threshold::Float64,
+                                     filter_above_poles::Bool,
+                                     filter_outside_re::Bool)
+    length(Q) == length(Δ) ||
+        throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
+    length(Q) >= 3 ||
+        throw(ArgumentError("_extract_growth_rates_amr: need ≥ 3 points to triangulate"))
+
+    pts = [(real(q), imag(q)) for q in Q]
+    tri = triangulate(pts)
+
+    # Segment types (carry complementary-field value at each endpoint)
+    re_segs = NamedTuple{(:p1, :p2, :a1, :a2),
+                          Tuple{ComplexF64,ComplexF64,Float64,Float64}}[]
+    im_segs = NamedTuple{(:p1, :p2, :a1, :a2),
+                          Tuple{ComplexF64,ComplexF64,Float64,Float64}}[]
+
+    for T in each_solid_triangle(tri)
+        i1, i2, i3 = T
+        p1 = Q[i1]; p2 = Q[i2]; p3 = Q[i3]
+        v1 = Δ[i1]; v2 = Δ[i2]; v3 = Δ[i3]
+        re_seg, im_seg = _march_triangle(p1, p2, p3, v1, v2, v3,
+                                          re_target, im_target)
+        re_seg !== nothing && push!(re_segs, re_seg)
+        im_seg !== nothing && push!(im_segs, im_seg)
+    end
+
+    re_paths, _          = _chain_segments(re_segs)
+    im_paths, im_re_vals = _chain_segments(im_segs)
+
+    return _run_analysis(re_paths, im_paths, im_re_vals, tauk;
+                          pole_threshold=pole_threshold,
+                          filter_above_poles=filter_above_poles,
+                          filter_outside_re=filter_outside_re)
 end
