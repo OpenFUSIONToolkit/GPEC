@@ -358,13 +358,47 @@ function main(args::Vector{String}=String[])
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
     # ----------------------------------------------------------------
+    # SLAYER tearing-mode analysis
+    # ----------------------------------------------------------------
+    slayer_result = nothing
+    if "SLAYER" in keys(inputs)
+        slayer_ctrl = SLAYERRunner.slayer_control_from_toml(inputs["SLAYER"])
+        if slayer_ctrl.enabled
+            @info "\n  SLAYER\n$_SECTION"
+            slayer_start = time()
+            slayer_result = SLAYERRunner.run_slayer(
+                equil, intr, slayer_ctrl, inputs["SLAYER"];
+                dir_path=intr.dir_path,
+            )
+            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+
+            # Append the `slayer/` group to whichever HDF5 file the run
+            # is already writing (PE output file if PE ran, otherwise
+            # the ForceFreeStates file).
+            h5_filename = if "PerturbedEquilibrium" in keys(inputs)
+                pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+                isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+            else
+                ctrl.HDF5_filename
+            end
+            h5_path = joinpath(intr.dir_path, h5_filename)
+            HDF5.h5open(h5_path, "r+") do f
+                SLAYERRunner.write_slayer_hdf5!(f, slayer_result)
+            end
+            @info "SLAYER results written to $h5_filename"
+        end
+    end
+
+    # ----------------------------------------------------------------
     # Done
     # ----------------------------------------------------------------
     @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
 
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
-    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
+    return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+            vac_data=ctrl.vac_flag ? vac_data : nothing,
+            slayer=slayer_result)
 
 end
 
