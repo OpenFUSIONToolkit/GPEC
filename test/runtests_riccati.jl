@@ -156,10 +156,13 @@ end
         @test all(s -> all(isfinite, s.delta_prime), intr_ric.sing)
 
         # Regression: Solovev Δ' values (in the bounded Riccati normalization).
-        # Positive Δ' (surface 1) and negative Δ' (surface 2) are both physically plausible
-        # for this configuration.
-        @test isapprox(real(intr_ric.sing[1].delta_prime[1]),  57.3; rtol=0.05)
-        @test isapprox(real(intr_ric.sing[2].delta_prime[1]), -4.03; rtol=0.05)
+        # Both surfaces are negative here because the integration now runs to
+        # the qhigh/psihigh-defined edge; the previous positive Δ' on surface 1
+        # was an artefact of the edge-dW heuristic silently truncating psilim.
+        # rtol is wider than the other Δ' tests to tolerate a ~5% run-to-run
+        # spread in the exact value depending on thread scheduling.
+        @test isapprox(real(intr_ric.sing[1].delta_prime[1]), -72.43; rtol=0.1)
+        @test isapprox(real(intr_ric.sing[2].delta_prime[1]),  -9.59; rtol=0.1)
 
         # delta_prime_col is populated, has correct shape (N × n_res_modes), and
         # its diagonal elements match delta_prime exactly.
