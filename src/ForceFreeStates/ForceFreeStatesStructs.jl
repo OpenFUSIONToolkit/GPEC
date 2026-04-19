@@ -36,6 +36,7 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     ua_right::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)  # asymptotic basis at right inner-layer boundary
     psi_ua_left::Float64 = 0.0   # ψ where ua_left was evaluated (left inner-layer boundary)
     psi_ua_right::Float64 = 0.0  # ψ where ua_right was evaluated (right inner-layer boundary)
+    restype::Any = nothing       # ResistGeometry from ResistEval.jl (populated by resist_eval_all!); typed `Any` to avoid a cross-file type reference
 end
 
 """

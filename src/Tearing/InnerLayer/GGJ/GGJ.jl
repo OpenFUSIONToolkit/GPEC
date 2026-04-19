@@ -37,11 +37,13 @@ include("InnerAsymptotics.jl")
 include("Reference.jl")
 include("Shooting.jl")
 include("Galerkin.jl")
+include("LayerInputs.jl")
 
 export GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
 export build_asymptotics, evaluate_asymptotics, pick_xmax
 export InnerAsymptoticsCache
 export glasser_wang_2020_eq55
+export build_ggj_inputs
 
 end # module GGJ

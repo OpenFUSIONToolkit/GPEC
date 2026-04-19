@@ -50,7 +50,7 @@ import AdaptiveArrayPools: @with_pool
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_find!
+using .ForceFreeStates: sing_lim!, sing_find!, resist_eval_all!, resist_geometry, ResistGeometry
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
@@ -197,6 +197,14 @@ function main(args::Vector{String}=String[])
             intr.sing = intr.sing[keep]
             intr.msing = length(keep)
         end
+    end
+
+    # Populate Glasser-Greene-Johnson geometric coefficients (E, F, G, H,
+    # K, M) for each surviving singular surface. Needed by the Julia GGJ
+    # inner-layer analysis; kinetic timescales (τ_A, τ_R) are layered on
+    # top by `build_ggj_inputs` using the same kinetic profiles as SLAYER.
+    if intr.msing > 0
+        ForceFreeStates.resist_eval_all!(intr, equil)
     end
 
     # Determine poloidal mode numbers
@@ -538,6 +546,26 @@ function write_outputs_to_HDF5(
             end
             out_h5["singular/m"] = m_matrix
             out_h5["singular/n"] = n_matrix
+
+            # Glasser-Greene-Johnson geometric coefficients + surface averages
+            # (populated by ForceFreeStates.resist_eval_all! after sing_find!).
+            # Both kinetic-free (E, F, G, H, K, M) and geometry-only
+            # (avg_bsq_over_dpsisq, avg_bsq) quantities are written so
+            # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
+            # can reconstruct τ_A / τ_R from any kinetic-profile source.
+            if all(s -> s.restype !== nothing, intr.sing)
+                out_h5["singular/E"]                  = [s.restype.E    for s in intr.sing]
+                out_h5["singular/F"]                  = [s.restype.F    for s in intr.sing]
+                out_h5["singular/G"]                  = [s.restype.G    for s in intr.sing]
+                out_h5["singular/H"]                  = [s.restype.H    for s in intr.sing]
+                out_h5["singular/K"]                  = [s.restype.K    for s in intr.sing]
+                out_h5["singular/M"]                  = [s.restype.M    for s in intr.sing]
+                out_h5["singular/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
+                out_h5["singular/avg_bsq"]            = [s.restype.avg_bsq             for s in intr.sing]
+                out_h5["singular/p_local"]            = [s.restype.p_local  for s in intr.sing]
+                out_h5["singular/p1_local"]           = [s.restype.p1_local for s in intr.sing]
+                out_h5["singular/v1_local"]           = [s.restype.v1_local for s in intr.sing]
+            end
         end
 
         # Write Δ' if computed (one complex value per resonant mode per singular surface)
