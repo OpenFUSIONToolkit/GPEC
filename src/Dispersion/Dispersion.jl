@@ -35,7 +35,9 @@ using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
                     SLAYERModel, SLAYERParameters
 
 include("SurfaceCoupling.jl")
+include("Coupled.jl")
 
 export SurfaceCoupling, surface_coupling
+export MultiSurfaceCoupling, multi_surface_coupling
 
 end # module Dispersion
