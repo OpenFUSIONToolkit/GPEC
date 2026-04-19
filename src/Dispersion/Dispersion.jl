@@ -36,8 +36,12 @@ using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
 
 include("SurfaceCoupling.jl")
 include("Coupled.jl")
+include("BruteForceScan.jl")
+include("GrowthRateExtraction.jl")
 
 export SurfaceCoupling, surface_coupling
 export MultiSurfaceCoupling, multi_surface_coupling
+export ScanResult, brute_force_scan
+export GrowthRateResult, find_growth_rates
 
 end # module Dispersion

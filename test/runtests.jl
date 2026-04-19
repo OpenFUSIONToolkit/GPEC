@@ -32,5 +32,6 @@ else
     include("./runtests_slayer_riccati.jl")
     include("./runtests_dispersion_residual.jl")
     include("./runtests_dispersion_coupled.jl")
+    include("./runtests_dispersion_scan.jl")
     include("./runtests_fullruns.jl")
 end
