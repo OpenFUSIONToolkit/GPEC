@@ -1535,9 +1535,14 @@ function parallel_eulerlagrange_integration(
     N = intr.numpert_total
     propagators = [ChunkPropagator(N) for _ in chunks]
 
-    # Per-thread lightweight proxy OdeState for sing_der! side effects
+    # Per-thread lightweight proxy OdeState for sing_der! side effects.
+    # Julia 1.9+ splits threads into :default and :interactive pools; Threads.threadid()
+    # can return any id up to Threads.maxthreadid() (e.g. 2 on a runner with nthreads=1
+    # but one interactive thread), so the proxy array must be sized by maxthreadid()
+    # rather than nthreads() to avoid a BoundsError inside the @threads loop.
     nthreads = Threads.nthreads()
-    odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:nthreads]
+    max_tid = Threads.maxthreadid()
+    odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:max_tid]
 
     if ctrl.verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
