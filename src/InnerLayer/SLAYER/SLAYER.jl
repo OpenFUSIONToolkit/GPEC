@@ -39,6 +39,7 @@ struct SLAYERModel{S} <: InnerLayerModel end
 SLAYERModel(; variant::Symbol=:fitzpatrick) = SLAYERModel{variant}()
 
 include("LayerParameters.jl")
+include("Riccati.jl")
 
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
