@@ -21,6 +21,10 @@ include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
 
+include("Dispersion/Dispersion.jl")
+import .Dispersion as Dispersion
+export Dispersion
+
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
 export ForcingTerms
