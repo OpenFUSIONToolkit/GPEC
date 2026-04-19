@@ -28,5 +28,6 @@ else
     include("./runtests_parallel_integration.jl")
     include("./runtests_sing.jl")
     include("./runtests_tj_analytic.jl")
+    include("./runtests_slayer_params.jl")
     include("./runtests_fullruns.jl")
 end

@@ -10,14 +10,17 @@ module InnerLayer
 using LinearAlgebra
 using StaticArrays
 
+using ..Utilities
+
 include("InnerLayerInterface.jl")
 include("GGJ/GGJ.jl")
-# include("SLAYER/Slayer.jl") --- SLAYER code goes here
+include("SLAYER/SLAYER.jl")
 
 import .GGJ: GGJModel, GGJParameters, build_asymptotics, evaluate_asymptotics, pick_xmax
 import .GGJ: InnerAsymptoticsCache, mercier_di, mercier_dr, inner_Q, rescale_delta
 import .GGJ: glasser_wang_2020_eq55
-# SLAYER imports go here
+
+import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 
 export InnerLayerModel, solve_inner
 export GGJ, GGJModel, GGJParameters
@@ -25,7 +28,6 @@ export build_asymptotics, evaluate_asymptotics, pick_xmax, InnerAsymptoticsCache
 export mercier_di, mercier_dr, inner_Q, rescale_delta
 export glasser_wang_2020_eq55
 
-# SLAYER exports go here
-
+export SLAYER, SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 
 end # module InnerLayer
