@@ -266,7 +266,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 0.0
+    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
     cyl_flag::Bool = false
     set_psilim_via_dmlim::Bool = false
     dmlim::Float64 = 0.2
@@ -287,7 +287,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     save_interval::Int = 3
     force_termination::Bool = false
     use_riccati::Bool = false
-    use_parallel::Bool = false
+    use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
     use_double64_bvp::Bool = true
 end
 
