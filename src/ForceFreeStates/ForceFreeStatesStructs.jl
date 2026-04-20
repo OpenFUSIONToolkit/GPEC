@@ -223,7 +223,9 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `sing_order::Int` - Order of singular layer expansion
+  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim (Fortran sas_flag equivalent). Default false.
+  - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true.
+  - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
@@ -260,13 +262,15 @@ A mutable struct containing control parameters for stability analysis, set by th
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
-    eulerlagrange_tolerance::Float64 = 1e-7
+    eulerlagrange_tolerance::Float64 = 1e-8
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
-    sing_order::Int = 2
+    set_psilim_via_dmlim::Bool = false
+    dmlim::Float64 = 0.2
+    sing_order::Int = 6
     qhigh::Float64 = 1e3
     kinetic_source::String = "fixed"
     kinetic_factor::Float64 = 0.0

@@ -49,7 +49,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     mtheta::Int = 512
 
     newq0::Int = 0
-    etol::Float64 = 1e-7
+    etol::Float64 = 1e-10
 
     force_termination::Bool = false
 
