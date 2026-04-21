@@ -1,3 +1,4 @@
+*.cov
 *.mod
 *.dylib
 *.dll
@@ -20,3 +21,6 @@ anaconda_projects/
 modovmc
 pestotv
 *.csv
+regression-harness/*.sqlite
+regression-harness/*.sqlite-shm
+regression-harness/*.sqlite-wal

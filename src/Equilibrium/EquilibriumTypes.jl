@@ -44,7 +44,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
 
     grid_type::String = "log_asymptotic"
     psilow::Float64 = 1e-2
-    psihigh::Float64 = 0.994
+    psihigh::Float64 = 0.9995
     mpsi::Int = 0
     psi_accuracy::Float64 = 0.001
     mtheta::Int = 256
@@ -63,31 +63,51 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         force_termination, use_galgrid)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
-            power_b = 0; power_bp = 0; power_r = 0; power_rc = 0
+            power_b = 0;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "pest"
             @info "Forcing pest coordinate jacobian exponents: power_*"
-            power_b = 0; power_bp = 0; power_r = 2; power_rc = 0
+            power_b = 0;
+            power_bp = 0;
+            power_r = 2;
+            power_rc = 0
         elseif jac_type == "equal_arc"
             @info "Forcing equal_arc coordinate jacobian exponents: power_*"
-            power_b = 0; power_bp = 1; power_r = 0; power_rc = 0
+            power_b = 0;
+            power_bp = 1;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "boozer"
             @info "Forcing boozer coordinate jacobian exponents: power_*"
-            power_b = 2; power_bp = 0; power_r = 0; power_rc = 0
+            power_b = 2;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "park"
             @info "Forcing park coordinate jacobian exponents: power_*"
-            power_b = 1; power_bp = 0; power_r = 0; power_rc = 0
+            power_b = 1;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "other"
             # Normalize to a named type when the powers match, so fast paths are taken.
-            if     power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "hamada";    @info "Recognized hamada jacobian from power exponents"
+            if power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "hamada";
+                @info "Recognized hamada jacobian from power exponents"
             elseif power_b == 0 && power_bp == 0 && power_r == 2 && power_rc == 0
-                jac_type = "pest";      @info "Recognized pest jacobian from power exponents"
+                jac_type = "pest";
+                @info "Recognized pest jacobian from power exponents"
             elseif power_b == 0 && power_bp == 1 && power_r == 0 && power_rc == 0
-                jac_type = "equal_arc"; @info "Recognized equal_arc jacobian from power exponents"
+                jac_type = "equal_arc";
+                @info "Recognized equal_arc jacobian from power exponents"
             elseif power_b == 2 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "boozer";    @info "Recognized boozer jacobian from power exponents"
+                jac_type = "boozer";
+                @info "Recognized boozer jacobian from power exponents"
             elseif power_b == 1 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "park";      @info "Recognized park jacobian from power exponents"
+                jac_type = "park";
+                @info "Recognized park jacobian from power exponents"
             else
                 @info "Using manual jacobian exponents: power b, bp, r, rc = $(power_b), $(power_bp), $(power_r), $(power_rc)"
             end
@@ -139,7 +159,7 @@ end
 
 """
 Outer constructor for EquilibriumConfig that enables a toml file
-    interface for specifying the configuration settings
+interface for specifying the configuration settings
 
 DEPRECATED: Use [Equilibrium] section in gpec.toml instead
 """
@@ -499,11 +519,11 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(dVdpsi_vals) == npts
     @assert length(q_vals) == npts
 
-    # Create value interpolants with CubicFit BC and LinearBinary search for sequential psi access
-    F_spline = cubic_interp(xs, F_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    P_spline = cubic_interp(xs, P_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    q_spline = cubic_interp(xs, q_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    # Create value interpolants with CubicFit BC (default) for sequential psi access
+    F_spline = cubic_interp(xs, F_vals; extrap=extrap)
+    P_spline = cubic_interp(xs, P_vals; extrap=extrap)
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; extrap=extrap)
+    q_spline = cubic_interp(xs, q_vals; extrap=extrap)
 
     # Create derivative views (these share data with value interpolants, no extra storage)
     F_deriv = deriv1(F_spline)
@@ -535,28 +555,27 @@ This object provides a complete representation of the processed plasma equilibri
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
-
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
+
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
       + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
-
   - **Geometric quantities (rzphi, 4 interpolants):**
     2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
+
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
       + `rzphi_rsquared::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
       + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
       + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
       + `rzphi_jac::CubicInterpolantND`: Jacobian
-
   - **Physics quantities (eqfun, 3 interpolants):**
     2D cubic interpolants storing local physics and geometric quantities.
+
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle θₙₑw
       + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
       + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
       + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
-
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]

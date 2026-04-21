@@ -9,7 +9,6 @@ using OrdinaryDiffEq
 using HDF5
 using JLD2
 using FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary
 using AdaptiveArrayPools
 using Roots
 
@@ -26,6 +25,7 @@ include("Bal.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")
+include("Kinetic.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")

@@ -37,6 +37,9 @@ and data dumping.
         @views vac_data.wv[:, ipert] .*= singfac[ipert]
     end
 
+    # Least stable eigenvalue of the vacuum matrix alone (should be PSD; clamp numerical noise to zero)
+    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv)))))
+
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
     vac_data.wt0 .= vac_data.wt
@@ -127,8 +130,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     wv_array = zeros(ComplexF64, npsi + 1, intr.numpert_total, intr.numpert_total)
 
     for i in 1:(npsi+1)
-        # Space points evenly in q
-        qi = qedge + (intr.qlim - qedge) * (i / npsi)
+        # Space points evenly in q over [qedge, qlim] (i=1 → qedge, i=npsi+1 → qlim)
+        qi = qedge + (intr.qlim - qedge) * ((i - 1) / npsi)
 
         psii = ctrl.psiedge + (intr.psilim - ctrl.psiedge) * ((i - 1) / npsi)
         psi_array[i] = find_zero(
@@ -137,17 +140,9 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
             psii, Roots.Newton()
         )
 
-        # Compute vacuum response matrix at this psi (2D single-n, 2D multi-n block-diagonal, or 3D)
-        vac_inputs = Vacuum.VacuumInput(equil, psii, ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
+        # Compute raw vacuum matrix at the actual scan psi (singfac NOT applied; free_compute_total applies it analytically)
+        vac_inputs = Vacuum.VacuumInput(equil, psi_array[i], ctrl.mthvac, ctrl.nzvac, intr.mpert, intr.mlow, intr.npert, intr.nlow; force_wv_symmetry=ctrl.force_wv_symmetry)
         wv, _, _, _, _ = Vacuum.compute_vacuum_response(vac_inputs, intr.wall_settings)
-
-        # Apply singular factor scaling: (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
-        singfac = vec((intr.mlow:intr.mhigh) .- qi .* (intr.nlow:intr.nhigh)')
-        @inbounds for ipert in 1:intr.numpert_total
-            @views wv[ipert, :] .*= singfac[ipert]
-            @views wv[:, ipert] .*= singfac[ipert]
-        end
-
         @views wv_array[i, :, :] .= wv
     end
 
@@ -155,8 +150,8 @@ function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium
     wv_flat = reshape(wv_array, npsi + 1, intr.numpert_total^2)
 
     # FastInterpolations now natively supports complex values - create complex series interpolant directly
-    # Use CubicFit() for native endpoint handling
-    wvmat = cubic_interp(psi_array, wv_flat; bc=CubicFit(), extrap=ExtendExtrap(), search=LinearBinary())
+    # Use CubicFit() (default) for native endpoint handling
+    wvmat = cubic_interp(psi_array, Series(wv_flat); extrap=ExtendExtrap())
 
     return wvmat
 end
@@ -168,46 +163,76 @@ Compute total complex energy eigenvalue (total1). This is a trimmed down version
 that only computes the total energy eigenvalue for the mode unstable mode, used in `findmax_dW_edge!`
 which calls this function at each step in the psiedge -> psilim region of integration. This performs
 the same function as `free_test` in the Fortran code, except we have moved the creation of the
-wv matrix spline to `free_compute_wv_spline` and pass it in `odet.wvmat` (a complex-valued spline).
+wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvmat` (a complex-valued spline).
 """
-function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
+@with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
-    # Allocations
-    wp = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
-    tot_eigvals = zeros(ComplexF64, intr.numpert_total)
-    wt = zeros(ComplexF64, intr.numpert_total, intr.numpert_total)
+    Npert = intr.numpert_total
+    wp = zeros!(pool, ComplexF64, Npert, Npert)
+    eigenvalues = zeros!(pool, ComplexF64, Npert)
+    wt = zeros!(pool, ComplexF64, Npert, Npert)
+    wv = zeros!(pool, ComplexF64, Npert, Npert)
+    eindex = zeros!(pool, Int, Npert)
+    evals_real = zeros!(pool, Float64, Npert)
+    tmp_v = zeros!(pool, ComplexF64, Npert)
 
-    dV_dpsi = equil.profiles.dVdpsi_spline(intr.psilim)
+    dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 
     # Compute plasma response matrix
-    @views wp = (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
+    @views wp .= (odet.u[:, :, 2] / odet.u[:, :, 1]) ./ equil.psio^2
 
-    # Compute vacuum matrix from series interpolant (use separate hint for wv grid)
-    # FastInterpolations now natively supports complex values
-    odet.wvmat(vec(odet._wv_out), odet.psifac; hint=odet.wv_hint)
-    wv = odet._wv_out
+    # Retrieve raw vacuum matrix from spline and apply singfac analytically at the local q.
+    # Singfac is not pre-applied in the spline (see free_compute_wv_spline) to avoid interpolating
+    # a zero-crossing function near rational surfaces, which would distort the peaks.
+    es = odet.edge_scan
+    es.wvmat(vec(wv), odet.psifac; hint=es.wv_hint)
+    q_at_psifac = equil.profiles.q_spline(odet.psifac)
+    # Scale by (m - n*q)(m' - n'*q) [Chance Phys. Plasmas 1997 2161 eq. 126]
+    singfac = vec((intr.mlow:intr.mhigh) .- q_at_psifac .* (intr.nlow:intr.nhigh)')
+    @inbounds for ipert in 1:Npert
+        @views wv[ipert, :] .*= singfac[ipert]
+        @views wv[:, ipert] .*= singfac[ipert]
+    end
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
     Ev = eigen(wt)
 
-    # Sort eigenvalues and reorder columns of wt
-    eindex = sortperm(real.(Ev.values); rev=true)
-    for ipert in 1:intr.numpert_total
-        wt[:, ipert] .= Ev.vectors[:, eindex[intr.numpert_total+1-ipert]]
-        tot_eigvals[ipert] = Ev.values[eindex[intr.numpert_total+1-ipert]]
+    # Sort eigenvalues by descending real part
+    @inbounds for i in 1:Npert
+        evals_real[i] = real(Ev.values[i])
+    end
+    sortperm!(eindex, evals_real; rev=true)
+    for ipert in 1:Npert
+        wt[:, ipert] .= Ev.vectors[:, eindex[Npert+1-ipert]]
+        eigenvalues[ipert] = Ev.values[eindex[Npert+1-ipert]]
     end
 
-    # Normalize eigenfunction and energy (only need the first eigenmode)
+    # Compute kinetic norm xi'*J(psi)*xi / dV_dpsi for the leading eigenvector.
+    # This normalizes total_eigenvalue, plasma_energy, vacuum_energy to be dimensionally consistent with free_run!.
     isol = 1
+    v = @view wt[:, isol]
     norm = 0.0 + 0.0im
     for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
         ipert = (ipert_n - 1) * intr.mpert + ipert_m
         jpert = (ipert_n - 1) * intr.mpert + jpert_m
-        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * wt[ipert, isol] * conj(wt[jpert, isol])
+        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * v[ipert] * conj(v[jpert])
     end
     norm /= dV_dpsi
-    tot_eigvals[isol] /= norm
+    eigenvalues[isol] /= norm
 
-    return tot_eigvals[1]
+    # Plasma and vacuum energy components for the leading eigenvector, normalized by the same norm.
+    # plasma_energy + vacuum_energy = total_eigenvalue by construction (wt = wp + wv; eigenvalue = v'*wt*v / norm).
+    mul!(tmp_v, wp, v)
+    plasma_energy = ComplexF64(dot(v, tmp_v)) / norm
+    mul!(tmp_v, wv, v)
+    vacuum_energy = ComplexF64(dot(v, tmp_v)) / norm
+
+    # Smallest eigenvalue of the vacuum matrix alone, normalized by the same kinetic norm as the other energies
+    # so all four outputs are directly comparable. The singfac-scaled wv should be PSD by
+    # construction (congruence of PSD wv_raw), but numerical noise can make eigenvalues slightly
+    # negative. Clamp to zero to enforce the physical constraint.
+    vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / norm)
+
+    return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue)
 end

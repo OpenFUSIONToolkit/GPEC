@@ -60,7 +60,7 @@ can do it post-integration rather than during and don't directly handle file out
 @with_pool pool function check_for_zero_crossings!(odet::OdeState, profiles::Equilibrium.ProfileSplines, istep::Int)
 
     # Compute smallest eigenvalue (crit) at current step
-    # Use shared hint with LinearBinary() search for O(1) interval lookup during sequential stability evaluation
+    # Use shared hint for O(1) interval lookup during sequential stability evaluation
     u = acquire!(pool, eltype(odet.u_store), size(odet.u_store)[1:3])
     psi = odet.psi_store[istep]
     u .= odet.u_store[:, :, :, istep]

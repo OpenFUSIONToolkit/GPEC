@@ -77,15 +77,15 @@ function direct_get_bfield!(
         bf_out.psi = psi_in((r, z))
     elseif derivs == 1
         bf_out.psi = psi_in((r, z))
-        bf_out.psir = psi_in((r, z); deriv=Val((1, 0)))
-        bf_out.psiz = psi_in((r, z); deriv=Val((0, 1)))
+        bf_out.psir = psi_in((r, z); deriv=DerivOp(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=DerivOp(0, 1))
     else # derivs >= 2
         bf_out.psi = psi_in((r, z))
-        bf_out.psir = psi_in((r, z); deriv=Val((1, 0)))
-        bf_out.psiz = psi_in((r, z); deriv=Val((0, 1)))
-        bf_out.psirr = psi_in((r, z); deriv=Val((2, 0)))
-        bf_out.psirz = psi_in((r, z); deriv=Val((1, 1)))
-        bf_out.psizz = psi_in((r, z); deriv=Val((0, 2)))
+        bf_out.psir = psi_in((r, z); deriv=DerivOp(1, 0))
+        bf_out.psiz = psi_in((r, z); deriv=DerivOp(0, 1))
+        bf_out.psirr = psi_in((r, z); deriv=DerivOp(2, 0))
+        bf_out.psirz = psi_in((r, z); deriv=DerivOp(1, 1))
+        bf_out.psizz = psi_in((r, z); deriv=DerivOp(0, 2))
     end
 
     # Evaluate magnetic fields from equilibrium profiles
@@ -196,8 +196,7 @@ function direct_position!(raw_profile::DirectRunInput)
     # Access nodal values from psi_in interpolant: partials[1,:,:] = function values
     new_psi_fs = raw_profile.psi_in.nodal_derivs.partials[1, :, :] .* raw_profile.psio / bfield.psi
     # Because DirectRunInput is a mutable struct, we can update the spline here
-    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; search=LinearBinary(),
-        bc=CubicFit(), extrap=ExtendExtrap())
+    raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; extrap=ExtendExtrap())
 
     # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
     # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is
@@ -416,12 +415,17 @@ function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     h_samp = step(psi_samp)
     h_min = Inf
     buf = zeros(4)
-    all_vals = [begin sq_in(buf, ψ); copy(buf) end for ψ in psi_samp]
+    all_vals = [
+        begin
+            sq_in(buf, ψ)
+            copy(buf)
+        end for ψ in psi_samp
+    ]
     for k in 1:4
         vals = [all_vals[i][k] for i in 1:n_samp]
         f_scale = max(maximum(abs.(vals)), 1e-12)
         d2_max = 0.0
-        for i in 2:n_samp-1
+        for i in 2:(n_samp-1)
             d2 = abs(vals[i+1] - 2vals[i] + vals[i-1]) / (h_samp^2 * f_scale)
             d2_max = max(d2_max, d2)
         end
@@ -439,7 +443,7 @@ given the separatrix log slope A. Three-region geometric grid: core, pedestal, f
 The middle-region spacing is driven by profile curvature (P, F, dV/dψ, q) via sq_in.
 """
 function make_optimal_mpsi(psilow, psihigh, A, sq_in;
-        tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
+    tau=0.005, psi_split_core=0.03, psi_split_edge=0.98)
     dlog = (13.0 * tau / A)^(1/4)
     N_edge = ceil(Int, log((1.0 - psi_split_edge) / (1.0 - psihigh)) / dlog) + 1
     h_mid = _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
@@ -458,7 +462,7 @@ directly as provided — core and edge are geometric in log(ψ) and log(1−ψ) 
 middle is uniform in ψ.
 """
 function make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge;
-        psi_split_core=0.03, psi_split_edge=0.98)
+    psi_split_core=0.03, psi_split_edge=0.98)
     # Core: [psilow, psi_split_core], geometric in log(ψ)
     core_pts = [psilow * (psi_split_core / psilow)^(i / N_core) for i in 0:N_core]
     # Middle: [psi_split_core, psi_split_edge], uniform (skip first to avoid duplicate)
@@ -491,16 +495,16 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
 
     psi_nodes = if equil_params.grid_type == "log_asymptotic"
         if n_core_mid_edge !== nothing
-            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...; )
+            make_optimal_psi_grid(psilow, psihigh, n_core_mid_edge...;)
         else
             # Fixed mpsi specified: distribute by log-weights
             log_core = log(0.03 / psilow)
-            log_mid  = log(0.98 / 0.03)
+            log_mid = log(0.98 / 0.03)
             log_edge = log((1.0 - 0.98) / (1.0 - psihigh))
             log_total = log_core + log_mid + log_edge
             N_edge = clamp(round(Int, mpsi * log_edge / log_total), 2, mpsi ÷ 2)
             N_core = round(Int, mpsi * log_core / log_total)
-            N_mid  = mpsi - N_edge - N_core
+            N_mid = mpsi - N_edge - N_core
             make_optimal_psi_grid(psilow, psihigh, N_core, N_mid, N_edge)
         end
     elseif equil_params.grid_type == "ldp"
@@ -721,12 +725,51 @@ function equilibrium_solver(
     sq_nodes = zeros(Float64, mpsi + 1, 4)
     rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
 
+<<<<<<< HEAD
     t_flux = @elapsed _equilibrium_run_parallel_flux_surfaces!(
         mpsi, psi_nodes, rzphi_nodes, sq_nodes, mtheta, theta_nodes,
         raw_profile, ro, zo, rs2, psio, fieldline_int,
     )
     if benchmark
         @info "equilibrium_solver: parallel flux-surface for-loop — @elapsed (1 run): $(@sprintf("%.6f", t_flux)) s"
+=======
+    for ipsi in (mpsi+1):-1:1  # outermost to innermost
+        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
+        checkpoint!(pool, Float64)
+
+        # Fit data into temporary straight fieldline poloidal angle splines
+        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
+        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
+
+        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
+        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
+        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
+        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
+        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
+
+        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
+
+        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
+        ff_deriv = deriv1(ff_interp)
+
+        # Resample ff onto uniform theta grid
+        for itheta in 1:(mtheta+1)
+            theta = theta_nodes[itheta]
+            ff_interp(ff_val, theta)
+            ff_deriv(ff_deriv_val, theta)
+
+            rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
+            rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
+            rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
+            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
+        end
+
+        sq_nodes[ipsi, 1] = bfield.f * 2π
+        sq_nodes[ipsi, 2] = bfield.p
+        sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
+        sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
+        rewind!(pool, Float64)
+>>>>>>> origin/develop
     end
 
     # Temporary splines for q0 extrapolation and optional newq0 revision
@@ -769,7 +812,7 @@ function equilibrium_solver(
     rzphi_ys = collect(theta_nodes)
 
     grid2d = (rzphi_xs, theta_nodes)
-    opts2d = (search=LinearBinary(), bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)

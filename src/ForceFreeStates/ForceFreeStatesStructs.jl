@@ -107,7 +107,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
   - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
@@ -132,7 +131,6 @@ A mutable struct holding internal state variables for stability calculations.
     keq_out::Bool = false
     theta_out::Bool = false
     xlmda_out::Bool = false
-    fkg_kmats_flag::Bool = false
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
@@ -141,7 +139,7 @@ A mutable struct holding internal state variables for stability calculations.
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
-    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), zeros(5, 5); bc=NaturalBC())
+    locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
 end
@@ -177,22 +175,10 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim
-  - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kin_flag::Bool` - Enable kinetic effects
-  - `con_flag::Bool` - Continue integration through rationals without zeroing singular solutions
-  - `kinfac1::Float64` - First kinetic scaling factor (not yet implemented)
-  - `kinfac2::Float64` - Second kinetic scaling factor (not yet implemented)
-  - `kingridtype::Int` - Type of kinetic grid (0=standard) (not yet implemented)
-  - `ktanh_flag::Bool` - Enable hyperbolic tangent profile (not yet implemented)
-  - `passing_flag::Bool` - Include passing particles (not yet implemented)
-  - `trapped_flag::Bool` - Include trapped particles (not yet implemented)
-  - `ion_flag::Bool` - Include ion kinetic effects (not yet implemented)
-  - `electron_flag::Bool` - Include electron kinetic effects (not yet implemented)
-  - `ktc::Float64` - Kinetic collision parameter (not yet implemented)
-  - `ktw::Float64` - Kinetic width parameter (not yet implemented)
+  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
+  - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
@@ -230,25 +216,13 @@ A mutable struct containing control parameters for stability analysis, set by th
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
-    set_psilim_via_dmlim::Bool = false
-    dmlim::Float64 = 0.2
     sing_order::Int = 2
     qhigh::Float64 = 1e3
-    kin_flag::Bool = false
-    con_flag::Bool = false
-    kinfac1::Float64 = 1.0
-    kinfac2::Float64 = 1.0
-    kingridtype::Int = 0
-    ktanh_flag::Bool = false
-    passing_flag::Bool = false
-    trapped_flag::Bool = true
-    ion_flag::Bool = true
-    electron_flag::Bool = false
-    ktc::Float64 = 0.1
-    ktw::Float64 = 50.0
+    kinetic_source::String = "fixed"
+    kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
-    psiedge::Float64 = 1.0
+    psiedge::Float64 = 0.99
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
@@ -268,7 +242,7 @@ end
     # Each matrix is flattened to (npsi × numpert_total^2) series
     # FastInterpolations natively supports complex values: CubicSeriesInterpolant{Tgrid, Tvalue}
     # NOTE: itp_opts must precede interpolant fields — @kwdef evaluates defaults in declaration order
-    itp_opts::Opts = (; bc=CubicFit(), search=LinearBinary(), extrap=ExtendExtrap())
+    itp_opts::Opts = (; extrap=ExtendExtrap())
 
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
@@ -277,8 +251,30 @@ end
     emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Ideal A,B,C splines preserved before kinetic overwrite (for mat_flag output)
+    amats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
+    kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+    # Kinetic torque matrix splines: 6 components
+    ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+
+    # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
+    f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r1mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -294,13 +290,13 @@ end
 function _empty_series_interp_complex(n_series::Int)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Y)
+    return cubic_interp(xs, Series(Y))
 end
 
 function _empty_series_interp_complex(n_series::Int, itp_opts::NamedTuple)
     xs = collect(range(0.0, 1.0; length=5))
     Y = zeros(ComplexF64, 5, n_series)
-    return cubic_interp(xs, Y; itp_opts...)
+    return cubic_interp(xs, Series(Y); itp_opts...)
 end
 
 # Convenience constructor
@@ -323,6 +319,7 @@ Populated in `Free.jl`.
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the vacuum matrix wv, clamped to zero
   - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points [x, y, z] (mthvac * nzvac × 3)
@@ -339,6 +336,7 @@ Populated in `Free.jl`.
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+    vacuum_eigenvalue::Float64 = NaN
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
@@ -346,6 +344,38 @@ Populated in `Free.jl`.
 end
 
 VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpoints, numpert_total, mthvac)
+
+"""
+EdgeScanState
+
+Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
+Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `edge_scan/`.
+
+## Fields
+
+  - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
+  - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
+  - `psi, q` - ψ and q values at each edge scan step.
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step (NaN for failed steps).
+"""
+@kwdef mutable struct EdgeScanState
+    numpert_total::Int
+    N_edge::Int
+
+    # Vacuum matrix spline and evaluation infrastructure
+    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
+    wv_hint::Base.RefValue{Int} = Ref(1)
+
+    # Scan results (written to HDF5 under edge_scan/; NaN where free_compute_total raised SingularException)
+    psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
+    q::Vector{Float64} = Vector{Float64}(undef, N_edge)
+    total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
+end
+
+EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)
 
 """
 OdeState
@@ -373,8 +403,7 @@ and a small set of temporary matrices and factors used to compute singular-layer
     with shape `(numpert_total, numpert_total, 2, msing)`.
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
-  - `dW_edge::Vector{ComplexF64}` - dW values computed in the psiedge < psilim region for each stored step (length `numsteps_init`).
-  - `wvmat::CubicSeriesInterpolant{Float64,ComplexF64}` - Complex-valued precomputed wv matrices used by `free_test`/vacuum routines.
+  - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
@@ -413,10 +442,8 @@ and a small set of temporary matrices and factors used to compute singular-layer
     ca_r::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
     ca_l::Array{ComplexF64,4} = Array{ComplexF64}(undef, numpert_total, numpert_total, 2, msing)
 
-    # Used for to find peak dW in the edge
-    dW_edge::Vector{ComplexF64} = Array{ComplexF64}(undef, numsteps_init)
-    wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
-    _wv_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
+    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
+    edge_scan::EdgeScanState = EdgeScanState(numpert_total, 0)
 
     # Data for integrator
     psifac::Float64 = 0.0
@@ -439,15 +466,17 @@ and a small set of temporary matrices and factors used to compute singular-layer
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
 
+    # Kinetic workspace arrays: evaluated from kwmats/ktmats splines at current psi
+    kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+    ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups
     spline_hint::Base.RefValue{Int} = Ref(1)
-    # Separate hint for wvmat splines (different grid size than equilibrium profiles)
-    wv_hint::Base.RefValue{Int} = Ref(1)
     # Shared 2D hint for CubicInterpolantND (rzphi splines) during ODE integration
     # Tuple of (psi_hint, theta_hint) for O(1) interval lookups in 2D bicubic splines
     rzphi_hint::Tuple{Base.RefValue{Int},Base.RefValue{Int}} = (Ref(1), Ref(1))
 end
 
-# Initialize function for OdeState with relevant parameters for array initialization
-OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) = OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
+    OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
