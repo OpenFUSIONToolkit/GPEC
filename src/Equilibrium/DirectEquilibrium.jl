@@ -62,7 +62,7 @@ the Julia spline implementation.
   - `psio`: total toroidal flux
   - `derivs`: An integer specifying number of derivatives to compute (0, 1, or 2)
 """
-function direct_get_bfield!(
+@with_pool pool function direct_get_bfield!(
     bf_out::DirectBField,
     r::Float64,
     z::Float64,
@@ -92,9 +92,8 @@ function direct_get_bfield!(
     psi_norm = (psio > 1e-12) ? (1.0 - bf_out.psi / psio) : 0.0
     psi_norm = clamp(psi_norm, 0.0, 1.0)
 
-    n_s = n_series(sq_in)
-    f_sq = Vector{eltype(sq_in.y)}(undef, n_s)
-    f1_sq = Vector{eltype(sq_in_deriv.parent.y)}(undef, n_s)
+    f_sq = acquire!(pool, eltype(sq_in.y), n_series(sq_in))
+    f1_sq = acquire!(pool, eltype(sq_in_deriv.parent.y), n_series(sq_in_deriv.parent))
     sq_in(f_sq, psi_norm)
     sq_in_deriv(f1_sq, psi_norm)
     bf_out.f = f_sq[1]  # F = R*Bt
@@ -725,51 +724,12 @@ function equilibrium_solver(
     sq_nodes = zeros(Float64, mpsi + 1, 4)
     rzphi_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 4)
 
-<<<<<<< HEAD
     t_flux = @elapsed _equilibrium_run_parallel_flux_surfaces!(
         mpsi, psi_nodes, rzphi_nodes, sq_nodes, mtheta, theta_nodes,
         raw_profile, ro, zo, rs2, psio, fieldline_int,
     )
     if benchmark
         @info "equilibrium_solver: parallel flux-surface for-loop — @elapsed (1 run): $(@sprintf("%.6f", t_flux)) s"
-=======
-    for ipsi in (mpsi+1):-1:1  # outermost to innermost
-        y_out, bfield = fieldline_int(psi_nodes[ipsi], raw_profile, ro, zo, rs2)
-        checkpoint!(pool, Float64)
-
-        # Fit data into temporary straight fieldline poloidal angle splines
-        ff_x_nodes = acquire!(pool, Float64, size(y_out, 1))
-        @. ff_x_nodes = @view(y_out[:, 5]) / y_out[end, 5]
-
-        ff_fs_nodes = acquire!(pool, Float64, size(y_out, 1), 4)
-        @. ff_fs_nodes[:, 1] = @view(y_out[:, 3]) ^ 2
-        @. ff_fs_nodes[:, 2] = @view(y_out[:, 1]) / (2π) - ff_x_nodes
-        @. ff_fs_nodes[:, 3] = bfield.f * (@view(y_out[:, 4]) - ff_x_nodes * y_out[end, 4])
-        @. ff_fs_nodes[:, 4] = @view(y_out[:, 2]) / y_out[end, 2] - ff_x_nodes
-
-        ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
-
-        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
-        ff_deriv = deriv1(ff_interp)
-
-        # Resample ff onto uniform theta grid
-        for itheta in 1:(mtheta+1)
-            theta = theta_nodes[itheta]
-            ff_interp(ff_val, theta)
-            ff_deriv(ff_deriv_val, theta)
-
-            rzphi_nodes[ipsi, itheta, 1] = ff_val[1]
-            rzphi_nodes[ipsi, itheta, 2] = ff_val[2]
-            rzphi_nodes[ipsi, itheta, 3] = ff_val[3]
-            rzphi_nodes[ipsi, itheta, 4] = (1.0 + ff_deriv_val[4]) * y_out[end, 2] * 2π * psio
-        end
-
-        sq_nodes[ipsi, 1] = bfield.f * 2π
-        sq_nodes[ipsi, 2] = bfield.p
-        sq_nodes[ipsi, 3] = y_out[end, 2] * 2π * psio
-        sq_nodes[ipsi, 4] = y_out[end, 4] * bfield.f / (2π)
-        rewind!(pool, Float64)
->>>>>>> origin/develop
     end
 
     # Temporary splines for q0 extrapolation and optional newq0 revision
