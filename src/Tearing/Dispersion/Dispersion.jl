@@ -36,12 +36,14 @@ using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
 
 include("SurfaceCoupling.jl")
 include("Coupled.jl")
+include("CoupledFull.jl")
 include("BruteForceScan.jl")
 include("ContourSearchAMR.jl")
 include("GrowthRateExtraction.jl")
 
 export SurfaceCoupling, surface_coupling
 export MultiSurfaceCoupling, multi_surface_coupling
+export MultiSurfaceCouplingFull, multi_surface_coupling_full
 export ScanResult, brute_force_scan
 export AMRCell, AMRResult, amr_scan
 export GrowthRateResult, find_growth_rates
