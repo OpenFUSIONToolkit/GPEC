@@ -34,11 +34,13 @@
 
         # Trivially exact ratios
         @test p.tau ≈ 1.0
-        @test p.iota_e ≈ 2.0 / 3.0    # Q_e/(Q_e − Q_i) with Q_e=−2·Q_i
+        # Q_e = −tauk·1e4 = negative; Q_i = −tauk·5e3 = negative
+        # Q_e − Q_i = −tauk·5e3 = Q_i (since Q_e = 2·Q_i) ⇒ iota_e = Q_e/Q_i = 2
+        @test p.iota_e ≈ 2.0
 
         # Sign convention check (layerinputs.f:540-541)
         @test p.Q_e == -p.tauk * 1.0e4
-        @test p.Q_i ==  p.tauk * 5.0e3
+        @test p.Q_i == -p.tauk * 5.0e3    # params.f convention: Q_i = −tauk·ω*i
 
         # Spitzer resistivity follows η = 1.65e-9·lnΛ/(T_e/1keV)^1.5
         # with lnΛ = 24 + 3 ln 10 − 0.5 ln n_e + ln T_e.

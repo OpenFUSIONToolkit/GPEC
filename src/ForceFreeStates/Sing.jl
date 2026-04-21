@@ -56,12 +56,20 @@ end
 """
     sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute and set integration ψ, q, and q' limits by handling cases where the user truncates
-before the last singular surface via `ctrl.qhigh`.
+Compute and set integration ψ, q, and q' limits by handling cases where user truncates
+before the last singular surface. Performs a similar function to `sing_lim`
+in the Fortran code. Main differences include renaming of sas_flag -> set_psilim_via_dmlim,
+removing dW edge storage variables since we now store all integration terms in memory, and
+simplification of the logic.
 
-The target value `qlim` is taken as `min(equil.params.qmax, ctrl.qhigh)`. If `qlim < qmax`,
-a Newton iteration finds the corresponding `psilim` to integrate to; otherwise the
-equilibrium edge values are used.
+The target value `qlim` is first determined from user-specified control parameters
+(`ctrl.qhigh` or `ctrl.dmlim`), subject to the constraint that it does not exceed
+`equil.params.qmax`. If `set_psilim_via_dmlim` is true, `qlim` is adjusted to the largest
+rational surface such that `nq + dmlim < qmax`. If `qlim < qmax`, a Newton iteration is
+performed to find the corresponding `psilim` to integrate to.
+
+Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
+or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
@@ -72,7 +80,23 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.psihigh
 
-    # If qhigh < qmax we need to find the precise psilim via newton iteration
+    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent)
+    if ctrl.set_psilim_via_dmlim
+        if ctrl.nn_low != ctrl.nn_high
+            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
+        end
+        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
+        # Normalize dmlim ∈ [0,1)
+        ctrl.dmlim = mod(ctrl.dmlim, 1.0)
+        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
+
+        # Reduce qlim if above qmax
+        while intr.qlim > equil.params.qmax
+            intr.qlim -= 1.0 / ctrl.nn_low
+        end
+    end
+
+    # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))

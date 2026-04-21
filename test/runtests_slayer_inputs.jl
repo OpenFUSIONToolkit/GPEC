@@ -96,7 +96,7 @@
 
         # Q_e, Q_i follow the layerinputs.f sign convention
         @test sl[1].Q_e == -sl[1].tauk * profiles.omega_e(0.3)
-        @test sl[1].Q_i ==  sl[1].tauk * profiles.omega_i(0.3)
+        @test sl[1].Q_i == -sl[1].tauk * profiles.omega_i(0.3)
     end
 
     @testset "build_slayer_inputs: chi_perp/chi_tor as scalars and callables" begin
