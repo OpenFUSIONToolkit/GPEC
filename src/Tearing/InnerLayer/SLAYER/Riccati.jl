@@ -192,5 +192,8 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     _riccati_f_rhs!(dW_end, W_end, rhs_params, pmin)
     Δ = π / dW_end[1]
 
-    return SVector{2,ComplexF64}(Δ, zero(ComplexF64))
+    # Fitzpatrick / pressureless SLAYER has no interchange channel
+    # (the Δ_− / even-parity matching quantity is identically zero in
+    # the pressureless limit), so populate only the tearing field.
+    return InnerLayerResponse(Δ, zero(ComplexF64))
 end

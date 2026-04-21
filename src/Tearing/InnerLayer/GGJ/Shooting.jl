@@ -324,15 +324,19 @@ end
     solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
                 reltol::Float64=1e-6, abstol::Float64=1e-6,
                 rtol_origin::Float64=1e-6, nps::Int=8,
-                fmax::Float64=1.0, solver=Tsit5()) -> SVector{2,ComplexF64}
+                fmax::Float64=1.0, solver=Tsit5()) -> InnerLayerResponse
 
 Solve the GGJ inner-layer matching problem by stable backward shooting in
-the origin-diagonalized 4×4 basis. Direct port of the rmatch `deltar.f`
-algorithm.
+the origin-diagonalized 4×4 basis. Port of `match/deltar.f`.
 
-Returns the parity-projected matching data `(Δ₁, Δ₂)` (already rescaled
-back to physical units via `rescale_delta`). Index ordering matches the
-Fortran `deltar` output.
+Returns an `InnerLayerResponse(tearing, interchange)` with rescaling
+applied. `_delta_from_c0` returns `(deltar(1), deltar(2))` in Fortran
+`deltar.f` order — and per the `match/matrix.f::matrix_layer` analysis,
+`deltar(1)` is the **interchange** (anti-symmetric / W-odd) channel while
+`deltar(2)` is the **tearing** (symmetric / W-even) channel. We therefore
+map `deltar(2) → tearing` and `deltar(1) → interchange` into the named
+fields, matching the physics channel labels used by the Galerkin solver
+and by the `InnerLayerResponse` docstring.
 
 Tolerances `reltol`/`abstol` are the integrator tolerances; `rtol_origin`
 controls the truncation error of the origin Frobenius series and the
@@ -357,7 +361,9 @@ function solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Number;
     c0 = Matrix(u) \ Matrix(y_end)
 
     Δ_raw = _delta_from_c0(c0, sys)
-    return rescale_delta(Δ_raw, params)
+    Δ_rescaled = rescale_delta(Δ_raw, params)
+    # Δ_rescaled ≡ (deltar(1), deltar(2)) = (interchange, tearing).
+    return InnerLayerResponse(Δ_rescaled[2], Δ_rescaled[1])
 end
 
 solve_inner(::GGJModel{:shooting}, params::GGJParameters, γ::Real; kwargs...) =

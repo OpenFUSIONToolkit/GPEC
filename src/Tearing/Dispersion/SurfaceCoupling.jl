@@ -25,13 +25,15 @@ Per-surface dispersion data: `(model, params, dp_diag, dc, scale, tauk)`.
 Calling `sc(Q)` returns the complex residual
 
 ```
-r(Q) = dp_diag - scale * solve_inner(model, params, Q)[1] - dc
+r(Q) = dp_diag - scale * solve_inner(model, params, Q).tearing - dc
 ```
 
-A root of `sc` in the complex `Q` plane is a tearing eigenvalue at this
-surface in the *uncoupled* approximation. Coupled multi-surface
-eigenvalues come from `MultiSurfaceCoupling` evaluating the determinant
-of the modified Δ' matrix.
+A root of `sc` in the complex `Q` plane is a **tearing** eigenvalue at
+this surface in the *uncoupled* approximation (only the tearing channel
+of the inner-layer response appears — the interchange channel enters the
+full 2m×2m dispersion via `MultiSurfaceCoupling`, not this scalar form).
+Coupled multi-surface eigenvalues come from `MultiSurfaceCoupling`
+evaluating the determinant of the modified Δ' matrix.
 """
 struct SurfaceCoupling{M<:InnerLayerModel, P}
     model::M
@@ -43,7 +45,7 @@ struct SurfaceCoupling{M<:InnerLayerModel, P}
 end
 
 function (sc::SurfaceCoupling)(Q::Number)
-    Δ = solve_inner(sc.model, sc.params, ComplexF64(Q))[1]
+    Δ = solve_inner(sc.model, sc.params, ComplexF64(Q)).tearing
     return sc.dp_diag - sc.scale * Δ - sc.dc
 end
 

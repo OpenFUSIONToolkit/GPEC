@@ -616,9 +616,19 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         end
     end
 
-    # Apply parity BCs for each solution (isol=1: odd, isol=2: even).
-    # Mirrors deltac_set_boundary: for each isol, build a modified local
-    # matrix for ip=0..1 of cell 1, then write it into the global matrix.
+    # Apply parity BCs for each solution. Mirrors deltac_set_boundary.
+    #   isol=1 → Fortran "odd mode" = PHYSICS TEARING channel
+    #            (W'(0)=0 → W even across x=0; N(0)=0, Θ(0)=0 → N,Θ odd).
+    #            Even W ⇒ sheet-current reconnecting mode. This is the Δ_+
+    #            of Glasser-Wang-Park 2016.
+    #   isol=2 → Fortran "even mode" = PHYSICS INTERCHANGE channel
+    #            (W(0)=0 → W odd; N'(0)=0, Θ'(0)=0 → N,Θ even). Non-reconnecting;
+    #            carries Glasser stabilization. This is GWP Δ_−.
+    # The raw ordering out of this loop is therefore (tearing, interchange) —
+    # the parity-swap formerly applied at the end of `solve_inner` (mirroring
+    # deltac.f lines 193-196) has been removed. Downstream code receives an
+    # `InnerLayerResponse` whose fields are named by physics channel, not by
+    # parity label, eliminating the ambiguity.
     for isol in 1:2
         # Zero out ip=0 rows in the global matrix
         for ipert in 1:mpert
@@ -628,11 +638,11 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
                 ws.mat[offset + i - jj, jj, isol] = 0
             end
         end
-        # Odd parity (isol=1): W'(0)=0, N(0)=0, Θ(0)=0
+        # isol=1 (tearing, Fortran "odd"): W'(0)=0, N(0)=0, Θ(0)=0
         # → row=W(ip=0), col=W(ip=1): A[map[1,1], map[1,2]] = 1
         # → row=N(ip=0), col=N(ip=0): A[map[2,1], map[2,1]] = 1
         # → row=Θ(ip=0), col=Θ(ip=0): A[map[3,1], map[3,1]] = 1
-        # Even parity (isol=2): W(0)=0, N'(0)=0, Θ'(0)=0
+        # isol=2 (interchange, Fortran "even"): W(0)=0, N'(0)=0, Θ'(0)=0
         # → row=W(ip=0), col=W(ip=0): A[map[1,1], map[1,1]] = 1
         # → row=N(ip=0), col=N(ip=1): A[map[2,1], map[2,2]] = 1
         # → row=Θ(ip=0), col=Θ(ip=1): A[map[3,1], map[3,2]] = 1
@@ -678,14 +688,22 @@ end
     solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
                 kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
                 cutoff::Int=5, xfac::Float64=1.0, tol_res::Float64=1e-5)
-                -> SVector{2,ComplexF64}
+                -> InnerLayerResponse
 
 Solve the GGJ inner-layer matching problem using the Hermite-cubic finite
-element (Galerkin) method. Direct port of rmatch/deltac.f in the
+element (Galerkin) method. Port of `rmatch/deltac.f` in the
 "resonant + noexp + inps" configuration.
 
-Returns `(Δ₁, Δ₂)` with rescaling applied. The ordering matches deltac.f's
-output convention (swapped relative to deltar.f).
+Returns an `InnerLayerResponse(tearing, interchange)` with rescaling
+applied. `tearing` comes from `isol=1` (W even, N/Θ odd — Fortran "odd
+mode"; reconnecting channel, GWP Δ_+); `interchange` comes from `isol=2`
+(W odd, N/Θ even — Fortran "even mode"; Glasser stabilization channel,
+GWP Δ_−).
+
+Note: Fortran `rmatch/deltac.f` lines 193-196 apply a swap
+`tmp=delta(1); delta(1)=delta(2); delta(2)=tmp` before returning; the Julia
+port deliberately omits this swap and uses named fields instead, avoiding
+the ambiguity between parity-by-W and parity-by-N,Θ conventions.
 """
 function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
                      kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,
@@ -703,13 +721,15 @@ function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     # Assemble and solve
     _assemble_and_solve!(ws, params, Q, cache; nq=nq, tol_res=tol_res)
 
-    # Extract delta from the resonant cell's emap DOF
+    # Extract delta from the resonant cell's emap DOF. isol=1 = tearing,
+    # isol=2 = interchange (see BC block above for the parity derivation).
     res_cell = ws.cells[ws.nx]
     emap1 = res_cell.emap[1]
     Δ_raw = SVector{2,ComplexF64}(ws.sol[emap1, 1], ws.sol[emap1, 2])
 
-    # Apply deltac.f's swap convention (line 194-196)
-    Δ_swapped = SVector{2,ComplexF64}(Δ_raw[2], Δ_raw[1])
+    # Rescaling is linear & diagonal; apply to the (tearing, interchange)
+    # pair directly, no parity swap.
+    Δ_rescaled = rescale_delta(Δ_raw, params)
 
-    return rescale_delta(Δ_swapped, params)
+    return InnerLayerResponse(Δ_rescaled[1], Δ_rescaled[2])
 end

@@ -136,7 +136,7 @@
         end
         GeneralizedPerturbedEquilibrium.InnerLayer.solve_inner(
             m::LinModel, params, Q::Number) =
-            SVector{2,ComplexF64}(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
+            InnerLayerResponse(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
 
         Q_pin = 0.7 - 0.3im
         sc = surface_coupling(LinModel(0.0im, 1.0+0im), nothing,

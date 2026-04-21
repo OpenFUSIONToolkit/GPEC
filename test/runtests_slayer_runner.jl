@@ -123,8 +123,8 @@
         # rescaling: surface 2 sees Q_target * tauk_1/tauk_2).
         Q_1 = Q_target * (p1.tauk / p1.tauk)         # = Q_target
         Q_2 = Q_target * (p1.tauk / p2.tauk)
-        Δ1 = InnerLayer.solve_inner(model, p1, Q_1)[1] * p1.lu^(1/3)
-        Δ2 = InnerLayer.solve_inner(model, p2, Q_2)[1] * p2.lu^(1/3)
+        Δ1 = InnerLayer.solve_inner(model, p1, Q_1).tearing * p1.lu^(1/3)
+        Δ2 = InnerLayer.solve_inner(model, p2, Q_2).tearing * p2.lu^(1/3)
         # Setting dp[k,k] = Δ_k at Q_target makes both diagonals of M vanish,
         # which makes det(M) = 0 at Q_target.
         dp = ComplexF64[Δ1 0.0; 0.0 Δ2]
@@ -153,8 +153,8 @@
         # Diagonal dp, zero coupling → trivial root structure at Q_target=0
         Q_target = 0.0 + 0.0im
         model = SLAYERModel()
-        Δ1 = InnerLayer.solve_inner(model, p1, Q_target)[1] * p1.lu^(1/3)
-        Δ2 = InnerLayer.solve_inner(model, p2, Q_target)[1] * p2.lu^(1/3)
+        Δ1 = InnerLayer.solve_inner(model, p1, Q_target).tearing * p1.lu^(1/3)
+        Δ2 = InnerLayer.solve_inner(model, p2, Q_target).tearing * p2.lu^(1/3)
         dp = ComplexF64[Δ1 0.0; 0.0 Δ2]
 
         c = SLAYERControl(; enabled=true,

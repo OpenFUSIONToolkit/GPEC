@@ -23,7 +23,7 @@ import .GGJ: glasser_wang_2020_eq55, build_ggj_inputs
 import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
 import .SLAYER: surface_minor_radius, surface_da_dpsi, build_slayer_inputs
 
-export InnerLayerModel, solve_inner
+export InnerLayerModel, InnerLayerResponse, solve_inner
 export GGJ, GGJModel, GGJParameters
 export build_asymptotics, evaluate_asymptotics, pick_xmax, InnerAsymptoticsCache
 export mercier_di, mercier_dr, inner_Q, rescale_delta

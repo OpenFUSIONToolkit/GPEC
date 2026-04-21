@@ -16,7 +16,7 @@
     end
     GeneralizedPerturbedEquilibrium.InnerLayer.solve_inner(
         m::LinearTestModel, params, Q::Number) =
-        SVector{2,ComplexF64}(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
+        InnerLayerResponse(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
 
     function _slayer_ref()
         return slayer_parameters(
@@ -74,7 +74,7 @@
         p = _slayer_ref()
         m = SLAYERModel()
         Q_pin = 0.3 + 0.4im
-        Δ_pin = solve_inner(m, p, Q_pin)[1]
+        Δ_pin = solve_inner(m, p, Q_pin).tearing
         dp_diag = p.lu^(1/3) * Δ_pin
 
         sc = surface_coupling(m, p, dp_diag)

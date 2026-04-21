@@ -31,10 +31,10 @@
     @testset "Interface compliance" begin
         p = _ref_params_large_D()
         Δ = solve_inner(SLAYERModel(), p, 0.5 + 0.2im)
-        @test Δ isa SVector{2,ComplexF64}
-        @test Δ[2] == zero(ComplexF64)        # SLAYER has no parity decomposition
-        @test isfinite(real(Δ[1]))
-        @test isfinite(imag(Δ[1]))
+        @test Δ isa InnerLayerResponse
+        @test Δ.interchange == zero(ComplexF64)    # pressureless SLAYER has no interchange channel
+        @test isfinite(real(Δ.tearing))
+        @test isfinite(imag(Δ.tearing))
     end
 
     @testset "Boundary-condition branch selection" begin
@@ -55,7 +55,7 @@
         # Both branches should yield finite Δ values
         Δl = solve_inner(SLAYERModel(), p_large, 0.5 + 0.1im)
         Δs = solve_inner(SLAYERModel(), p_small, 0.5 + 0.1im)
-        @test isfinite(Δl[1]) && isfinite(Δs[1])
+        @test isfinite(Δl.tearing) && isfinite(Δs.tearing)
 
         # p_floor (=6 by default) is honored even when the branch
         # formula would produce a smaller value.
@@ -72,7 +72,7 @@
         m = SLAYERModel()
         γ = 0.2
         ωs = collect(range(-2.0; stop=2.0, length=21))
-        Δs = [solve_inner(m, p, ω + γ*im)[1] for ω in ωs]
+        Δs = [solve_inner(m, p, ω + γ*im).tearing for ω in ωs]
         @test all(isfinite.(real.(Δs)))
         @test all(isfinite.(imag.(Δs)))
 
@@ -95,8 +95,8 @@
         # the long inward integration span amplifies local tolerances
         # by roughly 5 orders of magnitude, so 1e-3 relative is the
         # realistic self-consistency threshold here.
-        Δ_default = solve_inner(m, p, Q)[1]
-        Δ_tight   = solve_inner(m, p, Q; reltol=1e-13, abstol=1e-13)[1]
+        Δ_default = solve_inner(m, p, Q).tearing
+        Δ_tight   = solve_inner(m, p, Q; reltol=1e-13, abstol=1e-13).tearing
         @test abs(Δ_default - Δ_tight) < 1e-3 * abs(Δ_tight)
     end
 
@@ -107,8 +107,8 @@
         p = _ref_params_large_D()
         m = SLAYERModel()
         Q = 0.5 + 0.2im
-        Δ_default = solve_inner(m, p, Q; pmin=1e-6)[1]
-        Δ_deeper  = solve_inner(m, p, Q; pmin=1e-7)[1]
+        Δ_default = solve_inner(m, p, Q; pmin=1e-6).tearing
+        Δ_deeper  = solve_inner(m, p, Q; pmin=1e-7).tearing
         @test abs(Δ_default - Δ_deeper) < 0.05 * abs(Δ_default)
     end
 end

@@ -19,7 +19,7 @@ module SLAYER
 using LinearAlgebra
 using StaticArrays
 
-import ..InnerLayerModel, ..solve_inner
+import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner
 using ...Utilities.PhysicalConstants
 using ...Utilities.NeoclassicalResistivity
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,

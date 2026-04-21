@@ -189,6 +189,8 @@
         @test mercier_di(gs[1]) < 0
 
         Δ = solve_inner(GGJModel(solver=:shooting), gs[1], 0.01 + 0.0im)
-        @test all(isfinite, Δ)
+        @test Δ isa InnerLayerResponse
+        @test isfinite(Δ.tearing)
+        @test isfinite(Δ.interchange)
     end
 end

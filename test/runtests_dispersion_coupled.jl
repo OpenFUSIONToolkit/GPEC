@@ -16,7 +16,7 @@
     end
     GeneralizedPerturbedEquilibrium.InnerLayer.solve_inner(
         m::LinTestModel, params, Q::Number) =
-        SVector{2,ComplexF64}(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
+        InnerLayerResponse(m.a + m.b * ComplexF64(Q), zero(ComplexF64))
 
     function _slayer_ref()
         return slayer_parameters(
@@ -209,8 +209,8 @@
         ref_tauk = sc1.tauk
 
         # Compute the diagonal modifications at Q_pin
-        Δ1 = solve_inner(m, p_a, Q_pin * (ref_tauk/sc1.tauk))[1] * sc1.scale
-        Δ2 = solve_inner(m, p_b, Q_pin * (ref_tauk/sc2.tauk))[1] * sc2.scale
+        Δ1 = solve_inner(m, p_a, Q_pin * (ref_tauk/sc1.tauk)).tearing * sc1.scale
+        Δ2 = solve_inner(m, p_b, Q_pin * (ref_tauk/sc2.tauk)).tearing * sc2.scale
 
         # Build dp such that M(Q_pin) is exactly singular.
         # Choose off-diagonal couplings, then set diagonals so M[k,k]=Δ_k
