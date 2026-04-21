@@ -16,11 +16,17 @@
 
 using ...Utilities: KineticProfiles
 using ....Utilities.PhysicalConstants: MU_0, M_E, M_P, E_CHG, EPS_0
+using ....Utilities.NeoclassicalResistivity
+using ....Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
+    SauterNeoModel, RedlNeoModel,
+    coulomb_log_e, eta_spitzer, nu_star_e, eta_neoclassical
 using ....ForceFreeStates: ResistGeometry
 
 """
     build_ggj_inputs(equil, sings, profiles; mu_i=2.0, zeff=1.0,
-                      v1_scale=1.0) -> Vector{GGJParameters}
+                      v1_scale=1.0,
+                      resistivity_model::NeoResistivityModel=SpitzerModel(),
+                      lnLambda_form::Symbol=:nrl) -> Vector{GGJParameters}
 
 Construct a `GGJParameters` for each rational surface in `sings`. Each
 surface's geometric coefficients (E, F, G, H, K, M) come from the
@@ -29,10 +35,9 @@ timescales are derived from the `KineticProfiles` at `sing.psifac`:
 
 ```
 ρ(ψ)   = μ_i · m_p · n_e(ψ)
-ln Λ   = 24 + 3 ln 10 − ½ ln n_e + ln T_e
-η(ψ)   = 1.65e-9 · ln Λ / (T_e / 1 keV)^(3/2)         [Ω·m, Spitzer]
-τ_A    = √(ρ · M · μ_0) / |2π · n · q' · χ₁ / V'|     [Alfvén time]
-τ_R    = (⟨B²/|∇ψ|²⟩ / ⟨B²⟩) · μ_0 / η                 [resistive diffusion]
+η(ψ)   = eta_neoclassical(model, n_e, T_e, Z_eff, f_t, ν*_e)     [Ω·m]
+τ_A    = √(ρ · M · μ_0) / |2π · n · q' · χ₁ / V'|                 [Alfvén time]
+τ_R    = (⟨B²/|∇ψ|²⟩ / ⟨B²⟩) · μ_0 / η                             [resistive diffusion]
 ```
 
 The mode number `n` is taken from `sings[k].n[1]` (first resonant mode at
@@ -41,12 +46,27 @@ multiplicative factor on `V'` in the τ_A denominator — matches the
 Fortran `sing%restype%v1 = v1 / volume` normalization option from
 `rdcon/resist.f:144`; default `1.0` means use the raw `V'`.
 
+# Resistivity model
+
+`resistivity_model` selects the η closure:
+
+  - `SpitzerModel()` (default) — Sauter 1999 Eq. 18a (Zeff-aware Spitzer).
+    Matches legacy Fortran RDCON behaviour but with the NRL Coulomb log.
+  - `SauterNeoModel()` — multiplies by Sauter 1999 F_33 using f_t and ν*_e
+    from the surface's `ResistGeometry`. Produces the physically-correct
+    trapped-particle-corrected η for H-mode tearing stability.
+  - `RedlNeoModel()` — Redl 2021 F_33 (improved high-ν* fit).
+
+`lnLambda_form` selects `:nrl` (default), `:sauter`, or `:wesson`.
+
 Throws if any surface's `restype` is still `nothing` — call
 `ForceFreeStates.resist_eval_all!(intr, equil)` first.
 """
 function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
                            mu_i::Real=2.0, zeff::Real=1.0,
-                           v1_scale::Real=1.0)
+                           v1_scale::Real=1.0,
+                           resistivity_model::NeoResistivityModel=SpitzerModel(),
+                           lnLambda_form::Symbol=:nrl)
     psio  = equil.psio
     chi1  = 2π * psio
 
@@ -67,11 +87,18 @@ function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
         n_e  = prof.n_e          # [m⁻³]
         t_e  = prof.T_e          # [eV]
 
-        # Mass density and Spitzer resistivity — same formulas as
-        # slayer_parameters so SLAYER and GGJ see identical plasma inputs
-        lnLamb = 24.0 + 3.0 * log(10.0) - 0.5 * log(n_e) + log(t_e)
-        eta_sp = 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
-        rho    = mu_i * M_P * n_e
+        # Shared Coulomb log and resistivity closure (identical to SLAYER
+        # when the same resistivity_model is selected).
+        lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
+        if resistivity_model isa SpitzerModel
+            eta_use = eta_spitzer(n_e, t_e, zeff; lnLamb=lnLamb)
+        else
+            nuestar = nu_star_e(n_e, t_e, rg.R_major, rg.eps_local,
+                                sing.q, zeff; lnLamb=lnLamb)
+            eta_use = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
+                                       rg.f_trap, nuestar; lnLamb=lnLamb)
+        end
+        rho = mu_i * M_P * n_e
 
         # Alfvén time at the rational surface (resist.f:136-137)
         n_tor = Int(sing.n[1])
@@ -80,7 +107,7 @@ function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
                 abs(2π * n_tor * sing.q1 * chi1 / v1)
 
         # Resistive diffusion time (resist.f:138)
-        taur  = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta_sp
+        taur  = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta_use
 
         out[k] = GGJParameters(
             E=rg.E, F=rg.F, G=rg.G, H=rg.H, K=rg.K, M=rg.M,

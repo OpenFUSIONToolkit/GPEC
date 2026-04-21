@@ -173,7 +173,11 @@ end
                         chi_perp, chi_tor,
                         m, n,
                         dr_val=0.0, dgeo_val=0.0,
-                        dc_type=:none, ising=0)
+                        dc_type=:none, ising=0,
+                        resistivity_model=SpitzerModel(),
+                        f_trap=nothing, nu_e_star=nothing,
+                        R_major_eff=nothing,
+                        lnLambda_form=:wesson)
         -> SLAYERParameters
 
 Build a `SLAYERParameters` for one rational surface from dimensional
@@ -205,19 +209,38 @@ formulations).
   - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
 
+# Neoclassical resistivity kwargs
+
+  - `resistivity_model` -- `SpitzerModel()` (default, preserves legacy
+    behaviour), `SauterNeoModel()`, or `RedlNeoModel()` from
+    `Utilities.NeoclassicalResistivity`. When non-Spitzer, the Sauter/Redl
+    F_33 correction is applied using `f_trap` and `nu_e_star`.
+  - `f_trap`  -- trapped-particle fraction at this surface. If not provided
+    with a neoclassical model, falls back to Lin-Liu-Miller ε-only form
+    with `ε = rs / (R_major_eff or R0)`.
+  - `nu_e_star` -- electron collisionality. If `nothing` with a non-Spitzer
+    model, computed from Sauter 1999 Eq. 18b using the same ε.
+  - `R_major_eff` -- ⟨R⟩ at the surface for the ν*_e formula (default `R0`).
+  - `lnLambda_form` -- `:wesson` (legacy Fortran default), `:nrl`, or
+    `:sauter`. `:wesson` preserves identical η to the previous Julia SLAYER
+    output when `resistivity_model=SpitzerModel()`.
+
 # Sign convention for diamagnetic frequencies
 
-Following the Fortran `layerinputs.f:540-541` convention used by the
-SLAYER dispersion solver:
+Follows the Fortran `params.f:154-155` convention
 
 ```
 Q_e = -tauk · ω_*e
-Q_i = +tauk · ω_*i
+Q_i = -tauk · ω_*i
 ```
 
-i.e. callers pass `omega_e` and `omega_i` as raw diamagnetic frequencies
-in the convention used by the kinetic-profile splines. The sign flip on
-`Q_e` is intrinsic to the dispersion-relation derivation.
+**Not** the `layerinputs.f:540-541` convention (which flips the Q_i sign
+— the two Fortran paths are inconsistent with each other and with the
+physics; `layerinputs.f` is a bug that produces same-sign Q_e and Q_i).
+For the standard plasma-physics input where ω_*e is tabulated negative
+and ω_*i positive (electrons and ions drifting in opposite directions),
+this convention produces `Q_e > 0, Q_i < 0`, matching the opposite-drift
+expectation of the dispersion relation.
 """
 function slayer_parameters(;
         n_e::Real, t_e::Real, t_i::Real,
@@ -227,14 +250,43 @@ function slayer_parameters(;
         chi_perp::Real, chi_tor::Real,
         m::Integer, n::Integer,
         dr_val::Real=0.0, dgeo_val::Real=0.0,
-        dc_type::Symbol=:none, ising::Integer=0)
+        dc_type::Symbol=:none, ising::Integer=0,
+        resistivity_model::NeoResistivityModel=SpitzerModel(),
+        f_trap::Union{Real,Nothing}=nothing,
+        nu_e_star::Union{Real,Nothing}=nothing,
+        R_major_eff::Union{Real,Nothing}=nothing,
+        lnLambda_form::Symbol=:wesson)
 
-    # Coulomb logarithm (params.f:91)
-    lnLamb = 24.0 + 3.0 * log(10.0) - 0.5 * log(n_e) + log(t_e)
+    # Coulomb logarithm — default to legacy Wesson form so Spitzer results
+    # are bit-identical to the previous SLAYER η; :nrl / :sauter are opt-in.
+    lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
+
+    # Resistivity closure.  SpitzerModel + :wesson reproduces the legacy
+    # params.f:95 formula η = 1.65e-9 · lnΛ / (T_e/keV)^1.5 to within the
+    # Sauter-vs-Wesson Zeff=1 agreement (~1%); other models apply the
+    # Sauter/Redl F_33 correction.
+    if resistivity_model isa SpitzerModel
+        if lnLambda_form === :wesson
+            # Preserve bit-identical legacy behaviour.
+            eta = 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
+        else
+            eta = eta_spitzer(n_e, t_e, zeff; lnLamb=lnLamb)
+        end
+    else
+        R_eff = R_major_eff === nothing ? R0 : Float64(R_major_eff)
+        eps_here = clamp(rs / R_eff, 1e-6, 1.0 - 1e-6)
+        ft_here  = f_trap === nothing ? trapped_fraction_eps(eps_here) :
+                                         Float64(f_trap)
+        nue_here = nu_e_star === nothing ?
+                   nu_star_e(n_e, t_e, R_eff, eps_here, qval, zeff;
+                             lnLamb=lnLamb) :
+                   Float64(nu_e_star)
+        eta = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
+                               ft_here, nue_here; lnLamb=lnLamb)
+    end
 
     # Basic plasma quantities (params.f:93-97)
     tau = t_i / t_e
-    eta = 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
     rho = mu_i * M_P * n_e
 
     # Electron-electron collision time and Spitzer-Härm conductivity
@@ -269,7 +321,7 @@ function slayer_parameters(;
     # Normalized diamagnetic frequencies (layerinputs.f:540-541
     # convention; see docstring sign convention discussion).
     Q_e = -tauk * omega_e
-    Q_i = +tauk * omega_i
+    Q_i = -tauk * omega_i
     Q_e_minus_Q_i = Q_e - Q_i
     iota_e = Q_e_minus_Q_i == 0 ? 0.0 : Q_e / Q_e_minus_Q_i
 

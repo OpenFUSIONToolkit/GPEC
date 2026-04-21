@@ -21,6 +21,11 @@ using StaticArrays
 
 import ..InnerLayerModel, ..solve_inner
 using ...Utilities.PhysicalConstants
+using ...Utilities.NeoclassicalResistivity
+using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
+    SauterNeoModel, RedlNeoModel,
+    coulomb_log_e, eta_spitzer, trapped_fraction_eps, nu_star_e,
+    eta_neoclassical
 
 """
     SLAYERModel{S} <: InnerLayerModel
@@ -45,5 +50,6 @@ include("LayerInputs.jl")
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
 export surface_minor_radius, surface_da_dpsi, build_slayer_inputs
+export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
 
 end # module SLAYER

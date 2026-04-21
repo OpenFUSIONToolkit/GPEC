@@ -14,6 +14,8 @@
 #     in LayerParameters.jl).
 
 using ..Utilities: KineticProfiles
+using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
+    coulomb_log_e, nu_star_e
 
 """
     surface_minor_radius(equil, psi; theta=0.0) -> Float64
@@ -77,7 +79,11 @@ without the intermediate STRIDE NetCDF round-trip.
 
 # Keyword arguments
 
-  - `bt`        -- toroidal field [T]. Defaults to `equil.config.b0exp`.
+  - `bt`        -- toroidal field [T]. Scalar, callable of `psi`, or
+    `nothing` (default). When `nothing`, the physical `B_T = F(ψ) / (2π·R₀)`
+    is computed per surface from the equilibrium's F-spline. Note:
+    `equil.config.b0exp` is a *normalization* (often just `1.0`), not the
+    physical field, so passing it as a scalar is almost always wrong.
   - `mu_i`      -- ion mass in proton-mass units (default `2.0` for D).
   - `zeff`      -- effective charge (default `1.0`).
   - `chi_perp`  -- perpendicular heat diffusivity [m²/s]. Scalar or a
@@ -91,9 +97,17 @@ without the intermediate STRIDE NetCDF round-trip.
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
   - `theta`     -- poloidal angle at which to measure minor radius (default
     `0.0`, outboard midplane).
+  - `resistivity_model` -- `SpitzerModel()` (default), `SauterNeoModel()`,
+    or `RedlNeoModel()`. When non-Spitzer, `f_trap` and ν*_e are taken
+    from the surface's `ResistGeometry` if populated (via
+    `ForceFreeStates.resist_eval_all!`), otherwise fall back to the ε-only
+    Lin-Liu-Miller form and `rs/R_0` aspect ratio.
+  - `lnLambda_form` -- Coulomb-log form passed through to `slayer_parameters`
+    (default `:wesson` to match legacy SLAYER exactly when
+    `resistivity_model=SpitzerModel()`).
 """
 function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
-                              bt::Real = equil.config.b0exp,
+                              bt = nothing,
                               mu_i::Real = 2.0,
                               zeff::Real = 1.0,
                               chi_perp = 1.0,
@@ -101,9 +115,21 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                               dr_val   = 0.0,
                               dgeo_val = 0.0,
                               dc_type::Symbol = :none,
-                              theta::Real = 0.0)
+                              theta::Real = 0.0,
+                              resistivity_model::NeoResistivityModel = SpitzerModel(),
+                              lnLambda_form::Symbol = :wesson)
     R0 = equil.ro
     _eval(x, ψ) = x isa Real ? Float64(x) : Float64(x(ψ))
+
+    # Compute physical B_T = F(ψ) / (2π·R₀) per surface from the F spline
+    # when `bt` is not explicitly supplied.
+    _bt_at(ψ) = if bt === nothing
+        Float64(equil.profiles.F_spline(ψ)) / (2π * R0)
+    elseif bt isa Real
+        Float64(bt)
+    else
+        Float64(bt(ψ))
+    end
 
     out = Vector{SLAYERParameters}(undef, length(sings))
     for (k, sing) in enumerate(sings)
@@ -123,10 +149,25 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         m_res = sing.m[1]
         n_res = sing.n[1]
 
+        # Pull geometric trapped-fraction inputs from ResistGeometry when
+        # available (populated by ForceFreeStates.resist_eval_all!); else
+        # fall back to nothing and let slayer_parameters compute them from
+        # aspect ratio + Lin-Liu-Miller ε-only form.
+        rg = sing.restype
+        f_trap_kw    = rg === nothing ? nothing : rg.f_trap
+        R_major_eff  = rg === nothing ? nothing : rg.R_major
+        nu_e_star_kw = if rg === nothing || resistivity_model isa SpitzerModel
+            nothing
+        else
+            lnL = coulomb_log_e(prof.n_e, prof.T_e; form=lnLambda_form)
+            nu_star_e(prof.n_e, prof.T_e, rg.R_major, rg.eps_local,
+                      q, zeff; lnLamb=lnL)
+        end
+
         out[k] = slayer_parameters(;
             n_e = prof.n_e, t_e = prof.T_e, t_i = prof.T_i,
             omega = prof.omega, omega_e = prof.omega_e, omega_i = prof.omega_i,
-            qval = q, sval_r = sval_r, bt = bt,
+            qval = q, sval_r = sval_r, bt = _bt_at(psi),
             rs = rs, R0 = R0, mu_i = mu_i, zeff = zeff,
             chi_perp = _eval(chi_perp, psi),
             chi_tor  = _eval(chi_tor,  psi),
@@ -134,6 +175,11 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             dr_val   = _eval(dr_val,   psi),
             dgeo_val = _eval(dgeo_val, psi),
             dc_type = dc_type, ising = k,
+            resistivity_model = resistivity_model,
+            f_trap = f_trap_kw,
+            nu_e_star = nu_e_star_kw,
+            R_major_eff = R_major_eff,
+            lnLambda_form = lnLambda_form,
         )
     end
     return out

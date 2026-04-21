@@ -11,6 +11,8 @@ mathematical utilities.
 
   - `FourierTransforms`: Efficient Fourier transforms with pre-computed basis functions
   - `PhysicalConstants`: SI physical constants matching Fortran GPEC/SLAYER values
+  - `NeoclassicalResistivity`: Spitzer/Sauter/Redl resistivity closures shared by
+    the GGJ and SLAYER inner-layer models
 """
 module Utilities
 
@@ -18,6 +20,7 @@ include("FourierTransforms.jl")
 include("FourierCoefficients.jl")
 include("PhysicalConstants.jl")
 include("KineticProfiles.jl")
+include("NeoclassicalResistivity.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients
@@ -31,5 +34,11 @@ export PhysicalConstants
 export MU_0, M_E, M_P, E_CHG, K_B, EPS_0
 
 export KineticProfiles, kinetic_profiles_from_toml, kinetic_profiles_from_h5
+
+using .NeoclassicalResistivity
+export NeoclassicalResistivity
+export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
+export coulomb_log_e, eta_spitzer, trapped_fraction, trapped_fraction_eps
+export nu_star_e, eta_neoclassical
 
 end # module Utilities

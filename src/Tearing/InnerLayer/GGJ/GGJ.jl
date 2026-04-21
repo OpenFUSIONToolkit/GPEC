@@ -45,5 +45,6 @@ export build_asymptotics, evaluate_asymptotics, pick_xmax
 export InnerAsymptoticsCache
 export glasser_wang_2020_eq55
 export build_ggj_inputs
+export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
 
 end # module GGJ

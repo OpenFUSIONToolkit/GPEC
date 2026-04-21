@@ -20,6 +20,12 @@
 #   5: B²
 #   6: |∇ψ|² / B²
 # All weighted by `jac / v1` (jacobian / dV/dψ) before integration.
+#
+# A seventh integrand, B, is added (beyond the Fortran set) so that ⟨B⟩ is
+# available for the Lin-Liu & Miller 1995 trapped-fraction formula used by
+# the shared NeoclassicalResistivity closure. B_max, B_min, and the flux-
+# surface-averaged major radius R_major are accumulated alongside by
+# running extrema over the θ-loop.
 
 """
     ResistGeometry
@@ -36,12 +42,23 @@ supporting flux-surface averages.
 | `M`         | Mass factor                                          |
 | `avg_bsq_over_dpsisq` | ⟨B²/|∇ψ|²⟩ — needed for τ_R         |
 | `avg_bsq`   | ⟨B²⟩ — needed for τ_R                                |
+| `avg_B`     | ⟨B⟩ — needed for Lin-Liu-Miller f_t                  |
+| `B_max`, `B_min` | θ-extrema of B on the surface [T]               |
+| `f_trap`    | Lin-Liu & Miller 1995 trapped-particle fraction      |
+| `R_major`   | flux-surface-averaged major radius ⟨R⟩ [m]           |
+| `eps_local` | (R_max − R_min)/2 / R_major — local inverse aspect ratio |
 | `p_local`   | Plasma pressure at this surface [Pa]                 |
 | `p1_local`  | dp/dψ at this surface                                |
 | `v1_local`  | dV/dψ at this surface                                |
 
 `H` here is identical to the `H` reported by `mercier_scan!` and stored
 in `locstab/h` — the GGJ routine recomputes it for convenience.
+
+`avg_B`, `B_max`, `B_min`, `f_trap`, `R_major`, and `eps_local` are used
+by `NeoclassicalResistivity.eta_neoclassical` to form the Sauter/Redl
+F_33 correction to Spitzer resistivity. See Sauter, Angioni & Lin-Liu
+1999, Phys. Plasmas 6, 2834 and Lin-Liu & Miller 1995, Phys. Plasmas 2,
+1666.
 """
 struct ResistGeometry
     E::Float64
@@ -52,6 +69,12 @@ struct ResistGeometry
     M::Float64
     avg_bsq_over_dpsisq::Float64
     avg_bsq::Float64
+    avg_B::Float64
+    B_max::Float64
+    B_min::Float64
+    f_trap::Float64
+    R_major::Float64
+    eps_local::Float64
     p_local::Float64
     p1_local::Float64
     v1_local::Float64
@@ -90,10 +113,15 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     v2     = profiles.dVdpsi_deriv(psi_f)
     q      = profiles.q_spline(psi_f)
 
-    # Build the 6 theta-integrands by evaluating rzphi-derived metric
-    # terms at every poloidal grid point, then integrate around θ.
+    # Build the 6 GGJ θ-integrands plus a 7th (B) for the neoclassical
+    # resistivity f_t calculation, and accumulate running extrema of
+    # (B, R) for Lin-Liu-Miller f_t and the local ε.
     ntheta = length(equil.rzphi_ys)
-    ff     = zeros(Float64, ntheta, 6)
+    ff     = zeros(Float64, ntheta, 7)
+    B_max  = -Inf
+    B_min  =  Inf
+    R_max  = -Inf
+    R_min  =  Inf
     for itheta in 1:ntheta
         theta = equil.rzphi_ys[itheta]
         f1  = equil.rzphi_rsquared((psi_f, theta))
@@ -114,12 +142,19 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
         bsq    = chi1^2 * (v21^2 + v22^2 + (v23 + q*v33)^2)
         dpsisq = (twopi * r)^2 * (v21^2 + v22^2)
 
+        B_here = sqrt(bsq)
+        B_max = max(B_max, B_here)
+        B_min = min(B_min, B_here)
+        R_max = max(R_max, r)
+        R_min = min(R_min, r)
+
         ff[itheta, 1] = bsq / dpsisq
         ff[itheta, 2] = 1.0 / dpsisq
         ff[itheta, 3] = 1.0 / bsq
         ff[itheta, 4] = 1.0 / (bsq * dpsisq)
         ff[itheta, 5] = bsq
         ff[itheta, 6] = dpsisq / bsq
+        ff[itheta, 7] = B_here
         @views ff[itheta, :] .*= jac / v1
     end
 
@@ -127,6 +162,10 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     # integrator Mercier.jl uses
     itp = cubic_interp(equil.rzphi_ys, Series(ff); bc=PeriodicBC())
     avg = FastInterpolations.integrate(itp)
+    avg_B = avg[7]
+    R_major = 0.5 * (R_max + R_min)
+    eps_local = R_major > 0 ? 0.5 * (R_max - R_min) / R_major : 0.0
+    f_trap = Utilities.NeoclassicalResistivity.trapped_fraction(avg_B, avg[5], B_min, B_max)
 
     # GGJ coefficients (resist.f:107-125)
     E_coef = p1 * v1 / (q1 * chi1^2)^2 * avg[1] *
@@ -143,7 +182,9 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
 
     return ResistGeometry(
         E_coef, F_coef, G_coef, H_coef, K_coef, M_coef,
-        avg[1], avg[5], p, p1, v1,
+        avg[1], avg[5],
+        avg_B, B_max, B_min, f_trap, R_major, eps_local,
+        p, p1, v1,
     )
 end
 
