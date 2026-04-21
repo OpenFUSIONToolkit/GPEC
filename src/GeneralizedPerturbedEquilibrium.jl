@@ -600,6 +600,15 @@ function write_outputs_to_HDF5(
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
         end
 
+        # Write raw 2msing×2msing outer-region D' matrix in side-major ordering
+        # [L_s1, R_s1, L_s2, R_s2, …]. Byte-compatible with Fortran
+        # rdcon/gal.f::gal_write_delta top 2msing×2msing block of delta_gw.dat.
+        # Needed for the full det(D' − D(γ)) = 0 eigenvalue problem via
+        # pest3_decompose to recover (A', B', Γ', Δ').
+        if intr.msing > 0 && !isempty(intr.delta_prime_raw)
+            out_h5["singular/delta_prime_raw"] = intr.delta_prime_raw
+        end
+
         # Write vacuum data; always write all entries, using empty arrays when not computed
         out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
         out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]

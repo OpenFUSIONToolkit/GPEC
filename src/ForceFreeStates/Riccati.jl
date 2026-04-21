@@ -835,7 +835,92 @@ function compute_delta_prime_matrix!(
         @info "Δ' BVP: deltap diagonal = $([@sprintf("%.4f%+.4fi", real(deltap[i,i]), imag(deltap[i,i])) for i in 1:msing])"
     end
 
+    # Persist the raw 2m×2m D' matrix (side-major ordering) alongside the m×m
+    # PEST3 tearing projection. Byte-compatible with Fortran `rdcon/gal.f::
+    # gal_write_delta` (top 2msing×2msing block of delta_gw.dat); consumed by
+    # `pest3_decompose` to recover (A', B', Γ', Δ') for the full
+    # det(D' − D(γ)) = 0 eigenvalue problem. See ForceFreeStatesStructs.jl
+    # docstring for field semantics.
+    intr.delta_prime_raw    = ComplexF64.(dp_raw)
     intr.delta_prime_matrix = deltap
+end
+
+"""
+    pest3_decompose(dp_raw::AbstractMatrix) -> (A', B', Γ', Δ')
+
+Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
+ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
+blocks. Given rows and columns paired by surface (odd index = left, even
+index = right), the Fortran `rdcon/gal.f:1723-1743` combination is
+
+```
+A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
+B'(i,j) = RR − RL + LR − LL    (even-i, odd-j)    — interchange↔tearing
+Γ'(i,j) = RR + RL − LR − LL    (odd-i,  even-j)   — tearing↔interchange
+Δ'(i,j) = RR − RL − LR + LL    (odd-i,  odd-j)    — tearing↔tearing
+```
+
+where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
+`LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
+
+Matches Fortran exactly — no ½ prefactor (Pletzer–Dewar multiply by ½, but
+Fortran `gal.f:1746-1749` leaves it commented out and our Julia port follows
+Fortran to keep the benchmark bit-identical; the prefactor cancels in
+`det(D' − D(γ)) = 0`).
+
+The Δ' block returned here equals `intr.delta_prime_matrix` (the m×m PEST3
+tearing projection computed inside `compute_delta_prime_matrix!`).
+
+# Arguments
+
+  - `dp_raw` — 2m×2m complex matrix (typically `intr.delta_prime_raw`).
+
+# Returns
+
+Named tuple `(A=A', B=B', Γ=Gp, Δ=Dp)` of four m×m complex matrices. In the
+full `det(D' − D(γ)) = 0` eigenvalue problem, these fill the 2m×2m outer
+matrix as `D' = [[A' B'] [Γ' Δ']]` with the interchange channel (Glasser
+stabilization) in the upper-left block and the tearing channel in the
+lower-right.
+"""
+function pest3_decompose(dp_raw::AbstractMatrix)
+    s2 = size(dp_raw, 1)
+    size(dp_raw, 2) == s2 ||
+        throw(ArgumentError("pest3_decompose: dp_raw must be square, got $(size(dp_raw))"))
+    iseven(s2) ||
+        throw(ArgumentError("pest3_decompose: dp_raw side must be 2m for integer m, got $s2"))
+    m = s2 ÷ 2
+    Tc = eltype(dp_raw)
+    Ap = zeros(Tc, m, m)
+    Bp = zeros(Tc, m, m)
+    Gp = zeros(Tc, m, m)
+    Dp = zeros(Tc, m, m)
+    for i in 1:m, j in 1:m
+        LL = dp_raw[2i-1, 2j-1]
+        LR = dp_raw[2i-1, 2j]
+        RL = dp_raw[2i,   2j-1]
+        RR = dp_raw[2i,   2j]
+        Ap[i, j] = RR + RL + LR + LL
+        Bp[i, j] = RR - RL + LR - LL
+        Gp[i, j] = RR + RL - LR - LL
+        Dp[i, j] = RR - RL - LR + LL
+    end
+    return (A=Ap, B=Bp, Γ=Gp, Δ=Dp)
+end
+
+"""
+    dprime_outer_matrix(dp_raw::AbstractMatrix) -> Matrix
+
+Assemble the 2m×2m outer-region matrix D′ in parity-major ordering
+`[interchange_1..m; tearing_1..m]` by rotating the side-major `dp_raw`
+through `pest3_decompose`. The ordering matches the `det(D' − D(γ)) = 0`
+eigenvalue problem where `D(γ) = blockdiag(Δ_interchange(γ), Δ_tearing(γ))`
+with each inner block m×m diagonal over singular surfaces.
+"""
+function dprime_outer_matrix(dp_raw::AbstractMatrix)
+    blocks = pest3_decompose(dp_raw)
+    return [blocks.A  blocks.B;
+            blocks.Γ  blocks.Δ]
 end
 
 """

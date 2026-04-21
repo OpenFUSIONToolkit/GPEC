@@ -191,6 +191,23 @@ A mutable struct holding internal state variables for stability calculations.
     raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
     """
     delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+
+    """
+    Raw 2msing × 2msing outer-region matching matrix `D'` from the STRIDE global
+    BVP, in the side-major ordering `[L_s1, R_s1, L_s2, R_s2, …, L_sm, R_sm]`
+    (left vs right of each singular surface, interleaved surface-by-surface).
+    This is the Pletzer–Dewar 1991 outer-region matrix before parity rotation,
+    and is stored byte-compatibly with the Fortran `rdcon/gal.f::gal_write_delta`
+    convention (top 2msing×2msing block of `delta_gw.dat`). The PEST3 Δ' matrix
+    stored in `delta_prime_matrix` is the odd-parity tearing projection of this
+    raw matrix; the even-parity A' and off-parity B', Γ' blocks are recovered
+    via `pest3_decompose(dp_raw)` — needed for the full det(D' − D(γ)) = 0
+    eigenvalue problem with Glasser stabilization.
+
+    Empty unless `ctrl.use_parallel` is true. No ½ prefactor is applied (matches
+    Fortran rdcon; Pletzer–Dewar paper multiplies by ½).
+    """
+    delta_prime_raw::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """
