@@ -17,7 +17,7 @@ include("MathUtils.jl")
 # Include VacuumFromEquilibrium after DataTypes so VacuumInput is defined
 include("VacuumFromEquilibrium.jl")
 
-export mscvac, set_surface_params, VacuumInput, compute_vacuum_response
+export mscvac, set_surface_params, dcon_surface_arrays_for_fortran, VacuumInput, compute_vacuum_response
 export compute_vacuum_field
 export kernel!
 export WallShapeSettings
@@ -49,17 +49,23 @@ Initialize ForceFreeStates parameters for vacuum field calculations.
 # Note
 
 This function must be called before using `mscvac` to perform vacuum calculations.
-The coordinate and displacement vectors should have length `lmax - lmin + 1`.
+
+The Fortran side copies `xin`, `zin`, and `deltain` for indices `1:mtheta+1` (periodic
+closure: the last point duplicates the first). Each vector must therefore have length
+at least `mtheta + 1`. Use [`dcon_surface_arrays_for_fortran`](@ref) to build these from
+a [`VacuumInput`](@ref) on the same poloidal grid as [`compute_vacuum_response`](@ref).
 
 # Examples
 
 ```julia
-mtheta, lmin, lmax, nnin = Int32(4), Int32(1), Int32(4), Int32(2)
+mtheta, lmin, lmax, nnin = 4, 1, 4, 2
 qa1in = 1.23
-n_modes = lmax - lmin + 1
-xin = rand(Float64, n_modes)
-zin = rand(Float64, n_modes)
-deltain = rand(Float64, n_modes)
+xin = rand(Float64, mtheta + 1)
+zin = rand(Float64, mtheta + 1)
+deltain = rand(Float64, mtheta + 1)
+xin[end] = xin[1]
+zin[end] = zin[1]
+deltain[end] = deltain[1]
 
 set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 ```
@@ -67,6 +73,18 @@ set_surface_params(mtheta, lmin, lmax, nnin, qa1in, xin, zin, deltain)
 function set_surface_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin::Integer,
     qa1in::Float64,
     xin::Vector{Float64}, zin::Vector{Float64}, deltain::Vector{Float64})
+
+    mth = Int(mtheta)
+    need = mth + 1
+    if length(xin) < need || length(zin) < need || length(deltain) < need
+        throw(
+            ArgumentError(
+                "set_surface_params: xin, zin, deltain must each have length >= mtheta + 1 " *
+                "(got lengths $(length(xin)), $(length(zin)), $(length(deltain)) for mtheta=$mth). " *
+                "Use Vacuum.dcon_surface_arrays_for_fortran(vac_input, qa) to build them."
+            )
+        )
+    end
 
     return ccall((:set_surface_params_, libvac),
         Nothing,
@@ -76,6 +94,34 @@ function set_surface_params(mtheta::Integer, lmin::Integer, lmax::Integer, nnin:
         Ref(Int32(mtheta)), Ref(Int32(lmin)), Ref(Int32(lmax)), Ref(Int32(nnin)),
         Ref(qa1in),
         pointer(xin), pointer(zin), pointer(deltain))
+end
+
+"""
+    dcon_surface_arrays_for_fortran(inputs::VacuumInput, qa::Float64) -> (r, z, delta)
+
+Build `xin`, `zin`, `deltain` for [`set_surface_params`](@ref) from a [`VacuumInput`](@ref).
+
+Uses the same `PlasmaGeometry` interpolation as [`compute_vacuum_response`](@ref), so the
+Fortran DCON in-memory path sees the same boundary as the pure-Julia vacuum solve at
+`inputs.mtheta`. Arrays have length `inputs.mtheta + 1` with periodic closure
+(`[end] == [1]`). Here `delta = ν/qa` (or zeros if `qa == 0`).
+"""
+function dcon_surface_arrays_for_fortran(inputs::VacuumInput, qa::Float64)
+    surf = PlasmaGeometry(inputs)
+    mth = inputs.mtheta
+    r = Vector{Float64}(undef, mth + 1)
+    z = similar(r)
+    delta = similar(r)
+    inv_qa = qa == 0.0 ? 0.0 : inv(qa)
+    @inbounds for i in 1:mth
+        r[i] = surf.x[i]
+        z[i] = surf.z[i]
+        delta[i] = inv_qa == 0.0 ? 0.0 : surf.ν[i] * inv_qa
+    end
+    r[mth+1] = r[1]
+    z[mth+1] = z[1]
+    delta[mth+1] = delta[1]
+    return r, z, delta
 end
 
 """
