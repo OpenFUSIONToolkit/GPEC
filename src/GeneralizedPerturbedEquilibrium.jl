@@ -39,6 +39,7 @@ using Printf
 using HDF5
 
 using FastInterpolations
+import IMASdd
 
 import AdaptiveArrayPools: @with_pool
 
@@ -52,7 +53,7 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
-function main(args::Vector{String}=String[])
+function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
@@ -81,7 +82,7 @@ function main(args::Vector{String}=String[])
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        equil = Equilibrium.setup_equilibrium(eq_config)
+        equil = Equilibrium.setup_equilibrium(eq_config, eq_config.eq_type == "imas" ? dd : nothing)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
         @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
@@ -531,6 +532,46 @@ function write_outputs_to_HDF5(
     end
 end
 
-export main
+"""
+    write_imas(dd, result)
+
+Write GPEC stability results into `dd.mhd_linear`. Creates one `toroidal_mode` entry per
+requested toroidal mode number, storing the least-stable (minimum real part) `energy_perturbed`
+for that `n_tor`. For multi-n runs the eigenvalue array `et` is sorted by stability across all
+n-blocks; `n_tor_idx[i]` identifies which n-block eigenvalue `i` belongs to, so each n_tor
+receives the correct least-stable δW regardless of how modes are interleaved in `et`.
+
+The `result` argument is the named tuple returned by `main`.
+"""
+function write_imas(dd, result)
+    result.vac_data === nothing && return
+
+    vac_data = result.vac_data
+    intr = result.intr
+
+    # Top-level metadata
+    dd.mhd_linear.code.name = "GPEC"
+    dd.mhd_linear.ideal_flag = 1
+
+    # Add a time_slice at the current global_time (wipe=false reuses an existing slice
+    # at the same time, or appends a new one if none exists yet)
+    ts = resize!(dd.mhd_linear.time_slice; wipe=false)
+
+    # One toroidal_mode entry per n_tor, storing the least-stable (minimum real part)
+    # energy for each toroidal mode number. Since et is sorted ascending (least stable
+    # first), eigenvalues from different n-blocks are interleaved; n_tor_idx[i] (0-based)
+    # identifies which block eigenvalue i belongs to.
+    resize!(ts.toroidal_mode, intr.npert)
+    for j in 0:(intr.npert - 1)
+        n_indices = findall(==(j), vac_data.n_tor_idx)
+        mode = ts.toroidal_mode[j + 1]
+        mode.n_tor = intr.nlow + j
+        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices]))
+    end
+
+    return dd
+end
+
+export main, write_imas
 
 end # module GeneralizedPerturbedEquilibrium

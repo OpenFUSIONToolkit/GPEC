@@ -50,8 +50,15 @@ and data dumping.
     etemp .= vac_data.et
     # Rearrange wt columns for descending real eigenvalues
     for ipert in 1:numpert_total
-        vac_data.wt[:, ipert] .= Ev.vectors[:, eindex[numpert_total+1-ipert]]
-        vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
+        orig = eindex[numpert_total+1-ipert]
+        vac_data.wt[:, ipert] .= Ev.vectors[:, orig]
+        vac_data.et[ipert] = etemp[orig]
+        # Identify which n-block this eigenvector belongs to by finding the largest
+        # component. For an axisymmetric tokamak, modes don't couple across n-blocks,
+        # so each eigenvector is nonzero in exactly one block. argmax is robust because
+        # LAPACK does not guarantee block-ordered eigenvector columns.
+        imax = argmax(abs.(Ev.vectors[:, orig]))
+        vac_data.n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
 
     # Normalize eigenfunction and energy.

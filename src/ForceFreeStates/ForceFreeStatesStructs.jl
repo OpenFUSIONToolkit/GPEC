@@ -336,6 +336,7 @@ Populated in `Free.jl`.
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+    n_tor_idx::Vector{Int} = zeros(Int, numpert_total)  # 0-based n index for each sorted eigenvalue
     vacuum_eigenvalue::Float64 = NaN
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
