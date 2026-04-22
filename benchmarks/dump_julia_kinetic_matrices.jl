@@ -30,7 +30,7 @@ Usage:
     julia --project=. benchmarks/dump_julia_kinetic_matrices.jl [fortran_dir] [out_h5] [pitch_integrator]
 
 `pitch_integrator` ∈ {"ode", "quadgk"} selects the pitch-angle quadrature
-used inside `calculate_gar_matrices!`. Default is "ode" (coupled Tsit5);
+used inside `kinetic_energy_matrices_for_euler_lagrange!`. Default is "ode" (coupled Tsit5);
 "quadgk" exercises the vector-valued adaptive Gauss-Kronrod path added in
 Phase C2.
 """
