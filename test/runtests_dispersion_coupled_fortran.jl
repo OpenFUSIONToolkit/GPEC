@@ -194,6 +194,32 @@
         @test isfinite(imag(d))
     end
 
+    @testset "inner_kwargs pass-through" begin
+        # Verify that inner_kwargs reaches solve_inner at each Q evaluation.
+        # Use a synthetic model with a tuning parameter to confirm plumbing.
+        struct _ProbeModel <: InnerLayerModel end
+        GeneralizedPerturbedEquilibrium.InnerLayer.solve_inner(
+            ::_ProbeModel, params, Q::Number; scale_factor::Float64=1.0) =
+            InnerLayerResponse(scale_factor * (1.0 + 0im),
+                               scale_factor * (0.5 + 0im))
+
+        dp_raw = ComplexF64[1.0 0; 0 1.0]
+        sc = surface_coupling(_ProbeModel(), nothing, 0+0im;
+                              scale=1.0, tauk=1.0, dc=0.0)
+        mc_native = multi_surface_coupling_fortran([sc], dp_raw)
+        mc_tuned  = multi_surface_coupling_fortran([sc], dp_raw;
+                                                    inner_kwargs=(scale_factor=0.5,))
+        @test mc_native.inner_kwargs == NamedTuple()
+        @test mc_tuned.inner_kwargs == (scale_factor=0.5,)
+
+        # Det should differ because inner Δ's are halved by the kwarg
+        det_native = mc_native(0.0 + 0.0im)
+        det_tuned  = mc_tuned(0.0 + 0.0im)
+        @test det_native ≠ det_tuned
+        @test isfinite(real(det_native)) && isfinite(imag(det_native))
+        @test isfinite(real(det_tuned))  && isfinite(imag(det_tuned))
+    end
+
     @testset "Static GGJ-like scenario runs without error" begin
         # Smoke test: larger m=3 case, both channels non-trivial, Q shifted
         m = 3

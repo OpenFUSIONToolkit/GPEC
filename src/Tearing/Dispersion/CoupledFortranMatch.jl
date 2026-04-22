@@ -70,13 +70,14 @@ relation.
   - `rotation::Vector{Float64}` — per-surface rotation frequencies (s⁻¹).
   - `ntor::Int`                 — toroidal mode number `n` (default 1).
 """
-struct MultiSurfaceCouplingFortran{V<:AbstractVector{<:SurfaceCoupling}}
+struct MultiSurfaceCouplingFortran{V<:AbstractVector{<:SurfaceCoupling},K<:NamedTuple}
     surfaces::V
     dp_raw::Matrix{ComplexF64}
     ref_idx::Int
     msing_max::Int
     rotation::Vector{Float64}
     ntor::Int
+    inner_kwargs::K    # kwargs forwarded to solve_inner; e.g. (pfac=0.1, nx=128, nq=5)
 end
 
 """
@@ -105,13 +106,18 @@ rotation matches the static-equilibrium case.
   - `rotation`  — per-surface rotation frequencies in s⁻¹ (length m).
     Defaults to all zero.
   - `ntor`      — toroidal mode number n. Defaults to 1.
+  - `inner_kwargs` — NamedTuple of kwargs forwarded to `solve_inner` at
+    every Q evaluation, e.g. `(pfac=0.1, xfac=10.0, nx=128, nq=5)` to
+    match the Fortran `rmatch/DELTAC_LIST` defaults for Galerkin grid
+    tuning. Defaults to `NamedTuple()`.
 """
 function multi_surface_coupling_fortran(surfaces::AbstractVector{<:SurfaceCoupling},
                                         dp_raw::AbstractMatrix;
                                         ref_idx::Integer=1,
                                         msing_max::Integer=length(surfaces),
                                         rotation::AbstractVector{<:Real}=zeros(length(surfaces)),
-                                        ntor::Integer=1)
+                                        ntor::Integer=1,
+                                        inner_kwargs::NamedTuple=NamedTuple())
     m = length(surfaces)
     size(dp_raw) == (2m, 2m) ||
         throw(ArgumentError("multi_surface_coupling_fortran: dp_raw size " *
@@ -129,7 +135,8 @@ function multi_surface_coupling_fortran(surfaces::AbstractVector{<:SurfaceCoupli
                                        Matrix{ComplexF64}(dp_raw),
                                        Int(ref_idx), Int(msing_max),
                                        Float64.(collect(rotation)),
-                                       Int(ntor))
+                                       Int(ntor),
+                                       inner_kwargs)
 end
 
 # Assemble and return det(mat) where mat is the 4·msing_max × 4·msing_max
@@ -158,7 +165,7 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
         # Also apply ref_tauk / sc.tauk rescaling (we keep the SurfaceCoupling
         # tauk normalization that SLAYER needs; GGJ has tauk=1 so it's a no-op).
         Q_k = Qc * (ref_tauk / sc.tauk) + 1im * mc.ntor * mc.rotation[k]
-        resp = solve_inner(sc.model, sc.params, Q_k)
+        resp = solve_inner(sc.model, sc.params, Q_k; mc.inner_kwargs...)
 
         # Fortran delta(1) = Julia .interchange (post-swap in deltac.f;
         # Julia removes the swap and exposes named fields instead).
