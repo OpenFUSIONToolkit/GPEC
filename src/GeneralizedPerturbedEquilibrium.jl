@@ -557,16 +557,14 @@ function write_imas(dd, result)
     # at the same time, or appends a new one if none exists yet)
     ts = resize!(dd.mhd_linear.time_slice; wipe=false)
 
-    # One toroidal_mode entry per n_tor, storing the least-stable (minimum real part)
-    # energy for each toroidal mode number. Since et is sorted ascending (least stable
-    # first), eigenvalues from different n-blocks are interleaved; n_tor_idx[i] (0-based)
-    # identifies which block eigenvalue i belongs to.
+    # Write the least-stable energy for each toroidal mode number
+    # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
     resize!(ts.toroidal_mode, intr.npert)
-    for j in 0:(intr.npert - 1)
-        n_indices = findall(==(j), vac_data.n_tor_idx)
-        mode = ts.toroidal_mode[j + 1]
+    for j in 0:(intr.npert-1)
+        n_indices = findall(==(j), vac_data.n_tor_idx) # indices of eigenvalues in the j-th n-block
+        mode = ts.toroidal_mode[j+1]
         mode.n_tor = intr.nlow + j
-        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices]))
+        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices])) # least-stable energy for this n-toroidal mode
     end
 
     return dd
