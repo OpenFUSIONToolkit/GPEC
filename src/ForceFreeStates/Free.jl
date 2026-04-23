@@ -50,8 +50,13 @@ and data dumping.
     etemp .= vac_data.et
     # Rearrange wt columns for descending real eigenvalues
     for ipert in 1:numpert_total
-        vac_data.wt[:, ipert] .= Ev.vectors[:, eindex[numpert_total+1-ipert]]
-        vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
+        orig = eindex[numpert_total+1-ipert]
+        vac_data.wt[:, ipert] .= Ev.vectors[:, orig]
+        vac_data.et[ipert] = etemp[orig]
+        # Store which n this eigenvector corresponds to (needed to write IMAS data)
+        # This relies on the block diagonal matrix structure due to n decoupling in tokamaks
+        imax = argmax(abs.(Ev.vectors[:, orig]))
+        vac_data.n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
 
     # Normalize eigenfunction and energy.

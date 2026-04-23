@@ -55,12 +55,15 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     force_termination::Bool = false
     use_galgrid::Bool = true
 
+    # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
+    imas_cocos::Int = 11
+
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination, use_galgrid)
+        force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0;
@@ -120,7 +123,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination, use_galgrid)
+            force_termination, use_galgrid, imas_cocos)
     end
 end
 
