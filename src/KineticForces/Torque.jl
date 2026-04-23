@@ -718,23 +718,25 @@ end
 
 
 """
-    calculate_gar_matrices!(out_wmats, state, psi, n, l, wdfac, intr;
-                             kwargs...) → nothing
+    kinetic_energy_matrices_for_euler_lagrange!(cmplx_kinetic_energy_mats, state, psi, n, l, wdfac, intr;
+                                                kwargs...) → nothing
 
-Matrix-only GAR kernel. Computes the six full-complex kinetic matrices
-(Logan 2015 Eqs 7.30–7.35) at a single (ψ, n, ℓ) and writes them into the
-pre-allocated `out_wmats[mpert, mpert, 6]`.
+Compute the six kinetic Euler-Lagrange coefficient matrices of Logan 2015
+Eqs 7.30–7.35 (A_k, B_k, C_k, D_k, E_k, H_k) at a single (ψ, n, ℓ) and write
+them into the pre-allocated `cmplx_kinetic_energy_mats[mpert, mpert, 6]`.
 
-Parallel to the matrix branch of `calculate_gar`, but with no scalar
-torque slot in the pitch-angle buffer (`nqty = mpert²·6` instead of
-`1 + mpert²·6`).
+Matrix-only path (no scalar torque slot in the pitch-angle buffer), so
+`nqty = mpert²·6` instead of `1 + mpert²·6`.
 
-The resonance operator is evaluated with `rex = imx = 1` so the caller
-obtains the full complex result; energy and torque pieces are split by
-taking imaginary and real parts respectively.
+The resonance operator is evaluated with `rex = imx = 1` so the output
+is the full complex response. Downstream callers decompose the result
+into the Fortran-convention `kwmat` (all-real values, from the `"wmm"`
+integrand) and `ktmat` (all-imag values, from the `"tmm"` integrand) via
+`real(cmplx_kinetic_energy_mats)` and `imag(cmplx_kinetic_energy_mats)` respectively — see
+`compute_kinetic_matrices_at_psi!`.
 """
-function calculate_gar_matrices!(
-    out_wmats::Array{ComplexF64,3},
+function kinetic_energy_matrices_for_euler_lagrange!(
+    cmplx_kinetic_energy_mats::Array{ComplexF64,3},
     state::NamedTuple,
     psi::Float64, n::Int, l::Int, wdfac::Float64,
     intr::KineticForcesInternal;
@@ -769,7 +771,7 @@ function calculate_gar_matrices!(
         nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
 
     if bounce.nlmda == 0
-        out_wmats .= 0
+        cmplx_kinetic_energy_mats .= 0
         return nothing
     end
 
@@ -825,49 +827,49 @@ function calculate_gar_matrices!(
     off = 0
     @inbounds for j in 1:mpert, i in 1:j
         v = elem(off + _tri_idx(i, j))
-        out_wmats[i, j, 1] = v
+        cmplx_kinetic_energy_mats[i, j, 1] = v
         if i != j
-            out_wmats[j, i, 1] = conj(v)
+            cmplx_kinetic_energy_mats[j, i, 1] = conj(v)
         end
     end
     off += Mu
     # D (Hermitian, k=4)
     @inbounds for j in 1:mpert, i in 1:j
         v = elem(off + _tri_idx(i, j))
-        out_wmats[i, j, 4] = v
+        cmplx_kinetic_energy_mats[i, j, 4] = v
         if i != j
-            out_wmats[j, i, 4] = conj(v)
+            cmplx_kinetic_energy_mats[j, i, 4] = conj(v)
         end
     end
     off += Mu
     # H (Hermitian, k=6)
     @inbounds for j in 1:mpert, i in 1:j
         v = elem(off + _tri_idx(i, j))
-        out_wmats[i, j, 6] = v
+        cmplx_kinetic_energy_mats[i, j, 6] = v
         if i != j
-            out_wmats[j, i, 6] = conj(v)
+            cmplx_kinetic_energy_mats[j, i, 6] = conj(v)
         end
     end
     off += Mu
     # B (full, k=2)
     @inbounds for j in 1:mpert, i in 1:mpert
-        out_wmats[i, j, 2] = elem(off + _full_idx(i, j, mpert))
+        cmplx_kinetic_energy_mats[i, j, 2] = elem(off + _full_idx(i, j, mpert))
     end
     off += mpert^2
     # C (full, k=3)
     @inbounds for j in 1:mpert, i in 1:mpert
-        out_wmats[i, j, 3] = elem(off + _full_idx(i, j, mpert))
+        cmplx_kinetic_energy_mats[i, j, 3] = elem(off + _full_idx(i, j, mpert))
     end
     off += mpert^2
     # E (full, k=5)
     @inbounds for j in 1:mpert, i in 1:mpert
-        out_wmats[i, j, 5] = elem(off + _full_idx(i, j, mpert))
+        cmplx_kinetic_energy_mats[i, j, 5] = elem(off + _full_idx(i, j, mpert))
     end
 
     # DCON normalization (Fortran torque.F90 lines 874-876)
-    out_wmats .*= 2 * μ₀
-    out_wmats[:, :, 1:3] ./= chi1
-    out_wmats[:, :, 1] ./= chi1
+    cmplx_kinetic_energy_mats .*= 2 * μ₀
+    cmplx_kinetic_energy_mats[:, :, 1:3] ./= chi1
+    cmplx_kinetic_energy_mats[:, :, 1] ./= chi1
 
     return nothing
 end
@@ -877,20 +879,33 @@ end
     compute_kinetic_matrices_at_psi!(kwmat, ktmat, psi, n, l, zi, mi,
         wdfac, divxfac, electron, equil, intr, kinetic_profiles)
 
-Compute both kinetic energy (`kwmat`) and torque (`ktmat`) matrices at a
-single flux surface in one pass. Dedicated matrix-only path — does not
-delegate to `tpsi!` — so the pitch-angle buffer is sized exactly
-`mpert²·6` (no vestigial scalar torque slot).
+Compute the six kinetic Euler-Lagrange coefficient matrices at a single
+flux surface and split them into `kwmat` and `ktmat` in the convention
+used by the DCON matrix-assembly path (Logan 2015 Eqs 7.30–7.35).
 
-The bounce averaging, pitch-angle quadrature, and energy-space quadrature share the
-same math as the perturbative torque pipeline in `tpsi!`, but the
-`rex = imx = 1` full-complex result is split locally:
-  - `kwmat[i,j,k] = complex(0, imag(full[i,j,k]))` (energy)
-  - `ktmat[i,j,k] = complex(real(full[i,j,k]), 0)` (torque)
+Rather than running two integrations like the reference Fortran PENTRC
+(one with `rex=0, imx=1` for `kwmat` and another with `rex=1, imx=0` for
+`ktmat`), this path integrates once with `rex=imx=1` to get the full
+complex response, then decomposes by real/imag parts — equivalent math
+at half the work. After the `-i/(2n)` normalization inside
+`kinetic_energy_matrices_for_euler_lagrange!`, the full complex response
+splits cleanly:
+
+  - `kwmat` holds the "wmm" half — pure real values (carried as
+    `complex(real(full), 0)`), matching Fortran `kwmat`.
+  - `ktmat` holds the "tmm" half — pure imaginary values (carried as
+    `complex(0, imag(full))`), matching Fortran `ktmat`.
+
+The split convention matters: downstream FKG reduction in
+`ForceFreeStates/Kinetic.jl` uses asymmetric combinations like
+`caat = cmat_kin - 2·ktmat[3]` and `bkmat = kwmat[2] + ktmat[2] + i·(...)`
+whose physical meaning (kinetic adjoint structure) requires the Fortran
+convention — swapping the two halves produces sign-flipped adjoints that
+corrupt F̄, K̄, Ḡ in the kinetic ODE RHS.
 
 # Arguments
-- `kwmat::Array{ComplexF64,3}`: Output energy matrices (mpert×mpert×6), zeroed on entry
-- `ktmat::Array{ComplexF64,3}`: Output torque matrices (mpert×mpert×6), zeroed on entry
+- `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), pure-real values, zeroed on entry
+- `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), pure-imag values, zeroed on entry
 - `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!` (divxfac unused
   on the matrix path — retained for call-site compatibility)
 - `equil`: PlasmaEquilibrium
@@ -921,15 +936,16 @@ function compute_kinetic_matrices_at_psi!(
     state = _setup_surface_state(psi, zi, mi, electron,
                                   equil, intr, kinetic_profiles)
 
-    full_wmats = zeros(ComplexF64, mpert, mpert, 6)
-    calculate_gar_matrices!(full_wmats, state, psi, n, l, wdfac, intr;
-                            energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
-                            pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
+    cmplx_kinetic_energy_mats = zeros(ComplexF64, mpert, mpert, 6)
+    kinetic_energy_matrices_for_euler_lagrange!(
+        cmplx_kinetic_energy_mats, state, psi, n, l, wdfac, intr;
+        energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
+        pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
 
     for k in 1:6, j in 1:mpert, i in 1:mpert
-        val = full_wmats[i, j, k]
-        kwmat[i, j, k] = complex(0.0, imag(val))
-        ktmat[i, j, k] = complex(real(val), 0.0)
+        val = cmplx_kinetic_energy_mats[i, j, k]
+        kwmat[i, j, k] = complex(real(val), 0.0)
+        ktmat[i, j, k] = complex(0.0, imag(val))
     end
 
     return nothing
