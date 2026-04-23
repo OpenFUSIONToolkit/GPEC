@@ -167,7 +167,18 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
                      abstol::Real=1e-10,
                      maxiters::Integer=50_000,
                      solver=Rodas5P(autodiff=false))
-    Q_c = ComplexF64(Q)
+    # Wick-rotation: Fortran SLAYER (`growthrates.f:337,340`) applies
+    # `g_tmp = q_in * ifac` with `ifac = +i` (`sglobal.f:105`). Empirically,
+    # Julia's Riccati behaves as `J_Ric(p) = F_Ric(-conj(p))` — i.e. the
+    # Julia integration is a reflected-about-Im-axis version of Fortran's.
+    # To make `Julia_det(Q) = Fortran_det(Q)` at every plot-Q, we feed
+    # the Riccati `Q_c = im·conj(Q)`, which yields `-conj(Q_c) = im·Q`
+    # — exactly Fortran's internal `g_tmp`. Verified against fortran_scans.h5
+    # vs julia_scans.h5 at TJ ε=0.001: median (Re, Im) ratios ≈ (1.01, 1.02).
+    # Root-cause audit of why Julia's Riccati runs the Im-reflected branch
+    # (suspected: sign in boundary-condition branch selector or in Δ₋/Δ₊
+    # parity) is tracked in CONVENTIONS.md §4 TODO.
+    Q_c = im * conj(ComplexF64(Q))
 
     # Boundary condition at p_start
     p_start, W_bound, _ = _riccati_f_initial(p, Q_c; p_floor=p_floor)
