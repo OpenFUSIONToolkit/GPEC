@@ -66,11 +66,19 @@ Compute Fourier coefficients via FFT without creating splines.
 """
 function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
     fs::Array{Float64,3}, mband::Int)
-    npsi, ntheta, nqty = size(fs)
+    npsi, ny_full, nqty = size(fs)
 
     @assert length(xs) == npsi "xs length must match first dimension of fs"
-    @assert length(ys) == ntheta "ys length must match second dimension of fs"
+    @assert length(ys) == ny_full "ys length must match second dimension of fs"
     @assert mband >= 0 "mband must be non-negative"
+
+    # Drop periodic-duplicate endpoint before FFT to match Fortran fspline_fit_2
+    # (math/fspline.f:293 uses `f = fst%fs(:, 0:my-1, iq)`). The equilibrium θ-grids
+    # in this codebase store θ=0 and θ=2π as both endpoints (length mtheta+1);
+    # including the duplicate biases the DC coefficient by ~(f(0) − mean)/N.
+    has_duplicate = ny_full > 1 && isapprox(ys[end] - ys[1], 2π; rtol=1e-10)
+    ntheta = has_duplicate ? ny_full - 1 : ny_full
+    fs_view = has_duplicate ? view(fs, :, 1:ntheta, :) : fs
 
     # Clamp mband to Nyquist limit
     nyquist_limit = ntheta ÷ 2
@@ -79,7 +87,7 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
     nmodes = actual_mband + 1
 
     # Compute Fourier coefficients using batched FFT
-    fs_reshaped = reshape(permutedims(fs, (2, 1, 3)), ntheta, npsi * nqty)
+    fs_reshaped = reshape(permutedims(fs_view, (2, 1, 3)), ntheta, npsi * nqty)
     fft_results = fft(fs_reshaped, 1)
 
     # Extract and normalize coefficients
