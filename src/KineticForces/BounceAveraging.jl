@@ -437,11 +437,10 @@ function _bounce_integrate(
     cum_wb = 0.0
     cum_wd = 0.0
 
-    # θ-scratch arrays allocated fresh each call. Pool-based reuse was tried
+    # θ-scratch array allocated fresh each call. Pool-based reuse was tried
     # (AdaptiveArrayPools) but showed no speedup and introduced severe slowdowns
     # at 2+ threads; plain allocations match Fortran baseline behavior.
     cum_wb_arr = zeros(Float64, ntheta)
-    cum_wd_arr = zeros(Float64, ntheta)
 
     # Action integrand
     jvtheta = zeros(ComplexF64, ntheta)
@@ -493,7 +492,6 @@ function _bounce_integrate(
         # Trapezoidal cumulative (matches Fortran spline_int semantics on linear fn):
         # bspl%fsi(j)/Δx = g_1 + ... + g_{j-1} + g_j/2, so subtract half the current sample.
         cum_wb_arr[i] = cum_wb - wb_integrand / 2
-        cum_wd_arr[i] = cum_wd - wd_integrand / 2
 
         # Fourier modes at this θ (Fortran lines 702-708) — write into pre-allocated
         # expm buffer using the ORIGINAL expression order to preserve bit-level parity.
@@ -550,7 +548,10 @@ function _bounce_integrate(
     # (ntheta-1) cancels, no scaling. For do_matrices we keep `pl` as a Vector because
     # it is referenced below; otherwise we fuse pl + bjspl → bj_integral in a single
     # pass, avoiding two Vector{ComplexF64}(ntheta) allocations.
-    # Expression order below matches the original list comprehension exactly.
+    # Trapezoidal quadrature: boundary samples weighted by 0.5. jvtheta is zero at
+    # i=1 and i=ntheta (loop above runs 2:ntheta-1) so the boundary terms contribute
+    # nothing in practice, but writing the weights explicitly keeps the integration
+    # self-correct if the boundary handling ever changes.
     pl_denom = (2 - sigma) * total_wb
     one_minus_sigma = 1 - sigma
     bj_integral = ComplexF64(0.0)
@@ -559,14 +560,16 @@ function _bounce_integrate(
         @inbounds for i in 1:ntheta
             pl[i] = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
         end
-        @inbounds for i in 2:ntheta
-            bj_integral += conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
+        @inbounds for i in 1:ntheta
+            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
+            bj_integral += w * conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
         end
     else
         pl = nothing
-        @inbounds for i in 2:ntheta
+        @inbounds for i in 1:ntheta
             pli = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
-            bj_integral += conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + 1e-30))
+            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
+            bj_integral += w * conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + 1e-30))
         end
     end
     bj_integral *= nrm
@@ -578,13 +581,13 @@ function _bounce_integrate(
     wmats_lmda = nothing
     if do_matrices
         # Bounce-average W_μ and W_E vectors (Fortran lines 762-767).
-        # Factor `pl + (1-σ)/pl` must match the bj_integral path above — both
-        # come from the same Fortran `pl(:)+(1-sigma)/pl(:)` quadrature kernel.
-        # Sum range `2:ntheta` matches bj_integral and Fortran spline_int.
+        # Trapezoidal quadrature: boundary samples weighted by 0.5 (wmu_mt and wen_mt
+        # are zero at i=1 and i=ntheta from the 2:ntheta-1 population loop above).
         wmu_ba = zeros(ComplexF64, mpert)
         wen_ba = zeros(ComplexF64, mpert)
-        @inbounds for i in 2:ntheta
-            factor = pl[i] + one_minus_sigma / (pl[i] + 1e-30)
+        @inbounds for i in 1:ntheta
+            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
+            factor = w * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
             for mi in 1:mpert
                 wmu_ba[mi] += conj(wmu_mt[mi, i]) * factor
                 wen_ba[mi] += conj(wen_mt[mi, i]) * factor
