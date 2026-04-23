@@ -490,8 +490,10 @@ function _bounce_integrate(
 
         cum_wb += wb_integrand
         cum_wd += wd_integrand
-        cum_wb_arr[i] = cum_wb
-        cum_wd_arr[i] = cum_wd
+        # Trapezoidal cumulative (matches Fortran spline_int semantics on linear fn):
+        # bspl%fsi(j)/Δx = g_1 + ... + g_{j-1} + g_j/2, so subtract half the current sample.
+        cum_wb_arr[i] = cum_wb - wb_integrand / 2
+        cum_wd_arr[i] = cum_wd - wd_integrand / 2
 
         # Fourier modes at this θ (Fortran lines 702-708) — write into pre-allocated
         # expm buffer using the ORIGINAL expression order to preserve bit-level parity.
