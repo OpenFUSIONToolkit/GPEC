@@ -227,9 +227,17 @@ struct GalerkinWorkspace
     ndim::Int
     nx::Int
     kl::Int
-    mat::Array{ComplexF64,3}   # (ldab, ndim, 2) banded storage
-    rhs::Matrix{ComplexF64}    # (ndim, 2)
-    sol::Matrix{ComplexF64}    # (ndim, 2)
+    mat::Array{ComplexF64,3}              # (ldab, ndim, 2) banded storage
+    rhs::Matrix{ComplexF64}               # (ndim, 2)
+    sol::Matrix{ComplexF64}               # (ndim, 2)
+    # Reusable scratch buffers, zeroed per-cell via `fill!`. Eliminates the
+    # per-cell `zeros(...)` that otherwise allocates thousands of MiB over a
+    # full dispersion scan.
+    cell_mat_buf::Array{ComplexF64,4}     # (mpert=3, mpert, np+1=4, np+1=4)
+    cell_mat_ext_buf::Array{ComplexF64,4} # (3, 3, 4, 4)  max over CT_EXT/EXT1/EXT2
+    cell_rhs_ext_buf::Matrix{ComplexF64}  # (3, 4)
+    ab_buf::Matrix{ComplexF64}            # (ldab, ndim) scratch for banded LU
+    rhs_buf::Vector{ComplexF64}           # (ndim,) scratch for banded solve
 end
 
 function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Float64,
@@ -333,8 +341,18 @@ function _build_grid_and_workspace(nx::Int, xmax::Float64, dx1::Float64, dx2::Fl
     mat = zeros(ComplexF64, ldab, ndim, 2)
     rhs = zeros(ComplexF64, ndim, 2)
     sol = zeros(ComplexF64, ndim, 2)
+    # Preallocate per-cell scratch buffers sized to the max case (np+1=4).
+    # Smaller cells (e.g. CT_EXT with cell.np=1) use a (2×2) sub-slice and
+    # rely on fill!(buf, 0) to keep the remainder zero.
+    cell_mat_buf     = zeros(ComplexF64, mpert, mpert, np + 1, np + 1)
+    cell_mat_ext_buf = zeros(ComplexF64, mpert, mpert, np + 1, np + 1)
+    cell_rhs_ext_buf = zeros(ComplexF64, mpert, np + 1)
+    ab_buf  = zeros(ComplexF64, ldab, ndim)
+    rhs_buf = zeros(ComplexF64, ndim)
 
-    return GalerkinWorkspace(cells, ndim, nx, kl, mat, rhs, sol)
+    return GalerkinWorkspace(cells, ndim, nx, kl, mat, rhs, sol,
+                              cell_mat_buf, cell_mat_ext_buf, cell_rhs_ext_buf,
+                              ab_buf, rhs_buf)
 end
 
 # -----------------------------------------------------------------------
@@ -513,14 +531,18 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
     fill!(ws.mat, 0)
     fill!(ws.rhs, 0)
 
-    # Per-cell assembly
+    # Per-cell assembly — reuse the preallocated scratch buffers, zeroing
+    # only the sub-slice actually used by this cell's np_eff.
+    cell_mat     = ws.cell_mat_buf
+    cell_mat_ext = ws.cell_mat_ext_buf
+    cell_rhs_ext = ws.cell_rhs_ext_buf
     for ix in 1:ws.nx
         cell = ws.cells[ix]
 
         # Gauss quadrature for Hermite contribution (all cell types)
         if cell.np >= 0
             np_eff = cell.np
-            cell_mat = zeros(ComplexF64, mpert, mpert, np_eff + 1, np_eff + 1)
+            fill!(cell_mat, 0)
             _gauss_quad!(cell_mat, cell, quad_nodes, quad_weights, params, Q)
 
             # Assemble into global banded matrix (both parities use same base matrix)
@@ -537,21 +559,18 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
 
         # Extension terms
         if cell.etype in (CT_EXT, CT_EXT1, CT_EXT2)
+            # np_eff matches the semantic size: CT_EXT has cell.np=1 → ext slot
+            # at index cell.np+1=2 (using 0-based; +1 in Julia), so the array
+            # used by the current code is (3,3,cell.np+2,cell.np+2)=(3,3,3,3).
+            # For CT_EXT1/EXT2 it's (3,3,cell.np+1,cell.np+1)=(3,3,4,4).
+            # Either way npp = cell.etype == CT_EXT ? cell.np + 1 : cell.np.
             np_eff = cell.etype == CT_EXT ? cell.np + 1 : cell.np
-            cell_mat_ext = zeros(ComplexF64, mpert, mpert, np_eff + 1, np_eff + 1)
-            cell_rhs_ext = zeros(ComplexF64, mpert, np_eff + 1)
-            # For ext, we need to create a temporary cell_mat that includes the extra DOF
-            if cell.etype == CT_EXT
-                cell_mat_ext = zeros(ComplexF64, mpert, mpert, cell.np + 2, cell.np + 2)
-                cell_rhs_ext = zeros(ComplexF64, mpert, cell.np + 2)
-            else
-                cell_mat_ext = zeros(ComplexF64, mpert, mpert, cell.np + 1, cell.np + 1)
-                cell_rhs_ext = zeros(ComplexF64, mpert, cell.np + 1)
-            end
+            fill!(cell_mat_ext, 0)
+            fill!(cell_rhs_ext, 0)
             _extension!(cell_mat_ext, cell_rhs_ext, cell, quad_nodes, quad_weights, params, Q, cache)
 
             # Assemble ext contributions
-            npp = size(cell_mat_ext, 3) - 1
+            npp = np_eff
             for ip in 0:npp, ipert in 1:mpert
                 i = ip < size(cell.map, 2) ? cell.map[ipert, ip+1] : cell.emap[1]
                 # For the extra DOF, only ipert=1 is meaningful (noexp)
@@ -669,14 +688,17 @@ function _assemble_and_solve!(ws::GalerkinWorkspace,
         end
     end
 
-    # Solve for each parity using LAPACK banded LU (gbtrf! + gbtrs!)
+    # Solve for each parity using LAPACK banded LU (gbtrf! + gbtrs!).
+    # Reuse the preallocated `ab_buf` / `rhs_buf` instead of `copy`, which
+    # avoided two (ldab × ndim) ComplexF64 allocations per call (≈7 MiB at
+    # ndim=3000).
     n = ws.ndim; kl = ws.kl; ku = kl
     for isol in 1:2
-        ab = copy(ws.mat[:, :, isol])
-        rhs_col = copy(ws.rhs[:, isol])
-        ab, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ab)
-        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ab, ipiv, rhs_col)
-        ws.sol[:, isol] .= rhs_col
+        copyto!(ws.ab_buf, @view(ws.mat[:, :, isol]))
+        copyto!(ws.rhs_buf, @view(ws.rhs[:, isol]))
+        _, ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, n, ws.ab_buf)
+        LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, n, ws.ab_buf, ipiv, ws.rhs_buf)
+        ws.sol[:, isol] .= ws.rhs_buf
     end
 end
 

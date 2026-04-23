@@ -67,6 +67,41 @@ end
     return Δ
 end
 
+# Parallel-friendly bulk filler: given a list of Q values, evaluates the
+# residual at each one that isn't already in `cache` and stores the result.
+# When `parallel=true` AND more than one Julia thread is available, the
+# evaluations run via `@threads`; the cache is populated serially afterward
+# to avoid Dict data races. Per-call evaluations of `f` are assumed to be
+# thread-safe (true for `mc_fort(Q)` which constructs its own local state).
+function _bulk_eval_into_cache!(cache::Dict{ComplexF64,ComplexF64}, f,
+                                 qs::AbstractVector{ComplexF64};
+                                 parallel::Bool)
+    # First pass: partition `qs` into already-cached vs new. Keep uniqueness.
+    seen = Set{ComplexF64}()
+    new_qs = Vector{ComplexF64}()
+    for q in qs
+        if !haskey(cache, q) && !(q in seen)
+            push!(new_qs, q)
+            push!(seen, q)
+        end
+    end
+    isempty(new_qs) && return
+    new_vals = Vector{ComplexF64}(undef, length(new_qs))
+    if parallel && Threads.nthreads() > 1
+        Threads.@threads for k in eachindex(new_qs)
+            new_vals[k] = ComplexF64(f(new_qs[k]))
+        end
+    else
+        @inbounds for k in eachindex(new_qs)
+            new_vals[k] = ComplexF64(f(new_qs[k]))
+        end
+    end
+    @inbounds for k in eachindex(new_qs)
+        cache[new_qs[k]] = new_vals[k]
+    end
+    return
+end
+
 # Sign-crossing test: does `vals` straddle zero? Used in both Re and Im
 # directions on a cell's 4 corners (mirrors check_cell_crossing_sub).
 @inline _crosses_zero(vals) = minimum(vals) * maximum(vals) <= 0
@@ -102,7 +137,8 @@ end
 """
     amr_scan(f, Q_re_range, Q_im_range;
               nre0, nim0, passes,
-              max_cells=10_000_000) -> AMRResult
+              max_cells=10_000_000,
+              parallel=Threads.nthreads() > 1) -> AMRResult
 
 Adaptively refine a Q-plane scan of the residual `f(Q)`. An initial
 `nre0 × nim0` axis-aligned grid of cells is built over `Q_re_range ×
@@ -125,11 +161,17 @@ evaluations.
   - `nre0`, `nim0`   -- initial coarse-grid cell counts along each axis
   - `passes`         -- number of refinement passes
   - `max_cells`      -- safety cap on total cells (errors out if exceeded)
+  - `parallel`       -- evaluate `f` in parallel via `Threads.@threads` within
+    each phase (initial grid + each refinement pass). Defaults to `true`
+    when more than one Julia thread is available. Per-call evaluations of
+    `f` must be thread-safe. Cache updates and cell-list construction stay
+    serial, so the result is deterministic regardless of thread count.
 """
 function amr_scan(f, Q_re_range::NTuple{2,<:Real},
                   Q_im_range::NTuple{2,<:Real};
                   nre0::Integer, nim0::Integer, passes::Integer,
-                  max_cells::Integer=10_000_000)
+                  max_cells::Integer=10_000_000,
+                  parallel::Bool=Threads.nthreads() > 1)
     nre0 >= 1 || throw(ArgumentError("amr_scan: nre0 must be ≥ 1"))
     nim0 >= 1 || throw(ArgumentError("amr_scan: nim0 must be ≥ 1"))
     passes >= 0 || throw(ArgumentError("amr_scan: passes must be ≥ 0"))
@@ -142,39 +184,83 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
     cache = Dict{ComplexF64,ComplexF64}()
 
     # ---- 1. coarse initial grid (nre0 × nim0 cells, (nre0+1)·(nim0+1) corners)
+    # Collect every corner Q, evaluate in parallel, then build the cells using
+    # cache lookups (no further evaluation happens in the build step).
+    ncorners_x = nre0 + 1
+    ncorners_y = nim0 + 1
+    corners = Vector{ComplexF64}(undef, ncorners_x * ncorners_y)
+    @inbounds for j in 0:nim0, i in 0:nre0
+        corners[j * ncorners_x + i + 1] =
+            ComplexF64(re_lo + i * re_step, im_lo + j * im_step)
+    end
+    _bulk_eval_into_cache!(cache, f, corners; parallel=parallel)
+
     cells = Vector{AMRCell}(undef, nre0 * nim0)
-    idx = 0
-    for j in 0:nim0-1, i in 0:nre0-1
-        x  = re_lo + i * re_step
-        y  = im_lo + j * im_step
-        q_bl = ComplexF64(x,           y)
-        q_br = ComplexF64(x + re_step, y)
-        q_tl = ComplexF64(x,           y + im_step)
-        q_tr = ComplexF64(x + re_step, y + im_step)
-
-        d_bl = _cached_eval!(cache, f, q_bl)
-        d_br = _cached_eval!(cache, f, q_br)
-        d_tl = _cached_eval!(cache, f, q_tl)
-        d_tr = _cached_eval!(cache, f, q_tr)
-
-        idx += 1
-        cells[idx] = AMRCell(q_bl, q_br, q_tl, q_tr,
-                             d_bl, d_br, d_tl, d_tr)
+    @inbounds for j in 0:nim0-1, i in 0:nre0-1
+        # Read corner Q values from the same `corners` array used to populate
+        # the cache. Recomputing them with `x + re_step` here would differ in
+        # the last floating-point bit from the cache keys, causing spurious
+        # KeyErrors on lookup.
+        q_bl = corners[j     * ncorners_x + i     + 1]
+        q_br = corners[j     * ncorners_x + (i+1) + 1]
+        q_tl = corners[(j+1) * ncorners_x + i     + 1]
+        q_tr = corners[(j+1) * ncorners_x + (i+1) + 1]
+        cells[j * nre0 + i + 1] = AMRCell(q_bl, q_br, q_tl, q_tr,
+                                           cache[q_bl], cache[q_br],
+                                           cache[q_tl], cache[q_tr])
     end
 
     # ---- 2. refinement passes
     for _ in 1:passes
-        new_cells = Vector{AMRCell}()
-        sizehint!(new_cells, length(cells))
-        for cell in cells
+        # Phase A: identify flagged parent cells and collect the midpoints we
+        # need to evaluate. The 5 midpoints per parent (BM, TM, LM, RM, MM)
+        # mirror _subdivide_cell's coordinates exactly.
+        flagged_idx = Int[]
+        new_qs = Vector{ComplexF64}()
+        sizehint!(new_qs, length(cells))
+        for (idx, cell) in enumerate(cells)
             re_corners = (real(cell.d_bl), real(cell.d_br),
                           real(cell.d_tl), real(cell.d_tr))
             im_corners = (imag(cell.d_bl), imag(cell.d_br),
                           imag(cell.d_tl), imag(cell.d_tr))
             if _crosses_zero(re_corners) || _crosses_zero(im_corners)
-                children = _subdivide_cell(cell, cache, f)
-                push!(new_cells, children[1], children[2],
-                                  children[3], children[4])
+                push!(flagged_idx, idx)
+                push!(new_qs, 0.5 * (cell.q_bl + cell.q_br))
+                push!(new_qs, 0.5 * (cell.q_tl + cell.q_tr))
+                push!(new_qs, 0.5 * (cell.q_bl + cell.q_tl))
+                push!(new_qs, 0.5 * (cell.q_br + cell.q_tr))
+                push!(new_qs, 0.25 * (cell.q_bl + cell.q_br +
+                                       cell.q_tl + cell.q_tr))
+            end
+        end
+
+        # Phase B: evaluate all new midpoints in parallel, fill the cache.
+        _bulk_eval_into_cache!(cache, f, new_qs; parallel=parallel)
+
+        # Phase C: build the refined cell list using cache lookups.
+        new_cells = Vector{AMRCell}()
+        sizehint!(new_cells, length(cells) + 3 * length(flagged_idx))
+        flagged_set = Set(flagged_idx)
+        for (idx, cell) in enumerate(cells)
+            if idx in flagged_set
+                q_bm = 0.5 * (cell.q_bl + cell.q_br)
+                q_tm = 0.5 * (cell.q_tl + cell.q_tr)
+                q_lm = 0.5 * (cell.q_bl + cell.q_tl)
+                q_rm = 0.5 * (cell.q_br + cell.q_tr)
+                q_mm = 0.25 * (cell.q_bl + cell.q_br +
+                                cell.q_tl + cell.q_tr)
+                d_bm = cache[q_bm]; d_tm = cache[q_tm]
+                d_lm = cache[q_lm]; d_rm = cache[q_rm]
+                d_mm = cache[q_mm]
+                push!(new_cells,
+                      AMRCell(cell.q_bl, q_bm, q_lm, q_mm,
+                              cell.d_bl, d_bm, d_lm, d_mm),
+                      AMRCell(q_bm, cell.q_br, q_mm, q_rm,
+                              d_bm, cell.d_br, d_mm, d_rm),
+                      AMRCell(q_lm, q_mm, cell.q_tl, q_tm,
+                              d_lm, d_mm, cell.d_tl, d_tm),
+                      AMRCell(q_mm, q_rm, q_tm, cell.q_tr,
+                              d_mm, d_rm, d_tm, cell.d_tr))
             else
                 push!(new_cells, cell)
             end
