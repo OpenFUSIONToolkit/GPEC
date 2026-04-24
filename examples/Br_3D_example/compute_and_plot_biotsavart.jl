@@ -6,6 +6,36 @@ using LinearAlgebra
 using Statistics
 using GLMakie
 
+# ═══════════════════════════════════════════════════════════════
+# Global theme — large, bold, serif fonts
+# ═══════════════════════════════════════════════════════════════
+set_theme!(Theme(
+    fontsize = 28,
+    font = :bold,
+    Axis = (
+        xlabelsize = 32,
+        ylabelsize = 32,
+        xticklabelsize = 24,
+        yticklabelsize = 24,
+        titlesize = 36,
+        xlabelfont = "CMU Serif Bold",
+        ylabelfont = "CMU Serif Bold",
+        titlefont = "CMU Serif Bold",
+        xticklabelfont = "CMU Serif",
+        yticklabelfont = "CMU Serif",
+    ),
+    Colorbar = (
+        labelsize = 28,
+        ticklabelsize = 22,
+        labelfont = "CMU Serif Bold",
+        ticklabelfont = "CMU Serif",
+    ),
+    Label = (
+        fontsize = 36,
+        font = "CMU Serif Bold",
+    ),
+))
+
 const FT = GeneralizedPerturbedEquilibrium.ForcingTerms
 const compute_biot_savart_boundary! = FT.compute_biot_savart_boundary!
 const read_coil_dat = FT.read_coil_dat
@@ -14,29 +44,29 @@ const read_coil_dat = FT.read_coil_dat
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 
-# Each entry: (filepath, current_per_conductor [A])
 COIL_FILES = [
-    (joinpath(@__DIR__, "sparc_pf1u.dat"), 1000.0),
-    (joinpath(@__DIR__, "sparc_pf3u.dat"), 1000.0),
+    (joinpath(@__DIR__, "sparc_pf1u.dat"), 100.0),
 ]
 
-# Plasma torus parameters
 R0 = 1.85
-a  = .57
+a  = 0.57
 
-# Torus grid resolution
 N_THETA = 120
 N_PHI   = 180
 
 # ── Field component selection ────────────────────────────
-# Choose which component to display on ALL plots:
 #   :B_R, :B_phi, :B_Z, :B_mag
 FIELD_COMPONENT = :B_R
 
+# ── Units ────────────────────────────────────────────────
+#   :T  or  :G  (1 T = 10000 G)
+FIELD_UNITS = :G
+
 # ── Plot toggles ─────────────────────────────────────────
-ENABLE_TORUS_PLOT       = true    # Fig 1: field on torus surface
-ENABLE_HALL_PROBES      = true    # Fig 2: total field at probe grid
-ENABLE_HALL_PERTURBATION = true   # Fig 3: non-axisymmetric (n≠0) only
+ENABLE_TORUS_PLOT        = true
+ENABLE_HALL_PROBES       = true
+ENABLE_HALL_PERTURBATION = true
+ENABLE_Z_SLICES          = true
 
 # ── Hall probe grid settings ─────────────────────────────
 HALL_MARGIN = 0.5
@@ -44,42 +74,57 @@ HALL_N_R    = 8
 HALL_N_PHI  = 24
 HALL_N_Z    = 8
 
+# ── Perturbation visibility threshold ────────────────────
+PERT_VISIBILITY_THRESHOLD = 0.005
+
+# ── Z-slice settings ─────────────────────────────────────
+# :auto  → one slice through the Z-center of each coil set
+# or provide explicit list of Z values, e.g. [0.0, 0.5, -0.3]
+Z_SLICE_POSITIONS       = :auto
+Z_SLICE_N_XY            = 200
+Z_SLICE_MARGIN          = 0.5
+Z_SLICE_SHOW_COILS      = true    # overplot coil geometry on Z-slices
+Z_SLICE_COIL_PROJECT    = true    # true  = project full coil onto XY plane
+                                   # false = only show points near the Z slice
+Z_SLICE_COIL_TOL_FRAC   = 0.05   # only used when Z_SLICE_COIL_PROJECT = false
+
 # Output
 PLOT_FILE = joinpath(@__DIR__, "b_3d_colorplot.png")
+
+# ═══════════════════════════════════════════════════════════════
+# Units
+# ═══════════════════════════════════════════════════════════════
+
+const T_TO_G = 1e4
+
+unit_scale() = FIELD_UNITS == :G ? T_TO_G : 1.0
+unit_str()   = FIELD_UNITS == :G ? "G" : "T"
 
 # ═══════════════════════════════════════════════════════════════
 # Field component helpers
 # ═══════════════════════════════════════════════════════════════
 
-const FIELD_LABELS = Dict(
-    :B_R   => ("Bᵣ",  "Bᵣ [T]"),
-    :B_phi => ("Bφ",  "Bφ [T]"),
-    :B_Z   => ("Bz",  "Bz [T]"),
-    :B_mag => ("|B|", "|B| [T]"),
-)
-
-const PERT_LABELS = Dict(
-    :B_R   => ("δBᵣ",  "δBᵣ (n≠0) [T]"),
-    :B_phi => ("δBφ",  "δBφ (n≠0) [T]"),
-    :B_Z   => ("δBz",  "δBz (n≠0) [T]"),
-    :B_mag => ("|δB|", "|δB| (n≠0) [T]"),
-)
-
-function field_is_signed(component::Symbol)
-    return component in (:B_R, :B_phi, :B_Z)
+function field_label(c::Symbol)
+    Dict(:B_R => "Bᵣ", :B_phi => "Bφ", :B_Z => "Bz", :B_mag => "|B|")[c]
 end
 
-function select_component(B_R, B_phi, B_Z, component::Symbol)
-    if component == :B_R;      return B_R
-    elseif component == :B_phi; return B_phi
-    elseif component == :B_Z;   return B_Z
-    else                        return sqrt.(B_R.^2 .+ B_phi.^2 .+ B_Z.^2)
-    end
+function pert_label(c::Symbol)
+    Dict(:B_R => "δBᵣ", :B_phi => "δBφ", :B_Z => "δBz", :B_mag => "|δB|")[c]
+end
+
+field_cb_label(c::Symbol)  = "$(field_label(c)) [$(unit_str())]"
+pert_cb_label(c::Symbol)   = "$(pert_label(c)) (n≠0) [$(unit_str())]"
+field_is_signed(c::Symbol) = c in (:B_R, :B_phi, :B_Z)
+
+function select_component(B_R, B_phi, B_Z, c::Symbol)
+    c == :B_R   && return B_R
+    c == :B_phi && return B_phi
+    c == :B_Z   && return B_Z
+    return sqrt.(B_R.^2 .+ B_phi.^2 .+ B_Z.^2)
 end
 
 function symmetric_clim(data; q=0.98)
-    c = quantile(abs.(vec(data)), q)
-    return max(c, 1e-30)
+    max(quantile(abs.(vec(data)), q), 1e-30)
 end
 
 # ═══════════════════════════════════════════════════════════════
@@ -119,11 +164,8 @@ function compute_field_on_torus(coil_sets, R0, a, n_theta, n_phi)
     println("Computing Biot-Savart on torus ($nobs points, $(length(coil_sets)) coil sets)...")
     compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
 
-    println("  B_R   range: [$(minimum(B_R)), $(maximum(B_R))]")
-    println("  B_phi range: [$(minimum(B_phi)), $(maximum(B_phi))]")
-    println("  B_Z   range: [$(minimum(B_Z)), $(maximum(B_Z))]")
-
-    C = reshape(select_component(B_R, B_phi, B_Z, FIELD_COMPONENT), n_phi, n_theta)
+    s = unit_scale()
+    C = reshape(select_component(B_R, B_phi, B_Z, FIELD_COMPONENT) .* s, n_phi, n_theta)
     X = [(R0 + a*cos(θ))*cos(φ) for φ in phi_range, θ in theta_range]
     Y = [(R0 + a*cos(θ))*sin(φ) for φ in phi_range, θ in theta_range]
     Z = [a*sin(θ)               for φ in phi_range, θ in theta_range]
@@ -142,6 +184,10 @@ function compute_coil_bounding_box(coil_sets)
         Z_max = max(Z_max, maximum(cs.z))
     end
     return R_min, R_max, Z_min, Z_max
+end
+
+function coil_set_z_centers(coil_sets)
+    [(minimum(cs.z) + maximum(cs.z)) / 2.0 for cs in coil_sets]
 end
 
 function compute_hall_probes(coil_sets, coil_bbox, margin, n_r, n_phi, n_z)
@@ -196,14 +242,60 @@ end
 
 function subtract_axisymmetric(field_flat::Vector{Float64}, n_r::Int, n_phi::Int, n_z::Int)
     field_3d = reshape(copy(field_flat), n_r, n_phi, n_z)
-    for iz in 1:n_z
-        for ir in 1:n_r
-            n0 = mean(field_3d[ir, :, iz])
-            field_3d[ir, :, iz] .-= n0
-        end
+    for iz in 1:n_z, ir in 1:n_r
+        n0 = mean(field_3d[ir, :, iz])
+        field_3d[ir, :, iz] .-= n0
     end
     println("    Perturbation range: [$(round(minimum(field_3d), sigdigits=4)), $(round(maximum(field_3d), sigdigits=4))]")
     return vec(field_3d)
+end
+
+# ═══════════════════════════════════════════════════════════════
+# Z-slice computation
+# ═══════════════════════════════════════════════════════════════
+
+function compute_z_slice_xy(coil_sets, z_val, coil_bbox, margin, n_xy)
+    _, R_max_coil, _, _ = coil_bbox
+    extent = R_max_coil + margin
+
+    x_range = range(-extent, extent, length=n_xy)
+    y_range = range(-extent, extent, length=n_xy)
+
+    R_min_safe = 0.02
+
+    obs_R   = Float64[]
+    obs_phi = Float64[]
+    obs_Z   = Float64[]
+    valid_idx = Int[]
+
+    for (iy, yv) in enumerate(y_range)
+        for (ix, xv) in enumerate(x_range)
+            R = sqrt(xv^2 + yv^2)
+            if R >= R_min_safe
+                push!(obs_R, R)
+                push!(obs_phi, atan(yv, xv))
+                push!(obs_Z, z_val)
+                push!(valid_idx, (iy - 1) * n_xy + ix)
+            end
+        end
+    end
+
+    nobs = length(obs_R)
+    B_R   = zeros(nobs)
+    B_phi = zeros(nobs)
+    B_Z   = zeros(nobs)
+
+    println("    Computing Biot-Savart at $nobs points (Z = $(round(z_val, digits=4)) m)...")
+    compute_biot_savart_boundary!(B_R, B_phi, B_Z, obs_R, obs_phi, obs_Z, coil_sets)
+
+    field_vals = select_component(B_R, B_phi, B_Z, FIELD_COMPONENT) .* unit_scale()
+
+    field_2d = fill(NaN, n_xy, n_xy)
+    for (k, li) in enumerate(valid_idx)
+        field_2d[li] = field_vals[k]
+    end
+
+    return collect(x_range), collect(y_range), field_2d
 end
 
 # ═══════════════════════════════════════════════════════════════
@@ -231,6 +323,49 @@ function plot_coils!(ax, coil_sets, set_palettes)
     return total
 end
 
+"""
+    plot_coils_xy_at_z!(ax, coil_sets, z_val, set_palettes;
+                        project=true, tol=0.05)
+
+Overlay coil geometry on a 2D (X, Y) axis.
+
+If `project=true`: draw the full coil outline projected onto the XY plane
+(ignoring Z), so the complete coil footprint is always visible regardless
+of whether the coil passes through the slice plane.
+
+If `project=false`: only show coil points within `tol` of z_val.
+"""
+function plot_coils_xy_at_z!(ax, coil_sets, z_val, set_palettes;
+                              project::Bool=true, tol=0.05)
+    for (s_idx, cs) in enumerate(coil_sets)
+        palette = set_palettes[mod1(s_idx, length(set_palettes))]
+        for j in 1:cs.ncoil
+            cc = palette[mod1(j, length(palette))]
+            for k in 1:cs.s
+                xl = vec(cs.x[j, k, :])
+                yl = vec(cs.y[j, k, :])
+                zl = vec(cs.z[j, k, :])
+
+                if project
+                    # Close the loop
+                    if (xl[1]-xl[end])^2 + (yl[1]-yl[end])^2 > 1e-10
+                        push!(xl, xl[1])
+                        push!(yl, yl[1])
+                    end
+                    # Draw full coil outline projected onto XY
+                    lines!(ax, xl, yl; color=cc, linewidth=2.5)
+                else
+                    mask = abs.(zl .- z_val) .< tol
+                    any(mask) || continue
+                    scatter!(ax, xl[mask], yl[mask];
+                             color=cc, markersize=6,
+                             strokecolor=:black, strokewidth=0.5)
+                end
+            end
+        end
+    end
+end
+
 function make_3d_figure(; title="")
     fig = Figure(size=(1400, 1100), backgroundcolor=:white)
     if !isempty(title)
@@ -243,26 +378,55 @@ function make_3d_figure(; title="")
 end
 
 function make_hall_scatter!(fig, ax, px, py, pz, color_data, component, is_perturbation)
+    s = unit_scale()
+    color_display = color_data .* s
     signed = field_is_signed(component) || is_perturbation
 
     if signed
-        clim_hi = symmetric_clim(color_data)
+        clim_hi = symmetric_clim(color_display)
         clim_lo = -clim_hi
         cmap = :RdBu
     else
         clim_lo = 0.0
-        clim_hi = max(quantile(color_data, 0.98), 1e-30)
+        clim_hi = max(quantile(color_display, 0.98), 1e-30)
         cmap = :inferno
     end
 
-    labels = is_perturbation ? PERT_LABELS : FIELD_LABELS
-    _, cb_label = labels[component]
+    cb_label = is_perturbation ? pert_cb_label(component) : field_cb_label(component)
 
     hp = scatter!(ax, px, py, pz;
-                  color=color_data, colormap=cmap,
+                  color=color_display, colormap=cmap,
                   colorrange=(clim_lo, clim_hi),
                   markersize=12)
     Colorbar(fig[1, 2], hp; label=cb_label, width=20)
+
+    return clim_lo, clim_hi
+end
+
+function make_hall_scatter_filtered!(fig, ax, px, py, pz, color_data, component, threshold_frac)
+    s = unit_scale()
+    u = unit_str()
+    color_display = color_data .* s
+
+    peak = maximum(abs.(color_display))
+    threshold = threshold_frac * peak
+    mask = abs.(color_display) .>= threshold
+
+    n_total = length(color_display)
+    n_visible = count(mask)
+    println("    Visibility filter: threshold = $(round(threshold, sigdigits=4)) $u " *
+            "($(round(threshold_frac*100, digits=1))% of peak $(round(peak, sigdigits=4)) $u)")
+    println("    Showing $n_visible / $n_total probes ($(n_total - n_visible) hidden)")
+
+    cd_f = color_display[mask]
+    clim_hi = symmetric_clim(cd_f)
+    clim_lo = -clim_hi
+
+    hp = scatter!(ax, px[mask], py[mask], pz[mask];
+                  color=cd_f, colormap=:RdBu,
+                  colorrange=(clim_lo, clim_hi),
+                  markersize=14)
+    Colorbar(fig[1, 2], hp; label=pert_cb_label(component), width=20)
 
     return clim_lo, clim_hi
 end
@@ -272,8 +436,8 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 function main()
-    short_name, cb_label = FIELD_LABELS[FIELD_COMPONENT]
-    println("Field component: $short_name ($FIELD_COMPONENT)")
+    fl = field_label(FIELD_COMPONENT)
+    println("Field component: $fl ($FIELD_COMPONENT), units: $(unit_str())")
     println("Loading coil sets...")
     coil_sets = load_all_coil_sets(COIL_FILES)
 
@@ -281,16 +445,16 @@ function main()
     X_torus, Y_torus, Z_torus, C_torus = compute_field_on_torus(coil_sets, R0, a, N_THETA, N_PHI)
 
     hall_data = nothing
+    coil_bbox = compute_coil_bounding_box(coil_sets)
     if ENABLE_HALL_PROBES || ENABLE_HALL_PERTURBATION
         println("\nComputing synthetic Hall probe measurements...")
-        coil_bbox = compute_coil_bounding_box(coil_sets)
         hall_data = compute_hall_probes(
             coil_sets, coil_bbox, HALL_MARGIN,
             HALL_N_R, HALL_N_PHI, HALL_N_Z
         )
     end
 
-    println("\nCreating 3D plots...")
+    println("\nCreating plots...")
 
     set_palettes = [
         [:royalblue, :dodgerblue, :steelblue, :cornflowerblue, :navy, :mediumblue],
@@ -309,7 +473,7 @@ function main()
 
     # ── Figure 1: Torus surface ──────────────────────────
     if ENABLE_TORUS_PLOT
-        fig1, ax1 = make_3d_figure(title="$short_name on Torus Surface")
+        fig1, ax1 = make_3d_figure(title="$fl on Torus Surface")
 
         if field_is_signed(FIELD_COMPONENT)
             clim = symmetric_clim(C_torus)
@@ -320,7 +484,7 @@ function main()
             sf = surface!(ax1, X_torus, Y_torus, Z_torus;
                           color=C_torus, colormap=:inferno, colorrange=(0.0, clim_hi))
         end
-        Colorbar(fig1[1, 2], sf; label=cb_label, width=20)
+        Colorbar(fig1[1, 2], sf; label=field_cb_label(FIELD_COMPONENT), width=20)
 
         plot_coils!(ax1, coil_sets, set_palettes)
         cam3d!(ax1.scene; lookat=cam_lookat, eyeposition=cam_eye, upvector=cam_up)
@@ -331,7 +495,7 @@ function main()
     if ENABLE_HALL_PROBES && hall_data !== nothing
         probe_color = select_component(hall_data.B_R, hall_data.B_phi, hall_data.B_Z, FIELD_COMPONENT)
 
-        fig2, ax2 = make_3d_figure(title="Synthetic Hall Probes — Total $short_name")
+        fig2, ax2 = make_3d_figure(title="Synthetic Hall Probes — Total $fl")
 
         lo, hi = make_hall_scatter!(fig2, ax2,
             hall_data.probe_x, hall_data.probe_y, hall_data.probe_z,
@@ -340,11 +504,11 @@ function main()
         plot_coils!(ax2, coil_sets, set_palettes)
         cam3d!(ax2.scene; lookat=cam_lookat, eyeposition=cam_eye, upvector=cam_up)
 
-        println("  Hall total: $(length(probe_color)) probes, $short_name ∈ [$lo, $hi]")
+        println("  Hall total: $(length(probe_color)) probes")
         push!(figures, ("hall_total", fig2))
     end
 
-    # ── Figure 3: Hall probes — non-axisymmetric ─────────
+    # ── Figure 3: Hall probes — non-axisymmetric, filtered ──
     if ENABLE_HALL_PERTURBATION && hall_data !== nothing
         println("\n  Subtracting axisymmetric (n=0) component...")
 
@@ -353,20 +517,73 @@ function main()
         B_Z_pert   = subtract_axisymmetric(hall_data.B_Z,   hall_data.n_r, hall_data.n_phi, hall_data.n_z)
 
         pert_color = select_component(B_R_pert, B_phi_pert, B_Z_pert, FIELD_COMPONENT)
+        pl = pert_label(FIELD_COMPONENT)
 
-        pert_short, _ = PERT_LABELS[FIELD_COMPONENT]
+        fig3, ax3 = make_3d_figure(title="Synthetic Hall Probes — Non-Axisymmetric $pl (filtered)")
 
-        fig3, ax3 = make_3d_figure(title="Synthetic Hall Probes — Non-Axisymmetric $pert_short")
-
-        lo, hi = make_hall_scatter!(fig3, ax3,
+        lo, hi = make_hall_scatter_filtered!(fig3, ax3,
             hall_data.probe_x, hall_data.probe_y, hall_data.probe_z,
-            pert_color, FIELD_COMPONENT, true)
+            pert_color, FIELD_COMPONENT, PERT_VISIBILITY_THRESHOLD)
 
         plot_coils!(ax3, coil_sets, set_palettes)
         cam3d!(ax3.scene; lookat=cam_lookat, eyeposition=cam_eye, upvector=cam_up)
 
-        println("  Hall perturbation: $pert_short ∈ [$lo, $hi]")
+        println("  Hall perturbation: $pl ∈ [$lo, $hi]")
         push!(figures, ("hall_perturbation", fig3))
+    end
+
+    # ── Z-slice 2D plots in (X, Y) ──────────────────────
+    if ENABLE_Z_SLICES
+        z_positions = if Z_SLICE_POSITIONS == :auto
+            unique(round.(coil_set_z_centers(coil_sets), digits=4))
+        else
+            Float64.(Z_SLICE_POSITIONS)
+        end
+
+        println("\n  Computing Z-slices at: $(z_positions) m")
+
+        for (si, z_val) in enumerate(z_positions)
+            x_range, y_range, field_2d = compute_z_slice_xy(
+                coil_sets, z_val, coil_bbox, Z_SLICE_MARGIN, Z_SLICE_N_XY
+            )
+
+            fig_s = Figure(size=(1000, 900), backgroundcolor=:white)
+
+            Label(fig_s[0, 1:2],
+                  "$(field_label(FIELD_COMPONENT)) at Z = $(round(z_val, digits=3)) m";
+                  fontsize=22, halign=:center)
+            rowsize!(fig_s.layout, 0, Fixed(30))
+
+            ax_s = Axis(fig_s[1, 1];
+                        xlabel="X [m]", ylabel="Y [m]",
+                        aspect=DataAspect())
+
+            valid = filter(!isnan, vec(field_2d))
+
+            if field_is_signed(FIELD_COMPONENT)
+                clim = symmetric_clim(valid)
+                hm = heatmap!(ax_s, x_range, y_range, field_2d;
+                              colormap=:RdBu, colorrange=(-clim, clim),
+                              nan_color=:transparent)
+            else
+                clim_hi = max(quantile(valid, 0.98), 1e-30)
+                hm = heatmap!(ax_s, x_range, y_range, field_2d;
+                              colormap=:inferno, colorrange=(0.0, clim_hi),
+                              nan_color=:transparent)
+            end
+
+            Colorbar(fig_s[1, 2], hm; label=field_cb_label(FIELD_COMPONENT), width=20)
+
+            # Overlay coil geometry if enabled
+            if Z_SLICE_SHOW_COILS
+                z_extent = coil_bbox[4] - coil_bbox[3]
+                slice_tol = max(0.05, z_extent * Z_SLICE_COIL_TOL_FRAC)
+                plot_coils_xy_at_z!(ax_s, coil_sets, z_val, set_palettes;
+                                     project=Z_SLICE_COIL_PROJECT, tol=slice_tol)
+            end
+
+            push!(figures, ("zslice_$(si)", fig_s))
+        end
     end
 
     # ── Display & save ───────────────────────────────────
