@@ -718,25 +718,33 @@ end
 
 
 """
-    kinetic_energy_matrices_for_euler_lagrange!(cmplx_kinetic_energy_mats, state, psi, n, l, wdfac, intr;
+    kinetic_energy_matrices_for_euler_lagrange!(kwmat, ktmat, state, psi, n, l, wdfac, intr;
                                                 kwargs...) → nothing
 
 Compute the six kinetic Euler-Lagrange coefficient matrices of Logan 2015
 Eqs 7.30–7.35 (A_k, B_k, C_k, D_k, E_k, H_k) at a single (ψ, n, ℓ) and write
-them into the pre-allocated `cmplx_kinetic_energy_mats[mpert, mpert, 6]`.
+them into pre-allocated `kwmat[mpert, mpert, 6]` (fwmm half, Fortran
+rex=0, imx=1) and `ktmat[mpert, mpert, 6]` (ftmm half, rex=1, imx=0).
 
 Matrix-only path (no scalar torque slot in the pitch-angle buffer), so
 `nqty = mpert²·6` instead of `1 + mpert²·6`.
 
-The resonance operator is evaluated with `rex = imx = 1` so the output
-is the full complex response. Downstream callers decompose the result
-into the Fortran-convention `kwmat` (all-real values, from the `"wmm"`
-integrand) and `ktmat` (all-imag values, from the `"tmm"` integrand) via
-`real(cmplx_kinetic_energy_mats)` and `imag(cmplx_kinetic_energy_mats)` respectively — see
-`compute_kinetic_matrices_at_psi!`.
+Uses `integrate_pitch_gar_quadgk_wt` to emit both halves from a single
+energy integration per (λ, E), reproducing Fortran's two-pass semantics
+(`torque.F90:842-847`). Per-surface matrix dumps confirm element-by-element
+match against Fortran `fourfit.F:1080-1082` (`kwmat_l`, `ktmat_l`).
+
+For the Hermitian-outer-product blocks A/D/H stored as upper-triangles,
+the mirror rule differs between halves:
+  kwmat[j,i] =  conj(kwmat[i,j])   — Hermitian (S_w pure imaginary)
+  ktmat[j,i] = -conj(ktmat[i,j])   — anti-Hermitian (S_t pure real)
+Derivation: `conj(S_w) = -S_w` vs `conj(S_t) = S_t`, combined with
+`conj(factor) = -factor` (factor = -i/(2n)). These mirrors recover
+Fortran's independent-slot computation at the mirrored (j,i) positions.
 """
 function kinetic_energy_matrices_for_euler_lagrange!(
-    cmplx_kinetic_energy_mats::Array{ComplexF64,3},
+    kwmat::Array{ComplexF64,3},
+    ktmat::Array{ComplexF64,3},
     state::NamedTuple,
     psi::Float64, n::Int, l::Int, wdfac::Float64,
     intr::KineticForcesInternal;
@@ -771,7 +779,8 @@ function kinetic_energy_matrices_for_euler_lagrange!(
         nlmda, ntheta, smat=smat_f, tmat=tmat_f, xmat=xmat_f, ymat=ymat_f, zmat=zmat_f)
 
     if bounce.nlmda == 0
-        cmplx_kinetic_energy_mats .= 0
+        fill!(kwmat, 0)
+        fill!(ktmat, 0)
         return nothing
     end
 
@@ -804,12 +813,12 @@ function kinetic_energy_matrices_for_euler_lagrange!(
 
     fbnce = cubic_interp(bounce.lambda, Series(fbnce_data); bc=ZeroCurvBC())
 
-    # Full complex resonance operator (rex=1, imx=1) — caller splits into
-    # energy (imag) and torque (real) parts downstream.
-    lxint = integrate_pitch_gar_quadgk(
+    # Dual-output pitch integration: one energy sweep per (λ, E) produces both
+    # halves. Packed return is [wmm | tmm], each length nqty.
+    lxint = integrate_pitch_gar_quadgk_wt(
         state.wdian, state.wdiat, state.welec, state.nuk,
         bo / state.bmax, state.epsr, state.q,
-        fbnce, fbnce_norm, nqty, l, n, 1.0, 1.0, psi, "fwmm";
+        fbnce, fbnce_norm, nqty, l, n, psi, "fwmm";
         nutype, f0type, nufac, ximag, qt=false,
         energy_atol, energy_rtol, pitch_atol, pitch_rtol)
 
@@ -820,56 +829,47 @@ function kinetic_energy_matrices_for_euler_lagrange!(
     energy_factor = tnorm * (1 / (2 * im * n))
 
     Mu = (mpert * (mpert + 1)) ÷ 2
-    # Helper: fetch normalized pitch integral at lxint[q] for q ∈ [1..nqty].
-    @inline elem(q) = complex(lxint[q] / fbnce_norm[q]) * energy_factor
+    # Fetch normalized element at pitch-integral slot q, from either half.
+    # half_offset = 0 for wmm (→kwmat), = nqty for tmm (→ktmat).
+    @inline elem(q, half_offset) = complex(lxint[half_offset + q] / fbnce_norm[q]) * energy_factor
 
-    # A (Hermitian, k=1): upper triangle → full with Hermitian mirror.
-    off = 0
-    @inbounds for j in 1:mpert, i in 1:j
-        v = elem(off + _tri_idx(i, j))
-        cmplx_kinetic_energy_mats[i, j, 1] = v
-        if i != j
-            cmplx_kinetic_energy_mats[j, i, 1] = conj(v)
+    # For A/D/H Hermitian-outer-product blocks stored as upper-triangles, the
+    # lower-triangle reconstruction uses different mirrors per half:
+    #   kwmat[j,i] =  conj(kwmat[i,j])  (Hermitian; S_w pure imaginary)
+    #   ktmat[j,i] = -conj(ktmat[i,j])  (anti-Hermitian; S_t pure real)
+    # This matches Fortran's independently-computed slots at (j,i).
+    @inline function _assemble_hermitian!(dest, k, off, half, mirror_sign)
+        @inbounds for j in 1:mpert, i in 1:j
+            v = elem(off + _tri_idx(i, j), half)
+            dest[i, j, k] = v
+            if i != j
+                dest[j, i, k] = mirror_sign * conj(v)
+            end
         end
     end
-    off += Mu
-    # D (Hermitian, k=4)
-    @inbounds for j in 1:mpert, i in 1:j
-        v = elem(off + _tri_idx(i, j))
-        cmplx_kinetic_energy_mats[i, j, 4] = v
-        if i != j
-            cmplx_kinetic_energy_mats[j, i, 4] = conj(v)
+
+    @inline function _assemble_full!(dest, k, off, half)
+        @inbounds for j in 1:mpert, i in 1:mpert
+            dest[i, j, k] = elem(off + _full_idx(i, j, mpert), half)
         end
     end
-    off += Mu
-    # H (Hermitian, k=6)
-    @inbounds for j in 1:mpert, i in 1:j
-        v = elem(off + _tri_idx(i, j))
-        cmplx_kinetic_energy_mats[i, j, 6] = v
-        if i != j
-            cmplx_kinetic_energy_mats[j, i, 6] = conj(v)
-        end
-    end
-    off += Mu
-    # B (full, k=2)
-    @inbounds for j in 1:mpert, i in 1:mpert
-        cmplx_kinetic_energy_mats[i, j, 2] = elem(off + _full_idx(i, j, mpert))
-    end
-    off += mpert^2
-    # C (full, k=3)
-    @inbounds for j in 1:mpert, i in 1:mpert
-        cmplx_kinetic_energy_mats[i, j, 3] = elem(off + _full_idx(i, j, mpert))
-    end
-    off += mpert^2
-    # E (full, k=5)
-    @inbounds for j in 1:mpert, i in 1:mpert
-        cmplx_kinetic_energy_mats[i, j, 5] = elem(off + _full_idx(i, j, mpert))
+
+    for (dest, half, mirror_sign) in ((kwmat, 0, 1.0), (ktmat, nqty, -1.0))
+        off = 0
+        _assemble_hermitian!(dest, 1, off, half, mirror_sign);  off += Mu        # A (k=1)
+        _assemble_hermitian!(dest, 4, off, half, mirror_sign);  off += Mu        # D (k=4)
+        _assemble_hermitian!(dest, 6, off, half, mirror_sign);  off += Mu        # H (k=6)
+        _assemble_full!(dest, 2, off, half);                    off += mpert^2   # B (k=2)
+        _assemble_full!(dest, 3, off, half);                    off += mpert^2   # C (k=3)
+        _assemble_full!(dest, 5, off, half)                                      # E (k=5)
     end
 
     # DCON normalization (Fortran torque.F90 lines 874-876)
-    cmplx_kinetic_energy_mats .*= 2 * μ₀
-    cmplx_kinetic_energy_mats[:, :, 1:3] ./= chi1
-    cmplx_kinetic_energy_mats[:, :, 1] ./= chi1
+    for mat in (kwmat, ktmat)
+        mat .*= 2 * μ₀
+        mat[:, :, 1:3] ./= chi1
+        mat[:, :, 1] ./= chi1
+    end
 
     return nothing
 end
@@ -891,21 +891,19 @@ at half the work. After the `-i/(2n)` normalization inside
 `kinetic_energy_matrices_for_euler_lagrange!`, the full complex response
 splits cleanly:
 
-  - `kwmat` holds the "wmm" half — pure real values (carried as
-    `complex(real(full), 0)`), matching Fortran `kwmat`.
-  - `ktmat` holds the "tmm" half — pure imaginary values (carried as
-    `complex(0, imag(full))`), matching Fortran `ktmat`.
+  - `kwmat` ← fwmm half (Fortran rex=0, imx=1 pass)
+  - `ktmat` ← ftmm half (Fortran rex=1, imx=0 pass)
 
-The split convention matters: downstream FKG reduction in
-`ForceFreeStates/Kinetic.jl` uses asymmetric combinations like
-`caat = cmat_kin - 2·ktmat[3]` and `bkmat = kwmat[2] + ktmat[2] + i·(...)`
-whose physical meaning (kinetic adjoint structure) requires the Fortran
-convention — swapping the two halves produces sign-flipped adjoints that
-corrupt F̄, K̄, Ḡ in the kinetic ODE RHS.
+Each half is complex (not pure real / pure imag), matching Fortran's two
+independent integration passes at `torque.F90:842-847`. Per-surface matrix
+dumps confirm element-by-element agreement with Fortran `fourfit.F:1080-1082`
+(`kwmat_l`, `ktmat_l`). This is the Fortran convention required by the
+adjoint combinations `kwmat ± ktmat` in `ForceFreeStates/Kinetic.jl` /
+`~/Code/gpec/dcon/sing.f:967-1075` for non-Hermitian B_k, C_k, E_k.
 
 # Arguments
-- `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), pure-real values, zeroed on entry
-- `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), pure-imag values, zeroed on entry
+- `kwmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), fwmm half, zeroed on entry
+- `ktmat::Array{ComplexF64,3}`: Output (mpert×mpert×6), ftmm half, zeroed on entry
 - `psi, n, l, zi, mi, wdfac, divxfac, electron`: Same as `tpsi!` (divxfac unused
   on the matrix path — retained for call-site compatibility)
 - `equil`: PlasmaEquilibrium
@@ -924,8 +922,6 @@ function compute_kinetic_matrices_at_psi!(
     kinetic_profiles::Equilibrium.KineticProfileSplines;
     atol_xlmda::Float64=1e-9, rtol_xlmda::Float64=1e-6)
 
-    mpert = intr.mpert
-
     # Bypass ψ > 1 (no kinetic contribution outside plasma)
     if psi > 1
         fill!(kwmat, 0)
@@ -936,17 +932,10 @@ function compute_kinetic_matrices_at_psi!(
     state = _setup_surface_state(psi, zi, mi, electron,
                                   equil, intr, kinetic_profiles)
 
-    cmplx_kinetic_energy_mats = zeros(ComplexF64, mpert, mpert, 6)
     kinetic_energy_matrices_for_euler_lagrange!(
-        cmplx_kinetic_energy_mats, state, psi, n, l, wdfac, intr;
+        kwmat, ktmat, state, psi, n, l, wdfac, intr;
         energy_atol=atol_xlmda, energy_rtol=rtol_xlmda,
         pitch_atol=atol_xlmda, pitch_rtol=rtol_xlmda)
-
-    for k in 1:6, j in 1:mpert, i in 1:mpert
-        val = cmplx_kinetic_energy_mats[i, j, k]
-        kwmat[i, j, k] = complex(real(val), 0.0)
-        ktmat[i, j, k] = complex(0.0, imag(val))
-    end
 
     return nothing
 end
