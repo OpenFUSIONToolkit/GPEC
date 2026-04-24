@@ -173,11 +173,16 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
         #
         # sc.scale converts inner-basis Δ to outer units (1.0 for GGJ since
         # rescale_delta is applied inside solve_inner; S^(1/3) for SLAYER).
-        # sc.dc critical-Δ offset applies additively to both channels per
-        # the Fortran convention (the offset represents a χ_parallel shift
-        # that acts on the outer diagonal before matching).
-        delta1 = resp.interchange * sc.scale + sc.dc
-        delta2 = resp.tearing     * sc.scale + sc.dc
+        # NOTE: match.f::match_delta (fulldomain=0, lines 508-519) does
+        # NOT add any Δ_crit offset here — delta1,delta2 are the raw
+        # inner-layer outputs. The full 4m×4m Pletzer-Dewar residual
+        # includes the interchange channel, which provides Glasser
+        # (Mercier) stabilization natively; Δ_crit is a slab-layer proxy
+        # only relevant to SLAYER's tearing-only model. Earlier versions
+        # of this file added `+ sc.dc` to both channels — that was a port
+        # error (no corresponding term in Fortran) and is removed here.
+        delta1 = resp.interchange * sc.scale
+        delta2 = resp.tearing     * sc.scale
 
         # --- Upper-left 2×2 block: per-surface identity on C_{L,R} ---
         mat[idx1, idx1] = 1

@@ -66,18 +66,25 @@ end
 
 """
     surface_coupling(model::GGJModel, params::GGJParameters,
-                     dp_diag::Number; dc::Real=0.0) -> SurfaceCoupling
+                     dp_diag::Number) -> SurfaceCoupling
 
 GGJ convenience constructor. `scale` is `1.0` because GGJ's `solve_inner`
 applies its own `rescale_delta` (S^(2p₁/3)·v1^(2p₁)) internally, so the
 returned Δ is already in outer units. `tauk` defaults to `1.0` (GGJ has no
 direct analogue of SLAYER's per-surface time normalization, so multi-surface
 Q rescaling is a no-op for GGJ surfaces unless overridden).
+
+**No `dc` kwarg**: GGJ's 4m×4m Pletzer-Dewar residual already includes the
+interchange channel, which provides Glasser (Mercier) stabilization
+natively. A Δ_crit proxy (χ_parallel-matching offset on the diagonal) is
+meaningful only for tearing-only slab-layer approximations like SLAYER;
+for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
+struct's `dc` field is hard-wired to 0 here.
 """
 function surface_coupling(model::GGJModel, params::GGJParameters,
-                          dp_diag::Number; dc::Real=0.0)
+                          dp_diag::Number)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-                           Float64(dc), 1.0, 1.0)
+                           0.0, 1.0, 1.0)
 end
 
 """
