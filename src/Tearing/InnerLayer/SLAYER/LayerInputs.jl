@@ -91,10 +91,32 @@ without the intermediate STRIDE NetCDF round-trip.
     callable of `psi` (default `1.0`).
   - `chi_tor`   -- toroidal heat diffusivity [m²/s]. Scalar or a callable
     of `psi` (default `1.0`).
-  - `dr_val`    -- radial width for the critical-Δ offset. Scalar or a
-    callable of `psi` (default `0.0`, which turns the offset off).
-  - `dgeo_val`  -- geometric Shafranov shift factor for the toroidal
-    dc_type. Scalar or a callable of `psi` (default `0.0`).
+  - `dr_val`    -- resistive interchange index `D_R = E + F + H²`
+    (Glasser-Greene-Johnson 1975) feeding the critical-Δ formulas
+    (`:lar`, `:rfitzp`, `:toroidal`). When `nothing` (default), Julia
+    derives it per-surface from the equilibrium as
+    `dr_val_k = D_R(ψ_k) = E_k + F_k + H_k²`,
+    consistent with Connor-Hastie-Helander 2015 (PPCF 57 065001) Eq. 59
+    which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar /
+    vector / callable to override.
+
+    **NOTE on Fortran/STRIDE divergence**: Fortran STRIDE
+    (`stride_netcdf.f:100`) writes the netcdf variable `dr_rational` as
+    `locstab%f(1)/respsi`, where component 1 of `locstab` is actually
+    `D_I × ψ` (Mercier, see `dcon/mercier.f:95-96`). The intended index
+    is 2 (= `D_R × ψ`); using 1 silently substitutes the Mercier index
+    `D_I = E + F + H − 1/4` for `D_R`. They differ by `(H − 1/2)²`,
+    which is non-trivial on shaped equilibria (~factor 3 on DIII-D).
+    Julia uses the physically correct `D_R` here; benchmarks against
+    Fortran SLAYER's `dc_tmp` will therefore disagree until that
+    upstream Fortran bug is fixed.
+  - `dgeo_val`  -- Connor 2015 (PPCF 57 065001) Eq. 59 geometric factor
+    used by `dc_type=:toroidal`. When `nothing` (default), an error is
+    raised if `dc_type=:toroidal` is also requested — the auto-derived
+    formula additionally needs ⟨|∇ψ|²⟩ FSA which `ResistGeometry`
+    doesn't currently expose. Pass a scalar / vector / callable to use
+    a prescribed value. (For `dc_type=:rfitzp` and `:lar`, dgeo_val is
+    not consulted.)
   - `dc_type`   -- `:none` (default), `:lar`, `:rfitzp`, or `:toroidal`.
   - `theta`     -- poloidal angle at which to measure minor radius (default
     `0.0`, outboard midplane).
@@ -116,8 +138,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                               z_i::Real = 1.0,
                               chi_perp = 1.0,
                               chi_tor  = 1.0,
-                              dr_val   = 0.0,
-                              dgeo_val = 0.0,
+                              dr_val   = nothing,
+                              dgeo_val = nothing,
                               dc_type::Symbol = :none,
                               theta::Real = 0.0,
                               compute_omega_star::Bool = true,
@@ -222,6 +244,41 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
                       q, zeff; lnLamb=lnL)
         end
 
+        # dr_val: per-surface resistive interchange index D_R = E + F + H²
+        # (Glasser-Greene-Johnson 1975). Used by `_solve_dc_tmp` to compute
+        # the χ_‖-matching critical-Δ via Connor-Hastie-Helander 2015 Eq. 59,
+        # which has `(−D_R)` as a multiplier. NOT the Mercier index
+        # D_I = E + F + H − 1/4. Fortran STRIDE's `dr_rational` netcdf
+        # variable accidentally writes `D_I/ψ` instead (see this function's
+        # docstring); we use the physically correct D_R here.
+        dr_val_k = if dr_val === nothing
+            rg === nothing &&
+                throw(ArgumentError("build_slayer_inputs: dr_val=nothing " *
+                                    "requires `sing.restype` populated by " *
+                                    "ForceFreeStates.resist_eval_all!. " *
+                                    "Surface k=$k has restype=nothing."))
+            rg.E + rg.F + rg.H^2
+        else
+            _eval(dr_val, psi)
+        end
+
+        # dgeo_val: only used by dc_type=:toroidal (the Connor-Hastie-
+        # Helander 2015 formula). Auto-derivation requires ⟨|∇ψ|²⟩ FSA
+        # which the current `ResistGeometry` doesn't expose; for now we
+        # require an explicit value if the toroidal dc_type is selected.
+        dgeo_val_k = if dgeo_val === nothing
+            dc_type === :toroidal &&
+                throw(ArgumentError("build_slayer_inputs: dc_type=:toroidal " *
+                                    "needs `dgeo_val` (Connor 2015 PPCF 57 " *
+                                    "065001 Eq. 59 geometric factor). " *
+                                    "Auto-derivation from equilibrium not " *
+                                    "yet implemented; pass a scalar / vector " *
+                                    "/ callable explicitly."))
+            0.0
+        else
+            _eval(dgeo_val, psi)
+        end
+
         out[k] = slayer_parameters(;
             n_e = prof.n_e, t_e = prof.T_e, t_i = prof.T_i,
             omega = prof.omega, omega_e = ω_e_use, omega_i = ω_i_use,
@@ -230,8 +287,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             chi_perp = _eval(chi_perp, psi),
             chi_tor  = _eval(chi_tor,  psi),
             m = m_res, n = n_res,
-            dr_val   = _eval(dr_val,   psi),
-            dgeo_val = _eval(dgeo_val, psi),
+            dr_val   = dr_val_k,
+            dgeo_val = dgeo_val_k,
             dc_type = dc_type, ising = k,
             resistivity_model = resistivity_model,
             f_trap = f_trap_kw,

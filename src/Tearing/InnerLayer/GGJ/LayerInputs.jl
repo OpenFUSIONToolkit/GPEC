@@ -109,9 +109,19 @@ function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
         # Resistive diffusion time (resist.f:138)
         taur  = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta_use
 
+        # dV/dψ normalized by total plasma volume (Fortran resist.f:144
+        # `sing%restype%v1 = v1/volume`). This is the `v1` consumed by
+        # `rescale_delta` as v1^(2p1); NOT the raw V' used in τ_A above.
+        equil.params.volume === nothing &&
+            throw(ArgumentError("build_ggj_inputs: equil.params.volume " *
+                                "is nothing. Ensure the equilibrium " *
+                                "solver populated the total plasma " *
+                                "volume before building GGJ inputs."))
+        v1_norm = rg.v1_local / equil.params.volume
+
         out[k] = GGJParameters(
             E=rg.E, F=rg.F, G=rg.G, H=rg.H, K=rg.K, M=rg.M,
-            taua=taua, taur=taur, v1=1.0, ising=k,
+            taua=taua, taur=taur, v1=v1_norm, ising=k,
         )
     end
     return out
