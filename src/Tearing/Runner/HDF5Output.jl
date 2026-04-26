@@ -70,6 +70,7 @@ function _write_settings!(g, ctrl::SLAYERControl)
     s["amr_passes"]    = ctrl.amr_passes
     s["amr_max_cells"] = ctrl.amr_max_cells
     s["pole_threshold"]     = ctrl.pole_threshold
+    s["pole_threshold_adaptive"] = Int(ctrl.pole_threshold_adaptive)
     s["filter_above_poles"] = Int(ctrl.filter_above_poles)
     s["filter_outside_re"]  = Int(ctrl.filter_outside_re)
     s["store_scan"]    = Int(ctrl.store_scan)

@@ -49,6 +49,13 @@ constructor.
 # Growth-rate-extraction filters
 
   - `pole_threshold`      -- threshold for pole classification (default 10)
+  - `pole_threshold_adaptive` -- if true, pole_threshold is OVERRIDDEN per
+    scan with `|mean(Δ)|` (the magnitude of the mean dispersion residual
+    over the scan grid). Useful when |Δ| spans 8+ orders of magnitude
+    (e.g. SLAYER scans where the hardcoded 10.0 default is too restrictive
+    and classifies all intersections as poles). Validated against the
+    omfit recipe and the Python `10·median(|d|)` heuristic — both
+    converge to the same root identification on DIIID benchmark cases.
   - `filter_above_poles`  -- discard roots above the highest pole γ
   - `filter_outside_re`   -- condition the above-pole filter on the +γ
     step exiting the Re(Δ)=0 contour loop
@@ -93,6 +100,7 @@ constructor.
     amr_max_cells::Int = 10_000_000
 
     pole_threshold::Float64    = 10.0
+    pole_threshold_adaptive::Bool = false
     filter_above_poles::Bool   = true
     filter_outside_re::Bool    = true
 

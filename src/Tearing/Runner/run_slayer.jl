@@ -122,11 +122,28 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     coupled_extraction = nothing
     scan_data_list = Any[]
 
+    # Helper: compute the pole_threshold actually passed to find_growth_rates.
+    # When `control.pole_threshold_adaptive` is true, override with
+    # `|mean(Δ)|` over the scan's dispersion residual array. The omfit
+    # recipe — empirically converges to the same root identification as
+    # `10·median(|Δ|)` on DIIID benchmark cases (see CTM-processing/
+    # CONVENTIONS.md §1 and the v9 pole_threshold test for justification).
+    function _pole_threshold_for(scan)
+        control.pole_threshold_adaptive || return control.pole_threshold
+        # ScanResult and AMRResult both carry `.Δ` — abstract over both
+        Δ_arr = isdefined(scan, :Δ) ? scan.Δ : nothing
+        Δ_arr === nothing && return control.pole_threshold
+        finite = filter(z -> isfinite(z) && abs(z) < 1e30, Δ_arr)
+        isempty(finite) && return control.pole_threshold
+        return abs(mean(finite))
+    end
+
     if control.coupling_mode === :uncoupled
         for sc in scs
             scan = _run_scan(sc, control)
+            pthr = _pole_threshold_for(scan)
             gr   = find_growth_rates(scan, sc.tauk;
-                    pole_threshold=control.pole_threshold,
+                    pole_threshold=pthr,
                     filter_above_poles=control.filter_above_poles,
                     filter_outside_re=control.filter_outside_re)
             push!(Q_root, gr.Q_root)
@@ -140,9 +157,10 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
         m_use = min(control.msing_max, n)
         mc = multi_surface_coupling(scs, dp; ref_idx=1, msing_max=m_use)
         scan = _run_scan(mc, control)
+        pthr = _pole_threshold_for(scan)
         ref_tauk = scs[1].tauk
         gr = find_growth_rates(scan, ref_tauk;
-                pole_threshold=control.pole_threshold,
+                pole_threshold=pthr,
                 filter_above_poles=control.filter_above_poles,
                 filter_outside_re=control.filter_outside_re)
         push!(Q_root, gr.Q_root)

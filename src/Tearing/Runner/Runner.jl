@@ -24,6 +24,7 @@
 module Runner
 
 using LinearAlgebra
+using Statistics: mean
 using HDF5
 
 using ..Utilities
