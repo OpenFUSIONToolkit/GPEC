@@ -51,25 +51,28 @@ using OrdinaryDiffEq
     return fA, fA_prime, fB, fC
 end
 
-# In-place ODE right-hand side dW/dp for OrdinaryDiffEq.
-function _riccati_f_rhs!(dW, W, params, x)
+# Scalar ODE right-hand side dW/dp for OrdinaryDiffEq.
+#
+# This is a 1-equation ODE — modeling W(x) as a `ComplexF64` scalar (rather
+# than a 1-element `Vector{ComplexF64}`) lets the integrator's stage updates
+# stay on the stack with no per-step allocations. SDIRK + Rosenbrock + BDF
+# methods in OrdinaryDiffEq all support scalar `u`.
+@inline function _riccati_f_rhs(W::Number, params, x::Real)
     p, Q = params
     fA, fA_prime, fB, fC = _riccati_f_coeffs(p, Q, x)
-    W1 = W[1]
-    dW[1] = -(fA_prime / x) * W1 - W1 * W1 / x + (fB / (fA * fC)) * (x * x * x)
-    return nothing
+    return -(fA_prime / x) * W - W * W / x + (fB / (fA * fC)) * (x * x * x)
 end
 
 # Analytic Jacobian (port of jac_f, delta.f:442-455). The full RHS has
 # both the explicit (fA'/p, fB·p³) terms and the W² term; for the
-# Jacobian only the W-dependent pieces survive.
-function _riccati_f_jac!(J, W, params, x)
+# Jacobian only the W-dependent pieces survive. Returns a scalar — the
+# 1×1 Jacobian of the scalar ODE.
+@inline function _riccati_f_jac(W::Number, params, x::Real)
     p, Q = params
     p2     = x * x
     denom  = Q + im * p.Q_e + p2
     fA_prime = (denom - 2 * p2) / denom
-    J[1, 1] = -(fA_prime / x) - 2 * W[1] / x
-    return nothing
+    return -(fA_prime / x) - 2 * W / x
 end
 
 # ---------------------------------------------------------------------
@@ -185,10 +188,14 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
 
     # Pack params for the closure-free RHS
     rhs_params = (p, Q_c)
-    u0 = ComplexF64[W_bound]
 
-    # ODEFunction with analytic Jacobian for the stiff Rosenbrock solver
-    f = ODEFunction{true}(_riccati_f_rhs!; jac=_riccati_f_jac!)
+    # Scalar `u0`: the ODE state is a single `ComplexF64`, not a 1-element
+    # vector. OrdinaryDiffEq supports scalar problems via the out-of-place
+    # form (`ODEFunction{false}`). This eliminates the per-step heap-
+    # allocation of intermediate `dW` vectors that the in-place form
+    # incurred for every stage of every accepted/rejected step.
+    u0 = ComplexF64(W_bound)
+    f = ODEFunction{false}(_riccati_f_rhs; jac=_riccati_f_jac)
     prob = ODEProblem(f, u0, (p_start, pmin), rhs_params)
     sol = solve(prob, solver;
                 reltol=reltol, abstol=abstol, maxiters=maxiters,
@@ -197,11 +204,10 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     sol.retcode == ReturnCode.Success ||
         @warn "SLAYER Riccati integration did not return Success" sol.retcode
 
-    # Δ = π / W'(pmin) — recompute the RHS once at the final endpoint
+    # Δ = π / W'(pmin) — single RHS evaluation at the inner endpoint
     W_end = sol.u[end]
-    dW_end = similar(W_end)
-    _riccati_f_rhs!(dW_end, W_end, rhs_params, pmin)
-    Δ = π / dW_end[1]
+    dW_end = _riccati_f_rhs(W_end, rhs_params, pmin)
+    Δ = π / dW_end
 
     # Fitzpatrick / pressureless SLAYER has no interchange channel
     # (the Δ_− / even-parity matching quantity is identically zero in
