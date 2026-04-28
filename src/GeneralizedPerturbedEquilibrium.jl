@@ -598,8 +598,8 @@ function write_outputs_to_HDF5(
                 out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats)
                 out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats)
             end
-            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats)
-            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats)
+            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats_prim)
+            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats_prim)
             out_h5["matrices/ideal/H"] = _eval_mat_spline(ffit.hmats)
 
             # Ideal derived matrices (F, K, G)

@@ -113,8 +113,8 @@ function _compute_fkg_matrices!(
         amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
         bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
         cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
-        dmat_full = reshape(ffit.dmats(psi; hint=hint), np, np)
-        emat_full = reshape(ffit.emats(psi; hint=hint), np, np)
+        dmat_full = reshape(ffit.dmats_prim(psi; hint=hint), np, np)
+        emat_full = reshape(ffit.emats_prim(psi; hint=hint), np, np)
         hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
         fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
 

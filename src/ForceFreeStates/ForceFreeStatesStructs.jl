@@ -257,8 +257,13 @@ end
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    dmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    # `dmats_prim`, `emats_prim` are the pre-Schur-reduction geometric forms
+    # (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)).
+    # The `_prim` suffix follows `fmats_prim`. Downstream kinetic FKG Schur complements
+    # consume these primitive forms; the alternate singular-layer path that would need
+    # kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+    dmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    emats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
