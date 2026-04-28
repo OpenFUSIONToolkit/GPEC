@@ -260,6 +260,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
+  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `1` runs the FM chunks SERIALLY** (no `Threads.@threads`), eliminating sub-tolerance nondeterminism that otherwise causes intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). The algorithm is identical at any thread count; only wall time differs. Typical cost of serial vs 2-thread on DIII-D 147131: ~14 % slower. Set `parallel_threads > 1` for wall-time speedup on robust equilibria; production scans should keep `parallel_threads = 1` for reliability. Capped at `Threads.nthreads()`.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
