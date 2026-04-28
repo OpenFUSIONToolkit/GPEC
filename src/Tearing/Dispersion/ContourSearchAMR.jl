@@ -138,6 +138,8 @@ end
     amr_scan(f, Q_re_range, Q_im_range;
               nre0, nim0, passes,
               max_cells=10_000_000,
+              max_cells_action=:error,
+              snapshot_callback=nothing,
               parallel=Threads.nthreads() > 1) -> AMRResult
 
 Adaptively refine a Q-plane scan of the residual `f(Q)`. An initial
@@ -160,7 +162,18 @@ evaluations.
 
   - `nre0`, `nim0`   -- initial coarse-grid cell counts along each axis
   - `passes`         -- number of refinement passes
-  - `max_cells`      -- safety cap on total cells (errors out if exceeded)
+  - `max_cells`      -- safety cap on total cells; behavior on hit is set
+    by `max_cells_action`
+  - `max_cells_action` -- `:error` (raises) or `:warn_truncate` (logs a
+    warning and returns the partial result). The latter is useful for
+    convergence-vs-resolution studies where we deliberately push max_cells
+    and want graceful degradation. Default `:error` preserves the prior
+    safety-rail behaviour.
+  - `snapshot_callback` -- if not `nothing`, a function called after each
+    pass (and once for the initial grid, pass=0) with arguments
+    `(pass::Int, cells::Vector{AMRCell}, cache::Dict{ComplexF64,ComplexF64})`.
+    The callback receives live references — copy if you need persistence.
+    Used by convergence studies to extract intermediate γ at each pass count.
   - `parallel`       -- evaluate `f` in parallel via `Threads.@threads` within
     each phase (initial grid + each refinement pass). Defaults to `true`
     when more than one Julia thread is available. Per-call evaluations of
@@ -171,10 +184,15 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
                   Q_im_range::NTuple{2,<:Real};
                   nre0::Integer, nim0::Integer, passes::Integer,
                   max_cells::Integer=10_000_000,
+                  max_cells_action::Symbol=:error,
+                  snapshot_callback::Union{Nothing,Function}=nothing,
                   parallel::Bool=Threads.nthreads() > 1)
     nre0 >= 1 || throw(ArgumentError("amr_scan: nre0 must be ≥ 1"))
     nim0 >= 1 || throw(ArgumentError("amr_scan: nim0 must be ≥ 1"))
     passes >= 0 || throw(ArgumentError("amr_scan: passes must be ≥ 0"))
+    max_cells_action in (:error, :warn_truncate) ||
+        throw(ArgumentError("amr_scan: max_cells_action must be :error or " *
+                            ":warn_truncate, got :$max_cells_action"))
 
     re_lo, re_hi = Float64.(Q_re_range)
     im_lo, im_hi = Float64.(Q_im_range)
@@ -210,8 +228,13 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
                                            cache[q_tl], cache[q_tr])
     end
 
+    # Snapshot the initial grid (pass 0) before any refinement.
+    snapshot_callback === nothing || snapshot_callback(0, cells, cache)
+
     # ---- 2. refinement passes
-    for _ in 1:passes
+    truncated = false   # set true when max_cells is hit and action == :warn_truncate
+    for pass_idx in 1:passes
+        truncated && break
         # Phase A: identify flagged parent cells and collect the midpoints we
         # need to evaluate. The 5 midpoints per parent (BM, TM, LM, RM, MM)
         # mirror _subdivide_cell's coordinates exactly.
@@ -241,8 +264,9 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
         new_cells = Vector{AMRCell}()
         sizehint!(new_cells, length(cells) + 3 * length(flagged_idx))
         flagged_set = Set(flagged_idx)
+        skip_remaining = false   # true once max_cells is hit (warn_truncate path)
         for (idx, cell) in enumerate(cells)
-            if idx in flagged_set
+            if idx in flagged_set && !skip_remaining
                 q_bm = 0.5 * (cell.q_bl + cell.q_br)
                 q_tm = 0.5 * (cell.q_tl + cell.q_tr)
                 q_lm = 0.5 * (cell.q_bl + cell.q_tl)
@@ -264,12 +288,22 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
             else
                 push!(new_cells, cell)
             end
-            length(new_cells) > max_cells &&
-                error("amr_scan: exceeded max_cells=$max_cells " *
-                      "(currently $(length(new_cells))). Reduce " *
-                      "`passes` or raise `max_cells`.")
+            if length(new_cells) > max_cells
+                if max_cells_action === :error
+                    error("amr_scan: exceeded max_cells=$max_cells " *
+                          "(currently $(length(new_cells))). Reduce " *
+                          "`passes` or raise `max_cells`, or pass " *
+                          "max_cells_action=:warn_truncate to truncate gracefully.")
+                else  # :warn_truncate (validated at function entry)
+                    @warn "amr_scan: max_cells=$max_cells reached at pass=$pass_idx cell=$idx/$(length(cells)); truncating refinement here and skipping remaining passes"
+                    skip_remaining = true
+                    truncated = true
+                end
+            end
         end
         cells = new_cells
+        # Snapshot after this pass.
+        snapshot_callback === nothing || snapshot_callback(pass_idx, cells, cache)
     end
 
     # ---- 3. flatten the cache into output Q/Δ vectors
