@@ -1545,12 +1545,15 @@ function parallel_eulerlagrange_integration(
     odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:max_tid]
 
     # Effective BVP thread count is capped by `ctrl.parallel_threads` (≥1).
-    # Default `parallel_threads = 1` runs the FM chunks SERIALLY — the algorithm
-    # is identical, but eliminating thread interleaving removes a sub-tolerance
-    # nondeterminism that historically caused intermittent BVP divergences on
-    # ill-conditioned equilibria like DIII-D 147131. Set parallel_threads > 1
-    # for wall-time speedup on robust equilibria; production scans should keep
-    # parallel_threads = 1 for reliability. (See CONVENTIONS.md §7.)
+    # Default `parallel_threads = 2` parallelises the FM chunks across two threads
+    # — the BVP has ~10 chunks, so 2 threads is enough to amortize them and
+    # speedup saturates here (raising to 4 adds scheduling overhead). Set
+    # `parallel_threads = 1` to run SERIALLY; that is bit-deterministic and
+    # immune to the thread-schedule sensitivity that has historically caused
+    # intermittent BVP divergences on numerically delicate equilibria like
+    # DIII-D 147131. If a parallel run diverges, drop to `parallel_threads = 1`
+    # rather than switching `use_parallel = false` (the latter is silently
+    # wrong). See CONVENTIONS.md §7.
     bvp_threads = max(1, min(julia_nthreads, ctrl.parallel_threads))
 
     if ctrl.verbose
@@ -1560,21 +1563,24 @@ function parallel_eulerlagrange_integration(
 
     if bvp_threads == 1
         # SERIAL FM phase: integrate chunks one at a time on the calling thread.
-        # Race-free; deterministic. ~14% slower than 2-thread parallel for DIII-D
-        # 147131 but immune to the thread-schedule sensitivity. Uses proxy[1].
+        # Race-free; bit-deterministic. ~20% slower than 2-thread parallel on
+        # DIII-D 147131 but immune to thread-schedule sensitivity. Uses proxy[1].
+        # Drop to this if the parallel path ever diverges on a delicate equilibrium.
         for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                         odet_proxies[1])
         end
     else
-        # PARALLEL phase: integrate all chunks independently from identity IC.
+        # PARALLEL phase (default, bvp_threads = 2): integrate all chunks
+        # independently from identity IC.
         # :static scheduler pins each task to one OS thread for its lifetime, so
         # Threads.threadid() returns a stable index into odet_proxies.
         # Without :static, Julia's task scheduler can migrate tasks between threads,
         # making threadid() unreliable (Julia 1.7+).
-        # NOTE: this path can intermittently produce divergent FM matrices on
-        # numerically delicate equilibria due to thread-schedule sensitivity.
-        # See CONVENTIONS.md §7. Robust workflows should set parallel_threads = 1.
+        # The 2-thread parallel path was empirically bit-deterministic in 5 trials
+        # on DIII-D 147131 βₚ≈0.07 (CONVENTIONS.md §7). It remains the historical
+        # source of rare intermittent divergences on numerically delicate equilibria;
+        # if one occurs, set `parallel_threads = 1` rather than `use_parallel = false`.
         Threads.@threads :static for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                         odet_proxies[Threads.threadid()])

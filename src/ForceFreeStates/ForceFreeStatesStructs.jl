@@ -242,7 +242,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
-  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `1` runs the FM chunks SERIALLY** (no `Threads.@threads`), eliminating sub-tolerance nondeterminism that otherwise causes intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). The algorithm is identical at any thread count; only wall time differs. Typical cost of serial vs 2-thread on DIII-D 147131: ~14 % slower. Set `parallel_threads > 1` for wall-time speedup on robust equilibria; production scans should keep `parallel_threads = 1` for reliability. Capped at `Threads.nthreads()`.
+  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -279,7 +279,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Legacy: edge-dW peak truncates psilim. Corrupts Δ' and δW; see docstring.
-    parallel_threads::Int = 1
+    parallel_threads::Int = 2
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
