@@ -1540,23 +1540,45 @@ function parallel_eulerlagrange_integration(
     # can return any id up to Threads.maxthreadid() (e.g. 2 on a runner with nthreads=1
     # but one interactive thread), so the proxy array must be sized by maxthreadid()
     # rather than nthreads() to avoid a BoundsError inside the @threads loop.
-    nthreads = Threads.nthreads()
+    julia_nthreads = Threads.nthreads()
     max_tid = Threads.maxthreadid()
     odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:max_tid]
 
+    # Effective BVP thread count is capped by `ctrl.parallel_threads` (≥1).
+    # Default `parallel_threads = 1` runs the FM chunks SERIALLY — the algorithm
+    # is identical, but eliminating thread interleaving removes a sub-tolerance
+    # nondeterminism that historically caused intermittent BVP divergences on
+    # ill-conditioned equilibria like DIII-D 147131. Set parallel_threads > 1
+    # for wall-time speedup on robust equilibria; production scans should keep
+    # parallel_threads = 1 for reliability. (See CONVENTIONS.md §7.)
+    bvp_threads = max(1, min(julia_nthreads, ctrl.parallel_threads))
+
     if ctrl.verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
-        @info "   Parallel FM: $(length(chunks)) chunks, $nthreads threads"
+        @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads BVP thread$(bvp_threads == 1 ? "" : "s") (julia_nthreads=$julia_nthreads, ctrl.parallel_threads=$(ctrl.parallel_threads))"
     end
 
-    # PARALLEL phase: integrate all chunks independently from identity IC.
-    # :static scheduler pins each task to one OS thread for its lifetime, so
-    # Threads.threadid() returns a stable index into odet_proxies.
-    # Without :static, Julia's task scheduler can migrate tasks between threads,
-    # making threadid() unreliable (Julia 1.7+).
-    Threads.@threads :static for i in eachindex(chunks)
-        integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                    odet_proxies[Threads.threadid()])
+    if bvp_threads == 1
+        # SERIAL FM phase: integrate chunks one at a time on the calling thread.
+        # Race-free; deterministic. ~14% slower than 2-thread parallel for DIII-D
+        # 147131 but immune to the thread-schedule sensitivity. Uses proxy[1].
+        for i in eachindex(chunks)
+            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
+                                        odet_proxies[1])
+        end
+    else
+        # PARALLEL phase: integrate all chunks independently from identity IC.
+        # :static scheduler pins each task to one OS thread for its lifetime, so
+        # Threads.threadid() returns a stable index into odet_proxies.
+        # Without :static, Julia's task scheduler can migrate tasks between threads,
+        # making threadid() unreliable (Julia 1.7+).
+        # NOTE: this path can intermittently produce divergent FM matrices on
+        # numerically delicate equilibria due to thread-schedule sensitivity.
+        # See CONVENTIONS.md §7. Robust workflows should set parallel_threads = 1.
+        Threads.@threads :static for i in eachindex(chunks)
+            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
+                                        odet_proxies[Threads.threadid()])
+        end
     end
 
     # SERIAL assembly: apply propagators and handle crossings in order.
