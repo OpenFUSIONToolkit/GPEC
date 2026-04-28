@@ -48,6 +48,7 @@ export MultiSurfaceCouplingFull, multi_surface_coupling_full
 export MultiSurfaceCouplingFortran, multi_surface_coupling_fortran
 export ScanResult, brute_force_scan
 export AMRCell, AMRResult, amr_scan
+export BoxActivity, MultiBoxAMRResult, multi_box_amr_scan, as_amr_result
 export GrowthRateResult, find_growth_rates
 
 end # module Dispersion

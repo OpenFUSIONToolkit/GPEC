@@ -159,4 +159,81 @@
         r_c = find_growth_rates(amr_c, mc.surfaces[mc.ref_idx].tauk)
         @test abs(r_c.Q_root - Q_b) < 1e-2     # higher-γ root
     end
+
+    # =========================================================================
+    # multi_box_amr_scan
+    # =========================================================================
+    using GeneralizedPerturbedEquilibrium.Dispersion: BoxActivity, NoActivity,
+        ReZeroCrossing, ImZeroCrossing, PoleMagnitude, MultiBoxAMRResult,
+        multi_box_amr_scan, as_amr_result
+
+    @testset "multi_box_amr_scan: 3-box stripe with zero, pole, and inactive box" begin
+        # Synthetic residual: zero at Q=0 (centre stripe), pole at Q=-50
+        # (left stripe), nothing in right stripe. Complex offset 1+1im keeps
+        # Im(f) above zero in the right stripe so its sign-change tests don't
+        # fire spuriously on rational-function residuals (Im=0 contour
+        # otherwise crosses the entire real axis).
+        f(Q) = (ComplexF64(Q) - 0.0) / (ComplexF64(Q) - (-50.0)) + (1.0 + 1.0im)
+        boxes = [((-75.0, -25.0), (-25.0, 25.0)),
+                 ((-25.0,  25.0), (-25.0, 25.0)),
+                 (( 25.0,  75.0), (-25.0, 25.0))]
+        result = multi_box_amr_scan(f, boxes;
+                                     pole_magnitude_threshold=10.0,
+                                     prescreen_nre=25, prescreen_nim=25,
+                                     nre0=25, nim0=25, passes=2,
+                                     max_cells=100_000,
+                                     max_cells_action=:warn_truncate,
+                                     parallel=false)
+        @test result isa MultiBoxAMRResult
+        @test length(result.box_results) == 3
+        @test length(result.box_activity) == 3
+        @test result.box_activity[1] != NoActivity   # contains pole
+        @test result.box_activity[2] != NoActivity   # contains zero
+        @test result.box_activity[3] == NoActivity   # empty stripe
+        @test result.box_results[3] === nothing
+        @test result.box_results[1] !== nothing
+        @test result.box_results[2] !== nothing
+        # prescreen_evals is bounded by 3 boxes × 26×26 = 2028 (some shared
+        # boundary corners are deduplicated within each box's local cache, so
+        # the count is ≤ 2028).
+        @test result.prescreen_evals ≤ 3 * 26 * 26
+
+        # as_amr_result wraps cleanly
+        amr = as_amr_result(result)
+        @test amr isa AMRResult
+        @test length(amr.cells) == length(result.cells)
+        @test length(amr.Q) == length(result.Q)
+    end
+
+    @testset "multi_box_amr_scan: pole-only path" begin
+        # Sharp pole at Q=-50+0i with complex offset that keeps Re(f),Im(f) one-
+        # signed across the prescreen grid except in the cell containing the
+        # pole. Confirms the |Δ| ≥ pole_magnitude_threshold criterion fires
+        # independent of sign-change tests.
+        g(Q) = 1000.0 / (ComplexF64(Q) - (-50.0))^2 + (5.0 + 5.0im)
+        boxes = [((-75.0, -25.0), (-25.0, 25.0)),
+                 ((-25.0,  25.0), (-25.0, 25.0)),
+                 (( 25.0,  75.0), (-25.0, 25.0))]
+        result = multi_box_amr_scan(g, boxes;
+                                     pole_magnitude_threshold=50.0,
+                                     prescreen_nre=25, prescreen_nim=25,
+                                     nre0=25, nim0=25, passes=1,
+                                     max_cells=100_000,
+                                     max_cells_action=:warn_truncate,
+                                     parallel=false)
+        @test result.box_activity[1] != NoActivity
+        @test result.box_activity[2] == NoActivity
+        @test result.box_activity[3] == NoActivity
+    end
+
+    @testset "multi_box_amr_scan: argument validation" begin
+        f(Q) = ComplexF64(Q)
+        boxes = [((-1.0, 1.0), (-1.0, 1.0))]
+        @test_throws ArgumentError multi_box_amr_scan(f, boxes;
+            pole_magnitude_threshold=1.0, prescreen_nre=0)
+        @test_throws ArgumentError multi_box_amr_scan(f, boxes;
+            pole_magnitude_threshold=1.0, prescreen_nim=0)
+        @test_throws ArgumentError multi_box_amr_scan(f, boxes;
+            pole_magnitude_threshold=-1.0)
+    end
 end
