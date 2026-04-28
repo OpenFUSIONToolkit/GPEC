@@ -53,9 +53,10 @@ using LinearAlgebra, Printf, Statistics
 # Pull the private Riccati helpers via internal accessors. They live in the
 # SLAYER module — we import them by qualified name for the test only.
 const RC = GeneralizedPerturbedEquilibrium.Tearing.InnerLayer.SLAYER
-const _riccati_f_rhs      = getfield(RC, :_riccati_f_rhs)
-const _riccati_f_jac      = getfield(RC, :_riccati_f_jac)
-const _riccati_f_initial  = getfield(RC, :_riccati_f_initial)
+const _riccati_f_rhs        = getfield(RC, :_riccati_f_rhs)
+const _riccati_f_jac        = getfield(RC, :_riccati_f_jac)
+const _riccati_f_initial    = getfield(RC, :_riccati_f_initial)
+const _build_riccati_consts = getfield(RC, :_build_riccati_consts)
 
 # CLI ---------------------------------------------------------------------
 function get_arg(args, name, default=nothing; parser=identity)
@@ -177,7 +178,7 @@ function _solve_riccati_at_x0(p::SLAYERParameters, Q::ComplexF64,
         W_bound = -1.0 + xk * p_start - sqrt_bk * p_start^3
     end
 
-    rhs_params = (p, Q_c)
+    rhs_params = _build_riccati_consts(p, Q_c)
     u0 = ComplexF64(W_bound)
     f = ODEFunction{false}(_riccati_f_rhs; jac=_riccati_f_jac)
     prob = ODEProblem(f, u0, (p_start, pmin), rhs_params)

@@ -25,28 +25,60 @@ using OrdinaryDiffEq
 
 # ---------------------------------------------------------------------
 # Coefficient evaluation (port of w_der_f, delta.f:461-494).
-# Inlined wherever called in the hot ODE RHS.
+#
+# All x-independent quantities are bundled in `_RiccatiConsts` and computed
+# once per `solve_inner` call (see line ~200). The hot RHS / Jacobian
+# evaluations then access only the bundled constants and `x`, avoiding the
+# tens of thousands of redundant complex muls/adds the prior code did.
 # ---------------------------------------------------------------------
 
-# Riccati RHS coefficients fA, fA', fB, fC at point p for normalized
-# growth rate Q. Returns a 4-tuple of complex numbers.
-@inline function _riccati_f_coeffs(p::SLAYERParameters, Q::ComplexF64, x::Real)
+# Pre-computed x-independent constants for the Fitzpatrick Riccati ODE.
+# Derived from `(p::SLAYERParameters, Q::ComplexF64)` once per solve. Used as
+# the integrator `params` so `_riccati_f_rhs` and `_riccati_f_jac` only need
+# the x-dependent algebra.
+struct _RiccatiConsts
+    Q_plus_iQe::ComplexF64    # constant part of denom = Q + iQe + x²
+    A::ComplexF64             # Q·(Q + iQi)               — fB constant term
+    B::ComplexF64             # (Q + iQi)·(P_perp + P_tor) — fB · x² coefficient
+    C::Float64                # P_perp · P_tor            — fB · x⁴ coefficient
+    E::ComplexF64             # (Q + iQi) · D² + P_perp   — fC · x² coefficient
+    G::Float64                # P_tor · D² / iota_e       — fC · x⁴ coefficient
+end
+
+@inline function _build_riccati_consts(p::SLAYERParameters, Q::ComplexF64)
+    Q_plus_iQe  = Q + im * p.Q_e
+    Q_plus_iQi  = Q + im * p.Q_i
+    D2          = p.D_norm * p.D_norm
+    return _RiccatiConsts(
+        Q_plus_iQe,
+        Q * Q_plus_iQi,                                   # A
+        Q_plus_iQi * (p.P_perp + p.P_tor),                # B
+        p.P_perp * p.P_tor,                               # C
+        p.P_perp + Q_plus_iQi * D2,                       # E
+        p.P_tor * D2 / p.iota_e,                          # G
+    )
+end
+
+# Riccati RHS coefficients fA, fA', fB, fC at point x. Receives the
+# pre-built `_RiccatiConsts` so each call costs only a handful of muls/adds
+# plus one complex division (the fA = p²/denom).
+@inline function _riccati_f_coeffs(c::_RiccatiConsts, x::Real)
     p2    = x * x
     p4    = p2 * p2
-    D2    = p.D_norm * p.D_norm
-    denom = Q + im * p.Q_e + p2
+    denom = c.Q_plus_iQe + p2
 
     fA       = p2 / denom
+    # Use the original numerator-subtracts-twice-p² form rather than the
+    # algebraic identity 1 − 2·fA. The two are mathematically equal but the
+    # integrator's adaptive stepping near marginal stability compounds
+    # ULP-level differences in fA' over thousands of steps; the original
+    # form preserves agreement to ≤1e-5 vs the frozen baseline, the
+    # identity drifted to ~3e-3 relative (within abs-tolerance, but tighter
+    # is better).
     fA_prime = (denom - 2 * p2) / denom
 
-    Q_plus_iQi = Q + im * p.Q_i
-    fB = Q * Q_plus_iQi +
-         Q_plus_iQi * (p.P_perp + p.P_tor) * p2 +
-         p.P_perp * p.P_tor * p4
-
-    fC = (Q + im * p.Q_e) +
-         (p.P_perp + Q_plus_iQi * D2) * p2 +
-         (p.P_tor * D2 / p.iota_e) * p4
+    fB = c.A + c.B * p2 + c.C * p4
+    fC = c.Q_plus_iQe + c.E * p2 + c.G * p4
 
     return fA, fA_prime, fB, fC
 end
@@ -57,9 +89,8 @@ end
 # than a 1-element `Vector{ComplexF64}`) lets the integrator's stage updates
 # stay on the stack with no per-step allocations. SDIRK + Rosenbrock + BDF
 # methods in OrdinaryDiffEq all support scalar `u`.
-@inline function _riccati_f_rhs(W::Number, params, x::Real)
-    p, Q = params
-    fA, fA_prime, fB, fC = _riccati_f_coeffs(p, Q, x)
+@inline function _riccati_f_rhs(W::Number, consts::_RiccatiConsts, x::Real)
+    fA, fA_prime, fB, fC = _riccati_f_coeffs(consts, x)
     return -(fA_prime / x) * W - W * W / x + (fB / (fA * fC)) * (x * x * x)
 end
 
@@ -67,10 +98,9 @@ end
 # both the explicit (fA'/p, fB·p³) terms and the W² term; for the
 # Jacobian only the W-dependent pieces survive. Returns a scalar — the
 # 1×1 Jacobian of the scalar ODE.
-@inline function _riccati_f_jac(W::Number, params, x::Real)
-    p, Q = params
-    p2     = x * x
-    denom  = Q + im * p.Q_e + p2
+@inline function _riccati_f_jac(W::Number, consts::_RiccatiConsts, x::Real)
+    p2    = x * x
+    denom = consts.Q_plus_iQe + p2
     fA_prime = (denom - 2 * p2) / denom
     return -(fA_prime / x) - 2 * W / x
 end
@@ -199,8 +229,9 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     # Boundary condition at p_start
     p_start, W_bound, _ = _riccati_f_initial(p, Q_c; p_floor=p_floor)
 
-    # Pack params for the closure-free RHS
-    rhs_params = (p, Q_c)
+    # Pre-compute x-independent constants ONCE; the integrator threads this
+    # through to every RHS / Jacobian call instead of recomputing per-step.
+    rhs_params = _build_riccati_consts(p, Q_c)
 
     # Scalar `u0`: the ODE state is a single `ComplexF64`, not a 1-element
     # vector. OrdinaryDiffEq supports scalar problems via the out-of-place
@@ -220,7 +251,7 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     # Δ = π / W'(pmin) — single RHS evaluation at the inner endpoint
     W_end = sol.u[end]
     dW_end = _riccati_f_rhs(W_end, rhs_params, pmin)
-    Δ = π / dW_end
+    Δ::ComplexF64 = π / dW_end
 
     # Fitzpatrick / pressureless SLAYER has no interchange channel
     # (the Δ_− / even-parity matching quantity is identically zero in
