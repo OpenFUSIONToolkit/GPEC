@@ -154,6 +154,19 @@ the Newton solves. AD is disabled because complex `Dual` propagation
 through the chained denominators incurs allocations in this regime;
 finite-difference fallback is fast enough for the 1-equation system.
 
+**Note on solver swaps:** sub-percent floating-point differences between
+ODE solvers cascade through the outer AMR's cell-flagging decisions
+(`ContourSearchAMR.jl::_crosses_zero`) and produce **structurally
+different** AMR cell trees. An empirical comparison (April 2026) found
+KenCarp4 ~10% faster per call than Rodas5P on the TJ coupled_rfitzp at
+βₚ=0.07 case under the scalar form, but the same case classified
+**43 valid roots / 34 poles** under KenCarp4 versus **26 / 27** under
+Rodas5P. The "best Q_root" (most-unstable γ) agreed to 2.1e-5 relative,
+but the secondary root structure differed substantially. So solver
+choice is not just a per-call optimization — it affects the downstream
+root/pole inventory. Future solver swaps need to be validated against
+the topology fields (`n_valid_roots`, `n_poles`), not just γ.
+
 # Keyword arguments
 
   - `pmin`     -- inner-layer cutoff (Fortran `xmin = 1e-6`)
