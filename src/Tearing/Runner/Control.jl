@@ -99,10 +99,22 @@ constructor.
     amr_passes::Int    = 4
     amr_max_cells::Int = 10_000_000
 
+    # Multi-box stripe layout. When non-empty, `scan_mode=:amr` dispatches to
+    # `multi_box_amr_scan` instead of single-box `amr_scan`. Each entry is a
+    # dimensionless Q-space rectangle as `(omega_lo, omega_hi, gamma_lo,
+    # gamma_hi)`. Activity criteria fire on Re(Δ) sign change, Im(Δ) sign
+    # change, OR |Δ| ≥ pre-screen pole threshold. A typical 25-kHz stripe
+    # layout for DIII-D-style equilibria (with kHz/Q given by the per-surface
+    # τ_k, see run_julia_betascan.jl) is built externally by the driver,
+    # converted to Q-units, and passed in here.
+    boxes::Vector{NTuple{4, Float64}} = NTuple{4, Float64}[]
+    multi_box_prescreen_n::Int = 25         # pre-screen grid resolution per box
+
     pole_threshold::Float64    = 10.0
     pole_threshold_adaptive::Bool = false
     filter_above_poles::Bool   = true
     filter_outside_re::Bool    = true
+    gap_kHz_threshold::Float64 = 1.0       # forwarded to find_growth_rates
 
     profile_source::Symbol = :inline
     profile_file::String   = ""

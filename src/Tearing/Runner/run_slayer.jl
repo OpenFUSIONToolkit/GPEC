@@ -55,6 +55,33 @@ function _run_scan(f, control::SLAYERControl)
         return brute_force_scan(f, control.Q_re_range, control.Q_im_range;
                                  nre=control.nre, nim=control.nim)
     elseif control.scan_mode === :amr
+        if !isempty(control.boxes)
+            # Multi-box stripe layout. Pole magnitude threshold for the
+            # activity check is derived from a coarse 16×6 sample of the
+            # union of all boxes — matches the validate_multi_box.jl driver
+            # behaviour. 10 × median(|Δ|) is the project default.
+            ω_lo = minimum(b[1] for b in control.boxes)
+            ω_hi = maximum(b[2] for b in control.boxes)
+            γ_lo = minimum(b[3] for b in control.boxes)
+            γ_hi = maximum(b[4] for b in control.boxes)
+            coarse_pts = ComplexF64[ComplexF64(ω, γ)
+                                       for ω in range(ω_lo, ω_hi; length=16)
+                                       for γ in range(γ_lo, γ_hi; length=6)]
+            coarse_Δ = ComplexF64[ComplexF64(f(q)) for q in coarse_pts]
+            finite = filter(z -> isfinite(z) && abs(z) < 1e30, coarse_Δ)
+            pole_thr = isempty(finite) ? 1e8 : 10.0 * median(abs.(finite))
+            # Convert NTuple{4,Float64} → ((ω_lo,ω_hi),(γ_lo,γ_hi)) tuples
+            boxes_in = [((b[1], b[2]), (b[3], b[4])) for b in control.boxes]
+            return multi_box_amr_scan(f, boxes_in;
+                                       pole_magnitude_threshold=pole_thr,
+                                       prescreen_nre=control.multi_box_prescreen_n,
+                                       prescreen_nim=control.multi_box_prescreen_n,
+                                       nre0=control.nre, nim0=control.nim,
+                                       passes=control.amr_passes,
+                                       max_cells=control.amr_max_cells,
+                                       max_cells_action=:warn_truncate) |>
+                   as_amr_result        # downstream expects AMRResult
+        end
         return amr_scan(f, control.Q_re_range, control.Q_im_range;
                          nre0=control.nre, nim0=control.nim,
                          passes=control.amr_passes,
@@ -124,10 +151,15 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
 
     # Helper: compute the pole_threshold actually passed to find_growth_rates.
     # When `control.pole_threshold_adaptive` is true, override with
-    # `|mean(Δ)|` over the scan's dispersion residual array. The omfit
-    # recipe — empirically converges to the same root identification as
-    # `10·median(|Δ|)` on DIIID benchmark cases (see CTM-processing/
-    # CONVENTIONS.md §1 and the v9 pole_threshold test for justification).
+    # `10 × median(|Δ|)` over the scan's dispersion residual array.
+    #
+    # The median formulation is robust against pre-screen samples landing
+    # near a pole. A single near-pole sample inflates `|mean(Δ)|` by orders
+    # of magnitude (and `|mean|` further collapses on oscillating residuals
+    # whose phases cancel in the complex sum). 10 × median(|Δ|) reflects
+    # "10× the typical residual magnitude" with median robust to both
+    # pathologies. See CONVENTIONS.md §7 and the DIII-D 147131 βₚ=0.07
+    # debugging session that motivated the switch.
     function _pole_threshold_for(scan)
         control.pole_threshold_adaptive || return control.pole_threshold
         # ScanResult and AMRResult both carry `.Δ` — abstract over both
@@ -135,7 +167,7 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
         Δ_arr === nothing && return control.pole_threshold
         finite = filter(z -> isfinite(z) && abs(z) < 1e30, Δ_arr)
         isempty(finite) && return control.pole_threshold
-        return abs(mean(finite))
+        return 10.0 * median(abs.(finite))
     end
 
     if control.coupling_mode === :uncoupled
@@ -145,7 +177,8 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
             gr   = find_growth_rates(scan, sc.tauk;
                     pole_threshold=pthr,
                     filter_above_poles=control.filter_above_poles,
-                    filter_outside_re=control.filter_outside_re)
+                    filter_outside_re=control.filter_outside_re,
+                    gap_kHz_threshold=control.gap_kHz_threshold)
             push!(Q_root, gr.Q_root)
             push!(omega_Hz, gr.omega_Hz)
             push!(gamma_Hz, gr.gamma_Hz)
@@ -162,7 +195,8 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
         gr = find_growth_rates(scan, ref_tauk;
                 pole_threshold=pthr,
                 filter_above_poles=control.filter_above_poles,
-                filter_outside_re=control.filter_outside_re)
+                filter_outside_re=control.filter_outside_re,
+                gap_kHz_threshold=control.gap_kHz_threshold)
         push!(Q_root, gr.Q_root)
         push!(omega_Hz, gr.omega_Hz)
         push!(gamma_Hz, gr.gamma_Hz)

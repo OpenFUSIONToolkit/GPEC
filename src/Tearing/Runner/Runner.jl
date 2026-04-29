@@ -24,7 +24,7 @@
 module Runner
 
 using LinearAlgebra
-using Statistics: mean
+using Statistics: mean, median
 using HDF5
 
 using ..Utilities
@@ -37,6 +37,7 @@ using ..Dispersion: SurfaceCoupling, surface_coupling,
                      MultiSurfaceCoupling, multi_surface_coupling,
                      ScanResult, brute_force_scan,
                      AMRResult, amr_scan,
+                     MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
                      GrowthRateResult, find_growth_rates
 
 include("Control.jl")
