@@ -124,9 +124,7 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
                            filter_above_poles::Bool=true,
                            filter_outside_re::Bool=true,
                            gap_kHz_threshold::Real=1.0,
-                           angle_threshold_deg::Real=45.0,
-                           density_radius_Q::Real=0.5,
-                           min_neighbors::Integer=2)
+                           angle_threshold_deg::Real=45.0)
     return _extract_growth_rates(scan.re_axis, scan.im_axis, scan.Δ,
                                   Float64(tauk);
                                   re_target=Float64(re_target),
@@ -135,9 +133,7 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
                                   filter_above_poles=filter_above_poles,
                                   filter_outside_re=filter_outside_re,
                                   gap_kHz_threshold=Float64(gap_kHz_threshold),
-                                  angle_threshold_deg=Float64(angle_threshold_deg),
-                                  density_radius_Q=Float64(density_radius_Q),
-                                  min_neighbors=Int(min_neighbors))
+                                  angle_threshold_deg=Float64(angle_threshold_deg))
 end
 
 """
@@ -161,9 +157,7 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
                            filter_above_poles::Bool=true,
                            filter_outside_re::Bool=true,
                            gap_kHz_threshold::Real=1.0,
-                           angle_threshold_deg::Real=45.0,
-                           density_radius_Q::Real=0.5,
-                           min_neighbors::Integer=2)
+                           angle_threshold_deg::Real=45.0)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
                                       re_target=Float64(re_target),
                                       im_target=Float64(im_target),
@@ -171,9 +165,7 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
                                       filter_above_poles=filter_above_poles,
                                       filter_outside_re=filter_outside_re,
                                       gap_kHz_threshold=Float64(gap_kHz_threshold),
-                                      angle_threshold_deg=Float64(angle_threshold_deg),
-                                      density_radius_Q=Float64(density_radius_Q),
-                                      min_neighbors=Int(min_neighbors))
+                                      angle_threshold_deg=Float64(angle_threshold_deg))
 end
 
 # ---------------------------------------------------------------------
@@ -410,32 +402,12 @@ function _is_gap_spurious(sorted_roots::Vector{ComplexF64}, idx::Int,
     return (γ_idx - γ_next) > gap_kHz_threshold
 end
 
-# Local-density check: spurious high-γ outliers are typically isolated in the
-# Q plane, while legitimate (coupled) tearing roots cluster densely in the
-# resonant region. Counts other valid roots within `density_radius_Q` of the
-# candidate; flags when the count is below `min_neighbors`. Distance is in
-# normalized Q-units (so the threshold is case-independent up to the natural
-# Q-plane scale of the residual).
-#
-# Disabled for cases with very few total roots (n_roots < `min_total_for_density`,
-# default 5): without a meaningful cluster baseline, "isolation" carries no
-# signal — uncoupled cases (n_roots = 1-3) would otherwise spuriously fire on
-# every candidate.
-function _is_density_isolated(sorted_roots::Vector{ComplexF64}, idx::Int,
-                              density_radius_Q::Float64, min_neighbors::Int;
-                              min_total_for_density::Int=5)
-    n_total = length(sorted_roots)
-    n_total < min_total_for_density && return false
-    n_neighbors = 0
-    pt = sorted_roots[idx]
-    @inbounds for k in eachindex(sorted_roots)
-        k == idx && continue
-        if abs(sorted_roots[k] - pt) < density_radius_Q
-            n_neighbors += 1
-        end
-    end
-    return n_neighbors < min_neighbors
-end
+# (removed: `_is_density_isolated`. The isolation-of-roots heuristic was
+# tried as a third spurious-root flag but discarded — the user noted that
+# `:gap + :density` could both falsely fire on a legitimate isolated mode
+# (e.g. an uncoupled case with one dominant unstable root and one stable
+# root separated by > 1 kHz), causing the recursion to incorrectly discard
+# the right answer. Stuck with `:geom + :gap` as the two flags.)
 
 function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                         im_paths::Vector{Vector{ComplexF64}},
@@ -445,9 +417,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                         filter_above_poles::Bool,
                         filter_outside_re::Bool,
                         gap_kHz_threshold::Float64=1.0,
-                        angle_threshold_deg::Float64=45.0,
-                        density_radius_Q::Float64=0.5,
-                        min_neighbors::Int=2)
+                        angle_threshold_deg::Float64=45.0)
     raw_intersections = _all_intersections(re_paths, im_paths)
 
     poles      = ComplexF64[]
@@ -541,33 +511,24 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                 push!(filtered_roots, cand)
                 continue
             end
-            # New checks: 3 spurious-root flags (any 2+ → discard, 1 → warn)
-            #   :geom    — Re=0 contour is locally a downward-concave "hill"
-            #              at the candidate (clean polyline-following fit)
-            #   :gap     — candidate is unstable AND >1 kHz above next root
-            #              (an isolated γ peak — spurious outlier signature)
-            #   :density — fewer than `min_neighbors` other roots within
-            #              `density_radius_Q` of the candidate. Spurious
-            #              high-kHz outliers tend to be isolated in Q-space;
-            #              legitimate coupled-tearing roots cluster.
-            geom_flag    = _is_geom_spurious(cand, re_paths, im_paths,
-                                              angle_threshold_deg)
-            gap_flag     = _is_gap_spurious(sorted_pts, k, tauk,
-                                             gap_kHz_threshold)
-            density_flag = _is_density_isolated(sorted_pts, k,
-                                                 density_radius_Q, min_neighbors)
-            n_flags = (geom_flag ? 1 : 0) + (gap_flag ? 1 : 0) +
-                      (density_flag ? 1 : 0)
-            if n_flags >= 2
-                # 2+ of {geom, gap, density} → discard, recurse to next
+            # New checks: 2 spurious-root flags (both → discard, 1 → warn)
+            #   :geom — Re=0 contour is locally a downward-concave "hill"
+            #           at the candidate (clean polyline-following fit)
+            #   :gap  — candidate is unstable AND >1 kHz above next root
+            #           (isolated γ peak — spurious outlier signature)
+            geom_flag = _is_geom_spurious(cand, re_paths, im_paths,
+                                           angle_threshold_deg)
+            gap_flag  = _is_gap_spurious(sorted_pts, k, tauk,
+                                          gap_kHz_threshold)
+            if geom_flag && gap_flag
+                # Both conditions met → discard, recurse to next
                 push!(filtered_roots, cand)
                 continue
             end
             # Accept candidate as primary; record any single-flag warning.
             chosen_idx = k
-            geom_flag    && push!(warning_flags, :geom)
-            gap_flag     && push!(warning_flags, :gap)
-            density_flag && push!(warning_flags, :density)
+            geom_flag && push!(warning_flags, :geom)
+            gap_flag  && push!(warning_flags, :gap)
             break
         end
 
@@ -606,9 +567,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
                                 filter_above_poles::Bool,
                                 filter_outside_re::Bool,
                                 gap_kHz_threshold::Float64=1.0,
-                                angle_threshold_deg::Float64=45.0,
-                                density_radius_Q::Float64=0.5,
-                                min_neighbors::Int=2)
+                                angle_threshold_deg::Float64=45.0)
     re_field = real.(Δ_grid)
     im_field = imag.(Δ_grid)
 
@@ -625,9 +584,7 @@ function _extract_growth_rates(re_axis::Vector{Float64},
                           filter_above_poles=filter_above_poles,
                           filter_outside_re=filter_outside_re,
                           gap_kHz_threshold=gap_kHz_threshold,
-                          angle_threshold_deg=angle_threshold_deg,
-                          density_radius_Q=density_radius_Q,
-                          min_neighbors=min_neighbors)
+                          angle_threshold_deg=angle_threshold_deg)
 end
 
 # ---------------------------------------------------------------------
@@ -774,9 +731,7 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
                                      filter_above_poles::Bool,
                                      filter_outside_re::Bool,
                                      gap_kHz_threshold::Float64=1.0,
-                                     angle_threshold_deg::Float64=45.0,
-                                     density_radius_Q::Float64=0.5,
-                                     min_neighbors::Int=2)
+                                     angle_threshold_deg::Float64=45.0)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
     length(Q) >= 3 ||
@@ -809,7 +764,5 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
                           filter_above_poles=filter_above_poles,
                           filter_outside_re=filter_outside_re,
                           gap_kHz_threshold=gap_kHz_threshold,
-                          angle_threshold_deg=angle_threshold_deg,
-                          density_radius_Q=density_radius_Q,
-                          min_neighbors=min_neighbors)
+                          angle_threshold_deg=angle_threshold_deg)
 end
