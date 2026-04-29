@@ -33,23 +33,33 @@ using DelaunayTriangulation
 
 Output of `find_growth_rates`.
 
-| field             | meaning                                                |
-|-------------------|--------------------------------------------------------|
-| `Q_root`          | Best (highest-γ surviving) root, normalized            |
-| `omega_Hz`        | `Re(Q_root) / tauk` — physical rotation frequency      |
-| `gamma_Hz`        | `Im(Q_root) / tauk` — physical growth rate             |
-| `valid_roots`     | All non-pole intersections that survived the filters   |
-| `poles`           | Intersections classified as poles                      |
-| `filtered_roots`  | Intersections rejected by the above-pole/outside-Re   |
-|                   | filter                                                 |
-| `re_contours`     | Extracted Re(Δ)=`re_target` polylines                  |
-| `im_contours`     | Extracted Im(Δ)=`im_target` polylines                  |
-| `pole_threshold`  | Threshold used for pole classification                 |
+| field                | meaning                                                |
+|----------------------|--------------------------------------------------------|
+| `Q_root`             | Best (highest-γ surviving) root, normalized            |
+| `omega_Hz`           | `Re(Q_root) / tauk` — physical rotation frequency      |
+| `gamma_Hz`           | `Im(Q_root) / tauk` — physical growth rate             |
+| `Q_root_secondary`   | Second-most-unstable root flagged for ambiguity, or    |
+|                      | `NaN+NaNim` if the primary root was unambiguous.       |
+| `omega_Hz_secondary` | physical ω of the secondary root, or 0 if none         |
+| `gamma_Hz_secondary` | physical γ of the secondary root, or 0 if none         |
+| `warning_flags`      | `Vector{Symbol}` of warnings raised on `Q_root`:       |
+|                      | `:geom`, `:gap`. Empty if root is clean.               |
+| `valid_roots`        | All non-pole intersections that survived pole filter   |
+| `poles`              | Intersections classified as poles                      |
+| `filtered_roots`     | Intersections rejected by the above-pole/outside-Re    |
+|                      | filter or the new geom+gap recursion                   |
+| `re_contours`        | Extracted Re(Δ)=`re_target` polylines                  |
+| `im_contours`        | Extracted Im(Δ)=`im_target` polylines                  |
+| `pole_threshold`     | Threshold used for pole classification                 |
 """
 struct GrowthRateResult
     Q_root::ComplexF64
     omega_Hz::Float64
     gamma_Hz::Float64
+    Q_root_secondary::ComplexF64
+    omega_Hz_secondary::Float64
+    gamma_Hz_secondary::Float64
+    warning_flags::Vector{Symbol}
     valid_roots::Vector{ComplexF64}
     poles::Vector{ComplexF64}
     filtered_roots::Vector{ComplexF64}
@@ -63,7 +73,9 @@ end
                        re_target=0.0, im_target=0.0,
                        pole_threshold=10.0,
                        filter_above_poles=true,
-                       filter_outside_re=true) -> GrowthRateResult
+                       filter_outside_re=true,
+                       gap_kHz_threshold=1.0,
+                       angle_threshold_deg=45.0) -> GrowthRateResult
 
 Extract tearing growth-rate eigenvalues from a brute-force `ScanResult` by
 contour-intersection analysis. `tauk` is the per-surface time normalization
@@ -81,20 +93,47 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
   - `filter_outside_re`  -- restrict the above-pole rejection to roots whose
     +γ step along the Im=0 contour exits the Re=0 contour loop. When `true`,
     roots that are above a pole but geometrically inside the Re=0 contour
-    survive (matches the Python default).
+    survive (matches the Python default). Note this gate fails when the
+    Re=0 contour is OPEN (e.g., exits the Q box edge), letting spurious
+    upper-branch roots through. The `angle_threshold_deg` and
+    `gap_kHz_threshold` checks below cover that case.
+  - `gap_kHz_threshold` -- if the highest-γ root is unstable (γ > 0) AND its
+    γ exceeds the next root by more than this many kHz, it is flagged as
+    a `:gap` warning. Default 1.0 kHz.
+  - `angle_threshold_deg` -- a candidate is flagged with `:geom` warning if
+    it sits where the Re(Δ)=0 contour is locally downward-concave AND the
+    Im(Δ)=0 tangent makes an angle greater than this (in degrees) with the
+    horizontal. Captures the "spurious upper-branch" geometry that the
+    `filter_outside_re` gate misses on open contours. Default 45°.
+
+# Spurious-root recursion
+
+After the per-intersection pole / above-pole filters, the remaining roots
+are sorted by descending γ. The selection loop walks down this list and at
+each candidate evaluates the two new flags `:geom` (concavity + Im exit
+angle) and `:gap` (γ-separation from next root). If BOTH flags fire, the
+candidate is discarded as spurious and the next root is tried. If exactly
+ONE fires, the candidate is accepted as the primary root but a warning is
+recorded in `warning_flags`, and the next root is exposed as
+`Q_root_secondary` so downstream tools can plot or reanalyse it. If neither
+fires, the candidate is accepted cleanly.
 """
 function find_growth_rates(scan::ScanResult, tauk::Real;
                            re_target::Real=0.0, im_target::Real=0.0,
                            pole_threshold::Real=10.0,
                            filter_above_poles::Bool=true,
-                           filter_outside_re::Bool=true)
+                           filter_outside_re::Bool=true,
+                           gap_kHz_threshold::Real=1.0,
+                           angle_threshold_deg::Real=45.0)
     return _extract_growth_rates(scan.re_axis, scan.im_axis, scan.Δ,
                                   Float64(tauk);
                                   re_target=Float64(re_target),
                                   im_target=Float64(im_target),
                                   pole_threshold=Float64(pole_threshold),
                                   filter_above_poles=filter_above_poles,
-                                  filter_outside_re=filter_outside_re)
+                                  filter_outside_re=filter_outside_re,
+                                  gap_kHz_threshold=Float64(gap_kHz_threshold),
+                                  angle_threshold_deg=Float64(angle_threshold_deg))
 end
 
 """
@@ -116,13 +155,17 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
                            re_target::Real=0.0, im_target::Real=0.0,
                            pole_threshold::Real=10.0,
                            filter_above_poles::Bool=true,
-                           filter_outside_re::Bool=true)
+                           filter_outside_re::Bool=true,
+                           gap_kHz_threshold::Real=1.0,
+                           angle_threshold_deg::Real=45.0)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
                                       re_target=Float64(re_target),
                                       im_target=Float64(im_target),
                                       pole_threshold=Float64(pole_threshold),
                                       filter_above_poles=filter_above_poles,
-                                      filter_outside_re=filter_outside_re)
+                                      filter_outside_re=filter_outside_re,
+                                      gap_kHz_threshold=Float64(gap_kHz_threshold),
+                                      angle_threshold_deg=Float64(angle_threshold_deg))
 end
 
 # ---------------------------------------------------------------------
@@ -244,13 +287,73 @@ end
 # Both the regular-grid path (_extract_growth_rates) and the AMR
 # triangulation path (_extract_growth_rates_amr) funnel through this.
 # ---------------------------------------------------------------------
+# Geometric "spurious upper-branch" detector — does NOT depend on the Re=0
+# contour being closed. Flags candidates where the Re(Δ)=0 contour is locally
+# downward-concave AND the Im(Δ)=0 tangent at the candidate makes an angle
+# greater than `angle_threshold_deg` with the horizontal. The combination
+# captures roots sitting on the top of a downward-curving Re=0 arc with the
+# Im=0 contour exiting steeply upward — the classic spurious-upper-branch
+# geometry. The closed-contour `filter_outside_re` test misses these when
+# the Re=0 contour exits the Q-box edge.
+#
+# Concavity test is orientation-invariant: for 3 consecutive Re=0 vertices
+# (p_prev, p_curr, p_next), `(x_next - x_prev) * cross < 0` iff the local
+# arc is downward-concave (⌒) regardless of traversal direction.
+function _is_geom_spurious(pt::ComplexF64,
+                            re_paths::Vector{Vector{ComplexF64}},
+                            im_paths::Vector{Vector{ComplexF64}},
+                            angle_threshold_deg::Float64)
+    re_idx, re_v_idx, _ = _closest_polyline_vertex(re_paths, pt)
+    re_idx == 0 && return false
+    re_path = re_paths[re_idx]
+    n_re = length(re_path)
+    (re_v_idx <= 1 || re_v_idx >= n_re) && return false   # need neighbours
+
+    p_prev = re_path[re_v_idx - 1]
+    p_curr = re_path[re_v_idx]
+    p_next = re_path[re_v_idx + 1]
+    a = p_curr - p_prev
+    b = p_next - p_curr
+    cross = real(a) * imag(b) - imag(a) * real(b)
+    dx = real(p_next) - real(p_prev)
+    abs(dx) < 1e-12 && return false   # nearly vertical contour, skip
+    concave_down = (dx * cross) < 0
+    !concave_down && return false
+
+    im_idx, im_v_idx, _ = _closest_polyline_vertex(im_paths, pt)
+    im_idx == 0 && return false
+    im_path = im_paths[im_idx]
+    n_im = length(im_path)
+    (im_v_idx <= 1 || im_v_idx >= n_im) && return false
+    tangent = im_path[im_v_idx + 1] - im_path[im_v_idx - 1]
+    abs(tangent) < 1e-30 && return false
+
+    angle_deg = abs(atand(imag(tangent), real(tangent)))
+    angle_deg > 90.0 && (angle_deg = 180.0 - angle_deg)
+    return angle_deg > angle_threshold_deg
+end
+
+# γ-gap separation: the candidate at `idx` (in γ-descending order) is unstable
+# AND clearly separated above the next-most-unstable candidate by more than
+# `gap_kHz_threshold` kHz. Flags an outlier "lone peak" root.
+function _is_gap_spurious(sorted_roots::Vector{ComplexF64}, idx::Int,
+                          tauk::Float64, gap_kHz_threshold::Float64)
+    γ_idx = imag(sorted_roots[idx]) / tauk * 1e-3   # kHz
+    γ_idx > 0.0 || return false                       # only suspicious if unstable
+    idx >= length(sorted_roots) && return false       # nothing below to compare
+    γ_next = imag(sorted_roots[idx + 1]) / tauk * 1e-3
+    return (γ_idx - γ_next) > gap_kHz_threshold
+end
+
 function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                         im_paths::Vector{Vector{ComplexF64}},
                         im_re_vals::Vector{Vector{Float64}},
                         tauk::Float64;
                         pole_threshold::Float64,
                         filter_above_poles::Bool,
-                        filter_outside_re::Bool)
+                        filter_outside_re::Bool,
+                        gap_kHz_threshold::Float64=1.0,
+                        angle_threshold_deg::Float64=45.0)
     raw_intersections = _all_intersections(re_paths, im_paths)
 
     poles      = ComplexF64[]
@@ -319,10 +422,12 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         push!(candidates, (pt, on_top_half_re))
     end
 
-    # --- 3. pole / outside-Re filtering and pick highest-γ root
+    # --- 3. pole + closed-loop filter (legacy), then geom + gap recursion (new)
     valid_roots    = ComplexF64[c[1] for c in candidates]
     filtered_roots = ComplexF64[]
     Q_root         = ComplexF64(NaN, NaN)
+    Q_root_2nd     = ComplexF64(NaN, NaN)
+    warning_flags  = Symbol[]
 
     if !isempty(valid_roots)
         order = sortperm(valid_roots; by=q -> -imag(q))
@@ -335,23 +440,48 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         for k in 1:length(sorted_pts)
             cand   = sorted_pts[k]
             top_re = sorted_top[k]
-            reject = filter_above_poles && imag(cand) > max_pole_gamma &&
-                     (!filter_outside_re || top_re)
-            if reject
+            # Legacy filter: above-pole + closed-loop outside-Re
+            legacy_reject = filter_above_poles && imag(cand) > max_pole_gamma &&
+                            (!filter_outside_re || top_re)
+            if legacy_reject
                 push!(filtered_roots, cand)
-            else
-                chosen_idx = k
-                break
+                continue
             end
+            # New checks: geometric concavity + γ-gap separation
+            geom_flag = _is_geom_spurious(cand, re_paths, im_paths,
+                                          angle_threshold_deg)
+            gap_flag  = _is_gap_spurious(sorted_pts, k, tauk, gap_kHz_threshold)
+            if geom_flag && gap_flag
+                # Both conditions met → discard, try next
+                push!(filtered_roots, cand)
+                continue
+            end
+            # Accept candidate as primary; record any single-flag warning.
+            chosen_idx = k
+            geom_flag && push!(warning_flags, :geom)
+            gap_flag  && push!(warning_flags, :gap)
+            break
         end
 
-        chosen_idx > 0 && (Q_root = sorted_pts[chosen_idx])
+        if chosen_idx > 0
+            Q_root = sorted_pts[chosen_idx]
+            # When a warning fired, expose the next-down root as secondary so
+            # downstream tools can plot/reanalyse. (Indices > chosen_idx in
+            # sorted_pts are the next-most-unstable.)
+            if !isempty(warning_flags) && chosen_idx < length(sorted_pts)
+                Q_root_2nd = sorted_pts[chosen_idx + 1]
+            end
+        end
     end
 
     omega_Hz = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
     gamma_Hz = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
+    omega_Hz_2nd = isnan(real(Q_root_2nd)) ? 0.0 : real(Q_root_2nd) / tauk
+    gamma_Hz_2nd = isnan(imag(Q_root_2nd)) ? 0.0 : imag(Q_root_2nd) / tauk
 
     return GrowthRateResult(Q_root, omega_Hz, gamma_Hz,
+                             Q_root_2nd, omega_Hz_2nd, gamma_Hz_2nd,
+                             warning_flags,
                              valid_roots, poles, filtered_roots,
                              re_paths, im_paths, pole_threshold)
 end
@@ -366,7 +496,9 @@ function _extract_growth_rates(re_axis::Vector{Float64},
                                 im_target::Float64,
                                 pole_threshold::Float64,
                                 filter_above_poles::Bool,
-                                filter_outside_re::Bool)
+                                filter_outside_re::Bool,
+                                gap_kHz_threshold::Float64=1.0,
+                                angle_threshold_deg::Float64=45.0)
     re_field = real.(Δ_grid)
     im_field = imag.(Δ_grid)
 
@@ -381,7 +513,9 @@ function _extract_growth_rates(re_axis::Vector{Float64},
     return _run_analysis(re_paths, im_paths, im_re_vals, tauk;
                           pole_threshold=pole_threshold,
                           filter_above_poles=filter_above_poles,
-                          filter_outside_re=filter_outside_re)
+                          filter_outside_re=filter_outside_re,
+                          gap_kHz_threshold=gap_kHz_threshold,
+                          angle_threshold_deg=angle_threshold_deg)
 end
 
 # ---------------------------------------------------------------------
@@ -526,7 +660,9 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
                                      im_target::Float64,
                                      pole_threshold::Float64,
                                      filter_above_poles::Bool,
-                                     filter_outside_re::Bool)
+                                     filter_outside_re::Bool,
+                                     gap_kHz_threshold::Float64=1.0,
+                                     angle_threshold_deg::Float64=45.0)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
     length(Q) >= 3 ||
@@ -557,5 +693,7 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
     return _run_analysis(re_paths, im_paths, im_re_vals, tauk;
                           pole_threshold=pole_threshold,
                           filter_above_poles=filter_above_poles,
-                          filter_outside_re=filter_outside_re)
+                          filter_outside_re=filter_outside_re,
+                          gap_kHz_threshold=gap_kHz_threshold,
+                          angle_threshold_deg=angle_threshold_deg)
 end
