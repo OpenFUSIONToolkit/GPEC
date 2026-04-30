@@ -46,7 +46,7 @@ import AdaptiveArrayPools: @with_pool
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_find!
-using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
+using .ForceFreeStates: compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
@@ -132,17 +132,11 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         # equil = set_up_equilibrium(equil.config)
     end
 
-    # Compute Mercier and Ballooning stability (if desired)
-    # This holds di, dr, h (calculated in mercier_scan), ca1, and ca2 (calculated in ballooning scan)
+    # Compute local stability (if desired). This holds `D_I` from the
+    # ballooning coefficient system and the local ballooning result.
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
-    if ctrl.mer_flag
-        if ctrl.verbose
-            @info "Evaluating Mercier criterion"
-        end
-        mercier_scan!(locstab_fs, equil)
-    end
-    if ctrl.bal_flag
+    if ctrl.local_stability_flag
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
     end
     # Fit data to splines
@@ -415,17 +409,17 @@ function write_outputs_to_HDF5(
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
         # Write local stability data; always write all entries, using empty arrays when not computed
-        if ctrl.mer_flag
+        if ctrl.local_stability_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
-            out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
         else
             out_h5["locstab/di"] = Float64[]
-            out_h5["locstab/dr"] = Float64[]
         end
-        out_h5["singular/di0"] = (ctrl.mer_flag && !isempty(intr.sing)) ?
+        out_h5["locstab/dr"] = Float64[]
+        out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
                                  [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/ca1"] = ctrl.bal_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["locstab/delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+        out_h5["locstab/ca1"] = Float64[]
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually

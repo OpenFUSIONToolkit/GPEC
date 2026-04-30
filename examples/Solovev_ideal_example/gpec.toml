@@ -6,7 +6,7 @@ power_bp = 0                            # Poloidal field power exponent for Jaco
 power_b = 0                             # Toroidal field power exponent for Jacobian
 power_r = 0                             # Major radius power exponent for Jacobian
 grid_type = "ldp"                       # Radial grid packing type
-psilow = 1e-4                           # Lower limit of normalized flux coordinate
+psilow = 1e-2                           # Lower limit of normalized flux coordinate
 psihigh = 0.9995                        # Upper limit of normalized flux coordinate
 mpsi = 128                              # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
@@ -37,11 +37,10 @@ equal_arc_wall = true                   # Equal arc length distribution of nodes
 # write_outputs_to_HDF5 = true           # Write outputs to HDF5
 
 [ForceFreeStates]
-bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
+local_stability_flag = true # Local D_I and ballooning stability
 mat_flag = true               # Construct coefficient matrices for diagnostic purposes
 ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
-mer_flag = true               # Evaluate the Mercier criterian
 
 psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
