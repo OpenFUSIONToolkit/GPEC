@@ -28,8 +28,7 @@ function compute_ballooning_stability!(
     locstab_fs::Matrix{Float64},
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
-    compute_delta_prime::Bool=true,
-    mode::Symbol=:delta_prime_legacy
+    compute_delta_prime::Bool=true
 )
 
     if ctrl.verbose
@@ -47,14 +46,9 @@ function compute_ballooning_stability!(
         if compute_delta_prime && plasma_eq.profiles.xs[flux_surface_index] <= 1.0
             result = integrate_ballooning_ode(
                 coeff_data.ode_coefficient_spline;
-                theta_k=theta_k,
-                mode=mode,
-                d0bar=coeff_data.d0bar,
-                n0_spline=coeff_data.n0_spline,
-                n1_spline=coeff_data.n1_spline,
-                theta_grid=coeff_data.theta_grid
+                theta_k=theta_k
             )
-            locstab_fs[flux_surface_index, 4] = _real_scalar_or_nan(result.value)
+            locstab_fs[flux_surface_index, 4] = result.value
         end
     end
 
@@ -65,17 +59,6 @@ function compute_ballooning_stability!(
 end
 
 
-
-
-function _real_scalar_or_nan(value)
-    if value isa Real
-        return Float64(value)
-    elseif value isa Complex
-        return isapprox(imag(value), 0.0; atol=1e-10) ? Float64(real(value)) : NaN
-    else
-        return NaN
-    end
-end
 
 
 
@@ -368,7 +351,9 @@ function prepare_ballooning_coefficients(
         eta_dp = 2pi * bg.fx0[idx, 2]
         dr_dp = drfac_dp * cos(bg.eta0[idx]) - bg.rho0[idx] * sin(bg.eta0[idx]) * eta_dp
 
-        dv21_dp = (bg.fxy0[idx, 1] / (2 * bg.rho0[idx]) - bg.fx0[idx, 1] * bg.fy0[idx, 1] / (4 * bg.f0[idx, 1] * bg.rho0[idx])) / bg.jac0[idx] - bg.v0[idx, 2, 1] * jac_psi_loop1[idx] / bg.jac0[idx]
+        dv21_dp =
+            (bg.fxy0[idx, 1] / (2 * bg.rho0[idx]) - bg.fx0[idx, 1] * bg.fy0[idx, 1] / (4 * bg.f0[idx, 1] * bg.rho0[idx])) / bg.jac0[idx] -
+            bg.v0[idx, 2, 1] * jac_psi_loop1[idx] / bg.jac0[idx]
         dv22_dp = (bg.fxy0[idx, 2] * 2pi * bg.rho0[idx] + (1 + bg.fy0[idx, 2]) * 2pi * drfac_dp) / bg.jac0[idx] - bg.v0[idx, 2, 2] * jac_psi_loop1[idx] / bg.jac0[idx]
         dv23_dp = (bg.fxy0[idx, 3] * bg.r0[idx] + bg.fy0[idx, 3] * dr_dp) / bg.jac0[idx] - bg.v0[idx, 2, 3] * jac_psi_loop1[idx] / bg.jac0[idx]
         dv33_dp = (2pi * dr_dp) / bg.jac0[idx] - bg.v0[idx, 3, 3] * jac_psi_loop1[idx] / bg.jac0[idx]
@@ -450,8 +435,7 @@ function prepare_ballooning_coefficients(
     n0_fs[:, 4] = -0.5 .- m0_12 .* sigma
 
     @views n0_fs[end, :] .= n0_fs[1, :]
-    n0_spline = (xs=theta_grid, fs=n0_fs, itp=cubic_interp(theta_grid, Series(n0_fs); bc=PeriodicBC()))
-    n0_int = FastInterpolations.integrate(n0_spline.itp)
+    n0_int = FastInterpolations.integrate(cubic_interp(theta_grid, Series(n0_fs); bc=PeriodicBC()))
 
     d0bar = zeros(2, 2)
     d0bar[1, 1] = n0_int[1]
@@ -459,26 +443,12 @@ function prepare_ballooning_coefficients(
     d0bar[2, 1] = n0_int[3]
     d0bar[2, 2] = n0_int[4]
 
-    i_per_total = i_per0_shifted .+ i_per_perturbed
-    a1_fs = -2.0 .* jac_chiprime .* bsq ./ (bg.gradpsi_sq0 .* q_derivative^3) .* (i_per_total .- q_derivative .* theta_k_reference)
-
-    n1_fs = zeros(mtheta + 1, 4)
-    n1_fs[:, 1] = sigma .* a1_fs
-    n1_fs[:, 2] = a1_fs
-    n1_fs[:, 3] = .-(sigma .^ 2) .* a1_fs
-    n1_fs[:, 4] = .-sigma .* a1_fs
-    @views n1_fs[end, :] .= n1_fs[1, :]
-    n1_spline = (xs=theta_grid, fs=n1_fs, itp=cubic_interp(theta_grid, Series(n1_fs); bc=PeriodicBC()))
-
     @views bf_fs[end, :] .= bf_fs[1, :]
     ode_coefficient_spline = (xs=theta_grid, itp=cubic_interp(theta_grid, Series(bf_fs); bc=PeriodicBC()))
 
     return (
         ode_coefficient_spline=ode_coefficient_spline,
-        d0bar=d0bar,
         di=det(d0bar),
-        n0_spline=n0_spline,
-        n1_spline=n1_spline,
         theta_grid=theta_grid
     )
 end
@@ -548,8 +518,7 @@ function ballooning_delta_prime(
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     corr_qprime::Float64=0.0,
     corr_pprime::Float64=0.0,
-    theta_k::Float64=0.0,
-    mode::Symbol=:delta_prime_legacy
+    theta_k::Float64=0.0
 )
     coeff_data = prepare_ballooning_coefficients(
         psi_idx,
@@ -558,17 +527,12 @@ function ballooning_delta_prime(
         corr_pprime=corr_pprime,
         theta_k=theta_k
     )
-    result = integrate_ballooning_ode(
+    delta_prime = integrate_ballooning_ode(
         coeff_data.ode_coefficient_spline;
-        theta_k=theta_k,
-        mode=mode,
-        d0bar=coeff_data.d0bar,
-        n0_spline=coeff_data.n0_spline,
-        n1_spline=coeff_data.n1_spline,
-        theta_grid=coeff_data.theta_grid
-    )
+        theta_k=theta_k
+    ).value
 
-    return merge(result, (delta_prime=result.value, di=coeff_data.di))
+    return (delta_prime=delta_prime, di=coeff_data.di)
 end
 
 """
@@ -584,7 +548,6 @@ function scan_delta_prime_map(
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     ctrl::ForceFreeStatesControl=ForceFreeStatesControl(; verbose=false),
     theta_k::Float64=0.0,
-    mode::Symbol=:delta_prime_legacy,
     s_scales::AbstractVector{<:Real},
     alpha_scales::AbstractVector{<:Real}
 )
@@ -608,8 +571,7 @@ function scan_delta_prime_map(
                 plasma_eq;
                 corr_qprime=corr_qprime,
                 corr_pprime=corr_pprime,
-                theta_k=theta_k,
-                mode=mode
+                theta_k=theta_k
             )
         catch err
             if ctrl.verbose
@@ -647,206 +609,8 @@ end
 #   ODE Integration
 #   Integrates the ideal marginal ballooning equations
 # ======================================================================
-
-function _compute_mercier_from_d0bar(d0bar::Matrix{Float64})
-    di = det(d0bar)
-    if !isfinite(di) || di >= 0.0
-        return di, NaN
-    end
-    return di, sqrt(-di)
-end
-
-function _compute_theta_max_like_fortran(ode_coefficient_spline; thmax0::Float64=16.5)
-    theta_vals = ode_coefficient_spline.xs
-    ratio = fill(NaN, length(theta_vals))
-
-    @inbounds for i in eachindex(theta_vals)
-        coeffs = ode_coefficient_spline.itp(theta_vals[i])
-        a0 = coeffs[1]
-        a1 = coeffs[2]
-        a2 = coeffs[3]
-        if isfinite(a0) && isfinite(a1) && isfinite(a2) && a2 != 0.0
-            residual = a0 - a1^2 / (4.0 * a2)
-            ratio[i] = abs(residual / a2)
-        end
-    end
-
-    finite_ratio = ratio[isfinite.(ratio)]
-    if isempty(finite_ratio)
-        return thmax0
-    end
-
-    theta_max = sqrt(maximum(finite_ratio)) * 10.0 * thmax0
-    return min(theta_max, 100.0)
-end
-
-function _build_periodic_primitive_spline(theta_grid::AbstractVector{<:Real}, values::AbstractMatrix{<:Real})
-    theta_vals = Float64.(theta_grid)
-    period = theta_vals[end] - theta_vals[1]
-    ntheta, nqty = size(values)
-
-    primitive = zeros(Float64, ntheta, nqty)
-    for j in 1:nqty
-        for i in 2:ntheta
-            dtheta = theta_vals[i] - theta_vals[i-1]
-            primitive[i, j] = primitive[i-1, j] + 0.5 * dtheta * (values[i-1, j] + values[i, j])
-        end
-
-        mean_component = primitive[end, j] / period
-        for i in 1:ntheta
-            primitive[i, j] -= (theta_vals[i] - theta_vals[1]) * mean_component
-        end
-        primitive[end, j] = primitive[1, j]
-    end
-
-    return (xs=theta_vals, fs=primitive, itp=cubic_interp(theta_vals, Series(primitive); bc=PeriodicBC()))
-end
-
-function _compute_branch_eigendata(d0bar::Matrix{Float64}, branch::Symbol)
-    di, alpha = _compute_mercier_from_d0bar(d0bar)
-    if !isfinite(di) || di >= 0.0 || isnan(alpha)
-        return di, alpha, NaN, [NaN, NaN]
-    end
-
-    if branch == :big
-        exponent = alpha
-        w2 = -(d0bar[1, 1] - alpha) / d0bar[1, 2]
-    elseif branch == :small
-        exponent = -alpha
-        w2 = -(d0bar[1, 1] + alpha) / d0bar[1, 2]
-    else
-        error("Unsupported asymptotic branch: $(branch)")
-    end
-
-    return di, alpha, exponent, [1.0, w2]
-end
-
-function _build_branch_matching_data(n0_spline, n1_spline, d0bar::Matrix{Float64}, branch::Symbol, theta_grid::Vector{Float64})
-    di, alpha, exponent, w0 = _compute_branch_eigendata(d0bar, branch)
-    if !isfinite(exponent) || isnan(exponent)
-        return (
-            di=di,
-            alpha=alpha,
-            exponent=exponent,
-            w0=w0,
-            c1=[NaN, NaN],
-            w1tilde_spline=nothing,
-            branch=branch
-        )
-    end
-
-    n0_fs = n0_spline.fs
-    n1_fs = n1_spline.fs
-    ntheta = size(n0_fs, 1)
-
-    forcing_fs = zeros(Float64, ntheta, 2)
-    for i in 1:ntheta
-        n0 = [n0_fs[i, 1] n0_fs[i, 2]; n0_fs[i, 3] n0_fs[i, 4]]
-        rhs = n0 * w0 - exponent .* w0
-        forcing_fs[i, 1] = rhs[1]
-        forcing_fs[i, 2] = rhs[2]
-    end
-    @views forcing_fs[end, :] .= forcing_fs[1, :]
-
-    w1tilde_spline = _build_periodic_primitive_spline(theta_grid, forcing_fs)
-    w1tilde_fs = w1tilde_spline.fs
-
-    rhs1_fs = zeros(Float64, ntheta, 2)
-    for i in 1:ntheta
-        n0 = [n0_fs[i, 1] n0_fs[i, 2]; n0_fs[i, 3] n0_fs[i, 4]]
-        n1 = [n1_fs[i, 1] n1_fs[i, 2]; n1_fs[i, 3] n1_fs[i, 4]]
-        w1tilde = [w1tilde_fs[i, 1], w1tilde_fs[i, 2]]
-        rhs = (n0 * w1tilde - (exponent - 1.0) .* w1tilde) + n1 * w0
-        rhs1_fs[i, 1] = rhs[1]
-        rhs1_fs[i, 2] = rhs[2]
-    end
-    @views rhs1_fs[end, :] .= rhs1_fs[1, :]
-
-    rhs_avg = FastInterpolations.integrate(cubic_interp(theta_grid, Series(rhs1_fs); bc=PeriodicBC()))
-
-    lhs = copy(d0bar)
-    lhs[1, 1] -= exponent - 1.0
-    lhs[2, 2] -= exponent - 1.0
-    c1 = -(lhs \ rhs_avg)
-
-    return (
-        di=di,
-        alpha=alpha,
-        exponent=exponent,
-        w0=w0,
-        c1=c1,
-        w1tilde_spline=w1tilde_spline,
-        branch=branch
-    )
-end
-
-function _eval_periodic_series(spline, theta::Real)
-    theta_min = first(spline.xs)
-    theta_period = last(spline.xs) - theta_min
-    theta_wrapped = mod(Float64(theta) - theta_min, theta_period) + theta_min
-    return spline.itp(theta_wrapped)
-end
-
-function _compute_asymptotic_initial_condition(ode_coefficient_spline, matching_data::NamedTuple, theta_start::Float64)
-    coeffs = _eval_periodic_series(ode_coefficient_spline, theta_start)
-    sigma = coeffs[9]
-
-    tau = abs(theta_start)
-    exponent = matching_data.exponent
-    if !isfinite(exponent) || isnan(exponent)
-        return ComplexF64[NaN, NaN], matching_data.di, matching_data.alpha
-    end
-
-    w1tilde = _eval_periodic_series(matching_data.w1tilde_spline, theta_start)
-    w1 = [
-        w1tilde[1] + matching_data.c1[1],
-        w1tilde[2] + matching_data.c1[2]
-    ]
-
-    w0 = matching_data.w0
-    prefactor = tau^exponent
-    y1 = prefactor * tau^(-0.5) * (w0[1] + w1[1] / theta_start)
-    y2 = prefactor * tau^(+0.5) * (sigma * (w0[1] + w1[1] / theta_start) + w0[2] + w1[2] / theta_start)
-
-    return ComplexF64[y1, y2], matching_data.di, matching_data.alpha
-end
-
-function _integrate_ballooning_side(
-    ode_coefficient_spline,
-    theta_start::Float64,
-    theta_end::Float64,
-    initial_condition,
-    theta_k::Float64,
-    tolerance::Float64,
-    minimum_step::Float64
-)
-    problem = ODEProblem(
-        compute_ballooning_ode!,
-        initial_condition,
-        (theta_start, theta_end),
-        (ode_coefficient_spline, theta_k)
-    )
-
-    return solve(problem, DP5(); reltol=tolerance, abstol=tolerance^2, dtmin=minimum_step, adaptive=true)
-end
-
-function _extract_log_derivative(solution)
-    y_end = solution.u[end]
-    theta_end = solution.t[end]
-    return y_end[2] / y_end[1], y_end, theta_end
-end
-
-function _project_onto_asymptotic_basis(target_solution, big_solution, small_solution)
-    basis_matrix = ComplexF64[
-        big_solution[1] small_solution[1]
-        big_solution[2] small_solution[2]
-    ]
-    coefficients = basis_matrix \ ComplexF64[target_solution[1], target_solution[2]]
-    return coefficients[1], coefficients[2]
-end
-
 """
-    integrate_ballooning_ode(ode_coefficient_spline; theta_k=0.0, mode=:delta_prime_legacy)
+    integrate_ballooning_ode(ode_coefficient_spline; theta_k=0.0)
 
 Integrates the ballooning ODE from `-Infinity` to `-1e-3` and `+Infinity` to `+1e-3`.
 Computes Delta' = (y'/y)_right - (y'/y)_left.
@@ -855,15 +619,7 @@ Computes Delta' = (y'/y)_right - (y'/y)_left.
 
   - `delta_prime`: The stability index Δ'.
 """
-function integrate_ballooning_ode(
-    ode_coefficient_spline;
-    theta_k::Float64=0.0,
-    mode::Symbol=:delta_prime_legacy,
-    d0bar::Union{Nothing,Matrix{Float64}}=nothing,
-    n0_spline=nothing,
-    n1_spline=nothing,
-    theta_grid::Union{Nothing,Vector{Float64}}=nothing
-)
+function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     TOLERANCE = 1e-8
     MINIMUM_STEP = 1e-10
     MATCHING_POINT = 1e-3
@@ -874,159 +630,49 @@ function integrate_ballooning_ode(
     theta_start_right = THETA_MAX0
     theta_end_right = MATCHING_POINT
 
-    if mode == :delta_prime_legacy
-        initial_condition_left = [0.0, 1.0]
-        initial_condition_right = [0.0, -1.0]
+    initial_condition_left = [0.0, 1.0]
+    initial_condition_right = [0.0, -1.0]
 
-        sol_left = _integrate_ballooning_side(
-            ode_coefficient_spline,
-            theta_start_left,
-            theta_end_left,
-            initial_condition_left,
-            theta_k,
-            TOLERANCE,
-            MINIMUM_STEP
-        )
-        if sol_left.retcode != ReturnCode.Success
-            return (value=NaN, di=NaN)
-        end
-
-        sol_right = _integrate_ballooning_side(
-            ode_coefficient_spline,
-            theta_start_right,
-            theta_end_right,
-            initial_condition_right,
-            theta_k,
-            TOLERANCE,
-            MINIMUM_STEP
-        )
-        if sol_right.retcode != ReturnCode.Success
-            return (value=NaN, di=NaN)
-        end
-
-        log_deriv_left, _, _ = _extract_log_derivative(sol_left)
-        log_deriv_right, _, _ = _extract_log_derivative(sol_right)
-
-        return (value=log_deriv_right - log_deriv_left, di=NaN)
-    elseif mode == :delta_prime_small
-        if d0bar === nothing || n0_spline === nothing || n1_spline === nothing || theta_grid === nothing
-            error("d0bar, n0_spline, n1_spline, and theta_grid are required for mode=:delta_prime_small")
-        end
-
-        di, alpha = _compute_mercier_from_d0bar(d0bar)
-        if !isfinite(di) || di >= 0.0 || isnan(alpha)
-            return (value=NaN, di=di, alpha=NaN)
-        end
-
-        theta_max = _compute_theta_max_like_fortran(ode_coefficient_spline; thmax0=THETA_MAX0)
-        theta_start_left = -theta_max
-        theta_start_right = theta_max
-
-        small_matching_data = _build_branch_matching_data(n0_spline, n1_spline, d0bar, :small, theta_grid)
-        initial_condition_left, _, _ = _compute_asymptotic_initial_condition(
-            ode_coefficient_spline,
-            small_matching_data,
-            theta_start_left
-        )
-        initial_condition_right, _, _ = _compute_asymptotic_initial_condition(
-            ode_coefficient_spline,
-            small_matching_data,
-            theta_start_right
-        )
-
-        sol_left = _integrate_ballooning_side(
-            ode_coefficient_spline,
-            theta_start_left,
-            theta_end_left,
-            initial_condition_left,
-            theta_k,
-            TOLERANCE,
-            MINIMUM_STEP
-        )
-        if sol_left.retcode != ReturnCode.Success
-            return (value=NaN, di=di, alpha=alpha)
-        end
-
-        sol_right = _integrate_ballooning_side(
-            ode_coefficient_spline,
-            theta_start_right,
-            theta_end_right,
-            initial_condition_right,
-            theta_k,
-            TOLERANCE,
-            MINIMUM_STEP
-        )
-        if sol_right.retcode != ReturnCode.Success
-            return (value=NaN, di=di, alpha=alpha)
-        end
-
-        log_deriv_left, _, _ = _extract_log_derivative(sol_left)
-        log_deriv_right, _, _ = _extract_log_derivative(sol_right)
-
-        return (value=log_deriv_right - log_deriv_left, di=di, alpha=alpha)
-    elseif mode == :ca1
-        if d0bar === nothing || n0_spline === nothing || n1_spline === nothing || theta_grid === nothing
-            error("d0bar, n0_spline, n1_spline, and theta_grid are required for mode=:ca1")
-        end
-
-        di, alpha = _compute_mercier_from_d0bar(d0bar)
-        if !isfinite(di) || di >= 0.0 || isnan(alpha)
-            return (value=NaN, di=di, alpha=NaN, ca1_left=NaN, ca2_left=NaN, ca1_right=NaN, ca2_right=NaN)
-        end
-
-        theta_max = _compute_theta_max_like_fortran(ode_coefficient_spline; thmax0=THETA_MAX0)
-        theta_start_left = -theta_max
-        theta_start_right = theta_max
-
-        legacy_left = [0.0, 1.0]
-        legacy_right = [0.0, -1.0]
-        big_matching_data = _build_branch_matching_data(n0_spline, n1_spline, d0bar, :big, theta_grid)
-        small_matching_data = _build_branch_matching_data(n0_spline, n1_spline, d0bar, :small, theta_grid)
-        big_left, _, _ = _compute_asymptotic_initial_condition(ode_coefficient_spline, big_matching_data, theta_start_left)
-        small_left, _, _ = _compute_asymptotic_initial_condition(ode_coefficient_spline, small_matching_data, theta_start_left)
-        big_right, _, _ = _compute_asymptotic_initial_condition(ode_coefficient_spline, big_matching_data, theta_start_right)
-        small_right, _, _ = _compute_asymptotic_initial_condition(ode_coefficient_spline, small_matching_data, theta_start_right)
-
-        sol_target_left = _integrate_ballooning_side(ode_coefficient_spline, theta_start_left, theta_end_left, legacy_left, theta_k, TOLERANCE, MINIMUM_STEP)
-        sol_target_right = _integrate_ballooning_side(ode_coefficient_spline, theta_start_right, theta_end_right, legacy_right, theta_k, TOLERANCE, MINIMUM_STEP)
-        sol_big_left = _integrate_ballooning_side(ode_coefficient_spline, theta_start_left, theta_end_left, big_left, theta_k, TOLERANCE, MINIMUM_STEP)
-        sol_small_left = _integrate_ballooning_side(ode_coefficient_spline, theta_start_left, theta_end_left, small_left, theta_k, TOLERANCE, MINIMUM_STEP)
-        sol_big_right = _integrate_ballooning_side(ode_coefficient_spline, theta_start_right, theta_end_right, big_right, theta_k, TOLERANCE, MINIMUM_STEP)
-        sol_small_right = _integrate_ballooning_side(ode_coefficient_spline, theta_start_right, theta_end_right, small_right, theta_k, TOLERANCE, MINIMUM_STEP)
-
-        if !(
-            sol_target_left.retcode == ReturnCode.Success &&
-            sol_target_right.retcode == ReturnCode.Success &&
-            sol_big_left.retcode == ReturnCode.Success &&
-            sol_small_left.retcode == ReturnCode.Success &&
-            sol_big_right.retcode == ReturnCode.Success &&
-            sol_small_right.retcode == ReturnCode.Success
-        )
-            return (value=NaN, di=di, alpha=alpha, ca1_left=NaN, ca2_left=NaN, ca1_right=NaN, ca2_right=NaN)
-        end
-
-        target_left = ComplexF64[sol_target_left.u[end][1], sol_target_left.u[end][2]]
-        target_right = ComplexF64[sol_target_right.u[end][1], sol_target_right.u[end][2]]
-        basis_big_left = ComplexF64[sol_big_left.u[end][1], sol_big_left.u[end][2]]
-        basis_small_left = ComplexF64[sol_small_left.u[end][1], sol_small_left.u[end][2]]
-        basis_big_right = ComplexF64[sol_big_right.u[end][1], sol_big_right.u[end][2]]
-        basis_small_right = ComplexF64[sol_small_right.u[end][1], sol_small_right.u[end][2]]
-
-        ca1_left, ca2_left = _project_onto_asymptotic_basis(target_left, basis_big_left, basis_small_left)
-        ca1_right, ca2_right = _project_onto_asymptotic_basis(target_right, basis_big_right, basis_small_right)
-
-        return (
-            value=ca1_right,
-            di=di,
-            alpha=alpha,
-            ca1_left=ca1_left,
-            ca2_left=ca2_left,
-            ca1_right=ca1_right,
-            ca2_right=ca2_right
-        )
-    else
-        error("Unsupported integration mode: $(mode)")
+    problem_left = ODEProblem(
+        compute_ballooning_ode!,
+        initial_condition_left,
+        (theta_start_left, theta_end_left),
+        (ode_coefficient_spline, theta_k)
+    )
+    sol_left = solve(
+        problem_left,
+        DP5();
+        reltol=TOLERANCE,
+        abstol=TOLERANCE^2,
+        dtmin=MINIMUM_STEP,
+        adaptive=true
+    )
+    if sol_left.retcode != ReturnCode.Success
+        return (value=NaN,)
     end
+
+    problem_right = ODEProblem(
+        compute_ballooning_ode!,
+        initial_condition_right,
+        (theta_start_right, theta_end_right),
+        (ode_coefficient_spline, theta_k)
+    )
+    sol_right = solve(
+        problem_right,
+        DP5();
+        reltol=TOLERANCE,
+        abstol=TOLERANCE^2,
+        dtmin=MINIMUM_STEP,
+        adaptive=true
+    )
+    if sol_right.retcode != ReturnCode.Success
+        return (value=NaN,)
+    end
+
+    log_deriv_left = sol_left.u[end][2] / sol_left.u[end][1]
+    log_deriv_right = sol_right.u[end][2] / sol_right.u[end][1]
+
+    return (value=log_deriv_right - log_deriv_left,)
 end
 
 
