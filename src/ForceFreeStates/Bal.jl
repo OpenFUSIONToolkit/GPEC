@@ -3,6 +3,7 @@
 #   Computes ballooning stability criterion over all flux surfaces
 # ======================================================================
 using LinearAlgebra
+
 """
     compute_ballooning_stability!(ctrl, locstab_fs, plasma_eq)
 
@@ -13,7 +14,7 @@ to compute Delta Prime.
 
 ## Arguments
 
-  - `ctrl::DconControl`: Control parameters for the analysis.
+  - `ctrl::ForceFreeStatesControl`: Control parameters for the analysis.
   - `locstab_fs::Matrix{Float64}`: Local stability matrix to store results (modified in place).
   - `plasma_eq::Equilibrium.PlasmaEquilibrium`: Plasma equilibrium data.
 
@@ -23,7 +24,7 @@ This function modifies `locstab_fs` in place with:
   - Column 4: Delta Prime (Δ')
 """
 function compute_ballooning_stability!(
-    ctrl::DconControl,
+    ctrl::ForceFreeStatesControl,
     locstab_fs::Matrix{Float64},
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
@@ -34,15 +35,15 @@ function compute_ballooning_stability!(
         println("Evaluating local high-n ballooning stability...")
     end
 
-    num_psi = length(plasma_eq.sq.xs)
+    num_psi = length(plasma_eq.profiles.xs)
 
     # Loop over flux surfaces
     for flux_surface_index in 1:num_psi
 
         coeff_data = prepare_ballooning_coefficients(flux_surface_index, plasma_eq; theta_k=theta_k)
-        locstab_fs[flux_surface_index, 1] = coeff_data.di * plasma_eq.sq.xs[flux_surface_index]
+        locstab_fs[flux_surface_index, 1] = coeff_data.di * plasma_eq.profiles.xs[flux_surface_index]
 
-        if compute_delta_prime && plasma_eq.sq.xs[flux_surface_index] <= 1.0
+        if compute_delta_prime && plasma_eq.profiles.xs[flux_surface_index] <= 1.0
             result = integrate_ballooning_ode(
                 coeff_data.ode_coefficient_spline;
                 theta_k=theta_k
@@ -66,17 +67,17 @@ function _collect_surface_response_background(
     plasma_eq::Equilibrium.PlasmaEquilibrium,
     theta_grid::AbstractVector{<:Real}
 )::NamedTuple
-    sq = plasma_eq.sq
+    profiles = plasma_eq.profiles
 
     theta_vals = Float64.(theta_grid)
     ntheta = length(theta_vals)
 
-    q0 = Float64(sq.fs[flux_surface_index, 4])
-    q0prime = Float64(sq.fs1[flux_surface_index, 4])
-    p0prime = Float64(sq.fs1[flux_surface_index, 2])
-    two_pi_f0 = Float64(sq.fs[flux_surface_index, 1])
+    psi0 = profiles.xs[flux_surface_index]
+    q0 = Float64(profiles.q_spline.y[flux_surface_index])
+    q0prime = Float64(profiles.q_deriv(psi0))
+    p0prime = Float64(profiles.P_deriv(psi0))
+    two_pi_f0 = Float64(profiles.F_spline.y[flux_surface_index])
     chi_prime0 = Float64(2pi * plasma_eq.psio)
-    psi0 = plasma_eq.rzphi.xs[flux_surface_index]
 
     f0 = zeros(ntheta, 4)
     fx0 = zeros(ntheta, 4)
@@ -96,10 +97,19 @@ function _collect_surface_response_background(
     v0 = zeros(ntheta, 3, 3)
     v_zeta_psi0 = zeros(ntheta, 3)
     v_psi_theta0 = zeros(ntheta, 3)
+    rz = (
+        plasma_eq.rzphi_rsquared,
+        plasma_eq.rzphi_offset,
+        plasma_eq.rzphi_nu,
+        plasma_eq.rzphi_jac
+    )
 
     for i in eachindex(theta_vals)
         theta = theta_vals[i]
-        f, fx, fy, _, fxy, _ = Spl.bicube_deriv2!(plasma_eq.rzphi, psi0, theta)
+        f = ntuple(k -> rz[k].nodal_derivs.partials[1, flux_surface_index, i], 4)
+        fx = ntuple(k -> rz[k].nodal_derivs.partials[2, flux_surface_index, i], 4)
+        fy = ntuple(k -> rz[k].nodal_derivs.partials[3, flux_surface_index, i], 4)
+        fxy = ntuple(k -> rz[k].nodal_derivs.partials[4, flux_surface_index, i], 4)
 
         rho = sqrt(f[1])
         eta = 2pi * (theta + f[2])
@@ -189,15 +199,11 @@ function _collect_surface_response_background(
 
     kappas0 .= -dinvbsq_dtheta .* two_pi_f0 ./ (2 .* jac0)
 
-    int_spl = Spl.CubicSpline(
-        theta_vals,
-        hcat(1 ./ gradpsi_sq0, r0 .* r0 ./ gradpsi_sq0);
-        bctype="periodic"
-    )
-    Spl.spline_integrate!(int_spl)
-
-    I0 = Float64(int_spl.fsi[end, 1])
-    IR = Float64(int_spl.fsi[end, 2])
+    int_fs = hcat(1 ./ gradpsi_sq0, r0 .* r0 ./ gradpsi_sq0)
+    @views int_fs[end, :] .= int_fs[1, :]
+    int_vals = FastInterpolations.integrate(cubic_interp(theta_vals, Series(int_fs); bc=PeriodicBC()))
+    I0 = Float64(int_vals[1])
+    IR = Float64(int_vals[2])
     Delta_tilde = Float64(I0 * two_pi_f0^2 + chi_prime0^2)
 
     return (
@@ -273,10 +279,11 @@ function _calculate_i_per_perturbed(
     A = 4pi^2 .* bg.r0 .* bg.r0 ./ (bg.chi_prime0^2 .* bg.gradpsi_sq0)
     B = bg.two_pi_f0^2 ./ (bg.chi_prime0^2 .* bg.gradpsi_sq0)
 
-    weight_spl = Spl.CubicSpline(theta_grid, hcat(H .* A, H .* B); bctype="periodic")
-    Spl.spline_integrate!(weight_spl)
-    Abar_w = weight_spl.fsi[end, 1] / bg.q0
-    Bbar_w = weight_spl.fsi[end, 2] / bg.q0
+    weight_fs = hcat(H .* A, H .* B)
+    @views weight_fs[end, :] .= weight_fs[1, :]
+    weight_int = FastInterpolations.integrate(cubic_interp(theta_grid, Series(weight_fs); bc=PeriodicBC()))
+    Abar_w = weight_int[1] / bg.q0
+    Bbar_w = weight_int[2] / bg.q0
 
     denom = 1.0 + Bbar_w
 
@@ -285,16 +292,16 @@ function _calculate_i_per_perturbed(
 
     dI_dtheta = AperP .* corr_pprime .+ Aperq .* corr_qprime
 
-    dI_spl = Spl.CubicSpline(theta_grid, reshape(dI_dtheta, :, 1); bctype="periodic")
-    Spl.spline_integrate!(dI_spl)
-    i_per_primitive = copy(dI_spl.fsi[:, 1])
-    i_per_spl = Spl.CubicSpline(theta_grid, reshape(i_per_primitive, :, 1); bctype="extrap")
+    dI_dtheta_periodic = Vector{Float64}(dI_dtheta)
+    dI_dtheta_periodic[end] = dI_dtheta_periodic[1]
+    i_per_primitive = vec(FastInterpolations.cumulative_integrate(cubic_interp(theta_grid, dI_dtheta_periodic; bc=PeriodicBC())))
+    i_per_spl = cubic_interp(Float64.(theta_grid), i_per_primitive; bc=CubicFit())
 
     theta_min = theta_grid[1]
     theta_period = theta_grid[end] - theta_min
     theta_k_wrapped = mod(theta_k - theta_min, theta_period) + theta_min
-    i_per_theta_k = Spl.spline_eval!(i_per_spl, theta_k_wrapped)[1]
-    i_per_perturbed = copy(i_per_spl.fs[:, 1] .- i_per_theta_k)
+    i_per_theta_k = i_per_spl(theta_k_wrapped)
+    i_per_perturbed = copy(i_per_primitive .- i_per_theta_k)
 
 
     return i_per_perturbed
@@ -307,10 +314,8 @@ function prepare_ballooning_coefficients(
     corr_pprime::Float64=0.0,
     theta_k::Float64=0.0
 )
-    sq = plasma_eq.sq
-    rzphi = plasma_eq.rzphi
-    mtheta = length(rzphi.ys) - 1
-    theta_grid = Vector(rzphi.ys)
+    mtheta = length(plasma_eq.rzphi_ys) - 1
+    theta_grid = Vector(plasma_eq.rzphi_ys)
 
     bg = _collect_surface_response_background(flux_surface_index, plasma_eq, theta_grid)
 
@@ -319,9 +324,11 @@ function prepare_ballooning_coefficients(
     theta_k_wrapped = mod(theta_k - theta_min, theta_period) + theta_min
     theta_k_reference = Float64(theta_k)
 
-    i_per0_spl = Spl.CubicSpline(theta_grid, reshape(bg.Iper0, :, 1); bctype="periodic")
-    i_per0_theta_k = Spl.spline_eval!(i_per0_spl, theta_k_wrapped)[1]
-    i_per0_theta_ref = Spl.spline_eval!(i_per0_spl, theta_min)[1]
+    i_per0_periodic = Vector{Float64}(bg.Iper0)
+    i_per0_periodic[end] = i_per0_periodic[1]
+    i_per0_spl = cubic_interp(theta_grid, i_per0_periodic; bc=PeriodicBC())
+    i_per0_theta_k = i_per0_spl(theta_k_wrapped)
+    i_per0_theta_ref = i_per0_spl(theta_min)
     i_per0_thetak_shift = i_per0_theta_k - i_per0_theta_ref
     i_per0_shifted = bg.Iper0 .- i_per0_theta_k
 
@@ -359,10 +366,11 @@ function prepare_ballooning_coefficients(
     bmag = sqrt.(bsq)
     kappaw_periodic = zeros(mtheta + 1)
 
-    spl1 = Spl.CubicSpline(theta_grid, jac_arr_loop1 .* bdot_theta_phi_loop1 ./ bmag; bctype="periodic")
+    spl1_vals = jac_arr_loop1 .* bdot_theta_phi_loop1 ./ bmag
+    spl1_deriv = _periodic_fft_lowpass_derivative(spl1_vals, theta_grid; nkeep=32)
 
     cell1 = -(jac_psi_loop1 ./ jac_arr_loop1 .+ 0.5 .* bsq_psi_loop1 ./ bsq) ./ chi_prime
-    cell2 = spl1.fs1[:, 1] ./ (jac_arr_loop1 .* bmag)
+    cell2 = spl1_deriv ./ (jac_arr_loop1 .* bmag)
     cell3 = two_pi_f .* q_derivative ./ (bsq .* jac_arr_loop1)
 
     kappaw_periodic .= cell1 .+ cell2 .+ cell3
@@ -424,16 +432,17 @@ function prepare_ballooning_coefficients(
     n0_fs[:, 3] = m0_21 .- sigma .- m0_12 .* sigma .^ 2
     n0_fs[:, 4] = -0.5 .- m0_12 .* sigma
 
-    n0_spline = Spl.CubicSpline(theta_grid, n0_fs; bctype="periodic")
-    Spl.spline_integrate!(n0_spline)
+    @views n0_fs[end, :] .= n0_fs[1, :]
+    n0_int = FastInterpolations.integrate(cubic_interp(theta_grid, Series(n0_fs); bc=PeriodicBC()))
 
     d0bar = zeros(2, 2)
-    d0bar[1, 1] = n0_spline.fsi[end, 1]
-    d0bar[1, 2] = n0_spline.fsi[end, 2]
-    d0bar[2, 1] = n0_spline.fsi[end, 3]
-    d0bar[2, 2] = n0_spline.fsi[end, 4]
+    d0bar[1, 1] = n0_int[1]
+    d0bar[1, 2] = n0_int[2]
+    d0bar[2, 1] = n0_int[3]
+    d0bar[2, 2] = n0_int[4]
 
-    ode_coefficient_spline = Spl.CubicSpline(theta_grid, bf_fs; bctype="periodic")
+    @views bf_fs[end, :] .= bf_fs[1, :]
+    ode_coefficient_spline = (xs=theta_grid, itp=cubic_interp(theta_grid, Series(bf_fs); bc=PeriodicBC()))
 
     return (
         ode_coefficient_spline=ode_coefficient_spline,
@@ -452,11 +461,11 @@ function salpha_reference(
     psi_idx::Int,
     plasma_eq::Equilibrium.PlasmaEquilibrium
 )
-    sq = plasma_eq.sq
+    profiles = plasma_eq.profiles
     psio = plasma_eq.psio
     mu0 = Equilibrium.mu0
 
-    npsi = length(sq.xs)
+    npsi = length(profiles.xs)
     if psi_idx < 1 || psi_idx > npsi
         throw(ArgumentError("psi_idx=$psi_idx is out of bounds for npsi=$npsi"))
     end
@@ -464,12 +473,13 @@ function salpha_reference(
         throw(ArgumentError("plasma_eq.psio is too small to compute physical derivatives"))
     end
 
-    Spl.spline_integrate!(sq)
-    volume = max(Float64(sq.fsi[psi_idx, 3]), 0.0)
-    vprime_phys = sq.fs[psi_idx, 3] / psio
-    q_ref = sq.fs[psi_idx, 4]
-    qprime_norm_ref = sq.fs1[psi_idx, 4]
-    pprime_norm_ref = sq.fs1[psi_idx, 2]
+    dVdpsi_int = FastInterpolations.cumulative_integrate(profiles.dVdpsi_spline)
+    volume = max(Float64(dVdpsi_int[psi_idx]), 0.0)
+    psi = profiles.xs[psi_idx]
+    vprime_phys = profiles.dVdpsi_spline.y[psi_idx] / psio
+    q_ref = profiles.q_spline.y[psi_idx]
+    qprime_norm_ref = profiles.q_deriv(psi)
+    pprime_norm_ref = profiles.P_deriv(psi)
     qprime_ref = qprime_norm_ref / psio
     pprime_ref = (pprime_norm_ref / mu0) / psio
 
@@ -534,7 +544,7 @@ ballooning evaluator, and returns delta-prime and `det(d0bar)` `Di` maps.
 function scan_delta_prime_map(
     psi_idx::Int,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
-    ctrl::DconControl=DconControl(; verbose=false),
+    ctrl::ForceFreeStatesControl=ForceFreeStatesControl(; verbose=false),
     theta_k::Float64=0.0,
     s_scales::AbstractVector{<:Real},
     alpha_scales::AbstractVector{<:Real}
@@ -607,10 +617,7 @@ Computes Delta' = (y'/y)_right - (y'/y)_left.
 
   - `delta_prime`: The stability index Δ'.
 """
-function integrate_ballooning_ode(
-    ode_coefficient_spline::Spl.CubicSpline;
-    theta_k::Float64=0.0
-)
+function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
     TOLERANCE = 1e-8
     MINIMUM_STEP = 1e-10
     MATCHING_POINT = 1e-3
@@ -694,15 +701,18 @@ where y₁ is the solution and y₂ = f·dy/dθ.
 """
 function compute_ballooning_ode!(derivatives, solution, parameters, poloidal_angle)
     ode_coefficient_spline = parameters[1]
-    coeff_matrix = Spl.spline_eval(ode_coefficient_spline, [poloidal_angle])
+    theta_min = first(ode_coefficient_spline.xs)
+    theta_period = last(ode_coefficient_spline.xs) - theta_min
+    theta_wrapped = mod(Float64(poloidal_angle) - theta_min, theta_period) + theta_min
+    coeffs = ode_coefficient_spline.itp(theta_wrapped)
 
-    periodic = coeff_matrix[1, 1]
-    peculiar_1st = coeff_matrix[1, 2]
-    peculiar_2nd = coeff_matrix[1, 3]
-    kappaw_periodic = coeff_matrix[1, 4]
-    kappaw_secular = coeff_matrix[1, 5]
-    jac_chiprime = coeff_matrix[1, 6]
-    pprime_chiprime = coeff_matrix[1, 7]
+    periodic = coeffs[1]
+    peculiar_1st = coeffs[2]
+    peculiar_2nd = coeffs[3]
+    kappaw_periodic = coeffs[4]
+    kappaw_secular = coeffs[5]
+    jac_chiprime = coeffs[6]
+    pprime_chiprime = coeffs[7]
 
     f = (periodic + poloidal_angle * peculiar_1st + poloidal_angle^2 * peculiar_2nd) / jac_chiprime
     kappaw = kappaw_periodic - poloidal_angle * kappaw_secular
