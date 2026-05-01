@@ -198,15 +198,36 @@ function direct_position!(raw_profile::DirectRunInput)
     raw_profile.psi_in = cubic_interp((x_coords, y_coords), new_psi_fs; extrap=ExtendExtrap())
 
     # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
-    # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is
-    # globally convergent within the bracket (start_r, end_r) and needs no restarts.
-    function find_separatrix_crossing(start_r, end_r, label)
-        r_sol = find_zero(
-            r -> (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi),
-            (start_r, end_r), Roots.Brent()
-        )
-        @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
-        return r_sol
+    # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0). Walking
+    # outward from the axis, the FIRST sign change is the LCFS — Brent on that
+    # sub-bracket is globally convergent.
+    #
+    # Pre-scan rather than handing Brent the full (start_r, end_r) interval so
+    # we tolerate fixed-boundary geqdsks (e.g. TokaMaker free/fixed-boundary
+    # output) where ψ outside the LCFS does NOT remain negative all the way
+    # to the box edge — it can re-cross zero in a thin spurious-extrapolation
+    # ring near rmin/rmax. Brent applied to the full bracket would see two
+    # same-sign endpoints and throw "non-bracketing interval"; the pre-scan
+    # locks onto the physical LCFS crossing closest to the axis.
+    function find_separatrix_crossing(start_r, end_r, label;
+                                       n_scan::Int=200)
+        f(r) = (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in,
+                    raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0);
+                bfield.psi)
+        r_prev = start_r
+        f_prev = f(r_prev)
+        for i in 1:n_scan
+            r_curr = start_r + (end_r - start_r) * (i / n_scan)
+            f_curr = f(r_curr)
+            if f_prev * f_curr < 0
+                r_sol = find_zero(f, (r_prev, r_curr), Roots.Brent())
+                @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
+                return r_sol
+            end
+            r_prev, f_prev = r_curr, f_curr
+        end
+        error("$label separatrix: no ψ sign change found scanning ($start_r, $end_r) " *
+              "in $n_scan steps. Geqdsk may be malformed or axis ψ misnormalized.")
     end
 
     # Find inboard (rs1) and outboard (rs2) separatrix positions
