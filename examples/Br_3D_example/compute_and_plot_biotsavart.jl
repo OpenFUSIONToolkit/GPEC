@@ -46,7 +46,7 @@ const read_coil_dat                 = FT.read_coil_dat
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 COIL_FILES = [
-    (joinpath(@__DIR__, "sparc_pf1u_AS_357_noT.dat"), 100.0),
+    (joinpath(@__DIR__, "sparc_pf1u_axisymmetric.dat"), 100.0),
 ]
 
 R0 = 1.85
@@ -55,7 +55,7 @@ a  = 0.57
 N_THETA = 120
 N_PHI   = 180
 
-out_name = "pf1_AS_357_noT_small"
+out_name = "pf1_AS_small"
 
 # ── Field component selection ────────────────────────────
 # :B_R, :B_phi, :B_Z, :B_mag
@@ -66,10 +66,10 @@ FIELD_COMPONENT = :B_phi
 FIELD_UNITS = :G
 
 # ── Plot toggles ─────────────────────────────────────────
-ENABLE_TORUS_PLOT        = false
+ENABLE_TORUS_PLOT        = true
 ENABLE_HALL_PROBES       = true
 ENABLE_HALL_PERTURBATION = true
-ENABLE_Z_SLICES          = false
+ENABLE_Z_SLICES          = true
 ENABLE_FOURIER_ANALYSIS  = true    # NEW: Fourier tilt/center analysis
 
 # ── Hall probe shell settings ─────────────────────────────
