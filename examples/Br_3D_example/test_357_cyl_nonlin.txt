@@ -1,0 +1,19 @@
+═══════════════════════════════════════════════════════
+ 5-DOF Cylindrical Coil Centering — Nonlinear Fit
+═══════════════════════════════════════════════════════
+
+── Reference coil ──
+  Centroid: R = 20.1658 mm at φ = 133.919°,  Z = 2310.4859 mm
+  R_coil  = 933.1721 mm
+  Tilt γ = 0.5945° about φ_tilt = 48.463°
+
+── Transformed (truth) coil ──
+  Centroid: R = 22.4051 mm at φ = 119.370°,  Z = 2317.4861 mm
+  R_coil  = 933.1912 mm
+  Tilt γ = 0.7525° about φ_tilt = 98.084°
+
+── Fit (Hall-data only) ──
+  Centroid: R = 0.0000 mm at φ = 0.000°,  Z = 2211.9000 mm
+  R_coil  = 653.3456 mm
+  Tilt γ = 0.0000° about φ_tilt = 0.000°
+  Relative residual: NaN%
