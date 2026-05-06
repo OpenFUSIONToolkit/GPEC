@@ -1392,7 +1392,7 @@ function plot_hall_z_slice(hall_data, z_val, tol, component,
                                 display(GLMakie.Screen(), fig)
                             end
                         
-                            println("\nPress Enter to save and exit...")
+                            println("\nwPress Enter to save and exit...")
                             readline()
                         
                             # ── Save all figures ──────────────────────────────────

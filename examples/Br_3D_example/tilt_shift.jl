@@ -4,19 +4,20 @@
 # Reads a coil .dat file, applies user-specified translations
 # and rotations (tilts), and writes a new .dat file.
 #
-# The transformations are applied about the coil's geometric
-# centroid, so a pure tilt rotates the coil in place.
+# This version uses the SAME pose definition as coil_centering_full.jl:
+#   • center = segment-length-weighted centroid of conductor path
+#   • orientation = weighted best-fit plane normal from segment midpoints
 #
-# Order of operations:
-#   1. Compute centroid
-#   2. Center the coil (subtract centroid)
+# Transform order:
+#   1. Compute weighted coil pose
+#   2. Center coil about weighted pose center
 #   3. Apply rotation (tilt_x, tilt_y, tilt_z) — extrinsic XYZ Euler angles
-#   4. Un-center (add centroid back)
-#   5. Apply translation (shift_x, shift_y, shift_z)
+#   4. Un-center
+#   5. Apply translation
 #
 # Usage:
-#   julia transform_coil.jl
-#   (edit the CONFIGURATION section below, or import and call transform_coil())
+#   julia tilt_shift.jl
+#
 # ═══════════════════════════════════════════════════════════════
 
 using LinearAlgebra
@@ -27,29 +28,19 @@ using Statistics
 # CONFIGURATION — edit these values
 # ═══════════════════════════════════════════════════════════════
 
-# Input / output files
-INPUT_COIL_FILE  = joinpath(@__DIR__, "sparc_pf1u.dat")
-OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_200_xy29T.dat")
+INPUT_COIL_FILE  = joinpath(@__DIR__, "sparc_pf1u_axisymmetric.dat")
+OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_AS_728_xy29T_FA.dat")
 
-# ── Translation (applied AFTER rotation) ─────────────────────
-# Units: meters
-SHIFT_X = .002#0.001    # 1 mm shift in X
-SHIFT_Y = .00#0.000    # no shift in Y
-SHIFT_Z = .00#0.002    # 2 mm shift in Z
+# Translation AFTER rotation, units: meters
+SHIFT_X = 0.007
+SHIFT_Y = 0.002
+SHIFT_Z = 0.080
 
-# ── Rotation / tilt (applied about the coil centroid) ────────
-# Units: degrees
-# These are extrinsic rotations applied in order: Rx then Ry then Rz
-#   TILT_X = rotation about the X-axis (pitches the coil in the Y-Z plane)
-#   TILT_Y = rotation about the Y-axis (pitches the coil in the X-Z plane)
-#   TILT_Z = rotation about the Z-axis (rotates the coil in the X-Y plane)
-TILT_X_DEG = .2 # 0.1    # 0.1° tilt about X
-TILT_Y_DEG = .9 # 0.0    # no tilt about Y
-TILT_Z_DEG = 0 # 0.0    # no tilt about Z
+# Extrinsic XYZ rotations, units: degrees
+TILT_X_DEG = 0.2
+TILT_Y_DEG = 0.9
+TILT_Z_DEG = 0.0
 
-# EQUIVALENTLY: R, Z, Phi 
-
-# ── Verbose output ───────────────────────────────────────────
 VERBOSE = true
 
 # ═══════════════════════════════════════════════════════════════
@@ -81,7 +72,7 @@ end
     build_rotation_matrix(tilt_x_deg, tilt_y_deg, tilt_z_deg)
 
 Build the combined rotation matrix for extrinsic XYZ Euler rotations.
-Applied as R = Rz * Ry * Rx  (i.e., Rx first, then Ry, then Rz).
+Applied as R = Rz * Ry * Rx  (i.e. Rx first, then Ry, then Rz).
 """
 function build_rotation_matrix(tilt_x_deg::Float64, tilt_y_deg::Float64, tilt_z_deg::Float64)
     Rx = rotation_x(deg2rad(tilt_x_deg))
@@ -94,13 +85,6 @@ end
 # Coil file I/O
 # ═══════════════════════════════════════════════════════════════
 
-"""
-    read_coil_file(filepath)
-
-Read a coil .dat file.  Returns:
-  - header_line::String   (the first line, e.g. "    1    1 30600    1.00")
-  - x, y, z :: Vector{Float64}  (the conductor point coordinates)
-"""
 function read_coil_file(filepath::String)
     isfile(filepath) || error("Input coil file not found: $filepath")
 
@@ -117,18 +101,13 @@ function read_coil_file(filepath::String)
         stripped = strip(lines[i])
         isempty(stripped) && continue
 
-        # Try to parse as 3 floats
         tokens = split(stripped)
         if length(tokens) >= 3
             try
-                xv = parse(Float64, tokens[1])
-                yv = parse(Float64, tokens[2])
-                zv = parse(Float64, tokens[3])
-                push!(x, xv)
-                push!(y, yv)
-                push!(z, zv)
+                push!(x, parse(Float64, tokens[1]))
+                push!(y, parse(Float64, tokens[2]))
+                push!(z, parse(Float64, tokens[3]))
             catch
-                # Skip lines that don't parse (e.g. additional headers)
                 if VERBOSE
                     println("  Skipping unparseable line $i: \"$stripped\"")
                 end
@@ -139,13 +118,8 @@ function read_coil_file(filepath::String)
     return header_line, x, y, z
 end
 
-"""
-    write_coil_file(filepath, header_line, x, y, z)
-
-Write a coil .dat file with the same format as the input.
-"""
 function write_coil_file(filepath::String, header_line::String,
-                          x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64})
+                         x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64})
     N = length(x)
     open(filepath, "w") do io
         println(io, header_line)
@@ -156,26 +130,126 @@ function write_coil_file(filepath::String, header_line::String,
 end
 
 # ═══════════════════════════════════════════════════════════════
+# Geometry helpers: same pose definitions as coil_centering_full.jl
+# ═══════════════════════════════════════════════════════════════
+
+"""
+Return true if the polyline is explicitly closed.
+"""
+function is_closed_curve(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}; tol=1e-12)
+    length(x) >= 2 || return false
+    return (x[1]-x[end])^2 + (y[1]-y[end])^2 + (z[1]-z[end])^2 <= tol^2
+end
+
+"""
+Build segment midpoints and segment lengths from a polyline.
+If the curve is not explicitly closed, include the closing segment from N → 1.
+"""
+function segment_midpoints_lengths(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64})
+    N = length(x)
+    N >= 2 || error("Need at least 2 points")
+
+    closed = is_closed_curve(x, y, z)
+    lastseg = closed ? N - 1 : N
+
+    mx = Float64[]
+    my = Float64[]
+    mz = Float64[]
+    w  = Float64[]
+
+    for i in 1:lastseg
+        j = (i == N ? 1 : i + 1)
+
+        x1, y1, z1 = x[i], y[i], z[i]
+        x2, y2, z2 = x[j], y[j], z[j]
+
+        dlx = x2 - x1
+        dly = y2 - y1
+        dlz = z2 - z1
+        ds = sqrt(dlx^2 + dly^2 + dlz^2)
+        ds <= 0 && continue
+
+        push!(mx, 0.5 * (x1 + x2))
+        push!(my, 0.5 * (y1 + y2))
+        push!(mz, 0.5 * (z1 + z2))
+        push!(w, ds)
+    end
+
+    return mx, my, mz, w
+end
+
+function plane_basis_from_normal(n::Vector{Float64})
+    ref = abs(n[3]) < 0.9 ? [0.0, 0.0, 1.0] : [1.0, 0.0, 0.0]
+    e1 = normalize(cross(ref, n))
+    e2 = cross(n, e1)
+    return e1, e2
+end
+
+"""
+Compute the coil pose using the same definition as coil_centering_full.jl:
+  - center = segment-length-weighted centroid of segment midpoints
+  - normal = weighted SVD best-fit plane normal
+  - tilts from normal using:
+      normal ∝ [tan(tilt_y), -tan(tilt_x), 1]
+"""
+function coil_pose_from_points(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64})
+    mx, my, mz, w = segment_midpoints_lengths(x, y, z)
+    W = sum(w)
+    W <= 0 && error("No valid segments found")
+
+    cx = sum(w .* mx) / W
+    cy = sum(w .* my) / W
+    cz = sum(w .* mz) / W
+
+    P = hcat(mx .- cx, my .- cy, mz .- cz)
+    Pw = P .* sqrt.(w)
+    _, _, V = svd(Pw)
+    n = Vector(V[:,3])
+    n[3] < 0 && (n = -n)
+
+    tilt_x = atand(-n[2], n[3])
+    tilt_y = atand( n[1], n[3])
+
+    e1, e2 = plane_basis_from_normal(n)
+    dx = mx .- cx
+    dy = my .- cy
+    dz = mz .- cz
+    u = dx .* e1[1] .+ dy .* e1[2] .+ dz .* e1[3]
+    v = dx .* e2[1] .+ dy .* e2[2] .+ dz .* e2[3]
+    ρ = sqrt.(u.^2 .+ v.^2)
+    rfit = sum(w .* ρ) / W
+
+    cR   = sqrt(cx^2 + cy^2)
+    cphi = rad2deg(atan(cy, cx))
+
+    return (
+        x0 = cx, y0 = cy, z0 = cz,
+        R = cR, phi = cphi,
+        tilt_x = tilt_x, tilt_y = tilt_y,
+        normal = n,
+        Rfit = rfit,
+        weights = w,
+        mx = mx, my = my, mz = mz,
+    )
+end
+
+# ═══════════════════════════════════════════════════════════════
 # Main transform function
 # ═══════════════════════════════════════════════════════════════
 
 """
-    transform_coil(input_file, output_file;
-                    shift_x=0.0, shift_y=0.0, shift_z=0.0,
-                    tilt_x_deg=0.0, tilt_y_deg=0.0, tilt_z_deg=0.0,
-                    verbose=true)
+    transform_coil(input_file, output_file; ...)
 
-Read a coil file, apply shift and tilt, write the result.
+Read a coil file, apply shift and tilt, and write the result.
 
-Tilt is applied about the coil's geometric centroid.
-Shift is applied after tilt.
+Rotation is applied about the SAME weighted pose center used by
+coil_centering_full.jl.
 """
 function transform_coil(input_file::String, output_file::String;
-                         shift_x::Float64=0.0, shift_y::Float64=0.0, shift_z::Float64=0.0,
-                         tilt_x_deg::Float64=0.0, tilt_y_deg::Float64=0.0, tilt_z_deg::Float64=0.0,
-                         verbose::Bool=true)
+                        shift_x::Float64=0.0, shift_y::Float64=0.0, shift_z::Float64=0.0,
+                        tilt_x_deg::Float64=0.0, tilt_y_deg::Float64=0.0, tilt_z_deg::Float64=0.0,
+                        verbose::Bool=true)
 
-    # ── Read ─────────────────────────────────────────────
     if verbose
         println("═══════════════════════════════════════════════════════")
         println(" Coil Transformation Utility")
@@ -192,36 +266,32 @@ function transform_coil(input_file::String, output_file::String;
         println("  Header: \"$(strip(header_line))\"")
     end
 
-    # ── Compute centroid ─────────────────────────────────
-    cx = mean(x)
-    cy = mean(y)
-    cz = mean(z)
-
-    cR   = sqrt(cx^2 + cy^2)
-    cphi = rad2deg(atan(cy, cx))
+    # ── Original pose using same definition as coil_centering_full.jl ─────
+    pose = coil_pose_from_points(x, y, z)
+    cx, cy, cz = pose.x0, pose.y0, pose.z0
 
     if verbose
-        println("\n  ── Original coil centroid ──")
-        println("  Cartesian:   ($(@sprintf("%.4f", cx)), $(@sprintf("%.4f", cy)), $(@sprintf("%.4f", cz))) m")
-        println("  Cylindrical: R=$(@sprintf("%.5f", cR)) m, φ=$(@sprintf("%.3f", cphi))°, Z=$(@sprintf("%.5f", cz)) m")
+        println("\n  ── Original coil pose ──")
+        println("  Cartesian center:   ($(@sprintf("%.4f", cx)), $(@sprintf("%.4f", cy)), $(@sprintf("%.4f", cz))) m")
+        println("  Cylindrical center: R=$(@sprintf("%.5f", pose.R)) m, φ=$(@sprintf("%.3f", pose.phi))°, Z=$(@sprintf("%.5f", cz)) m")
+        println("  Tilt:              θx=$(@sprintf("%.6f", pose.tilt_x))°, θy=$(@sprintf("%.6f", pose.tilt_y))°")
+        println("  Fit radius:        $(@sprintf("%.5f", pose.Rfit)) m")
 
         R_all = sqrt.(x.^2 .+ y.^2)
         println("  R range: [$(@sprintf("%.4f", minimum(R_all))), $(@sprintf("%.4f", maximum(R_all)))] m")
         println("  Z range: [$(@sprintf("%.4f", minimum(z))), $(@sprintf("%.4f", maximum(z)))] m")
     end
 
-    # ── Requested transformation ─────────────────────────
     if verbose
         println("\n  ── Requested transformation ──")
         println("  Shift:  ΔX=$(@sprintf("%.4f", shift_x*1000)) mm, " *
-                         "ΔY=$(@sprintf("%.4f", shift_y*1000)) mm, " *
-                         "ΔZ=$(@sprintf("%.4f", shift_z*1000)) mm")
+                        "ΔY=$(@sprintf("%.4f", shift_y*1000)) mm, " *
+                        "ΔZ=$(@sprintf("%.4f", shift_z*1000)) mm")
         println("  Tilt:   θx=$(@sprintf("%.4f", tilt_x_deg))°, " *
-                         "θy=$(@sprintf("%.4f", tilt_y_deg))°, " *
-                         "θz=$(@sprintf("%.4f", tilt_z_deg))°")
+                        "θy=$(@sprintf("%.4f", tilt_y_deg))°, " *
+                        "θz=$(@sprintf("%.4f", tilt_z_deg))°")
     end
 
-    # ── Build rotation matrix ────────────────────────────
     R_mat = build_rotation_matrix(tilt_x_deg, tilt_y_deg, tilt_z_deg)
 
     has_rotation = !(tilt_x_deg == 0.0 && tilt_y_deg == 0.0 && tilt_z_deg == 0.0)
@@ -236,18 +306,16 @@ function transform_coil(input_file::String, output_file::String;
         end
     end
 
-    # ── Apply transformation ─────────────────────────────
+    # ── Apply transformation about weighted pose center ───────────────────
     x_new = copy(x)
     y_new = copy(y)
     z_new = copy(z)
 
     if has_rotation
-        # Step 1: Center about centroid
         x_new .-= cx
         y_new .-= cy
         z_new .-= cz
 
-        # Step 2: Rotate
         for i in 1:N
             p = R_mat * [x_new[i], y_new[i], z_new[i]]
             x_new[i] = p[1]
@@ -255,63 +323,48 @@ function transform_coil(input_file::String, output_file::String;
             z_new[i] = p[3]
         end
 
-        # Step 3: Un-center
         x_new .+= cx
         y_new .+= cy
         z_new .+= cz
     end
 
     if has_shift
-        # Step 4: Translate
         x_new .+= shift_x
         y_new .+= shift_y
         z_new .+= shift_z
     end
 
-    # ── Report new centroid ──────────────────────────────
-    cx_new = mean(x_new)
-    cy_new = mean(y_new)
-    cz_new = mean(z_new)
-
-    cR_new   = sqrt(cx_new^2 + cy_new^2)
-    cphi_new = rad2deg(atan(cy_new, cx_new))
+    # ── New pose with same definition ──────────────────────────────────────
+    pose_new = coil_pose_from_points(x_new, y_new, z_new)
+    cx_new, cy_new, cz_new = pose_new.x0, pose_new.y0, pose_new.z0
 
     if verbose
-        println("\n  ── Transformed coil centroid ──")
-        println("  Cartesian:   ($(@sprintf("%.4f", cx_new)), $(@sprintf("%.4f", cy_new)), $(@sprintf("%.4f", cz_new))) m")
-        println("  Cylindrical: R=$(@sprintf("%.5f", cR_new)) m, φ=$(@sprintf("%.3f", cphi_new))°, Z=$(@sprintf("%.5f", cz_new)) m")
+        println("\n  ── Transformed coil pose ──")
+        println("  Cartesian center:   ($(@sprintf("%.4f", cx_new)), $(@sprintf("%.4f", cy_new)), $(@sprintf("%.4f", cz_new))) m")
+        println("  Cylindrical center: R=$(@sprintf("%.5f", pose_new.R)) m, φ=$(@sprintf("%.3f", pose_new.phi))°, Z=$(@sprintf("%.5f", cz_new)) m")
+        println("  Tilt:              θx=$(@sprintf("%.6f", pose_new.tilt_x))°, θy=$(@sprintf("%.6f", pose_new.tilt_y))°")
+        println("  Fit radius:        $(@sprintf("%.5f", pose_new.Rfit)) m")
 
         R_all_new = sqrt.(x_new.^2 .+ y_new.^2)
         println("  R range: [$(@sprintf("%.4f", minimum(R_all_new))), $(@sprintf("%.4f", maximum(R_all_new)))] m")
         println("  Z range: [$(@sprintf("%.4f", minimum(z_new))), $(@sprintf("%.4f", maximum(z_new)))] m")
 
-        # Centroid shift
         dcx = (cx_new - cx) * 1000
         dcy = (cy_new - cy) * 1000
         dcz = (cz_new - cz) * 1000
         dc_total = sqrt(dcx^2 + dcy^2 + dcz^2)
-        println("\n  ── Centroid displacement ──")
+
+        println("\n  ── Pose-center displacement ──")
         println("  ΔX=$(@sprintf("%.4f", dcx)) mm, ΔY=$(@sprintf("%.4f", dcy)) mm, ΔZ=$(@sprintf("%.4f", dcz)) mm")
         println("  |Δ|=$(@sprintf("%.4f", dc_total)) mm")
 
-        # Verify rotation via SVD-based normal comparison
         if has_rotation
-            # Original normal
-            P_orig = hcat(x .- cx, y .- cy, z .- cz)
-            _, _, V_orig = svd(P_orig)
-            n_orig = V_orig[:, 3]
-            if n_orig[3] < 0; n_orig = -n_orig; end
-
-            # Transformed normal
-            P_new = hcat(x_new .- cx_new, y_new .- cy_new, z_new .- cz_new)
-            _, _, V_new = svd(P_new)
-            n_new = V_new[:, 3]
-            if n_new[3] < 0; n_new = -n_new; end
-
+            n_orig = pose.normal
+            n_new  = pose_new.normal
             angle_between = rad2deg(acos(clamp(dot(n_orig, n_new), -1.0, 1.0)))
 
             println("\n  ── Normal vector verification ──")
-            println("  Original normal: [$(@sprintf("%.6f", n_orig[1])), $(@sprintf("%.6f", n_orig[2])), $(@sprintf("%.6f", n_orig[3]))]")
+            println("  Original normal:    [$(@sprintf("%.6f", n_orig[1])), $(@sprintf("%.6f", n_orig[2])), $(@sprintf("%.6f", n_orig[3]))]")
             println("  Transformed normal: [$(@sprintf("%.6f", n_new[1])), $(@sprintf("%.6f", n_new[2])), $(@sprintf("%.6f", n_new[3]))]")
             println("  Angle between normals: $(@sprintf("%.6f", angle_between))°")
 
@@ -321,7 +374,6 @@ function transform_coil(input_file::String, output_file::String;
         end
     end
 
-    # ── Write ────────────────────────────────────────────
     write_coil_file(output_file, header_line, x_new, y_new, z_new)
 
     if verbose
@@ -330,8 +382,8 @@ function transform_coil(input_file::String, output_file::String;
     end
 
     return (;
-        original_centroid  = (x=cx, y=cy, z=cz, R=cR, phi=cphi),
-        transformed_centroid = (x=cx_new, y=cy_new, z=cz_new, R=cR_new, phi=cphi_new),
+        original_pose = pose,
+        transformed_pose = pose_new,
         n_points = N,
     )
 end
@@ -339,6 +391,7 @@ end
 # ═══════════════════════════════════════════════════════════════
 # Run
 # ═══════════════════════════════════════════════════════════════
+
 function main()
     transform_coil(
         INPUT_COIL_FILE, OUTPUT_COIL_FILE;
