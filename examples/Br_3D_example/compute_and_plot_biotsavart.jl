@@ -46,7 +46,7 @@ const read_coil_dat                 = FT.read_coil_dat
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 COIL_FILES = [
-    (joinpath(@__DIR__, "sparc_pf1u_axisymmetric.dat"), 100.0),
+    (joinpath(@__DIR__, "sparc_pf1u_105070_2010T.dat"), 100.0),
 ]
 
 R0 = 1.85
@@ -55,7 +55,7 @@ a  = 0.57
 N_THETA = 120
 N_PHI   = 180
 
-out_name = "pf1_AS_small"
+out_name = "sparc_pf1u_105070_2010T"
 
 # ── Field component selection ────────────────────────────
 # :B_R, :B_phi, :B_Z, :B_mag
@@ -80,10 +80,10 @@ ENABLE_FOURIER_ANALYSIS  = true    # NEW: Fourier tilt/center analysis
 HALL_MARGIN          = 0.4    # [m] axial margin beyond coil Z extents
 HALL_N_PHI_INNER     = 24    # φ points on inner shell
 HALL_N_Z_INNER       = 22    # Z levels on inner shell
-HALL_N_PHI_OUTER     = 20    # φ points on outer shell
-HALL_N_Z_OUTER       = 10    # Z levels on outer shell
-HALL_R_INNER_FRAC    = 0.80  # inner shell R = this fraction × R_min_coil
-HALL_R_OUTER_FRAC    = 1.20  # outer shell R = this fraction × R_max_coil
+HALL_N_PHI_OUTER     = 200    # φ points on outer shell
+HALL_N_Z_OUTER       = 100    # Z levels on outer shell
+HALL_R_INNER_FRAC    = 0.4 # inner shell R = this fraction × R_min_coil
+HALL_R_OUTER_FRAC    = .5  # outer shell R = this fraction × R_max_coil
 
 # ── Perturbation visibility threshold ────────────────────
 PERT_VISIBILITY_THRESHOLD = 0.0005

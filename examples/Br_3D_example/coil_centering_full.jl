@@ -16,13 +16,13 @@ const read_coil_dat = FT.read_coil_dat
 # ═══════════════════════════════════════════════════════════════
 
 # Name used only for output files.
-RUN_NAME = "sparc_pf1u_728"
+RUN_NAME = "sparc_pf1u_105070_2010T"
 
 # Physical/baseline coil: what we think the coil physically is.
 PHYSICAL_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u.dat")
 
 # Field coil: the instantiated / perturbed / actual coil used for Biot-Savart.
-FIELD_COIL_FILE = joinpath(@__DIR__, "$(RUN_NAME).dat")
+FIELD_COIL_FILE = PHYSICAL_COIL_FILE#joinpath(@__DIR__, "$(RUN_NAME).dat")
 
 COIL_CURRENT_A = 100.0
 
@@ -1141,7 +1141,7 @@ function plot_axis(
             h.x .* 1e3,
             h.y .* 1e3,
             h.Z .* 1e3;
-            color=(:gray, 0.6),
+            color=(:gray, 0.9),
             markersize=4,
             label="Hall probes",
         )
@@ -1319,7 +1319,7 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 function main()
-    println("\nPhysical Baseline vs Field-Generated Magnetic Axis Analysis")
+    println("\n")
     println("Physical baseline coil file:")
     println("  $PHYSICAL_COIL_FILE")
     println("Field calculation coil file:")

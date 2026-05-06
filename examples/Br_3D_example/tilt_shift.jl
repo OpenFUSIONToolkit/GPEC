@@ -29,16 +29,16 @@ using Statistics
 # ═══════════════════════════════════════════════════════════════
 
 INPUT_COIL_FILE  = joinpath(@__DIR__, "sparc_pf1u.dat")
-OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_357_35T.dat")
+OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_105070_2010T.dat")
 
 # Translation AFTER rotation, units: meters
-SHIFT_X = 0.003
-SHIFT_Y = 0.005
-SHIFT_Z = 0.007
+SHIFT_X = 0.01
+SHIFT_Y = 0.05
+SHIFT_Z = 0.07
 
 # Extrinsic XYZ rotations, units: degrees
-TILT_X_DEG = 0.3
-TILT_Y_DEG = 0.5
+TILT_X_DEG = 20
+TILT_Y_DEG = 10
 TILT_Z_DEG = 0.0
 
 VERBOSE = true
