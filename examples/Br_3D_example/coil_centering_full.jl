@@ -16,10 +16,10 @@ const read_coil_dat = FT.read_coil_dat
 # USER INPUTS
 # ═══════════════════════════════════════════════════════════════
 
-COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_357_test.dat")
+COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_AS_9501_xy3T.dat")
 COIL_CURRENT_A = 100.0
 
-OUT_NAME = "sparc_pf1u_357"
+OUT_NAME = "sparc_pf1u_AS_9501_xy3T"
 HALL_CSV = joinpath(@__DIR__, "hall_probe_$OUT_NAME.csv")
 AXIS_PLOT_FILE = joinpath(@__DIR__, "axis_comparison_$OUT_NAME.png")
 
@@ -38,7 +38,7 @@ HALL_Z_HALFSPAN_OUTER_M = 0.40
 TILT_CALIBRATION_RADIUS_M = NaN
 
 # Analysis settings.
-BR_ZERO_NOISE_FRAC = 0.02
+BR_ZERO_NOISE_FRAC = 0.0#2
 BR_MIN_FRAC_FOR_FOURIER_XY = 0.10
 BPHI_SIGN = 1.0                 # set -1 if Fourier dx/dy signs are both flipped
 XY_MIN_STEP0_M = 0.050

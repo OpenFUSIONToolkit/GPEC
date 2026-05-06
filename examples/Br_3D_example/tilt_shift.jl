@@ -29,13 +29,13 @@ using Statistics
 
 # Input / output files
 INPUT_COIL_FILE  = joinpath(@__DIR__, "sparc_pf1u.dat")
-OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_9501_xy3T.dat")
+OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_200_xy29T.dat")
 
 # ── Translation (applied AFTER rotation) ─────────────────────
 # Units: meters
-SHIFT_X = .009#0.001    # 1 mm shift in X
-SHIFT_Y = .05#0.000    # no shift in Y
-SHIFT_Z = .0001#0.002    # 2 mm shift in Z
+SHIFT_X = .002#0.001    # 1 mm shift in X
+SHIFT_Y = .00#0.000    # no shift in Y
+SHIFT_Z = .00#0.002    # 2 mm shift in Z
 
 # ── Rotation / tilt (applied about the coil centroid) ────────
 # Units: degrees
@@ -43,8 +43,8 @@ SHIFT_Z = .0001#0.002    # 2 mm shift in Z
 #   TILT_X = rotation about the X-axis (pitches the coil in the Y-Z plane)
 #   TILT_Y = rotation about the Y-axis (pitches the coil in the X-Z plane)
 #   TILT_Z = rotation about the Z-axis (rotates the coil in the X-Y plane)
-TILT_X_DEG = .3 # 0.1    # 0.1° tilt about X
-TILT_Y_DEG = .3 # 0.0    # no tilt about Y
+TILT_X_DEG = .2 # 0.1    # 0.1° tilt about X
+TILT_Y_DEG = .9 # 0.0    # no tilt about Y
 TILT_Z_DEG = 0 # 0.0    # no tilt about Z
 
 # EQUIVALENTLY: R, Z, Phi 
