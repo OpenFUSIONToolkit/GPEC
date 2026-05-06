@@ -34,6 +34,8 @@ Covariant components from metric tensor contraction (matches Fortran gpeq_cova):
     ξ_ζ(m) = Σ_dm g³¹J(dm)·ξ^ψJ(m+dm) + g²³J(dm)·ξ^θ_m(m+dm) + g³³J(dm)·ξ^ζ_m(m+dm)
 """
 
+using Base.Threads: @threads, threadid, nthreads
+
 """
     reconstruct_physical_fields(
         response_vector, flux_matrix, ForceFreeStates_results,
@@ -126,7 +128,7 @@ function reconstruct_physical_fields(
     mthsurf = length(equil.rzphi_ys) - 1
     thetas_for_avg = [(k - 1) / mthsurf for k in 1:mthsurf]
     Jb_psi_modes = similar(b_psi_modes)
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
         psi = psi_grid[ipsi]
         hint2d = (Ref(1), Ref(1))
         area = 0.0
@@ -205,6 +207,8 @@ Then sum eigenmode contributions at each radial point (matches Fortran gpeq_sol)
     xi_psi1[ipsi, :] = ud_store[:, :, 1, ipsi] * alpha   # dΞ_ψ/dψ
     xi_s[ipsi, :]    = ud_store[:, :, 2, ipsi] * alpha   # Ξ_s (toroidal, Glasser 2016 eq. 18)
 
+Surfaces are independent: with multiple Julia threads (`julia -t auto` or `JULIA_NUM_THREADS`), the ψ loop uses `@threads`.
+
 # Returns
 
 - `xi_psi_modes`: Radial displacement ξ_ψ(ψ, m) [npsi, mpert]
@@ -227,7 +231,7 @@ function sum_eigenmode_contributions(
     xi_psi_modes  = zeros(ComplexF64, npsi, mpert)
     xi_psi1_modes = zeros(ComplexF64, npsi, mpert)
     xi_s_modes    = zeros(ComplexF64, npsi, mpert)
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
         # u_store[:,:,1] = Ξ_ψ (radial displacement)
         mul!(view(xi_psi_modes, ipsi, :),
              ForceFreeStates_results.u_store[:, :, 1, ipsi],
@@ -276,7 +280,7 @@ function compute_perturbed_field_modes(
     nn = ffs_intr.nlow
     chi1 = 2π * equil.psio
 
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
         q1 = equil.profiles.q_deriv(psi_norm)
@@ -344,16 +348,24 @@ function compute_clebsch_displacements(
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
-    # Pre-allocate buffers for matrix operations
-    amat = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    bmat = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    cmat_buf = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    xmp1_vec = Vector{ComplexF64}(undef, mpert)
-    xms_vec  = Vector{ComplexF64}(undef, mpert)
+    # Per-thread workspaces (matrix ops + spline hints are not thread-safe if shared)
+    nt = nthreads()
+    amat_bufs = [Matrix{ComplexF64}(undef, numpert_total, numpert_total) for _ in 1:nt]
+    bmat_bufs = [Matrix{ComplexF64}(undef, numpert_total, numpert_total) for _ in 1:nt]
+    cmat_bufs = [Matrix{ComplexF64}(undef, numpert_total, numpert_total) for _ in 1:nt]
+    xmp1_vecs = [Vector{ComplexF64}(undef, mpert) for _ in 1:nt]
+    xms_vecs = [Vector{ComplexF64}(undef, mpert) for _ in 1:nt]
+    hints = [Ref(1) for _ in 1:nt]
 
-    hint = Ref(1)
+    @threads for ipsi in 1:npsi
+        tid = threadid()
+        amat = amat_bufs[tid]
+        bmat = bmat_bufs[tid]
+        cmat_buf = cmat_bufs[tid]
+        xmp1_vec = xmp1_vecs[tid]
+        xms_vec = xms_vecs[tid]
+        hint = hints[tid]
 
-    for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
 
@@ -416,7 +428,7 @@ function compute_modified_field_modes(
     b_theta_reg = zeros(ComplexF64, npsi, mpert)
     b_zeta_reg  = zeros(ComplexF64, npsi, mpert)
 
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
         q1 = equil.profiles.q_deriv(psi_norm)
@@ -476,18 +488,25 @@ function compute_contra_displacements(
     xwt_modes = zeros(ComplexF64, npsi, mpert)
     xwz_modes = zeros(ComplexF64, npsi, mpert)
 
-    # Pre-allocate Fourier coefficient vectors
-    jmat  = Vector{ComplexF64}(undef, 2 * mband + 1)
-    jmat1 = Vector{ComplexF64}(undef, 2 * mband + 1)
+    vlen = 2 * mband + 1
+    nt = nthreads()
+    jmat_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    jmat1_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    jmat_hints = [Ref(1) for _ in 1:nt]
+    jmat1_hints = [Ref(1) for _ in 1:nt]
 
     # Build cubic spline interpolants for Jacobian Fourier coefficients (quantities 7, 8).
     # Matches Fortran cspline_eval(metric%cs, psi, 0) which interpolates smoothly.
     jmat_interp  = _build_metric_interp(fc, 7)
     jmat1_interp = _build_metric_interp(fc, 8)
-    jmat_hint  = Ref(1)
-    jmat1_hint = Ref(1)
 
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
+        tid = threadid()
+        jmat = jmat_bufs[tid]
+        jmat1 = jmat1_bufs[tid]
+        jmat_hint = jmat_hints[tid]
+        jmat1_hint = jmat1_hints[tid]
+
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
 
@@ -545,7 +564,7 @@ function compute_contra_displacements(
     xmt_modes = copy(xwt_modes)
     xmz_modes = copy(xwz_modes)
     if reg_spot > 0
-        for ipsi in 1:npsi
+        @threads for ipsi in 1:npsi
             psi_norm = psi_grid[ipsi]
             q = equil.profiles.q_spline(psi_norm)
             for ipert in 1:mpert
@@ -600,24 +619,34 @@ function compute_cova_components(
     bvt_modes = zeros(ComplexF64, npsi, mpert)
     bvz_modes = zeros(ComplexF64, npsi, mpert)
 
-    # Pre-allocate metric Fourier coefficient vectors
-    g11 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g22 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g33 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g23 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g31 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g12 = Vector{ComplexF64}(undef, 2 * mband + 1)
+    vlen = 2 * mband + 1
+    nt = nthreads()
+    g11_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g22_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g33_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g23_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g31_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g12_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g_hints_bufs = [[Ref(1) for _ in 1:6] for _ in 1:nt]
 
     # Build cubic spline interpolants for metric tensor Fourier coefficients (quantities 1-6).
     # Matches Fortran cspline_eval(metric%cs, psi, 0) which interpolates smoothly.
     g_interps = [_build_metric_interp(fc, qty) for qty in 1:6]
-    g_hints = [Ref(1) for _ in 1:6]
 
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
+        tid = threadid()
+        g11 = g11_bufs[tid]
+        g22 = g22_bufs[tid]
+        g33 = g33_bufs[tid]
+        g23 = g23_bufs[tid]
+        g31 = g31_bufs[tid]
+        g12 = g12_bufs[tid]
+        gh = g_hints_bufs[tid]
+
         psi_norm = psi_grid[ipsi]
 
         # Interpolate metric tensor Fourier coefficients at this psi
-        g_vals = [g_interps[qty](psi_norm; hint=g_hints[qty]) for qty in 1:6]
+        g_vals = [g_interps[qty](psi_norm; hint=gh[qty]) for qty in 1:6]
         for m in 0:mband
             g11[mid-m] = g_vals[1][m+1]
             g22[mid-m] = g_vals[2][m+1]
@@ -737,7 +766,7 @@ function compute_b_n_xi_n_modes(
     phase_fwd  = [exp( twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
     phase_back = [exp(-twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
 
-    for ipsi in 1:npsi
+    @threads for ipsi in 1:npsi
         psi = ForceFreeStates_results.psi_store[ipsi]
         hint2d_psi = (Ref(1), Ref(1))
 
@@ -794,6 +823,21 @@ the mode count or use `Analysis.PerturbedEquilibriumModes.modes_to_theta` post-h
 
 The caller passes different inputs for ξ vs b (see `reconstruct_physical_fields`).
 """
+function _rzphi_workspace(mtheta::Int)
+    return (
+        R_fun = zeros(ComplexF64, mtheta),
+        Z_fun = zeros(ComplexF64, mtheta),
+        phi_fun = zeros(ComplexF64, mtheta),
+        t11 = Vector{Float64}(undef, mtheta),
+        t12 = Vector{Float64}(undef, mtheta),
+        t21 = Vector{Float64}(undef, mtheta),
+        t22 = Vector{Float64}(undef, mtheta),
+        t33 = Vector{Float64}(undef, mtheta),
+        J_theta = Vector{Float64}(undef, mtheta),
+        hint = (Ref(1), Ref(1)),
+    )
+end
+
 function _compute_rzphi_modes(
     equil::Equilibrium.PlasmaEquilibrium,
     psi_grid::Vector{Float64},
@@ -812,21 +856,22 @@ function _compute_rzphi_modes(
     R_modes   = zeros(ComplexF64, npsi, mpert)
     Z_modes   = zeros(ComplexF64, npsi, mpert)
     phi_modes = zeros(ComplexF64, npsi, mpert)
-    R_fun     = zeros(ComplexF64, mtheta)
-    Z_fun     = zeros(ComplexF64, mtheta)
-    phi_fun   = zeros(ComplexF64, mtheta)
 
-    # Pre-allocate theta-space buffers
-    t11 = Vector{Float64}(undef, mtheta)
-    t12 = Vector{Float64}(undef, mtheta)
-    t21 = Vector{Float64}(undef, mtheta)
-    t22 = Vector{Float64}(undef, mtheta)
-    t33 = Vector{Float64}(undef, mtheta)
-    J_theta = Vector{Float64}(undef, mtheta)
+    ws_bufs = [_rzphi_workspace(mtheta) for _ in 1:nthreads()]
 
-    hint = (Ref(1), Ref(1))
+    @threads for ipsi in 1:npsi
+        w = ws_bufs[threadid()]
+        R_fun = w.R_fun
+        Z_fun = w.Z_fun
+        phi_fun = w.phi_fun
+        t11 = w.t11
+        t12 = w.t12
+        t21 = w.t21
+        t22 = w.t22
+        t33 = w.t33
+        J_theta = w.J_theta
+        hint = w.hint
 
-    for ipsi in 1:npsi
         psi = psi_grid[ipsi]
 
         # Compute transformation matrix at each theta point (Fortran gpeq.f:458-475)
