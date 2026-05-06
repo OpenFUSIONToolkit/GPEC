@@ -28,17 +28,17 @@ using Statistics
 # CONFIGURATION — edit these values
 # ═══════════════════════════════════════════════════════════════
 
-INPUT_COIL_FILE  = joinpath(@__DIR__, "sparc_pf1u_axisymmetric.dat")
-OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_AS_728_xy29T_FA.dat")
+INPUT_COIL_FILE  = joinpath(@__DIR__, "sparc_pf1u.dat")
+OUTPUT_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_357_35T.dat")
 
 # Translation AFTER rotation, units: meters
-SHIFT_X = 0.007
-SHIFT_Y = 0.002
-SHIFT_Z = 0.080
+SHIFT_X = 0.003
+SHIFT_Y = 0.005
+SHIFT_Z = 0.007
 
 # Extrinsic XYZ rotations, units: degrees
-TILT_X_DEG = 0.2
-TILT_Y_DEG = 0.9
+TILT_X_DEG = 0.3
+TILT_Y_DEG = 0.5
 TILT_Z_DEG = 0.0
 
 VERBOSE = true

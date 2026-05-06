@@ -14,11 +14,11 @@ const read_coil_dat = FT.read_coil_dat
 # ═══════════════════════════════════════════════════════════════
 # USER INPUTS
 # ═══════════════════════════════════════════════════════════════
+OUT_NAME = "sparc_pf1u_357_35T"
 
-COIL_FILE = joinpath(@__DIR__, "sparc_pf1u_AS_728_xy29T_FA.dat")
+COIL_FILE = joinpath(@__DIR__, "$OUT_NAME.dat")
 COIL_CURRENT_A = 100.0
 
-OUT_NAME = "sparc_pf1u_AS_728_xy29T"
 HALL_CSV = joinpath(@__DIR__, "hall_probe_$OUT_NAME.csv")
 AXIS_PLOT_FILE = joinpath(@__DIR__, "axis_comparison_$OUT_NAME.png")
 
