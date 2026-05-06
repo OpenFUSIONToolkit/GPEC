@@ -15,19 +15,34 @@ const read_coil_dat = FT.read_coil_dat
 # USER INPUTS
 # ═══════════════════════════════════════════════════════════════
 
-# Name used only for output files.
-RUN_NAME = "sparc_pf1u_105070_2010T"
+RUN_NAME = "sparc_pf1u_357_test"
 
-# Physical/baseline coil: what we think the coil physically is.
+# Physical/baseline coil: nominal geometry.
 PHYSICAL_COIL_FILE = joinpath(@__DIR__, "sparc_pf1u.dat")
 
-# Field coil: the instantiated / perturbed / actual coil used for Biot-Savart.
-FIELD_COIL_FILE = PHYSICAL_COIL_FILE#joinpath(@__DIR__, "$(RUN_NAME).dat")
+# Field coil: actual/instantiated coil used for the field calculation.
+FIELD_COIL_FILE = joinpath(@__DIR__, "$(RUN_NAME).dat") # PHYSICAL_COIL_FILE
 
 COIL_CURRENT_A = 100.0
 
-HALL_CSV = joinpath(@__DIR__, "hall_probe_$(RUN_NAME)_field_vs_physical.csv")
-AXIS_PLOT_FILE = joinpath(@__DIR__, "axis_comparison_$(RUN_NAME)_field_vs_physical.png")
+HALL_CSV_FIELD    = joinpath(@__DIR__, "hall_probe_$(RUN_NAME)_FIELD_coil.csv")
+HALL_CSV_PHYSICAL = joinpath(@__DIR__, "hall_probe_$(RUN_NAME)_PHYSICAL_coil.csv")
+AXIS_PLOT_FILE    = joinpath(@__DIR__, "axis_comparison_$(RUN_NAME)_field_vs_physical.png")
+
+# Hall input mode:
+#   :internal -> compute Hall data internally from Biot-Savart and optionally export CSV
+#   :csv      -> read precomputed Hall data from CSV
+FIELD_HALL_MODE = :internal
+#FIELD_HALL_MODE = :csv
+
+FIELD_HALL_INPUT_CSV = joinpath(@__DIR__, "hall_probe_sparc_pf1u_357.csv") #HALL_CSV_FIELD
+
+# Optional matching control for physical-coil field.
+# Usually leave this as :internal.
+PHYSICAL_HALL_MODE = :internal
+# PHYSICAL_HALL_MODE = :csv
+
+PHYSICAL_HALL_INPUT_CSV = HALL_CSV_PHYSICAL
 
 HALL_R_INNER_FRAC = 0.40
 HALL_R_OUTER_FRAC = 0.50
@@ -62,11 +77,18 @@ SHOW_HALL_PROBES = true
 AXIS_PLOT_ZMIN_M = NaN
 AXIS_PLOT_ZMAX_M = NaN
 
+ENABLE_DETAILED_FIELD_SUMMARY = true
+
 # ═══════════════════════════════════════════════════════════════
-# Helpers
+# Small helpers
 # ═══════════════════════════════════════════════════════════════
 
 wmean(x, w) = sum(w) <= 0 ? mean(x) : sum(w .* x) / sum(w)
+
+function meanfinite(v)
+    u = filter(isfinite, collect(v))
+    return isempty(u) ? NaN : mean(u)
+end
 
 function fit_cossin(φ, y)
     c = hcat(ones(length(φ)), cos.(φ), sin.(φ)) \ y
@@ -75,43 +97,35 @@ end
 
 function zcrossings(vals, z)
     out = Float64[]
-    for i in 1:length(vals)-1
-        vals[i] == 0 && push!(out, z[i])
-        vals[i] * vals[i+1] < 0 || continue
-        t = vals[i] / (vals[i] - vals[i+1])
-        push!(out, z[i] + t * (z[i+1] - z[i]))
-    end
-    return out
-end
 
-function fit_circle_xy(x, y)
-    A = hcat(2 .* x, 2 .* y, ones(length(x)))
-    b = x.^2 .+ y.^2
-    c = A \ b
-    cx, cy = c[1], c[2]
-    r = sqrt(max(c[3] + cx^2 + cy^2, 0.0))
-    return cx, cy, r
+    for i in 1:(length(vals) - 1)
+        vals[i] == 0 && push!(out, z[i])
+
+        vals[i] * vals[i + 1] < 0 || continue
+
+        t = vals[i] / (vals[i] - vals[i + 1])
+        push!(out, z[i] + t * (z[i + 1] - z[i]))
+    end
+
+    return out
 end
 
 function axis_line(x0, y0, z0, tx_deg, ty_deg, z)
     tx = tand(tx_deg)
     ty = tand(ty_deg)
+
     x = x0 .+ ty .* (z .- z0)
     y = y0 .- tx .* (z .- z0)
+
     return x, y, z
 end
 
-meanfinite(v) = begin
-    u = filter(isfinite, collect(v))
-    isempty(u) ? NaN : mean(u)
-end
-
 shellmeta(h, shell) = shell == 1 ?
-    (HALL_N_PHI_INNER, h.nzi, h.R_inner, h.Zi, h.phi_i) :
-    (HALL_N_PHI_OUTER, h.nzo, h.R_outer, h.Zo, h.phi_o)
+    (length(h.phi_i), h.nzi, h.R_inner, h.Zi, h.phi_i) :
+    (length(h.phi_o), h.nzo, h.R_outer, h.Zo, h.phi_o)
 
 # ═══════════════════════════════════════════════════════════════
-# Geometry helpers for robust coil pose
+# Coil geometry helpers
 # ═══════════════════════════════════════════════════════════════
 
 function segment_midpoints_lengths(coils)
@@ -121,13 +135,18 @@ function segment_midpoints_lengths(coils)
     w  = Float64[]
 
     for cs in coils, j in 1:cs.ncoil, k in 1:cs.s, l in 1:(cs.nsec - 1)
-        x1 = cs.x[j, k, l];   x2 = cs.x[j, k, l+1]
-        y1 = cs.y[j, k, l];   y2 = cs.y[j, k, l+1]
-        z1 = cs.z[j, k, l];   z2 = cs.z[j, k, l+1]
+        x1 = cs.x[j, k, l]
+        y1 = cs.y[j, k, l]
+        z1 = cs.z[j, k, l]
+
+        x2 = cs.x[j, k, l + 1]
+        y2 = cs.y[j, k, l + 1]
+        z2 = cs.z[j, k, l + 1]
 
         dlx = x2 - x1
         dly = y2 - y1
         dlz = z2 - z1
+
         ds = sqrt(dlx^2 + dly^2 + dlz^2)
         ds <= 0 && continue
 
@@ -142,13 +161,16 @@ end
 
 function plane_basis_from_normal(n)
     ref = abs(n[3]) < 0.9 ? [0.0, 0.0, 1.0] : [1.0, 0.0, 0.0]
+
     e1 = normalize(cross(ref, n))
     e2 = cross(n, e1)
+
     return e1, e2
 end
 
 function coil_pose_from_segments(coils)
     mx, my, mz, w = segment_midpoints_lengths(coils)
+
     W = sum(w)
     W <= 0 && error("No valid coil segments found")
 
@@ -158,6 +180,7 @@ function coil_pose_from_segments(coils)
 
     P = hcat(mx .- cx, my .- cy, mz .- cz)
     Pw = P .* sqrt.(w)
+
     _, _, V = svd(Pw)
 
     n = Vector(V[:, 3])
@@ -175,43 +198,83 @@ function coil_pose_from_segments(coils)
     )
 end
 
+function collect_coil_xyz(coils)
+    x = Float64[]
+    y = Float64[]
+    z = Float64[]
+
+    for cs in coils, j in 1:cs.ncoil, k in 1:cs.s
+        append!(x, vec(cs.x[j, k, :]))
+        append!(y, vec(cs.y[j, k, :]))
+        append!(z, vec(cs.z[j, k, :]))
+    end
+
+    return x, y, z
+end
+
+function _axis_from_coil_impl(coils)
+    pose = coil_pose_from_segments(coils)
+
+    cx, cy, cz = pose.cx, pose.cy, pose.cz
+    n = pose.n
+
+    # Convention:
+    # normal = [tan(tilt_y), -tan(tilt_x), 1] / norm
+    tx = atand(-n[2], n[3])
+    ty = atand( n[1], n[3])
+
+    e1, e2 = plane_basis_from_normal(n)
+
+    dx = pose.mx .- cx
+    dy = pose.my .- cy
+    dz = pose.mz .- cz
+
+    u = dx .* e1[1] .+ dy .* e1[2] .+ dz .* e1[3]
+    v = dx .* e2[1] .+ dy .* e2[2] .+ dz .* e2[3]
+
+    ρ = sqrt.(u.^2 .+ v.^2)
+    rfit = sum(pose.w .* ρ) / sum(pose.w)
+
+    x, y, z = collect_coil_xyz(coils)
+    R = sqrt.(x.^2 .+ y.^2)
+
+    return (
+        x0=cx,
+        y0=cy,
+        z0=cz,
+        tilt_x=tx,
+        tilt_y=ty,
+        tilt_mag=hypot(tx, ty),
+        Rfit=rfit,
+        Rmin=minimum(R),
+        Rmax=maximum(R),
+        Zmin=minimum(z),
+        Zmax=maximum(z),
+    )
+end
+
+function axis_from_coil(coils; label="Coil geometric axis")
+    a = _axis_from_coil_impl(coils)
+
+    println("\n$label:")
+    @printf("  center = (%.3f, %.3f, %.3f) mm\n",
+            a.x0 * 1e3, a.y0 * 1e3, a.z0 * 1e3)
+    @printf("  tilt_x = %.6f deg, tilt_y = %.6f deg\n",
+            a.tilt_x, a.tilt_y)
+    @printf("  fit radius = %.3f mm\n", a.Rfit * 1e3)
+    @printf("  R range = [%.3f, %.3f] mm\n",
+            a.Rmin * 1e3, a.Rmax * 1e3)
+    @printf("  Z range = [%.3f, %.3f] mm\n",
+            a.Zmin * 1e3, a.Zmax * 1e3)
+
+    return a
+end
+
+axis_from_coil_silent(coils) = _axis_from_coil_impl(coils)
+
 # ═══════════════════════════════════════════════════════════════
-# Rotation helpers
+# Rotation and coil placement
 # ═══════════════════════════════════════════════════════════════
-
-function rotation_x(θ::Float64)
-    c, s = cos(θ), sin(θ)
-    return [
-        1.0 0.0 0.0
-        0.0 c   -s
-        0.0 s    c
-    ]
-end
-
-function rotation_y(θ::Float64)
-    c, s = cos(θ), sin(θ)
-    return [
-         c   0.0  s
-        0.0  1.0 0.0
-        -s   0.0  c
-    ]
-end
-
-function rotation_z(θ::Float64)
-    c, s = cos(θ), sin(θ)
-    return [
-        c  -s  0.0
-        s   c  0.0
-        0.0 0.0 1.0
-    ]
-end
-
-function build_rotation_matrix(tx_deg::Float64, ty_deg::Float64, tz_deg::Float64)
-    Rx = rotation_x(deg2rad(tx_deg))
-    Ry = rotation_y(deg2rad(ty_deg))
-    Rz = rotation_z(deg2rad(tz_deg))
-    return Rz * Ry * Rx
-end
 
 function rotation_between_vectors(a::Vector{Float64}, b::Vector{Float64})
     a = normalize(a)
@@ -236,12 +299,8 @@ function rotation_between_vectors(a::Vector{Float64}, b::Vector{Float64})
         -k[2]  k[1]   0.0
     ]
 
-    return I + sinθ * K + (1.0 - cosθ) * K * K
+    return Matrix{Float64}(I, 3, 3) + sinθ * K + (1.0 - cosθ) * K * K
 end
-
-# ═══════════════════════════════════════════════════════════════
-# Coil placement: exact target axis in lab frame
-# ═══════════════════════════════════════════════════════════════
 
 function place_coil_at_axis(
     coils,
@@ -254,14 +313,14 @@ function place_coil_at_axis(
     coils_new = deepcopy(coils)
 
     pose = coil_pose_from_segments(coils_new)
+
     cx, cy, cz = pose.cx, pose.cy, pose.cz
     n_orig = copy(pose.n)
 
-    # Convention consistent with _physical_axis_from_coil_impl:
-    # normal = [tan(ty), -tan(tx), 1] up to normalization.
     n_target = normalize([tand(target_ty_deg), -tand(target_tx_deg), 1.0])
 
-    z_hat   = [0.0, 0.0, 1.0]
+    z_hat = [0.0, 0.0, 1.0]
+
     R_undo  = rotation_between_vectors(n_orig, z_hat)
     R_apply = rotation_between_vectors(z_hat, n_target)
     R_total = R_apply * R_undo
@@ -286,7 +345,7 @@ function place_coil_at_axis(
 end
 
 # ═══════════════════════════════════════════════════════════════
-# Coil loading and physical axis
+# Coil loading
 # ═══════════════════════════════════════════════════════════════
 
 function load_coils(file::AbstractString; label::String, current_A::Float64=COIL_CURRENT_A)
@@ -302,84 +361,11 @@ function load_coils(file::AbstractString; label::String, current_A::Float64=COIL
     return [cs]
 end
 
-function collect_coil_xyz(coils)
-    x = Float64[]
-    y = Float64[]
-    z = Float64[]
-
-    for cs in coils, j in 1:cs.ncoil, k in 1:cs.s
-        append!(x, vec(cs.x[j, k, :]))
-        append!(y, vec(cs.y[j, k, :]))
-        append!(z, vec(cs.z[j, k, :]))
-    end
-
-    return x, y, z
-end
-
-function _physical_axis_from_coil_impl(coils)
-    pose = coil_pose_from_segments(coils)
-
-    cx, cy, cz = pose.cx, pose.cy, pose.cz
-    n = pose.n
-
-    # normal = [tan(ty), -tan(tx), 1] / norm
-    tx = atand(-n[2], n[3])
-    ty = atand( n[1], n[3])
-
-    # Radius estimate in coil plane using weighted segment midpoints.
-    e1, e2 = plane_basis_from_normal(n)
-
-    dx = pose.mx .- cx
-    dy = pose.my .- cy
-    dz = pose.mz .- cz
-
-    u = dx .* e1[1] .+ dy .* e1[2] .+ dz .* e1[3]
-    v = dx .* e2[1] .+ dy .* e2[2] .+ dz .* e2[3]
-    ρ = sqrt.(u.^2 .+ v.^2)
-
-    rfit = sum(pose.w .* ρ) / sum(pose.w)
-
-    x, y, z = collect_coil_xyz(coils)
-    R = sqrt.(x.^2 .+ y.^2)
-
-    return (
-        x0=cx,
-        y0=cy,
-        z0=cz,
-        tilt_x=tx,
-        tilt_y=ty,
-        Rfit=rfit,
-        Rmin=minimum(R),
-        Rmax=maximum(R),
-        Zmin=minimum(z),
-        Zmax=maximum(z),
-    )
-end
-
-function physical_axis_from_coil(coils; label::String="Physical axis from coil geometry")
-    phys = _physical_axis_from_coil_impl(coils)
-
-    println("\n$label:")
-    @printf("  center = (%.3f, %.3f, %.3f) mm\n",
-            phys.x0 * 1e3, phys.y0 * 1e3, phys.z0 * 1e3)
-    @printf("  tilt_x = %.6f deg, tilt_y = %.6f deg\n",
-            phys.tilt_x, phys.tilt_y)
-    @printf("  fit radius = %.3f mm\n", phys.Rfit * 1e3)
-    @printf("  R range = [%.3f, %.3f] mm\n",
-            phys.Rmin * 1e3, phys.Rmax * 1e3)
-    @printf("  Z range = [%.3f, %.3f] mm\n",
-            phys.Zmin * 1e3, phys.Zmax * 1e3)
-
-    return phys
-end
-
-physical_axis_from_coil_silent(coils) = _physical_axis_from_coil_impl(coils)
-
 # ═══════════════════════════════════════════════════════════════
-# Synthetic Hall measurements
+# Hall data generation, export, and CSV import
 # ═══════════════════════════════════════════════════════════════
 
-function make_hall_data(field_coils, phys_baseline)
+function make_hall_data(source_coils, phys_baseline; label="FIELD")
     R_inner = HALL_R_INNER_FRAC * phys_baseline.Rmin
     R_outer = HALL_R_OUTER_FRAC * phys_baseline.Rmax
     Zc = phys_baseline.z0
@@ -429,18 +415,19 @@ function make_hall_data(field_coils, phys_baseline)
     BP = zeros(N)
     BZ = zeros(N)
 
-    println("\nComputing synthetic Hall data from FIELD coil:")
+    println("\nComputing synthetic Hall data from $label coil:")
     println("  probes = $N")
     @printf("  R1 = %.3f mm, Z1=[%.3f, %.3f] mm\n",
             R_inner * 1e3, first(Zi) * 1e3, last(Zi) * 1e3)
     @printf("  R2 = %.3f mm, Z2=[%.3f, %.3f] mm\n",
             R_outer * 1e3, first(Zo) * 1e3, last(Zo) * 1e3)
 
-    compute_biot_savart_boundary!(BR, BP, BZ, R, φ, Z, field_coils)
+    compute_biot_savart_boundary!(BR, BP, BZ, R, φ, Z, source_coils)
 
     Bmag = sqrt.(BR.^2 .+ BP.^2 .+ BZ.^2)
 
     return (
+        label=label,
         R=R,
         phi=φ,
         Z=Z,
@@ -462,7 +449,7 @@ function make_hall_data(field_coils, phys_baseline)
     )
 end
 
-function recompute_hall_field(h, coils)
+function recompute_hall_field(h, coils; label=h.label)
     N = length(h.R)
 
     BR = zeros(N)
@@ -474,6 +461,7 @@ function recompute_hall_field(h, coils)
     Bmag = sqrt.(BR.^2 .+ BP.^2 .+ BZ.^2)
 
     return (
+        label=label,
         R=h.R,
         phi=h.phi,
         Z=h.Z,
@@ -495,8 +483,8 @@ function recompute_hall_field(h, coils)
     )
 end
 
-function export_hall_csv(h)
-    open(HALL_CSV, "w") do io
+function export_hall_csv(h, path::AbstractString)
+    open(path, "w") do io
         println(io, "x,y,z,R,phi,shell,B_R,B_phi,B_Z,B_mag")
 
         for i in eachindex(h.R)
@@ -507,11 +495,165 @@ function export_hall_csv(h)
         end
     end
 
-    println("\nExported Hall CSV: $HALL_CSV")
+    println("\nExported Hall CSV: $path")
+end
+
+function _csv_col(header, choices; required=true)
+    hlo = lowercase.(strip.(header))
+
+    for name in choices
+        j = findfirst(==(lowercase(name)), hlo)
+        j !== nothing && return j
+    end
+
+    required && error("Missing required CSV column. Tried names: $(join(choices, ", "))")
+    return nothing
+end
+
+function _csv_float_col(rows, idx)
+    return [parse(Float64, rows[i][idx]) for i in eachindex(rows)]
+end
+
+function _csv_int_col(rows, idx)
+    return [Int(round(parse(Float64, rows[i][idx]))) for i in eachindex(rows)]
+end
+
+function _sorted_unique(v)
+    return sort(unique(collect(v)))
+end
+
+function read_hall_csv(path::AbstractString; label="FIELD-FIELD")
+    isfile(path) || error("Hall CSV not found: $path")
+
+    raw = readlines(path)
+    raw = filter(line -> !isempty(strip(line)), raw)
+    length(raw) >= 2 || error("Hall CSV has no data rows: $path")
+
+    header = strip.(split(raw[1], ","))
+
+    rows = Vector{Vector{SubString{String}}}()
+
+    for line in raw[2:end]
+        push!(rows, strip.(split(line, ",")))
+    end
+
+    N = length(rows)
+
+    xidx    = _csv_col(header, ["x"]; required=false)
+    yidx    = _csv_col(header, ["y"]; required=false)
+    zidx    = _csv_col(header, ["z"], required=true)
+    Ridx    = _csv_col(header, ["R", "r"], required=false)
+    phiidx  = _csv_col(header, ["phi", "φ"], required=false)
+    shidx   = _csv_col(header, ["shell"], required=true)
+    BRidx   = _csv_col(header, ["B_R", "BR", "B_r", "br"], required=true)
+    BPidx   = _csv_col(header, ["B_phi", "BPHI", "BP", "B_P", "Bphi", "b_phi"], required=true)
+    BZidx   = _csv_col(header, ["B_Z", "BZ", "B_z", "bz"], required=true)
+    Bmagidx = _csv_col(header, ["B_mag", "Bmag", "B", "B_abs"], required=false)
+
+    Z = _csv_float_col(rows, zidx)
+    shell = _csv_int_col(rows, shidx)
+
+    if Ridx === nothing || phiidx === nothing
+        xidx === nothing && error("CSV must contain either R/phi or x/y. Missing x.")
+        yidx === nothing && error("CSV must contain either R/phi or x/y. Missing y.")
+
+        x = _csv_float_col(rows, xidx)
+        y = _csv_float_col(rows, yidx)
+
+        R = sqrt.(x.^2 .+ y.^2)
+        phi = mod.(atan.(y, x), 2π)
+    else
+        R = _csv_float_col(rows, Ridx)
+        phi = mod.(_csv_float_col(rows, phiidx), 2π)
+
+        x = xidx === nothing ? R .* cos.(phi) : _csv_float_col(rows, xidx)
+        y = yidx === nothing ? R .* sin.(phi) : _csv_float_col(rows, yidx)
+    end
+
+    BR = _csv_float_col(rows, BRidx)
+    BP = _csv_float_col(rows, BPidx)
+    BZ = _csv_float_col(rows, BZidx)
+
+    Bmag = Bmagidx === nothing ?
+        sqrt.(BR.^2 .+ BP.^2 .+ BZ.^2) :
+        _csv_float_col(rows, Bmagidx)
+
+    # Reorder into make_hall_data convention:
+    # shell, then Z, then phi. This matches reshape(..., nphi, nz).
+    perm = sortperm(1:N; by=i -> (shell[i], Z[i], phi[i]))
+
+    R = R[perm]
+    phi = phi[perm]
+    Z = Z[perm]
+    x = x[perm]
+    y = y[perm]
+    shell = shell[perm]
+    BR = BR[perm]
+    BP = BP[perm]
+    BZ = BZ[perm]
+    Bmag = Bmag[perm]
+
+    mask1 = shell .== 1
+    mask2 = shell .== 2
+
+    any(mask1) || error("Hall CSV has no shell == 1 rows.")
+    any(mask2) || error("Hall CSV has no shell == 2 rows.")
+
+    Zi = _sorted_unique(Z[mask1])
+    Zo = _sorted_unique(Z[mask2])
+    phi_i = _sorted_unique(phi[mask1])
+    phi_o = _sorted_unique(phi[mask2])
+
+    nzi = length(Zi)
+    nzo = length(Zo)
+
+    expected1 = length(phi_i) * nzi
+    expected2 = length(phi_o) * nzo
+
+    count(mask1) == expected1 || error(
+        "Shell 1 CSV grid is not rectangular: count=$(count(mask1)), expected=$expected1"
+    )
+
+    count(mask2) == expected2 || error(
+        "Shell 2 CSV grid is not rectangular: count=$(count(mask2)), expected=$expected2"
+    )
+
+    R_inner = mean(R[mask1])
+    R_outer = mean(R[mask2])
+
+    println("\nLoaded precomputed Hall CSV for $label:")
+    println("  file = $path")
+    println("  probes = $N")
+    @printf("  shell 1: nphi=%d, nz=%d, R≈%.3f mm\n",
+            length(phi_i), nzi, R_inner * 1e3)
+    @printf("  shell 2: nphi=%d, nz=%d, R≈%.3f mm\n",
+            length(phi_o), nzo, R_outer * 1e3)
+
+    return (
+        label=label,
+        R=R,
+        phi=phi,
+        Z=Z,
+        x=x,
+        y=y,
+        shell=shell,
+        B_R=BR,
+        B_phi=BP,
+        B_Z=BZ,
+        B_mag=Bmag,
+        Zi=Zi,
+        Zo=Zo,
+        phi_i=phi_i,
+        phi_o=phi_o,
+        nzi=nzi,
+        nzo=nzo,
+        R_inner=R_inner,
+        R_outer=R_outer,
+    )
 end
 
 # ═══════════════════════════════════════════════════════════════
-# Magnetic Z/tilt: n=1 sinusoid of B_R zero-crossings
+# Magnetic Z and tilt from B_R zero crossings
 # ═══════════════════════════════════════════════════════════════
 
 function magnetic_z_tilt(h, phys_ref; shell=1, verbose=true)
@@ -543,6 +685,7 @@ function magnetic_z_tilt(h, phys_ref; shell=1, verbose=true)
         Z0, Bc, Cs = M \ zc[valid]
 
         fit = M * [Z0, Bc, Cs]
+
         amp = hypot(Bc, Cs)
         rms = sqrt(mean((zc[valid] .- fit).^2))
 
@@ -551,7 +694,7 @@ function magnetic_z_tilt(h, phys_ref; shell=1, verbose=true)
         tmag = atand(amp, Rcal)
 
         if verbose
-            println("\nB_R zero-crossing sinusoid, shell $shell:")
+            println("\nB_R zero-crossing sinusoid, $(h.label), shell $shell:")
             @printf("  valid = %d/%d, Z0 = %.6f mm, tilt_x = %.6f deg, tilt_y = %.6f deg\n",
                     count(valid), nφ, Z0 * 1e3, tx, ty)
         end
@@ -580,7 +723,7 @@ function magnetic_z_tilt(h, phys_ref; shell=1, verbose=true)
     Z0 = isempty(c) ? NaN : c[argmin(abs.(c .- zguess))]
 
     if verbose
-        println("\nB_R zero-crossing fallback, shell $shell:")
+        println("\nB_R zero-crossing fallback, $(h.label), shell $shell:")
         if isnan(Z0)
             @printf("  valid = %d/%d, Z0 = NaN\n", count(valid), nφ)
         else
@@ -608,7 +751,7 @@ function magnetic_z_tilt(h, phys_ref; shell=1, verbose=true)
 end
 
 # ═══════════════════════════════════════════════════════════════
-# Magnetic X/Y: local B_phi minimization
+# Magnetic X/Y from local B_phi minimization
 # ═══════════════════════════════════════════════════════════════
 
 function B_cartesian(h)
@@ -700,7 +843,7 @@ function magnetic_xy_minimize(h, phys_ref, zt; shell=1, verbose=true)
     end
 
     if verbose
-        println("\nLocal B_phi minimization, shell $shell:")
+        println("\nLocal B_phi minimization, $(h.label), shell $shell:")
         @printf("  x0 = %.6f mm, y0 = %.6f mm, objective = %.6e\n",
                 x * 1e3, y * 1e3, best)
     end
@@ -755,11 +898,12 @@ function magnetic_xy_fourier(h; shell=1, verbose=true)
     )
 
     w = abs.(BR0[valid]).^2
+
     x0 = wmean(x[valid], w)
     y0 = wmean(y[valid], w)
 
     if verbose
-        println("\nFourier B_phi n=1 XY, shell $shell:")
+        println("\nFourier B_phi n=1 XY, $(h.label), shell $shell:")
         @printf("  x0 = %.6f mm, y0 = %.6f mm\n", x0 * 1e3, y0 * 1e3)
     end
 
@@ -801,7 +945,7 @@ function average_axes(a1, a2)
 end
 
 # ═══════════════════════════════════════════════════════════════
-# Analysis pipeline
+# Complete magnetic-axis analysis for one source coil / Hall dataset
 # ═══════════════════════════════════════════════════════════════
 
 function run_analysis_pipeline(h, phys_ref; verbose=false)
@@ -810,8 +954,71 @@ function run_analysis_pipeline(h, phys_ref; verbose=false)
 
     sin1 = magnetic_xy_minimize(h, phys_ref, zt1; shell=1, verbose=verbose)
     sin2 = magnetic_xy_minimize(h, phys_ref, zt2; shell=2, verbose=verbose)
+    sinavg = average_axes(sin1, sin2)
 
-    return average_axes(sin1, sin2), zt1, zt2, sin1, sin2
+    fxy1 = magnetic_xy_fourier(h; shell=1, verbose=verbose)
+    fxy2 = magnetic_xy_fourier(h; shell=2, verbose=verbose)
+
+    fou1 = combine_axis(fxy1, zt1)
+    fou2 = combine_axis(fxy2, zt2)
+    fouavg = average_axes(fou1, fou2)
+
+    return (
+        zt1=zt1,
+        zt2=zt2,
+        sin1=sin1,
+        sin2=sin2,
+        sinavg=sinavg,
+        fxy1=fxy1,
+        fxy2=fxy2,
+        fou1=fou1,
+        fou2=fou2,
+        fouavg=fouavg,
+    )
+end
+
+function analyze_source_coil(
+    label::String,
+    source_coils,
+    phys_baseline;
+    csv_path::Union{Nothing,AbstractString}=nothing,
+    hall_mode::Symbol=:internal,
+    hall_input_csv::Union{Nothing,AbstractString}=nothing,
+    verbose=true,
+)
+    h = if hall_mode == :internal
+        h_internal = make_hall_data(source_coils, phys_baseline; label=label)
+
+        csv_path !== nothing && export_hall_csv(h_internal, csv_path)
+
+        h_internal
+
+    elseif hall_mode == :csv
+        input_path = hall_input_csv === nothing ? csv_path : hall_input_csv
+        input_path === nothing && error("hall_mode=:csv requires hall_input_csv or csv_path.")
+
+        read_hall_csv(input_path; label=label)
+
+    else
+        error("Unknown hall_mode=$hall_mode. Use :internal or :csv.")
+    end
+
+    results = run_analysis_pipeline(h, phys_baseline; verbose=verbose)
+
+    return (
+        label=label,
+        h=h,
+        zt1=results.zt1,
+        zt2=results.zt2,
+        sin1=results.sin1,
+        sin2=results.sin2,
+        sinavg=results.sinavg,
+        fxy1=results.fxy1,
+        fxy2=results.fxy2,
+        fou1=results.fou1,
+        fou2=results.fou2,
+        fouavg=results.fouavg,
+    )
 end
 
 # ═══════════════════════════════════════════════════════════════
@@ -820,18 +1027,23 @@ end
 
 function bias_correct_axis(
     model_coils,
-    phys_baseline,
     h,
-    measured_sinavg,
     measured_zt1,
     measured_zt2,
     measured_sin1,
     measured_sin2;
     n_iter=BIAS_CORRECTION_N_ITER,
     damping=BIAS_CORRECTION_DAMPING,
+    label="",
 )
     println("\n" * "─"^70)
-    println("Forward-model bias correction using ASSUMED coil model  ($n_iter iterations, α=$damping)")
+
+    if isempty(label)
+        println("Forward-model bias correction using ASSUMED coil model  ($n_iter iterations, α=$damping)")
+    else
+        println("Forward-model bias correction for $label using ASSUMED coil model  ($n_iter iterations, α=$damping)")
+    end
+
     println("─"^70)
 
     meas_x  = meanfinite([measured_sin1.x0,    measured_sin2.x0])
@@ -840,9 +1052,9 @@ function bias_correct_axis(
     meas_tx = meanfinite([measured_zt1.tilt_x, measured_zt2.tilt_x])
     meas_ty = meanfinite([measured_zt1.tilt_y, measured_zt2.tilt_y])
 
-    if any(!isfinite, [meas_x, meas_y, meas_z, meas_tx, meas_ty])
+    if any(x -> !isfinite(x), [meas_x, meas_y, meas_z, meas_tx, meas_ty])
         @warn "bias_correct_axis: measured values contain NaN — skipping correction"
-        return measured_sinavg
+        return average_axes(measured_sin1, measured_sin2)
     end
 
     est_x  = meas_x
@@ -851,7 +1063,16 @@ function bias_correct_axis(
     est_tx = meas_tx
     est_ty = meas_ty
 
-    corrected_avg = measured_sinavg
+    corrected = (
+        shell=0,
+        R=NaN,
+        x0=meas_x,
+        y0=meas_y,
+        z0=meas_z,
+        tilt_x=meas_tx,
+        tilt_y=meas_ty,
+        tilt_mag=hypot(meas_tx, meas_ty),
+    )
 
     for iter in 1:n_iter
         synth_coils = place_coil_at_axis(
@@ -863,17 +1084,16 @@ function bias_correct_axis(
             est_ty,
         )
 
-        h_synth = recompute_hall_field(h, synth_coils)
-        phys_synth = physical_axis_from_coil_silent(synth_coils)
+        h_synth = recompute_hall_field(h, synth_coils; label="BIAS-MODEL-SYNTH")
+        geom_synth = axis_from_coil_silent(synth_coils)
 
-        _, szt1, szt2, ssin1, ssin2 =
-            run_analysis_pipeline(h_synth, phys_synth; verbose=false)
+        synth_results = run_analysis_pipeline(h_synth, geom_synth; verbose=false)
 
-        bias_x  = meanfinite([ssin1.x0,     ssin2.x0])    - phys_synth.x0
-        bias_y  = meanfinite([ssin1.y0,     ssin2.y0])    - phys_synth.y0
-        bias_z  = meanfinite([szt1.z0,      szt2.z0])     - phys_synth.z0
-        bias_tx = meanfinite([szt1.tilt_x,  szt2.tilt_x]) - phys_synth.tilt_x
-        bias_ty = meanfinite([szt1.tilt_y,  szt2.tilt_y]) - phys_synth.tilt_y
+        bias_x  = meanfinite([synth_results.sin1.x0,    synth_results.sin2.x0])    - geom_synth.x0
+        bias_y  = meanfinite([synth_results.sin1.y0,    synth_results.sin2.y0])    - geom_synth.y0
+        bias_z  = meanfinite([synth_results.zt1.z0,     synth_results.zt2.z0])     - geom_synth.z0
+        bias_tx = meanfinite([synth_results.zt1.tilt_x, synth_results.zt2.tilt_x]) - geom_synth.tilt_x
+        bias_ty = meanfinite([synth_results.zt1.tilt_y, synth_results.zt2.tilt_y]) - geom_synth.tilt_y
 
         corr_x  = meas_x  - bias_x
         corr_y  = meas_y  - bias_y
@@ -886,7 +1106,7 @@ function bias_correct_axis(
         @printf("  iter %d | corrected: x=%+.4f mm   y=%+.4f mm   z=%+.4f mm   tx=%+.6f°   ty=%+.6f°\n",
                 iter, corr_x * 1e3, corr_y * 1e3, corr_z * 1e3, corr_tx, corr_ty)
 
-        corrected_avg = (
+        corrected = (
             shell=0,
             R=NaN,
             x0=corr_x,
@@ -909,25 +1129,23 @@ function bias_correct_axis(
 
     println("─"^70)
 
-    return corrected_avg
+    return corrected
 end
 
-# ═══════════════════════════════════════════════════════════════
-# Summary table
-# ═══════════════════════════════════════════════════════════════
+function print_axis_row(method, label, R, ref, a)
+    dx = (a.x0 - ref.x0) * 1e3
+    dy = (a.y0 - ref.y0) * 1e3
+    dz = (a.z0 - ref.z0) * 1e3
+    dtx = a.tilt_x - ref.tilt_x
+    dty = a.tilt_y - ref.tilt_y
 
-function print_axis_row(method, label, R, phys_baseline, a)
-    dx = (a.x0 - phys_baseline.x0) * 1e3
-    dy = (a.y0 - phys_baseline.y0) * 1e3
-    dz = (a.z0 - phys_baseline.z0) * 1e3
-    dtx = a.tilt_x - phys_baseline.tilt_x
-    dty = a.tilt_y - phys_baseline.tilt_y
+    Rmm = isfinite(R) ? R * 1e3 : NaN
 
     @printf(
-        "%-16s %-10s %9.1f %11.3f %11.3f %11.3f %10.5f %10.5f %11.3f %11.3f %11.3f %10.5f %10.5f\n",
+        "%-18s %-12s %9.1f %11.3f %11.3f %11.3f %10.5f %10.5f %11.3f %11.3f %11.3f %10.5f %10.5f\n",
         method,
         label,
-        R * 1e3,
+        Rmm,
         a.x0 * 1e3,
         a.y0 * 1e3,
         a.z0 * 1e3,
@@ -941,27 +1159,14 @@ function print_axis_row(method, label, R, phys_baseline, a)
     )
 end
 
-function print_summary(
-    phys_baseline,
-    field_geom,
-    sin1,
-    sin2,
-    sinavg,
-    fou1,
-    fou2,
-    fouavg,
-    zt1,
-    zt2,
-    corrected,
-)
-    println("\n" * "═"^160)
-    println("PHYSICAL BASELINE VS FIELD-GENERATED MAGNETIC AXES")
-    println("═"^160)
-    println("Columns: x/y/z in mm, tilts in deg, deltas = row - physical baseline")
-    println("─"^160)
+function print_detailed_field_summary(phys_geom, field_geom, field_analysis, field_corrected)
+    println("\n" * "═"^165)
+    println("DETAILED FIELD-COIL ANALYSIS")
+    println("Deltas in this table are relative to physical baseline geometry.")
+    println("═"^165)
 
     @printf(
-        "%-16s %-10s %9s %11s %11s %11s %10s %10s %11s %11s %11s %10s %10s\n",
+        "%-18s %-12s %9s %11s %11s %11s %10s %10s %11s %11s %11s %10s %10s\n",
         "method",
         "radius",
         "R[mm]",
@@ -977,67 +1182,96 @@ function print_summary(
         "Δty",
     )
 
-    println("─"^160)
+    println("─"^165)
 
-    print_axis_row("physical-base", "-", phys_baseline.Rfit, phys_baseline, phys_baseline)
-    print_axis_row("field-geom", "-", field_geom.Rfit, phys_baseline, field_geom)
+    print_axis_row("physical-base", "-", phys_geom.Rfit, phys_geom, phys_geom)
+    print_axis_row("field-geom", "-", field_geom.Rfit, phys_geom, field_geom)
 
-    println("─"^160)
+    println("─"^165)
 
-    print_axis_row("sinusoid", "R1", sin1.R, phys_baseline, sin1)
-    print_axis_row("sinusoid", "R2", sin2.R, phys_baseline, sin2)
-    print_axis_row("sinusoid", "average", NaN, phys_baseline, sinavg)
+    print_axis_row("sinusoid/local", "R1", field_analysis.sin1.R, phys_geom, field_analysis.sin1)
+    print_axis_row("sinusoid/local", "R2", field_analysis.sin2.R, phys_geom, field_analysis.sin2)
+    print_axis_row("sinusoid/local", "average", NaN, phys_geom, field_analysis.sinavg)
 
-    println("─"^160)
+    println("─"^165)
 
-    print_axis_row("fourier", "R1", fou1.R, phys_baseline, fou1)
-    print_axis_row("fourier", "R2", fou2.R, phys_baseline, fou2)
-    print_axis_row("fourier", "average", NaN, phys_baseline, fouavg)
+    print_axis_row("fourier", "R1", field_analysis.fou1.R, phys_geom, field_analysis.fou1)
+    print_axis_row("fourier", "R2", field_analysis.fou2.R, phys_geom, field_analysis.fou2)
+    print_axis_row("fourier", "average", NaN, phys_geom, field_analysis.fouavg)
 
-    println("─"^160)
+    println("─"^165)
 
-    print_axis_row("bias-corrected", "average", NaN, phys_baseline, corrected)
+    print_axis_row("bias-corrected", "field", NaN, phys_geom, field_corrected)
 
-    println("─"^160)
+    println("─"^165)
 
-    rms1_str = isfinite(zt1.rms) ? @sprintf("%.3f", zt1.rms * 1e3) : "NaN"
-    rms2_str = isfinite(zt2.rms) ? @sprintf("%.3f", zt2.rms * 1e3) : "NaN"
+    rms1_str = isfinite(field_analysis.zt1.rms) ? @sprintf("%.3f", field_analysis.zt1.rms * 1e3) : "NaN"
+    rms2_str = isfinite(field_analysis.zt2.rms) ? @sprintf("%.3f", field_analysis.zt2.rms * 1e3) : "NaN"
+
+    @printf("%-18s %-12s %9s %11s %11s %11s\n", "BR RMS", "R1", "", "", "", rms1_str)
+    @printf("%-18s %-12s %9s %11s %11s %11s\n", "BR RMS", "R2", "", "", "", rms2_str)
+
+    println("═"^165)
+end
+
+# ═══════════════════════════════════════════════════════════════
+# Final one-line output table
+# ═══════════════════════════════════════════════════════════════
+
+function print_final_field_bias_one_line(
+    physical_corrected,
+    field_corrected,
+)
+    # One line = field-coil field bias-corrected result.
+    # Deltas are relative to physical-coil field bias-corrected result.
+    ref = physical_corrected
+    a = field_corrected
+
+    dx = (a.x0 - ref.x0) * 1e3
+    dy = (a.y0 - ref.y0) * 1e3
+    dz = (a.z0 - ref.z0) * 1e3
+    dtx = a.tilt_x - ref.tilt_x
+    dty = a.tilt_y - ref.tilt_y
+
+    println("\n" * "═"^145)
+    println("FINAL FIELD BIAS-CORRECTED AXIS")
+    println("One-line table. Deltas are relative to physical-coil field bias-corrected axis.")
+    println("Positions in mm, tilts in deg.")
+    println("═"^145)
 
     @printf(
-        "%-16s %-10s %9s %11s %11s %11s %10s %10s %11s %11s %11s %10s %10s\n",
-        "BR RMS",
-        "R1",
-        "",
-        "",
-        "",
-        rms1_str,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
+        "%-36s %12s %12s %12s %12s %12s %12s %12s %12s %12s %12s\n",
+        "row",
+        "x",
+        "y",
+        "z",
+        "tilt_x",
+        "tilt_y",
+        "Δx_phys",
+        "Δy_phys",
+        "Δz_phys",
+        "Δtx_phys",
+        "Δty_phys",
     )
+
+    println("─"^145)
 
     @printf(
-        "%-16s %-10s %9s %11s %11s %11s %10s %10s %11s %11s %11s %10s %10s\n",
-        "BR RMS",
-        "R2",
-        "",
-        "",
-        "",
-        rms2_str,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
+        "%-36s %12.4f %12.4f %12.4f %12.6f %12.6f %12.4f %12.4f %12.4f %12.6f %12.6f\n",
+        "field bias corrected",
+        a.x0 * 1e3,
+        a.y0 * 1e3,
+        a.z0 * 1e3,
+        a.tilt_x,
+        a.tilt_y,
+        dx,
+        dy,
+        dz,
+        dtx,
+        dty,
     )
 
-    println("═"^160)
+    println("═"^145)
 end
 
 # ═══════════════════════════════════════════════════════════════
@@ -1084,20 +1318,20 @@ end
 
 function plot_axis(
     h,
-    phys_baseline,
+    phys_geom,
     field_geom,
-    sinavg,
-    fouavg,
-    corrected,
+    physical_mag,
+    field_mag,
+    field_corrected,
     physical_coils,
     field_coils,
 )
     zmin = isnan(AXIS_PLOT_ZMIN_M) ?
-        minimum([minimum(h.Z), phys_baseline.Zmin, field_geom.Zmin]) :
+        minimum([minimum(h.Z), phys_geom.Zmin, field_geom.Zmin]) :
         AXIS_PLOT_ZMIN_M
 
     zmax = isnan(AXIS_PLOT_ZMAX_M) ?
-        maximum([maximum(h.Z), phys_baseline.Zmax, field_geom.Zmax]) :
+        maximum([maximum(h.Z), phys_geom.Zmax, field_geom.Zmax]) :
         AXIS_PLOT_ZMAX_M
 
     z = collect(range(zmin, zmax, length=200))
@@ -1109,7 +1343,7 @@ function plot_axis(
         xlabel="X [mm]",
         ylabel="Y [mm]",
         zlabel="Z [mm]",
-        title="Physical Baseline vs Field-Generated Magnetic Axis",
+        title="Physical, Field, and Bias-Corrected Magnetic Axes",
         aspect=:data,
     )
 
@@ -1141,18 +1375,18 @@ function plot_axis(
             h.x .* 1e3,
             h.y .* 1e3,
             h.Z .* 1e3;
-            color=(:gray, 0.9),
+            color=(:gray, 0.85),
             markersize=4,
             label="Hall probes",
         )
     end
 
     xp, yp, zp = axis_line(
-        phys_baseline.x0,
-        phys_baseline.y0,
-        phys_baseline.z0,
-        phys_baseline.tilt_x,
-        phys_baseline.tilt_y,
+        phys_geom.x0,
+        phys_geom.y0,
+        phys_geom.z0,
+        phys_geom.tilt_x,
+        phys_geom.tilt_y,
         z,
     )
 
@@ -1165,149 +1399,62 @@ function plot_axis(
         z,
     )
 
-    xs, ys, zs = axis_line(
-        sinavg.x0,
-        sinavg.y0,
-        sinavg.z0,
-        sinavg.tilt_x,
-        sinavg.tilt_y,
+    xpm, ypm, zpm = axis_line(
+        physical_mag.x0,
+        physical_mag.y0,
+        physical_mag.z0,
+        physical_mag.tilt_x,
+        physical_mag.tilt_y,
         z,
     )
 
-    xf, yf, zf = axis_line(
-        fouavg.x0,
-        fouavg.y0,
-        fouavg.z0,
-        fouavg.tilt_x,
-        fouavg.tilt_y,
+    xfm, yfm, zfm = axis_line(
+        field_mag.x0,
+        field_mag.y0,
+        field_mag.z0,
+        field_mag.tilt_x,
+        field_mag.tilt_y,
         z,
     )
 
-    xc, yc, zc_l = axis_line(
-        corrected.x0,
-        corrected.y0,
-        corrected.z0,
-        corrected.tilt_x,
-        corrected.tilt_y,
+    xc, yc, zc = axis_line(
+        field_corrected.x0,
+        field_corrected.y0,
+        field_corrected.z0,
+        field_corrected.tilt_x,
+        field_corrected.tilt_y,
         z,
     )
 
-    lines!(
-        ax,
-        xp .* 1e3,
-        yp .* 1e3,
-        zp .* 1e3;
-        color=:black,
-        linewidth=6,
-        linestyle=:dash,
-        label="physical baseline axis",
-    )
+    lines!(ax, xp .* 1e3, yp .* 1e3, zp .* 1e3;
+           color=:black, linewidth=6, linestyle=:dash, label="physical-base geom")
 
-    scatter!(
-        ax,
-        [phys_baseline.x0 * 1e3],
-        [phys_baseline.y0 * 1e3],
-        [phys_baseline.z0 * 1e3];
-        color=:black,
-        marker=:utriangle,
-        markersize=20,
-        label="physical baseline center",
-    )
+    lines!(ax, xg .* 1e3, yg .* 1e3, zg .* 1e3;
+           color=:royalblue, linewidth=4, linestyle=:dashdot, label="field-coil geom")
 
-    lines!(
-        ax,
-        xg .* 1e3,
-        yg .* 1e3,
-        zg .* 1e3;
-        color=:royalblue,
-        linewidth=4,
-        linestyle=:dashdot,
-        label="field coil geometric axis",
-    )
+    lines!(ax, xpm .* 1e3, ypm .* 1e3, zpm .* 1e3;
+           color=:purple, linewidth=4, label="physical-coil field magnetic")
 
-    scatter!(
-        ax,
-        [field_geom.x0 * 1e3],
-        [field_geom.y0 * 1e3],
-        [field_geom.z0 * 1e3];
-        color=:royalblue,
-        marker=:rect,
-        markersize=16,
-        label="field coil geom center",
-    )
+    lines!(ax, xfm .* 1e3, yfm .* 1e3, zfm .* 1e3;
+           color=:crimson, linewidth=5, label="field-coil field magnetic")
 
-    lines!(
-        ax,
-        xs .* 1e3,
-        ys .* 1e3,
-        zs .* 1e3;
-        color=:crimson,
-        linewidth=4,
-        label="sinusoid/local-Bφ",
-    )
+    lines!(ax, xc .* 1e3, yc .* 1e3, zc .* 1e3;
+           color=:darkorange, linewidth=5, label="field bias-corrected")
 
-    scatter!(
-        ax,
-        [sinavg.x0 * 1e3],
-        [sinavg.y0 * 1e3],
-        [sinavg.z0 * 1e3];
-        color=:crimson,
-        markersize=16,
-        label="sinusoid center",
-    )
+    scatter!(ax, [phys_geom.x0 * 1e3], [phys_geom.y0 * 1e3], [phys_geom.z0 * 1e3];
+             color=:black, marker=:utriangle, markersize=20, label="physical-base center")
 
-    lines!(
-        ax,
-        xf .* 1e3,
-        yf .* 1e3,
-        zf .* 1e3;
-        color=:forestgreen,
-        linewidth=4,
-        label="Fourier n=1",
-    )
+    scatter!(ax, [physical_mag.x0 * 1e3], [physical_mag.y0 * 1e3], [physical_mag.z0 * 1e3];
+             color=:purple, marker=:circle, markersize=16, label="physical-field center")
 
-    scatter!(
-        ax,
-        [fouavg.x0 * 1e3],
-        [fouavg.y0 * 1e3],
-        [fouavg.z0 * 1e3];
-        color=:forestgreen,
-        marker=:diamond,
-        markersize=16,
-        label="Fourier center",
-    )
+    scatter!(ax, [field_mag.x0 * 1e3], [field_mag.y0 * 1e3], [field_mag.z0 * 1e3];
+             color=:crimson, marker=:diamond, markersize=18, label="field-field center")
 
-    lines!(
-        ax,
-        xc .* 1e3,
-        yc .* 1e3,
-        zc_l .* 1e3;
-        color=:darkorange,
-        linewidth=6,
-        label="bias-corrected",
-    )
+    scatter!(ax, [field_corrected.x0 * 1e3], [field_corrected.y0 * 1e3], [field_corrected.z0 * 1e3];
+             color=:darkorange, marker=:star5, markersize=22, label="field bias-corr center")
 
-    scatter!(
-        ax,
-        [corrected.x0 * 1e3],
-        [corrected.y0 * 1e3],
-        [corrected.z0 * 1e3];
-        color=:darkorange,
-        marker=:star5,
-        markersize=22,
-        label="bias-corr center",
-    )
-
-    lines!(
-        ax,
-        zeros(length(z)),
-        zeros(length(z)),
-        z .* 1e3;
-        color=(:black, 0.3),
-        linestyle=:dot,
-        linewidth=2,
-        label="machine Z",
-    )
+    lines!(ax, zeros(length(z)), zeros(length(z)), z .* 1e3;
+           color=(:black, 0.3), linestyle=:dot, linewidth=2, label="machine Z")
 
     axislegend(ax; position=:lt)
 
@@ -1319,11 +1466,23 @@ end
 # ═══════════════════════════════════════════════════════════════
 
 function main()
-    println("\n")
+    println("\nPhysical/Field Coil Magnetic Axis Comparison")
     println("Physical baseline coil file:")
     println("  $PHYSICAL_COIL_FILE")
     println("Field calculation coil file:")
     println("  $FIELD_COIL_FILE")
+
+    println("\nHall input modes:")
+    println("  PHYSICAL_HALL_MODE = $PHYSICAL_HALL_MODE")
+    println("  FIELD_HALL_MODE    = $FIELD_HALL_MODE")
+
+    if PHYSICAL_HALL_MODE == :csv
+        println("  PHYSICAL_HALL_INPUT_CSV = $PHYSICAL_HALL_INPUT_CSV")
+    end
+
+    if FIELD_HALL_MODE == :csv
+        println("  FIELD_HALL_INPUT_CSV    = $FIELD_HALL_INPUT_CSV")
+    end
 
     # 1. Nominal physical baseline.
     physical_coils = load_coils(
@@ -1332,89 +1491,111 @@ function main()
         current_A=COIL_CURRENT_A,
     )
 
-    # 2. Actual instantiated coil used to generate the magnetic field.
-    #    In synthetic tests this is the "truth" file.
-    true_field_coils = load_coils(
+    # 2. Actual instantiated coil used to generate or compare field-coil field.
+    # If FIELD_HALL_MODE=:csv, this is still used for field geometry and plotting,
+    # while magnetic field values come from FIELD_HALL_INPUT_CSV.
+    field_coils = load_coils(
         FIELD_COIL_FILE;
-        label="TRUE FIELD CALCULATION",
+        label="FIELD CALCULATION",
         current_A=COIL_CURRENT_A,
     )
 
     # 3. Bias-correction model.
-    #    If you want the correction to work with only the geometry you think you have,
-    #    this should be the physical baseline, not the true field coil.
+    # Realistic mode: only the physical baseline model is assumed available.
     bias_model_coils = load_coils(
         PHYSICAL_COIL_FILE;
         label="BIAS-CORRECTION MODEL",
         current_A=COIL_CURRENT_A,
     )
 
-    phys_baseline = physical_axis_from_coil(
+    # Geometric axes.
+    phys_geom = axis_from_coil(
         physical_coils;
-        label="Physical baseline axis from PHYSICAL coil geometry",
+        label="Physical baseline geometric axis",
     )
 
-    field_geom = physical_axis_from_coil(
-        true_field_coils;
-        label="True field-coil geometric axis from FIELD coil geometry",
+    field_geom = axis_from_coil(
+        field_coils;
+        label="Field-coil geometric axis",
     )
 
-    # Hall data is generated by the actual field-producing coil.
-    h = make_hall_data(true_field_coils, phys_baseline)
-    export_hall_csv(h)
+    # Magnetic axes from physical-coil field.
+    physical_analysis = analyze_source_coil(
+        "PHYSICAL-FIELD",
+        physical_coils,
+        phys_geom;
+        csv_path=HALL_CSV_PHYSICAL,
+        hall_mode=PHYSICAL_HALL_MODE,
+        hall_input_csv=PHYSICAL_HALL_INPUT_CSV,
+        verbose=true,
+    )
 
-    # Magnetic analysis uses the physical baseline only as reference/initial guess.
-    zt1 = magnetic_z_tilt(h, phys_baseline; shell=1)
-    zt2 = magnetic_z_tilt(h, phys_baseline; shell=2)
+    # Magnetic axes from field-coil field.
+    #
+    # FIELD_HALL_MODE=:internal:
+    #   uses field_coils to compute Hall data and writes HALL_CSV_FIELD.
+    #
+    # FIELD_HALL_MODE=:csv:
+    #   reads FIELD_HALL_INPUT_CSV and does not recompute the field Hall data.
+    field_analysis = analyze_source_coil(
+        "FIELD-FIELD",
+        field_coils,
+        phys_geom;
+        csv_path=HALL_CSV_FIELD,
+        hall_mode=FIELD_HALL_MODE,
+        hall_input_csv=FIELD_HALL_INPUT_CSV,
+        verbose=true,
+    )
 
-    sin1 = magnetic_xy_minimize(h, phys_baseline, zt1; shell=1)
-    sin2 = magnetic_xy_minimize(h, phys_baseline, zt2; shell=2)
-    sinavg = average_axes(sin1, sin2)
-
-    fxy1 = magnetic_xy_fourier(h; shell=1)
-    fxy2 = magnetic_xy_fourier(h; shell=2)
-
-    fou1 = combine_axis(fxy1, zt1)
-    fou2 = combine_axis(fxy2, zt2)
-    fouavg = average_axes(fou1, fou2)
-
-    # Bias correction uses the assumed model geometry.
-    # This is intentionally NOT true_field_coils if you want to test unknown geometry.
-    corrected = bias_correct_axis(
+    # Bias-correct the physical-coil field result.
+    physical_corrected = bias_correct_axis(
         bias_model_coils,
-        phys_baseline,
-        h,
-        sinavg,
-        zt1,
-        zt2,
-        sin1,
-        sin2,
+        physical_analysis.h,
+        physical_analysis.zt1,
+        physical_analysis.zt2,
+        physical_analysis.sin1,
+        physical_analysis.sin2;
+        label="PHYSICAL-FIELD",
     )
 
-    print_summary(
-        phys_baseline,
-        field_geom,
-        sin1,
-        sin2,
-        sinavg,
-        fou1,
-        fou2,
-        fouavg,
-        zt1,
-        zt2,
-        corrected,
+    # Bias-correct the field-coil field result.
+    field_corrected = bias_correct_axis(
+        bias_model_coils,
+        field_analysis.h,
+        field_analysis.zt1,
+        field_analysis.zt2,
+        field_analysis.sin1,
+        field_analysis.sin2;
+        label="FIELD-FIELD",
+    )
+
+    if ENABLE_DETAILED_FIELD_SUMMARY
+        print_detailed_field_summary(
+            phys_geom,
+            field_geom,
+            field_analysis,
+            field_corrected,
+        )
+    end
+
+    # Final requested one-line output table.
+    # Deltas are relative to physical-coil field bias-corrected.
+    # This is deliberately before plot display/readline so it always appears.
+    print_final_field_bias_one_line(
+        physical_corrected,
+        field_corrected,
     )
 
     if ENABLE_AXIS_PLOT
         fig = plot_axis(
-            h,
-            phys_baseline,
+            field_analysis.h,
+            phys_geom,
             field_geom,
-            sinavg,
-            fouavg,
-            corrected,
+            physical_analysis.sinavg,
+            field_analysis.sinavg,
+            field_corrected,
             physical_coils,
-            true_field_coils,
+            field_coils,
         )
 
         save(AXIS_PLOT_FILE, fig)
