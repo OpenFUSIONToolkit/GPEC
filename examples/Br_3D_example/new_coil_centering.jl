@@ -724,21 +724,16 @@ end
 function run_coil_axis_comparison(;
     run_name                    = "sparc_pf1u_357_test",
     script_dir                  = @__DIR__,
-
-    # NEW: explicit dual-coil inputs (optional override of file resolution)
-    physical_coil_file          = nothing,
+    physical_coil_file          = nothing,   # defaults to "<script_dir>/<basename>.dat"
     field_coil_file             = nothing,
-
     coil_current_a              = 100.0,
-
-    # Hall modes (now symmetric)
-    physical_hall_mode          = :internal,
-    physical_hall_input_csv     = nothing,
-
+    hall_csv_field              = nothing,
+    hall_csv_physical           = nothing,
+    axis_plot_file              = nothing,
     field_hall_mode             = :internal,
     field_hall_input_csv        = nothing,
-
-    # Hall geometry
+    physical_hall_mode          = :internal,
+    physical_hall_input_csv     = nothing,
     hall_r_inner_frac           = 0.40,
     hall_r_outer_frac           = 0.50,
     hall_n_phi_inner            = 24,
@@ -747,18 +742,14 @@ function run_coil_axis_comparison(;
     hall_n_z_outer              = 10,
     hall_z_halfspan_inner_m     = 0.60,
     hall_z_halfspan_outer_m     = 0.40,
-
-    # Analysis knobs
     tilt_calibration_radius_m   = NaN,
     br_zero_noise_frac          = 0.0,
     br_min_frac_for_fourier_xy  = 0.10,
     bphi_sign                   = 1.0,
     xy_min_step0_m              = 0.050,
     xy_min_tol_m                = 1e-8,
-
     bias_correction_n_iter      = 4,
     bias_correction_damping     = 0.6,
-
     enable_axis_plot            = true,
     display_axis_plot           = true,
     show_physical_coils         = true,
@@ -768,182 +759,116 @@ function run_coil_axis_comparison(;
     axis_plot_zmax_m            = NaN,
     enable_detailed_field_summary = true,
 )
-
-    # ------------------------------------------------------------
-    # Resolve coil files
-    # ------------------------------------------------------------
-    phys_file = something(physical_coil_file,
+    # Resolve defaults that depend on run_name / script_dir
+    basename_phys = something(physical_coil_file,
         joinpath(script_dir, "sparc_pf1u.dat"))
-
-    field_file = something(field_coil_file,
+    basename_field = something(field_coil_file,
         joinpath(script_dir, "$(run_name).dat"))
-
-    # ------------------------------------------------------------
-    # Hall CSV defaults
-    # ------------------------------------------------------------
-    hall_csv_phys = joinpath(script_dir, "hall_probe_$(run_name)_PHYSICAL.csv")
-    hall_csv_field = joinpath(script_dir, "hall_probe_$(run_name)_FIELD.csv")
-
-    physical_hall_input_csv = something(physical_hall_input_csv, hall_csv_phys)
+    hall_csv_field    = something(hall_csv_field,
+        joinpath(script_dir, "hall_probe_$(run_name)_FIELD_coil.csv"))
+    hall_csv_physical = something(hall_csv_physical,
+        joinpath(script_dir, "hall_probe_$(run_name)_PHYSICAL_coil.csv"))
+    axis_plot_file    = something(axis_plot_file,
+        joinpath(script_dir, "axis_comparison_$(run_name)_field_vs_physical.png"))
     field_hall_input_csv    = something(field_hall_input_csv, hall_csv_field)
+    physical_hall_input_csv = something(physical_hall_input_csv, hall_csv_physical)
 
-    # ------------------------------------------------------------
-    # Load coils
-    # ------------------------------------------------------------
-    physical_coils = load_coils(phys_file; label="PHYSICAL", current_A=coil_current_a)
-    field_coils    = load_coils(field_file; label="FIELD", current_A=coil_current_a)
-
-    # IMPORTANT: independent geometries
-    phys_geom  = axis_from_coil(physical_coils; label="Physical geom")
-    field_geom = axis_from_coil(field_coils;    label="Field geom")
+    println("\nPhysical/Field Coil Magnetic Axis Comparison")
+    println("Physical baseline coil file:\n  $basename_phys")
+    println("Field calculation coil file:\n  $basename_field")
+    println("\nHall input modes:")
+    println("  PHYSICAL_HALL_MODE = $physical_hall_mode")
+    println("  FIELD_HALL_MODE    = $field_hall_mode")
+    physical_hall_mode == :csv && println("  PHYSICAL_HALL_INPUT_CSV = $physical_hall_input_csv")
+    field_hall_mode    == :csv && println("  FIELD_HALL_INPUT_CSV    = $field_hall_input_csv")
 
     hall_kwargs = (
-        hall_r_inner_frac=hall_r_inner_frac,
-        hall_r_outer_frac=hall_r_outer_frac,
-        hall_n_phi_inner=hall_n_phi_inner,
-        hall_n_z_inner=hall_n_z_inner,
-        hall_n_phi_outer=hall_n_phi_outer,
-        hall_n_z_outer=hall_n_z_outer,
+        hall_r_inner_frac=hall_r_inner_frac, hall_r_outer_frac=hall_r_outer_frac,
+        hall_n_phi_inner=hall_n_phi_inner, hall_n_z_inner=hall_n_z_inner,
+        hall_n_phi_outer=hall_n_phi_outer, hall_n_z_outer=hall_n_z_outer,
         hall_z_halfspan_inner_m=hall_z_halfspan_inner_m,
         hall_z_halfspan_outer_m=hall_z_halfspan_outer_m,
     )
-
     analysis_kwargs = (
         br_zero_noise_frac=br_zero_noise_frac,
         tilt_calibration_radius_m=tilt_calibration_radius_m,
-        xy_min_step0_m=xy_min_step0_m,
-        xy_min_tol_m=xy_min_tol_m,
+        xy_min_step0_m=xy_min_step0_m, xy_min_tol_m=xy_min_tol_m,
         br_min_frac_for_fourier_xy=br_min_frac_for_fourier_xy,
         bphi_sign=bphi_sign,
     )
 
-    # ------------------------------------------------------------
-    # PHYSICAL branch
-    # ------------------------------------------------------------
-    physical_analysis = analyze_source_coil(
-        "PHYSICAL",
-        physical_coils,
-        phys_geom;
-        csv_path=hall_csv_phys,
-        hall_mode=physical_hall_mode,
-        hall_input_csv=physical_hall_input_csv,
-        verbose=true,
-        hall_kwargs...,
-        analysis_kwargs...
-    )
+    physical_coils   = load_coils(basename_phys;  label="PHYSICAL BASELINE",    current_A=coil_current_a)
+    field_coils      = load_coils(basename_field;  label="FIELD CALCULATION",    current_A=coil_current_a)
+    bias_model_coils = load_coils(basename_phys;   label="BIAS-CORRECTION MODEL", current_A=coil_current_a)
 
-    # ------------------------------------------------------------
-    # FIELD branch
-    # ------------------------------------------------------------
-    field_analysis = analyze_source_coil(
-        "FIELD",
-        field_coils,
-        field_geom;
-        csv_path=hall_csv_field,
-        hall_mode=field_hall_mode,
-        hall_input_csv=field_hall_input_csv,
-        verbose=true,
-        hall_kwargs...,
-        analysis_kwargs...
-    )
+    phys_geom  = axis_from_coil(physical_coils; label="Physical baseline geometric axis")
+    field_geom = axis_from_coil(field_coils;    label="Field-coil geometric axis")
 
-    # ------------------------------------------------------------
-    # Bias model (uses physical coil basis)
-    # ------------------------------------------------------------
-    bias_model_coils = physical_coils
+    physical_analysis = analyze_source_coil("PHYSICAL-FIELD", physical_coils, phys_geom;
+        csv_path=hall_csv_physical, hall_mode=physical_hall_mode,
+        hall_input_csv=physical_hall_input_csv, verbose=true,
+        hall_kwargs..., analysis_kwargs...)
+
+    field_analysis = analyze_source_coil("FIELD-FIELD", field_coils, phys_geom;
+        csv_path=hall_csv_field, hall_mode=field_hall_mode,
+        hall_input_csv=field_hall_input_csv, verbose=true,
+        hall_kwargs..., analysis_kwargs...)
 
     physical_corrected = bias_correct_axis(
-        bias_model_coils,
-        physical_analysis.h,
-        physical_analysis.zt1,
-        physical_analysis.zt2,
-        physical_analysis.sin1,
-        physical_analysis.sin2;
-        label="PHYSICAL",
-        n_iter=bias_correction_n_iter,
-        damping=bias_correction_damping,
-        analysis_kwargs...
-    )
+        bias_model_coils, physical_analysis.h,
+        physical_analysis.zt1, physical_analysis.zt2,
+        physical_analysis.sin1, physical_analysis.sin2;
+        label="PHYSICAL-FIELD",
+        n_iter=bias_correction_n_iter, damping=bias_correction_damping,
+        analysis_kwargs...)
 
     field_corrected = bias_correct_axis(
-        bias_model_coils,
-        field_analysis.h,
-        field_analysis.zt1,
-        field_analysis.zt2,
-        field_analysis.sin1,
-        field_analysis.sin2;
-        label="FIELD",
-        n_iter=bias_correction_n_iter,
-        damping=bias_correction_damping,
-        analysis_kwargs...
-    )
+        bias_model_coils, field_analysis.h,
+        field_analysis.zt1, field_analysis.zt2,
+        field_analysis.sin1, field_analysis.sin2;
+        label="FIELD-FIELD",
+        n_iter=bias_correction_n_iter, damping=bias_correction_damping,
+        analysis_kwargs...)
 
-    # ------------------------------------------------------------
-    # Summary + plot
-    # ------------------------------------------------------------
     enable_detailed_field_summary && print_detailed_field_summary(
-        phys_geom, field_geom, field_analysis, field_corrected
-    )
+        phys_geom, field_geom, field_analysis, field_corrected)
 
     print_final_field_bias_one_line(physical_corrected, field_corrected)
 
     fig = nothing
     if enable_axis_plot
-        fig = plot_axis(
-            field_analysis.h,
-            phys_geom,
-            field_geom,
-            physical_analysis.sinavg,
-            field_analysis.sinavg,
-            field_corrected,
-            physical_coils,
-            field_coils;
-            axis_plot_zmin_m=axis_plot_zmin_m,
-            axis_plot_zmax_m=axis_plot_zmax_m,
+        fig = plot_axis(field_analysis.h, phys_geom, field_geom,
+            physical_analysis.sinavg, field_analysis.sinavg,
+            field_corrected, physical_coils, field_coils;
+            axis_plot_zmin_m=axis_plot_zmin_m, axis_plot_zmax_m=axis_plot_zmax_m,
             show_physical_coils=show_physical_coils,
-            show_field_coils=show_field_coils,
-            show_hall_probes=show_hall_probes
-        )
+            show_field_coils=show_field_coils, show_hall_probes=show_hall_probes)
 
-        save(joinpath(script_dir, "axis_comparison_$(run_name).png"), fig)
+        save(axis_plot_file, fig)
+        println("\nSaved plot: $axis_plot_file")
 
         if display_axis_plot
             display(fig)
+            println("\nPress Enter to exit...")
             readline()
         end
     end
 
-    return (
-        phys_geom=phys_geom,
-        field_geom=field_geom,
-        physical_analysis=physical_analysis,
-        field_analysis=field_analysis,
-        physical_corrected=physical_corrected,
-        field_corrected=field_corrected,
-        fig=fig
-    )
+    println("\nDone.")
+    return (phys_geom=phys_geom, field_geom=field_geom,
+            physical_analysis=physical_analysis, field_analysis=field_analysis,
+            physical_corrected=physical_corrected, field_corrected=field_corrected,
+            fig=fig)
 end
 
 # ─── Run when executed directly (julia script.jl) ───────────────────────────
 if abspath(PROGRAM_FILE) == @__FILE__
-
     run_coil_axis_comparison(
-        run_name                  = "sparc_pf1u_357_35T",
-        script_dir               = @__DIR__,
-
-        coil_current_a           = 100.0,
-
-        # ─────────────────────────────────────────────────────────────
-        # TWO-COIL INPUT MODE
-        #   - physical coil  → geometry baseline (no perturbation)
-        #   - field coil     → shifted/tilted configuration
-        # ─────────────────────────────────────────────────────────────
-        physical_coil_file      =joinpath(@__DIR__, "sparc_pf1u.dat"),
-        field_coil_file         = joinpath(@__DIR__,"sparc_pf1u_357_35T.dat"),
-
-        # ─────────────────────────────────────────────────────────────
-        # Hall grid definition
-        # ─────────────────────────────────────────────────────────────
+        run_name                  = "sparc_pf1u_357_test",
+        script_dir                = @__DIR__,
+        coil_current_a            = 100.0,
+        field_hall_mode           = :internal,
+        physical_hall_mode        = :internal,
         hall_r_inner_frac         = 0.40,
         hall_r_outer_frac         = 0.50,
         hall_n_phi_inner          = 24,
@@ -952,38 +877,19 @@ if abspath(PROGRAM_FILE) == @__FILE__
         hall_n_z_outer            = 10,
         hall_z_halfspan_inner_m   = 0.60,
         hall_z_halfspan_outer_m   = 0.40,
-
-        # ─────────────────────────────────────────────────────────────
-        # Hall mode selection (use CSV for field coil)
-        # ─────────────────────────────────────────────────────────────
-        field_hall_mode           = :csv,
-        field_hall_input_csv      = joinpath(@__DIR__,"A_Hall_Test.csv"),
-        physical_hall_mode        = :internal,
-
-        # ─────────────────────────────────────────────────────────────
-        # Fitting / numerical controls
-        # ─────────────────────────────────────────────────────────────
         tilt_calibration_radius_m = NaN,
         br_zero_noise_frac        = 0.0,
         br_min_frac_for_fourier_xy= 0.10,
         bphi_sign                 = 1.0,
         xy_min_step0_m            = 0.050,
         xy_min_tol_m              = 1e-8,
-
-        # ─────────────────────────────────────────────────────────────
-        # Bias correction
-        # ─────────────────────────────────────────────────────────────
         bias_correction_n_iter    = 4,
         bias_correction_damping   = 0.6,
-
-        # ─────────────────────────────────────────────────────────────
-        # Output control
-        # ─────────────────────────────────────────────────────────────
-        enable_axis_plot              = true,
-        display_axis_plot             = true,
-        show_physical_coils           = true,
-        show_field_coils              = true,
-        show_hall_probes              = true,
+        enable_axis_plot          = true,
+        display_axis_plot         = true,
+        show_physical_coils       = true,
+        show_field_coils          = true,
+        show_hall_probes          = true,
         enable_detailed_field_summary = true,
     )
 end
