@@ -176,7 +176,7 @@ end
 function make_hall_data(source_coils, phys_baseline; label="FIELD",
         hall_r_inner_frac, hall_r_outer_frac,
         hall_n_phi_inner, hall_n_z_inner, hall_n_phi_outer, hall_n_z_outer,
-        hall_z_halfspan_inner_m, hall_z_halfspan_outer_m)
+        hall_z_halfspan_inner_m, hall_z_halfspan_outer_m,add_noise_frac)
 
     R_inner = hall_r_inner_frac * phys_baseline.Rmin
     R_outer = hall_r_outer_frac * phys_baseline.Rmax
@@ -205,6 +205,12 @@ function make_hall_data(source_coils, phys_baseline; label="FIELD",
     @printf("  R2 = %.3f mm, Z2=[%.3f, %.3f] mm\n", R_outer*1e3, first(Zo)*1e3, last(Zo)*1e3)
 
     compute_biot_savart_boundary!(BR, BP, BZ, R, φ, Z, source_coils)
+    if add_noise_frac > 0
+        sigma = add_noise_frac * maximum(sqrt.(BR.^2 .+ BP.^2 .+ BZ.^2))
+        BR .= BR .+ randn(N) * sigma
+        BP .= BP .+ randn(N) * sigma
+        BZ .= BZ .+ randn(N) * sigma
+    end
     Bmag = sqrt.(BR.^2 .+ BP.^2 .+ BZ.^2)
 
     return (label=label, R=R, phi=φ, Z=Z, x=R.*cos.(φ), y=R.*sin.(φ), shell=shell,
@@ -485,7 +491,7 @@ function analyze_source_coil(label, source_coils, phys_baseline;
         csv_path=nothing, hall_mode=:internal, hall_input_csv=nothing, verbose=true,
         hall_r_inner_frac, hall_r_outer_frac,
         hall_n_phi_inner, hall_n_z_inner, hall_n_phi_outer, hall_n_z_outer,
-        hall_z_halfspan_inner_m, hall_z_halfspan_outer_m,
+        hall_z_halfspan_inner_m, hall_z_halfspan_outer_m, add_noise_frac,
         br_zero_noise_frac=0.0, tilt_calibration_radius_m=NaN,
         xy_min_step0_m=0.050, xy_min_tol_m=1e-8,
         br_min_frac_for_fourier_xy=0.10, bphi_sign=1.0)
@@ -496,7 +502,7 @@ function analyze_source_coil(label, source_coils, phys_baseline;
             hall_n_phi_inner=hall_n_phi_inner, hall_n_z_inner=hall_n_z_inner,
             hall_n_phi_outer=hall_n_phi_outer, hall_n_z_outer=hall_n_z_outer,
             hall_z_halfspan_inner_m=hall_z_halfspan_inner_m,
-            hall_z_halfspan_outer_m=hall_z_halfspan_outer_m)
+            hall_z_halfspan_outer_m=hall_z_halfspan_outer_m, add_noise_frac=add_noise_frac)
         csv_path !== nothing && export_hall_csv(h_internal, csv_path)
         h_internal
     elseif hall_mode == :csv
@@ -750,6 +756,7 @@ function run_coil_axis_comparison(;
 
     # Analysis knobs
     tilt_calibration_radius_m   = NaN,
+    add_noise_frac              = 0.0,
     br_zero_noise_frac          = 0.0,
     br_min_frac_for_fourier_xy  = 0.10,
     bphi_sign                   = 1.0,
@@ -806,6 +813,7 @@ function run_coil_axis_comparison(;
         hall_n_z_outer=hall_n_z_outer,
         hall_z_halfspan_inner_m=hall_z_halfspan_inner_m,
         hall_z_halfspan_outer_m=hall_z_halfspan_outer_m,
+        add_noise_frac=add_noise_frac
     )
 
     analysis_kwargs = (
@@ -964,6 +972,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
         # Fitting / numerical controls
         # ─────────────────────────────────────────────────────────────
         tilt_calibration_radius_m = NaN,
+        add_noise_frac            = 0.0,
         br_zero_noise_frac        = 0.0,
         br_min_frac_for_fourier_xy= 0.10,
         bphi_sign                 = 1.0,

@@ -46,20 +46,20 @@ const read_coil_dat                 = FT.read_coil_dat
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 COIL_FILES = [
-    (joinpath(@__DIR__, "sparc_pf1u_105070_2010T.dat"), 100.0),
+    (joinpath(@__DIR__, "sparc_pf1u.dat"), 100.0),
 ]
 
 R0 = 1.85
 a  = 0.57
 
-N_THETA = 120
-N_PHI   = 180
+N_THETA = 300
+N_PHI   = 300
 
-out_name = "sparc_pf1u_105070_2010T"
+out_name = "sparc_pf1u.dat"
 
 # ── Field component selection ────────────────────────────
 # :B_R, :B_phi, :B_Z, :B_mag
-FIELD_COMPONENT = :B_phi
+FIELD_COMPONENT = :B_R
 
 # ── Units ────────────────────────────────────────────────
 # :T or :G  (1 T = 10000 G)
@@ -77,11 +77,11 @@ ENABLE_FOURIER_ANALYSIS  = true    # NEW: Fourier tilt/center analysis
 # Inner shell: between axis and coil, high Z resolution
 # Outer shell: outside coil, moderate Z resolution
 # Total probes: N_PHI_INNER × N_Z_INNER + N_PHI_OUTER × N_Z_OUTER
-HALL_MARGIN          = 0.4    # [m] axial margin beyond coil Z extents
-HALL_N_PHI_INNER     = 24    # φ points on inner shell
+HALL_MARGIN          = 3.4    # [m] axial margin beyond coil Z extents
+HALL_N_PHI_INNER     = 3    # φ points on inner shell
 HALL_N_Z_INNER       = 22    # Z levels on inner shell
 HALL_N_PHI_OUTER     = 200    # φ points on outer shell
-HALL_N_Z_OUTER       = 100    # Z levels on outer shell
+HALL_N_Z_OUTER       = 400    # Z levels on outer shell
 HALL_R_INNER_FRAC    = 0.4 # inner shell R = this fraction × R_min_coil
 HALL_R_OUTER_FRAC    = .5  # outer shell R = this fraction × R_max_coil
 
