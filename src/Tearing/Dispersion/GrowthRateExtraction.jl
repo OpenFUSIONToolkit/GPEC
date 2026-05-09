@@ -495,20 +495,31 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                 push!(filtered_roots, cand)
                 continue
             end
-            # New checks: 2 spurious-root flags (both → discard, 1 → warn)
+            # New checks: 2 spurious-root flags — :geom and :gap.
             #   :geom — Re=0 contour is locally a downward-concave "hill"
             #           at the candidate (clean polyline-following fit)
             #   :gap  — candidate is unstable AND >1 kHz above next root
             #           (isolated γ peak — spurious outlier signature)
+            #
+            # Policy (post-2026-05-08): WARN, DO NOT DISCARD.  Empirically
+            # the both-flags-fire criterion was too aggressive in the
+            # kink-approach regime where valid roots become sparse — a
+            # 2–3 kHz γ separation between the dominant unstable root and
+            # the next-stable root is the GENUINE dispersion structure
+            # (not a "lone peak" artifact), but :gap fires regardless.
+            # Concrete failure case: coupled_n2_rfitzp β_N=2.7502 in the
+            # shaped β-scan, where the (ω=−22.67, γ=+0.088) root was
+            # discarded as spurious; the post-hoc smoothness override in
+            # plots/plot_betascan.py:apply_chooser_overrides has been
+            # successfully recovering it but it shouldn't have to.
+            # Now: every candidate is accepted with whatever warnings
+            # apply, and downstream tools (chooser_overrides, contour
+            # plotters) see the same valid_roots regardless of flag
+            # combination.  filtered_roots is preserved for the legacy
+            # above-pole + outside-Re reject branch only.
             geom_flag = _is_geom_spurious(cand, re_paths)
             gap_flag  = _is_gap_spurious(sorted_pts, k, tauk,
                                           gap_kHz_threshold)
-            if geom_flag && gap_flag
-                # Both conditions met → discard, recurse to next
-                push!(filtered_roots, cand)
-                continue
-            end
-            # Accept candidate as primary; record any single-flag warning.
             chosen_idx = k
             geom_flag && push!(warning_flags, :geom)
             gap_flag  && push!(warning_flags, :gap)

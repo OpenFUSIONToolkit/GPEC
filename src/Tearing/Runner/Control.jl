@@ -214,6 +214,19 @@ function slayer_control_from_toml(section::AbstractDict)
         elseif sym === :bt
             # Allow explicit nothing or a number
             kwargs[sym] = v === nothing ? nothing : Float64(v)
+        elseif sym === :boxes
+            # `boxes` is a Vector{NTuple{4,Float64}}; from TOML this comes
+            # in as a list of 4-element arrays. Coerce each.
+            kwargs[sym] = NTuple{4,Float64}[
+                let bb = collect(Float64, b)
+                    length(bb) == 4 ||
+                        throw(ArgumentError("SLAYER.boxes entry must have 4 " *
+                                             "elements (omega_lo, omega_hi, " *
+                                             "gamma_lo, gamma_hi); got $b"))
+                    (bb[1], bb[2], bb[3], bb[4])
+                end
+                for b in v
+            ]
         else
             kwargs[sym] = v
         end
