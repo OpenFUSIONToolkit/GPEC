@@ -1679,8 +1679,7 @@ function parallel_eulerlagrange_integration(
 
     # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
     # See EulerLagrange.jl counterpart and ForceFreeStatesControl docstring for the
-    # diagnostic vs legacy-truncation semantics and reliability caveats on
-    # truncate_at_dW_peak=true.
+    # diagnostic vs truncation semantics on truncate_at_dW_peak=true.
     odet.step -= 1
     trim_storage!(odet)
     # odet.u is already in (S, I) from riccati_integrate_chunk! above
@@ -1688,7 +1687,9 @@ function parallel_eulerlagrange_integration(
         saved_psifac, saved_u = odet.psifac, copy(odet.u)
         peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
         if ctrl.truncate_at_dW_peak
-            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
+            # Truncate integration data to the dW peak — the new physical
+            # plasma-edge boundary requested by the user.
+            n_chunks_before = length(chunks)
             odet.step = peak_step
             trim_storage!(odet)
             intr.psilim = odet.psi_store[end]
@@ -1696,8 +1697,50 @@ function parallel_eulerlagrange_integration(
             odet.u .= odet.u_store[:, :, :, end]
             # Stored state may be a pre-renorm callback snapshot; renorm to (S, I) for free_run!
             renormalize_riccati_inplace!(odet.u, N)
+
+            # ── Self-consistency for Δ' BVP ────────────────────────────
+            # The FM propagators and chunks were built spanning
+            # [axis, ORIGINAL_psilim].  With intr.psilim now relocated to
+            # the dW peak, retire any chunks that lie entirely past the
+            # new boundary, and re-integrate the straddling chunk's
+            # propagator so its psi_end matches the new boundary.
+            # Without this fix, compute_delta_prime_matrix! would apply
+            # the edge BC (wv at truncated psilim) to an outer
+            # propagator still extending to the original psilim —
+            # silently shifting the outermost rational's Δ' by ~tens of
+            # percent.
+            peak_psi = odet.psi_store[end]
+            last_chunk_idx = findlast(c -> c.psi_start < peak_psi, chunks)
+            if last_chunk_idx === nothing
+                error("truncate_at_dW_peak: peak ψ=$peak_psi lies before all chunk starts")
+            end
+            straddling = chunks[last_chunk_idx]
+            if straddling.psi_end > peak_psi
+                # Outer-plasma chunk (past last rational surface) —
+                # forward, non-crossing.  Rebuild with shorter psi_end
+                # and re-integrate.
+                new_chunk = IntegrationChunk(
+                    psi_start = straddling.psi_start,
+                    psi_end   = peak_psi,
+                    needs_crossing = straddling.needs_crossing,
+                    ising     = straddling.ising,
+                    direction = straddling.direction,
+                )
+                chunks[last_chunk_idx] = new_chunk
+                odet_proxy = OdeState(N, 1, 1, 0)
+                integrate_propagator_chunk!(propagators[last_chunk_idx], new_chunk,
+                                             ctrl, equil, ffit, intr, odet_proxy)
+            end
+            # Drop chunks entirely past the new boundary.
+            n_dropped = 0
+            if last_chunk_idx < length(chunks)
+                n_dropped = length(chunks) - last_chunk_idx
+                chunks      = chunks[1:last_chunk_idx]
+                propagators = propagators[1:last_chunk_idx]
+            end
+
             if ctrl.verbose
-                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.2f" odet.psi_store[odet.step])),  q = $((@sprintf "%.2f" odet.q_store[odet.step]))"
+                @info "Truncating integration at peak edge dW (self-consistent): ψ = $((@sprintf "%.4f" peak_psi)),  q = $((@sprintf "%.3f" odet.q_store[end])).  Rebuilt chunk $last_chunk_idx; dropped $n_dropped of $n_chunks_before outer chunks."
             end
         else
             odet.psifac = saved_psifac
@@ -1710,7 +1753,9 @@ function parallel_eulerlagrange_integration(
 
     # NOTE: compute_delta_prime_matrix! is called from the main pipeline (after free_run!)
     # so that vacuum response wv is available for the edge BC. The propagators and chunks
-    # are returned alongside odet for this purpose.
+    # are returned alongside odet for this purpose.  With Option-B self-consistent
+    # truncation, the propagators/chunks here match intr.psilim exactly, so Δ' is
+    # well-defined for both truncate_at_dW_peak=false (full domain) and =true (peak).
 
     # Evaluate fixed-boundary stability criterion
     if ctrl.verbose

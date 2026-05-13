@@ -39,13 +39,10 @@ const PC_TEST = [0.001, 0.10, 0.17]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "beta_scan.h5")
 
-# Fixed TJ parameters for beta scan (ε = 0.2, matching paper: R0=2m, a=0.4m)
-const LAR_R0 = 2.0    # Major radius [m]
-const LAR_A = 0.4      # Minor radius [m] → ε = 0.2
-const QC = 1.5
-const QA = 3.6
-const MU = 2.0
-const B0 = 12.0
+# All baseline TJ analytic-equilibrium parameters (R₀, a, qc, qa, μ, B₀,
+# grid resolution, etc.) live in tj.toml next to gpec.toml.  The scan
+# below reads that file once and overrides ONLY `pc` per scan point.
+const TJ_BASE = TOML.parsefile(joinpath(SCAN_DIR, "tj.toml"))
 
 # ============================================================================
 # Run a single pressure point
@@ -54,12 +51,9 @@ const B0 = 12.0
 function run_single(pc::Float64)
     run_dir = mktempdir(; prefix="gpec_tj_beta_")
     try
-        tj_dict = Dict("TJ_INPUT" => Dict(
-            "lar_r0" => LAR_R0, "lar_a" => LAR_A,
-            "qc" => QC, "qa" => QA, "pc" => pc,
-            "mu" => MU, "B0" => B0,
-            "ma" => 128, "mtau" => 128,
-        ))
+        # Write a per-point tj.toml = baseline tj.toml with pc overridden.
+        tj_dict = deepcopy(TJ_BASE)
+        tj_dict["TJ_INPUT"]["pc"] = pc
         open(joinpath(run_dir, "tj.toml"), "w") do io; TOML.print(io, tj_dict); end
 
         config = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
@@ -108,7 +102,8 @@ function main()
     test_mode = "--test" in ARGS
     pcs = test_mode ? PC_TEST : PC_FULL
 
-    @info "TJ beta scan: $(length(pcs)) points, ε=$(LAR_A/LAR_R0), B0=$(B0)T, qc=$(QC), qa=$(QA)" *
+    tj = TJ_BASE["TJ_INPUT"]
+    @info "TJ beta scan: $(length(pcs)) points, ε=$(tj["lar_a"]/tj["lar_r0"]), B0=$(tj["B0"])T, qc=$(tj["qc"]), qa=$(tj["qa"])" *
           (test_mode ? " (test mode)" : "")
 
     isfile(OUTPUT_H5) && rm(OUTPUT_H5)

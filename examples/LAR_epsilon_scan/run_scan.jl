@@ -39,13 +39,11 @@ const EPSILONS_TEST = [0.2495, 0.4072, 0.5510]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "epsilon_scan.h5")
 
-# TJ benchmark parameters (from TJ/Inputs/Equilibrium.json)
-const QC = 1.5      # On-axis safety factor
-const QA = 3.6      # Edge safety factor
-const PC = 0.001    # Normalized pressure (very low for epsilon scan)
-const MU = 2.0      # Pressure peaking exponent
-const B0 = 12.0     # Toroidal field [T]
-const LAR_A = 1.0   # Minor radius [m] (fixed)
+# All baseline TJ analytic-equilibrium parameters (lar_a, qc, qa, pc, μ,
+# B₀, grid resolution, etc.) live in tj.toml next to gpec.toml.  The
+# scan below reads that file once and overrides ONLY `lar_r0` per scan
+# point as `lar_r0 = lar_a / ε`.
+const TJ_BASE = TOML.parsefile(joinpath(SCAN_DIR, "tj.toml"))
 
 # ============================================================================
 # Run a single epsilon point
@@ -54,14 +52,9 @@ const LAR_A = 1.0   # Minor radius [m] (fixed)
 function run_single(epsilon::Float64)
     run_dir = mktempdir(; prefix="gpec_tj_")
     try
-        # Write TJ config
-        tj_dict = Dict("TJ_INPUT" => Dict(
-            "lar_r0" => LAR_A / epsilon,
-            "lar_a" => LAR_A,
-            "qc" => QC, "qa" => QA, "pc" => PC,
-            "mu" => MU, "B0" => B0,
-            "ma" => 128, "mtau" => 128,
-        ))
+        # Per-point tj.toml = baseline tj.toml with lar_r0 overridden.
+        tj_dict = deepcopy(TJ_BASE)
+        tj_dict["TJ_INPUT"]["lar_r0"] = TJ_BASE["TJ_INPUT"]["lar_a"] / epsilon
         open(joinpath(run_dir, "tj.toml"), "w") do io; TOML.print(io, tj_dict); end
 
         config = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
@@ -115,13 +108,15 @@ function main()
     test_mode = "--test" in ARGS
     epsilons = test_mode ? EPSILONS_TEST : EPSILONS_FULL
 
-    @info "TJ epsilon scan: $(length(epsilons)) points, B0=$(B0)T, qc=$(QC), qa=$(QA), pc=$(PC)" *
+    tj = TJ_BASE["TJ_INPUT"]
+    @info "TJ epsilon scan: $(length(epsilons)) points, B0=$(tj["B0"])T, qc=$(tj["qc"]), qa=$(tj["qa"]), pc=$(tj["pc"])" *
           (test_mode ? " (test mode)" : "")
 
     isfile(OUTPUT_H5) && rm(OUTPUT_H5)
 
+    lar_a = TJ_BASE["TJ_INPUT"]["lar_a"]
     for (i, eps) in enumerate(epsilons)
-        @info "[$(i)/$(length(epsilons))] ε=$eps (R0=$(@sprintf("%.3f", LAR_A/eps)))"
+        @info "[$(i)/$(length(epsilons))] ε=$eps (R0=$(@sprintf("%.3f", lar_a/eps)))"
         result = run_single(eps)
         if result !== nothing
             h5open(OUTPUT_H5, isfile(OUTPUT_H5) ? "r+" : "w") do f
