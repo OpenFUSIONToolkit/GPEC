@@ -228,14 +228,16 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
 end
 
 """
-    tj_f1(x, nu, qc)
+    tj_like_f1(x, nu, qc)
 
-TJ's poloidal flux function f1(x) where x = r/a.
-Uses Taylor expansion near axis for numerical stability.
+TJ-like poloidal flux function f1(x) where x = r/a, following the
+analytic-profile parameterization of R. Fitzpatrick's TJ code
+(https://github.com/rfitzp/TJ).  Uses a Taylor expansion near the axis
+for numerical stability.
 
-Reference: R. Fitzpatrick, TJ code.
+Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-function tj_f1(x::Float64, nu::Float64, qc::Float64)
+function tj_like_f1(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
         x2 = x * x
         return x2 * (1 - (nu-1)*x2/2 + (nu-1)*(nu-2)*x2*x2/6 -
@@ -246,11 +248,13 @@ function tj_f1(x::Float64, nu::Float64, qc::Float64)
 end
 
 """
-    tj_f1p(x, nu, qc)
+    tj_like_f1p(x, nu, qc)
 
-Derivative of TJ's f1 with respect to x (= r/a).
+Derivative of the TJ-like f1 with respect to x (= r/a).  See
+R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ) for the original
+parameterization.
 """
-function tj_f1p(x::Float64, nu::Float64, qc::Float64)
+function tj_like_f1p(x::Float64, nu::Float64, qc::Float64)
     if x < 0.1
         x2 = x * x
         return 2*x * (1 - (nu-1)*x2 + (nu-1)*(nu-2)*x2*x2/2 -
@@ -261,8 +265,10 @@ function tj_f1p(x::Float64, nu::Float64, qc::Float64)
 end
 
 """
-Internal parameter bundle for the TJ shape ODE (ψ, g₂, H₁, H₁', f₃).  Built
-once per TJ call so both `tj_run` and `tj_run_direct` share the same numerics.
+Internal parameter bundle for the TJ-like shape ODE (ψ, g₂, H₁, H₁', f₃) —
+GPEC adaptation of the analytic shape ODE used in R. Fitzpatrick's TJ code
+(https://github.com/rfitzp/TJ).  Built once per `tj_like_run` /
+`tj_like_run_direct` call so both pipelines share identical numerics.
 
 Fields:
   - physical: a, R0, qc, mu, pc, B0
@@ -270,7 +276,7 @@ Fields:
   - near-axis BC constants: rmin, x0 = rmin, r0 = rmin·a, f1c = 1/qc,
                              p2ppc = d²p₂/dx²|_0 = −2·μ·pc
 """
-struct TJShapeParams
+struct TJLikeShapeParams
     a::Float64
     R0::Float64
     qc::Float64
@@ -285,35 +291,37 @@ struct TJShapeParams
     p2ppc::Float64
 end
 
-function TJShapeParams(tj::TJConfig; rmin::Float64 = 1e-4)
-    a, R0 = tj.lar_a, tj.lar_r0
-    mu    = max(tj.mu, 1.001)
-    return TJShapeParams(
-        a, R0, tj.qc, mu, tj.pc, tj.B0,
+function TJLikeShapeParams(tjlike::TJLikeConfig; rmin::Float64 = 1e-4)
+    a, R0 = tjlike.lar_a, tjlike.lar_r0
+    mu    = max(tjlike.mu, 1.001)
+    return TJLikeShapeParams(
+        a, R0, tjlike.qc, mu, tjlike.pc, tjlike.B0,
         (a / R0)^2,
         rmin, rmin, rmin * a,
-        1.0 / tj.qc,
-        -2.0 * mu * tj.pc,
+        1.0 / tjlike.qc,
+        -2.0 * mu * tjlike.pc,
     )
 end
 
 """
-RHS for the TJ shape ODE.  State: y[1]=ψ, y[2]=g₂, y[3]=H₁, y[4]=H₁', y[5]=f₃.
-TJ writes derivatives in x=r/a; we advance in physical r=a·x so d/dr = (1/a)·d/dx.
+RHS for the TJ-like shape ODE (R. Fitzpatrick's TJ code parameterization,
+https://github.com/rfitzp/TJ).  State: y[1]=ψ, y[2]=g₂, y[3]=H₁, y[4]=H₁',
+y[5]=f₃.  The original derivation is written in x = r/a; we advance in
+physical r = a·x so d/dr = (1/a)·d/dx.
 
-The params argument carries TJShapeParams fields plus the current `nu`.
+The params argument carries TJLikeShapeParams fields plus the current `nu`.
 """
-function tj_shape_rhs!(dy, y, params, r)
+function tj_like_shape_rhs!(dy, y, params, r)
     (; a, B0, qc, mu, pc, epsa2, nu) = params
     x    = r / a
     xfac = max(1 - x^2, 0.0)
-    f1   = tj_f1(x, nu, qc)
-    f1px = tj_f1p(x, nu, qc)
+    f1   = tj_like_f1(x, nu, qc)
+    f1px = tj_like_f1p(x, nu, qc)
     p2px = -2 * mu * pc * x * xfac^(mu - 1)
 
-    # TJ writes its physical ψ as εa²·B₀·R₀²·Psi_TJ_norm where
-    # dPsi_TJ_norm/dr_TJ = (f1 + εa²·f3)/r_TJ.
-    # Converting to physical r = a·r_TJ gives dψ/dr = a²·B₀·(f1+εa²·f3)/r.
+    # The TJ-like model writes its physical ψ as εa²·B₀·R₀²·Psi_norm where
+    # dPsi_norm/dr_norm = (f1 + εa²·f3)/r_norm (cf. Fitzpatrick's TJ code).
+    # Converting to physical r = a·r_norm gives dψ/dr = a²·B₀·(f1+εa²·f3)/r.
     f3_cur = y[5]
     dy[1] = B0 * (f1 + epsa2 * f3_cur) * a^2 / r
 
@@ -327,7 +335,8 @@ function tj_shape_rhs!(dy, y, params, r)
     dy[3] = H1p / a
     dy[4] = (-facf * H1p - 1 + facp) / a
 
-    # f₃'(x) for Hₙ = Vₙ = 0 (n ≥ 2 harmonics rescaled to zero in TJ benchmark).
+    # f₃'(x) for Hₙ = Vₙ = 0 (n ≥ 2 harmonics rescaled to zero, as in the
+    # TJ-like benchmark configuration of Fitzpatrick's TJ code).
     g2, f3 = y[2], y[5]
     f3p_x = -f3 * f1px / f1 -
              f1 * (3 * x^2 / 2 - 2 * x * H1p + H1p^2) / x +
@@ -337,9 +346,10 @@ function tj_shape_rhs!(dy, y, params, r)
     return nothing
 end
 
-"""Initial conditions at x = x0, matching TJ's near-axis expansion."""
-function tj_shape_initial(p::TJShapeParams, nu::Float64)
-    f1_0 = tj_f1(p.x0, nu, p.qc)
+"""Initial conditions at x = x0, matching the TJ-like model's near-axis
+expansion (cf. R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ)."""
+function tj_like_shape_initial(p::TJLikeShapeParams, nu::Float64)
+    f1_0 = tj_like_f1(p.x0, nu, p.qc)
     y0 = zeros(5)
     y0[1] = p.B0 * f1_0 * p.a^2 / 2                                  # ψ(r0)
     y0[2] = -(p.f1c^2 + p.p2ppc / 2) * p.x0^2                         # g₂
@@ -350,16 +360,16 @@ function tj_shape_initial(p::TJShapeParams, nu::Float64)
 end
 
 """
-Integrate the TJ shape ODE for the given ν.  Pass `saveat` to collect output
-on a prescribed dense grid (used by `tj_run_direct` so the downstream Hₙ / ψ
-splines sit on uniform nodes); leave it nothing for the default adaptive
-save pattern used by `tj_run`.
+Integrate the TJ-like shape ODE for the given ν.  Pass `saveat` to collect
+output on a prescribed dense grid (used by `tj_like_run_direct` so the
+downstream Hₙ / ψ splines sit on uniform nodes); leave it `nothing` for
+the default adaptive save pattern used by `tj_like_run`.
 """
-function tj_shape_solve(p::TJShapeParams, nu::Float64;
+function tj_like_shape_solve(p::TJLikeShapeParams, nu::Float64;
                         reltol::Float64 = 1e-7, abstol::Float64 = 1e-8,
                         saveat = nothing)
     rhs_params = (; p.a, p.B0, p.qc, p.mu, p.pc, p.epsa2, nu = nu)
-    prob = ODEProblem(tj_shape_rhs!, tj_shape_initial(p, nu), (p.r0, p.a), rhs_params)
+    prob = ODEProblem(tj_like_shape_rhs!, tj_like_shape_initial(p, nu), (p.r0, p.a), rhs_params)
     if saveat === nothing
         return solve(prob, Vern9(); reltol, abstol, maxiters = 10000, dense = false)
     else
@@ -368,19 +378,21 @@ function tj_shape_solve(p::TJShapeParams, nu::Float64;
 end
 
 """
-TJ's `Setnu` / `GetNu`: root-find ν so that q₂(x=1) matches `qa_target`.
+TJ-like ν root-find (Fitzpatrick's `Setnu` / `GetNu` in
+https://github.com/rfitzp/TJ): solve for ν so that q₂(x=1) matches
+`qa_target`.
 
 `q₂ = x²·(1+εa²·g₂)·exp(−εa²·f3/f1)/f1`; at x=1 and low β this picks up an
-O(εa²) correction relative to the lowest-order guess ν = qa/qc, which matters
-for the TJ benchmark at large ε.  Falls back to the lowest-order ν if the
-bracket search diverges.
+O(εa²) correction relative to the lowest-order guess ν = qa/qc, which
+matters for the TJ-like benchmark at large ε.  Falls back to the
+lowest-order ν if the bracket search diverges.
 """
-function tj_find_nu(p::TJShapeParams, qa_target::Float64; reltol::Float64 = 1e-7)
+function tj_like_find_nu(p::TJLikeShapeParams, qa_target::Float64; reltol::Float64 = 1e-7)
     function q2_edge(nu::Float64)
-        sol   = tj_shape_solve(p, nu; reltol)
+        sol   = tj_like_shape_solve(p, nu; reltol)
         g2end = sol.u[end][2]
         f3end = sol.u[end][5]
-        f1end = tj_f1(1.0, nu, p.qc)
+        f1end = tj_like_f1(1.0, nu, p.qc)
         return (1 + p.epsa2 * g2end) * exp(-p.epsa2 * f3end / f1end) / f1end
     end
     nu_guess = qa_target / p.qc
@@ -388,30 +400,32 @@ function tj_find_nu(p::TJShapeParams, qa_target::Float64; reltol::Float64 = 1e-7
         find_zero(nu -> q2_edge(nu) - qa_target, (0.5 * nu_guess, 2 * nu_guess);
                   atol = 1e-8, rtol = 1e-10)
     catch err
-        @warn "ν root-find failed for TJ equilibrium; falling back to lowest-order ν = qa/qc" error = err
+        @warn "ν root-find failed for TJ-like equilibrium; falling back to lowest-order ν = qa/qc" error = err
         nu_guess
     end
 end
 
 """
-    tj_run(equil_input, tj_input)
+    tj_like_run(equil_input, tjlike_input)
 
-Construct a cylindrical tokamak equilibrium using the TJ analytic model.
+Construct a cylindrical tokamak equilibrium using the TJ-like analytic
+model — GPEC's adaptation of the analytic-profile family used in
+R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).
 
-Adapted from R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).
 Profiles are analytic:
 
     f1(x) = [1 - (1-x²)^ν] / (ν·qc),   p2(x) = pc·(1-x²)^μ,   x = r/a
 
-with ν = qa/qc.  The 2D geometry is built from TJ's inverse-aspect-ratio
-expansion.  With zero edge shaping (Hna = Vna = 0) — the TJ benchmark
-configuration — flux surfaces are shifted circles
+with ν = qa/qc.  The 2D geometry is built from the TJ-like inverse
+aspect-ratio expansion.  With zero edge shaping (Hna = Vna = 0) — the
+TJ-like benchmark configuration of Fitzpatrick's TJ — flux surfaces are
+shifted circles
 
     R(r,θ) = R₀ + Δ(r) + α(r)·r·cos θ
     Z(r,θ) =            α(r)·r·sin θ
 
 where Δ and α come from the shaping ODE for (g₂, H₁, H₁') (same equations
-as TJ's shape ODE):
+as Fitzpatrick's TJ shape ODE):
 
     Δ(r)   = R₀·εa²·H₁(x)                             (Shafranov shift)
     α(r)   = 1 − εa²·(x²/8 − H₁/2)                    (from L(x) = x³/8 − x·H₁/2)
@@ -422,32 +436,35 @@ F = R₀·B₀·(1 + εa²·g₂), and the higher-order poloidal flux f₃ enter
 safety factor as q₂ = x²·(1 + εa²·g₂)·exp(−εa²·f₃/f1)/f1.
 
 The (n ≥ 2) horizontal/vertical shaping harmonics Hₙ(r), Vₙ(r) are not yet
-included; they are zero in the TJ benchmark scans.
+included; they are zero in the TJ-like benchmark scans.
+
+Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-function tj_run(equil_input::EquilibriumConfig, tj::TJConfig)
-    a, R0  = tj.lar_a, tj.lar_r0
-    qc, mu = tj.qc, max(tj.mu, 1.001)
-    pc, B0 = tj.pc, tj.B0
-    ma, mtau = tj.ma, tj.mtau
-    p = TJShapeParams(tj)
+function tj_like_run(equil_input::EquilibriumConfig, tjlike::TJLikeConfig)
+    a, R0  = tjlike.lar_a, tjlike.lar_r0
+    qc, mu = tjlike.qc, max(tjlike.mu, 1.001)
+    pc, B0 = tjlike.pc, tjlike.B0
+    ma, mtau = tjlike.ma, tjlike.mtau
+    p = TJLikeShapeParams(tjlike)
     epsa2     = p.epsa2
     p00_phys  = B0^2 * epsa2 * pc          # μ₀P = B₀²·εa²·p₂ at axis
 
-    nu  = tj_find_nu(p, tj.qa; reltol = equil_input.etol)
-    sol = tj_shape_solve(p, nu; reltol = equil_input.etol)
+    nu  = tj_like_find_nu(p, tjlike.qa; reltol = equil_input.etol)
+    sol = tj_like_shape_solve(p, nu; reltol = equil_input.etol)
 
     r_arr = sol.t
     y_mat = reduce(hcat, sol.u)'
     steps = length(r_arr)
 
     # Profile table: columns [r, F, P, q, ψ, g₂, H₁].  H₁' and f₃ are only
-    # needed inside the ODE; F and q are folded from TJ's EFIT writer formulas.
+    # needed inside the ODE; F and q are folded from the TJ-like EFIT-writer
+    # formulas (cf. R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ).
     temp = zeros(steps, 7)
     for i in 1:steps
         r = r_arr[i]
         x = r / a
         xfac = max(1 - x^2, 0.0)
-        f1 = tj_f1(x, nu, qc)
+        f1 = tj_like_f1(x, nu, qc)
 
         ψ  = y_mat[i, 1]
         g2 = y_mat[i, 2]
@@ -493,7 +510,7 @@ function tj_run(equil_input::EquilibriumConfig, tj::TJConfig)
         sq_fs[ia, 2] = f[2]           # P
         sq_fs[ia, 3] = f[3]           # q
 
-        if tj.zeroth
+        if tjlike.zeroth
             Δ = 0.0
             α = 1.0
         else
@@ -526,58 +543,60 @@ function tj_run(equil_input::EquilibriumConfig, tj::TJConfig)
 end
 
 """
-    tj_run_direct(equil_input, tj_input; nrbox=257, nzbox=257, rc=1.2)
+    tj_like_run_direct(equil_input, tjlike_input; nrbox=257, nzbox=257, rc=1.2)
 
-Option B pipeline: construct ψ(R, Z) on a 2D grid from the TJ analytic model
-and return a `DirectRunInput` so the equilibrium is processed by the direct-GS
-solver (same path as the TJ-geqdsk scans).
+Option B pipeline: construct ψ(R, Z) on a 2D grid from the TJ-like analytic
+model — GPEC's adaptation of R. Fitzpatrick's TJ code analytic-profile
+family (https://github.com/rfitzp/TJ) — and return a `DirectRunInput` so the
+equilibrium is processed by the direct-GS solver (same path as the
+geqdsk-based scans).
 
 Using the inverse pipeline on just the first-order Shafranov-shifted-circle
 geometry systematically under-drives the external kink at large ε because the
 inverse solver consumes the prescribed q₂ profile and never recomputes q from
 geometry.  The direct pipeline, in contrast, line-integrates F·∮dθ/(R²·Bp) on
 the 2D ψ(R,Z) field, so higher-order geometric effects (buried in the shape of
-ψ away from the axis) feed back into q and δW.  Reproducing TJ's full geqdsk
-path therefore requires rebuilding ψ(R,Z) from the analytic model itself — not
-just the flux-surface coordinates — including the vacuum region outside the
-plasma.
+ψ away from the axis) feed back into q and δW.  Reproducing the full
+geqdsk-equivalent path therefore requires rebuilding ψ(R,Z) from the analytic
+model itself — not just the flux-surface coordinates — including the vacuum
+region outside the plasma.
 
 The benchmark keeps edge shaping `Hna = Vna = 0`, so the ODE-integrated shape
 harmonics Hₙ, Vₙ for n ≥ 2 are rescaled to zero; only the H₁ Shafranov shift
 contributes.  ψ(R, Z) is constructed by:
 
-  - for each grid point, iterating the map (R, Z) → (r, w) 10× per
-    TJ's EFIT writer (handles the εa²·H₁ shift of the axis);
-  - evaluating ψ_plasma(r) from the radial ψ-ODE when r < 1, TJ's analytic
-    vacuum solution `GetPSIvac` when 1 ≤ r < rc, and the 1/r² far-field form
-    when r ≥ rc.
+  - for each grid point, iterating the map (R, Z) → (r, w) 10× per the
+    TJ-like EFIT writer (handles the εa²·H₁ shift of the axis);
+  - evaluating ψ_plasma(r) from the radial ψ-ODE when r < 1, the TJ-like
+    analytic vacuum solution (`GetPSIvac` of Fitzpatrick's TJ) when 1 ≤ r < rc,
+    and the 1/r² far-field form when r ≥ rc.
 
 Reference: R. Fitzpatrick, TJ code (https://github.com/rfitzp/TJ) — the shape
 ODE (g₂, H₁, H₁', f₃), the `GetPSIvac` / `GetHHvac` vacuum extension, and the
-EFIT-writer (R, Z) → (r, w) Newton inversion.
+EFIT-writer (R, Z) → (r, w) Newton inversion that this routine adapts.
 """
-function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
+function tj_like_run_direct(equil_input::EquilibriumConfig, tjlike::TJLikeConfig;
                        nrbox::Int = 257, nzbox::Int = 257, rc::Float64 = 1.2)
-    a, R0  = tj.lar_a, tj.lar_r0
-    qc, mu = tj.qc, max(tj.mu, 1.001)
-    pc, B0 = tj.pc, tj.B0
-    p = TJShapeParams(tj)
+    a, R0  = tjlike.lar_a, tjlike.lar_r0
+    qc, mu = tjlike.qc, max(tjlike.mu, 1.001)
+    pc, B0 = tjlike.pc, tjlike.B0
+    p = TJLikeShapeParams(tjlike)
     epsa, epsa2 = p.a / p.R0, p.epsa2
     p00_phys    = B0^2 * epsa2 * pc
 
-    # ν root-find (TJ Setnu): q₂(1) = qa_target.
-    nu = tj_find_nu(p, tj.qa; reltol = equil_input.etol)
+    # ν root-find (cf. Fitzpatrick TJ's Setnu): q₂(1) = qa_target.
+    nu = tj_like_find_nu(p, tjlike.qa; reltol = equil_input.etol)
 
     # Dense saveat so the downstream splines (H₁, g₂, f₃, ψ) are evaluated on
     # a fine uniform r grid rather than the ~30 adaptive Vern9 steps — otherwise
     # the (R, Z) → (r, w) Newton iteration hits spline interpolation artifacts.
     dense_r = collect(range(p.r0, p.a; length = 1024))
-    sol     = tj_shape_solve(p, nu; reltol = equil_input.etol,
+    sol     = tj_like_shape_solve(p, nu; reltol = equil_input.etol,
                               abstol = 1e-10, saveat = dense_r)
     r_arr   = sol.t
     y_mat   = reduce(hcat, sol.u)'
 
-    # Radial splines in TJ's dimensionless x = r/a on a clean grid for H₁ etc.
+    # Radial splines in the TJ-like dimensionless x = r/a on a clean grid for H₁ etc.
     x_nodes = r_arr ./ a
     ψ_of_r   = cubic_interp(r_arr, y_mat[:, 1]; extrap=ExtendExtrap())
     H1_of_x  = cubic_interp(x_nodes, y_mat[:, 3]; extrap=ExtendExtrap())
@@ -586,29 +605,31 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
     f3_of_x  = cubic_interp(x_nodes, y_mat[:, 5]; extrap=ExtendExtrap())
 
     # Edge values needed by GetPSIvac
-    f1a  = tj_f1(1.0, nu, qc)
+    f1a  = tj_like_f1(1.0, nu, qc)
     f3a  = f3_of_x(1.0)
     H1a  = H1_of_x(1.0)
     H1ap = H1p_of_x(1.0)
     psio = ψ_of_r(a)   # ψ at r = a (boundary)
 
-    # Psi scaling factor that matches TJ's EFIT writer: Psi_TJ_phys = εa²·B0·R0²·Psi_norm
+    # Psi scaling factor matching the TJ-like EFIT writer: Psi_phys = εa²·B0·R0²·Psi_norm
     psi_scale = epsa2 * B0 * R0^2
 
-    # TJ's GetHHvac for n = 1.  Hₙ vacuum for n ≥ 2 vanishes because
-    # H_n(1) = H_n'(1) = 0 after TJ's Hna/Vna rescaling.
+    # TJ-like GetHHvac for n = 1 (cf. Fitzpatrick's TJ).  The n ≥ 2 vacuum
+    # Hₙ vanishes because H_n(1) = H_n'(1) = 0 after the Hna/Vna rescaling.
     function H1_vac(r::Float64)
         return H1a - 0.5 * r^2 * log(r) + 0.25 * (2 * H1ap + 1) * (r^2 - 1)
     end
 
-    # TJ's f_R, f_Z — the full shift of (R, Z) from the nominal shifted circle.
-    # With Hn = Vn = 0 for n ≥ 2 the residual terms are:
+    # TJ-like f_R, f_Z (cf. Fitzpatrick's TJ) — the full shift of (R, Z) from
+    # the nominal shifted circle.  With Hn = Vn = 0 for n ≥ 2 the residual
+    # terms are:
     #   f_R = εa²·H₁(r) + εa³·L(r)·cos(w)
     #   f_Z =          −εa³·L(r)·sin(w)
     # L(r) = r³/8 − r·H₁(r)/2.  The εa³ terms were omitted in the first pass
     # and shifted the pole location of the ε-scan to ε ≈ 0.41 instead of 0.66.
-    # Per TJ, freeze f_R, f_Z at r = rc and scale the inner value by r²/rc² for
-    # r ≥ rc to prevent the Newton iteration from diverging in the far vacuum.
+    # Per Fitzpatrick's TJ, freeze f_R, f_Z at r = rc and scale the inner
+    # value by r²/rc² for r ≥ rc to prevent the Newton iteration from
+    # diverging in the far vacuum.
     function L_of(r::Float64)
         rr = (r >= rc) ? (rc - 1e-8) : r
         H1 = (rr < 1.0) ? H1_of_x(rr) : H1_vac(rr)
@@ -616,7 +637,7 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
     end
     function f_R_shift(r::Float64, w::Float64)
         if r >= rc
-            # TJ's capping: f_R(r, w) = f_R(rc − ε, w) · r² / rc²
+            # TJ-like capping (Fitzpatrick's TJ): f_R(r, w) = f_R(rc − ε, w) · r² / rc²
             return f_R_shift(rc - 1e-8, w) * r^2 / rc^2
         end
         H1 = (r < 1.0) ? H1_of_x(r) : H1_vac(r)
@@ -632,7 +653,8 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
         return -epsa2 * epsa * L * sin(w)
     end
 
-    # (R_norm, Z_norm) → (r, w) by TJ's 10-step fixed-point iteration.
+    # (R_norm, Z_norm) → (r, w) by the TJ-like 10-step fixed-point iteration
+    # (cf. Fitzpatrick's TJ EFIT writer).
     # R_norm, Z_norm are normalized to R₀.
     function find_rw(R_norm::Float64, Z_norm::Float64)
         r = sqrt((R_norm - 1.0)^2 + Z_norm^2) / epsa
@@ -646,9 +668,10 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
         return r, w
     end
 
-    # TJ's GetPSIvac with Hn = Vn = 0 for n ≥ 2.  Returns the TJ-normalized
-    # vacuum ψ (same units as the plasma-interior ψ-ODE); multiplied by
-    # psi_scale outside to convert to physical units.
+    # TJ-like GetPSIvac (cf. Fitzpatrick's TJ) with Hn = Vn = 0 for n ≥ 2.
+    # Returns the TJ-like-normalized vacuum ψ (same units as the
+    # plasma-interior ψ-ODE); multiplied by psi_scale outside to convert to
+    # physical units.
     function psi_vac(r::Float64)
         logr = log(r)
         sum1 = 1.0 - H1ap + H1ap^2
@@ -695,9 +718,9 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
     # 2D spline consumed by direct-GS
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_rz; extrap=ExtendExtrap())
 
-    # 1D profile spline, same layout as read_efit (4 columns).  Use TJ's
-    # analytic q₂ on the radial grid so that the prescribed q is consistent with
-    # the ψ(R,Z) we just constructed.
+    # 1D profile spline, same layout as read_efit (4 columns).  Use the
+    # TJ-like analytic q₂ on the radial grid so that the prescribed q is
+    # consistent with the ψ(R,Z) we just constructed.
     psi_norm_grid = range(0.0, 1.0; length = nrbox)
     F_nodes  = zeros(nrbox); P_nodes = zeros(nrbox); q_nodes = zeros(nrbox)
     for i in 1:nrbox
@@ -713,7 +736,7 @@ function tj_run_direct(equil_input::EquilibriumConfig, tj::TJConfig;
             find_zero(r -> ψ_of_r(r) - target, (p.r0, p.a); atol=1e-10, rtol=1e-12)
         end
         x = rlocal / p.a
-        f1 = tj_f1(x, nu, qc)
+        f1 = tj_like_f1(x, nu, qc)
         g2_val = g2_of_x(x)
         f3_val = f3_of_x(x)
         xfac = max(1 - x^2, 0.0)

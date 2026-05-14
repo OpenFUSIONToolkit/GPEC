@@ -1,28 +1,31 @@
 using Test
 using Printf
 using GeneralizedPerturbedEquilibrium.Equilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: TJConfig, EquilibriumConfig,
-    setup_equilibrium, tj_run, tj_run_direct
+using GeneralizedPerturbedEquilibrium.Equilibrium: TJLikeConfig, EquilibriumConfig,
+    setup_equilibrium, tj_like_run, tj_like_run_direct
 
-# Two-path smoke tests for the TJ analytic equilibrium model.
+# Two-path smoke tests for the TJ-like analytic equilibrium model
+# (GPEC adaptation of R. Fitzpatrick's TJ code,
+# https://github.com/rfitzp/TJ).
 #
-# `tj_run` (inverse) is exercised at a low-εa point where the first-order
-# Shafranov-shifted-circle geometry is faithful; `tj_run_direct` (Option B
-# direct-GS) is exercised at a moderate-εa point where the εa³·L terms in
-# the (R,Z)→(r,w) Newton inversion matter.  These cover the two dispatch
-# branches (`eq_type = "tj"` / `"tj_direct"`) that are otherwise only run
-# end-to-end via the LAR_* scan scripts.
+# `tj_like_run` (inverse) is exercised at a low-εa point where the
+# first-order Shafranov-shifted-circle geometry is faithful;
+# `tj_like_run_direct` (Option B direct-GS) is exercised at a moderate-εa
+# point where the εa³·L terms in the (R,Z)→(r,w) Newton inversion matter.
+# These cover the two dispatch branches (`eq_type = "tj_like"` /
+# `"tj_like_direct"`) that are otherwise only run end-to-end via the LAR_*
+# scan scripts.
 
-@testset "TJ analytic model" begin
-    @testset "tj_run (inverse) — basic invariants at ε = 0.25" begin
+@testset "TJ-like analytic model" begin
+    @testset "tj_like_run (inverse) — basic invariants at ε = 0.25" begin
         # Keep ε, mpsi, mtheta modest so the whole block runs in ~1 s.
-        tj = TJConfig(lar_r0 = 1.0 / 0.25, lar_a = 1.0,
-                      qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                      ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj",
+        tjlike = TJLikeConfig(lar_r0 = 1.0 / 0.25, lar_a = 1.0,
+                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
+                              ma = 64, mtau = 64)
+        eq = EquilibriumConfig(eq_type = "tj_like",
                                psilow = 0.01, psihigh = 0.995,
                                mpsi = 64, mtheta = 128, etol = 1e-7)
-        pe = setup_equilibrium(eq, tj)
+        pe = setup_equilibrium(eq, tjlike)
 
         # psio is a physical-scale ψ; regressions in the a→a² normalization
         # or the dψ/dr construction would change it by factors of a.
@@ -39,17 +42,17 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJConfig, EquilibriumConfig,
         @test abs(pe.zo) < 1e-8
     end
 
-    @testset "tj_run_direct (Option B) — pole-approach physics at ε = 0.60" begin
+    @testset "tj_like_run_direct (Option B) — pole-approach physics at ε = 0.60" begin
         # ε = 0.60 sits on the stable side of the ideal-external-kink pole at
         # ε ≈ 0.665 for this (qc, qa, pc, μ) combination.  Pole-approach shape
         # (δW_t small, Δ' > 0 and growing) is the Option B success criterion.
-        tj = TJConfig(lar_r0 = 1.0 / 0.60, lar_a = 1.0,
-                      qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                      ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj_direct",
+        tjlike = TJLikeConfig(lar_r0 = 1.0 / 0.60, lar_a = 1.0,
+                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
+                              ma = 64, mtau = 64)
+        eq = EquilibriumConfig(eq_type = "tj_like_direct",
                                psilow = 0.01, psihigh = 0.995,
                                mpsi = 64, mtheta = 128, etol = 1e-7)
-        pe = setup_equilibrium(eq, tj)
+        pe = setup_equilibrium(eq, tjlike)
 
         @test pe.psio > 0
         @test isfinite(pe.psio)
@@ -66,17 +69,17 @@ using GeneralizedPerturbedEquilibrium.Equilibrium: TJConfig, EquilibriumConfig,
         @test abs(pe.zo) < 1e-4
     end
 
-    @testset "tj_run_direct — ψ(R,Z) endpoint consistency" begin
+    @testset "tj_like_run_direct — ψ(R,Z) endpoint consistency" begin
         # At the magnetic axis ψ_in should equal psio (axis convention: ψ
         # positive at axis, zero at LCFS); sampling well outside the LCFS should
         # give a negative value (the vacuum branch of psi_rz).
-        tj = TJConfig(lar_r0 = 1.0 / 0.25, lar_a = 1.0,
-                      qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
-                      ma = 64, mtau = 64)
-        eq = EquilibriumConfig(eq_type = "tj_direct",
+        tjlike = TJLikeConfig(lar_r0 = 1.0 / 0.25, lar_a = 1.0,
+                              qc = 1.5, qa = 3.6, pc = 0.001, mu = 2.0, B0 = 12.0,
+                              ma = 64, mtau = 64)
+        eq = EquilibriumConfig(eq_type = "tj_like_direct",
                                psilow = 0.01, psihigh = 0.995,
                                mpsi = 64, mtheta = 128, etol = 1e-7)
-        inp = tj_run_direct(eq, tj)
+        inp = tj_like_run_direct(eq, tjlike)
 
         # ψ at the geometric axis matches psio (see DirectRunInput docstring for
         # the sign convention: psi_in is positive at axis, zero at LCFS).
