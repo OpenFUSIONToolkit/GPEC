@@ -7,7 +7,7 @@ geqdsk-based equilibria produced by R. Fitzpatrick's external TJ code
 (https://github.com/rfitzp/TJ) and archived under
 `perf/riccati-full-geqdsk-scans:examples/LAR_epsilon_scan/equilibria/`
 at several ε values.  These "TJ" comparison data are produced by the
-upstream TJ code, NOT by GPEC's internal `tj_like` analytic model.
+upstream TJ code, NOT by GPEC's internal `tj_analytic` model.
 """
 
 using Pkg

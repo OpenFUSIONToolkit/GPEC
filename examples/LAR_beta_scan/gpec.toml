@@ -1,21 +1,21 @@
-# Single-file GPEC configuration for the TJ-like β (pressure factor) scan.
+# Single-file GPEC configuration for the TJ-analytic β (pressure factor) scan.
 #
-# The TJ-like analytic equilibrium follows the profile family of
+# The TJ-analytic equilibrium follows the profile family of
 # R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); we adapt the
 # same f₁ / pressure / shape-ODE parameterization but feed the result
 # through GPEC's own pipeline.
 #
 # The accompanying run_scan.jl reads this file, overrides only the scan
-# parameter (TJ_LIKE_INPUT.pc) per point, and writes a fresh gpec.toml
-# into each tempdir.  Every TJ-like analytic-equilibrium parameter is
-# embedded in the [TJ_LIKE_INPUT] section below — there is no side-car
+# parameter (TJ_ANALYTIC_INPUT.pc) per point, and writes a fresh gpec.toml
+# into each tempdir.  Every TJ-analytic equilibrium parameter is
+# embedded in the [TJ_ANALYTIC_INPUT] section below — there is no side-car
 # TOML file.
 
 # ────────────────────────────────────────────────────────────────────────
 #                              Equilibrium
 # ────────────────────────────────────────────────────────────────────────
 [Equilibrium]
-eq_type   = "tj_like"              # TJ-like analytic model (inverse pipeline; Fitzpatrick https://github.com/rfitzp/TJ)
+eq_type   = "tj_analytic"              # TJ-analytic model (inverse pipeline; Fitzpatrick https://github.com/rfitzp/TJ)
 jac_type  = "hamada"               # Flux-surface Jacobian convention used by the Euler-Lagrange ODE
 grid_type = "ldp"                  # Radial-grid packing strategy (logarithmic, dense near rationals)
 psilow    = 0.01                   # Lower normalized poloidal flux bound (start of integration)
@@ -24,13 +24,13 @@ mpsi      = 128                    # Number of radial spline nodes used to discr
 mtheta    = 512                    # Number of poloidal spline nodes used to discretize θ
 
 # ────────────────────────────────────────────────────────────────────────
-#               TJ-like analytic-equilibrium parameters
+#               TJ-analytic equilibrium parameters
 #               (cf. R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ)
 # ────────────────────────────────────────────────────────────────────────
-# Geometry is FIXED at ε = a / R₀ = 0.4 / 2.0 = 0.2 (matches the TJ-like
+# Geometry is FIXED at ε = a / R₀ = 0.4 / 2.0 = 0.2 (matches the TJ-analytic
 # benchmark configuration of Fitzpatrick's TJ).  run_scan.jl varies only
 # `pc` per scan point; every other field is held constant.
-[TJ_LIKE_INPUT]
+[TJ_ANALYTIC_INPUT]
 lar_r0 = 2.0                       # Major radius R₀ [m]  (centerline radius of the magnetic axis)
 lar_a  = 0.4                       # Minor radius a  [m]  (plasma half-width at the midplane; here ε = 0.2)
 qc     = 1.5                       # On-axis safety factor q(r=0) [dimensionless]
@@ -38,8 +38,8 @@ qa     = 3.6                       # Edge   safety factor q(r=a) [dimensionless]
 pc     = 0.001                     # Normalized on-axis pressure (β-scan parameter; OVERRIDDEN per run by run_scan.jl)
 mu     = 2.0                       # Pressure-profile peaking exponent in p₂(r) = pc·(1−r²)^μ
 B0     = 12.0                      # On-axis toroidal magnetic field strength [T]
-ma     = 128                       # TJ-like internal radial grid resolution (shape-ODE nodes)
-mtau   = 128                       # TJ-like internal poloidal grid resolution (θ-spline nodes)
+ma     = 128                       # TJ-analytic internal radial grid resolution (shape-ODE nodes)
+mtau   = 128                       # TJ-analytic internal poloidal grid resolution (θ-spline nodes)
 
 # ────────────────────────────────────────────────────────────────────────
 #                                  Wall

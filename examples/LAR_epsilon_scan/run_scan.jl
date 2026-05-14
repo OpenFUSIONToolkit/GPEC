@@ -1,9 +1,9 @@
 #!/usr/bin/env julia
 """
-    run_scan.jl — TJ-like ε (inverse aspect ratio) scan
+    run_scan.jl — TJ-analytic ε (inverse aspect ratio) scan
 
-Uses the TJ-like analytic equilibrium model (eq_type="tj_like" /
-"tj_like_direct").  The TJ-like model follows the profile family of
+Uses the TJ-analytic equilibrium model (eq_type="tj_analytic" /
+"tj_analytic_direct").  The TJ-analytic model follows the profile family of
 R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); no geqdsk files
 are needed.
 
@@ -16,13 +16,13 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, "../.."))
 
 using GeneralizedPerturbedEquilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: TJLikeConfig, EquilibriumConfig, setup_equilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, EquilibriumConfig, setup_equilibrium
 using HDF5
 using TOML
 using Printf
 
 # ============================================================================
-# Scan parameters (matching the TJ-like benchmark of Fitzpatrick's TJ code)
+# Scan parameters (matching the TJ-analytic benchmark of Fitzpatrick's TJ code)
 # ============================================================================
 
 # Aspect-ratio scan: ε grid ends just before the ideal-kink pole at
@@ -41,10 +41,10 @@ const EPSILONS_TEST = [0.2495, 0.4072, 0.5510]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "epsilon_scan.h5")
 
-# All baseline parameters (Equilibrium, TJ_LIKE_INPUT, Wall, ForceFreeStates)
+# All baseline parameters (Equilibrium, TJ_ANALYTIC_INPUT, Wall, ForceFreeStates)
 # live in gpec.toml next to this script — there is no side-car TOML file.
 # The scan below reads gpec.toml once and overrides ONLY
-# `TJ_LIKE_INPUT.lar_r0` per scan point as `lar_r0 = lar_a / ε` before
+# `TJ_ANALYTIC_INPUT.lar_r0` per scan point as `lar_r0 = lar_a / ε` before
 # writing the per-point gpec.toml into a tempdir.
 const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 
@@ -53,17 +53,17 @@ const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 # ============================================================================
 
 function run_single(epsilon::Float64)
-    run_dir = mktempdir(; prefix="gpec_tjlike_")
+    run_dir = mktempdir(; prefix="gpec_tj_analytic_")
     try
-        # Per-point gpec.toml = baseline gpec.toml with TJ_LIKE_INPUT.lar_r0
-        # overridden.  Switch eq_type to "tj_like_direct" so ψ(R, Z) is built
-        # from the TJ-like analytic model and processed by the direct-GS
+        # Per-point gpec.toml = baseline gpec.toml with TJ_ANALYTIC_INPUT.lar_r0
+        # overridden.  Switch eq_type to "tj_analytic_direct" so ψ(R, Z) is built
+        # from the TJ-analytic model and processed by the direct-GS
         # pipeline.  Required to capture the ideal external-kink pole (δW_t →
         # 0 as ε → ε_crit); the inverse path bypasses the line-integrated q
         # and shows no such pole.
         config = deepcopy(GPEC_BASE)
-        config["TJ_LIKE_INPUT"]["lar_r0"] = GPEC_BASE["TJ_LIKE_INPUT"]["lar_a"] / epsilon
-        config["Equilibrium"]["eq_type"] = "tj_like_direct"
+        config["TJ_ANALYTIC_INPUT"]["lar_r0"] = GPEC_BASE["TJ_ANALYTIC_INPUT"]["lar_a"] / epsilon
+        config["Equilibrium"]["eq_type"] = "tj_analytic_direct"
         config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
@@ -108,13 +108,13 @@ function main()
     test_mode = "--test" in ARGS
     epsilons = test_mode ? EPSILONS_TEST : EPSILONS_FULL
 
-    tjlike = GPEC_BASE["TJ_LIKE_INPUT"]
-    @info "TJ-like ε scan: $(length(epsilons)) points, B0=$(tjlike["B0"])T, qc=$(tjlike["qc"]), qa=$(tjlike["qa"]), pc=$(tjlike["pc"])" *
+    tj = GPEC_BASE["TJ_ANALYTIC_INPUT"]
+    @info "TJ-analytic ε scan: $(length(epsilons)) points, B0=$(tj["B0"])T, qc=$(tj["qc"]), qa=$(tj["qa"]), pc=$(tj["pc"])" *
           (test_mode ? " (test mode)" : "")
 
     isfile(OUTPUT_H5) && rm(OUTPUT_H5)
 
-    lar_a = GPEC_BASE["TJ_LIKE_INPUT"]["lar_a"]
+    lar_a = GPEC_BASE["TJ_ANALYTIC_INPUT"]["lar_a"]
     for (i, eps) in enumerate(epsilons)
         @info "[$(i)/$(length(epsilons))] ε=$eps (R0=$(@sprintf("%.3f", lar_a/eps)))"
         result = run_single(eps)

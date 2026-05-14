@@ -79,21 +79,21 @@ function main(args::Vector{String}=String[])
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
-    # Analytic equilibria ("tj_like", "tj_like_direct", "sol", "lar") can
+    # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
     # EITHER point `eq_filename` at a side-car TOML (legacy) OR embed their
     # parameters directly in gpec.toml under a top-level section:
-    # [TJ_LIKE_INPUT], [SOL_INPUT], [LAR_INPUT].  When the embedded section
+    # [TJ_ANALYTIC_INPUT], [SOL_INPUT], [LAR_INPUT].  When the embedded section
     # is present it takes precedence and the side-car file is not consulted,
     # so a run is fully described by a single gpec.toml.
     #
-    # The TJ-like analytic equilibrium follows the profile family of
+    # The TJ-analytic equilibrium follows the profile family of
     # R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); see
-    # `Equilibrium.TJLikeConfig`.
+    # `Equilibrium.TJAnalyticConfig`.
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
         additional_input = nothing
-        if eq_config.eq_type in ("tj_like", "tj_like_direct") && haskey(inputs, "TJ_LIKE_INPUT")
-            additional_input = Equilibrium.TJLikeConfig(inputs["TJ_LIKE_INPUT"])
+        if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
+            additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
         elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
             additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
         elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")

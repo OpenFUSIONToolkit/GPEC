@@ -128,7 +128,7 @@ Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
     # `eq_type` is always required.  `eq_filename` is required for file-based
     # equilibria (efit, chease, …) but optional for analytic types whose
-    # parameters live in an embedded `[TJ_LIKE_INPUT]` / `[SOL_INPUT]` /
+    # parameters live in an embedded `[TJ_ANALYTIC_INPUT]` / `[SOL_INPUT]` /
     # `[LAR_INPUT]` section of the parent gpec.toml.
     if !haskey(equil_dict, "eq_type")
         error("Missing required key in [Equilibrium]: eq_type")
@@ -239,9 +239,9 @@ function LargeAspectRatioConfig(input_dict::Dict{String,Any})
 end
 
 """
-    TJLikeConfig(...)
+    TJAnalyticConfig(...)
 
-Parameters for the **TJ-like** cylindrical large-aspect-ratio equilibrium
+Parameters for the **TJ-analytic** cylindrical large-aspect-ratio equilibrium
 model — a GPEC adaptation of the analytic profile family used by
 R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).  We follow the
 same analytic-profile parameterization (ψ-ODE in dimensionless r/a, f₁
@@ -260,7 +260,7 @@ profile is p₂(r) = pc·(1-r²)^μ.
 
 Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
 """
-@kwdef mutable struct TJLikeConfig
+@kwdef mutable struct TJAnalyticConfig
     lar_r0::Float64 = 10.0     # Major radius R₀ [m]
     lar_a::Float64 = 1.0       # Minor radius a [m] (ε = a/R₀)
     qc::Float64 = 1.5          # On-axis safety factor
@@ -273,20 +273,20 @@ Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
     zeroth::Bool = false       # If true, suppress Shafranov shift
 end
 
-function TJLikeConfig(path::String)
+function TJAnalyticConfig(path::String)
     raw = TOML.parsefile(path)
-    input_data = get(raw, "TJ_LIKE_INPUT", Dict())
-    return TJLikeConfig(; symbolize_keys(input_data)...)
+    input_data = get(raw, "TJ_ANALYTIC_INPUT", Dict())
+    return TJAnalyticConfig(; symbolize_keys(input_data)...)
 end
 
 """
-Outer constructor for TJLikeConfig from a parsed TOML dictionary. Supports
-embedding the TJ-like analytic-equilibrium parameters (cf. R. Fitzpatrick's
+Outer constructor for TJAnalyticConfig from a parsed TOML dictionary. Supports
+embedding the TJ-analytic equilibrium parameters (cf. R. Fitzpatrick's
 TJ code, https://github.com/rfitzp/TJ) directly in the main `gpec.toml`
-under `[TJ_LIKE_INPUT]`, removing the need for a separate side-car file.
+under `[TJ_ANALYTIC_INPUT]`, removing the need for a separate side-car file.
 """
-function TJLikeConfig(input_dict::Dict{String,Any})
-    return TJLikeConfig(; symbolize_keys(input_dict)...)
+function TJAnalyticConfig(input_dict::Dict{String,Any})
+    return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
 
 """

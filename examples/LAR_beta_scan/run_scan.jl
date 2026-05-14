@@ -1,9 +1,9 @@
 #!/usr/bin/env julia
 """
-    run_scan.jl — TJ-like β (pressure factor) scan
+    run_scan.jl — TJ-analytic β (pressure factor) scan
 
 Fixed geometry (ε=0.2), varying pressure via the `pc` parameter of the
-TJ-like analytic equilibrium model (eq_type="tj_like").  The TJ-like model
+TJ-analytic equilibrium model (eq_type="tj_analytic").  The TJ-analytic model
 follows the profile family of R. Fitzpatrick's TJ code
 (https://github.com/rfitzp/TJ); no geqdsk files are needed.
 
@@ -16,13 +16,13 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, "../.."))
 
 using GeneralizedPerturbedEquilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: TJLikeConfig, EquilibriumConfig, setup_equilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, EquilibriumConfig, setup_equilibrium
 using HDF5
 using TOML
 using Printf
 
 # ============================================================================
-# Scan parameters — TJ-like benchmark pressure factors
+# Scan parameters — TJ-analytic benchmark pressure factors
 # ============================================================================
 
 # Pressure scan: pc grid ends just before the ideal-kink pole at pc ≈ 0.174
@@ -41,9 +41,9 @@ const PC_TEST = [0.001, 0.10, 0.17]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "beta_scan.h5")
 
-# All baseline parameters (Equilibrium, TJ_LIKE_INPUT, Wall, ForceFreeStates)
+# All baseline parameters (Equilibrium, TJ_ANALYTIC_INPUT, Wall, ForceFreeStates)
 # live in gpec.toml next to this script — there is no side-car TOML file.
-# The scan below reads gpec.toml once and overrides ONLY `TJ_LIKE_INPUT.pc`
+# The scan below reads gpec.toml once and overrides ONLY `TJ_ANALYTIC_INPUT.pc`
 # per scan point before writing the per-point gpec.toml into a tempdir.
 const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 
@@ -52,11 +52,11 @@ const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 # ============================================================================
 
 function run_single(pc::Float64)
-    run_dir = mktempdir(; prefix="gpec_tjlike_beta_")
+    run_dir = mktempdir(; prefix="gpec_tj_analytic_beta_")
     try
-        # Per-point gpec.toml = baseline gpec.toml with TJ_LIKE_INPUT.pc overridden.
+        # Per-point gpec.toml = baseline gpec.toml with TJ_ANALYTIC_INPUT.pc overridden.
         config = deepcopy(GPEC_BASE)
-        config["TJ_LIKE_INPUT"]["pc"] = pc
+        config["TJ_ANALYTIC_INPUT"]["pc"] = pc
         config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
@@ -101,8 +101,8 @@ function main()
     test_mode = "--test" in ARGS
     pcs = test_mode ? PC_TEST : PC_FULL
 
-    tjlike = GPEC_BASE["TJ_LIKE_INPUT"]
-    @info "TJ-like β scan: $(length(pcs)) points, ε=$(tjlike["lar_a"]/tjlike["lar_r0"]), B0=$(tjlike["B0"])T, qc=$(tjlike["qc"]), qa=$(tjlike["qa"])" *
+    tj = GPEC_BASE["TJ_ANALYTIC_INPUT"]
+    @info "TJ-analytic β scan: $(length(pcs)) points, ε=$(tj["lar_a"]/tj["lar_r0"]), B0=$(tj["B0"])T, qc=$(tj["qc"]), qa=$(tj["qa"])" *
           (test_mode ? " (test mode)" : "")
 
     isfile(OUTPUT_H5) && rm(OUTPUT_H5)

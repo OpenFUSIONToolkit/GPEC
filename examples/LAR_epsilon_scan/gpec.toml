@@ -1,27 +1,27 @@
-# Single-file GPEC configuration for the TJ-like ε (inverse aspect ratio)
+# Single-file GPEC configuration for the TJ-analytic ε (inverse aspect ratio)
 # scan.
 #
-# The TJ-like analytic equilibrium follows the profile family of
+# The TJ-analytic equilibrium follows the profile family of
 # R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); we adapt the
 # same f₁ / pressure / shape-ODE parameterization but feed the result
 # through GPEC's own pipeline.
 #
 # The accompanying run_scan.jl reads this file, overrides only the scan
-# parameter (TJ_LIKE_INPUT.lar_r0 = TJ_LIKE_INPUT.lar_a / ε) per point,
-# and writes a fresh gpec.toml into each tempdir.  Every TJ-like
-# analytic-equilibrium parameter is embedded in the [TJ_LIKE_INPUT]
+# parameter (TJ_ANALYTIC_INPUT.lar_r0 = TJ_ANALYTIC_INPUT.lar_a / ε) per point,
+# and writes a fresh gpec.toml into each tempdir.  Every TJ-analytic
+# analytic-equilibrium parameter is embedded in the [TJ_ANALYTIC_INPUT]
 # section below — there is no side-car TOML file.
 
 # ────────────────────────────────────────────────────────────────────────
 #                              Equilibrium
 # ────────────────────────────────────────────────────────────────────────
-# Note: run_scan.jl overrides `eq_type` to "tj_like_direct" so the analytic
+# Note: run_scan.jl overrides `eq_type` to "tj_analytic_direct" so the analytic
 # ψ(R,Z) is processed by the direct-GS pipeline.  Required to capture the
-# ideal external-kink pole (δW_t → 0 as ε → ε_crit); the "tj_like" inverse
+# ideal external-kink pole (δW_t → 0 as ε → ε_crit); the "tj_analytic" inverse
 # path bypasses the line-integrated q and shows no such pole.  The
-# "tj_like" value below is a fallback for ad-hoc invocations.
+# "tj_analytic" value below is a fallback for ad-hoc invocations.
 [Equilibrium]
-eq_type   = "tj_like"              # TJ-like analytic model (inverse pipeline; overridden to "tj_like_direct" by run_scan.jl)
+eq_type   = "tj_analytic"              # TJ-analytic model (inverse pipeline; overridden to "tj_analytic_direct" by run_scan.jl)
 jac_type  = "hamada"               # Flux-surface Jacobian convention used by the Euler-Lagrange ODE
 grid_type = "ldp"                  # Radial-grid packing strategy (logarithmic, dense near rationals)
 psilow    = 0.01                   # Lower normalized poloidal flux bound (start of integration)
@@ -30,13 +30,13 @@ mpsi      = 128                    # Number of radial spline nodes used to discr
 mtheta    = 512                    # Number of poloidal spline nodes used to discretize θ
 
 # ────────────────────────────────────────────────────────────────────────
-#               TJ-like analytic-equilibrium parameters
+#               TJ-analytic equilibrium parameters
 #               (cf. R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ)
 # ────────────────────────────────────────────────────────────────────────
-# All TJ-like parameters are held FIXED except `lar_r0`, which run_scan.jl
+# All TJ-analytic parameters are held FIXED except `lar_r0`, which run_scan.jl
 # overrides per scan point as `lar_r0 = lar_a / ε`.  `lar_a` stays fixed at
 # 1 m so each scan point is a self-similar rescaling of the geometry.
-[TJ_LIKE_INPUT]
+[TJ_ANALYTIC_INPUT]
 lar_r0 = 5.0                       # Major radius R₀ [m]  (baseline ε = 0.2; OVERRIDDEN per scan point by run_scan.jl)
 lar_a  = 1.0                       # Minor radius a  [m]  (plasma half-width at the midplane; fixed across the scan)
 qc     = 1.5                       # On-axis safety factor q(r=0) [dimensionless]
@@ -44,8 +44,8 @@ qa     = 3.6                       # Edge   safety factor q(r=a) [dimensionless]
 pc     = 0.001                     # Normalized on-axis pressure (kept low for the ε scan to isolate geometry effects)
 mu     = 2.0                       # Pressure-profile peaking exponent in p₂(r) = pc·(1−r²)^μ
 B0     = 12.0                      # On-axis toroidal magnetic field strength [T]
-ma     = 128                       # TJ-like internal radial grid resolution (shape-ODE nodes)
-mtau   = 128                       # TJ-like internal poloidal grid resolution (θ-spline nodes)
+ma     = 128                       # TJ-analytic internal radial grid resolution (shape-ODE nodes)
+mtau   = 128                       # TJ-analytic internal poloidal grid resolution (θ-spline nodes)
 
 # ────────────────────────────────────────────────────────────────────────
 #                                  Wall
