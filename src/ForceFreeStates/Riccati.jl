@@ -1860,12 +1860,24 @@ function _populate_dense_xi_via_serial_el!(
 )
     msing = intr.msing
 
-    # Preserve every BVP-result field on `intr` that the dense pass would
-    # mutate.  These are the fields that downstream pipeline stages
-    # (`compute_delta_prime_matrix!`, perturbed equilibrium) consume.
+    # Preserve every BVP-result field on `intr` (and on `odet`) that the
+    # dense pass would mutate.  These are the fields that downstream
+    # pipeline stages (`compute_delta_prime_matrix!`, PerturbedEquilibrium
+    # `SingularCoupling.jl`) consume.
+    #
+    # `odet.ca_l` / `odet.ca_r` matter specifically: the parallel BVP
+    # populated them in the (S, I) Riccati gauge via
+    # `riccati_cross_ideal_singular_surf!`, and PE's resonant-flux /
+    # Δ' / island-half-width / Chirikov calculations are calibrated
+    # against that convention.  The fresh EL pass below would overwrite
+    # them with axis-basis values (exponentially-growing U₁ at the
+    # inner-layer boundary), which inflates the downstream resonant
+    # flux magnitude by ~25 orders of magnitude.
     saved = (
         psilim    = intr.psilim,
         qlim      = intr.qlim,
+        ca_l      = copy(odet.ca_l),
+        ca_r      = copy(odet.ca_r),
         sing_state = [(
             delta_prime     = copy(intr.sing[s].delta_prime),
             delta_prime_col = copy(intr.sing[s].delta_prime_col),
@@ -1906,7 +1918,14 @@ function _populate_dense_xi_via_serial_el!(
         intr.sing[s].psi_ua_left     = saved.sing_state[s].psi_ua_left
     end
 
-    # Return the fresh serial-EL odet (self-consistent: odet.u, u_store,
-    # ud_store, ca_l, ca_r, nzero, edge_scan all in EL axis basis).
+    # Restore the parallel BVP's Riccati-gauge `ca_l` / `ca_r` onto the
+    # fresh EL odet — these feed PE's `SingularCoupling.jl` which is
+    # written against the (S, I) Riccati convention.
+    fresh_odet.ca_l .= saved.ca_l
+    fresh_odet.ca_r .= saved.ca_r
+
+    # Return the fresh serial-EL odet (self-consistent for ξ-function
+    # storage in axis basis; `ca_l`/`ca_r` carry the parallel-BVP
+    # Riccati-gauge values needed by PE downstream).
     return fresh_odet
 end
