@@ -301,7 +301,20 @@ combination [Chance, PPPL-2527]:
 stored in `intr.delta_prime_matrix` (msing × msing).
 
 ## Limitations
-- Assumes exactly one resonant mode per singular surface (standard single-n case).
+
+This routine currently assumes exactly one resonant mode per singular surface
+(the standard single-`n` case).  When **any** surface carries more than one
+resonant mode — i.e., a multi-`n` run where a single q value satisfies two
+distinct `(m, n)` tuples (e.g. q = 2 with `(m=2, n=1)` AND `(m=4, n=2)`) —
+the routine emits a warning and skips the inter-surface BVP rather than
+crashing.  The per-surface scalar Δ' values in `intr.sing[*].delta_prime`
+(computed inline by `riccati_cross_ideal_singular_surf!` during chunk
+crossings) are still populated and written to HDF5 in that case; only
+`intr.delta_prime_matrix` (and HDF5 `singular/delta_prime_matrix`) is
+omitted.  Generalizing the BVP to multi-resonance surfaces is tracked as a
+follow-up: the matrix shape becomes `n_res_total × n_res_total` with
+`n_res_total = sum(length(intr.sing[j].m))` and a `(surface, mode, side)`
+↔ BVP-row map; see PR discussion.
 """
 function compute_delta_prime_matrix!(
     intr::ForceFreeStatesInternal,
@@ -319,7 +332,19 @@ function compute_delta_prime_matrix!(
     msing == 0 && return
     N = intr.numpert_total
 
-    @assert all(j -> length(intr.sing[j].m) == 1, 1:msing) "compute_delta_prime_matrix! only supports single-resonance surfaces"
+    # Multi-resonance surfaces (one q satisfying multiple (m, n) tuples in a
+    # multi-n run) are not yet handled by the inter-surface BVP.  Skip with a
+    # warning rather than crashing the pipeline; per-surface Δ' values are
+    # still populated upstream by `riccati_cross_ideal_singular_surf!` and
+    # written to HDF5 under `singular/delta_prime` / `delta_prime_col`.
+    n_res_per_surface = [length(intr.sing[j].m) for j in 1:msing]
+    if any(>(1), n_res_per_surface)
+        offenders = [(j, intr.sing[j].m, intr.sing[j].n) for j in 1:msing if n_res_per_surface[j] > 1]
+        @warn "compute_delta_prime_matrix!: skipping inter-surface Δ' BVP because some surfaces carry more than one resonant mode " *
+              "(multi-n collision; generalization tracked as follow-up). " *
+              "Per-surface Δ' is unaffected. Multi-resonance surfaces: $offenders"
+        return
+    end
 
     i_crossings = findall(c -> c.needs_crossing, chunks)
     # Map from BVP surface index (1:msing_active) to intr.sing index.
@@ -1492,10 +1517,18 @@ Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml, or by sett
 `ctrl.use_parallel = true` programmatically. Requires `singfac_min != 0`.
 
 **Key differences from standard integration:**
-- No Gaussian reduction (crossings use riccati-style, odet.ifix stays 0)
-- `transform_u!` is called but is a no-op (identity transform, ifix=0)
-- `ud_store` is approximate (set to zeros for FM chunks; does not affect energies or Δ')
+- No Gaussian reduction in the propagator BVP phase (crossings use the
+  Riccati-style algorithm, parallel `odet.ifix` stays 0)
+- `transform_u!` is called on the parallel odet but is a no-op (ifix=0)
 - Outer plasma uses serial Riccati integration for numerical stability
+- A serial Euler-Lagrange **dense pass** is appended at the end and
+  replaces the parallel `odet` so that `u_store` / `ud_store` are dense and
+  in axis basis — the only convention the PerturbedEquilibrium downstream
+  code consumes correctly.  Δ' (`singular/delta_prime_matrix`) is computed
+  from the parallel BVP and is bit-identical with vs. without this pass.
+  Toggle off with `ctrl.populate_dense_xi = false` if only Δ' / vacuum /
+  energies are needed and the extra serial-EL cost is unwanted (HDF5
+  `integration/xi_*` will then be sparse / zero).
 
 **Bidirectional integration for large-N accuracy:**
 The crossing chunk (nearest to each rational surface singL[j]) is integrated *backward*
@@ -1647,6 +1680,10 @@ function parallel_eulerlagrange_integration(
             odet.q_store[odet.step] = odet.q
             @views odet.u_store[:, :, :, odet.step] .= odet.u
             # ud not available from propagator integration — left as zeros
+            # here.  When ctrl.populate_dense_xi = true (default) the entire
+            # `odet` is replaced by a dense serial-EL run at the end of this
+            # function, so u_store/ud_store reach the main pipeline densely
+            # populated in axis basis (the PerturbedEquilibrium convention).
             odet.step += 1
         end
     end
@@ -1766,5 +1803,110 @@ function parallel_eulerlagrange_integration(
     # transform_u! is called for consistency but is a no-op (ifix=0, no Gaussian reduction)
     transform_u!(odet, intr)
 
+    # ── S → ξ: populate dense u_store/ud_store for PerturbedEquilibrium ───
+    # The propagator-based BVP only stores S (= U₁·U₂⁻¹) at chunk endpoints
+    # and leaves `ud_store` as zeros for the FM chunks, so the HDF5 outputs
+    # `integration/xi_psi`, `integration/dxi_psi`, `integration/xi_s` would
+    # be unusable by downstream eigenfunction reconstruction.  A serial
+    # Euler-Lagrange dense pass replaces the BVP `odet` with a fresh
+    # axis-basis `odet` whose `u_store`/`ud_store` match what a pure serial
+    # `eulerlagrange_integration` would produce — the only convention the
+    # PerturbedEquilibrium downstream code consumes correctly.  The
+    # parallel BVP results that survive downstream (propagators, chunks,
+    # `S_at_surface_left`, `intr.psilim`/`qlim`, `intr.sing[*].delta_prime`)
+    # are returned/restored alongside.  Set `ctrl.populate_dense_xi = false`
+    # to skip the dense pass (faster, but PerturbedEquilibrium reconstruction
+    # will not work and HDF5 `integration/xi_*` will be sparse / zero).
+    if ctrl.populate_dense_xi
+        odet = _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr)
+    end
+
     return odet, propagators, chunks, S_at_surface_left
+end
+
+"""
+    _populate_dense_xi_via_serial_el!(odet, ctrl, equil, ffit, intr) -> fresh_odet
+
+Replace the propagator-BVP's `odet` with a fresh serial-EL `odet` that has
+dense `u_store` / `ud_store` populated in axis basis (the PerturbedEquilibrium
+convention).  The caller's `odet` is fully replaced by the fresh one because
+`free_run!` downstream uses `odet.u[:,:,1,end]` to normalize `odet.u_store`,
+so both must be in the same basis.  The parallel BVP results that survive
+downstream are stored in `intr` (psilim/qlim, sing[*].delta_prime, …) and in
+the externally-returned `propagators` / `chunks` / `S_at_surface_left` —
+none of those live on `odet`, so replacing `odet` is safe.
+
+The dense pass uses the **serial EL path** (`sing_der!` with standard
+`integrator_callback!`, Gaussian reduction, and `transform_u!`) so that
+`u_store` is in the axis basis — the only convention the PerturbedEquilibrium
+/ FieldReconstruction downstream code is known to consume correctly.
+
+We do save and restore the `intr.psilim` / `intr.qlim` / `intr.sing[*]` fields
+that the parallel BVP populated, because the dense EL pass would otherwise
+overwrite them (its standard `cross_ideal_singular_surf!` runs unconditionally
+and does NOT populate `delta_prime`; we keep the parallel pass's values
+which `compute_delta_prime_matrix!` uses).
+
+Called from `parallel_eulerlagrange_integration` when
+`ctrl.populate_dense_xi = true` (default).  Approximate cost: one serial
+EL integration on top of the parallel BVP phase.  Required to make
+`use_parallel = true` produce DCON eigenfunctions usable by the
+PerturbedEquilibrium downstream pipeline.
+"""
+function _populate_dense_xi_via_serial_el!(
+    odet::OdeState, ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars,
+    intr::ForceFreeStatesInternal
+)
+    msing = intr.msing
+
+    # Preserve every BVP-result field on `intr` that the dense pass would
+    # mutate.  These are the fields that downstream pipeline stages
+    # (`compute_delta_prime_matrix!`, perturbed equilibrium) consume.
+    saved = (
+        psilim    = intr.psilim,
+        qlim      = intr.qlim,
+        sing_state = [(
+            delta_prime     = copy(intr.sing[s].delta_prime),
+            delta_prime_col = copy(intr.sing[s].delta_prime_col),
+            ua_left         = copy(intr.sing[s].ua_left),
+            psi_ua_left     = intr.sing[s].psi_ua_left,
+        ) for s in 1:msing],
+    )
+
+    # Temporarily switch dispatch flags so `eulerlagrange_integration`
+    # follows the serial EL branch (axis-basis u_store) for this call.
+    saved_use_parallel = ctrl.use_parallel
+    saved_use_riccati  = ctrl.use_riccati
+    saved_verbose      = ctrl.verbose
+    ctrl.use_parallel = false
+    ctrl.use_riccati  = false
+    ctrl.verbose      = false  # suppress duplicate per-chunk logging
+
+    if saved_verbose
+        @info "   S → ξ: serial EL dense pass for HDF5 integration/xi_*"
+    end
+
+    local fresh_odet::OdeState
+    try
+        fresh_odet, _, _, _ = eulerlagrange_integration(ctrl, equil, ffit, intr)
+    finally
+        ctrl.use_parallel = saved_use_parallel
+        ctrl.use_riccati  = saved_use_riccati
+        ctrl.verbose      = saved_verbose
+    end
+
+    # Restore BVP-result fields on `intr`.
+    intr.psilim = saved.psilim
+    intr.qlim   = saved.qlim
+    for s in 1:msing
+        intr.sing[s].delta_prime     = saved.sing_state[s].delta_prime
+        intr.sing[s].delta_prime_col = saved.sing_state[s].delta_prime_col
+        intr.sing[s].ua_left         = saved.sing_state[s].ua_left
+        intr.sing[s].psi_ua_left     = saved.sing_state[s].psi_ua_left
+    end
+
+    # Return the fresh serial-EL odet (self-consistent: odet.u, u_store,
+    # ud_store, ca_l, ca_r, nzero, edge_scan all in EL axis basis).
+    return fresh_odet
 end
