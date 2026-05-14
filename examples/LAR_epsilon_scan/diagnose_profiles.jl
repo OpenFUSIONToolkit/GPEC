@@ -3,7 +3,11 @@
 Diagnose LAR equilibrium profiles: P, P', FF', q, dV/dpsi vs psi_N.
 
 Generates overlay plots comparing Julia LAR analytic equilibria against
-TJ geqdsk-based equilibria (from the archive branch) at several epsilon values.
+geqdsk-based equilibria produced by R. Fitzpatrick's external TJ code
+(https://github.com/rfitzp/TJ) and archived under
+`perf/riccati-full-geqdsk-scans:examples/LAR_epsilon_scan/equilibria/`
+at several ε values.  These "TJ" comparison data are produced by the
+upstream TJ code, NOT by GPEC's internal `tj_like` analytic model.
 """
 
 using Pkg
