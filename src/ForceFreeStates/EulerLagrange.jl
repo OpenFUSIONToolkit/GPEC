@@ -55,7 +55,9 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         end
     end
 
-    # Deallocate unused storage of integration data
+    # Deallocate unused storage of integration data.
+    # `odet.step` was incremented one past the last filled index in integrate_el_region!.
+    odet.step -= 1
     if ctrl.psiedge < intr.psilim
         # Find the peak dW in the edge region and truncate integration data there
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
@@ -69,7 +71,6 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         intr.qlim = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
-        odet.step -= 1 # step was incremented one extra time in integrate_el_region!
         trim_storage!(odet)
     end
 
@@ -556,15 +557,20 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
+    # Steps where free_compute_total hits a singular wp solve are left as NaN per the EdgeScanState contract.
     for j in 1:N_edge
         istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
-        result = free_compute_total(equil, ffit, intr, odet)
-        es.total_eigenvalue[j] = result.total_eigenvalue
-        es.plasma_energy[j] = result.plasma_energy
-        es.vacuum_energy[j] = result.vacuum_energy
-        es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+        try
+            result = free_compute_total(equil, ffit, intr, odet)
+            es.total_eigenvalue[j] = result.total_eigenvalue
+            es.plasma_energy[j] = result.plasma_energy
+            es.vacuum_energy[j] = result.vacuum_energy
+            es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+        catch e
+            e isa LinearAlgebra.SingularException || rethrow()
+        end
     end
 
     # Return the ODE step index at peak total_eigenvalue (NaN-safe; failed steps ignored)

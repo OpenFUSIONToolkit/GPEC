@@ -17,6 +17,10 @@ include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
 
+include("InnerLayer/InnerLayer.jl")
+import .InnerLayer as InnerLayer
+export InnerLayer
+
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
 export ForcingTerms
@@ -35,6 +39,7 @@ using Printf
 using HDF5
 
 using FastInterpolations
+import IMASdd
 
 import AdaptiveArrayPools: @with_pool
 
@@ -48,7 +53,7 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
-function main(args::Vector{String}=String[])
+function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
@@ -77,7 +82,7 @@ function main(args::Vector{String}=String[])
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        equil = Equilibrium.setup_equilibrium(eq_config)
+        equil = Equilibrium.setup_equilibrium(eq_config, eq_config.eq_type == "imas" ? dd : nothing)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
         @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
@@ -117,11 +122,6 @@ function main(args::Vector{String}=String[])
 
     # Determine psilim and qlim (where we will integrate to)
     sing_lim!(intr, ctrl, equil)
-    if ctrl.set_psilim_via_dmlim && ctrl.psiedge < intr.psilim
-        @warn "Only one of set_psilim_via_dmlim and psiedge < psilim can be used at a time.
-            Setting psiedge = 1.0 and determining dW from psilim = $(intr.psilim) determined from dmlim = $(ctrl.dmlim)."
-        ctrl.psiedge = 1.0
-    end
 
     # If truncating before psihigh, reform equilibrium if desired
     if intr.psilim != equil.config.psihigh && ctrl.reform_eq_with_psilim
@@ -471,6 +471,7 @@ function write_outputs_to_HDF5(
         out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
         out_h5["vacuum/et"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
+        out_h5["vacuum/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
         out_h5["vacuum/x_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 1] : Float64[]
         out_h5["vacuum/y_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 2] : Float64[]
         out_h5["vacuum/z_plasma"] = ctrl.vac_flag ? vac_data.plasma_pts[:, 3] : Float64[]
@@ -538,6 +539,44 @@ function write_outputs_to_HDF5(
     end
 end
 
-export main
+"""
+    write_imas(dd, result)
+
+Write GPEC stability results into `dd.mhd_linear`. Creates one `toroidal_mode` entry per
+requested toroidal mode number, storing the least-stable (minimum real part) `energy_perturbed`
+for that `n_tor`. For multi-n runs the eigenvalue array `et` is sorted by stability across all
+n-blocks; `n_tor_idx[i]` identifies which n-block eigenvalue `i` belongs to, so each n_tor
+receives the correct least-stable δW regardless of how modes are interleaved in `et`.
+
+The `result` argument is the named tuple returned by `main`.
+"""
+function write_imas(dd, result)
+    result.vac_data === nothing && return
+
+    vac_data = result.vac_data
+    intr = result.intr
+
+    # Top-level metadata
+    dd.mhd_linear.code.name = "GPEC"
+    dd.mhd_linear.ideal_flag = 1
+
+    # Add a time_slice at the current global_time (wipe=false reuses an existing slice
+    # at the same time, or appends a new one if none exists yet)
+    ts = resize!(dd.mhd_linear.time_slice; wipe=false)
+
+    # Write the least-stable energy for each toroidal mode number
+    # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
+    resize!(ts.toroidal_mode, intr.npert)
+    for j in 0:(intr.npert-1)
+        n_indices = findall(==(j), vac_data.n_tor_idx) # indices of eigenvalues in the j-th n-block
+        mode = ts.toroidal_mode[j+1]
+        mode.n_tor = intr.nlow + j
+        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices])) # least-stable energy for this n-toroidal mode
+    end
+
+    return dd
+end
+
+export main, write_imas
 
 end # module GeneralizedPerturbedEquilibrium
