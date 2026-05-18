@@ -14,6 +14,12 @@ The Utilities module currently provides:
 Modules = [GeneralizedPerturbedEquilibrium.Utilities, GeneralizedPerturbedEquilibrium.Utilities.FourierTransforms]
 ```
 
+## IMAS Output
+
+```@docs
+GeneralizedPerturbedEquilibrium.write_imas
+```
+
 ## Example Usage
 
 ```julia

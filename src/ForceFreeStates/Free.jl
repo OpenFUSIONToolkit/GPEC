@@ -37,6 +37,9 @@ and data dumping.
         @views vac_data.wv[:, ipert] .*= singfac[ipert]
     end
 
+    # Least stable eigenvalue of the vacuum matrix alone (should be PSD; clamp numerical noise to zero)
+    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv)))))
+
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
     vac_data.wt0 .= vac_data.wt
@@ -47,8 +50,13 @@ and data dumping.
     etemp .= vac_data.et
     # Rearrange wt columns for descending real eigenvalues
     for ipert in 1:numpert_total
-        vac_data.wt[:, ipert] .= Ev.vectors[:, eindex[numpert_total+1-ipert]]
-        vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
+        orig = eindex[numpert_total+1-ipert]
+        vac_data.wt[:, ipert] .= Ev.vectors[:, orig]
+        vac_data.et[ipert] = etemp[orig]
+        # Store which n this eigenvector corresponds to (needed to write IMAS data)
+        # This relies on the block diagonal matrix structure due to n decoupling in tokamaks
+        imax = argmax(abs.(Ev.vectors[:, orig]))
+        vac_data.n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
 
     # Normalize eigenfunction and energy.
@@ -165,13 +173,13 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
 @with_pool pool function free_compute_total(equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
 
     Npert = intr.numpert_total
-    wp          = zeros!(pool, ComplexF64, Npert, Npert)
+    wp = zeros!(pool, ComplexF64, Npert, Npert)
     eigenvalues = zeros!(pool, ComplexF64, Npert)
-    wt          = zeros!(pool, ComplexF64, Npert, Npert)
-    wv          = zeros!(pool, ComplexF64, Npert, Npert)
-    eindex      = zeros!(pool, Int, Npert)
-    evals_real  = zeros!(pool, Float64, Npert)
-    tmp_v       = zeros!(pool, ComplexF64, Npert)
+    wt = zeros!(pool, ComplexF64, Npert, Npert)
+    wv = zeros!(pool, ComplexF64, Npert, Npert)
+    eindex = zeros!(pool, Int, Npert)
+    evals_real = zeros!(pool, Float64, Npert)
+    tmp_v = zeros!(pool, ComplexF64, Npert)
 
     dV_dpsi = equil.profiles.dVdpsi_spline(odet.psifac)
 

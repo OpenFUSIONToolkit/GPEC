@@ -107,7 +107,6 @@ A mutable struct holding internal state variables for stability calculations.
   - `keq_out::Bool` - Flag to output equilibrium quantities (not yet implemented)
   - `theta_out::Bool` - Flag to output theta coordinate data (not yet implemented)
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
-  - `fkg_kmats_flag::Bool` - Flag for kinetic matrix computation (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
   - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
@@ -132,7 +131,6 @@ A mutable struct holding internal state variables for stability calculations.
     keq_out::Bool = false
     theta_out::Bool = false
     xlmda_out::Bool = false
-    fkg_kmats_flag::Bool = false
     sol_base::Int = 50
     msing::Int = 0
     kmsing::Int = 0
@@ -177,22 +175,10 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim
-  - `dmlim::Float64` - Distance beyond last rational surface (as percentage)
   - `sing_order::Int` - Order of singular layer expansion
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
-  - `kin_flag::Bool` - Enable kinetic effects
-  - `con_flag::Bool` - Continue integration through rationals without zeroing singular solutions
-  - `kinfac1::Float64` - First kinetic scaling factor (not yet implemented)
-  - `kinfac2::Float64` - Second kinetic scaling factor (not yet implemented)
-  - `kingridtype::Int` - Type of kinetic grid (0=standard) (not yet implemented)
-  - `ktanh_flag::Bool` - Enable hyperbolic tangent profile (not yet implemented)
-  - `passing_flag::Bool` - Include passing particles (not yet implemented)
-  - `trapped_flag::Bool` - Include trapped particles (not yet implemented)
-  - `ion_flag::Bool` - Include ion kinetic effects (not yet implemented)
-  - `electron_flag::Bool` - Include electron kinetic effects (not yet implemented)
-  - `ktc::Float64` - Kinetic collision parameter (not yet implemented)
-  - `ktw::Float64` - Kinetic width parameter (not yet implemented)
+  - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
+  - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
@@ -230,25 +216,13 @@ A mutable struct containing control parameters for stability analysis, set by th
     numunorms_init::Int = 100
     singfac_min::Float64 = 0.0
     cyl_flag::Bool = false
-    set_psilim_via_dmlim::Bool = false
-    dmlim::Float64 = 0.2
     sing_order::Int = 2
     qhigh::Float64 = 1e3
-    kin_flag::Bool = false
-    con_flag::Bool = false
-    kinfac1::Float64 = 1.0
-    kinfac2::Float64 = 1.0
-    kingridtype::Int = 0
-    ktanh_flag::Bool = false
-    passing_flag::Bool = false
-    trapped_flag::Bool = true
-    ion_flag::Bool = true
-    electron_flag::Bool = false
-    ktc::Float64 = 0.1
-    ktw::Float64 = 50.0
+    kinetic_source::String = "fixed"
+    kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
-    psiedge::Float64 = 1.0
+    psiedge::Float64 = 0.99
     parallel_threads::Int = 1
     diagnose::Bool = false
     diagnose_ca::Bool = false
@@ -277,8 +251,30 @@ end
     emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
     kmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     gmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Ideal A,B,C splines preserved before kinetic overwrite (for mat_flag output)
+    amats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    bmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    cmats_ideal::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+
+    # Kinetic energy matrix splines: 6 components (A,B,C,D,E,H perturbations)
+    kwmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+    # Kinetic torque matrix splines: 6 components
+    ktmats::Vector{S} = [_empty_series_interp_complex(numpert_total^2, itp_opts) for _ in 1:6]
+
+    # Pre-computed FKG kinetic matrices (populated by make_kinetic_matrix)
+    f0mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    pmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    paats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    kkaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r1mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r2mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    r3mats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    gaats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
 
     # Pre-allocated evaluation buffer for matrix output
     _mat_out::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
@@ -323,6 +319,8 @@ Populated in `Free.jl`.
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
+  - `n_tor_idx::Vector{Int}` -  0-based toroidal mode number index of each sorted eigenvalue (numpert_total). Needed in `write_imas`
+  - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the vacuum matrix wv, clamped to zero
   - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points [x, y, z] (mthvac * nzvac × 3)
@@ -339,6 +337,8 @@ Populated in `Free.jl`.
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
+    n_tor_idx::Vector{Int} = zeros(Int, numpert_total)
+    vacuum_eigenvalue::Float64 = NaN
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
@@ -392,38 +392,72 @@ and a small set of temporary matrices and factors used to compute singular-layer
   - `numpert_total::Int` - Total number of Fourier mode combinations (m × n) used in the calculation.
 
   - `numunorms_init::Int` - Initial allocation size for the number of normalization operations recorded.
+
   - `msing::Int` - Number of singular surfaces in the equilibrium (used to size asymptotic coefficient arrays).
+
   - `numsteps_init::Int` - Initial allocation size for the number of integration steps to store.
+
   - `step::Int` - Current integration step index (1-based, like `istep` in the original Fortran).
+
   - `psi_store::Vector{Float64}` - Stored psi values at each saved integration step (length `numsteps_init`).
+
   - `q_store::Vector{Float64}` - Stored q values at each saved integration step (length `numsteps_init`).
+
   - `u_store::Array{ComplexF64,4}` - Stored solution arrays at each saved step with shape
     `(numpert_total, numpert_total, 2, numsteps_init)` (complex solution state used by the solver).
+
   - `ud_store::Array{ComplexF64,4}` - Stored derivatives of the solution at each saved step with same shape as `u_store`.
+
   - `crit_store::Vector{Float64}` - Stored crit parameter values (smallest eigenvalue of W⁻ꜝ) (length `numsteps_init`).
+
   - `ca_r::Array{ComplexF64,4}` - Asymptotic coefficients just to the right of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
+
   - `ca_l::Array{ComplexF64,4}` - Asymptotic coefficients just to the left of each singular surface
     with shape `(numpert_total, numpert_total, 2, msing)`.
+
   - `edge_scan::EdgeScanState` - Edge dW scan state and results. Initialized as a disabled sentinel (N_edge=0) and replaced by `findmax_dW_edge!` when a scan runs.
+
   - `psifac::Float64` - Current normalized flux coordinate for the integrator.
+
   - `q::Float64` - Safety factor value at `psifac` (current q during integration).
+
   - `u::Array{ComplexF64,3}` - Current working solution arrays with shape `(numpert_total, numpert_total, 2)`.
+
   - `ud::Array{ComplexF64,3}` - Current working solution derivative (different than du) arrays with shape `(numpert_total, numpert_total, 2)`.
+
   - `ising_start::Int` - Index of the starting singular surface to be crossed during integration.
+
+    # Initialization parameters
+
   - `psimax::Float64` - Maximum psi value for which the integrator is allowed to run in next integration region.
+
   - `needs_crossing::Bool` - Flag indicating whether a rational surface needs to be crossed after the current integration region.
+
   - `nzero::Int` - Count of detected zero crossings (used for diagnostics).
+
+    # Saved data throughout integration
+
   - `new::Bool` - Flag indicating whether a new `unorm0` should be computed after a fixup.
+
+# Total ODE solver steps taken (all steps, not just saved ones)
+
   - `unorm::Vector{Float64}` - Current norms of the solution vectors (length `numpert_total`).
+
   - `unorm0::Vector{Float64}` - Reference/initial norms of the solution vectors (length `numpert_total`).
+
   - `ifix::Int` - Number of normalization operations performed (index into normalization arrays).
+
   - `index::Array{Int,2}` - Index matrix used for sorting solution norms with shape `(numpert_total, numunorms_init)`.
-  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions
+
+  - `sing_flag::Vector{Bool}` - Boolean flags indicating which stored normalizations correspond to singular solutions    # Edge dW scan state and results (disabled sentinel when psiedge >= psilim, i.e. no edge scan)
     (length `numunorms_init`).
-  - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.
-  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape
+
+  - `zeroed_idx::Vector{Vector{Int}}` - For each ideal rational surface jump, a vector of indices of solutions that were zeroed.    # Data for integrator
+
+  - `fixfac::Array{ComplexF64,3}` - Fix-up factors for Gaussian reduction with shape    # Initialization parameters
     `(numpert_total, numpert_total, numunorms_init)`.
+
   - `fixstep::Vector{Int64}` - Step indices (psi step positions) at which normalization/fixups were performed (length `numunorms_init`).
 """
 @kwdef mutable struct OdeState
@@ -467,6 +501,10 @@ and a small set of temporary matrices and factors used to compute singular-layer
     zeroed_idx::Vector{Vector{Int}} = [Int[] for _ in 1:numunorms_init]
     fixfac::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, numunorms_init)
     fixstep::Vector{Int64} = zeros(Int64, numunorms_init)
+
+    # Kinetic workspace arrays: evaluated from kwmats/ktmats splines at current psi
+    kwmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
+    ktmat::Array{ComplexF64,3} = zeros(ComplexF64, numpert_total, numpert_total, 6)
 
     # Shared hint for CubicInterpolant interval search optimization during ODE integration
     # All splines evaluated at the same psi can share this hint for O(1) interval lookups

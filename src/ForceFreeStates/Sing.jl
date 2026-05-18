@@ -56,21 +56,12 @@ end
 """
     sing_lim!(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
-Compute and set integration ψ, q, and q' limits by handling cases where user truncates
-before the last singular surface. Performs a similar function to `sing_lim`
-in the Fortran code. Main differences include renaming of sas_flag -> set_psilim_via_dmlim,
-removing dW edge storage variables since we now store all integration terms in memory, and
-simplification of the logic.
+Compute and set integration ψ, q, and q' limits by handling cases where the user truncates
+before the last singular surface via `ctrl.qhigh`.
 
-The target value `qlim` is first determined from user-specified control parameters
-(`ctrl.qhigh` or `ctrl.dmlim`), subject to the constraint that it does not exceed
-`equil.params.qmax`. If set_psilim_via_dmlim is true, `qlim` is adjusted to the largest
-rational surface such that `nq + dmlim < qmax`, where qmax is the maximum q value in the equilibrium.
-If `qlim < qmax`, a Newton iteration is performed to find the corresponding
-`psilim` to integrate to.
-
-Note that the Newton iteration will be triggered if either `set_psilim_via_dmlim` is true
-or `ctrl.qhigh < equil.params.qmax`. Otherwise, the equilibrium edge values are used.
+The target value `qlim` is taken as `min(equil.params.qmax, ctrl.qhigh)`. If `qlim < qmax`,
+a Newton iteration finds the corresponding `psilim` to integrate to; otherwise the
+equilibrium edge values are used.
 """
 function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
@@ -81,23 +72,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.psihigh
 
-    # Optionally override qlim based on dmlim
-    if ctrl.set_psilim_via_dmlim
-        if ctrl.nn_low != ctrl.nn_high
-            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
-        end
-        @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
-        # Normalize dmlim ∈ [0,1)
-        ctrl.dmlim = mod(ctrl.dmlim, 1.0)
-        intr.qlim = (trunc(Int, ctrl.nn_low * intr.qlim) + ctrl.dmlim) / ctrl.nn_low
-
-        # Reduce qlim if above qmax
-        while intr.qlim > equil.params.qmax
-            intr.qlim -= 1.0 / ctrl.nn_low
-        end
-    end
-
-    # If set_psilim_via_dmlim decreased qlim or qhigh < qmax, we need to find the precise psilim via newton iteration
+    # If qhigh < qmax we need to find the precise psilim via newton iteration
     if intr.qlim < equil.params.qmax
         # Find nearest ψ index where q ≈ qlim
         _, jpsi = findmin(abs.(profiles.q_spline.y .- intr.qlim))
@@ -106,7 +81,7 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
         hint = Ref(jpsi)
         intr.psilim = find_zero(
             (psi -> profiles.q_spline(psi; hint=hint) - intr.qlim,
-             psi -> profiles.q_deriv(psi; hint=hint)),
+                psi -> profiles.q_deriv(psi; hint=hint)),
             profiles.xs[jpsi], Roots.Newton()
         )
         intr.q1lim = profiles.q_deriv(intr.psilim)
@@ -229,7 +204,14 @@ Better way to unpack the cubic splines
 Rename variables to be more intuitive? I don't like ff - maybe f and f_fact instead of f_lower
 Add a spline for F directly instead of the lower triangular factorization to avoid complexity?
 """
-@with_pool pool function compute_sing_mmat!(mmat::Array{ComplexF64,4}, singp::SingType, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+@with_pool pool function compute_sing_mmat!(
+    mmat::Array{ComplexF64,4},
+    singp::SingType,
+    ctrl::ForceFreeStatesControl,
+    profiles::Equilibrium.ProfileSplines,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal
+)
 
     q_spline = profiles.q_spline
     q_d1 = profiles.q_deriv
@@ -684,12 +666,12 @@ end
     sing_der!(
         du::Array{ComplexF64,3},
         u::Array{ComplexF64,3},
-        params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState},
+        params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk},
         psieval::Float64
     )
 
 Evaluate the derivative of the Euler-Lagrange equations [Glasser Phys. Plasmas 2016 112506 eq. 24].
-This implements du/dψ for the ideal MHD eigenvalue problem.
+This implements du/dψ for both the ideal and kinetic MHD eigenvalue problems.
 
 This function performs the same role as `sing_der` in the Fortran code, with main differences
 coming from hiding LAPACK operations under the hood via Julia's LinearAlgebra package,
@@ -713,21 +695,16 @@ more simplistic code with similar performance.
 
   - `du::Array{ComplexF64,3}`: Pre-allocated array to hold the derivative result, shape (mpert, mpert, 2), updated in-place
   - `u::Array{ComplexF64,3}`: Current state array, shape (mpert, mpert, 2)
-  - `params::Tuple{ForceFreeStatesControl, Equilibrium.PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState}`: Tuple of relevant structs
+  - `params::Tuple{ForceFreeStatesControl, PlasmaEquilibrium, FourFitVars, ForceFreeStatesInternal, OdeState, IntegrationChunk}`: Tuple of relevant structs
   - `psieval::Float64`: Current psi value at which to evaluate the derivative
-
-### TODOs
-
-Implement kin_flag functionality
 """
 @with_pool pool function sing_der!(du::Array{ComplexF64,3}, u::Array{ComplexF64,3},
     params::Tuple{ForceFreeStatesControl,Equilibrium.PlasmaEquilibrium,
         FourFitVars,ForceFreeStatesInternal,OdeState,IntegrationChunk},
     psieval::Float64)
 
-    # Unpack structs and initialize
-    # note the two items not used here are needed in the integrator params tuple
-    _, equil, ffit, intr, odet, _ = params
+    # Unpack structs
+    ctrl, equil, ffit, intr, odet, _ = params
 
     # Allocate temporary arrays from the pool
     Npert = intr.numpert_total
@@ -754,10 +731,82 @@ Implement kin_flag functionality
     odet.q = equil.profiles.q_spline(psieval; hint=odet.spline_hint)
     singfac_mat .= 1.0 ./ ((intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)')
 
-    # kinetic stuff - skip for now
-    if false #(TODO: kin_flag)
-        error("kin_flag not implemented yet")
+    if ctrl.kinetic_factor > 0
+        # ---- Kinetic path with pre-computed FKG matrices ----
+        # Load pre-computed kinetic matrices from splines
+        # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
+        ffit.amats(vec(amat), psieval; hint=ffit._hint)
+        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
+        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+
+        # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
+        f0mat = similar!(pool, amat)
+        pmat_kin = similar!(pool, amat)
+        paat_kin = similar!(pool, amat)
+        kkmat_kin = similar!(pool, amat)
+        kkaat_kin = similar!(pool, amat)
+        r1mat_kin = similar!(pool, amat)
+        r2mat_kin = similar!(pool, amat)
+        r3mat_kin = similar!(pool, amat)
+        gaat_kin = similar!(pool, amat)
+
+        ffit.f0mats(vec(f0mat), psieval; hint=ffit._hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=ffit._hint)
+        ffit.paats(vec(paat_kin), psieval; hint=ffit._hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit._hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit._hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit._hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit._hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit._hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=ffit._hint)
+
+        # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
+        # Direct LAPACK to avoid the ipiv allocation that lu!/ldiv! would do in this hot loop
+        _, ipiv, _ = LAPACK.getrf!(amat)
+        LAPACK.getrs!('N', amat, ipiv, bmat)
+        LAPACK.getrs!('N', amat, ipiv, cmat)
+
+        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11)
+        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1  [Fortran sing.f lines 1102-1105]
+        # K̄(i,j) = q1*KK + R2                        [lines 1106-1107]
+        # K̄†(i,j) = KK†*q2 + R3                      [lines 1108-1109]
+        # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
+        singfac_direct = acquire!(pool, Float64, Npert)
+        singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
+        singfac_direct_mat .= (intr.mlow:intr.mhigh) .- odet.q .* (intr.nlow:intr.nhigh)'
+
+        # Build F, K, K† with singfac (using fmat_lower, kmat, gmat as workspace for F, K, K†)
+        kaat_kin = similar!(pool, amat)  # K† matrix
+        for j in 1:Npert
+            q2 = singfac_direct[j]
+            for i in 1:Npert
+                q1 = singfac_direct[i]
+                fmat_lower[i, j] = q1 * f0mat[i, j] * q2 - q1 * pmat_kin[i, j] -
+                                   conj(paat_kin[j, i]) * q2 + r1mat_kin[i, j]
+                kmat[i, j] = q1 * kkmat_kin[i, j] + r2mat_kin[i, j]
+                kaat_kin[i, j] = kkaat_kin[i, j] * q2 + r3mat_kin[i, j]
+            end
+        end
+        # gmat = gaat (already loaded)
+        gmat .= gaat_kin
+
+        # Kinetic ODE (Logan 2015 Eq 7.46): singfac absorbed into F̄/K̄/K̄†, no explicit Q⁻¹
+        # du₁ = F̄⁻¹(u₂ - K̄·u₁)  [Fortran sing.f lines 1200-1215]
+        du1 .= u2
+        mul!(tmp_mat, kmat, u1)
+        du1 .-= tmp_mat
+        # LU factorize F (non-Hermitian, non-symmetric); direct LAPACK for the same hot-loop reason
+        _, ipiv2, _ = LAPACK.getrf!(fmat_lower)
+        LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
+
+        # du₂ = Ḡ†·u₁ + K̄†·du₁  [Fortran sing.f lines 1217-1222]
+        mul!(tmp_mat, gmat, u1)
+        du2 .= tmp_mat
+        mul!(tmp_mat, kaat_kin, du1)
+        du2 .+= tmp_mat
+
     else
+        # ---- Ideal path ----
         # Evaluate matrix splines at the current psi value using shared hint
         ffit.amats(vec(amat), psieval; hint=ffit._hint)
         ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
@@ -767,18 +816,10 @@ Implement kin_flag functionality
         ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
 
         # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
-        # Equivalent to: Afact = cholesky!(Hermitian(amat)); ldiv!(Afact, bmat); ldiv!(Afact, cmat)
-        # but calls LAPACK directly to avoid Hermitian/Cholesky wrapper allocations in this hot loop
         LAPACK.potrf!('U', amat)
         LAPACK.potrs!('U', amat, bmat)
         LAPACK.potrs!('U', amat, cmat)
 
-    end
-
-    # Compute du
-    if false #(TODO: kin_flag)
-        error("kin_flag not implemented yet")
-    else
         # See equations 22-24 in Glasser 2016 DCON paper for derivation
         # du[1] = - F̄⁻¹ * K̄ * u[1] + F̄⁻¹ * Q⁻¹ * u[2]
         du1 .= u2 .* singfac_vec

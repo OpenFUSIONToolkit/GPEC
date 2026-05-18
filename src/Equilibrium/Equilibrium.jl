@@ -59,8 +59,13 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
             additional_input = SolovevConfig(eq_config.eq_filename)
         end
         eq_input = sol_run(eq_config, additional_input)
+    elseif eq_type == "imas"
+        if additional_input === nothing
+            error("setup_equilibrium: eq_type=\"imas\" requires an IMASdd.dd passed as additional_input")
+        end
+        eq_input = read_imas(eq_config, additional_input)
     else
-        error("Equilibrium type $(equil_in.eq_type) is not implemented")
+        error("Equilibrium type $(eq_config.eq_type) is not implemented")
     end
 
     if eq_type == "efit_by_inversion"

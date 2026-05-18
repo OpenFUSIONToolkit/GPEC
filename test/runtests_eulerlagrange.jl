@@ -361,4 +361,29 @@ end
         @test length(chunks) == 1
         @test chunks[1].needs_crossing == false
     end
+
+    @testset "EdgeScanState" begin
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        # Default construction with sentinel values
+        es = FFS.EdgeScanState(2, 0)
+        @test es.numpert_total == 2
+        @test es.N_edge == 0
+        @test length(es.psi) == 0
+        @test length(es.total_eigenvalue) == 0
+
+        # Non-trivial N_edge: arrays initialized to NaN
+        es2 = FFS.EdgeScanState(3, 5)
+        @test es2.N_edge == 5
+        @test length(es2.psi) == 5
+        @test length(es2.q) == 5
+        @test all(isnan, real.(es2.total_eigenvalue))
+        @test all(isnan, real.(es2.plasma_energy))
+        @test all(isnan, real.(es2.vacuum_energy))
+        @test all(isnan, es2.vacuum_eigenvalue)
+
+        # OdeState default construction (smoke test)
+        ode = FFS.OdeState(2, 100, 10, 0)
+        @test ode.numpert_total == 2
+        @test ode.step == 1
+    end
 end
