@@ -18,6 +18,8 @@ Where CODE is the module name (EQUIL, ForceFreeStates, VAC, PERTURBED EQUILIBRIU
 
 ## Regression Testing
 
+The regression harness **must be run on every pull request before merging into `develop`**. It is the project's primary safeguard for tracking how numerical results evolve across changes, so it is only useful if every PR exercises it. When you open a PR, paste the regression report into the PR thread so reviewers can see what moved (and what did not). If your change touches a quantity that is not yet tracked, add a new regression case — or extend an existing one — in the same PR.
+
 ### Regression Harness: Quick usage guide
 
 Set up an alias for convenience (optional):

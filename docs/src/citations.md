@@ -77,6 +77,17 @@ Local PDF: `docs/resources/2007-Park-Control_of_Asymmetric_Magnetic_Perturbation
 
 ---
 
+### Park et al. (2009) {#park-2009}
+
+> J.-K. Park et al., "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
+> *Physics of Plasmas* **16**, 056115 (2009).
+
+Establishes the self-consistent plasma response calculation. Derives the permeability matrix formalism linking external fields to the internal displacement field, and connects the response to island half-widths and singular coupling diagnostics — the theoretical foundation for the `PerturbedEquilibrium` module.
+
+Local PDF: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
+
+---
+
 ## InnerLayer Module
 
 ### Glasser et al. (2016) — Resistive Instabilities {#glasser-2016-resistive}
@@ -149,14 +160,15 @@ Local PDF: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining T
 
 The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) formalism.
 
-### Park et al. (2009) {#park-2009}
+### Park et al. (2009) — Nonambipolar Transport {#park-2009-prl}
 
-> J.-K. Park et al., "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
-> *Physics of Plasmas* **16**, 056115 (2009).
+> J.-K. Park et al., "Nonambipolar Transport by Trapped Particles in Tokamaks,"
+> *Physical Review Letters* **102**, 065002 (2009).
+> DOI: [10.1103/PhysRevLett.102.065002](https://doi.org/10.1103/PhysRevLett.102.065002)
 
-Establishes the self-consistent plasma response calculation. Derives the permeability matrix formalism linking external fields to the internal displacement field, and connects the response to island half-widths and singular coupling diagnostics.
+Grounds the NTV calculation in the trapped-particle nonambipolar transport theory used downstream by Logan & Park (2013) and Logan (2015) — establishes the kinetic transport channel through which the perturbed equilibrium drives a toroidal torque.
 
-Local PDF: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
+Local PDF: `docs/resources/2009-Park-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
 
 ---
 
@@ -202,13 +214,3 @@ Describes the fully self-consistent coupling between the perturbed equilibrium a
 
 Local PDF: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_neoclassical_toroidal_torque_in_toka.pdf`
 
----
-
-### Shaing et al. (2009)
-
-> K. C. Shaing et al., "Nonambipolar Transport by Trapped Particles in Tokamaks,"
-> (2009).
-
-Describes the neoclassical transport theory for trapped particles in tokamaks that underpins the NTV calculation.
-
-Local PDF: `docs/resources/2009-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`

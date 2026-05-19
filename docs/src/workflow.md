@@ -9,13 +9,14 @@ GPEC follows a five-stage analysis pipeline driven by a single `gpec.toml` confi
         ┌────────────┬───────────┴───┬─────────────────────┐
         ▼            ▼               ▼                     ▼
    Equilibrium ──► Vacuum ──► ForceFreeStates ──► PerturbedEquilibrium ──► gpec.h5
-        ▲                                                 ▲
-        │                                                 │
-   equilibrium file                                  ForcingTerms
-   kinetic profiles (planned)              (external perturbation file)
+        ▲            │                                    ▲   ▲
+        │            └────────────────────────────────────┘   │
+        │                                                     │
+   equilibrium file                                      ForcingTerms
+   kinetic profiles (planned)                  (external perturbation file)
 ```
 
-The single `gpec.toml` file supplies user-selected options to every module. The two primary input files — the equilibrium file and (planned) the kinetic profiles file — are read by the `Equilibrium` module, while the external perturbation specification enters at `PerturbedEquilibrium` via `ForcingTerms`.
+The single `gpec.toml` file supplies user-selected options to every module. The two primary input files — the equilibrium file and (planned) the kinetic profiles file — are read by the `Equilibrium` module, while the external perturbation specification enters at `PerturbedEquilibrium` via `ForcingTerms`. `Vacuum` feeds both `ForceFreeStates` and `PerturbedEquilibrium` directly: the response matrices it builds are consumed by both downstream stages.
 
 ---
 

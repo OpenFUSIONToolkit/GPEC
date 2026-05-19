@@ -7,6 +7,8 @@ using Markdown
 using GeneralizedPerturbedEquilibrium
 readme = read(joinpath(pkgdir(GeneralizedPerturbedEquilibrium), "README.md"), String)
 # The "Full documentation" self-link belongs in the GitHub README, not on the doc site itself.
+# If that line is ever removed from README.md this `replace` silently no-ops, which is fine —
+# the strip is defensive, not load-bearing.
 readme = replace(readme, r"^Full documentation:.*$"m => "")
 Markdown.parse(readme)
 ```
