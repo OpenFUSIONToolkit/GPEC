@@ -62,7 +62,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
 - `grri` — Interior Green's function matrix (plasma boundary → plasma boundary)
 - `grre` — Exterior Green's function matrix (plasma boundary → wall)
 
-**Key references**: [Chance et al. (1997)](citations.md#chance-1997), [Chance et al. (2007)](citations.md#chance-2007)
+**Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
 
 ---
 
@@ -89,7 +89,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
   - Tearing stability parameter Δ'
   - Small solution coefficients (used by PerturbedEquilibrium)
 
-**Key references**: [Glasser (2016) Newcomb](citations.md#glasser-2016-newcomb), [Glasser (2018) Riccati](citations.md#glasser-2018-riccati)
+**Key references**: [Glasser (2016) Newcomb](citations.md#ForceFreeStates-Module), [Glasser (2018) Riccati](citations.md#ForceFreeStates-Module)
 
 ---
 
@@ -131,7 +131,7 @@ The single `gpec.toml` file supplies user-selected options to every module. The 
   - Island half-width w_s (proportional to √|δψ_s|)
   - Chirikov overlap parameter σ (ratio of adjacent island widths to their separation)
 
-**Key references**: [Park et al. (2007a)](citations.md#park-2007a), [Park et al. (2009)](citations.md#park-2009), [Park et al. (2017)](citations.md#park-2017)
+**Key references**: [Park et al. (2007a)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2009)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2017)](citations.md#Kinetic-Forces)
 
 ---
 
