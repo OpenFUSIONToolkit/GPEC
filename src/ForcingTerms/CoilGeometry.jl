@@ -49,7 +49,7 @@ Per-coil-set configuration from a `[[ForcingTerms.coil_set]]` TOML block.
 - `dat_file`: explicit path to .dat file (overrides `machine`+`name` convention)
 - `currents`: current [A] per conductor `[ncoil]`; shorter arrays pad with zeros
 - `shiftx`, `shifty`, `shiftz`: per-conductor translation [m] `[ncoil]`
-- `tiltx`, `tilty`, `tiltz`: per-conductor tilt [degrees] (or [m] if `tilt_in_meters`)
+- `tiltx`, `tilty`, `tiltz`: per-conductor tilt in degrees (or meters if `tilt_in_meters`)
 - `xnom`, `ynom`, `znom`: explicit rotation center [m]; defaults to arc-length-weighted center of mass
 - `n_tilt`: toroidal mode number for tilt/shift modulation; -1 means inherit run's n
 - `tilt_in_meters`: interpret tilt as displacement [m] instead of angle [degrees]
