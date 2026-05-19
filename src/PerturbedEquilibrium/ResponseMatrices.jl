@@ -309,12 +309,12 @@ Map external forcing modes to eigenmode basis.
 Matches forcing mode numbers (n,m) to the eigenmode basis used in ForceFreeStates
 and creates a forcing vector in that basis.
 
-**Unit convention**: `ForcingMode.amplitude` must be in `sfl_flux_Wb` units
-(T·m², Julia 2π-angle convention). Files loaded in `normal_field_T` convention are
-automatically converted by `convert_forcing_normalization!` before this function is called.
+**Unit convention**: `ForcingMode.amplitude` is in unit-norm convention (= Fortran Phi_x,
+T·m² per unit-norm cell). Files loaded in `normal_field_T` or `sfl_flux_Wb` convention
+are automatically converted to unit-norm on load (see `ForcingMode` docstring).
 
 ## Arguments
-- `forcing_modes`: External forcing modes, amplitudes in `sfl_flux_Wb` convention
+- `forcing_modes`: External forcing modes (amplitudes in unit-norm / Phi_x convention)
 - `intr`: ForceFreeStates internal state with mode arrays
 
 ## Returns
