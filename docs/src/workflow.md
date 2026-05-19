@@ -3,10 +3,19 @@
 GPEC follows a five-stage analysis pipeline driven by a single `gpec.toml` configuration file. Each stage produces structured output consumed by the next.
 
 ```
-gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ──► PerturbedEquilibrium ──► gpec.h5
-                                              ▲
-                                         ForcingTerms
+                              gpec.toml
+                  (user options for every module)
+                                 │
+        ┌────────────┬───────────┴───┬─────────────────────┐
+        ▼            ▼               ▼                     ▼
+   Equilibrium ──► Vacuum ──► ForceFreeStates ──► PerturbedEquilibrium ──► gpec.h5
+        ▲                                                 ▲
+        │                                                 │
+   equilibrium file                                  ForcingTerms
+   kinetic profiles (planned)              (external perturbation file)
 ```
+
+The single `gpec.toml` file supplies user-selected options to every module. The two primary input files — the equilibrium file and (planned) the kinetic profiles file — are read by the `Equilibrium` module, while the external perturbation specification enters at `PerturbedEquilibrium` via `ForcingTerms`.
 
 ---
 
@@ -24,6 +33,7 @@ gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ─�
   - `chease` / `chease2` — CHEASE equilibrium code output
   - `lar` — Large aspect ratio analytical model
   - `sol` — Solov'ev analytical equilibrium
+- Kinetic profiles file (planned) — temperature and density profiles for the kinetic analysis path
 - Grid resolution and solver settings
 
 **Outputs** (`PlasmaEquilibrium`):

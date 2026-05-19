@@ -77,39 +77,6 @@ Local PDF: `docs/resources/2007-Park-Control_of_Asymmetric_Magnetic_Perturbation
 
 ---
 
-### Park et al. (2009) {#park-2009}
-
-> J.-K. Park et al., "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
-> *Physics of Plasmas* **16**, 056115 (2009).
-
-Establishes the self-consistent plasma response calculation. Derives the permeability matrix formalism linking external fields to the internal displacement field, and connects the response to island half-widths and singular coupling diagnostics.
-
-Local PDF: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
-
----
-
-### Park et al. (2011) {#park-2011}
-
-> J.-K. Park et al., "Kinetic energy principle and neoclassical toroidal torque in tokamaks,"
-> *Physics of Plasmas* **18**, 110702 (2011).
-
-Extends the energy principle to account for kinetic effects and derives the relationship between the perturbed equilibrium response and neoclassical toroidal torque.
-
-Local PDF: `docs/resources/2011-Park-Physics_of_Plasmas_Kinetic_energy_principle_and_neoclassical_toroidal_torque_in_tokamaks.pdf`
-
----
-
-### Park et al. (2017) {#park-2017}
-
-> J.-K. Park et al., "Self-consistent perturbed equilibrium with neoclassical toroidal torque in tokamaks,"
-> *Physics of Plasmas* **24**, 032505 (2017).
-
-Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV). Provides the theoretical foundation for the PENTRC functionality (future work in GPEC).
-
-Local PDF: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_neoclassical_toroidal_torque_in_toka.pdf`
-
----
-
 ## InnerLayer Module
 
 ### Glasser et al. (2016) — Resistive Instabilities {#glasser-2016-resistive}
@@ -156,9 +123,7 @@ Local PDF: `docs/resources/2020-Wang-Modeling of resistive plasma response in to
 
 ---
 
-### Yet to be implemented:
-
-### Park (2022) Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes {#park-2022-parametric-dependencies}
+### Park (2022) — Parametric dependencies of resonant layer responses {#park-2022-parametric-dependencies}
 
 > J.-K. Park, "Parametric dependencies of resonant layer responses across linear, two-fluid, drift-MHD regimes,"
 > *Physics of Plasmas* **29**, 072506 (2022).
@@ -174,15 +139,37 @@ Local PDF: `docs/resources/2022-Park-Parametric dependencies of resonant layer r
 > A. Burgess et al., "Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer,"
 > Preprint (2026).
 
-TODO: Add once published.
+Combines the toroidal outer-region calculation with the two-fluid slab layer model to predict tearing stability, extending the matched-asymptotic approach used in the `InnerLayer` module.
 
 Local PDF: `docs/resources/2026-Burgess-Tearing Stability Prediction Combining Toroidal Calculations With a Two-Fluid Slab Layer.pdf`
 
 ---
 
-## Future Work — PENTRC / Neoclassical Toroidal Viscosity
+## Kinetic Forces
 
-The following papers describe the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality to be ported from the Fortran GPEC suite.
+The following papers develop the kinetic-force and neoclassical toroidal viscosity (NTV) theory underpinning GPEC's kinetic analysis path — the energy principle with kinetic effects, the self-consistent coupling of the perturbed equilibrium to NTV, and the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) formalism.
+
+### Park et al. (2009) {#park-2009}
+
+> J.-K. Park et al., "Importance of plasma response to nonaxisymmetric perturbations in tokamaks,"
+> *Physics of Plasmas* **16**, 056115 (2009).
+
+Establishes the self-consistent plasma response calculation. Derives the permeability matrix formalism linking external fields to the internal displacement field, and connects the response to island half-widths and singular coupling diagnostics.
+
+Local PDF: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
+
+---
+
+### Park et al. (2011) {#park-2011}
+
+> J.-K. Park et al., "Kinetic energy principle and neoclassical toroidal torque in tokamaks,"
+> *Physics of Plasmas* **18**, 110702 (2011).
+
+Extends the energy principle to account for kinetic effects and derives the relationship between the perturbed equilibrium response and neoclassical toroidal torque.
+
+Local PDF: `docs/resources/2011-Park-Physics_of_Plasmas_Kinetic_energy_principle_and_neoclassical_toroidal_torque_in_tokamaks.pdf`
+
+---
 
 ### Logan & Park (2013)
 
@@ -203,6 +190,17 @@ Local PDF: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturb
 Provides the complete PENTRC theory and implementation details, including NTV in the presence of finite collisionality and general magnetic geometry.
 
 Local PDF: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
+
+---
+
+### Park et al. (2017) {#park-2017}
+
+> J.-K. Park et al., "Self-consistent perturbed equilibrium with neoclassical toroidal torque in tokamaks,"
+> *Physics of Plasmas* **24**, 032505 (2017).
+
+Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the PENTRC functionality.
+
+Local PDF: `docs/resources/2017-Park-Self_consistent_perturbed_equilibrium_with_neoclassical_toroidal_torque_in_toka.pdf`
 
 ---
 
