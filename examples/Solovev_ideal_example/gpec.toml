@@ -25,16 +25,18 @@ dw = 0.5                                # Triangularity parameter for wall shape
 tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
-# [PerturbedEquilibrium]
-# # Uncomment this section to enable perturbed equilibrium calculations
-# forcing_data_file = "forcing.dat"      # Path to forcing data (n, m, real, imag)
-# forcing_data_format = "ascii"          # "ascii" or "hdf5"
-# fixed_boundary = false                 # Fixed boundary flag
-# output_eigenmodes = true               # Output mode fields as b-fields
-# compute_response = true                # Compute plasma response
-# compute_singular_coupling = true       # Compute singular coupling metrics
-# verbose = true                         # Enable verbose logging
-# write_outputs_to_HDF5 = true           # Write outputs to HDF5
+[ForcingTerms]
+forcing_data_file = "forcing.dat"       # Manual mode table (n, m, real, imag)
+forcing_data_format = "ascii"           # "ascii" or "hdf5"
+
+[PerturbedEquilibrium]
+fixed_boundary = false                  # Fixed boundary flag
+output_eigenmodes = true                # Output mode fields as b-fields
+compute_response = true                 # Compute plasma response
+compute_singular_coupling = true        # Compute singular coupling metrics
+verbose = true                          # Enable verbose logging
+write_outputs_to_HDF5 = true            # Write outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
 
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
