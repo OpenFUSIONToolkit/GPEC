@@ -119,7 +119,7 @@ function equilibrium_solver(input::InverseRunInput)
     @views r2[:, end] .= r2[:, 1]
     @views deta[:, end] .= deta[:, 1]
 
-    itp_opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
@@ -253,7 +253,7 @@ function equilibrium_solver(input::InverseRunInput)
         # (Numerical operations may have broken exact periodicity)
         @views spl_fs[end, :] .= spl_fs[1, :]
 
-        spl = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC(; check=false))
+        spl = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
         spl_xs .= spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
@@ -268,7 +268,7 @@ function equilibrium_solver(input::InverseRunInput)
         # then evaluate at the uniform SFL theta grid (rzphi_ys). This correctly
         # propagates the SFL coordinate transformation into the rzphi splines.
         # (Using spl.y directly would give pre-transformation values — wrong for eqfun.)
-        spl_post = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC(; check=false))
+        spl_post = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         hint_post = Ref(1)
         for itheta in 0:mtheta
             spl_post(spl_post_buf, rzphi_ys[itheta+1]; hint=hint_post)

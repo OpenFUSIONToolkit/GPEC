@@ -210,8 +210,8 @@ function read_chease_binary(config::EquilibriumConfig)
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
         rz_in_ys = range(0, 1; length=mtau) |> collect
-        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
-        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
         @info "Finished reading CHEASE equilibrium (Binary)"
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
@@ -373,7 +373,7 @@ function read_chease_ascii(config::EquilibriumConfig)
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
 
-    opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; opts2d...)
     @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
