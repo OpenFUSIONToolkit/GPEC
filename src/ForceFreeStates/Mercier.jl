@@ -61,7 +61,7 @@ function mercier_scan!(locstab_fs::Matrix{Float64}, plasma_eq::Equilibrium.Plasm
         end
 
         # Integrate quantities with respect to theta using FastInterpolations
-        itp = cubic_interp(plasma_eq.rzphi_ys, Series(ff_fs); bc=PeriodicBC())
+        itp = cubic_interp(plasma_eq.rzphi_ys, Series(ff_fs); bc=PeriodicBC(; check=false))
         avg = FastInterpolations.integrate(itp)
 
         # Evaluate Mercier criterion and related quantities

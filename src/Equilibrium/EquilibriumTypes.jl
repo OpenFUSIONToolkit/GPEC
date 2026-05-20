@@ -309,6 +309,7 @@ raw equilibrium data and preparing the initial splines.
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
+  - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -321,6 +322,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
+    bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
 end
 
 """
@@ -445,8 +447,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     kappa::Union{Nothing,Float64} = nothing # Elongation of the plasma cross-section
     delta1::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (upper triangularity)
     delta2::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (lower triangularity)
-    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T]
+    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
+    bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data

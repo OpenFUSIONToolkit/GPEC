@@ -12,7 +12,7 @@ mpsi = 0                       # Number of radial grid points (0 = auto-compute 
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
-etol = 1e-7                    # Error tolerance for equilibrium solver
+etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
@@ -47,14 +47,20 @@ thmax0 = 1                     # Linear multiplier on the automatic choice of th
 
 kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
 [ForcingTerms]
-forcing_data_file = "forcing.dat"       # Path to forcing data file (n, m, complex amplitude)
-forcing_data_format = "ascii"           # Format of forcing data: "ascii" or "hdf5"
+forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
+mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
+nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
+
+[[ForcingTerms.coil_set]]
+name = "c"                              # DIII-D C-coil (6 coils); resolves to coil_geometries/d3d_c.dat
+currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
 [PerturbedEquilibrium]
 fixed_boundary = false                  # Use fixed boundary conditions
@@ -63,3 +69,4 @@ compute_response = true                 # Compute plasma response to forcing
 compute_singular_coupling = true        # Compute singular layer coupling metrics
 verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)

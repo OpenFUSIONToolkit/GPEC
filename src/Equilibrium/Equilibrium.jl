@@ -457,7 +457,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    flux_opts = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
 
@@ -508,6 +508,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix = zeros(Float64, mtheta + 1, 2)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
+        # Snap the repeated endpoint exactly equal to the start
+        fs_matrix[end, :] .= fs_matrix[1, :]
 
         # Compute total integral using FastInterpolations native integration
         itp = cubic_interp(equil.rzphi_ys, Series(fs_matrix); bc=PeriodicBC())
