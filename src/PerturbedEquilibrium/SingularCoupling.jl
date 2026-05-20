@@ -38,6 +38,10 @@ function _hermite_cubic_val(u_a, u_b, du_a, du_b, psi_a, psi_b, psi)
     return @. h00 * u_a + h * h10 * du_a + h01 * u_b + h * h11 * du_b
 end
 
+# Reflect a periodic theta-space vector θ → -θ: sample index j ↦ N-j+2 (mod N), index 1 fixed.
+# Equivalent to the Fortran `rtheta = mthsurf - itheta` reversal in gpvacuum_flxsurf.
+_reverse_theta(v::AbstractVector) = circshift(reverse(v), 1)
+
 """
     compute_singular_coupling_metrics!(
         state::PerturbedEquilibriumState,
@@ -465,11 +469,13 @@ Surface inductance matrix [mpert × mpert]
             kax_im[k] = (grri_surf[k, mpert+i]  + grre_surf[k, mpert+i])  / (μ₀ * (2π)^2)
         end
 
-        # Apply exp(-i*n*ν): (kax_re - i*kax_im)*(cos(nν) - i*sin(nν))
-        kax_re_corr = kax_re .* cos_nν .- kax_im .* sin_nν
-        kax_im_corr = kax_re .* sin_nν .+ kax_im .* cos_nν
-
-        current_matrix[:, i] = ft(kax_re_corr) .- im .* ft(kax_im_corr)
+        # Port of Fortran gpvacuum_flxsurf (gpvacuum.f:308-323): apply the toroidal
+        # phase exp(-i*n*ν) to the Green's function, reverse theta (VACUUM theta runs
+        # opposite to DCON theta), then forward-DFT (iscdftf). Reversing the phased
+        # product `ft(reverse_theta(g·phase))` reproduces the validated result; the
+        # stricter port that reverses only the un-phased g regresses (see PR #196).
+        g_phased = (kax_re .- im .* kax_im) .* (cos_nν .- im .* sin_nν)
+        current_matrix[:, i] = ft(_reverse_theta(g_phased))
     end
 
     # Compute surface inductance: L_surf = flux * inv(current) = inv(current)
