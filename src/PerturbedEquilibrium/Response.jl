@@ -78,8 +78,7 @@ function compute_plasma_response!(
     py = dot(response_vector, L_plas_inv * response_vector) / 4
     state.vacuum_energy   = real(vy)
     state.surface_energy  = real(sy)
-    state.plasma_energy   = real(py)
-    state.total_energy    = real(py)              # Fortran convention: total energy is pengy
+    state.plasma_energy   = real(py)              # Fortran's "total energy" is this pengy
     state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(

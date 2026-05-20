@@ -202,14 +202,6 @@ label = "resonant flux Phi_res"
 noise_threshold = 1e-8
 
 # Perturbed equilibrium: energies
-[quantities.pe_total_energy]
-h5path = "perturbed_equilibrium/energies/total_energy"
-type = "real_scalar"
-extract = "value"
-label = "PE total energy"
-noise_threshold = 1e-10
-order = 90
-
 [quantities.pe_plasma_energy]
 h5path = "perturbed_equilibrium/energies/plasma_energy"
 type = "real_scalar"

@@ -111,8 +111,7 @@ Control surface matrices [numpert_total × numpert_total]:
 Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ inductances):
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
-  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma)
-  - `total_energy`   - = plasma_energy (Fortran convention)
+  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")
   - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
 """
 @kwdef mutable struct PerturbedEquilibriumState
@@ -161,6 +160,5 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
     vacuum_energy::Float64   = 0.0
     surface_energy::Float64  = 0.0
     plasma_energy::Float64   = 0.0
-    total_energy::Float64    = 0.0
     toroidal_torque::Float64 = 0.0
 end

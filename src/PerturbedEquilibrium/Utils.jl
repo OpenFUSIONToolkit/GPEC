@@ -87,7 +87,6 @@ perturbed_equilibrium/
     ├── vacuum_energy
     ├── surface_energy
     ├── plasma_energy
-    ├── total_energy
     └── toroidal_torque
 ```
 """
@@ -201,7 +200,6 @@ function write_outputs_to_HDF5(
         energy_group["vacuum_energy"]   = state.vacuum_energy
         energy_group["surface_energy"]  = state.surface_energy
         energy_group["plasma_energy"]   = state.plasma_energy
-        energy_group["total_energy"]    = state.total_energy
         energy_group["toroidal_torque"] = state.toroidal_torque
     end
 end
