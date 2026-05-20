@@ -218,6 +218,30 @@ label = "PE plasma energy"
 noise_threshold = 1e-10
 order = 91
 
+[quantities.pe_vacuum_energy]
+h5path = "perturbed_equilibrium/energies/vacuum_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE vacuum energy"
+noise_threshold = 1e-10
+order = 92
+
+[quantities.pe_surface_energy]
+h5path = "perturbed_equilibrium/energies/surface_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE surface energy"
+noise_threshold = 1e-10
+order = 93
+
+[quantities.pe_toroidal_torque]
+h5path = "perturbed_equilibrium/energies/toroidal_torque"
+type = "real_scalar"
+extract = "value"
+label = "PE toroidal torque"
+noise_threshold = 1e-12
+order = 94
+
 # Profiles (checksums)
 [quantities.q_profile]
 h5path = "splines/profiles/q"
