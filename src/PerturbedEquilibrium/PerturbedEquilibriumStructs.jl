@@ -108,12 +108,12 @@ Control surface matrices [numpert_total × numpert_total]:
   - `permeability` - P = Lambda * L^{-1} (plasma response matrix, Phi_tot = P * Phi_x)
   - `reluctance` - Rho = L^{-1} * (Lambda - L) * L^{-1}
 
-Energies (matches Fortran `gpout.f:1211-1218`, factor 1/4):
-  - `vacuum_energy`  - vengy = Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb vacuum from external flux)
-  - `surface_energy` - sengy = Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
-  - `plasma_energy`  - pengy = Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma)
-  - `total_energy`   - = pengy (Fortran labels pengy as the eigenmode "total energy"; see gpout.f:6276)
-  - `toroidal_torque` - -2·n·Im(py), where py = ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4
+Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ inductances):
+  - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
+  - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
+  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma)
+  - `total_energy`   - = plasma_energy (Fortran convention)
+  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Response fields in mode space [npsi, mpert]
@@ -157,10 +157,10 @@ Energies (matches Fortran `gpout.f:1211-1218`, factor 1/4):
     permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P = Lambda * L^{-1}
     reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # Rho = L^{-1}*(Lambda-L)*L^{-1}
 
-    # Energies — see Fortran gpout.f:1211-1218
-    vacuum_energy::Float64   = 0.0   # vengy = Re(⟨Φ_x, L⁻¹·Φ_x⟩)/4
-    surface_energy::Float64  = 0.0   # sengy = Re(⟨Φ_tot, L⁻¹·Φ_tot⟩)/4
-    plasma_energy::Float64   = 0.0   # pengy = Re(⟨Φ_tot, Λ⁻¹·Φ_tot⟩)/4
-    total_energy::Float64    = 0.0   # = pengy (Fortran convention, gpout.f:6276)
-    toroidal_torque::Float64 = 0.0   # -2·n·Im(py) (gpout.f:1271, 1382)
+    # Energies — see the struct docstring for formulas
+    vacuum_energy::Float64   = 0.0
+    surface_energy::Float64  = 0.0
+    plasma_energy::Float64   = 0.0
+    total_energy::Float64    = 0.0
+    toroidal_torque::Float64 = 0.0
 end

@@ -84,11 +84,11 @@ perturbed_equilibrium/
 │   ├── rational_m_res
 │   └── rational_n
 └── energies/
-    ├── vacuum_energy     # vengy (gpout.f:1211)
-    ├── surface_energy    # sengy (gpout.f:1212)
-    ├── plasma_energy     # pengy (gpout.f:1217)
-    ├── total_energy      # = pengy (Fortran "total energy" convention)
-    └── toroidal_torque   # -2·n·Im(py)
+    ├── vacuum_energy
+    ├── surface_energy
+    ├── plasma_energy
+    ├── total_energy
+    └── toroidal_torque
 ```
 """
 function write_outputs_to_HDF5(
@@ -196,7 +196,7 @@ function write_outputs_to_HDF5(
         !isempty(state.rational_m_res)     && (coupling_group["rational_m_res"]     = state.rational_m_res)
         !isempty(state.rational_n)         && (coupling_group["rational_n"]         = state.rational_n)
 
-        # Energies (gpout.f:1211-1218; total_energy ≡ pengy by Fortran convention)
+        # Energies
         energy_group = haskey(pe_group, "energies") ? pe_group["energies"] : create_group(pe_group, "energies")
         energy_group["vacuum_energy"]   = state.vacuum_energy
         energy_group["surface_energy"]  = state.surface_energy

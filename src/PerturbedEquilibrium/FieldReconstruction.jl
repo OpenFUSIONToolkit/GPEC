@@ -376,9 +376,7 @@ function compute_clebsch_displacements(
         xsp_vec = view(xi_psi_modes, ipsi, :)
         mul!(xms_vec, bmat, xmp1_vec)                     # xms = B*xmp1
         mul!(xms_vec, cmat_buf, xsp_vec, 1.0+0.0im, 1.0+0.0im)  # xms += C*xsp
-        # Solve A*result = xms for result, then negate.
-        # amat is PD by construction (Newcomb kinetic-energy quadratic form built in Fourfit.jl:265);
-        # the same cholesky is used unconditionally during ODE setup at Fourfit.jl:303.
+        # amat is positive-definite by construction (Newcomb kinetic-energy form), so cholesky is safe.
         amat_fact = cholesky(Hermitian(amat, :L))
         ldiv!(amat_fact, xms_vec)                          # xms = A\(B*xmp1 + C*xsp)
         xms_vec .*= -1                                     # xms = -A\(B*xmp1 + C*xsp)

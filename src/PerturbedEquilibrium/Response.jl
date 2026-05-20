@@ -69,8 +69,8 @@ function compute_plasma_response!(
     state.forcing_vec  = forcing_vector
     state.response_vec = response_vector
 
-    # Scalar energies and torque from Fortran gpout.f:1211-1218.
-    # forcing_vector ≈ finmn, response_vector ≈ foutmn — both in the Phi_x (gpeq_weight=1) basis.
+    # Scalar energies and torque, ported from Fortran gpout. forcing_vector and
+    # response_vector are Phi_x and Phi_tot in the gpeq_weight=1 basis.
     L_surf_inv = inv(surface_inductance)
     L_plas_inv = inv(plasma_inductance)
     vy = dot(forcing_vector,  L_surf_inv * forcing_vector)  / 4
@@ -79,8 +79,8 @@ function compute_plasma_response!(
     state.vacuum_energy   = real(vy)
     state.surface_energy  = real(sy)
     state.plasma_energy   = real(py)
-    state.total_energy    = real(py)              # Fortran "total energy" ≡ pengy (gpout.f:6276)
-    state.toroidal_torque = -2 * nn * imag(py)    # gpout.f:1271-1272
+    state.total_energy    = real(py)              # Fortran convention: total energy is pengy
+    state.toroidal_torque = -2 * nn * imag(py)
 
     xi_modes, b_modes = reconstruct_physical_fields(
         response_vector, flux_matrix, ForceFreeStates_results, equil, ffs_intr, intr,
