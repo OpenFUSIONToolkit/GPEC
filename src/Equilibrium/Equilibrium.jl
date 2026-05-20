@@ -508,9 +508,11 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix = zeros(Float64, mtheta + 1, 2)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
+        # Snap the repeated endpoint exactly equal to the start
+        fs_matrix[end, :] .= fs_matrix[1, :]
 
         # Compute total integral using FastInterpolations native integration
-        itp = cubic_interp(equil.rzphi_ys, Series(fs_matrix); bc=PeriodicBC(; check=false))
+        itp = cubic_interp(equil.rzphi_ys, Series(fs_matrix); bc=PeriodicBC())
         term[ipsi, :] .= FastInterpolations.integrate(itp)
     end
 
