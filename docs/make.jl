@@ -34,6 +34,7 @@ makedocs(;
             "Analysis" => "analysis.md"
         ],
         "Citations" => "citations.md",
+        "Developer Notes" => "developer_notes.md",
     ],
     checkdocs=:exports
 )

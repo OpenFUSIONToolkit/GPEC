@@ -111,9 +111,11 @@ GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 
 ### Additional References
 
-- **Various (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
-  - Location: `docs/resources/2009-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
-  - Describes: Neoclassical transport theory
+- **Park et al. (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
+  - Location: `docs/resources/2009-Park-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
+  - Published: Physical Review Letters **102**, 065002 (2009)
+  - Link: https://doi.org/10.1103/PhysRevLett.102.065002
+  - Describes: Trapped-particle nonambipolar transport theory underpinning the NTV calculation
 
 ## Common Commands
 
