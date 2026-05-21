@@ -223,8 +223,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim (Fortran sas_flag equivalent). Default false.
-  - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true.
+  - `set_psilim_via_dmlim::Bool` - Truncate the integration domain at `(last_rational_q + dmlim) / n` rather than at `qhigh` / `psihigh`. Fortran STRIDE found that truncating ~20 % above the outermost rational (`dmlim = 0.2`) avoids a numerical kink instability in δW that appears when the integration ends too close to or just below a rational surface. **For diverted equilibria where q → ∞ at the separatrix** (e.g. DIII-D geqdsks, the bulk of production use) this costs negligible physical domain because rationals get arbitrarily dense near the LCFS — `set_psilim_via_dmlim = true` is the safe and recommended default. **For limited circular / analytical equilibria with finite q at the edge** (Solovev, LAR scans), rationals are sparse and 20 % above the last rational chops off too much edge, so set `set_psilim_via_dmlim = false` and let `qhigh` / `psihigh` control the truncation. Multi-`n` runs are not supported by this truncation (the "outermost rational + dmlim / n" depends on which `n`); when `set_psilim_via_dmlim = true` with `nn_low != nn_high`, `sing_lim!` warns and falls back to `qhigh` / `psihigh`. Default `true`.
+  - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true. Fortran STRIDE convention is 0.2 (truncate 20 % of one rational-surface spacing above the last surface), retained here.
   - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
@@ -244,7 +244,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
   - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
   - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `ud_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices and zeros for `ud_store` (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead.  Default `true`.  Approximate cost: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
-  - `use_double64_bvp::Bool` - Promote the Δ' BVP matrix and right-hand side to `Complex{Double64}` (~31 decimal digits, via DoubleFloats.jl) for the linear solve and the dp_raw extraction inside `compute_delta_prime_matrix!`. The PEST3 four-term combination that produces the physical Δ' subtracts dp_raw diagonal entries that are typically 10,000–30,000× larger than the result, so plain `ComplexF64` (~15 digits) loses most of its significance at low ε/β — Double64 preserves ≳ 15 digits after the cancellation. The promotion is local to the BVP solve (chunk integration, vacuum response, and all upstream physics stay in `Float64`/`ComplexF64`), so the runtime cost is small (~1.5–2× the BVP solve, which is a small fraction of the total Δ' wall-clock). Only takes effect with `use_parallel = true`. Default `true`.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -271,7 +270,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     numunorms_init::Int = 100
     singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
     cyl_flag::Bool = false
-    set_psilim_via_dmlim::Bool = false
+    set_psilim_via_dmlim::Bool = true   # Safe default for diverted equilibria (most production use); set false for limited/analytical (LAR, Solovev). Auto-skipped for multi-n. See docstring.
     dmlim::Float64 = 0.2
     sing_order::Int = 6
     qhigh::Float64 = 1e3
@@ -292,7 +291,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     use_riccati::Bool = false
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
     populate_dense_xi::Bool = true  # Append a dense serial-EL pass after parallel BVP so HDF5 integration/xi_psi etc. carry valid DCON ξ in axis basis for PerturbedEquilibrium.
-    use_double64_bvp::Bool = true
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}

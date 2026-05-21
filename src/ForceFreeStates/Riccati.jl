@@ -789,10 +789,13 @@ function compute_delta_prime_matrix!(
     # Promote BVP matrix to Double64 for extended precision during the solve and
     # PEST3 combination. The PEST3 formula subtracts dp_raw entries that can be
     # 10,000-30,000× larger than the result; Double64 (~31 digits) preserves ~15
-    # extra digits through this cancellation vs Float64 (~16 digits).
-    use_d64 = ctrl !== nothing && ctrl.use_double64_bvp
-    Tc = use_d64 ? Complex{Double64} : ComplexF64
-    M_solve = use_d64 ? Tc.(M) : M
+    # extra digits through this cancellation vs Float64 (~16 digits). Hardcoded:
+    # parameter sensitivity showed Float64 vs Double64 had no measurable effect
+    # on the final Δ' (the precision bottleneck lies upstream of the linear
+    # algebra), but Double64 is kept as the conservative choice — the cost is
+    # ~1.5–2× the BVP solve, which is a small fraction of total Δ' wall-clock.
+    Tc = Complex{Double64}
+    M_solve = Tc.(M)
 
     # Solve the BVP for each driving configuration.
     M_lu = lu(M_solve; check=false)
@@ -851,7 +854,7 @@ function compute_delta_prime_matrix!(
     deltap = ComplexF64.(deltap_ext)
 
     if debug
-        @info "Δ' BVP: Full dp_raw matrix ($(s2)×$(s2))$(use_d64 ? " [Double64]" : ""):"
+        @info "Δ' BVP: Full dp_raw matrix ($(s2)×$(s2)) [Double64]:"
         for i in 1:s2
             row_str = join([@sprintf("%+.6e", Float64(real(dp_raw[i,j]))) for j in 1:s2], "  ")
             @info "  dp_raw[$i,:] = $row_str"

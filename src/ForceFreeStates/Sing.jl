@@ -80,11 +80,15 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.psihigh
 
-    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent)
-    if ctrl.set_psilim_via_dmlim
-        if ctrl.nn_low != ctrl.nn_high
-            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
-        end
+    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent).
+    # Multi-n runs are not supported by this truncation — the "outermost rational +
+    # dmlim / n" cutoff depends on which n is used, so it isn't well-defined when
+    # nn_low != nn_high. Skip-with-warning rather than erroring so that production
+    # users running multi-n on diverted geqdsks (where the default = true is correct
+    # for their per-n runs) don't have to remember to override the default.
+    if ctrl.set_psilim_via_dmlim && ctrl.nn_low != ctrl.nn_high
+        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(ctrl.nn_low), nn_high=$(ctrl.nn_high)); falling back to qhigh / psihigh truncation."
+    elseif ctrl.set_psilim_via_dmlim
         @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)

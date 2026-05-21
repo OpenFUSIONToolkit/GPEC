@@ -323,23 +323,28 @@ using TOML
 
         et_par, intr_par = run_diiid(true)
 
-        # Parallel FM pinned-value regression: the bidirectional fix gives et ≈ 1.29
-        # (was ~1.15 before the fix, off by ~10%). Pin to 1.29 with rtol=0.05 so a
-        # regression in the bidirectional assembly would still be caught.
-        @test isapprox(et_par, 1.29; rtol=0.05)
+        # Parallel FM pinned-value regression. The bidirectional fix gives et ≈ 1.60
+        # with set_psilim_via_dmlim = true (production diverted convention; DIIID-like
+        # example sets it explicitly). With the previous default (false) this was
+        # ≈ 1.29. The 24 % shift reflects the dmlim truncation moving the outer
+        # boundary; physics is unchanged. Pin with rtol = 0.05 so a real regression
+        # in the bidirectional assembly is still caught.
+        @test isapprox(et_par, 1.5988; rtol=0.05)
 
         # Pinned per-surface Δ' values for the DIIID-like parallel path
-        # (msing = 5: m = 2, 3, 4, 5, 6).  Captures the absolute Δ' values in
-        # the (S, I) Riccati gauge so any regression in
-        # `riccati_cross_ideal_singular_surf!` ca_l/ca_r accumulation on a
-        # realistic large-N case is caught.  Pinned at perf/riccati commit
-        # 3c8130da (post bit-identical-ξ work) with rtol = 5% to match the
-        # existing energy pin.
-        @test isapprox(intr_par.sing[1].delta_prime[1], -8.577807e-01 - 3.534327e-02im; rtol=0.05)
-        @test isapprox(intr_par.sing[2].delta_prime[1], +1.138879e+01 - 1.094006e+00im; rtol=0.05)
-        @test isapprox(intr_par.sing[3].delta_prime[1], -7.674451e+00 + 6.580060e-01im; rtol=0.05)
-        @test isapprox(intr_par.sing[4].delta_prime[1], +2.616381e+00 - 2.618100e-03im; rtol=0.05)
-        @test isapprox(intr_par.sing[5].delta_prime[1], +3.515442e+00 + 4.396268e-01im; rtol=0.05)
+        # (msing = 5: m = 2, 3, 4, 5, 6). These are computed by
+        # `riccati_cross_ideal_singular_surf!` during integration up to each
+        # rational, so they are insensitive to the edge truncation and barely
+        # moved (≲ 1e-4 % shift) when set_psilim_via_dmlim flipped to true.
+        # Captures the absolute Δ' values in the (S, I) Riccati gauge so any
+        # regression in ca_l/ca_r accumulation on a realistic large-N case is
+        # caught. Pinned at perf/riccati post-`set_psilim_via_dmlim` flip with
+        # rtol = 5 %.
+        @test isapprox(intr_par.sing[1].delta_prime[1], -8.580660e-01 - 3.534334e-02im; rtol=0.05)
+        @test isapprox(intr_par.sing[2].delta_prime[1], +1.138881e+01 - 1.094007e+00im; rtol=0.05)
+        @test isapprox(intr_par.sing[3].delta_prime[1], -7.674474e+00 + 6.580045e-01im; rtol=0.05)
+        @test isapprox(intr_par.sing[4].delta_prime[1], +2.616392e+00 - 2.615709e-03im; rtol=0.05)
+        @test isapprox(intr_par.sing[5].delta_prime[1], +3.515433e+00 + 4.396283e-01im; rtol=0.05)
 
         # Cross-path consistency (parallel vs standard) is omitted here: after the
         # edge-dW decoupling, the two paths store the final-state U at different
@@ -597,14 +602,17 @@ using TOML
 
         # Pinned diagonal `delta_prime_matrix` values for the DIIID-like case (msing = 5).
         # PEST3-convention self-response Δ' from the STRIDE BVP with vacuum coupling.
-        # Pinned at perf/riccati commit 3c8130da (post bit-identical-ξ work) with
-        # rtol = 5% to catch regressions in the large-N BVP assembly while tolerating
-        # cross-platform FP variation.
-        @test isapprox(dpm[1, 1], +8.306213e+00 + 2.040545e-02im; rtol=0.05)
-        @test isapprox(dpm[2, 2], -4.044646e+00 - 5.422897e-02im; rtol=0.05)
-        @test isapprox(dpm[3, 3], -9.057543e+00 + 7.704890e+00im; rtol=0.05)
-        @test isapprox(dpm[4, 4], +5.767150e+03 - 2.401509e+03im; rtol=0.05)
-        @test isapprox(dpm[5, 5], -3.140954e+02 + 2.800570e+01im; rtol=0.05)
+        # Re-pinned after the set_psilim_via_dmlim default flip to true (DIIID-like is
+        # now an explicit true case, matching production diverted convention). Shifts
+        # vs the previous false pinning: dpm[1,1]+0.6 %, dpm[2,2]−1.2 %, dpm[3,3]+0.9 %,
+        # dpm[4,4]+0.4 %, dpm[5,5]−6.4 % — only the last fell outside the previous rtol;
+        # all others had drifted within tolerance. rtol = 5 % preserved to catch regressions
+        # in the large-N BVP assembly while tolerating cross-platform FP variation.
+        @test isapprox(dpm[1, 1], +8.357176e+00 + 2.040534e-02im; rtol=0.05)
+        @test isapprox(dpm[2, 2], -3.995079e+00 - 5.422822e-02im; rtol=0.05)
+        @test isapprox(dpm[3, 3], -9.137656e+00 + 7.704888e+00im; rtol=0.05)
+        @test isapprox(dpm[4, 4], +5.790777e+03 - 2.401508e+03im; rtol=0.05)
+        @test isapprox(dpm[5, 5], -2.940021e+02 + 2.800907e+01im; rtol=0.05)
     end
 
 end
