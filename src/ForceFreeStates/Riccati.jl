@@ -1545,148 +1545,6 @@ function propagate_chunk_state(upper::Array{ComplexF64,3}, lower::Array{ComplexF
 end
 
 """
-    solve_chunk_fm(upper, lower, rhs, N) -> Array{ComplexF64,3}
-
-Solve `Φ_chunk · x = rhs` for the (N,N,2) state `x`, where `Φ_chunk` is the 2N×2N chunk
-fundamental matrix assembled from the (upper, lower) identity-IC blocks at one ψ. Used by
-`reconstruct_u_store_via_gr!` to express a backward chunk's inbound state in the chunk-FM
-IC basis.
-"""
-function solve_chunk_fm(upper::Array{ComplexF64,3}, lower::Array{ComplexF64,3},
-                        rhs::Array{ComplexF64,3}, N::Int)
-    Φ = [upper[:, :, 1] lower[:, :, 1]; upper[:, :, 2] lower[:, :, 2]]
-    x = Φ \ [rhs[:, :, 1]; rhs[:, :, 2]]
-    out = similar(rhs)
-    out[:, :, 1] .= @view x[1:N, :]
-    out[:, :, 2] .= @view x[N+1:2N, :]
-    return out
-end
-
-"""
-    gr_right_multiply!(cbase, odet, ifix, N)
-
-Right-multiply `cbase` (an (N,N,2) state) by the Gaussian-reduction matrix `G` of fixup
-`ifix`, reconstructed from `odet.fixfac` / `odet.index` (the same construction `transform_u!`
-uses). `apply_gaussian_reduction!` transforms the running state as `u → u·G`, and the dense
-reconstruction holds `u(ψ) = Φ_chunk(ψ)·cbase`; therefore re-anchoring `cbase` after a GR
-fixup is exactly `cbase → cbase·G`. This is an O(1) right-multiplication — unlike a re-solve
-against `Φ_chunk`, whose 2N×2N inverse is catastrophically ill-conditioned for a chunk that
-spans large solution growth.
-"""
-function gr_right_multiply!(cbase::Array{ComplexF64,3}, odet::OdeState, ifix::Int, N::Int)
-    G = Matrix{ComplexF64}(I, N, N)
-    temp = Matrix{ComplexF64}(undef, N, N)
-    buf = Matrix{ComplexF64}(undef, N, N)
-    mask = trues(N)
-    for isol in 1:N
-        ksol = odet.index[isol, ifix]
-        mask[ksol] = false
-        fill!(temp, 0)
-        for d in 1:N
-            temp[d, d] = 1
-        end
-        for jsol in 1:N
-            if mask[jsol]
-                temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
-            end
-        end
-        mul!(buf, G, temp)
-        G .= buf
-    end
-    @views cbase[:, :, 1] .= cbase[:, :, 1] * G
-    @views cbase[:, :, 2] .= cbase[:, :, 2] * G
-    return cbase
-end
-
-"""
-    reconstruct_u_store_via_gr!(odet, chunks, propagators, ctrl, equil, ffit, intr, odet_proxy)
-
-Reconstruct the canonical `u_store` — the eigenmode fundamental matrix ξ_ψ in the
-Gaussian-reduction (GR) axis basis that `PerturbedEquilibrium` consumes — from the
-parallel-FM chunk propagators. The caller applies `finalize_canonical_u_store!`
-(`transform_u!` etc.) afterwards.
-
-Walks the chunks ψ-increasing, maintaining a running state seeded at the axis identity IC.
-Within a chunk the un-renormalized solution at ψ_k is `Φ_chunk(ψ_k) · cbase`, a cheap
-linear-algebra replay of the chunk fundamental matrix. `compute_solution_norms!` is applied
-at every saved step exactly as the standard EL callback does; when a GR fixup fires, `cbase`
-is re-anchored by `cbase → cbase·G` (`gr_right_multiply!`). Singular crossings use the
-standard `cross_ideal_singular_surf!`.
-
-`ca_l`/`ca_r` written by the standard crossing here are in the axis gauge; the caller must
-overwrite them with the S-gauge pass's (S, I) values that `SingularCoupling.jl` requires.
-"""
-function reconstruct_u_store_via_gr!(
-    odet::OdeState, chunks::Vector{IntegrationChunk}, propagators::Vector{ChunkPropagator},
-    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
-    ffit::FourFitVars, intr::ForceFreeStatesInternal, odet_proxy::OdeState
-)
-    N = intr.numpert_total
-    initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
-    odet.new = true
-    odet.ifix = 0
-    odet.step = 1
-    du_scratch = zeros(ComplexF64, N, N, 2)
-
-    for (ci, chunk) in enumerate(chunks)
-        prop = propagators[ci]
-        M = length(prop.psi_history)
-        params = (ctrl, equil, ffit, intr, odet_proxy, chunk)
-
-        # cbase expresses the chunk-entry running state in the chunk FM's IC basis, so the
-        # un-renormalized solution at ψ_k is Φ_chunk(ψ_k)·cbase. For a forward chunk
-        # Φ_chunk(ψ_1) is the identity; for a backward chunk it is the full backward FM, so
-        # the inbound state is mapped into the IC basis with solve_chunk_fm.
-        cbase = chunk.direction == -1 ?
-            solve_chunk_fm(prop.upper_history[1], prop.lower_history[1], odet.u, N) :
-            copy(odet.u)
-
-        # Skip the first point of chunks after the first — it duplicates the previous
-        # chunk's last saved ψ.
-        k0 = ci == 1 ? 1 : 2
-        for k in k0:M
-            if odet.step >= size(odet.u_store, 4)
-                resize_storage!(odet)
-            end
-            ψ = prop.psi_history[k]
-            odet.u .= propagate_chunk_state(prop.upper_history[k], prop.lower_history[k], cbase)
-            odet.psifac = ψ
-            odet.q = equil.profiles.q_spline(ψ)
-
-            # Gaussian reduction, exactly as the standard EL callback. Guard the axis IC
-            # (a zero ξ_ψ column would abort the norm computation). When a GR fixup fires,
-            # re-anchor cbase by cbase → cbase·G (exact; no ill-conditioned chunk-FM solve)
-            # so subsequent Φ_chunk(ψ)·cbase continues the Gaussian-reduced state.
-            if minimum(norm, eachcol(@view odet.u[:, :, 1])) > 0
-                ifix_before = odet.ifix
-                compute_solution_norms!(odet.u, odet, ctrl, intr, false)
-                if odet.ifix > ifix_before
-                    gr_right_multiply!(cbase, odet, odet.ifix, N)
-                end
-            end
-
-            odet.psi_store[odet.step] = ψ
-            odet.q_store[odet.step] = odet.q
-            @views odet.u_store[:, :, :, odet.step] .= odet.u
-            # Ξ'_Ψ for ud_store: sing_der! writes odet_proxy.ud as a side effect.
-            odet_proxy.psifac = ψ
-            sing_der!(du_scratch, odet.u, params, ψ)
-            @views odet.ud_store[:, :, :, odet.step] .= odet_proxy.ud
-            odet.step += 1
-        end
-
-        odet.psifac = chunk.psi_end
-        odet.q = equil.profiles.q_spline(odet.psifac)
-
-        if chunk.needs_crossing
-            # Standard GR crossing: a forced GR fixup, resonant-column zeroing, and
-            # zeroed_idx/sing_flag recording so transform_u! handles the crossing.
-            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
-        end
-    end
-end
-
-"""
     assemble_riccati_s_gauge!(odet, chunks, propagators, ctrl, equil, ffit, intr) -> S_at_surface_left
 
 S-gauge assembly pass of the parallel-FM solution. Applies each chunk propagator in order,
@@ -1697,9 +1555,9 @@ Its purpose is the Riccati-gauge diagnostics: it returns `S_at_surface_left` (th
 matrix S at each singular surface's left boundary, the axis BC for the Δ' BVP) and
 populates `odet.ca_l`/`odet.ca_r` and `intr.sing[*]` (Δ', `ua_left`, …) in the (S, I) gauge
 that `PerturbedEquilibrium`'s `SingularCoupling.jl` and `compute_delta_prime_matrix!`
-require. It does NOT produce the canonical `u_store` — that comes from the separate
-`reconstruct_u_store_via_gr!` pass over the same chunk propagators. Run on a scratch
-`OdeState` so its axis-gauge bookkeeping does not collide with the GR pass.
+require. It does NOT produce the canonical `u_store` — that comes from
+`standard_eulerlagrange_pass`. Run on a scratch `OdeState` so its axis-gauge bookkeeping
+does not collide with the canonical odet from the standard pass.
 """
 function assemble_riccati_s_gauge!(
     odet::OdeState, chunks::Vector{IntegrationChunk}, propagators::Vector{ChunkPropagator},
@@ -1750,16 +1608,17 @@ end
         -> (odet, propagators, chunks, S_at_surface_left)
 
 Parallel fundamental-matrix (propagator) driver for the EL integration. The chunk
-propagators are integrated **once** (in parallel), then fed to two cheap linear-algebra
-assembly passes:
+propagators are integrated once (in parallel) and used only for the deferred Δ' BVP and
+S-gauge outputs — `u_store` is built by the standard EL pass so all three integration
+paths produce a bit-identical `u_store`.
 
-1. **Chunk generation**: `chunk_el_integration_bounds` (bidirectional) + `balance_integration_chunks`.
-2. **Parallel phase**: `integrate_propagator_chunk!` integrates each chunk's fundamental
+1. **u_store pass**: `standard_eulerlagrange_pass` runs the standard forward EL sweep on
+   natural chunks (`chunk_el_integration_bounds`), with `integrate_el_region!`'s
+   partition-invariant ContinuousCallback GR firing. Output is the canonical
+   ξ_ψ in the axis basis that `PerturbedEquilibrium` consumes.
+2. **Chunk generation**: `chunk_el_integration_bounds` (bidirectional) + `balance_integration_chunks`.
+3. **Parallel phase**: `integrate_propagator_chunk!` integrates each chunk's fundamental
    matrix from identity ICs, capturing per-ψ history. `Threads.@threads :static`.
-3. **GR pass** (`reconstruct_u_store_via_gr!`): replays the chunk propagators through the
-   Gaussian-reduction machinery to reconstruct the canonical `u_store` — ξ_ψ in the axis
-   basis that `PerturbedEquilibrium` consumes, identical to what the standard EL path
-   produces. Finalized by `finalize_canonical_u_store!` (`transform_u!`).
 4. **S-gauge pass** (`assemble_riccati_s_gauge!`, on a scratch `OdeState`): produces the
    (S, I) Riccati-gauge `ca_l`/`ca_r`, `intr.sing[*]`, and `S_at_surface_left` that the Δ'
    BVP (`compute_delta_prime_matrix!`) and `SingularCoupling.jl` require.
