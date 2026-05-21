@@ -256,7 +256,23 @@ function benchmark_example(example_name::AbstractString)
     # eigenvector), interpolated to a common ψ grid.
     raw = Dict(m => eigenmode_displacement(odet[m], vac[m]) for m in (:standard, :riccati, :parallel))
     N = size(raw[:standard][2], 1)
-    nplot = min(5, N)
+
+    # Pick poloidal harmonics that carry the plasma helicity (m = n·q across the
+    # rational surfaces) plus one neighbour on each side. Far-negative-m solutions
+    # are tiny on tokamak equilibria and aren't what we care about for PE coupling.
+    resonant_ms = sort!(unique(Int[s.m[1] for s in intr_std.sing if !isempty(s.m)]))
+    plot_ms = if isempty(resonant_ms)
+        # Fallback: middle of the mode range
+        mmid = intr_std.mlow + N ÷ 2
+        collect((mmid - 2):(mmid + 2))
+    else
+        m_lo = max(intr_std.mlow, minimum(resonant_ms) - 1)
+        m_hi = min(intr_std.mlow + N - 1, maximum(resonant_ms) + 1)
+        collect(m_lo:m_hi)
+    end
+    plot_idx = [m - intr_std.mlow + 1 for m in plot_ms]
+    nplot = length(plot_ms)
+
     lo = maximum(minimum(raw[m][1]) for m in keys(raw))
     hi = minimum(maximum(raw[m][1]) for m in keys(raw))
     psg = collect(range(lo, hi; length=400))
@@ -265,8 +281,8 @@ function benchmark_example(example_name::AbstractString)
     for mode in (:standard, :riccati, :parallel)
         psi_m, xi_m, _ = raw[mode]
         d = zeros(ComplexF64, nplot, length(psg))
-        for m in 1:nplot
-            d[m, :] .= interp1(psi_m, ComplexF64.(xi_m[m, :]), psg)
+        for (k, idx) in enumerate(plot_idx)
+            d[k, :] .= interp1(psi_m, ComplexF64.(xi_m[idx, :]), psg)
         end
         xi[mode] = d
     end
@@ -288,8 +304,8 @@ function benchmark_example(example_name::AbstractString)
         @printf("            least-stable eigenvalues: %s\n",
                 join((@sprintf("%+.5e", v) for v in evs[1:min(5, length(evs))]), "  "))
     end
-    # Direct u_store[:,:,1,:] comparison (diagonal m=j), interpolated to psg — gauge/
-    # basis-independent only if both paths share the canonical axis basis.
+    # Direct u_store[:,:,1,:] comparison on the helicity m-row diagonal, interpolated
+    # to psg — gauge/basis-independent only if both paths share the canonical axis basis.
     let
         ud = Dict{Symbol,Matrix{ComplexF64}}()
         for mode in (:standard, :parallel)
@@ -297,8 +313,8 @@ function benchmark_example(example_name::AbstractString)
             np = length(o.psi_store)
             pm = collect(o.psi_store[1:np])
             d = zeros(ComplexF64, nplot, length(psg))
-            for m in 1:nplot
-                d[m, :] .= interp1(pm, ComplexF64.(o.u_store[m, m, 1, 1:np]), psg)
+            for (k, idx) in enumerate(plot_idx)
+                d[k, :] .= interp1(pm, ComplexF64.(o.u_store[idx, idx, 1, 1:np]), psg)
             end
             ud[mode] = d
         end
@@ -314,14 +330,14 @@ function benchmark_example(example_name::AbstractString)
             np = length(o.psi_store)
             pm = collect(o.psi_store[1:np])
             d = zeros(ComplexF64, nplot, length(psg))
-            for m in 1:nplot
+            for (k, idx) in enumerate(plot_idx)
                 Sdiag = ComplexF64[]
-                for k in 1:np
-                    U1 = @view o.u_store[:, :, 1, k]
-                    U2 = @view o.u_store[:, :, 2, k]
-                    push!(Sdiag, try (U1 / U2)[m, m] catch; ComplexF64(NaN) end)
+                for j in 1:np
+                    U1 = @view o.u_store[:, :, 1, j]
+                    U2 = @view o.u_store[:, :, 2, j]
+                    push!(Sdiag, try (U1 / U2)[idx, idx] catch; ComplexF64(NaN) end)
                 end
-                d[m, :] .= interp1(pm, Sdiag, psg)
+                d[k, :] .= interp1(pm, Sdiag, psg)
             end
             Sd[mode] = d
         end
@@ -331,11 +347,10 @@ function benchmark_example(example_name::AbstractString)
     @printf("  ξ_m(ψ) rel-L1:   parallel vs standard %.3e   serial-riccati vs standard %.3e\n",
             reldiff(xi[:parallel], xi[:standard]), reldiff(xi[:riccati], xi[:standard]))
     println("  per-mode ξ_m(ψ) rel-L1  (parallel vs standard | serial-riccati vs standard):")
-    for m in 1:nplot
-        pm = intr_std.mlow + (m - 1)
-        @printf("    m = %+d :  %.3e   |   %.3e\n", pm,
-                reldiff(xi[:parallel][m:m, :], xi[:standard][m:m, :]),
-                reldiff(xi[:riccati][m:m, :], xi[:standard][m:m, :]))
+    for (k, m) in enumerate(plot_ms)
+        @printf("    m = %+d :  %.3e   |   %.3e\n", m,
+                reldiff(xi[:parallel][k:k, :], xi[:standard][k:k, :]),
+                reldiff(xi[:riccati][k:k, :], xi[:standard][k:k, :]))
     end
 
     pe_snapshot = compare_pe_outputs(pe_states, example_name)
@@ -346,11 +361,15 @@ function benchmark_example(example_name::AbstractString)
             TOML.print(io, pe_snapshot)
         end
         println("\n  PE snapshot saved: $snap_path")
+        pe_fig_path = abspath(joinpath(FIG_DIR, "parallel_u_store_pe_$(example_name).png"))
+        plot_pe_comparison(pe_snapshot, example_name, pe_fig_path)
+        println("  PE comparison figure: $pe_fig_path")
     end
 
     # Overlay plot: Re and Im of the least-stable eigenmode displacement ξ_m(ψ) for the
-    # first five poloidal harmonics — parallel (solid), serial-riccati (dotted),
-    # standard (dashed). With the canonical u_store all three should overlay.
+    # helicity-range poloidal harmonics (m ≈ n·q at the rational surfaces) —
+    # parallel (solid), serial-riccati (dotted), standard (dashed). With the canonical
+    # u_store all three should overlay.
     mkpath(FIG_DIR)
     palette = distinguishable_colors(nplot)
     preal = plot(; title="$example_name — Re ξ_m(ψ), least-stable mode",
@@ -359,20 +378,96 @@ function benchmark_example(example_name::AbstractString)
     pimag = plot(; title="$example_name — Im ξ_m(ψ), least-stable mode",
                  xlabel="ψ_n", ylabel="Im ξ_m  (normalized)",
                  left_margin=12Plots.mm, bottom_margin=4Plots.mm, legend=:outertopright)
-    for m in 1:nplot
-        pm = intr_std.mlow + (m - 1)
-        plot!(preal, psg, real(xi[:parallel][m, :]); color=palette[m], lw=2, label="m=$pm parallel")
-        plot!(preal, psg, real(xi[:riccati][m, :]); color=palette[m], lw=1, ls=:dot, label="")
-        plot!(preal, psg, real(xi[:standard][m, :]); color=palette[m], lw=1, ls=:dash, label="m=$pm standard")
-        plot!(pimag, psg, imag(xi[:parallel][m, :]); color=palette[m], lw=2, label="m=$pm parallel")
-        plot!(pimag, psg, imag(xi[:riccati][m, :]); color=palette[m], lw=1, ls=:dot, label="")
-        plot!(pimag, psg, imag(xi[:standard][m, :]); color=palette[m], lw=1, ls=:dash, label="m=$pm standard")
+    for (k, m) in enumerate(plot_ms)
+        plot!(preal, psg, real(xi[:parallel][k, :]); color=palette[k], lw=2, label="m=$m parallel")
+        plot!(preal, psg, real(xi[:riccati][k, :]); color=palette[k], lw=1, ls=:dot, label="")
+        plot!(preal, psg, real(xi[:standard][k, :]); color=palette[k], lw=1, ls=:dash, label="m=$m standard")
+        plot!(pimag, psg, imag(xi[:parallel][k, :]); color=palette[k], lw=2, label="m=$m parallel")
+        plot!(pimag, psg, imag(xi[:riccati][k, :]); color=palette[k], lw=1, ls=:dot, label="")
+        plot!(pimag, psg, imag(xi[:standard][k, :]); color=palette[k], lw=1, ls=:dash, label="m=$m standard")
     end
     fig = plot(preal, pimag; layout=(2, 1), size=(900, 800))
     outpath = abspath(joinpath(FIG_DIR, "parallel_u_store_$(example_name).png"))
     savefig(fig, outpath)
-    println("\n  figure saved: $outpath")
+    println("\n  ξ_m figure saved: $outpath")
     return nothing
+end
+
+"""
+Render a 2x2 panel comparing per-rational-surface PE outputs across the three paths:
+- top-left:  |Φ_res|     (resonant flux magnitude per surface)
+- top-right: arg(Φ_res)  (phase, since cancellations matter as much as magnitude)
+- bot-left:  |Δ'|        (tearing parameter magnitude per surface)
+- bot-right: w_island    (island half-width per surface)
+
+Each panel groups three side-by-side bars per rational surface (one per path), so the
+eye can compare per-surface agreement between :standard / :riccati / :parallel directly.
+"""
+function plot_pe_comparison(snapshot::AbstractDict, example_name::AbstractString, outpath::AbstractString)
+    paths = [m for m in ("standard", "riccati", "parallel") if haskey(snapshot, m)]
+    isempty(paths) && return
+    qs = get(snapshot, "rational_q", Float64[])
+    isempty(qs) && return
+    n_surf = length(qs)
+    surf_labels = ["q=" * (@sprintf("%.2f", q)) for q in qs]
+    surf_x = collect(1.0:n_surf)
+    offsets = Dict("standard" => -0.18, "riccati" => 0.0, "parallel" => +0.18)
+    colors  = Dict("standard" => :tomato, "riccati" => :forestgreen, "parallel" => :steelblue)
+    markers = Dict("standard" => :circle, "riccati" => :diamond, "parallel" => :utriangle)
+
+    function _get(path, key)
+        d = snapshot[path]
+        v = collect(Float64.(d[key]))
+        length(v) < n_surf ? vcat(v, fill(NaN, n_surf - length(v))) : v[1:n_surf]
+    end
+    function _cvec(path, base)
+        re = _get(path, base * "_re")
+        im = _get(path, base * "_im")
+        return complex.(re, im)
+    end
+
+    common = (; left_margin=10Plots.mm, bottom_margin=4Plots.mm,
+              xticks=(surf_x, surf_labels), legend=:outertopright,
+              xlims=(0.5, n_surf + 0.5))
+
+    p_phi_mag = plot(; title="|Φ_res| per surface", ylabel="|Φ_res|",
+                     yscale=:log10, common...)
+    p_phi_arg = plot(; title="arg(Φ_res) per surface", ylabel="arg(Φ_res) [rad]",
+                     ylims=(-π - 0.1, π + 0.1), common...)
+    p_dp_mag  = plot(; title="|Δ'| per surface", ylabel="|Δ'|", yscale=:log10, common...)
+    p_w       = plot(; title="island half-width per surface", ylabel="w_island",
+                     yscale=:log10, common...)
+
+    # Stem-style markers; log-scale axes handle wide dynamic ranges (DIIID standard
+    # q=2 |Φ_res| can be 6 OOM larger than other surfaces). One marker per path per
+    # surface — eye-friendly when paths disagree by orders of magnitude.
+    function _scatter_stem!(p, xs, ys, color, marker, label; logy=false)
+        valid = isfinite.(ys)
+        if logy
+            # Drop non-positive values (log axis can't render them); also drop tiny
+            # values below a relative floor so the y-axis doesn't get distorted.
+            ys = copy(ys)
+            ys[.!valid .| (ys .<= 0)] .= NaN
+        end
+        scatter!(p, xs, ys; color=color, marker=marker, ms=7, lw=0, label=label)
+    end
+
+    for path in paths
+        phi = _cvec(path, "resonant_flux")
+        dp  = _cvec(path, "delta_prime")
+        w   = _get(path, "island_half_width")
+        xshift = surf_x .+ offsets[path]
+        _scatter_stem!(p_phi_mag, xshift, abs.(phi), colors[path], markers[path], path; logy=true)
+        _scatter_stem!(p_phi_arg, xshift, angle.(phi), colors[path], markers[path], path)
+        _scatter_stem!(p_dp_mag,  xshift, abs.(dp),  colors[path], markers[path], path; logy=true)
+        _scatter_stem!(p_w,       xshift, w,        colors[path], markers[path], path; logy=true)
+    end
+
+    fig = plot(p_phi_mag, p_phi_arg, p_dp_mag, p_w;
+               layout=(2, 2), size=(1200, 800),
+               plot_title="$example_name — PE outputs across integration paths")
+    savefig(fig, outpath)
+    return outpath
 end
 
 function main()
