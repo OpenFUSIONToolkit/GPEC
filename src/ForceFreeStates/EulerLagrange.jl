@@ -504,14 +504,14 @@ function cross_ideal_singular_surf!(
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Note: Δ' is NOT computed for the standard path. The physical Δ' is a complex
-    # normalization-convention-dependent quantity: the correct value requires the solution
-    # columns to be in the Riccati gauge (U₂=I), which is maintained by the Riccati
-    # renormalization. The standard path's solution columns grow from the axis with an
-    # arbitrary complex phase; dividing by the outer asymptotic coefficient normalizes the
-    # magnitude but not the complex phase, so the result is in a different convention.
-    # Δ' is computed inline in riccati_cross_ideal_singular_surf! for the Riccati and
-    # parallel FM paths, where the renormalization convention is consistent.
+    # Δ' is NOT computed here in the standard path. Δ' is normalization-convention-dependent
+    # and requires the Riccati gauge (U₂=I); the standard path lacks that gauge. Δ' is computed
+    # in riccati_cross_ideal_singular_surf! for the Riccati and parallel-FM paths instead.
+
+    # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
+    # The earlier sing_der! calls operated on the pre-trapezoidal / pre-asymptotic u and left
+    # odet.ud stale; without this, ud_store diverges from u_store after rational crossings.
+    sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
@@ -568,6 +568,7 @@ function integrate_el_region!(
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
+    du_buffer = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
     function segment_callback!(integrator)
         ctrl, _, _, intr, odet, chunk = integrator.p
@@ -577,6 +578,12 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
+        # If Gaussian reduction modified u, recompute ud to keep it consistent.
+        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
+        if odet.new
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+        end
+
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -585,7 +592,7 @@ function integrate_el_region!(
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
-        if near_start || near_end || (odet.step % ctrl.save_interval == 0) || in_edge_scan
+        if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end

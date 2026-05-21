@@ -219,7 +219,7 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     rz_in_xs = sq_xs
     rz_in_ys = collect(rzphi_y_nodes)
 
-    itp_2d_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_2d_opts = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; itp_2d_opts...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)
 
@@ -751,8 +751,9 @@ function tj_analytic_run_direct(equil_input::EquilibriumConfig, tj::TJAnalyticCo
     rmin_grid, rmax_grid = extrema(psi_in_xs)
     zmin_grid, zmax_grid = extrema(psi_in_ys)
 
+    # TJ-analytic has positive toroidal field by construction (q > 0 with F > 0).
     return DirectRunInput(equil_input, sq_in, psi_in, psi_in_xs, psi_in_ys,
-                          rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio)
+                          rmin_grid, rmax_grid, zmin_grid, zmax_grid, psio, 1)
 end
 
 """
@@ -831,5 +832,7 @@ function sol_run(equil_inputs::EquilibriumConfig, sol_inputs::SolovevConfig)
     # Print out equilibrium info
     @info "Generating Solovev equilibrium: mr=$mr, mz=$mz, ma=$ma, e=$(@sprintf("%.3f", e)), a=$(@sprintf("%.3f", a)), r0=$(@sprintf("%.3f", r0)), q0=$(@sprintf("%.3f", q0))"
 
-    return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
+    # Trailing 1 is bt_sign=+1: Solovev has positive Bt by construction (f0 = r0 * b0fac > 0).
+    # No ip_sign field is needed; sign(crnt) is recovered from params.crnt downstream.
+    return DirectRunInput(equil_inputs, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, 1)
 end

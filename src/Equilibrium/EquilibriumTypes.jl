@@ -28,6 +28,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
   - `force_termination::Bool` - Terminate after equilibrium setup (skip stability calculations)
+  - `use_galgrid::Bool` - Use the same grid as galerkin method
 """
 @kwdef mutable struct EquilibriumConfig
     eq_type::String = "efit"
@@ -52,13 +53,17 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     etol::Float64 = 1e-10
 
     force_termination::Bool = false
+    use_galgrid::Bool = true
+
+    # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
+    imas_cocos::Int = 11
 
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination)
+        force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
             power_b = 0;
@@ -118,7 +123,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination)
+            force_termination, use_galgrid, imas_cocos)
     end
 end
 
@@ -377,6 +382,7 @@ raw equilibrium data and preparing the initial splines.
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
+  - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -389,6 +395,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
+    bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
 end
 
 """
@@ -513,8 +520,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     kappa::Union{Nothing,Float64} = nothing # Elongation of the plasma cross-section
     delta1::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (upper triangularity)
     delta2::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (lower triangularity)
-    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T]
+    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
+    bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data

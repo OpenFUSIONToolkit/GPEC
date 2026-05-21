@@ -6,7 +6,9 @@ The Analysis module provides post-processing and visualization utilities for GPE
 
 - `ForceFreeStates`: Plotting functions for DCON-style ideal MHD stability results
 - `Equilibrium`: Plotting functions for equilibrium objects
+- `CoilForcing`: Plotting functions for coil geometry and normal field spectra
 - `PerturbedEquilibrium`: Plotting functions for perturbed equilibrium results
+- `PerturbedEquilibriumModes`: Data helpers to convert modal GPEC output to (ψ, θ) and (ψ, θ, φ) grids
 
 ```@docs
 GeneralizedPerturbedEquilibrium.Analysis
@@ -24,8 +26,20 @@ Modules = [GeneralizedPerturbedEquilibrium.Analysis.ForceFreeStates]
 Modules = [GeneralizedPerturbedEquilibrium.Analysis.Equilibrium]
 ```
 
+## CoilForcing
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Analysis.CoilForcing]
+```
+
 ## PerturbedEquilibrium
 
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibrium]
+```
+
+## PerturbedEquilibriumModes
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.Analysis.PerturbedEquilibriumModes]
 ```

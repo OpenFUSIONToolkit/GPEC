@@ -259,10 +259,10 @@ using TOML
         # Pinned per-surface Δ' values for the parallel path, rtol = 5%.
         # Captures absolute Δ' (in the parallel (S,I) Riccati gauge) so any
         # regression in `riccati_cross_ideal_singular_surf!` ca_l/ca_r
-        # accumulation surfaces here. Pinned at perf/riccati commit 3c8130da
-        # (post bit-identical-ξ work).
+        # accumulation surfaces here. Re-pinned after merging develop, which
+        # introduced a post-crossing `ud` recompute that shifted these values.
         @test isapprox(intr_par.sing[1].delta_prime[1], -7.242521e+01 + 3.225930e+02im; rtol=0.05)
-        @test isapprox(intr_par.sing[2].delta_prime[1], -7.278138e+00 + 4.172681e+03im; rtol=0.05)
+        @test isapprox(intr_par.sing[2].delta_prime[1], -6.102560e+00 + 8.058736e+03im; rtol=0.05)
 
         # delta_prime_col is populated and has the correct shape (N × n_res_modes)
         N = intr_par.numpert_total
@@ -326,13 +326,13 @@ using TOML
         # (msing = 5: m = 2, 3, 4, 5, 6).  Captures the absolute Δ' values in
         # the (S, I) Riccati gauge so any regression in
         # `riccati_cross_ideal_singular_surf!` ca_l/ca_r accumulation on a
-        # realistic large-N case is caught.  Pinned at perf/riccati commit
-        # 3c8130da (post bit-identical-ξ work) with rtol = 5% to match the
-        # existing energy pin.
+        # realistic large-N case is caught.  Re-pinned after merging develop's
+        # post-crossing `ud` recompute; surface 4 imaginary part is small and
+        # most sensitive to that fix.
         @test isapprox(intr_par.sing[1].delta_prime[1], -8.577807e-01 - 3.534327e-02im; rtol=0.05)
         @test isapprox(intr_par.sing[2].delta_prime[1], +1.138879e+01 - 1.094006e+00im; rtol=0.05)
         @test isapprox(intr_par.sing[3].delta_prime[1], -7.674451e+00 + 6.580060e-01im; rtol=0.05)
-        @test isapprox(intr_par.sing[4].delta_prime[1], +2.616381e+00 - 2.618100e-03im; rtol=0.05)
+        @test isapprox(intr_par.sing[4].delta_prime[1], +2.539167e+00 - 1.379442e+00im; rtol=0.05)
         @test isapprox(intr_par.sing[5].delta_prime[1], +3.515442e+00 + 4.396268e-01im; rtol=0.05)
 
         # Cross-path consistency (parallel vs standard) is omitted here: after the
@@ -436,11 +436,10 @@ using TOML
 
         # Pinned diagonal `delta_prime_matrix` values for the Solovev case (msing = 2).
         # These are the PEST3-convention self-response Δ' from the STRIDE BVP with
-        # vacuum coupling.  Pinned at perf/riccati commit 3c8130da (post bit-identical-ξ
-        # work) with rtol = 5% to catch regressions in the BVP assembly while tolerating
-        # cross-platform FP variation.
+        # vacuum coupling.  Re-pinned post merge of develop's ud recompute fix
+        # (rtol = 5% kept loose for cross-platform FP variation).
         @test isapprox(dpm[1, 1], +1.458329e-01 - 8.143554e-01im; rtol=0.05)
-        @test isapprox(dpm[2, 2], -1.579300e+01 + 3.571084e+05im; rtol=0.05)
+        @test isapprox(dpm[2, 2], -1.276138e+02 + 7.661905e+05im; rtol=0.05)
     end
 
     @testset "subsample_chunk_steps keeps endpoints and stride" begin
@@ -513,13 +512,12 @@ using TOML
 
         # Pinned diagonal `delta_prime_matrix` values for the DIIID-like case (msing = 5).
         # PEST3-convention self-response Δ' from the STRIDE BVP with vacuum coupling.
-        # Pinned at perf/riccati commit 3c8130da (post bit-identical-ξ work) with
-        # rtol = 5% to catch regressions in the large-N BVP assembly while tolerating
-        # cross-platform FP variation.
+        # Re-pinned post merge of develop's ud recompute fix; surface 4 imaginary part
+        # is the most sensitive to that change.
         @test isapprox(dpm[1, 1], +8.306213e+00 + 2.040545e-02im; rtol=0.05)
         @test isapprox(dpm[2, 2], -4.044646e+00 - 5.422897e-02im; rtol=0.05)
         @test isapprox(dpm[3, 3], -9.057543e+00 + 7.704890e+00im; rtol=0.05)
-        @test isapprox(dpm[4, 4], +5.767150e+03 - 2.401509e+03im; rtol=0.05)
+        @test isapprox(dpm[4, 4], +5.728530e+03 - 3.729769e+03im; rtol=0.05)
         @test isapprox(dpm[5, 5], -3.140954e+02 + 2.800570e+01im; rtol=0.05)
     end
 

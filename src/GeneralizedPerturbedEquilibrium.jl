@@ -39,6 +39,7 @@ using Printf
 using HDF5
 
 using FastInterpolations
+import IMASdd
 
 import AdaptiveArrayPools: @with_pool
 
@@ -52,7 +53,7 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
-function main(args::Vector{String}=String[])
+function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
@@ -98,6 +99,8 @@ function main(args::Vector{String}=String[])
             additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
         elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
             additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
+        elseif eq_config.eq_type == "imas"
+            additional_input = dd
         end
         equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
@@ -337,9 +340,15 @@ function main(args::Vector{String}=String[])
     if "PerturbedEquilibrium" in keys(inputs)
         # Read ForcingTerms control parameters
         if "ForcingTerms" in keys(inputs)
+            forcing_raw = inputs["ForcingTerms"]
+            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
+            # kwarg splatting and handled separately via coil_sets_raw field
+            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
             ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForcingTerms"])...
+                (Symbol(k) => v for (k, v) in scalar_forcing)...
             )
+            ft_ctrl.coil_sets_raw = coil_sets_raw
         else
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end
@@ -352,14 +361,15 @@ function main(args::Vector{String}=String[])
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr
+            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
+            metric, ffit
         )
 
         # Write perturbed equilibrium outputs to same HDF5 file
         if pe_ctrl.write_outputs_to_HDF5
             output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
             PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
+                pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
             @info "Results written to $output_file"
         end
@@ -624,6 +634,44 @@ function write_outputs_to_HDF5(
     end
 end
 
-export main
+"""
+    write_imas(dd, result)
+
+Write GPEC stability results into `dd.mhd_linear`. Creates one `toroidal_mode` entry per
+requested toroidal mode number, storing the least-stable (minimum real part) `energy_perturbed`
+for that `n_tor`. For multi-n runs the eigenvalue array `et` is sorted by stability across all
+n-blocks; `n_tor_idx[i]` identifies which n-block eigenvalue `i` belongs to, so each n_tor
+receives the correct least-stable δW regardless of how modes are interleaved in `et`.
+
+The `result` argument is the named tuple returned by `main`.
+"""
+function write_imas(dd, result)
+    result.vac_data === nothing && return
+
+    vac_data = result.vac_data
+    intr = result.intr
+
+    # Top-level metadata
+    dd.mhd_linear.code.name = "GPEC"
+    dd.mhd_linear.ideal_flag = 1
+
+    # Add a time_slice at the current global_time (wipe=false reuses an existing slice
+    # at the same time, or appends a new one if none exists yet)
+    ts = resize!(dd.mhd_linear.time_slice; wipe=false)
+
+    # Write the least-stable energy for each toroidal mode number
+    # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
+    resize!(ts.toroidal_mode, intr.npert)
+    for j in 0:(intr.npert-1)
+        n_indices = findall(==(j), vac_data.n_tor_idx) # indices of eigenvalues in the j-th n-block
+        mode = ts.toroidal_mode[j+1]
+        mode.n_tor = intr.nlow + j
+        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices])) # least-stable energy for this n-toroidal mode
+    end
+
+    return dd
+end
+
+export main, write_imas
 
 end # module GeneralizedPerturbedEquilibrium
