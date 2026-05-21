@@ -433,6 +433,7 @@ function read_imas(config::EquilibriumConfig, dd)
     # Extract 1D profiles, converting psi from COCOS 11 to internal
     psi_1d = eqt.profiles_1d.psi .* cocos_factor
     f_1d = eqt.profiles_1d.f          # F(ψ) = R·Bt [T·m], COCOS-independent
+    bt_sign = Int(sign(f_1d[end]))    # sign of toroidal field (before abs is applied below)
     p_1d = eqt.profiles_1d.pressure   # plasma pressure P(ψ) [Pa], COCOS-independent
     q_1d = eqt.profiles_1d.q          # safety factor, COCOS-independent
 
@@ -482,5 +483,5 @@ function read_imas(config::EquilibriumConfig, dd)
           "\n    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m" *
           "\n    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m"
 
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign)
 end
