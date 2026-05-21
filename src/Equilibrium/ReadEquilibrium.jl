@@ -373,6 +373,9 @@ function read_chease_ascii(config::EquilibriumConfig)
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
 
+    @views R_data[:, end] .= R_data[:, 1]
+    @views Z_data[:, end] .= Z_data[:, 1]
+
     opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; opts2d...)

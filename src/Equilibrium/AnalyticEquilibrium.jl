@@ -217,6 +217,8 @@ function lar_run(equil_input::EquilibriumConfig, lar_input::LargeAspectRatioConf
     rz_in_xs = r_nodes
     rz_in_ys = collect(rzphi_y_nodes)
 
+    @views rzphi_fs_nodes[:, end, :] .= rzphi_fs_nodes[:, 1, :]
+
     itp_2d_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 1]; itp_2d_opts...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), rzphi_fs_nodes[:, :, 2]; itp_2d_opts...)

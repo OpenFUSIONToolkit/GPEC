@@ -312,6 +312,8 @@ function equilibrium_solver(input::InverseRunInput)
     # Create 2D interpolants for geometric quantities (rzphi)
     rzphi_grid2d = (rzphi_xs, theta_range)
 
+    @views rzphi_fs[:, end, :] .= rzphi_fs[:, 1, :]
+
     rzphi_rsquared = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 1]; itp_opts2d...)
     rzphi_offset = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 2]; itp_opts2d...)
     rzphi_nu = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 3]; itp_opts2d...)
@@ -365,6 +367,7 @@ function equilibrium_solver(input::InverseRunInput)
     end
     # Create 2D interpolants for physics quantities (eqfun)
     eqfun_grid2d = (eqfun_xs, theta_range)
+    @views eqfun_fs[:, end, :] .= eqfun_fs[:, 1, :]
     eqfun_B = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 1]; itp_opts2d...)
     eqfun_metric1 = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 2]; itp_opts2d...)
     eqfun_metric2 = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 3]; itp_opts2d...)
