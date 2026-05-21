@@ -136,50 +136,12 @@ end
         @test odet_ric.step <= 2 * odet_std.step
     end
 
-    @testset "Δ' computed by Riccati path — Solovev regression" begin
-        # Verify that the Riccati path populates delta_prime with physically correct values.
-        #
-        # The Riccati path computes Δ' in the bounded (U₁, U₂) normalization: before the
-        # crossing, the callback guarantees max(|U₁|, |U₂|) ≤ ucrit, and the asymptotic is
-        # introduced directly in column ipert_res (no GR permutation). This gives:
-        #   ca_r[ipert_res, ipert_res, 2] = 1  (exactly, by construction)
-        #   Δ' = (1 - ca_l[ipert_res, ipert_res, 2]) / (4π²·psio)
-        #
-        # The standard path uses Gaussian Reduction which inflates the resonant column's
-        # asymptotic coefficients, so it does NOT populate intr.sing[s].delta_prime.
-        # Use SingularCoupling.jl (which reads ca_l/ca_r directly) for standard-path Δ'.
-
-        # Riccati path should populate delta_prime for every singular surface
-        @test all(s -> !isempty(s.delta_prime), intr_ric.sing)
-
-        # All Riccati Δ' values should be finite
-        @test all(s -> all(isfinite, s.delta_prime), intr_ric.sing)
-
-        # Regression: Solovev Δ' values (in the bounded Riccati normalization).
-        # Both surfaces come out negative now that integration runs to the
-        # qhigh/psihigh-defined edge; the previous positive Δ' on surface 1
-        # was an artefact of the edge-dW heuristic silently truncating psilim.
-        # Surface 1 (inner) is numerically stable across environments. Surface 2
-        # (outermost rational) has shown a ~2× run-to-run spread (−9 to −17
-        # across Julia 1.11 vs 1.12 and thread counts), so it's checked only
-        # against sign + order-of-magnitude rather than a pinned value — a
-        # sign flip or order-of-magnitude shift would still be caught.
-        @test isapprox(real(intr_ric.sing[1].delta_prime[1]), -72.4; rtol=0.15)
-        @test real(intr_ric.sing[2].delta_prime[1]) < 0
-        @test 3 < abs(real(intr_ric.sing[2].delta_prime[1])) < 50
-
-        # delta_prime_col is populated, has correct shape (N × n_res_modes), and
-        # its diagonal elements match delta_prime exactly.
-        @test all(s -> !isempty(s.delta_prime_col), intr_ric.sing)
-        @test all(s -> size(s.delta_prime_col, 1) == N, intr_ric.sing)
-        @test all(s -> size(s.delta_prime_col, 2) == length(s.delta_prime), intr_ric.sing)
-        for s in intr_ric.sing
-            ipert_res_vals = 1 .+ s.m .- intr_ric.mlow .+ (s.n .- intr_ric.nlow) .* intr_ric.mpert
-            for (i, ipr) in enumerate(ipert_res_vals)
-                @test s.delta_prime_col[ipr, i] ≈ s.delta_prime[i]  rtol=1e-10
-            end
-        end
-    end
+    # Note: a Solovev per-surface Δ' regression testset previously lived here,
+    # exercising the (1 - ca_l[res,res,2]) / (4π²·psio) calculation from the
+    # Riccati path. Per-surface Δ' is now treated as a stub (left in the code
+    # for future work but de-emphasized): not reported, not output, and not
+    # regression-tested on any actual equilibrium. The canonical Δ' is the
+    # STRIDE BVP Δ' matrix (see runtests_parallel_integration.jl).
 
     @testset "Riccati end state has U₂ ≈ I" begin
         # After riccati_eulerlagrange_integration, odet.u[:,:,2] should be identity

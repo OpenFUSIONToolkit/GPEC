@@ -1174,8 +1174,16 @@ function riccati_cross_ideal_singular_surf!(
     # the normalization of the other columns. This gives Δ' = 1 - ca_l[ipert_res,ipert_res,2].
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Compute Δ' using ipert_res directly (no GR → perm_col = ipert_res, ca_r diagonal = 1).
-    # Also compute the full column Δ' (all N modes) for the off-diagonal coupling.
+    # **STUB — per-surface Δ' from asymptotic-coefficient jump.** Populates
+    # `intr.sing[ising].delta_prime` (and the full `delta_prime_col`) from
+    # (ca_r − ca_l) at the crossing. This is a per-surface estimate and does
+    # NOT match the canonical STRIDE BVP Δ' matrix
+    # (`intr.delta_prime_matrix`, populated by `compute_delta_prime_matrix!`),
+    # which is the value that should be used for physics, output, reporting,
+    # and regression testing. The per-surface calculation is retained in the
+    # struct for diagnostic / future-work use but is no longer written to HDF5
+    # nor regression-tested on actual equilibria. PE `SingularCoupling.jl`
+    # reads the BVP matrix diagonal instead of these per-surface values.
     if ctrl.kinetic_factor == 0
         denom = (2π)^2 * equil.psio
         n_res = length(sing_asymp_right.r1)

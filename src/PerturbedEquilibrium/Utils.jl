@@ -126,7 +126,9 @@ function write_outputs_to_HDF5(
         coupling_group["resonant_current"]   = state.resonant_current
         coupling_group["island_width_sq"]    = state.island_width_sq
         coupling_group["penetrated_field"]   = state.penetrated_field
-        coupling_group["delta_prime"]        = state.delta_prime
+        # `state.delta_prime` was previously written here but is redundant with the
+        # canonical `singular/delta_prime_matrix` (BVP) value upstream — they hold
+        # the same diagonal Δ'. Drop to keep HDF5 single-source.
         coupling_group["island_half_width"]  = state.island_half_width
         coupling_group["chirikov_parameter"] = state.chirikov_parameter
 

@@ -15,14 +15,14 @@ etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
-shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
-a = 0.2415                              # Distance from plasma (conformal) or shape parameter
-aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
-bw = 1.5                                # Elongation parameter for wall shapes
-cw = 0                                  # Offset of wall center from major radius
-dw = 0.5                                # Triangularity parameter for wall shapes
-tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
-equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
+shape = "conformal"                     # Close conformal wall stabilizes Solovev n=1 external kink; see examples/Solovev_ideal_example/gpec.toml
+a = 0.2415
+aw = 0.05
+bw = 1.5
+cw = 0
+dw = 0.5
+tw = 0.05
+equal_arc_wall = true
 
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths

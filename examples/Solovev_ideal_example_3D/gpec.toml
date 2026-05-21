@@ -52,6 +52,7 @@ set_psilim_via_dmlim  = false  # FALSE for limited circular / analytical equilib
 dmlim                 = 0.2    # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
 
 [Wall]
+# See examples/Solovev_ideal_example/gpec.toml for the rationale behind the close conformal wall.
 shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
@@ -59,7 +60,7 @@ bw = 1.5                                # Elongation parameter for wall shapes
 cw = 0                                  # Offset of wall center from major radius
 dw = 0.5                                # Triangularity parameter for wall shapes
 tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
-equal_arc_wall = false                   # Equal arc length distribution of nodes on wall
+equal_arc_wall = false                  # Equal arc length distribution of nodes on wall
 
 # [PerturbedEquilibrium]
 # # Uncomment this section to enable perturbed equilibrium calculations

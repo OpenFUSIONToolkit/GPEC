@@ -15,6 +15,7 @@ etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
+# See examples/Solovev_ideal_example/gpec.toml for the rationale behind the close conformal wall.
 shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls

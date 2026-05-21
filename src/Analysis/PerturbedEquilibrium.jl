@@ -181,18 +181,21 @@ end
 """
     plot_driven_delta_prime(h5path; save_path=nothing)
 
-Scatter plot of `Re(Δ')` per singular surface vs ψ_N, computed by the perturbed equilibrium
-module (from `singular_coupling/delta_prime`). One marker series per toroidal mode n.
-Integer-valued q rational surfaces are annotated.
+Scatter plot of `Re(Δ')` per singular surface vs ψ_N, read from the canonical
+STRIDE BVP Δ' matrix (`singular/delta_prime_matrix` diagonal). Integer-valued
+q rational surfaces are annotated.
 
-This is complementary to `Analysis.ForceFreeStates.plot_delta_prime`, which uses the FFS
-asymptotic coefficients. The PE result includes the vacuum Green's function contribution.
+The BVP matrix is computed by `ForceFreeStates.compute_delta_prime_matrix!`
+when `use_parallel = true`, `vac_flag = true`, `kinetic_factor == 0`, and
+single-resonance surfaces. The diagonal `dpm[s, s]` is the self-response Δ'
+at each singular surface — the canonical value, including vacuum coupling and
+inter-surface corrections.
 
-Requires `singular_coupling/delta_prime` in the HDF5 file.
+Requires `singular/delta_prime_matrix` in the HDF5 file.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `h5path`: Path to a GPEC HDF5 output file
 
 ### Keyword arguments
 
@@ -203,33 +206,28 @@ Requires `singular_coupling/delta_prime` in the HDF5 file.
 A `Plots.jl` plot object.
 """
 function plot_driven_delta_prime(h5path; save_path=nothing)
-    key = "perturbed_equilibrium/singular_coupling/delta_prime"
+    key = "singular/delta_prime_matrix"
     _has_pe_data(h5path, key) ||
-        return plot(; title="No PE Δ' data — run with perturbed equilibrium enabled", legend=false)
+        return plot(; title="No BVP Δ' matrix — run with use_parallel + vac_flag enabled", legend=false)
 
-    delta_prime, psi_sing, q_sing, msing, pe_n = h5open(h5path, "r") do fid
+    dpm, psi_sing, q_sing, msing = h5open(h5path, "r") do fid
         read(fid[key]), read(fid["singular/psi"]), read(fid["singular/q"]),
-        read(fid["singular/msing"]),
-        read(fid["perturbed_equilibrium/forcing_modes/n"])
+        read(fid["singular/msing"])
     end
 
+    dp_diag = [real(dpm[s, s]) for s in 1:msing]
+    colors = [v > 0 ? :red : :steelblue for v in dp_diag]
+
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
-        title="Tearing stability Δ' (PE)", legend=:outertopright,
+        title="Tearing stability Δ' (STRIDE BVP diagonal)", legend=:outertopright,
         left_margin=10Plots.mm, bottom_margin=5Plots.mm)
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
-
-    n_vals = unique(pe_n)
-    for nn in n_vals
-        n_rows = findall(==(nn), pe_n)
-        dp_n = [real(delta_prime[n_rows[1], s]) for s in 1:msing]
-        colors = [v > 0 ? :red : :steelblue for v in dp_n]
-        scatter!(p, psi_sing, dp_n; label="n=$nn", color=colors,
-            markersize=7, markerstrokewidth=0)
-        for s in 1:msing
-            abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
-            annotate!(p, psi_sing[s], dp_n[s],
-                text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
-        end
+    scatter!(p, psi_sing, dp_diag; label="dpm[s,s]", color=colors,
+        markersize=7, markerstrokewidth=0)
+    for s in 1:msing
+        abs(q_sing[s] - round(q_sing[s])) < 0.05 || continue
+        annotate!(p, psi_sing[s], dp_diag[s],
+            text("  q=$(round(Int, q_sing[s]))", 8, :left, :black))
     end
 
     isnothing(save_path) || savefig(p, save_path)

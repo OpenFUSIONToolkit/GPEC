@@ -518,31 +518,13 @@ function write_outputs_to_HDF5(
             out_h5["singular/n"] = n_matrix
         end
 
-        # Write Δ' if computed (one complex value per resonant mode per singular surface)
-        if intr.msing > 0 && all(s -> !isempty(s.delta_prime), intr.sing)
-            max_modes = maximum(s -> length(s.delta_prime), intr.sing)
-            dp_matrix = zeros(ComplexF64, intr.msing, max_modes)
-            for (s, sing) in enumerate(intr.sing)
-                for i in 1:length(sing.delta_prime)
-                    dp_matrix[s, i] = sing.delta_prime[i]
-                end
-            end
-            out_h5["singular/delta_prime"] = dp_matrix
-        end
-
-        # Write full off-diagonal Δ' column if computed (Riccati/parallel FM paths only).
-        # Shape: [numpert_total × max_modes × msing], where delta_prime_col[:, i, s] is
-        # the coupling of all N modes to resonant mode i at surface s.
-        if intr.msing > 0 && all(s -> !isempty(s.delta_prime_col), intr.sing)
-            N = size(intr.sing[1].delta_prime_col, 1)
-            max_modes = maximum(s -> size(s.delta_prime_col, 2), intr.sing)
-            dp_col_tensor = zeros(ComplexF64, N, max_modes, intr.msing)
-            for (s, sing) in enumerate(intr.sing)
-                n_res = size(sing.delta_prime_col, 2)
-                dp_col_tensor[:, 1:n_res, s] = sing.delta_prime_col
-            end
-            out_h5["singular/delta_prime_col"] = dp_col_tensor
-        end
+        # Per-surface Δ' (`sing.delta_prime`, `sing.delta_prime_col`) was previously
+        # written here, but it is a stub calculation from (ca_r - ca_l) at each
+        # crossing that doesn't agree with the canonical STRIDE BVP Δ' matrix below.
+        # It's retained in `intr.sing[*].delta_prime` for future work but is not
+        # emitted to HDF5 to avoid duplicating an unreliable value next to the
+        # canonical one. Downstream consumers (PE SingularCoupling, regression
+        # harness, Analysis plots) read the BVP matrix diagonal instead.
 
         # Write inter-surface Δ' matrix if computed (parallel FM path only).
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).

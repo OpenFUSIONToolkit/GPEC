@@ -183,8 +183,19 @@ function compute_singular_coupling_metrics!(
                 rbwp1 = interpolate_field_derivative(ForceFreeStates_results, rpsi, resnum, resnum)
             end
 
-            # Compute Delta' (tearing stability parameter)
-            delta_prime_val = (rbwp1 - lbwp1) / (twopi * chi1)
+            # Tearing stability Δ' — read from the canonical STRIDE BVP matrix
+            # diagonal that ForceFreeStates.compute_delta_prime_matrix! populates
+            # upstream. The earlier `(rbwp1 - lbwp1) / (twopi * chi1)` per-surface
+            # formula is a stub left in the code for future work; the BVP value is
+            # the physically correct Δ' (includes vacuum coupling and inter-surface
+            # corrections). Falls back to NaN when the BVP matrix isn't populated
+            # (kinetic_factor > 0, or multi-resonance multi-n where the BVP is
+            # skipped — sing_lim! / compute_delta_prime_matrix! warn in that case).
+            if !isempty(ffs_intr.delta_prime_matrix) && size(ffs_intr.delta_prime_matrix, 1) >= s
+                delta_prime_val = ffs_intr.delta_prime_matrix[s, s]
+            else
+                delta_prime_val = ComplexF64(NaN, NaN)
+            end
             state.delta_prime[n_idx, s] = delta_prime_val
 
             # Compute resonant current

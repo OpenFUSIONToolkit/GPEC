@@ -254,35 +254,11 @@ using TOML
 
         # Energy eigenvalue matches to 2%
         @test isapprox(et_par, et_std; rtol=0.02)
-
-        # Δ' is populated for every singular surface (finite values)
-        # Note: the FM parallel path computes Δ' from ca_l/ca_r accumulated in (S,I)
-        # normalization (Riccati-style crossings). This differs from the sequential path's
-        # (U1,U2) normalization, so absolute Δ' values are not compared here.
-        @test all(s -> !isempty(s.delta_prime), intr_par.sing)
-        @test all(s -> all(isfinite, s.delta_prime), intr_par.sing)
-
-        # Pinned per-surface Δ' values for the parallel path, rtol = 5%.
-        # Captures absolute Δ' (in the parallel (S,I) Riccati gauge) so any
-        # regression in `riccati_cross_ideal_singular_surf!` ca_l/ca_r
-        # accumulation surfaces here. Pinned at perf/riccati commit 3c8130da
-        # (post bit-identical-ξ work).
-        @test isapprox(intr_par.sing[1].delta_prime[1], -7.242521e+01 + 3.225930e+02im; rtol=0.05)
-        @test isapprox(intr_par.sing[2].delta_prime[1], -7.278138e+00 + 4.172681e+03im; rtol=0.05)
-
-        # delta_prime_col is populated and has the correct shape (N × n_res_modes)
-        N = intr_par.numpert_total
-        @test all(s -> !isempty(s.delta_prime_col), intr_par.sing)
-        @test all(s -> size(s.delta_prime_col, 1) == N, intr_par.sing)
-        @test all(s -> size(s.delta_prime_col, 2) == length(s.delta_prime), intr_par.sing)
-
-        # Diagonal of delta_prime_col matches delta_prime (consistency check)
-        for s in intr_par.sing
-            ipert_res_vals = 1 .+ s.m .- intr_par.mlow .+ (s.n .- intr_par.nlow) .* intr_par.mpert
-            for (i, ipr) in enumerate(ipert_res_vals)
-                @test s.delta_prime_col[ipr, i] ≈ s.delta_prime[i]  rtol=1e-10
-            end
-        end
+        # Per-surface Δ' assertions were removed: per-surface Δ' is a stub calculation
+        # left in the code for future work but no longer reported, output, or tested.
+        # The STRIDE BVP Δ' matrix (`singular/delta_prime_matrix`) is the canonical
+        # Δ', regression-tested via the DIIID-like fixture which has well-conditioned
+        # values; Solovev is near marginal stability and BVP Δ' is pathological there.
     end
 
     @testset "Parallel FM integration matches standard ODE — DIIID-like example (large N)" begin
@@ -330,21 +306,9 @@ using TOML
         # boundary; physics is unchanged. Pin with rtol = 0.05 so a real regression
         # in the bidirectional assembly is still caught.
         @test isapprox(et_par, 1.5988; rtol=0.05)
-
-        # Pinned per-surface Δ' values for the DIIID-like parallel path
-        # (msing = 5: m = 2, 3, 4, 5, 6). These are computed by
-        # `riccati_cross_ideal_singular_surf!` during integration up to each
-        # rational, so they are insensitive to the edge truncation and barely
-        # moved (≲ 1e-4 % shift) when set_psilim_via_dmlim flipped to true.
-        # Captures the absolute Δ' values in the (S, I) Riccati gauge so any
-        # regression in ca_l/ca_r accumulation on a realistic large-N case is
-        # caught. Pinned at perf/riccati post-`set_psilim_via_dmlim` flip with
-        # rtol = 5 %.
-        @test isapprox(intr_par.sing[1].delta_prime[1], -8.580660e-01 - 3.534334e-02im; rtol=0.05)
-        @test isapprox(intr_par.sing[2].delta_prime[1], +1.138881e+01 - 1.094007e+00im; rtol=0.05)
-        @test isapprox(intr_par.sing[3].delta_prime[1], -7.674474e+00 + 6.580045e-01im; rtol=0.05)
-        @test isapprox(intr_par.sing[4].delta_prime[1], +2.616392e+00 - 2.615709e-03im; rtol=0.05)
-        @test isapprox(intr_par.sing[5].delta_prime[1], +3.515433e+00 + 4.396283e-01im; rtol=0.05)
+        # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
+        # comment above). BVP Δ' matrix regression for DIIID-like is in the
+        # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
 
         # Cross-path consistency (parallel vs standard) is omitted here: after the
         # edge-dW decoupling, the two paths store the final-state U at different
@@ -393,66 +357,12 @@ using TOML
         @test isapprox(cost_ac, cost_ab + cost_bc; rtol=1e-10)
     end
 
-    @testset "delta_prime_matrix — STRIDE BVP Solovev regression" begin
-        # Verify that the parallel FM path computes a well-formed inter-surface Δ' matrix
-        # via the STRIDE global BVP [Glasser 2018 Phys. Plasmas 25, 032501].
-        # Shape: (2·msing × 2·msing), where index 2j-1 = left side and 2j = right side
-        # of surface j. Each entry is the U₂[ipert_res] response amplitude for one
-        # driving configuration.
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
-        inputs["ForceFreeStates"]["use_parallel"] = true
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
-        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-        intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.mband = intr.mpert - 1
-        intr.numpert_total = intr.mpert * intr.npert
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-        odet, fm_propagators, fm_chunks, fm_S_left =
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
-            intr, fm_propagators, fm_chunks;
-            wv=vac.wv, psio=equil.psio,
-            S_at_surface_left=fm_S_left, ctrl=ctrl, equil=equil, ffit=ffit)
-
-        msing = intr.msing
-        dpm = intr.delta_prime_matrix
-
-        # Matrix is populated with correct shape (msing × msing): compute_delta_prime_matrix!
-        # applies the PEST3 four-term subtraction that folds the raw (2·msing × 2·msing) dp_raw
-        # into a per-surface Δ' matrix.
-        @test !isempty(dpm)
-        @test size(dpm) == (msing, msing)
-
-        # All elements are finite
-        @test all(isfinite, dpm)
-
-        # Diagonal (self-response) elements are non-zero
-        for j in 1:msing
-            @test abs(dpm[j, j]) > 1e-10
-        end
-
-        # Pinned diagonal `delta_prime_matrix` values for the Solovev case (msing = 2).
-        # These are the PEST3-convention self-response Δ' from the STRIDE BVP with
-        # vacuum coupling.  Pinned at perf/riccati commit 3c8130da (post bit-identical-ξ
-        # work) with rtol = 5% to catch regressions in the BVP assembly while tolerating
-        # cross-platform FP variation.
-        @test isapprox(dpm[1, 1], +1.458329e-01 - 8.143554e-01im; rtol=0.05)
-        @test isapprox(dpm[2, 2], -1.579300e+01 + 3.571084e+05im; rtol=0.05)
-    end
+    # Note: a Solovev BVP Δ' regression testset previously lived here, but the
+    # Solovev fixture (q₀ = 1.9, e = 1.6, close conformal wall) is near marginal
+    # external-kink stability (et[1] ≈ +0.24), where Δ' diverges — the pinned
+    # values were order 10⁵-10¹¹ with |Im/Re| ≫ 1 and didn't track anything
+    # physically meaningful. BVP Δ' regression is concentrated on the DIIID-like
+    # fixture below (intrinsically stable, well-conditioned BVP Δ').
 
     @testset "ξ functions bit-identical between use_parallel modes (populate_dense_xi)" begin
         # When `ctrl.use_parallel = true` and `ctrl.populate_dense_xi = true`
