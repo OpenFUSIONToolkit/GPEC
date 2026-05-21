@@ -182,43 +182,55 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         end
     end
 
-    # Initialization
+    odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
+    finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
+    return (odet, nothing, nothing, nothing)
+end
+
+"""
+    standard_eulerlagrange_pass(ctrl, equil, ffit, intr) -> OdeState
+
+Build the canonical `u_store` via the standard Euler-Lagrange path: forward
+integration over `chunk_el_integration_bounds`, with `cross_ideal_singular_surf!`
+at each rational surface. Caller is responsible for calling
+`finalize_canonical_u_store!` afterwards.
+
+This is the partition-invariant reference build (GR firing is bisected on the
+`uratio − ucrit` zero crossing inside `integrate_el_region!`, see Phase C).
+`parallel_eulerlagrange_integration` calls this to obtain `u_store` that matches
+the standard path byte-for-byte, then runs its parallel propagator phase only for
+the deferred Δ' BVP / S-gauge outputs.
+"""
+function standard_eulerlagrange_pass(
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal
+)
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
-        # initialize_el_at_singular_surf!(ctrl, equil, intr, odet)
     else
         error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
     end
 
-    # Pre-compute all integration chunks
     chunks = chunk_el_integration_bounds(odet, ctrl, intr)
 
-    # Print initial integration condition
     if ctrl.verbose
         @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
     end
 
-    # Iterate through each integration chunk
     for chunk in chunks
-        # Integrate this region and display progress
         integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
         if ctrl.verbose
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
-
-        # Cross a rational surface after integration if this chunk requires it
         if chunk.needs_crossing
-            # Ideal surface crossings apply only in the ideal (non-kinetic) path.
             cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
         end
     end
 
-    finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
-
-    return (odet, nothing, nothing, nothing)
+    return odet
 end
 
 """

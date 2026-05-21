@@ -1778,54 +1778,48 @@ function parallel_eulerlagrange_integration(
     ffit::FourFitVars, intr::ForceFreeStatesInternal
 )
     N = intr.numpert_total
-    odet = OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-    if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
-    elseif ctrl.sing_start <= intr.msing
-        error("sing_start > 0 not implemented yet!")
-    else
-        error("Invalid value for sing_start: $(ctrl.sing_start) > msing = $(intr.msing)")
-    end
 
-    # Build chunks and sub-divide for load-balanced parallel execution. bidirectional=true:
-    # crossing chunks (nearest each rational surface) are integrated backward.
-    base_chunks = chunk_el_integration_bounds(odet, ctrl, intr; bidirectional=true)
+    # u_store is built by the standard EL pass on natural (un-balanced) chunks. With the
+    # Phase C ContinuousCallback fix in integrate_el_region!, GR fires at the exact
+    # uratio = ucrit crossing inside each chunk, so the resulting u_store is what the
+    # standard / Riccati / parallel paths all consume from PerturbedEquilibrium.
+    # Delegating to the standard pass here unifies the three paths' u_store basis
+    # without bisecting through balanced sub-chunk propagator histories.
+    odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
+
+    # Build balanced sub-chunks for the parallel-FM propagator pass. These feed the Δ'
+    # BVP (compute_delta_prime_matrix!) and the S-gauge ca_l/ca_r outputs, both of
+    # which benefit from load-balanced parallel execution. We use a *throwaway* OdeState
+    # primed at the axis only so chunk_el_integration_bounds reads psifac/ising_start
+    # correctly — odet has already advanced past the edge.
+    chunk_odet = OdeState(N, 1, 1, intr.msing)
+    if ctrl.sing_start <= 0
+        initialize_el_at_axis!(chunk_odet, ctrl, equil.profiles, intr)
+    end
+    base_chunks = chunk_el_integration_bounds(chunk_odet, ctrl, intr; bidirectional=true)
     chunks = balance_integration_chunks(base_chunks, ctrl, intr)
     propagators = [ChunkPropagator(N) for _ in chunks]
 
-    # Per-thread lightweight proxy OdeState for sing_der! side effects. Sized by
-    # maxthreadid() (Julia 1.9+ may return ids past nthreads() from interactive threads).
     julia_nthreads = Threads.nthreads()
     odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:Threads.maxthreadid()]
-
-    # Effective thread count, capped by ctrl.parallel_threads (≥1). parallel_threads=1
-    # runs the chunk integration serially — bit-deterministic, and the route the
-    # use_riccati path takes. See ForceFreeStatesControl docstring / CONVENTIONS.md §7.
     bvp_threads = max(1, min(julia_nthreads, ctrl.parallel_threads))
 
     if ctrl.verbose
-        @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" equil.profiles.q_spline(odet.psifac)))"
         @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads thread$(bvp_threads == 1 ? "" : "s")"
     end
 
-    # Parallel phase: integrate each chunk's propagator fundamental matrix.
     if bvp_threads == 1
         for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                         odet_proxies[1])
         end
     else
-        # :static pins each task to one OS thread so Threads.threadid() indexes odet_proxies stably.
         Threads.@threads :static for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                         odet_proxies[Threads.threadid()])
         end
     end
 
-    # GR pass: reconstruct the canonical u_store from the chunk propagators, then finalize
-    # (edge-dW scan, stability criterion, transform_u!) to the axis basis.
-    reconstruct_u_store_via_gr!(odet, chunks, propagators, ctrl, equil, ffit, intr,
-                                odet_proxies[1])
     psilim_before = intr.psilim
     finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
     # free_run! derives `coeffs` from odet.u and right-multiplies u_store by it — keep them

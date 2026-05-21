@@ -317,10 +317,12 @@ using TOML
 
         et_par, intr_par = run_diiid(true)
 
-        # Parallel FM pinned-value regression: the bidirectional fix gives et ≈ 1.29
-        # (was ~1.15 before the fix, off by ~10%). Pin to 1.29 with rtol=0.05 so a
-        # regression in the bidirectional assembly would still be caught.
-        @test isapprox(et_par, 1.29; rtol=0.05)
+        # Parallel-path et[1] regression. Re-pinned post Phase C.2, where the parallel
+        # path now delegates u_store building to standard_eulerlagrange_pass — so
+        # et_par == et_standard byte-for-byte. The old pin (≈ 1.29) reflected the
+        # chunk-balancing-corrupted parallel u_store; the new pin (≈ −30.8) reflects
+        # the standard-EL truth that the unified path produces.
+        @test isapprox(et_par, -30.84; rtol=0.05)
 
         # Pinned per-surface Δ' values for the DIIID-like parallel path
         # (msing = 5: m = 2, 3, 4, 5, 6).  Captures the absolute Δ' values in
@@ -613,12 +615,17 @@ using TOML
             @test states[:riccati].delta_prime   ≈ states[:parallel].delta_prime    rtol=1e-10
 
             # Cross-path ||Φ_res|| equivalence vs the standard path — the primary
-            # benchmark metric for the unified-u_store work. Currently broken on
-            # both examples by the chunk-balancing GR-trigger bug; Phase C will
-            # tighten to rtol = 1e-4 (Solovev) / 1e-3 (DIIID) once fixed.
+            # benchmark metric for the unified-u_store work. Closed by Phase C.2:
+            # parallel_eulerlagrange_integration now delegates u_store building to
+            # standard_eulerlagrange_pass, so all three paths feed an identical
+            # u_store to PerturbedEquilibrium. Tightened to bit-identity (rtol=1e-10).
             phi_std = norm(states[:standard].resonant_flux)
-            @test_broken isapprox(phi_std, norm(states[:parallel].resonant_flux); rtol=1e-3)
-            @test_broken isapprox(phi_std, norm(states[:riccati].resonant_flux);  rtol=1e-3)
+            @test isapprox(phi_std, norm(states[:parallel].resonant_flux); rtol=1e-10)
+            @test isapprox(phi_std, norm(states[:riccati].resonant_flux);  rtol=1e-10)
+            # Per-surface array equality (not just the norm) — catches sign flips or
+            # mode-by-mode cancellations that the scalar norm would mask.
+            @test states[:standard].resonant_flux ≈ states[:parallel].resonant_flux  rtol=1e-10
+            @test states[:standard].delta_prime   ≈ states[:parallel].delta_prime    rtol=1e-10
         end
     end
 
