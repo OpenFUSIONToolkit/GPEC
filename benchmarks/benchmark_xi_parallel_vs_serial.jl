@@ -22,9 +22,6 @@
 #     julia --project=.. benchmark_xi_parallel_vs_serial.jl
 #     julia --project=.. benchmark_xi_parallel_vs_serial.jl Solovev_ideal_example DIIID-like_ideal_example
 
-using Pkg
-Pkg.activate(joinpath(@__DIR__, ".."))
-
 using GeneralizedPerturbedEquilibrium
 using HDF5
 using Plots

@@ -130,10 +130,16 @@ using TOML
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
 
-        target_n = max(2 * intr.msing + 3, 4 * Threads.nthreads())
+        # Must mirror balance_integration_chunks' internal target_n formula
+        # (src/ForceFreeStates/EulerLagrange.jl). Keep this in sync.
+        target_n = max(2 * intr.msing + 3, 4 * Threads.nthreads(), 8 * (intr.msing + 1) + intr.msing)
 
-        # After balancing, should have at least target_n chunks
-        @test length(balanced) >= min(target_n, length(base_chunks) * 50)
+        # After balancing, chunk count equals target_n: the while-loop adds exactly one
+        # chunk per iteration (a bisection split) and exits when length(result) >= target_n,
+        # so the post-loop count is target_n under normal conditions. (The function can
+        # produce fewer if every remaining chunk is unsplittable — width < 1e-8 — but that
+        # never happens in the regression cases here.)
+        @test length(balanced) == target_n
 
         # First chunk starts at the correct position, last chunk ends at the edge
         @test balanced[1].psi_start ≈ base_chunks[1].psi_start

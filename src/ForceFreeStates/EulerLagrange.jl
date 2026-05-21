@@ -214,6 +214,8 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
     # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
+    # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
+    # product and is intentionally NOT restored.
     #
     # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
     # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
