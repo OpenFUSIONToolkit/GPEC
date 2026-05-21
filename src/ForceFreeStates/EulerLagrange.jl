@@ -570,18 +570,24 @@ function integrate_el_region!(
     steps_in_segment = Ref(0)
     du_buffer = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
-    function segment_callback!(integrator)
+    # save_callback fires after every accepted step. It does NOT fire Gaussian reduction
+    # any more — that is delegated to gr_continuous_callback below, which catches the
+    # exact ψ where `uratio - ucrit` crosses zero (partition-invariant by construction).
+    # save_callback only:
+    #   - bumps step counters
+    #   - initializes unorm0 the first time after a GR fixup (or chunk start)
+    #   - writes saved snapshots to u_store / ud_store at the existing heuristic
+    function save_callback!(integrator)
         ctrl, _, _, intr, odet, chunk = integrator.p
-
         odet.total_steps += 1
         steps_in_segment[] += 1
 
-        compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
-
-        # If Gaussian reduction modified u, recompute ud to keep it consistent.
-        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
+        # First sample of a new GR-interval: capture the reference norms used by the
+        # ContinuousCallback condition. Without this we would compare against stale
+        # unorm0 from before the most recent fixup.
         if odet.new
-            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+            odet.new = false
+            @views odet.unorm0 .= norm.(eachcol(integrator.u[:, :, 1]))
         end
 
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
@@ -604,7 +610,60 @@ function integrate_el_region!(
         end
     end
 
-    cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
+    # ContinuousCallback condition: `max(unorm) / min(unorm) - ucrit`, evaluated against
+    # the (frozen) unorm0 set by save_callback at the start of the current GR-interval.
+    # Returns a large negative sentinel while odet.new=true (i.e., unorm0 not yet initialized)
+    # so the bisection root-find never trips in that state.
+    function gr_condition(u, t, integrator)
+        ctrl, _, _, intr, odet, _ = integrator.p
+        odet.new && return -1.0
+        norms = norm.(eachcol(u[:, :, 1]))
+        mn = minimum(norms)
+        mn == 0 && return -1.0
+        ratios = norms ./ odet.unorm0
+        return maximum(ratios) / minimum(ratios) - ctrl.ucrit
+    end
+
+    # ContinuousCallback affect: fires GR at the exact ψ where gr_condition == 0.
+    # OrdinaryDiffEq bisects the dense interpolant to find this root, so the firing
+    # ψ depends only on the (continuous) solution u(ψ), not on the adaptive step grid
+    # or on how the integration domain was partitioned. After the fixup, the post-GR
+    # column norms are written *immediately* to unorm0 (and odet.new is kept false),
+    # so the next gr_condition evaluation compares against a reference set at the
+    # exact crossing ψ — also partition-invariant.
+    function gr_affect!(integrator)
+        ctrl, _, _, intr, odet, _ = integrator.p
+        odet.unorm .= norm.(eachcol(integrator.u[:, :, 1]))
+        odet.unorm ./= odet.unorm0
+        if odet.ifix < ctrl.numunorms_init
+            odet.ifix += 1
+        else
+            @warn "unorm storage reached, no longer saving fixfac data. Stability outputs and unorming will be correct, but cannot reconstruct `u`. \n
+            Increase `numunorms_init` if needed."
+        end
+        apply_gaussian_reduction!(integrator.u, odet, intr, false)
+        # Anchor the next GR-interval's reference norms to the post-GR state at this
+        # exact ψ. Replace zero post-GR norms (apply_gaussian_reduction! zeroes some
+        # pivots) with the geometric mean of the survivors, so the next gr_condition
+        # eval stays finite.
+        odet.unorm0 .= norm.(eachcol(@view integrator.u[:, :, 1]))
+        nonzero = odet.unorm0 .> 0
+        if any(nonzero) && !all(nonzero)
+            ref = exp(sum(log, odet.unorm0[nonzero]) / count(nonzero))
+            for j in eachindex(odet.unorm0)
+                odet.unorm0[j] == 0 && (odet.unorm0[j] = ref)
+            end
+        end
+        odet.new = false
+        # Recompute ud after Gaussian reduction so ud_store stays consistent with u_store.
+        sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+    end
+
+    cb_save = DiscreteCallback((u, t, integrator) -> true, save_callback!)
+    # `interp_points=10` and a tight `abstol` give a sharp root, comfortably below the
+    # ucrit threshold's relative scale (default ucrit = 1e4).
+    cb_gr = ContinuousCallback(gr_condition, gr_affect!; interp_points=10, abstol=1e-6 * ctrl.ucrit)
+    cb = CallbackSet(cb_gr, cb_save)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
     sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
 
