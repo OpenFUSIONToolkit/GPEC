@@ -27,6 +27,8 @@ using TOML
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
 const Eq  = GeneralizedPerturbedEquilibrium.Equilibrium
 const Vac = GeneralizedPerturbedEquilibrium.Vacuum
+const FT  = GeneralizedPerturbedEquilibrium.ForcingTerms
+const PE  = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
 
 const EXAMPLES_ROOT = joinpath(@__DIR__, "..", "examples")
 const FIG_DIR       = joinpath(@__DIR__, "figures")
@@ -76,12 +78,33 @@ function run_case(example_dir::AbstractString, mode::Symbol)
     metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
     ffit = FFS.make_matrix(equil, intr, metric)
 
-    local odet, vac
+    local odet, vac, fm_propagators, fm_chunks, fm_S_left
     elapsed = @elapsed begin
-        odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+        odet, fm_propagators, fm_chunks, fm_S_left =
+            FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
         vac = FFS.free_run!(odet, ctrl, equil, ffit, intr)
     end
-    return odet, vac, intr, elapsed
+
+    pe_state = nothing
+    if haskey(inputs, "PerturbedEquilibrium")
+        forcing_raw = get(inputs, "ForcingTerms", Dict{String,Any}())
+        coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+        scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
+        ft_ctrl = FT.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)...)
+        ft_ctrl.coil_sets_raw = coil_sets_raw
+
+        pe_ctrl_dict = copy(inputs["PerturbedEquilibrium"])
+        pe_ctrl_dict["verbose"] = false
+        pe_ctrl_dict["write_outputs_to_HDF5"] = false
+        pe_ctrl = PE.PerturbedEquilibriumControl(; (Symbol(k) => v for (k, v) in pe_ctrl_dict)...)
+        pe_intr = PE.PerturbedEquilibriumInternal(; dir_path=example_dir)
+
+        pe_state = PE.compute_perturbed_equilibrium(
+            equil, odet, vac, intr, ft_ctrl, pe_ctrl, pe_intr, metric, ffit
+        )
+    end
+
+    return odet, vac, intr, elapsed, pe_state
 end
 
 """
@@ -103,6 +126,75 @@ function eigenmode_displacement(odet, vac)
         @views xi[:, k] .= odet.u_store[:, :, 1, k] * e
     end
     return psi, xi, real.(F.values[order])
+end
+
+"""
+Compare PerturbedEquilibrium outputs across the three integration paths and emit a
+TOML-serializable snapshot. Primary metric is `||Φ_res||`; per-surface arrays are
+included for trend tracking and diagnosing where paths diverge. Returns `nothing`
+when none of the paths ran PE (no [PerturbedEquilibrium] in gpec.toml).
+"""
+function compare_pe_outputs(pe_states::AbstractDict, example_name::AbstractString)
+    have = filter(p -> p.second !== nothing, pe_states)
+    isempty(have) && return nothing
+
+    println("\n  PerturbedEquilibrium outputs (per-path):")
+    println("  " * "-"^68)
+    @printf("  %-9s  %-14s  %s\n", "path", "||Φ_res||", "rational q values")
+    function _phi_norm(st)
+        rf = getfield(st, :resonant_flux)
+        return isempty(rf) ? NaN : norm(rf)
+    end
+    qs_of(st) = collect(Float64.(getfield(st, :rational_q)))
+
+    qs = nothing
+    for mode in (:standard, :riccati, :parallel)
+        haskey(have, mode) || continue
+        st = have[mode]
+        qs = qs_of(st)
+        qs_str = isempty(qs) ? "(none)" : join((@sprintf("%.3f", q) for q in qs), ", ")
+        @printf("  %-9s  %.6e  [%s]\n", String(mode), _phi_norm(st), qs_str)
+    end
+
+    function _diff_norm(a, b)
+        nb = sum(abs2, b)
+        nb == 0 && return NaN
+        return sqrt(sum(abs2, a .- b) / nb)
+    end
+    if haskey(have, :standard)
+        st_std = have[:standard]
+        rf_std = collect(getfield(st_std, :resonant_flux))
+        dp_std = collect(getfield(st_std, :delta_prime))
+        println("  " * "-"^68)
+        println("  cross-path relative differences vs :standard")
+        for mode in (:parallel, :riccati)
+            haskey(have, mode) || continue
+            st = have[mode]
+            rf = collect(getfield(st, :resonant_flux))
+            dp = collect(getfield(st, :delta_prime))
+            @printf("    %-9s  ||Δrf||/||rf||=%.3e   ||Δdp||/||dp||=%.3e\n",
+                    String(mode), _diff_norm(rf, rf_std), _diff_norm(dp, dp_std))
+        end
+    end
+
+    snapshot = Dict{String,Any}(
+        "example" => example_name,
+        "rational_q" => qs === nothing ? Float64[] : qs,
+    )
+    for mode in (:standard, :riccati, :parallel)
+        haskey(have, mode) || continue
+        st = have[mode]
+        snapshot[String(mode)] = Dict{String,Any}(
+            "phi_res_norm" => _phi_norm(st),
+            "resonant_flux_re" => real.(getfield(st, :resonant_flux)),
+            "resonant_flux_im" => imag.(getfield(st, :resonant_flux)),
+            "delta_prime_re" => real.(getfield(st, :delta_prime)),
+            "delta_prime_im" => imag.(getfield(st, :delta_prime)),
+            "island_half_width" => collect(Float64.(getfield(st, :island_half_width))),
+            "chirikov_parameter" => collect(Float64.(getfield(st, :chirikov_parameter))),
+        )
+    end
+    return snapshot
 end
 
 """Relative L2 difference of `a` vs `b` minimized over a global complex scalar α — the
@@ -139,23 +231,25 @@ function benchmark_example(example_name::AbstractString)
     println("Example: $example_name")
     println("="^70)
 
-    odet, vac, intr_std, telapsed =
+    odet, vac, intr_std, telapsed, pe_states =
         mktempdir() do tmp
             work = joinpath(tmp, example_name)
             cp(example_dir, work)
             odet = Dict{Symbol,Any}()
             vac = Dict{Symbol,Any}()
             telapsed = Dict{Symbol,Float64}()
+            pe = Dict{Symbol,Any}()
             intr_ref = nothing
             for mode in (:standard, :riccati, :parallel)
                 println("  running $mode ...")
-                o, v, i, t = run_case(work, mode)
+                o, v, i, t, p = run_case(work, mode)
                 odet[mode] = o
                 vac[mode] = v
                 telapsed[mode] = t
+                pe[mode] = p
                 intr_ref = i
             end
-            return (odet, vac, intr_ref, telapsed)
+            return (odet, vac, intr_ref, telapsed, pe)
         end
 
     # Eigenmode radial displacement ξ_m(ψ) for each path (projected with its own
@@ -242,6 +336,16 @@ function benchmark_example(example_name::AbstractString)
         @printf("    m = %+d :  %.3e   |   %.3e\n", pm,
                 reldiff(xi[:parallel][m:m, :], xi[:standard][m:m, :]),
                 reldiff(xi[:riccati][m:m, :], xi[:standard][m:m, :]))
+    end
+
+    pe_snapshot = compare_pe_outputs(pe_states, example_name)
+    if pe_snapshot !== nothing
+        mkpath(FIG_DIR)
+        snap_path = abspath(joinpath(FIG_DIR, "parallel_u_store_pe_$(example_name).toml"))
+        open(snap_path, "w") do io
+            TOML.print(io, pe_snapshot)
+        end
+        println("\n  PE snapshot saved: $snap_path")
     end
 
     # Overlay plot: Re and Im of the least-stable eigenmode displacement ξ_m(ψ) for the

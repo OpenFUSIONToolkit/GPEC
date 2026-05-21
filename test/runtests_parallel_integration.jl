@@ -521,4 +521,105 @@ using TOML
         @test isapprox(dpm[5, 5], -3.140954e+02 + 2.800570e+01im; rtol=0.05)
     end
 
+    @testset "Three-path PerturbedEquilibrium ||Φ_res|| agreement" begin
+        # Cross-path equivalence of the canonical u_store, measured through its
+        # downstream consumer: PerturbedEquilibrium ||Φ_res||. All three FFS
+        # integration paths (:standard, :riccati, :parallel) feed identical
+        # u_store[:,:,1,:] in the GR axis basis to PE, so resonant_flux must agree.
+        #
+        # Pre-fix (current branch state): balance_integration_chunks corrupts
+        # the parallel/Riccati u_store on high-growth integrations (the chunk-
+        # partition-dependent GR-firing bug, root-caused in SESSION_STATUS.md).
+        # On Solovev the divergence is ~44% in ||Φ_res||; on DIIID it is ~100%.
+        # Both are marked @test_broken pending Phase C (post-hoc GR sweep on a
+        # deterministic ψ-grid in `integrate_el_region!`).
+        #
+        # The unconditional `@test` block below pins the data-flow contract:
+        # PE runs cleanly on all three paths and emits the same shape arrays.
+        FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+        FT  = GeneralizedPerturbedEquilibrium.ForcingTerms
+        PE  = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+        Eq  = GeneralizedPerturbedEquilibrium.Equilibrium
+        Vac = GeneralizedPerturbedEquilibrium.Vacuum
+
+        function run_pe(example_dir, mode)
+            inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
+            inputs["ForceFreeStates"]["verbose"] = false
+            inputs["ForceFreeStates"]["use_parallel"] = (mode === :parallel)
+            inputs["ForceFreeStates"]["use_riccati"] = (mode === :riccati)
+            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
+
+            intr = FFS.ForceFreeStatesInternal(; dir_path=example_dir)
+            ctrl = FFS.ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+            eq_config = Eq.EquilibriumConfig(inputs["Equilibrium"], example_dir)
+            additional = nothing
+            if eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
+                additional = Eq.SolovevConfig(inputs["SOL_INPUT"])
+            elseif eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
+                additional = Eq.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
+            elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
+                additional = Eq.LargeAspectRatioConfig(inputs["LAR_INPUT"])
+            end
+            equil = additional === nothing ? Eq.setup_equilibrium(eq_config) :
+                    Eq.setup_equilibrium(eq_config, additional)
+            intr.wall_settings = Vac.WallShapeSettings(; (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+
+            FFS.sing_lim!(intr, ctrl, equil)
+            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+            FFS.sing_find!(intr, equil)
+            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+            intr.mpert = intr.mhigh - intr.mlow + 1
+            intr.mband = intr.mpert - 1
+            intr.numpert_total = intr.mpert * intr.npert
+            metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+            ffit = FFS.make_matrix(equil, intr, metric)
+            odet, _, _, _ = FFS.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            vac = FFS.free_run!(odet, ctrl, equil, ffit, intr)
+
+            forcing_raw = get(inputs, "ForcingTerms", Dict{String,Any}())
+            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
+            ft_ctrl = FT.ForcingTermsControl(; (Symbol(k) => v for (k, v) in scalar_forcing)...)
+            ft_ctrl.coil_sets_raw = coil_sets_raw
+            pe_ctrl_dict = copy(inputs["PerturbedEquilibrium"])
+            pe_ctrl_dict["verbose"] = false
+            pe_ctrl_dict["write_outputs_to_HDF5"] = false
+            pe_ctrl = PE.PerturbedEquilibriumControl(; (Symbol(k) => v for (k, v) in pe_ctrl_dict)...)
+            pe_intr = PE.PerturbedEquilibriumInternal(; dir_path=example_dir)
+            return PE.compute_perturbed_equilibrium(equil, odet, vac, intr, ft_ctrl, pe_ctrl, pe_intr, metric, ffit)
+        end
+
+        # Both examples have a [PerturbedEquilibrium] section after the develop merge.
+        for example_name in ("Solovev_ideal_example", "DIIID-like_ideal_example")
+            example_dir = joinpath(@__DIR__, "..", "examples", example_name)
+            states = Dict{Symbol,Any}()
+            for mode in (:standard, :riccati, :parallel)
+                states[mode] = run_pe(example_dir, mode)
+            end
+
+            # Data-flow contract (must hold even pre-fix): each path runs without error
+            # and returns aligned per-surface arrays.
+            n_res = length(states[:standard].resonant_flux)
+            @test n_res > 0
+            for mode in (:riccati, :parallel)
+                @test length(states[mode].resonant_flux) == n_res
+                @test length(states[mode].delta_prime)   == n_res
+            end
+
+            # Riccati and parallel are bit-deterministic vs each other (same chunk
+            # partition, same FM propagator code path) — this *should* hold today.
+            @test states[:riccati].resonant_flux ≈ states[:parallel].resonant_flux  rtol=1e-10
+            @test states[:riccati].delta_prime   ≈ states[:parallel].delta_prime    rtol=1e-10
+
+            # Cross-path ||Φ_res|| equivalence vs the standard path — the primary
+            # benchmark metric for the unified-u_store work. Currently broken on
+            # both examples by the chunk-balancing GR-trigger bug; Phase C will
+            # tighten to rtol = 1e-4 (Solovev) / 1e-3 (DIIID) once fixed.
+            phi_std = norm(states[:standard].resonant_flux)
+            @test_broken isapprox(phi_std, norm(states[:parallel].resonant_flux); rtol=1e-3)
+            @test_broken isapprox(phi_std, norm(states[:riccati].resonant_flux);  rtol=1e-3)
+        end
+    end
+
 end
