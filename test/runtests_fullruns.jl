@@ -39,9 +39,14 @@ using HDF5
             @test isfinite(real(et[1]))
             # Edge-dW scan is now diagnostic-only; integration always reaches qhigh/psihigh.
             # Previous value (-0.01248) reflected the old truncated-integration behaviour.
-            # rtol is loose because this result is thread-count sensitive (drifts
-            # ~15% between single- and multi-threaded invocations).
-            @test real(et[1]) ≈ -0.18 rtol = 0.2
+            # The earlier "rtol=0.2 because thread-count sensitive" comment is now stale:
+            # a sweep over julia_nthreads ∈ {1,2,4} × parallel_threads ∈ {1,2,4} ×
+            # use_parallel ∈ {true,false} (9 runs total) on this exact test case
+            # produced et_re = -0.193593591803846 bit-identical to 15 digits in every
+            # configuration. The 15% drift was historical and is resolved by the
+            # edge-dW truncation decoupling (5d5b8eed). rtol=1e-6 leaves cross-platform
+            # floating-point headroom while still catching any real regression.
+            @test real(et[1]) ≈ -0.193593591803846 rtol = 1e-6
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true
