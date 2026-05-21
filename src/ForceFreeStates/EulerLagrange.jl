@@ -165,12 +165,21 @@ An OdeState struct containing the final state of the ODE solver after integratio
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Dispatch to parallel or Riccati solver if requested.
-    # Parallel path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
+    # Dispatch. Both the parallel-FM and serial-Riccati paths are served by
+    # parallel_eulerlagrange_integration — it returns the canonical GR-axis-basis u_store
+    # that PerturbedEquilibrium consumes, plus (propagators, chunks, S_at_surface_left) for
+    # the deferred Δ' BVP. use_riccati routes through the same machinery with the chunk
+    # integration forced single-threaded (parallel_threads = 1).
     if ctrl.use_parallel
         return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
     elseif ctrl.use_riccati
-        return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
+        saved_threads = ctrl.parallel_threads
+        ctrl.parallel_threads = 1
+        try
+            return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
+        finally
+            ctrl.parallel_threads = saved_threads
+        end
     end
 
     # Initialization
@@ -207,8 +216,31 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         end
     end
 
-    # Deallocate unused storage of integration data.
-    # `odet.step` was incremented one past the last filled index in integrate_el_region!.
+    finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
+
+    return (odet, nothing, nothing, nothing)
+end
+
+"""
+    finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
+
+Shared post-integration finalization that produces the canonical `u_store` — the eigenmode
+radial-displacement fundamental matrix ξ_ψ in the Gaussian-reduction axis basis that
+`PerturbedEquilibrium` consumes. Called by every integration path (standard EL directly;
+the parallel-FM path after its GR-based dense reconstruction) so all paths converge on the
+identical representation.
+
+Performs, in order: trim unused storage; the edge-dW scan over `[psiedge, psilim]`
+(`findmax_dW_edge!`, with `truncate_at_dW_peak` handling); the fixed-boundary stability
+criterion; and `transform_u!`, which composes the recorded Gaussian-reduction transforms
+to rotate `u_store`/`ud_store` into the axis basis. On entry `odet.step` is one past the
+last filled index (the integration/reconstruction convention).
+"""
+function finalize_canonical_u_store!(
+    odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal
+)
+    # `odet.step` was incremented one past the last filled index; point it at the last.
     odet.step -= 1
     trim_storage!(odet)
 
@@ -250,8 +282,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Undo Gaussian reduction to get true solution vectors (for free_run! eigenvector use)
     transform_u!(odet, intr)
-
-    return (odet, nothing, nothing, nothing)
+    return odet
 end
 
 """

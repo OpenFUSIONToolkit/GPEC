@@ -113,12 +113,23 @@ Applying the propagator to the current state `u_prev`:
 Since each chunk starts from a bounded identity IC (rather than the accumulated state),
 exponential growth within a chunk does not affect the conditioning of the overall
 assembly. This enables `Threads.@threads` parallel integration across all chunks.
+
+`psi_history` / `upper_history` / `lower_history` store the per-ψ solution of the
+two identity-IC integrations, captured by `integrate_propagator_chunk!`. They let the
+serial assembly reconstruct a dense `u_store` directly from the parallel phase (no
+second serial-EL pass): the chunk-local fundamental matrix at ψ is
+`Φ(ψ) = [upper_history[k]  lower_history[k]]`. `psi_history` is monotonically
+increasing for both forward and backward chunks.
 """
 struct ChunkPropagator
     block_upper_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (I, 0)
     block_lower_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (0, I)
+    psi_history::Vector{Float64}                  # saved ψ grid within the chunk
+    upper_history::Vector{Array{ComplexF64,3}}    # (N,N,2) state from upper IC at each ψ
+    lower_history::Vector{Array{ComplexF64,3}}    # (N,N,2) state from lower IC at each ψ
 end
-ChunkPropagator(N::Int) = ChunkPropagator(zeros(ComplexF64, N, N, 2), zeros(ComplexF64, N, N, 2))
+ChunkPropagator(N::Int) = ChunkPropagator(zeros(ComplexF64, N, N, 2), zeros(ComplexF64, N, N, 2),
+                                          Float64[], Array{ComplexF64,3}[], Array{ComplexF64,3}[])
 
 """
 DebugSettings
@@ -243,7 +254,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
   - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `ud_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices and zeros for `ud_store` (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead.  Default `true`.  Approximate cost: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -290,7 +300,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
     use_riccati::Bool = false
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
-    populate_dense_xi::Bool = true  # Append a dense serial-EL pass after parallel BVP so HDF5 integration/xi_psi etc. carry valid DCON ξ in axis basis for PerturbedEquilibrium.
     use_double64_bvp::Bool = true
 end
 

@@ -443,99 +443,21 @@ using TOML
         @test isapprox(dpm[2, 2], -1.579300e+01 + 3.571084e+05im; rtol=0.05)
     end
 
-    @testset "ξ functions bit-identical between use_parallel modes (populate_dense_xi)" begin
-        # When `ctrl.use_parallel = true` and `ctrl.populate_dense_xi = true`
-        # (default), `parallel_eulerlagrange_integration` appends a serial
-        # Euler-Lagrange pass and returns that fresh `odet` instead of the
-        # propagator-BVP one.  That dense pass invokes the SAME
-        # `eulerlagrange_integration` code path the serial `use_parallel = false`
-        # benchmark goes through with the SAME `(ctrl, equil, ffit, intr)`
-        # inputs (BVP-only state on `intr` saved/restored across the pass), so
-        # the resulting `psi_store` / `q_store` / `u_store` / `ud_store` /
-        # `crit_store` arrays must be bit-identical to a standalone serial run.
-        # This is a strong correctness guarantee that the dense pass does NOT
-        # perturb the DCON eigenfunction calculation in any way — exactly what
-        # downstream PerturbedEquilibrium / FieldReconstruction needs.
-        #
-        # Run on both the small-N Solovev case and the large-N DIIID-like case
-        # to catch any (m, IC, ψ)-dependent regression.
-
-        function run_and_capture(example_dir, use_parallel; populate_dense_xi=true)
-            inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
-            inputs["ForceFreeStates"]["verbose"] = false
-            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
-            inputs["ForceFreeStates"]["populate_dense_xi"] = populate_dense_xi
-            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
-            intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_dir)
-            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
-            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
-            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-            intr.mpert = intr.mhigh - intr.mlow + 1
-            intr.mband = intr.mpert - 1
-            intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
-            ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-            return odet
-        end
-
-        # Compare the storage arrays that downstream code reads.  All values
-        # must be EXACTLY equal (no tolerance — the dense pass calls the same
-        # ODE solver with the same inputs as the standalone serial path, so
-        # any nonzero difference indicates a real regression in the dense-pass
-        # machinery).
-        function assert_bit_identical(odet_a, odet_b)
-            @test odet_a.step == odet_b.step
-            @test odet_a.nzero == odet_b.nzero
-            @test length(odet_a.psi_store) == length(odet_b.psi_store)
-            @test length(odet_a.q_store) == length(odet_b.q_store)
-            @test size(odet_a.u_store) == size(odet_b.u_store)
-            @test size(odet_a.ud_store) == size(odet_b.ud_store)
-            @test maximum(abs.(odet_a.psi_store .- odet_b.psi_store))    == 0.0
-            @test maximum(abs.(odet_a.q_store   .- odet_b.q_store))      == 0.0
-            @test maximum(abs.(odet_a.u_store   .- odet_b.u_store))      == 0.0
-            @test maximum(abs.(odet_a.ud_store  .- odet_b.ud_store))     == 0.0
-            @test maximum(abs.(odet_a.crit_store .- odet_b.crit_store))  == 0.0
-        end
-
-        @testset "Solovev (small N)" begin
-            ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true;  populate_dense_xi=true)
-            assert_bit_identical(odet_std, odet_par)
-        end
-
-        @testset "DIIID-like (large N)" begin
-            ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
-            odet_std = run_and_capture(ex, false)
-            odet_par = run_and_capture(ex, true;  populate_dense_xi=true)
-            assert_bit_identical(odet_std, odet_par)
-        end
-
-        @testset "populate_dense_xi=false leaves sparse u_store (control)" begin
-            # Sanity-check the opposite mode: with populate_dense_xi=false, the
-            # parallel BVP path stores only chunk-endpoint Riccati snapshots,
-            # so u_store / ud_store / psi_store have strictly fewer entries
-            # than the serial path.  Catching this guarantees the bit-identical
-            # test above is meaningful — it's NOT trivially passing because
-            # both modes accidentally produce the same sparse data.
-            ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-            odet_std    = run_and_capture(ex, false)
-            odet_sparse = run_and_capture(ex, true;  populate_dense_xi=false)
-            @test odet_sparse.step < odet_std.step
-            # ud_store entries inside FM chunks are left at the @kwdef
-            # `undef` initial value when populate_dense_xi=false; ensure the
-            # array IS smaller (sparse).
-            @test length(odet_sparse.psi_store) < length(odet_std.psi_store)
-        end
+    @testset "subsample_chunk_steps keeps endpoints and stride" begin
+        # Unit test for the chunk-history subsampling used by dense u_store recovery.
+        subsample = GeneralizedPerturbedEquilibrium.ForceFreeStates.subsample_chunk_steps
+        # Short grids (≤ 4 steps) are kept whole.
+        @test subsample(3, 3) == [1, 2, 3]
+        @test subsample(4, 3) == [1, 2, 3, 4]
+        # Longer grids: first two, last two, and every save_interval-th step, sorted/deduped.
+        keep = subsample(20, 3)
+        @test issorted(keep)
+        @test allunique(keep)
+        @test 1 in keep && 2 in keep
+        @test 19 in keep && 20 in keep
+        @test all(k -> 1 <= k <= 20, keep)
+        # Every save_interval-th index is present.
+        @test all(k -> k in keep, 1:3:20)
     end
 
     @testset "delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)" begin
