@@ -22,8 +22,8 @@ include("Asymptotics.jl")
 include("Galerkin.jl")
 include("FullDomain.jl")
 
-export SystemSpec, ParityBC, BCKind, DIRICHLET, NEUMANN, nparities, n_exp
+export SystemSpec, ParityBC, BCKind, DIRICHLET, NEUMANN, nparities, n_exp, component_parity_from_bc
 export WasowCache, build_wasow, evaluate_wasow, wasow_residual, pick_xmax, xmax_3level
-export solve_galerkin, solve_galerkin_full, FullDomainMatching
+export solve_galerkin, solve_galerkin_full, FullDomainMatching, parity_recombine
 
 end # module WasowGalerkin

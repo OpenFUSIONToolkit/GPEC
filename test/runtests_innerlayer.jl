@@ -73,36 +73,39 @@ const ILGGJ = GeneralizedPerturbedEquilibrium.InnerLayer.GGJ
         @test xm > 0
     end
 
-    @testset "Full-domain scaffolding" begin
-        # The full-domain path builds a genuine two-sided grid spanning
-        # [-xmax, +xmax] with asymptotic matching at both ends (no parity
-        # reduction). This validates the domain *structure*; physical validation
-        # of the matching values is a C_LAYER Phase-4 task (see FullDomain.jl).
-        γ = ComplexF64(1.0, 1.0)
-        Q = inner_Q(p, γ)
-        specf = ILGGJ.ggj_system_spec_full(p)
-        @test specf.domain == :full
-        info = WG.xmax_3level(specf, p, Q)
-        ws = WG._build_full_grid_and_workspace(specf, 64, info.xmax, info.dx1, info.dx2, 1.0, 5)
-        # Symmetric two-sided grid with resonant matching cells at both ends.
-        @test ws.nx == 128                       # 2 * nx
-        @test ws.cells[1].etype == WG.CT_RES
-        @test ws.cells[end].etype == WG.CT_RES
-        @test ws.cells[1].x_left ≈ -info.xmax
-        @test ws.cells[end].x_right ≈ info.xmax
-        @test ws.nparity == 2
-        # The solve produces a finite, correctly-shaped matching object.
-        fm = solve_inner_full(GGJModel(; solver=:galerkin), p, γ; nx=128)
-        @test fm isa WG.FullDomainMatching
-        @test all(isfinite, fm.amp)
-        @test fm.xmax ≈ info.xmax
+    @testset "component_parity derived from bc" begin
+        # NEUMANN component → even (+1), DIRICHLET → odd (−1); GGJ odd sector.
+        @test spec.component_parity == [1, -1, -1]
+        @test WG.component_parity_from_bc(spec.bc) == [1, -1, -1]
     end
 
-    @testset "Full-domain runs on a parity-broken system" begin
+    @testset "Full-domain recombines to half-domain (parity-symmetric GGJ)" begin
+        # The two-sided full-domain solve on [-xmax,+xmax] must, for the
+        # parity-symmetric GGJ system, produce a SYMMETRIC end-matching matrix M,
+        # whose symmetric/antisymmetric parity combinations reproduce the
+        # half-domain (Δ_odd, Δ_even) matching data to solver tolerance.
+        for γ in (ComplexF64(1.0, 1.0), ComplexF64(0.5, 0.3))
+            fm = solve_inner_full(GGJModel(; solver=:galerkin), p, γ; nx=256)
+            @test fm isa WG.FullDomainMatching
+            @test all(isfinite, fm.M)
+            relasym = abs(fm.M[1, 2] - fm.M[2, 1]) / max(abs(fm.M[1, 2]), abs(fm.M[2, 1]))
+            @test relasym < 1e-7   # M symmetric for the parity-symmetric system
+            # Recombine and map to the half-domain output convention (λ_sym = odd,
+            # λ_anti = even; solve_inner returns rescale(even, odd)).
+            λs, λa = WG.parity_recombine(fm)
+            full_phys = ILGGJ.rescale_delta(SVector(λa, λs), p)
+            half = solve_inner(GGJModel(; solver=:galerkin), p, γ; nx=256)
+            @test full_phys[1] ≈ half[1] rtol = 1e-4
+            @test full_phys[2] ≈ half[2] rtol = 1e-4
+        end
+    end
+
+    @testset "Full-domain matching matrix on a parity-broken system" begin
         # A synthetic system whose FEM coefficients break x → -x symmetry: the
-        # half-domain even/odd decomposition no longer applies, so only the
-        # full-domain path is valid. The two-sided assembly must run and yield a
-        # finite result.
+        # half-domain even/odd decomposition no longer applies and the 2×2 matrix
+        # M is asymmetric by design — the full matrix is then the matching
+        # deliverable. The two-sided assembly must run and yield a finite,
+        # genuinely-asymmetric M.
         base = ILGGJ.ggj_system_spec(p)
         broken_coeffs(params, Q, x) = begin
             Imat, U, V = base.coeffs(params, Q, x)
@@ -113,11 +116,13 @@ const ILGGJ = GeneralizedPerturbedEquilibrium.InnerLayer.GGJ
             n_alg=base.n_alg, alg_idx=base.alg_idx, exp_idx=base.exp_idx,
             asymptotic_matrices=base.asymptotic_matrices, eigenbasis=base.eigenbasis,
             exponents=base.exponents, coeffs=broken_coeffs, physical=base.physical,
-            rescale=base.rescale, bc=base.bc, domain=:full)
+            rescale=base.rescale, bc=base.bc, domain=:full, component_parity=[1, -1, -1])
         Q = inner_Q(p, ComplexF64(1.0, 1.0))
         fm = WG.solve_galerkin_full(specb, p, Q; nx=128)
         @test fm isa WG.FullDomainMatching
-        @test all(isfinite, fm.amp)
+        @test all(isfinite, fm.M)
+        relasym = abs(fm.M[1, 2] - fm.M[2, 1]) / max(abs(fm.M[1, 2]), abs(fm.M[2, 1]))
+        @test relasym > 1e-6   # genuinely asymmetric
     end
 
     @testset "Shooting cross-check at small Q" begin

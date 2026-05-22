@@ -231,9 +231,10 @@ pick_xmax(params::GGJParameters, Q::Number; kwargs...) =
     ggj_system_spec_full(p::GGJParameters) -> SystemSpec
 
 Full-domain variant of [`ggj_system_spec`](@ref): identical physics with
-`domain = :full`, for the parity-coupled full-domain solve. Used to exercise the
-`WasowGalerkin` full-domain scaffolding; the GGJ system is parity-symmetric, so
-the half-domain path remains the production route.
+`domain = :full`, for the parity-coupled full-domain solve. The GGJ system is
+parity-symmetric, so its full-domain matching matrix is symmetric and recombines
+to the half-domain `(Δ_odd, Δ_even)` pair (the validation oracle); the
+half-domain path remains the production route for GGJ.
 """
 function ggj_system_spec_full(p::GGJParameters)
     s = ggj_system_spec(p)
@@ -249,9 +250,9 @@ end
         -> WasowGalerkin.FullDomainMatching
 
 Full-domain GGJ inner-layer solve via the shared engine's two-sided
-(parity-coupled) path. Returns the [`FullDomainMatching`](@ref) object. For the
-parity-symmetric GGJ system this generalizes the half-domain `(Δ_odd, Δ_even)`
-pair; see the engine `FullDomain.jl` header for the scaffolding status.
+(parity-coupled) path. Returns the [`FullDomainMatching`](@ref) object whose 2×2
+matrix `M` is symmetric for the parity-symmetric GGJ system and recombines (via
+`WasowGalerkin.parity_recombine`) to the half-domain `(Δ_odd, Δ_even)` pair.
 """
 function solve_inner_full(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     kmax::Int=8, nx::Int=512, nq::Int=4, pfac::Float64=1.0,

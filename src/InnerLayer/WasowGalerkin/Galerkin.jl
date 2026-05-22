@@ -21,11 +21,13 @@ using QuadGK: quadgk
 using StaticArrays
 
 # Evaluate the physical asymptotic basis (ncomp × n_alg) and its derivative at x.
-# For x > 0 (the half-domain path) this is the plain asymptotic evaluation. For
-# x < 0 (the full-domain left end) the basis is evaluated at |x| and continued by
-# parity-reflection of the derivative — a provisional convention for the
-# full-domain scaffolding that is finalized at C_LAYER Phase 4, where the
-# parity-broken two-fluid asymptotics define the negative-side basis directly.
+# For x ≥ 0 (the half-domain path, and the right half of the full domain) this is
+# the plain asymptotic evaluation. For x < 0 (the full-domain left end) the basis
+# is continued from the right by the system's parity: with per-component parity
+# σ_c (spec.component_parity), a solution u_c(x) maps to the solution
+# u_c(-x) = σ_c u_c(|x|), u'_c(-x) = -σ_c u'_c(|x|). For GGJ σ = (+1,-1,-1) (W
+# even, N/Θ odd); a uniform flip would be wrong because GGJ is mixed-parity. The
+# half-domain path never evaluates x < 0, so it is unaffected.
 function _eval_physical(spec::SystemSpec, cache::WasowCache, x::Real)
     if x >= 0
         U, dU = evaluate_wasow(cache, x; derivative=true, apply_T=true)
@@ -33,7 +35,14 @@ function _eval_physical(spec::SystemSpec, cache::WasowCache, x::Real)
     else
         U, dU = evaluate_wasow(cache, -x; derivative=true, apply_T=true)
         ua, dua = spec.physical(U, dU, -x)
-        return ua, -dua
+        σ = spec.component_parity
+        @inbounds for c in 1:spec.ncomp
+            for j in axes(ua, 2)
+                ua[c, j] *= σ[c]
+                dua[c, j] *= -σ[c]
+            end
+        end
+        return ua, dua
     end
 end
 
