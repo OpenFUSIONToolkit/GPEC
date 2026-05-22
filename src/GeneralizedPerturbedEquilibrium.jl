@@ -79,10 +79,28 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
 
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
+    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
+    # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
+    # EITHER point `eq_filename` at a side-car TOML (legacy) OR embed their
+    # parameters directly in gpec.toml under a top-level section:
+    # [TJ_ANALYTIC_INPUT], [SOL_INPUT], [LAR_INPUT]. When the embedded section
+    # is present it takes precedence and the side-car file is not consulted,
+    # so a run is fully described by a single gpec.toml. The TJ-analytic
+    # equilibrium follows the profile family of R. Fitzpatrick's TJ code
+    # (https://github.com/rfitzp/TJ); see `Equilibrium.TJAnalyticConfig`.
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        equil = Equilibrium.setup_equilibrium(eq_config, eq_config.eq_type == "imas" ? dd : nothing)
+        additional_input = nothing
+        if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
+            additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
+        elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
+            additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
+        elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
+            additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
+        elseif eq_config.eq_type == "imas"
+            additional_input = dd
+        end
+        equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
         @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
