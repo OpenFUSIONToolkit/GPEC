@@ -119,7 +119,7 @@ function equilibrium_solver(input::InverseRunInput)
     @views r2[:, end] .= r2[:, 1]
     @views deta[:, end] .= deta[:, 1]
 
-    itp_opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
     # Create 2D interpolants for r² and dη
     rz_rsq = cubic_interp((rz_in_xs, rz_in_ys), r2; itp_opts2d...)
@@ -253,7 +253,7 @@ function equilibrium_solver(input::InverseRunInput)
         # (Numerical operations may have broken exact periodicity)
         @views spl_fs[end, :] .= spl_fs[1, :]
 
-        spl = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC(; check=false))
+        spl = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         spl_fsi = FastInterpolations.cumulative_integrate(spl)
 
         spl_xs .= spl_fsi[:, 5] ./ spl_fsi[mtheta+1, 5]
@@ -268,7 +268,7 @@ function equilibrium_solver(input::InverseRunInput)
         # then evaluate at the uniform SFL theta grid (rzphi_ys). This correctly
         # propagates the SFL coordinate transformation into the rzphi splines.
         # (Using spl.y directly would give pre-transformation values — wrong for eqfun.)
-        spl_post = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC(; check=false))
+        spl_post = cubic_interp(spl_xs, Series(spl_fs); bc=PeriodicBC())
         hint_post = Ref(1)
         for itheta in 0:mtheta
             spl_post(spl_post_buf, rzphi_ys[itheta+1]; hint=hint_post)
@@ -311,6 +311,8 @@ function equilibrium_solver(input::InverseRunInput)
     qa = f_sq[mpsi+1, 4] + f1_sq_hi[4] * (1 - sq_xs[mpsi+1])
     # Create 2D interpolants for geometric quantities (rzphi)
     rzphi_grid2d = (rzphi_xs, theta_range)
+
+    @views rzphi_fs[:, end, :] .= rzphi_fs[:, 1, :]
 
     rzphi_rsquared = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 1]; itp_opts2d...)
     rzphi_offset = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 2]; itp_opts2d...)
@@ -365,6 +367,7 @@ function equilibrium_solver(input::InverseRunInput)
     end
     # Create 2D interpolants for physics quantities (eqfun)
     eqfun_grid2d = (eqfun_xs, theta_range)
+    @views eqfun_fs[:, end, :] .= eqfun_fs[:, 1, :]
     eqfun_B = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 1]; itp_opts2d...)
     eqfun_metric1 = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 2]; itp_opts2d...)
     eqfun_metric2 = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 3]; itp_opts2d...)
