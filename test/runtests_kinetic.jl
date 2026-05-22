@@ -129,19 +129,48 @@
     end
 
     # =========================================================================
-    # Energy ODE integration
+    # Resonance root solver
+    # =========================================================================
+    @testset "find_resonance_energies" begin
+        # Roots of Ω(x) = leff·wb·√x + n·(we + wd·x); quadratic n·wd·s² + leff·wb·s + n·we = 0.
+        @testset "no real root (negative discriminant)" begin
+            roots = KF.find_resonance_energies(1.0, 0.3, 1, 1.0, 0.5)
+            @test isempty(roots)
+        end
+
+        @testset "linear case (wd = 0)" begin
+            # b·s + c = 0 with b = leff·wb = 2, c = n·we = -3 ⟹ s = 1.5, x = 2.25.
+            roots = KF.find_resonance_energies(1.0, 2.0, 1, -3.0, 0.0)
+            @test length(roots) == 1
+            @test roots[1] ≈ 2.25 rtol=1e-12
+            # Same but positive we ⟹ s = -1.5 < 0 ⟹ no positive root.
+            @test isempty(KF.find_resonance_energies(1.0, 2.0, 1, 3.0, 0.0))
+        end
+
+        @testset "two positive roots" begin
+            # a = 0.5, b = -3, c = 1 ⟹ s = (3 ± √7)/1, both positive.
+            roots = KF.find_resonance_energies(1.0, -3.0, 1, 1.0, 0.5)
+            @test length(roots) == 2
+            for x in roots
+                s = sqrt(x)
+                # Ω(x) must vanish at each root.
+                @test 1.0 * (-3.0) * s + 1 * (1.0 + 0.5 * x) ≈ 0.0 atol=1e-10
+            end
+        end
+    end
+
+    # =========================================================================
+    # Energy integration (u-substitution + Sokhotski-Plemelj pole extraction)
     # =========================================================================
     @testset "integrate_energy" begin
         @testset "CGL integration" begin
-            # CGL mode: integral of x^2.5*exp(-x)/(i*n) dx from 0 to 72
-            # = Gamma(3.5)/(i*1) = (15/8)*sqrt(pi) / i
+            # CGL mode: ∫₀^∞ x^2.5·exp(-x)/(i·n) dx = Γ(3.5)/(i·1) = -i·(15/8)√π.
             result = KF.integrate_energy(
                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 1, 0.5, 0.5, "fcgl";
-                nutype="zero", f0type="cgl", nufac=1.0, ximag=0.0, qt=false
+                nutype="zero", f0type="cgl", nufac=1.0, ximag=0.0, qt=false,
+                atol=1e-12, rtol=1e-10
             )
             gamma_3_5 = 15/8 * sqrt(π)
-            # CGL integral = Gamma(3.5) / (i*n) where n=1
-            # = Gamma(3.5) * (-i) = complex(0, -Gamma(3.5))
             @test real(result) ≈ 0.0 atol=1e-6
             @test imag(result) ≈ -gamma_3_5 atol=1e-6
         end
@@ -153,6 +182,35 @@
             )
             @test isfinite(real(result))
             @test isfinite(imag(result))
+        end
+
+        @testset "collisional matches direct x-space quadrature" begin
+            # For ν > 0 the physical integrand N(x)·exp(-x)/denom is finite on the
+            # real axis, so a high-accuracy direct integral over [0,∞) is an
+            # independent reference for the u-substitution + pole-extraction result.
+            wn, wt, we, wd, wb, nuk, leff, n = 0.5, 0.8, -2.0, 0.5, 1.0, 0.3, 1.0, 1
+            p = KF.EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
+                                "harmonic", "maxwellian", 1.0, 0.0, false)
+            x_res = KF.find_resonance_energies(leff, wb, n, we, wd)
+            @test length(x_res) == 1   # this case has exactly one resonance
+            reference, _ = KF.quadgk(x -> KF.energy_integrand_scalar(x, p),
+                                     0.0, x_res[1], Inf; rtol=1e-12, atol=1e-14)
+            result = KF.integrate_energy(
+                wn, wt, we, wd, wb, nuk, 0, leff, n, 0.5, 0.5, "fgar";
+                nutype="harmonic", f0type="maxwellian", atol=1e-12, rtol=1e-10
+            )
+            @test result ≈ reference rtol=1e-6
+        end
+
+        @testset "collisionless is the ν → 0⁺ limit" begin
+            # The collisionless result must be continuous with vanishing collisionality.
+            args = (0.5, 0.8, -2.0, 0.5, 1.0)
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test collisionless ≈ small_nu rtol=1e-3
         end
     end
 

@@ -4,12 +4,13 @@
 Energy-space integration for the kinetic resonance operator.
 Implements the energy integrand from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 
-Uses QuadGK adaptive Gauss-Kronrod quadrature (the integrand is independent of the
-state variable, so this is pure quadrature — not an ODE).
+The integral over normalized energy x = E/T is mapped to the finite interval
+u ∈ [0,1) by the substitution u = 1 - exp(-x), which absorbs the Maxwellian
+weight exp(-x) into du and covers the full [0,∞) domain without truncation.
+Resonance poles (where the denominator i·Ω(x) - ν vanishes) are removed
+analytically by a Sokhotski-Plemelj decomposition, so the remaining integrand
+is smooth and integrated by QuadGK adaptive Gauss-Kronrod quadrature.
 """
-
-# Integration defaults
-const ENERGY_XMAX = 128.0
 
 """
     EnergyParams
@@ -28,27 +29,21 @@ struct EnergyParams
     nutype::String    # collision operator type
     f0type::String    # distribution function type
     nufac::Float64    # collisionality scaling factor
-    ximag::Float64    # imaginary contour offset
+    ximag::Float64    # deprecated: imaginary contour offset, no longer used
     qt::Bool          # heat flux calculation flag
 end
 
 """
-    _energy_integrand_real(x::Float64, p::EnergyParams) → ComplexF64
+    _energy_collision_frequency(x::Float64, p::EnergyParams) → Float64
 
-Fast Float64 kernel for the energy integrand on the real axis.
-Algebraically identical to `energy_integrand_scalar(x, p; imag_axis=false)`
-when `p.ximag == 0`, but avoids complex `_cpow` / `power_by_squaring` by
-rewriting the half-integer powers as multiplicative `sqrt(x)` forms.
+Collision frequency ν(x) at normalized energy x = E/T.
 
-For real `x > 0` the identities are exact:
-- `x^(-1.5) = 1 / (x * sqrt(x))`
-- `x^2.5   = x * x * sqrt(x)`
+- `"zero"`: collisionless (ν = 0)
+- `"small"`: 1e-5 * we
+- `"krook"`: unmodified Krook operator
+- `"harmonic"`: (1 + (l/2)²) * krook * x^(-3/2)
 """
-@inline function _energy_integrand_real(x::Float64, p::EnergyParams)::ComplexF64
-    sqx = sqrt(x)
-    inv_xsqx = 1.0 / (x * sqx)     # x^(-1.5)
-    x25 = x * x * sqx              # x^2.5
-
+@inline function _energy_collision_frequency(x::Float64, p::EnergyParams)::Float64
     nux = if p.nutype == "zero"
         0.0
     elseif p.nutype == "small"
@@ -56,121 +51,126 @@ For real `x > 0` the identities are exact:
     elseif p.nutype == "krook"
         p.nuk
     elseif p.nutype == "harmonic"
-        x == 0 ? floatmax(Float64) : p.nuk * (1 + 0.25 * p.leff^2) * inv_xsqx
+        x <= 0.0 ? floatmax(Float64) : p.nuk * (1 + 0.25 * p.leff^2) / (x * sqrt(x))
     else
         error("nutype must be zero, small, krook, or harmonic")
     end
-    nux = p.nufac * nux
+    return p.nufac * nux
+end
 
+"""
+    _energy_numerator(x::Float64, p::EnergyParams) → ComplexF64
+
+Numerator N(x) of the energy integrand, **without** the resonance denominator
+and **without** the Maxwellian weight exp(-x). Under the u = 1-exp(-x)
+substitution the factor exp(-x)·dx is absorbed into du, so the u-space
+integrand is N(x)/denom(x).
+
+For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
+"""
+@inline function _energy_numerator(x::Float64, p::EnergyParams)::ComplexF64
+    x25 = x * x * sqrt(x)   # x^2.5
+    fx = if p.f0type == "maxwellian"
+        ComplexF64((p.we + p.wn + p.wt * (x - 1.5)) * x25)
+    elseif p.f0type == "jkp"
+        ComplexF64((p.we + p.wn + p.wt * 2) * x25)
+    elseif p.f0type == "cgl"
+        complex(0.0, -x25 / p.n)   # x^2.5 / (i*n)
+    else
+        error("f0type must be maxwellian, jkp, or cgl")
+    end
+    if p.qt
+        fx *= (x - 2.5)
+    end
+    return fx
+end
+
+"""
+    _energy_integrand_real(x::Float64, p::EnergyParams) → ComplexF64
+
+Physical energy integrand in x-space, N(x)·exp(-x)/denom(x), evaluated on the
+real axis. Used for diagnostics (`evaluate_energy_integrand`) and tests; the
+production integral works in u-space via `integrate_energy`.
+"""
+@inline function _energy_integrand_real(x::Float64, p::EnergyParams)::ComplexF64
+    sqx = sqrt(x)
+    nux = _energy_collision_frequency(x, p)
     # Resonance denominator: i*(l_eff*wb*sqrt(x) + n*(we + wd*x)) - nu
     denom = complex(-nux, p.leff * p.wb * sqx + p.n * (p.we + p.wd * x))
-
     emx = exp(-x)
-    fx = if p.f0type == "maxwellian"
-        (p.we + p.wn + p.wt * (x - 1.5)) * x25 * emx / denom
-    elseif p.f0type == "jkp"
-        (p.we + p.wn + p.wt * 2) * x25 * emx / denom
-    elseif p.f0type == "cgl"
-        complex(0.0, -x25 * emx / p.n)   # (x^2.5 * exp(-x)) / (i*n) = -i * (...)/n
-    else
-        error("f0type must be maxwellian, jkp, or cgl")
+    if p.f0type == "cgl"
+        # CGL has no resonance denominator.
+        fx = complex(0.0, -x * x * sqx * emx / p.n)
+        return p.qt ? (x - 2.5) * fx : fx
     end
-
-    if p.qt
-        fx = (x - 2.5) * fx
-    end
-
-    return fx
+    return _energy_numerator(x, p) * emx / denom
 end
 
 """
-    _energy_integrand_complex(cx::ComplexF64, p::EnergyParams) → ComplexF64
+    energy_integrand_scalar(x::Float64, p::EnergyParams) → ComplexF64
 
-ComplexF64 kernel for the energy integrand at a complex contour point
-`cx`. Handles the `ximag > 0` pole-avoidance contour (upper half plane)
-and the imaginary-axis pre-step `cx = i*x`.
-
-Uses the same `sqrt`-based half-integer rewrites as `_energy_integrand_real`
-but with complex `sqrt` on the principal branch.
+Evaluate the physical energy integrand N(x)·exp(-x)/denom(x) at normalized
+energy x = E/T. Implements [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 """
-@inline function _energy_integrand_complex(cx::ComplexF64, p::EnergyParams)::ComplexF64
-    sqcx = sqrt(cx)
-    inv_cxsqcx = 1.0 / (cx * sqcx)    # cx^(-1.5)
-    cx25 = cx * cx * sqcx             # cx^2.5
-
-    nux = if p.nutype == "zero"
-        ComplexF64(0.0)
-    elseif p.nutype == "small"
-        ComplexF64(1e-5 * p.we)
-    elseif p.nutype == "krook"
-        ComplexF64(p.nuk)
-    elseif p.nutype == "harmonic"
-        cx == 0 ? ComplexF64(floatmax(Float64)) : p.nuk * (1 + 0.25 * p.leff^2) * inv_cxsqcx
-    else
-        error("nutype must be zero, small, krook, or harmonic")
-    end
-    nux = p.nufac * nux
-
-    denom = im * (p.leff * p.wb * sqcx + p.n * (p.we + p.wd * cx)) - nux
-
-    fx = if p.f0type == "maxwellian"
-        (p.we + p.wn + p.wt * (cx - 1.5)) * cx25 * exp(-cx) / denom
-    elseif p.f0type == "jkp"
-        (p.we + p.wn + p.wt * 2) * cx25 * exp(-cx) / denom
-    elseif p.f0type == "cgl"
-        cx25 * exp(-cx) / (im * p.n)
-    else
-        error("f0type must be maxwellian, jkp, or cgl")
-    end
-
-    if p.qt
-        fx = (cx - 2.5) * fx
-    end
-
-    return fx
-end
+energy_integrand_scalar(x::Float64, p::EnergyParams)::ComplexF64 = _energy_integrand_real(x, p)
 
 """
-    energy_integrand_scalar(x, p::EnergyParams; imag_axis=false) → ComplexF64
+    find_resonance_energies(leff, wb, n, we, wd) → Vector{Float64}
 
-Evaluate the energy integrand at normalized energy x = E/T.
-Implements [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
+Real positive energies x_res where the resonance condition vanishes:
 
-Thin wrapper dispatching to `_energy_integrand_real` on the fast
-Float64 path when `p.ximag == 0 && !imag_axis`, otherwise calling
-`_energy_integrand_complex` with `cx = imag_axis ? im*x : x + im*p.ximag`.
+    Ω(x) = leff·wb·√x + n·(we + wd·x) = 0
+
+With s = √x this is the quadratic n·wd·s² + leff·wb·s + n·we = 0. Returns the
+x = s² values for the positive real roots (the locations of the resonance
+poles of the energy integrand).
 """
-function energy_integrand_scalar(x::Float64, p::EnergyParams; imag_axis::Bool=false)::ComplexF64
-    if !imag_axis && p.ximag == 0.0
-        return _energy_integrand_real(x, p)
+function find_resonance_energies(leff::Float64, wb::Float64, n::Int, we::Float64, wd::Float64)::Vector{Float64}
+    a = n * wd
+    b = leff * wb
+    c = n * we
+    roots = Float64[]
+    if abs(a) < 1e-30
+        # Linear case: b·s + c = 0
+        abs(b) < 1e-30 && return roots
+        s = -c / b
+        s > 0.0 && push!(roots, s^2)
     else
-        cx = imag_axis ? im * x : complex(x, p.ximag)
-        return _energy_integrand_complex(cx, p)
+        disc = b^2 - 4 * a * c
+        disc < 0.0 && return roots
+        sd = sqrt(disc)
+        for s in ((-b + sd) / (2 * a), (-b - sd) / (2 * a))
+            s > 0.0 && push!(roots, s^2)
+        end
     end
+    return roots
 end
 
 """
     integrate_energy(wn, wt, we, wd, wb, nuk, ell, leff, n, psi, lambda, method;
-                         nutype="harmonic", f0type="maxwellian", nufac=1.0,
-                         ximag=0.0, qt=false,
-                         atol=1e-12, rtol=1e-9)::ComplexF64
+                     nutype="harmonic", f0type="maxwellian", nufac=1.0,
+                     ximag=0.0, qt=false, atol=1e-7, rtol=1e-5) → ComplexF64
 
 Integrate the kinetic resonance operator over normalized energy x = E/T.
-Uses QuadGK adaptive Gauss-Kronrod quadrature.
 
-The integration path optionally steps off the real axis (0 → i*ximag)
-then integrates along (0 → xmax + i*ximag) to handle poles.
+The integral ∫₀^∞ N(x)·exp(-x)/denom(x) dx is mapped to u ∈ [0,1) by
+u = 1 - exp(-x) (Jacobian dx/du = 1/(1-u)), giving ∫₀¹ N(x(u))/denom(x(u)) du
+with no energy truncation.
 
-Collision operator types (`nutype`):
-- `"zero"`: collisionless
-- `"small"`: 1e-5 * we
-- `"krook"`: unmodified Krook operator
-- `"harmonic"`: (1 + (l/2)^2) * krook * x^(-3/2)
+Each resonance pole (root of Ω(x) = leff·wb·√x + n·(we + wd·x), shifted off
+the real axis by collisions to x_pole = x_res - i·ν/Ω′) is removed by
+subtracting its singular part R/(u - u_pole) from the integrand and adding
+back the analytic contribution ∫₀¹ R/(u - u_pole) du = R·[log(1-u_pole) -
+log(-u_pole)]. The same pole u_pole is used in both the subtraction and the
+add-back, so the decomposition is exact and the remaining integrand is smooth.
+In the collisionless limit (ν = 0) the pole sits on the real axis and the
+add-back uses the causal Sokhotski-Plemelj branch (∓iπ following sign Ω′).
 
-Distribution function types (`f0type`):
-- `"maxwellian"`: standard Maxwellian, Eq. (8) of [Logan, Park, et al., 2013]
-- `"jkp"`: Jong-Kyu Park approximation [Park, Boozer, Menard, PRL 2009]
-- `"cgl"`: Chew-Goldberger-Low limit
+Collision operator types (`nutype`): `"zero"`, `"small"`, `"krook"`, `"harmonic"`.
+Distribution function types (`f0type`): `"maxwellian"`, `"jkp"`, `"cgl"`.
+
+`ximag` is accepted for backward compatibility but no longer used — resonance
+poles are now handled analytically rather than by contour deformation.
 
 # Returns
 - `ComplexF64`: energy integral value
@@ -185,37 +185,83 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
     p = EnergyParams(wn, wt, we, wd, wb, nuk, leff, n,
                      nutype, f0type, nufac, ximag, qt)
 
-    # Fast path: ximag==0 (every production TOML), all-real-axis Float64 kernel.
-    if ximag == 0.0
-        val, _ = quadgk(x -> _energy_integrand_real(x, p),
-                         1e-15, ENERGY_XMAX; atol=atol, rtol=rtol)
+    # CGL has no resonance denominator and no pole — integrate the physical
+    # x-space integrand directly over the half line (QuadGK maps [0,∞) itself).
+    if f0type == "cgl"
+        val, _ = quadgk(x -> _energy_integrand_real(x, p), 0.0, Inf; atol=atol, rtol=rtol)
         return val
     end
 
-    # Contour path: ximag>0 for nu=0 pole avoidance.
-    # Step from (1e-15, 0) up to (1e-15, ximag) on the imaginary axis, then
-    # integrate along (x + i*ximag) for x in [1e-15, xmax].
-    result = ComplexF64(0.0)
-    val, _ = quadgk(x -> _energy_integrand_complex(im * x, p),
-                     1e-15, ximag; atol=atol, rtol=rtol)
-    result += val
-    val, _ = quadgk(x -> _energy_integrand_complex(complex(x, ximag), p),
-                     1e-15, ENERGY_XMAX; atol=atol, rtol=rtol)
-    result += val
+    # Locate resonance poles and build their Sokhotski-Plemelj decomposition.
+    x_res_list = find_resonance_energies(leff, wb, n, we, wd)
+    u_poles = ComplexF64[]
+    residues = ComplexF64[]
+    u_breaks = Float64[]
+    pole_contribution = ComplexF64(0.0)
 
-    return result
+    for xr in x_res_list
+        xr <= 0.0 && continue
+        # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
+        omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
+        abs(omega_prime) < 1e-30 && continue
+
+        u_res = -expm1(-xr)   # 1 - exp(-x_res)
+        nu_res = _energy_collision_frequency(xr, p)
+
+        if nu_res > 0.0
+            # Collisional: pole shifted off the real axis. i·Ω - ν = 0 ⟹ x_pole = x_res - i·ν/Ω′.
+            x_pole = complex(xr, -nu_res / omega_prime)
+            u_pole = 1.0 - exp(-x_pole)
+            R = _energy_numerator(xr, p) * (1.0 - u_pole) / (im * omega_prime)
+            pole_contribution += R * (log(1.0 - u_pole) - log(-u_pole))
+        else
+            # Collisionless: real-axis pole, causal (ν → 0⁺) Sokhotski-Plemelj branch.
+            u_pole = ComplexF64(u_res)
+            R = _energy_numerator(xr, p) * (1.0 - u_res) / (im * omega_prime)
+            pole_contribution += R * (log1p(-u_res) - log(u_res) - im * π * sign(omega_prime))
+        end
+
+        push!(u_poles, u_pole)
+        push!(residues, R)
+        push!(u_breaks, u_res)
+    end
+
+    npole = length(residues)
+
+    # Smooth integrand: full u-space integrand minus the subtracted pole parts.
+    integrand = u -> begin
+        u >= 1.0 && return ComplexF64(0.0)
+        x = -log1p(-u)
+        nux = _energy_collision_frequency(x, p)
+        denom = complex(-nux, leff * wb * sqrt(x) + n * (we + wd * x))
+        val = _energy_numerator(x, p) / denom
+        @inbounds for k in 1:npole
+            val -= residues[k] / (u - u_poles[k])
+        end
+        return val
+    end
+
+    if npole == 0
+        val, _ = quadgk(integrand, 0.0, 1.0; atol=atol, rtol=rtol)
+        return val
+    end
+
+    # Resonance locations as QuadGK breakpoints so the (now smooth but possibly
+    # sharp) integrand is resolved near each pole.
+    breaks = unique!(sort!(filter(b -> 0.0 < b < 1.0, u_breaks)))
+    smooth_val, _ = quadgk(integrand, 0.0, breaks..., 1.0; atol=atol, rtol=rtol)
+    return smooth_val + pole_contribution
 end
-
 
 """
     evaluate_energy_integrand(x_grid; wn, wt, we, wd, wb, nuk, leff, n,
                                nutype="harmonic", f0type="maxwellian",
                                nufac=1.0, ximag=0.0, qt=false) → Vector{ComplexF64}
 
-Diagnostic convenience: evaluate the energy integrand at specified x = E/T values.
-Returns the integrand value (not the integral) at each point in `x_grid`.
-Useful for plotting the energy integrand shape and verifying kinetic resonance
-resolution.
+Diagnostic convenience: evaluate the physical x-space energy integrand
+N(x)·exp(-x)/denom(x) at specified x = E/T values. Returns the integrand value
+(not the integral) at each point in `x_grid`. Useful for plotting the energy
+integrand shape and verifying kinetic resonance resolution.
 
 # Example
 ```julia
