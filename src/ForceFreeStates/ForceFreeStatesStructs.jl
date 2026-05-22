@@ -13,6 +13,13 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `q1::Float64` - Derivative of safety factor with respect to ψ
   - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
   - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
+  - `delta_prime::Vector{ComplexF64}` - Tearing stability Δ' per resonant mode (indexed same as m/n)
+  - `delta_prime_col::Matrix{ComplexF64}` - Full Δ' column: shape (numpert_total × n_res_modes).
+    `delta_prime_col[j, i]` = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio),
+    the coupling of mode j to resonant mode i through the singular layer.
+    The diagonal element `delta_prime_col[ipert_res_i, i]` equals `delta_prime[i]`.
+    Off-diagonal elements represent intra-surface mode coupling via the small asymptotic.
+    Only populated for the Riccati/parallel FM paths (not the standard path).
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -23,6 +30,12 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
     q1::Float64 = 0.0
     grri::Array{Float64,2} = Array{Float64}(undef, 0, 0)
     grre::Array{Float64,2} = Array{Float64}(undef, 0, 0)
+    delta_prime::Vector{ComplexF64} = ComplexF64[]
+    delta_prime_col::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
+    ua_left::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)   # asymptotic basis at left inner-layer boundary
+    ua_right::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)  # asymptotic basis at right inner-layer boundary
+    psi_ua_left::Float64 = 0.0   # ψ where ua_left was evaluated (left inner-layer boundary)
+    psi_ua_right::Float64 = 0.0  # ψ where ua_right was evaluated (right inner-layer boundary)
 end
 
 """
@@ -67,13 +80,56 @@ A struct representing a region of integration in the Euler-Lagrange solver.
   - `psi_end::Float64` - Ending ψ coordinate for this integration region
   - `needs_crossing::Bool` - Whether a rational surface crossing is needed after this chunk
   - `ising::Int` - Index of the singular surface associated with this chunk (0 if none)
+  - `direction::Int` - Integration direction: +1 forward (axis→edge), -1 backward (edge→axis).
+    For `direction=-1` chunks, `psi_start` < `psi_end` but integration proceeds from `psi_end`
+    toward `psi_start`. The resulting propagator maps state at `psi_end` → state at `psi_start`.
+    Used in bidirectional parallel FM to produce well-conditioned crossing-chunk propagators:
+    solutions that grow exponentially forward (toward a singularity) decay when integrated
+    backward, so the backward propagator is well-conditioned.
 """
 @kwdef struct IntegrationChunk
     psi_start::Float64
     psi_end::Float64
     needs_crossing::Bool
     ising::Int = 0
+    direction::Int = 1   # +1 forward, -1 backward
 end
+
+"""
+    ChunkPropagator
+
+Fundamental matrix for one integration chunk, stored as two N×N×2 solution blocks.
+Represents the propagator Φ(ψ₂,ψ₁) computed by integrating the EL ODE from two
+identity-block initial conditions:
+
+  - `block_upper_ic`: result of integrating with IC = (I_N, 0_N)  (U₁ = I, U₂ = 0)
+  - `block_lower_ic`: result of integrating with IC = (0_N, I_N)  (U₁ = 0, U₂ = I)
+
+Applying the propagator to the current state `u_prev`:
+
+  u₁_new = block_upper_ic[:,:,1] · u₁_prev + block_lower_ic[:,:,1] · u₂_prev
+  u₂_new = block_upper_ic[:,:,2] · u₁_prev + block_lower_ic[:,:,2] · u₂_prev
+
+Since each chunk starts from a bounded identity IC (rather than the accumulated state),
+exponential growth within a chunk does not affect the conditioning of the overall
+assembly. This enables `Threads.@threads` parallel integration across all chunks.
+
+`psi_history` / `upper_history` / `lower_history` store the per-ψ solution of the
+two identity-IC integrations, captured by `integrate_propagator_chunk!`. They let the
+serial assembly reconstruct a dense `u_store` directly from the parallel phase (no
+second serial-EL pass): the chunk-local fundamental matrix at ψ is
+`Φ(ψ) = [upper_history[k]  lower_history[k]]`. `psi_history` is monotonically
+increasing for both forward and backward chunks.
+"""
+struct ChunkPropagator
+    block_upper_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (I, 0)
+    block_lower_ic::Array{ComplexF64,3}   # shape (N, N, 2) — result from IC = (0, I)
+    psi_history::Vector{Float64}                  # saved ψ grid within the chunk
+    upper_history::Vector{Array{ComplexF64,3}}    # (N,N,2) state from upper IC at each ψ
+    lower_history::Vector{Array{ComplexF64,3}}    # (N,N,2) state from lower IC at each ψ
+end
+ChunkPropagator(N::Int) = ChunkPropagator(zeros(ComplexF64, N, N, 2), zeros(ComplexF64, N, N, 2),
+                                          Float64[], Array{ComplexF64,3}[], Array{ComplexF64,3}[])
 
 """
 DebugSettings
@@ -109,9 +165,7 @@ A mutable struct holding internal state variables for stability calculations.
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
-  - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
   - `sing::Vector{SingType}` - Vector of ideal singular surface data
-  - `kinsing::Vector{SingType}` - Vector of kinetic singular surface data (not yet implemented)
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
@@ -133,15 +187,20 @@ A mutable struct holding internal state variables for stability calculations.
     xlmda_out::Bool = false
     sol_base::Int = 50
     msing::Int = 0
-    kmsing::Int = 0
     sing::Vector{SingType} = SingType[]
-    kinsing::Vector{SingType} = SingType[]
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
     locstab::FastInterpolations.CubicSeriesInterpolant = cubic_interp(collect(0.0:0.25:1.0), Series(zeros(5, 5)); bc=ZeroCurvBC())
     debug_settings::DebugSettings = DebugSettings()
     wall_settings::Vacuum.WallShapeSettings = Vacuum.WallShapeSettings()
+    """
+    Inter-surface Δ' matrix of shape (msing × msing) in PEST3 convention.
+    Computed by `compute_delta_prime_matrix!` (parallel FM path only) using the STRIDE
+    global BVP with vacuum coupling. The deltap linear combination is applied to the
+    raw 2msing×2msing BVP solution to produce the PEST3-compatible tearing parameter.
+    """
+    delta_prime_matrix::Matrix{ComplexF64} = Matrix{ComplexF64}(undef, 0, 0)
 end
 
 """
@@ -175,15 +234,16 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
   - `cyl_flag::Bool` - Make delta_mlow and delta_mhigh set the actual m truncation bounds. Default is to expand (n*qmin-4, n*qmax).
-  - `sing_order::Int` - Order of singular layer expansion
+  - `set_psilim_via_dmlim::Bool` - Determine psilim truncation from outermost rational + dmlim (Fortran sas_flag equivalent). Default false.
+  - `dmlim::Float64` - Distance beyond last rational surface (normalised ∈ [0,1) in units of 1/n). Only used when `set_psilim_via_dmlim` is true.
+  - `sing_order::Int` - Order of singular layer (Frobenius) expansion at rational surfaces. Default 6 (Fortran STRIDE convention for Δ' calculations; lower values trade accuracy for speed).
   - `qhigh::Float64` - Integration terminated at q limit determined by minimum of qhigh and qa from equil
   - `kinetic_source::String` - Kinetic matrix source: "fixed" (X-shaped test matrices scaled by kinetic_factor relative to ideal matrix Frobenius norms; Ak, Dk, Hk Hermitian, Bk, Ck, Ek non-Hermitian), "calculated" (PENTRC — not yet implemented)
   - `kinetic_factor::Float64` - Dimensionless scaling factor for kinetic matrices. Zero (the default) disables the kinetic path; any positive value enables it and scales the kinetic matrices: when kinetic_source="fixed", scales X-shaped test matrices relative to ideal matrix norms; when kinetic_source="calculated", applied as uniform post-hoc multiplier to W and T components.
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
-  - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
-  - `integration_method::String` - Euler-Lagrange integration path: `"ChunkedRiccati"` (default) chunks the domain at rational surfaces and integrates each chunk's fundamental matrix in parallel with backward integration away from rationals, producing accurate Δ'; `"LegacyEulerLagrange"` is the standard forward sweep kept for benchmarking.
-  - `integration_threads::Int` - Thread cap for the chunked-Riccati path. `0` (default) uses `Threads.nthreads()`; any positive value is capped at `Threads.nthreads()`. `1` runs serially. Output is bit-identical across thread counts.
+  - `psiedge::Float64` - If less than psilim, records a dW(ψ) diagnostic scan over [psiedge, psilim] on odet.edge_scan. The integration domain (psilim) is always controlled by qhigh / psihigh and is not modified by this scan (unless `truncate_at_dW_peak=true`, see caveats below).
+  - `truncate_at_dW_peak::Bool` - When `true` and `psiedge < psilim`, the edge-dW scan's peak location is adopted as the new physical plasma edge — `intr.psilim`/`intr.qlim`/`odet.u` are pulled back to the peak, AND the FM Δ' chunks/propagators are made self-consistent with the new boundary (the chunk that straddles the peak is rebuilt + re-integrated; any chunks past the peak are dropped). This reproduces the spirit of the original ode_record_edge heuristic from Fortran STRIDE while keeping Δ' and δW well-defined at the new boundary. The Δ' metric is still physically dependent on where the peak falls in the edge band, so use this flag deliberately when you mean to scan against the peak-defined edge (e.g. for studying edge-mode regimes); leave at `false` (default) for the full-domain Δ' at `qhigh` / `psihigh` / `dmlim`.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
@@ -191,6 +251,11 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
+  - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
+  - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
+  - `integration_method::String` - Euler-Lagrange integration path: `"ChunkedRiccati"` chunks the domain at rational surfaces and integrates each chunk's fundamental matrix in parallel with backward integration away from rationals (accurate Δ'); `"LegacyEulerLagrange"` is the standard forward sweep kept for benchmarking. Wired into the dispatcher in a later step; currently the legacy `use_parallel`/`use_riccati` flags still select the path.
+  - `integration_threads::Int` - Thread cap for the chunked-Riccati path. `0` uses `Threads.nthreads()`; any positive value is capped at `Threads.nthreads()`. `1` runs serially.
+  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -211,21 +276,23 @@ A mutable struct containing control parameters for stability analysis, set by th
     thmax0::Float64 = 1.0
     nstep::Int = typemax(Int)
     ksing::Int = -1
-    eulerlagrange_tolerance::Float64 = 1e-7
+    eulerlagrange_tolerance::Float64 = 1e-8
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 0.0
+    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
     cyl_flag::Bool = false
-    sing_order::Int = 2
+    set_psilim_via_dmlim::Bool = false
+    dmlim::Float64 = 0.2
+    sing_order::Int = 6
     qhigh::Float64 = 1e3
     kinetic_source::String = "fixed"
     kinetic_factor::Float64 = 0.0
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
-    integration_method::String = "LegacyEulerLagrange"
-    integration_threads::Int = 0
+    truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
+    parallel_threads::Int = 2
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
@@ -233,6 +300,11 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_wv_symmetry::Bool = true
     save_interval::Int = 3
     force_termination::Bool = false
+    use_riccati::Bool = false
+    use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
+    use_double64_bvp::Bool = true
+    integration_method::String = "LegacyEulerLagrange"
+    integration_threads::Int = 0
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}
@@ -325,8 +397,8 @@ Populated in `Free.jl`.
   - `vacuum_eigenvalue::Float64` - Least stable (minimum) eigenvalue of the vacuum matrix wv, clamped to zero
   - `grri::Array{Float64, 2}` - Interior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
   - `grre::Array{Float64, 2}` - Exterior Green's function matrices (2 * mthvac * nzvac × 2 * numpert_total)
-  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points [x, y, z] (mthvac * nzvac × 3)
-  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points [x, y, z] (mthvac * nzvac × 3)
+  - `plasma_pts::Array{Float64, 3}` - Cartesian coordinates of plasma points, shape (mthvac * nzvac) × 3 for (x, y, z)
+  - `wall_pts::Array{Float64, 3}` - Cartesian coordinates of wall points, shape (mthvac * nzvac) × 3 for (x, y, z)
 """
 @kwdef mutable struct VacuumData
     numpoints::Int

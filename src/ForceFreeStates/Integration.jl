@@ -1,26 +1,16 @@
 """
     forcefreestates_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> IntegrationResult
 
-Single entry point for ideal-MHD Euler-Lagrange integration. Dispatches on
-`ctrl.integration_method`:
+Single entry point for ideal-MHD Euler-Lagrange integration. Returns an
+[`IntegrationResult`](@ref) wrapping the integrated `OdeState` plus the optional
+fundamental-matrix data (`propagators`, `chunks`, `S_at_surface_left`) that the
+chunked-Riccati path produces for the deferred Δ' BVP.
 
-  - `"ChunkedRiccati"` — chunks the domain at rational surfaces and integrates each chunk's
-    fundamental matrix in parallel, with backward integration away from rationals so every
-    sub-integration runs well-conditioned. Produces accurate Δ' and the `u_store` consumed
-    by PerturbedEquilibrium. Runs on `ctrl.integration_threads` threads.
-  - `"LegacyEulerLagrange"` — the standard forward Euler-Lagrange sweep, kept for
-    benchmarking and cross-checking. Does not produce Δ'.
-
-Both paths return an [`IntegrationResult`](@ref); the propagator fields are populated only
-by the chunked-Riccati path.
+Currently delegates to `eulerlagrange_integration`, which dispatches on the legacy
+`use_parallel` / `use_riccati` flags. A later step replaces that dispatch with
+`ctrl.integration_method` (`"ChunkedRiccati"` / `"LegacyEulerLagrange"`).
 """
 function forcefreestates_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
-    if ctrl.integration_method == "LegacyEulerLagrange"
-        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
-        return IntegrationResult(odet)
-    elseif ctrl.integration_method == "ChunkedRiccati"
-        error("integration_method \"ChunkedRiccati\" is not yet implemented on this branch")
-    else
-        error("Unknown integration_method \"$(ctrl.integration_method)\"; expected \"ChunkedRiccati\" or \"LegacyEulerLagrange\"")
-    end
+    odet, propagators, chunks, S_at_surface_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
+    return IntegrationResult(; odet, propagators, chunks, S_at_surface_left)
 end

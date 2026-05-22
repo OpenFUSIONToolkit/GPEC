@@ -24,6 +24,7 @@ else
     include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
     include("./runtests_eulerlagrange.jl")
+    include("./runtests_riccati.jl")
     include("./runtests_sing.jl")
     include("./runtests_fullruns.jl")
     include("./runtests_coils.jl")

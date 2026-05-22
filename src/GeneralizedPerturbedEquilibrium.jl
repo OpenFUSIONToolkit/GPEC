@@ -178,6 +178,22 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
+    # Filter out surfaces outside the integration domain [qlow, qlim].
+    # Fortran STRIDE excludes these at the integration level; we remove them
+    # from intr.sing so the Δ' BVP sees only crossable surfaces.
+    if intr.msing > 0
+        qmin_integration = max(ctrl.qlow, equil.params.qmin)
+        n_before = intr.msing
+        keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin_integration && intr.sing[j].psifac <= intr.psilim]
+        if length(keep) < n_before
+            excluded = setdiff(1:n_before, keep)
+            excluded_mq = [(intr.sing[j].m, intr.sing[j].q) for j in excluded]
+            @info "Filtered $(n_before - length(keep)) singular surface(s) outside integration domain: $(excluded_mq)"
+            intr.sing = intr.sing[keep]
+            intr.msing = length(keep)
+        end
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -267,6 +283,18 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
             if ctrl.verbose
                 @info "All free-boundary modes stable for n = $nstring"
             end
+        end
+
+        # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
+        # Requires propagators from the chunked-Riccati path and wv from free_run!.
+        if ctrl.kinetic_factor == 0 && intr.msing > 0 && integration_result.propagators !== nothing
+            if ctrl.verbose
+                @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
+            end
+            ForceFreeStates.compute_delta_prime_matrix!(intr, integration_result.propagators, integration_result.chunks;
+                wv=vac_data.wv, psio=equil.psio, debug=ctrl.verbose,
+                S_at_surface_left=integration_result.S_at_surface_left,
+                ctrl=ctrl, equil=equil, ffit=ffit)
         end
     end
 
@@ -465,6 +493,53 @@ function write_outputs_to_HDF5(
         out_h5["singular/q1"] = [sing.q1 for sing in intr.sing]
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
+
+        if intr.msing > 0
+            # Mode numbers at each surface (jagged — pad with 0 to max_modes width)
+            max_modes = maximum(s -> length(s.m), intr.sing)
+            m_matrix = zeros(Int, intr.msing, max_modes)
+            n_matrix = zeros(Int, intr.msing, max_modes)
+            for (s, sing) in enumerate(intr.sing)
+                for i in 1:length(sing.m)
+                    m_matrix[s, i] = sing.m[i]
+                    n_matrix[s, i] = sing.n[i]
+                end
+            end
+            out_h5["singular/m"] = m_matrix
+            out_h5["singular/n"] = n_matrix
+        end
+
+        # Write Δ' if computed (one complex value per resonant mode per singular surface)
+        if intr.msing > 0 && all(s -> !isempty(s.delta_prime), intr.sing)
+            max_modes = maximum(s -> length(s.delta_prime), intr.sing)
+            dp_matrix = zeros(ComplexF64, intr.msing, max_modes)
+            for (s, sing) in enumerate(intr.sing)
+                for i in 1:length(sing.delta_prime)
+                    dp_matrix[s, i] = sing.delta_prime[i]
+                end
+            end
+            out_h5["singular/delta_prime"] = dp_matrix
+        end
+
+        # Write full off-diagonal Δ' column if computed (chunked-Riccati path only).
+        # Shape: [numpert_total × max_modes × msing], where delta_prime_col[:, i, s] is
+        # the coupling of all N modes to resonant mode i at surface s.
+        if intr.msing > 0 && all(s -> !isempty(s.delta_prime_col), intr.sing)
+            N = size(intr.sing[1].delta_prime_col, 1)
+            max_modes = maximum(s -> size(s.delta_prime_col, 2), intr.sing)
+            dp_col_tensor = zeros(ComplexF64, N, max_modes, intr.msing)
+            for (s, sing) in enumerate(intr.sing)
+                n_res = size(sing.delta_prime_col, 2)
+                dp_col_tensor[:, 1:n_res, s] = sing.delta_prime_col
+            end
+            out_h5["singular/delta_prime_col"] = dp_col_tensor
+        end
+
+        # Write inter-surface Δ' matrix if computed (chunked-Riccati path only).
+        # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
+        if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
+            out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+        end
 
         # Write vacuum data; always write all entries, using empty arrays when not computed
         out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]

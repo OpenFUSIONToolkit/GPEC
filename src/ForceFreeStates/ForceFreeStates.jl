@@ -16,6 +16,7 @@ import ..Equilibrium
 import ..Utilities
 import ..Vacuum
 using Printf
+using DoubleFloats
 import StaticArrays: @MMatrix
 
 # Include all necessary files
@@ -23,13 +24,14 @@ include("ForceFreeStatesStructs.jl")
 include("Mercier.jl")
 include("Bal.jl")
 include("EulerLagrange.jl")
-include("Integration.jl")
 include("Sing.jl")
 include("Fourfit.jl")
 include("Kinetic.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
+include("Riccati.jl")
+include("Integration.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
