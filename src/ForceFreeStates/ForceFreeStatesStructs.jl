@@ -13,13 +13,8 @@ A mutable struct holding data related to the singular surfaces in the equilibriu
   - `q1::Float64` - Derivative of safety factor with respect to ψ
   - `grri::Array{Float64,2}` - Interior Green's function at this surface [2*mthvac, 2*mpert]
   - `grre::Array{Float64,2}` - Exterior Green's function at this surface [2*mthvac, 2*mpert]
-  - `delta_prime::Vector{ComplexF64}` - Tearing stability Δ' per resonant mode (indexed same as m/n)
-  - `delta_prime_col::Matrix{ComplexF64}` - Full Δ' column: shape (numpert_total × n_res_modes).
-    `delta_prime_col[j, i]` = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio),
-    the coupling of mode j to resonant mode i through the singular layer.
-    The diagonal element `delta_prime_col[ipert_res_i, i]` equals `delta_prime[i]`.
-    Off-diagonal elements represent intra-surface mode coupling via the small asymptotic.
-    Only populated for the Riccati/parallel FM paths (not the standard path).
+  - `delta_prime::Vector{ComplexF64}` - **STUB (not physically valid)**. Per-surface ca-based Δ' estimate retained for future work / debugging only. The physically valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`, computed via the STRIDE global BVP (Glasser 2018 PoP 25, 032501). Do not use this field for tearing-stability analysis; do not expect agreement with `delta_prime_matrix`.
+  - `delta_prime_col::Matrix{ComplexF64}` - **STUB (not physically valid)**. Per-surface ca-based Δ' column retained for future work / debugging only. Shape (numpert_total × n_res_modes); `delta_prime_col[j, i] = (ca_r[j,ipert_res_i,2] - ca_l[j,ipert_res_i,2]) / (4π²·psio)`. The diagonal element matches the (also stubbed) `delta_prime[i]`. Only populated for the Riccati/parallel FM paths. The physically valid Δ' is `ForceFreeStatesInternal.delta_prime_matrix`; this field exists for future development on intra-surface coupling diagnostics, not for production use.
 """
 @kwdef mutable struct SingType
     psifac::Float64 = 0.0
@@ -218,7 +213,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `nstep::Int` - Maximum number of integration steps (not yet implemented)
   - `ksing::Int` - Singular surface handling parameter
   - `eulerlagrange_tolerance::Float64` - Relative tolerance for ODE integration of Euler-Lagrange equations
-  - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization
+  - `ucrit::Float64` - Critical value of unorm ratio to trigger solution normalization. In the standard path it triggers Gaussian reduction; in the Riccati path it triggers `renormalize_riccati_inplace!`. Default `1e4` empirically keeps max(|U₁|, |U₂|) in O(1)–O(10⁴) over the integration domain on DIII-D / Solovev sweeps; lower triggers excess renorms without accuracy gain, higher risks overflow before the next renorm.
   - `numsteps_init::Int` - Initial array size for ODE data storage
   - `numunorms_init::Int` - Initial array size for solution normalization data
   - `singfac_min::Float64` - Fractional distance from rational q at which ideal jump condition is enforced
@@ -243,7 +238,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
   - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
   - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
-  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `ud_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices and zeros for `ud_store` (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead.  Default `true`.  Approximate cost: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
+  - `populate_dense_xi::Bool` - When `use_parallel = true`, append a serial Euler-Lagrange pass at the end of the propagator BVP and let it replace the `odet` returned to the main pipeline.  This populates `u_store` / `ud_store` densely in the axis (EL) basis — the only convention the PerturbedEquilibrium / FieldReconstruction downstream code consumes correctly.  Without it the parallel path stores only chunk-endpoint Riccati S matrices and zeros for `ud_store` (see Riccati.jl docstring caveats), and HDF5 `integration/xi_psi`/`dxi_psi`/`xi_s` are unusable.  Δ' (`singular/delta_prime_matrix`) is computed from the parallel BVP and is bit-identical between `populate_dense_xi=true` and `false`.  Energies (`vacuum/ep`/`ev`/`et`) are computed by `free_run!` from `odet`, so with `populate_dense_xi=true` they match what a pure serial run (`use_parallel=false`) would produce; with `populate_dense_xi=false` they use the parallel-pass Riccati `odet.u` instead.  Default `true` when `force_termination = false` (i.e. PerturbedEquilibrium will consume ξ); auto-disabled when `force_termination = true` since the dense pass is pure overhead with no downstream consumer.  Approximate cost: one extra serial EL integration (~1× the parallel BVP wall-clock for typical N).
+  - `extended_precision_bvp::Bool` - When `true` (default), promote the Δ' BVP linear system to `Complex{Double64}` (~31 digits) for the LU solve and PEST3 combination. Guards against catastrophic cancellation in the PEST3 four-term combination (dp_raw entries can be 10⁴–10⁵× larger than the result; the imaginary part of off-diagonal Δ' is particularly sensitive). Disabling (`false`) saves ~1.5–2× the BVP solve time but on DIIID-class equilibria the imaginary Δ' components can drift by factors of 2–5×; only disable for performance experiments on cases where Float64 has been validated against Double64.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -290,7 +286,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_termination::Bool = false
     use_riccati::Bool = false
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
-    populate_dense_xi::Bool = true  # Append a dense serial-EL pass after parallel BVP so HDF5 integration/xi_psi etc. carry valid DCON ξ in axis basis for PerturbedEquilibrium.
+    populate_dense_xi::Bool = true  # Append a dense serial-EL pass after parallel BVP so HDF5 integration/xi_psi etc. carry valid DCON ξ in axis basis for PerturbedEquilibrium. Auto-disabled when force_termination=true.
+    extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).
 end
 
 @kwdef mutable struct FourFitVars{S<:CubicSeriesInterpolant,Opts<:NamedTuple}

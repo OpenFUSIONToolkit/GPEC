@@ -81,13 +81,14 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.psilim = equil.config.psihigh
 
     # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent).
-    # Multi-n runs are not supported by this truncation — the "outermost rational +
-    # dmlim / n" cutoff depends on which n is used, so it isn't well-defined when
-    # nn_low != nn_high. Skip-with-warning rather than erroring so that production
-    # users running multi-n on diverted geqdsks (where the default = true is correct
-    # for their per-n runs) don't have to remember to override the default.
+    # Multi-n runs (nn_low != nn_high) are not supported — the "outermost rational + dmlim/n"
+    # cutoff depends on which n is used, so it isn't well-defined. Single-n with nn_low <= 0
+    # (e.g. uninitialized default) is also skipped because the formula divides by nn_low.
+    # Both cases fall back to qhigh / psihigh truncation with a warning.
     if ctrl.set_psilim_via_dmlim && ctrl.nn_low != ctrl.nn_high
         @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(ctrl.nn_low), nn_high=$(ctrl.nn_high)); falling back to qhigh / psihigh truncation."
+    elseif ctrl.set_psilim_via_dmlim && ctrl.nn_low <= 0
+        @warn "set_psilim_via_dmlim = true requires nn_low > 0; got nn_low=$(ctrl.nn_low). Falling back to qhigh / psihigh truncation."
     elseif ctrl.set_psilim_via_dmlim
         @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
@@ -187,8 +188,8 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
     end
 
-    # Zeroth-order resonant solutions — Fortran sing_vmat uses sig*alpha in the
-    # initial conditions: v_big_ξ' = -(m0(1,1) + sig*α)/m0(1,2) (matching Fortran STRIDE).
+    # Zeroth-order resonant solutions: v_big_ξ' = -(m0(1,1) ± sig·α)/m0(1,2).
+    # Matches Fortran STRIDE sing_vmat (sig·α sign convention separates left vs right side).
     for i in eachindex(r1)
         m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
         r1_i = r1[i]
@@ -205,31 +206,31 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=sig)
     end
 
-    # Debug dump of m0mat and vmat matching Fortran sing_vmat output.  Gated
-    # behind ctrl.verbose; without the guard this fired for every singular
-    # surface on every integration.
-    if ctrl.verbose
+    # Per-crossing m0mat / vmat diagnostics matching Fortran sing_vmat output.
+    # @debug-only: enable via JULIA_DEBUG=GeneralizedPerturbedEquilibrium.
+    @debug begin
         side_str = sig > 0 ? "right" : "left"
         ipert0 = r1[1]
         N = intr.numpert_total
-        @info "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)"
-        @info @sprintf("  m0mat(1,1)= %+.12e %+.12ei", real(m0mat[1,1]), imag(m0mat[1,1]))
-        @info @sprintf("  m0mat(1,2)= %+.12e %+.12ei", real(m0mat[1,2]), imag(m0mat[1,2]))
-        @info @sprintf("  m0mat(2,1)= %+.12e %+.12ei", real(m0mat[2,1]), imag(m0mat[2,1]))
-        @info @sprintf("  m0mat(2,2)= %+.12e %+.12ei", real(m0mat[2,2]), imag(m0mat[2,2]))
+        msg = "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)\n"
+        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1,1]), imag(m0mat[1,1]))
+        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1,2]), imag(m0mat[1,2]))
+        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2,1]), imag(m0mat[2,1]))
+        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2,2]), imag(m0mat[2,2]))
         di = m0mat[1,1]*m0mat[2,2] - m0mat[2,1]*m0mat[1,2]
-        @info @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei", real(di), real(alpha[1]), imag(alpha[1]))
-        @info @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d", singp.psifac, r1[1], ipert0)
-        @info @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
-        @info @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
+        msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
+        msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
+        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
+        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
         for k in 0:(2*ctrl.sing_order)
-            @info @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei",
+            msg *= @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei\n",
                 k, real(vmat[ipert0,ipert0,1,k+1]), imag(vmat[ipert0,ipert0,1,k+1]),
                 real(vmat[ipert0,ipert0,2,k+1]), imag(vmat[ipert0,ipert0,2,k+1]))
-            @info @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei",
+            msg *= @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei\n",
                 k, real(vmat[ipert0,ipert0+N,1,k+1]), imag(vmat[ipert0,ipert0+N,1,k+1]),
                 real(vmat[ipert0,ipert0+N,2,k+1]), imag(vmat[ipert0,ipert0+N,2,k+1]))
         end
+        msg
     end
 
     return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)

@@ -129,8 +129,10 @@ end
     # ─────────────────────────────────────────────────────────────────────────
 
     @testset "Riccati integration matches standard ODE — Solovev example" begin
-        # Energy eigenvalue matches to 1%
-        @test isapprox(et_ric, et_std; rtol=0.01)
+        # PR description claims Solovev energy eigenvalue error 0.006 % vs standard path.
+        # Tightened to rtol=1e-4 (matches the PR's headline claim within ≈2×). A regression
+        # of the Riccati/renormalization algorithm to ~1 % error would fail here loudly.
+        @test isapprox(et_ric, et_std; rtol=1e-4)
 
         # Riccati uses no more than 2x as many steps as standard
         @test odet_ric.step <= 2 * odet_std.step
