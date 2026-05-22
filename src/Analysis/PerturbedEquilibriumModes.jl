@@ -71,7 +71,7 @@ function modes_to_theta(h5_file::String, variable::String;
             nu_vals  = read(f, "splines/rzphi/nu")
             nu_spline = cubic_interp(
                 (rzphi_xs, rzphi_ys), nu_vals;
-                bc=(CubicFit(), PeriodicBC()),
+                bc=(CubicFit(), PeriodicBC(; check=false)),
                 extrap=(ExtendExtrap(), WrapExtrap())
             )
 

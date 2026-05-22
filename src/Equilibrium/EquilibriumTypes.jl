@@ -44,7 +44,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
 
     grid_type::String = "log_asymptotic"
     psilow::Float64 = 1e-2
-    psihigh::Float64 = 0.994
+    psihigh::Float64 = 0.9995
     mpsi::Int = 0
     psi_accuracy::Float64 = 0.001
     mtheta::Int = 256
@@ -55,39 +55,62 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     force_termination::Bool = false
     use_galgrid::Bool = true
 
+    # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
+    imas_cocos::Int = 11
+
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
     function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
         grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-        force_termination, use_galgrid)
+        force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
-            power_b = 0; power_bp = 0; power_r = 0; power_rc = 0
+            power_b = 0;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "pest"
             @info "Forcing pest coordinate jacobian exponents: power_*"
-            power_b = 0; power_bp = 0; power_r = 2; power_rc = 0
+            power_b = 0;
+            power_bp = 0;
+            power_r = 2;
+            power_rc = 0
         elseif jac_type == "equal_arc"
             @info "Forcing equal_arc coordinate jacobian exponents: power_*"
-            power_b = 0; power_bp = 1; power_r = 0; power_rc = 0
+            power_b = 0;
+            power_bp = 1;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "boozer"
             @info "Forcing boozer coordinate jacobian exponents: power_*"
-            power_b = 2; power_bp = 0; power_r = 0; power_rc = 0
+            power_b = 2;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "park"
             @info "Forcing park coordinate jacobian exponents: power_*"
-            power_b = 1; power_bp = 0; power_r = 0; power_rc = 0
+            power_b = 1;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "other"
             # Normalize to a named type when the powers match, so fast paths are taken.
-            if     power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "hamada";    @info "Recognized hamada jacobian from power exponents"
+            if power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "hamada";
+                @info "Recognized hamada jacobian from power exponents"
             elseif power_b == 0 && power_bp == 0 && power_r == 2 && power_rc == 0
-                jac_type = "pest";      @info "Recognized pest jacobian from power exponents"
+                jac_type = "pest";
+                @info "Recognized pest jacobian from power exponents"
             elseif power_b == 0 && power_bp == 1 && power_r == 0 && power_rc == 0
-                jac_type = "equal_arc"; @info "Recognized equal_arc jacobian from power exponents"
+                jac_type = "equal_arc";
+                @info "Recognized equal_arc jacobian from power exponents"
             elseif power_b == 2 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "boozer";    @info "Recognized boozer jacobian from power exponents"
+                jac_type = "boozer";
+                @info "Recognized boozer jacobian from power exponents"
             elseif power_b == 1 && power_bp == 0 && power_r == 0 && power_rc == 0
-                jac_type = "park";      @info "Recognized park jacobian from power exponents"
+                jac_type = "park";
+                @info "Recognized park jacobian from power exponents"
             else
                 @info "Using manual jacobian exponents: power b, bp, r, rc = $(power_b), $(power_bp), $(power_r), $(power_rc)"
             end
@@ -100,7 +123,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
         psihigh = min(psihigh, 1.0)
         return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
             grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
-            force_termination, use_galgrid)
+            force_termination, use_galgrid, imas_cocos)
     end
 end
 

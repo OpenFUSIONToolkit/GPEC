@@ -573,7 +573,7 @@ robustness.
 
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
-        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
+        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC(; check=false))
         ff_deriv = deriv1(ff_interp)
 
         # Resample ff onto uniform theta grid
@@ -635,7 +635,7 @@ robustness.
     rzphi_ys = collect(theta_nodes)
 
     grid2d = (rzphi_xs, theta_nodes)
-    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
@@ -709,6 +709,7 @@ robustness.
 
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
+
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,

@@ -7,12 +7,12 @@ power_b = 0                    # Toroidal field power exponent for Jacobian
 power_r = 0                    # Major radius power exponent for Jacobian
 grid_type = "log_asymptotic"   # Radial grid packing type
 psilow = 1e-4                  # Lower limit of normalized flux coordinate
-psihigh = 0.993                # Upper limit of normalized flux coordinate
+psihigh = 0.9995               # Upper limit of normalized flux coordinate
 mpsi = 0                       # Number of radial grid points (0 = auto-compute from psi_accuracy)
 psi_accuracy = 0.001           # Target absolute error in q for auto-mpsi
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
-etol = 1e-7                    # Error tolerance for equilibrium solver
+etol = 1e-10                   # Error tolerance for equilibrium solver
 force_termination = false      # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
@@ -32,9 +32,7 @@ ode_flag = true                # Integrate ODE's for determining stability of in
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true                # Evaluate the Mercier criterian
 
-set_psilim_via_dmlim = true    # Safety factor (q) limit determined as q_ir+dmlim...
-dmlim = 0.2                    # See set_psilim_via_dmlim
-psiedge = 1.00                 # If less then psilim, calculates dW(psi)...
+psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
@@ -49,14 +47,20 @@ thmax0 = 1                     # Linear multiplier on the automatic choice of th
 
 kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
-eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
 save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
 ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
 
 [ForcingTerms]
-forcing_data_file = "forcing.dat"       # Path to forcing data file (n, m, complex amplitude)
-forcing_data_format = "ascii"           # Format of forcing data: "ascii" or "hdf5"
+forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
+machine = "d3d"                         # Geometry prefix; resolves to bundled coil_geometries/d3d_*.dat
+mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ evaluation
+nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
+
+[[ForcingTerms.coil_set]]
+name = "c"                              # DIII-D C-coil (6 coils); resolves to coil_geometries/d3d_c.dat
+currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
 [PerturbedEquilibrium]
 fixed_boundary = false                  # Use fixed boundary conditions

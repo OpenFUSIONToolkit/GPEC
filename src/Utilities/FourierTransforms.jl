@@ -32,6 +32,12 @@ modes = ft(theta_data)          # Complex modes [mpert, 10]
 # Inverse transform: Fourier modes → theta-space
 reconstructed = inverse(ft, modes)
 ```
+
+# Sign convention
+
+The forward transform uses `exp(-imθ)` (Fortran `iscdftf`) for both real- and
+complex-valued input; `inverse` uses `exp(+imθ)` (Fortran `iscdftb`). Hence
+`inverse(ft, ft(data)) ≈ data` for any real- or complex-valued `data`.
 """
 module FourierTransforms
 
@@ -232,18 +238,16 @@ Transforms real-valued data at theta grid points into complex Fourier mode coeff
 
 # Formula
 
-For each mode `l` (corresponding to mode number `m = mlow + l - 1`):
+For each mode `l` (corresponding to mode number `m = mlow + l - 1`), using the
+`exp(-imθ)` convention (Fortran `iscdftf`):
 
 ```
-mode[l] = Σᵢ data[i] * (cos(m*θᵢ + phase) + im*sin(m*θᵢ + phase))
+mode[l] = (1/N) Σᵢ data[i] * exp(-i*(m*θᵢ + phase))
+        = (1/N) Σᵢ data[i] * (cos(m*θᵢ + phase) - im*sin(m*θᵢ + phase))
 ```
 
-This is equivalent to computing:
-```
-real_part[l] = Σᵢ data[i] * cos(m*θᵢ + phase)
-imag_part[l] = Σᵢ data[i] * sin(m*θᵢ + phase)
-mode[l] = complex(real_part[l], imag_part[l])
-```
+Identical convention to the complex-input method, so `inverse(ft, ft(data)) ≈ data`
+holds for both real- and complex-valued `data`.
 
 # Examples
 
@@ -260,23 +264,21 @@ modes = ft(data)       # Matrix{ComplexF64} of size (40, 10)
 ```
 """
 function (ft::FourierTransform)(data::AbstractVecOrMat{<:Real})
-    # Forward transform with 1/N normalization and exp(+imθ) convention for real data.
-    # Note: the real forward uses exp(+imθ) (not exp(-imθ)) because ResponseMatrices and
-    # SingularCoupling are self-consistent in this convention. The complex forward uses
-    # exp(-imθ) to enable correct inverse→forward round-trips for _compute_rzphi_modes.
+    # Forward transform with 1/N normalization and exp(-imθ) convention (Fortran iscdftf),
+    # identical to the complex-input method below.
 
     if data isa AbstractVector
         # For vector input: [mtheta] → [mpert]
         @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
         real_part = ft.cslth' * data
         imag_part = ft.snlth' * data
-        return complex.(real_part, imag_part) ./ ft.mtheta
+        return complex.(real_part, -imag_part) ./ ft.mtheta
     else
         # For matrix input: [mtheta, n] → [mpert, n]
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
         real_part = ft.cslth' * data
         imag_part = ft.snlth' * data
-        return complex.(real_part, imag_part) ./ ft.mtheta
+        return complex.(real_part, -imag_part) ./ ft.mtheta
     end
 end
 
@@ -480,6 +482,7 @@ end
 ```
 """
 function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Real})
+    # exp(-imθ) convention (Fortran iscdftf), matching the allocating `ft(data::Real)`.
     if data isa AbstractVector
         @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
         @assert length(output) == ft.mpert "Output vector must have length mpert=$(ft.mpert)"
@@ -489,9 +492,10 @@ function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, 
         real_view = @view real_part[1:2:end]    # Real components
         imag_view = @view real_part[2:2:end]    # Imaginary components
 
-        # In-place computation: real = cslth' * data, imag = snlth' * data
+        # In-place computation: real = cslth' * data, imag = -snlth' * data
         mul!(real_view, ft.cslth', data)
         mul!(imag_view, ft.snlth', data)
+        imag_view .*= -1
         output ./= ft.mtheta
     else
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
@@ -508,7 +512,7 @@ function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, 
         mul!(imag_part, ft.snlth', data)
 
         # Combine into complex output with 1/N normalization
-        output .= complex.(real_part, imag_part) ./ ft.mtheta
+        output .= complex.(real_part, -imag_part) ./ ft.mtheta
     end
 
     return output

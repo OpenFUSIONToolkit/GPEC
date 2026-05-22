@@ -1,5 +1,5 @@
 # Forcing data for perturbed equilibrium calculations
 # normalization: normal_field_T
 # Format: n  m  real(amplitude)  imag(amplitude)
-# Single mode test case: n=1, m=6, amplitude=1e-4
-1  6  1e-4  0.0
+# Single mode test case: n=1, m=2, amplitude=1e-4 T
+1  2  1e-4  0.0

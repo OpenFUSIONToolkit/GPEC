@@ -84,9 +84,10 @@ perturbed_equilibrium/
 │   ├── rational_m_res
 │   └── rational_n
 └── energies/
-    ├── plasma_energy
     ├── vacuum_energy
-    └── total_energy
+    ├── surface_energy
+    ├── plasma_energy
+    └── toroidal_torque
 ```
 """
 function write_outputs_to_HDF5(
@@ -196,8 +197,9 @@ function write_outputs_to_HDF5(
 
         # Energies
         energy_group = haskey(pe_group, "energies") ? pe_group["energies"] : create_group(pe_group, "energies")
-        energy_group["plasma_energy"] = state.plasma_energy
-        energy_group["vacuum_energy"] = state.vacuum_energy
-        energy_group["total_energy"]  = state.total_energy
+        energy_group["vacuum_energy"]   = state.vacuum_energy
+        energy_group["surface_energy"]  = state.surface_energy
+        energy_group["plasma_energy"]   = state.plasma_energy
+        energy_group["toroidal_torque"] = state.toroidal_torque
     end
 end

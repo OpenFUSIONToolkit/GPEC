@@ -28,4 +28,5 @@ else
     include("./runtests_kinetic.jl")
     include("./runtests_fullruns.jl")
     include("./runtests_coils.jl")
+    include("./runtests_imas.jl")
 end

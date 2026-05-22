@@ -108,8 +108,11 @@ Control surface matrices [numpert_total × numpert_total]:
   - `permeability` - P = Lambda * L^{-1} (plasma response matrix, Phi_tot = P * Phi_x)
   - `reluctance` - Rho = L^{-1} * (Lambda - L) * L^{-1}
 
-Energies:
-  - `plasma_energy`, `vacuum_energy`, `total_energy`
+Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ inductances):
+  - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
+  - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
+  - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")
+  - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
 """
 @kwdef mutable struct PerturbedEquilibriumState
     # Radial grid (FFS ODE integration ψ_n values) [npsi]
@@ -156,8 +159,9 @@ Energies:
     permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P = Lambda * L^{-1}
     reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # Rho = L^{-1}*(Lambda-L)*L^{-1}
 
-    # Energies
-    plasma_energy::Float64  = 0.0
-    vacuum_energy::Float64  = 0.0
-    total_energy::Float64   = 0.0
+    # Energies — see the struct docstring for formulas
+    vacuum_energy::Float64   = 0.0
+    surface_energy::Float64  = 0.0
+    plasma_energy::Float64   = 0.0
+    toroidal_torque::Float64 = 0.0
 end
