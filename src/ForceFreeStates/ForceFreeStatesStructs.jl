@@ -182,7 +182,8 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `qlow::Float64` - Integration terminated at q limit determined by minimum of qlow and q0 from equil
   - `reform_eq_with_psilim::Bool` - Reform equilibrium with computed psilim (not yet implemented)
   - `psiedge::Float64` - If less then psilim, calculates dW(psi) between psiedge and psilim, then runs with truncation at max(dW)
-  - `parallel_threads::Int` - Number of parallel threads (not yet implemented)
+  - `integration_method::String` - Euler-Lagrange integration path: `"ChunkedRiccati"` (default) chunks the domain at rational surfaces and integrates each chunk's fundamental matrix in parallel with backward integration away from rationals, producing accurate Δ'; `"LegacyEulerLagrange"` is the standard forward sweep kept for benchmarking.
+  - `integration_threads::Int` - Thread cap for the chunked-Riccati path. `0` (default) uses `Threads.nthreads()`; any positive value is capped at `Threads.nthreads()`. `1` runs serially. Output is bit-identical across thread counts.
   - `diagnose::Bool` - Enable diagnostic output (not yet implemented)
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
@@ -223,7 +224,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     qlow::Float64 = 0.0
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
-    parallel_threads::Int = 1
+    integration_method::String = "LegacyEulerLagrange"
+    integration_threads::Int = 0
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
@@ -516,3 +518,25 @@ end
 
 OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int) =
     OdeState(; numpert_total, numsteps_init, numunorms_init, msing)
+
+"""
+    IntegrationResult
+
+Uniform return type of `forcefreestates_integration`, holding the integrated `OdeState`
+plus optional fundamental-matrix data produced only by the chunked-Riccati path.
+
+## Fields
+
+  - `odet::OdeState` - Integrated ODE state, consumed by `free_run!` and PerturbedEquilibrium.
+  - `propagators` - Per-chunk fundamental-matrix propagators (chunked-Riccati path; `nothing` for legacy).
+  - `chunks` - Integration chunks matching `propagators` (chunked-Riccati path; `nothing` for legacy).
+  - `S_at_surface_left` - Riccati S-matrix at each rational surface's left edge (chunked-Riccati path; `nothing` for legacy).
+"""
+@kwdef struct IntegrationResult
+    odet::OdeState
+    propagators::Any = nothing
+    chunks::Any = nothing
+    S_at_surface_left::Any = nothing
+end
+
+IntegrationResult(odet::OdeState) = IntegrationResult(; odet)

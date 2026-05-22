@@ -48,7 +48,7 @@ using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSe
 using .ForceFreeStates: sing_lim!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
-using .ForceFreeStates: eulerlagrange_integration, free_run!
+using .ForceFreeStates: forcefreestates_integration, eulerlagrange_integration, free_run!
 
 const _BANNER = "="^60
 const _SECTION = "-"^40
@@ -245,7 +245,8 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         if ctrl.verbose
             @info "Integrating Euler-Lagrange equation"
         end
-        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
+        integration_result = forcefreestates_integration(ctrl, equil, ffit, intr)
+        odet = integration_result.odet
         if odet.nzero > 0 && ctrl.verbose
             @warn "Fixed-boundary mode unstable for n = $nstring"
         end
