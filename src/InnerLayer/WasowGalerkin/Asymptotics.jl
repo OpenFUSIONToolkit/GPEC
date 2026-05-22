@@ -45,6 +45,9 @@ Fields:
   - `Y, Z` — `n_alg×n_alg` series matrices, k = 0..kmax.
   - `spow` — shear powers (in the `xfac = x⁻²` variable) of the `n_alg` algebraic
     columns, defining the diagonal scaling `S(x) = diag(xfac^spow)`.
+  - `cc, dd, rvec` — `x`-independent Horner-coefficient packings of `Y` and of
+    `(Qmat, P[exp,alg])`, and the fractional-power exponents `-R[j]/2`,
+    precomputed once so [`evaluate_wasow`](@ref) does not rebuild them per call.
 """
 struct WasowCache{RT<:Number}
     Q::ComplexF64
@@ -66,6 +69,9 @@ struct WasowCache{RT<:Number}
     Y::Vector{Matrix{ComplexF64}}
     Z::Vector{Matrix{ComplexF64}}
     spow::Vector{Int}
+    cc::Matrix{ComplexF64}
+    dd::Matrix{ComplexF64}
+    rvec::Vector{RT}
 end
 
 # -----------------------------------------------------------------------
@@ -265,9 +271,15 @@ function build_wasow(spec::SystemSpec, params, Q::ComplexF64; kmax::Int=8)
     P, B = _split_recurrence(J, spec.nterms, spec.alg_idx, spec.exp_idx, spec.n, kmax)
     Y0, Y0inv, Qmat, Y, Z, spow = _algebraic_coefs(B, R, spec.n_alg, spec.alg_idx, kmax)
 
+    # x-independent quantities used on every evaluation, packed once here.
+    na = spec.n_alg
+    cc = _pack_y_coefs(Y, kmax, na)
+    dd = _pack_qp_coefs(Qmat, P, kmax, na, spec.n - na, spec.alg_idx, spec.exp_idx)
+    rvec = [-R[j] / 2 for j in 1:na for _ in 1:na]   # column-major: rvec[(j-1)*na+i]
+
     return WasowCache(Q, kmax, spec.n, spec.n_alg, spec.nterms,
         copy(spec.alg_idx), copy(spec.exp_idx), R, Tm, Tim, J,
-        P, B, Qmat, Y0, Y0inv, Y, Z, spow)
+        P, B, Qmat, Y0, Y0inv, Y, Z, spow, cc, dd, rvec)
 end
 
 build_wasow(spec::SystemSpec, params, Q::Number; kmax::Int=8) =
@@ -336,12 +348,11 @@ function _horner(x::Real, c::AbstractMatrix{ComplexF64};
 end
 
 # Pack the Y series into Horner-coefficient form (n_alg² × (kmax+1)), column-major
-# in the algebraic indices.
-function _pack_y_coefs(cache::WasowCache)
-    na = cache.n_alg
-    cc = Matrix{ComplexF64}(undef, na * na, cache.kmax + 1)
-    @inbounds for k in 0:cache.kmax
-        Yk = cache.Y[k+1]
+# in the algebraic indices. `x`-independent; built once in `build_wasow`.
+function _pack_y_coefs(Y::Vector{Matrix{ComplexF64}}, kmax::Int, na::Int)
+    cc = Matrix{ComplexF64}(undef, na * na, kmax + 1)
+    @inbounds for k in 0:kmax
+        Yk = Y[k+1]
         for j in 1:na, i in 1:na
             cc[(j-1)*na+i, k+1] = Yk[i, j]
         end
@@ -350,16 +361,13 @@ function _pack_y_coefs(cache::WasowCache)
 end
 
 # Pack the companion Q series and the P[exp,alg] blocks into Horner-coefficient
-# form ((n_alg² + n_exp·n_alg) × (kmax+1)), column-major.
-function _pack_qp_coefs(cache::WasowCache)
-    na = cache.n_alg
-    ne = cache.n - na
-    alg = cache.alg_idx
-    exp = cache.exp_idx
-    dd = Matrix{ComplexF64}(undef, na * na + ne * na, cache.kmax + 1)
-    @inbounds for k in 0:cache.kmax
-        Qk = cache.Qmat[k+1]
-        Pk = cache.P[k+1]
+# form ((n_alg² + n_exp·n_alg) × (kmax+1)), column-major. `x`-independent.
+function _pack_qp_coefs(Qmat::Vector{Matrix{ComplexF64}}, P::Vector{Matrix{ComplexF64}},
+    kmax::Int, na::Int, ne::Int, alg::Vector{Int}, exp::Vector{Int})
+    dd = Matrix{ComplexF64}(undef, na * na + ne * na, kmax + 1)
+    @inbounds for k in 0:kmax
+        Qk = Qmat[k+1]
+        Pk = P[k+1]
         for j in 1:na, i in 1:na
             dd[(j-1)*na+i, k+1] = Qk[i, j]
         end
@@ -392,19 +400,11 @@ function evaluate_wasow(cache::WasowCache, x::Real; derivative::Bool=true, apply
     alg = cache.alg_idx
     exp = cache.exp_idx
     xfac = 1.0 / (x * x)
-    R = cache.R
 
-    # rvec: each Y column j carries fractional prefactor x^{R[j]} = xfac^{-R[j]/2}.
-    rvec = Vector{eltype(R)}(undef, na * na)
-    @inbounds for j in 1:na, i in 1:na
-        rvec[(j-1)*na+i] = -R[j] / 2
-    end
-
-    cc = _pack_y_coefs(cache)
-    dd = _pack_qp_coefs(cache)
-
-    yy, dyy = _horner(xfac, cc; rvec=rvec, derivative=derivative)
-    zz, dzz = _horner(xfac, dd; derivative=derivative)
+    # cc, dd (Horner packings) and rvec (= -R[j]/2) are x-independent: precomputed
+    # in build_wasow. Each Y column j carries a prefactor x^{R[j]} = xfac^{-R[j]/2}.
+    yy, dyy = _horner(xfac, cache.cc; rvec=cache.rvec, derivative=derivative)
+    zz, dzz = _horner(xfac, cache.dd; derivative=derivative)
 
     y = reshape(yy, na, na)
     q = reshape(view(zz, 1:(na*na)), na, na) |> Matrix

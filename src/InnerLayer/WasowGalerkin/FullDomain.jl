@@ -239,14 +239,13 @@ function solve_galerkin_full(spec::SystemSpec, params, Q::ComplexF64;
     _assemble_half_coo!(Is, Js, Vs, rhs, wsL, specL, params, Q, cache, gL, sgnL, 1; nq=nq, tol_res=tol_res)
 
     A = sparse(Is, Js, Vs, ndim_global, ndim_global)
-    F = lu(A)
-    x1 = F \ rhs[:, 1]   # response to left-end driving
-    x2 = F \ rhs[:, 2]   # response to right-end driving
+    # Both driving columns share the factorization; solve them together.
+    X = lu(A) \ rhs   # X[:,1] = response to left drive, X[:,2] = response to right drive
 
     leg = gL[wsL.cells[wsL.nx].emap[1]]   # left matching DOF (X = −Xmax)
     reg = gR[wsR.cells[wsR.nx].emap[1]]   # right matching DOF (X = +Xmax)
     # M[i,j]: amplitude at end i (1=left, 2=right) for drive j (1=left, 2=right).
-    M = SMatrix{2,2,ComplexF64}(x1[leg], x1[reg], x2[leg], x2[reg])
+    M = SMatrix{2,2,ComplexF64}(X[leg, 1], X[reg, 1], X[leg, 2], X[reg, 2])
     return FullDomainMatching(M, info.xmax, ndim_global)
 end
 
