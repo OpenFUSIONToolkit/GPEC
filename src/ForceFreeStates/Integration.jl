@@ -15,6 +15,14 @@ Returns an [`IntegrationResult`](@ref); the `propagators` / `chunks` /
 `S_at_surface_left` fields are populated only by the chunked-Riccati path.
 """
 function forcefreestates_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    # Kinetic runs regularize the rational-surface layers (Logan 2015 Eq. 7.46), so there
+    # are no ideal jumps to cross; the chunked-Riccati Δ' BVP is ideal-MHD specific. Route
+    # kinetic runs through the legacy Euler-Lagrange sweep regardless of integration_method.
+    if ctrl.kinetic_factor > 0
+        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
+        return IntegrationResult(odet)
+    end
+
     if ctrl.integration_method == "ChunkedRiccati"
         odet, propagators, chunks, S_at_surface_left = parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
         return IntegrationResult(; odet, propagators, chunks, S_at_surface_left)
