@@ -1212,8 +1212,9 @@ Functionally identical to `eulerlagrange_integration` except:
    and renormalizes to (S_new, I) in one step
 3. Skips `transform_u!` — S is already the true solution, no Gaussian-reduction undo needed
 
-Enable via `use_riccati = true` in `[ForceFreeStates]` section of gpec.toml, or by
-setting `ctrl.use_riccati = true` programmatically.
+Serial single-chunk Riccati driver, retained as a reference/unit-test path for the
+Riccati renormalization. The production chunked-Riccati path is
+`parallel_eulerlagrange_integration`, reached via `forcefreestates_integration`.
 """
 function riccati_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
@@ -1623,9 +1624,10 @@ paths produce a bit-identical `u_store`.
    (S, I) Riccati-gauge `ca_l`/`ca_r`, `intr.sing[*]`, and `S_at_surface_left` that the Δ'
    BVP (`compute_delta_prime_matrix!`) and `SingularCoupling.jl` require.
 
-Enable via `use_parallel = true` in `[ForceFreeStates]` of gpec.toml. Requires
-`singfac_min != 0`. `compute_delta_prime_matrix!` is called from the main pipeline (after
-`free_run!`, when the vacuum edge BC is available) using the returned propagators/chunks.
+This is the `integration_method = "ChunkedRiccati"` path, reached via
+`forcefreestates_integration`. Requires `singfac_min != 0`. `compute_delta_prime_matrix!`
+is called from the main pipeline (after `free_run!`, when the vacuum edge BC is
+available) using the returned propagators/chunks.
 
 **Bidirectional integration for large-N accuracy:** the crossing chunk nearest each
 rational surface is integrated *backward* (`direction=-1`); the backward propagator Φ_bwd
@@ -1661,7 +1663,9 @@ function parallel_eulerlagrange_integration(
 
     julia_nthreads = Threads.nthreads()
     odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:Threads.maxthreadid()]
-    bvp_threads = max(1, min(julia_nthreads, ctrl.parallel_threads))
+    # integration_threads = 0 → use all available threads; otherwise cap at nthreads().
+    requested_threads = ctrl.integration_threads == 0 ? julia_nthreads : ctrl.integration_threads
+    bvp_threads = max(1, min(julia_nthreads, requested_threads))
 
     if ctrl.verbose
         @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads thread$(bvp_threads == 1 ? "" : "s")"

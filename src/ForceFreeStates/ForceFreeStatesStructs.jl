@@ -251,11 +251,9 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
-  - `use_riccati::Bool` - Use the dual Riccati reformulation S = U₁·U₂⁻¹ instead of the standard U₁/U₂ ODE. Reduces stiffness for faster integration. See Glasser (2018) Phys. Plasmas 25, 032507.
-  - `use_parallel::Bool` - Parallel fundamental matrix (propagator) integration using `Threads.@threads`. Each chunk is integrated independently from identity IC and assembled serially. Requires `singfac_min != 0`. Uses the same chunk bounds as the standard path but sub-divides chunks for load balancing. Crossings use the Riccati-style algorithm (no Gaussian reduction).
-  - `integration_method::String` - Euler-Lagrange integration path: `"ChunkedRiccati"` chunks the domain at rational surfaces and integrates each chunk's fundamental matrix in parallel with backward integration away from rationals (accurate Δ'); `"LegacyEulerLagrange"` is the standard forward sweep kept for benchmarking. Wired into the dispatcher in a later step; currently the legacy `use_parallel`/`use_riccati` flags still select the path.
-  - `integration_threads::Int` - Thread cap for the chunked-Riccati path. `0` uses `Threads.nthreads()`; any positive value is capped at `Threads.nthreads()`. `1` runs serially.
-  - `parallel_threads::Int` - Cap on the number of threads the parallel BVP uses. **Default `2`** parallelises the FM chunks across two threads (the BVP has ~10 chunks; 2 threads is enough to amortize them — speedup saturates here, raising to 4 adds scheduling overhead). Set `parallel_threads = 1` to run the FM chunks SERIALLY (no `Threads.@threads`), which is bit-deterministic and immune to the thread-schedule sensitivity that historically caused intermittent BVP divergences on numerically delicate equilibria like DIII-D 147131 (see CONVENTIONS.md §7). Empirical reliability sweep (5 trials × {1,2,4} on DIII-D 147131 βₚ≈0.07): 15/15 bit-identical Δ′ at every setting; pt=2 ≈ pt=4 ≈ 20 % faster than serial. If a parallel run diverges, drop to `parallel_threads = 1` rather than switching `use_parallel = false` — the latter is silently wrong. Capped at `Threads.nthreads()`.
+  - `use_double64_bvp::Bool` - Solve the Δ' BVP in extended (Double64) precision to survive the PEST3 cancellation. Default true.
+  - `integration_method::String` - Euler-Lagrange integration path: `"ChunkedRiccati"` (default) chunks the domain at rational surfaces and integrates each chunk's fundamental matrix in parallel with backward integration away from rationals (accurate Δ'); `"LegacyEulerLagrange"` is the standard forward sweep kept for benchmarking (no Δ' matrix).
+  - `integration_threads::Int` - Thread cap for the chunked-Riccati path. `0` (default) uses `Threads.nthreads()`; any positive value is capped at `Threads.nthreads()`. `1` runs serially. Output is bit-identical across thread counts.
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
@@ -280,7 +278,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     ucrit::Float64 = 1e4
     numsteps_init::Int = 4000
     numunorms_init::Int = 100
-    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for use_parallel path.
+    singfac_min::Float64 = 1e-4   # Matches Fortran STRIDE; required nonzero for the chunked-Riccati path.
     cyl_flag::Bool = false
     set_psilim_via_dmlim::Bool = false
     dmlim::Float64 = 0.2
@@ -292,7 +290,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     reform_eq_with_psilim::Bool = false
     psiedge::Float64 = 0.99
     truncate_at_dW_peak::Bool = false   # Edge-dW peak becomes new physical edge; Δ' BVP made self-consistent. See docstring.
-    parallel_threads::Int = 2
     diagnose::Bool = false
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
@@ -300,10 +297,8 @@ A mutable struct containing control parameters for stability analysis, set by th
     force_wv_symmetry::Bool = true
     save_interval::Int = 3
     force_termination::Bool = false
-    use_riccati::Bool = false
-    use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
     use_double64_bvp::Bool = true
-    integration_method::String = "LegacyEulerLagrange"
+    integration_method::String = "ChunkedRiccati"
     integration_threads::Int = 0
 end
 

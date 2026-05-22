@@ -143,48 +143,21 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
 end
 
 """
-    eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal) -> OdeState
 
-Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
-Formerly `ode_run`. Has the same functionality as `ode_run` in the Fortran code, with the addition of
-a single dump to the `euler.h5` file at the end of integration instead of multiple dumps
-to `euler.bin` throughout the integration. We have made the control logic more clear
-by pre-computing all integration chunks upfront and using a for loop to iterate through them,
-eliminating the while-loop logic and making integration bounds explicit at each step.
-We now perform significant post-processing after integration including finding the peak dW
-in the edge region and evaluating the stability criterion over the entire integration,
-which were previously done during integration in the Fortran code.
+Legacy Euler-Lagrange integration driver — the standard forward sweep over
+`chunk_el_integration_bounds` with Gaussian-reduction normalization. This is the
+`integration_method = "LegacyEulerLagrange"` path, kept for benchmarking against the
+chunked-Riccati default. It does not produce a Δ' matrix.
 
-### TODOs
-
-restype functionality if we decide to do this
-
-### Returns
-
-An OdeState struct containing the final state of the ODE solver after integration is complete.
+Pre-computes all integration chunks upfront and iterates them, then post-processes
+(edge-dW scan, fixed-boundary stability criterion, Gaussian-reduction undo). Returns the
+final `OdeState`; callers reach it via [`forcefreestates_integration`](@ref).
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
-
-    # Dispatch. Both the parallel-FM and serial-Riccati paths are served by
-    # parallel_eulerlagrange_integration — it returns the canonical GR-axis-basis u_store
-    # that PerturbedEquilibrium consumes, plus (propagators, chunks, S_at_surface_left) for
-    # the deferred Δ' BVP. use_riccati routes through the same machinery with the chunk
-    # integration forced single-threaded (parallel_threads = 1).
-    if ctrl.use_parallel
-        return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
-    elseif ctrl.use_riccati
-        saved_threads = ctrl.parallel_threads
-        ctrl.parallel_threads = 1
-        try
-            return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
-        finally
-            ctrl.parallel_threads = saved_threads
-        end
-    end
-
     odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
     finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
-    return (odet, nothing, nothing, nothing)
+    return odet
 end
 
 """
