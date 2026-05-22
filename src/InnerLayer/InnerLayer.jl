@@ -11,6 +11,7 @@ using LinearAlgebra
 using StaticArrays
 
 include("InnerLayerInterface.jl")
+include("WasowGalerkin/WasowGalerkin.jl")
 include("GGJ/GGJ.jl")
 # include("SLAYER/Slayer.jl") --- SLAYER code goes here
 
@@ -19,7 +20,7 @@ import .GGJ: InnerAsymptoticsCache, mercier_di, mercier_dr, inner_Q, rescale_del
 import .GGJ: glasser_wang_2020_eq55
 # SLAYER imports go here
 
-export InnerLayerModel, solve_inner
+export InnerLayerModel, solve_inner, solve_inner_full
 export GGJ, GGJModel, GGJParameters
 export build_asymptotics, evaluate_asymptotics, pick_xmax, InnerAsymptoticsCache
 export mercier_di, mercier_dr, inner_Q, rescale_delta

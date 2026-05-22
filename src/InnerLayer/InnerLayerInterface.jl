@@ -27,3 +27,20 @@ imposed at the rational surface, X = 0). They are the Δ_{j,±}(γ) of
 Glasser, Wang & Park, Phys. Plasmas **23**, 112506 (2016), Eqs. (34)–(35).
 """
 function solve_inner end
+
+"""
+    solve_inner_full(model::InnerLayerModel, params, γ::ComplexF64; kwargs...)
+
+Compute the **full-domain** matching data for an inner-layer `model` on
+X ∈ [−Xmax, +Xmax], with asymptotic matching at both ends and no parity
+reduction at the rational surface (X = 0). Returns a model-defined matching
+object (e.g. `WasowGalerkin.FullDomainMatching`) that generalizes — and for a
+parity-symmetric system recombines to — the half-domain `(Δ_odd, Δ_even)` pair
+returned by [`solve_inner`](@ref).
+
+This path is required when the inner-layer physics breaks the X → −X parity of
+the single-fluid system (e.g. a rotating two-fluid drift-MHD layer), so the
+even/odd decomposition no longer applies. Concrete models specialize this
+function.
+"""
+function solve_inner_full end

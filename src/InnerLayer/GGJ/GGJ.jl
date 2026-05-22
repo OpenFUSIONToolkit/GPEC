@@ -23,7 +23,7 @@ import ..InnerLayerModel, ..solve_inner
     GGJModel{S} <: InnerLayerModel
 
 Glasser–Greene–Johnson resistive inner-layer model. The type parameter `S`
-selects the solver: `:galerkin` (default) for the Hermite-cubic finite element 
+selects the solver: `:galerkin` (default) for the Hermite-cubic finite element
 solver and `:shooting` for the backward stable-shoot solver. Both
 implementations consume the same `inps` asymptotic-basis kernel and return
 the parity-projected matching data.
@@ -33,10 +33,9 @@ struct GGJModel{S} <: InnerLayerModel end
 GGJModel(; solver::Symbol=:galerkin) = GGJModel{solver}()
 
 include("GGJParameters.jl")
-include("InnerAsymptotics.jl")
 include("Reference.jl")
+include("GGJSpec.jl")
 include("Shooting.jl")
-include("Galerkin.jl")
 
 export GGJModel, GGJParameters
 export mercier_di, mercier_dr, inner_Q, rescale_delta
