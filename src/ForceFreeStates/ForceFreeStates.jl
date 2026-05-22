@@ -19,10 +19,16 @@ using Printf
 using DoubleFloats
 import StaticArrays: @MMatrix
 
-# Include all necessary files
+# Include all necessary files. Integration files are split by role:
+#   Chunking.jl       — domain partitioning at rational surfaces (both paths)
+#   EulerLagrange.jl  — legacy forward Euler-Lagrange sweep
+#   Riccati.jl        — chunked-Riccati integration (the default path)
+#   DeltaPrime.jl     — STRIDE inter-surface Δ' boundary-value problem
+#   Integration.jl    — forcefreestates_integration dispatcher
 include("ForceFreeStatesStructs.jl")
 include("Mercier.jl")
 include("Bal.jl")
+include("Chunking.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")
@@ -31,6 +37,7 @@ include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 include("Riccati.jl")
+include("DeltaPrime.jl")
 include("Integration.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
