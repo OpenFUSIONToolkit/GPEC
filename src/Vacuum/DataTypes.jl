@@ -226,9 +226,9 @@ function PlasmaGeometry(inputs::VacuumInput)
     θ_out = range(; start=0, length=inputs.mtheta, step=2π/inputs.mtheta) # VACUUM uses [0, 2π) grid
 
     # Use one-shot API with PeriodicBC
-    x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC()) # no endpoint handling needed!
-    z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC())
-    ν = cubic_interp(θ_in, inputs.ν, θ_out; bc=PeriodicBC())
+    x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC(; check=false)) # no endpoint handling needed!
+    z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC(; check=false))
+    ν = cubic_interp(θ_in, inputs.ν, θ_out; bc=PeriodicBC(; check=false))
 
     return PlasmaGeometry(x, z, ν)
 end
@@ -346,7 +346,7 @@ function PlasmaGeometry3D(inputs::VacuumInput)
         ζ_flat = repeat(collect(ζ_grid); inner=mtheta)
         grid_points = (θ_flat, ζ_flat)
         for (k, data) in enumerate((inputs.x, inputs.y, inputs.z))
-            itp = cubic_interp((θ_in, ζ_in), reshape(data, inputs.mtheta_in, inputs.nzeta_in); bc=(PeriodicBC(), PeriodicBC()))
+            itp = cubic_interp((θ_in, ζ_in), reshape(data, inputs.mtheta_in, inputs.nzeta_in); bc=(PeriodicBC(; check=false), PeriodicBC(; check=false)))
             r[:, k] = itp(grid_points)
         end
     end

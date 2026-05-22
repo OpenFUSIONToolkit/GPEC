@@ -3,10 +3,20 @@
 GPEC follows a five-stage analysis pipeline driven by a single `gpec.toml` configuration file. Each stage produces structured output consumed by the next.
 
 ```
-gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ──► PerturbedEquilibrium ──► gpec.h5
-                                              ▲
-                                         ForcingTerms
+                              gpec.toml
+                  (user options for every module)
+                                 │
+        ┌────────────┬───────────┴───┬─────────────────────┐
+        ▼            ▼               ▼                     ▼
+   Equilibrium ──► Vacuum ──► ForceFreeStates ──► PerturbedEquilibrium ──► gpec.h5
+        ▲            │                                    ▲   ▲
+        │            └────────────────────────────────────┘   │
+        │                                                     │
+   equilibrium file                                      ForcingTerms
+   kinetic profiles (planned)                  (external perturbation file)
 ```
+
+The single `gpec.toml` file supplies user-selected options to every module. The two primary input files — the equilibrium file and (planned) the kinetic profiles file — are read by the `Equilibrium` module, while the external perturbation specification enters at `PerturbedEquilibrium` via `ForcingTerms`. `Vacuum` feeds both `ForceFreeStates` and `PerturbedEquilibrium` directly: the response matrices it builds are consumed by both downstream stages.
 
 ---
 
@@ -24,6 +34,7 @@ gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ─�
   - `chease` / `chease2` — CHEASE equilibrium code output
   - `lar` — Large aspect ratio analytical model
   - `sol` — Solov'ev analytical equilibrium
+- Kinetic profiles file (planned) — temperature and density profiles for the kinetic analysis path
 - Grid resolution and solver settings
 
 **Outputs** (`PlasmaEquilibrium`):
@@ -51,7 +62,7 @@ gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ─�
 - `grri` — Interior Green's function matrix (plasma boundary → plasma boundary)
 - `grre` — Exterior Green's function matrix (plasma boundary → wall)
 
-**Key references**: [Chance et al. (1997)](citations.md#chance-1997), [Chance et al. (2007)](citations.md#chance-2007)
+**Key references**: [Chance et al. (1997)](citations.md#Vacuum-Module), [Chance et al. (2007)](citations.md#Vacuum-Module)
 
 ---
 
@@ -78,7 +89,7 @@ gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ─�
   - Tearing stability parameter Δ'
   - Small solution coefficients (used by PerturbedEquilibrium)
 
-**Key references**: [Glasser (2016) Newcomb](citations.md#glasser-2016-newcomb), [Glasser (2018) Riccati](citations.md#glasser-2018-riccati)
+**Key references**: [Glasser (2016) Newcomb](citations.md#ForceFreeStates-Module), [Glasser (2018) Riccati](citations.md#ForceFreeStates-Module)
 
 ---
 
@@ -120,7 +131,7 @@ gpec.toml ──► Equilibrium ──► Vacuum ──► ForceFreeStates ─�
   - Island half-width w_s (proportional to √|δψ_s|)
   - Chirikov overlap parameter σ (ratio of adjacent island widths to their separation)
 
-**Key references**: [Park et al. (2007a)](citations.md#park-2007a), [Park et al. (2009)](citations.md#park-2009), [Park et al. (2017)](citations.md#park-2017)
+**Key references**: [Park et al. (2007a)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2009)](citations.md#PerturbedEquilibrium-Module), [Park et al. (2017)](citations.md#Kinetic-Forces)
 
 ---
 

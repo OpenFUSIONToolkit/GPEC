@@ -1,0 +1,34 @@
+# GPEC configuration for running from an IMAS data dictionary (IMASdd.dd).
+#
+# Usage (from Julia):
+#   using GeneralizedPerturbedEquilibrium as GPEC
+#   GPEC.main([dirname(@__FILE__)]; dd=my_dd)
+#
+# The eq_filename field is a placeholder — the equilibrium is read directly
+# from the dd passed at runtime. See run_imas_example.jl for a full workflow.
+
+[Equilibrium]
+eq_type      = "imas"
+eq_filename  = "from_dd"        # placeholder: equilibrium comes from runtime dd argument
+jac_type     = "boozer"
+psilow       = 0.01
+psihigh      = 0.9995
+mpsi         = 128
+mtheta       = 256
+imas_cocos   = 11               # IMAS standard COCOS (input dd is COCOS 11)
+
+[Wall]
+shape = "nowall"
+
+[ForceFreeStates]
+nn_low               = 1
+nn_high              = 1
+vac_flag             = true
+ode_flag             = true
+mat_flag             = true
+mer_flag             = false
+bal_flag             = false
+write_outputs_to_HDF5 = false
+verbose              = false
+delta_mhigh          = 16
+qlow                 = 1.02

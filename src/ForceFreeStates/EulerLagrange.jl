@@ -55,7 +55,9 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         end
     end
 
-    # Deallocate unused storage of integration data
+    # Deallocate unused storage of integration data.
+    # `odet.step` was incremented one past the last filled index in integrate_el_region!.
+    odet.step -= 1
     if ctrl.psiedge < intr.psilim
         # Find the peak dW in the edge region and truncate integration data there
         odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
@@ -69,7 +71,6 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
         intr.qlim = odet.q_store[end]
         odet.u .= odet.u_store[:, :, :, end]
     else
-        odet.step -= 1 # step was incremented one extra time in integrate_el_region!
         trim_storage!(odet)
     end
 
@@ -302,6 +303,11 @@ function cross_ideal_singular_surf!(
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
+    # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
+    # The previous sing_der! calls (lines above) computed du from the pre-trapezoidal,
+    # pre-asymptotic u, leaving odet.ud stale after the u modifications.
+    sing_der!(du1, odet.u, params, odet.psifac)
+
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
     odet.q_store[odet.step] = odet.q
@@ -358,6 +364,7 @@ function integrate_el_region!(
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
+    du_buffer = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
     function segment_callback!(integrator)
         ctrl, _, _, intr, odet, chunk = integrator.p
@@ -367,6 +374,12 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
+        # If Gaussian reduction modified u, recompute ud to keep it consistent.
+        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
+        if odet.new
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+        end
+
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -375,7 +388,7 @@ function integrate_el_region!(
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
-        if near_start || near_end || (odet.step % ctrl.save_interval == 0) || in_edge_scan
+        if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end
@@ -544,15 +557,20 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
+    # Steps where free_compute_total hits a singular wp solve are left as NaN per the EdgeScanState contract.
     for j in 1:N_edge
         istep = edge_start + j - 1
         odet.psifac = odet.psi_store[istep]
         odet.u .= odet.u_store[:, :, :, istep]
-        result = free_compute_total(equil, ffit, intr, odet)
-        es.total_eigenvalue[j] = result.total_eigenvalue
-        es.plasma_energy[j] = result.plasma_energy
-        es.vacuum_energy[j] = result.vacuum_energy
-        es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+        try
+            result = free_compute_total(equil, ffit, intr, odet)
+            es.total_eigenvalue[j] = result.total_eigenvalue
+            es.plasma_energy[j] = result.plasma_energy
+            es.vacuum_energy[j] = result.vacuum_energy
+            es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+        catch e
+            e isa LinearAlgebra.SingularException || rethrow()
+        end
     end
 
     # Return the ODE step index at peak total_eigenvalue (NaN-safe; failed steps ignored)
