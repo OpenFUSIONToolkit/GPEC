@@ -927,26 +927,32 @@ function parallel_eulerlagrange_integration(
     base_chunks = chunk_el_integration_bounds(chunk_odet, ctrl, intr; bidirectional=true)
     chunks = balance_integration_chunks(base_chunks, ctrl, intr)
     propagators = [ChunkPropagator(N) for _ in chunks]
-    odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:Threads.maxthreadid()]
+    # Per-chunk OdeState proxies: scratch state for `sing_der!` side effects (q, ud,
+    # spline_hint, total_steps). Allocating one per chunk lets us `@spawn` each chunk
+    # independently — the scheduler can then interleave Route A's task with the chunks,
+    # which `Threads.@threads :static` would not allow (its partitions don't yield, so a
+    # spawned Route A would have to wait for a partition to finish). Per-chunk (rather
+    # than per-`threadid`) proxies are also safe under Julia 1.8+ task migration, where
+    # `Threads.threadid()` can change mid-task.
+    odet_proxies = [OdeState(N, 1, 1, 0) for _ in eachindex(chunks)]
 
     if ctrl.verbose
         mode = use_concurrent ? "concurrent (Route A ≈1 thread, Route B on the remaining $(total_threads-1))" : "sequential"
         @info "   Chunked Riccati: $(length(chunks)) chunks, $total_threads thread$(total_threads == 1 ? "" : "s"), $mode"
     end
 
-    # Route B parallel phase. `:static` partitions chunks deterministically; output is
-    # bit-identical regardless of thread count (each chunk writes its own propagators[i]).
-    # When Route A is concurrently spawned the scheduler shares the threads — Route A
-    # effectively occupies one, Route B's chunks fill the rest.
+    # Route B parallel phase. One `@spawn` per chunk (work-stealing) so the scheduler
+    # naturally overlaps these many short tasks with Route A's one long task. Output is
+    # deterministic regardless of execution order (each chunk writes its own propagators[i]).
     if total_threads == 1
         for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                        odet_proxies[1])
+                                        odet_proxies[i])
         end
     else
-        Threads.@threads :static for i in eachindex(chunks)
-            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                        odet_proxies[Threads.threadid()])
+        @sync for i in eachindex(chunks)
+            Threads.@spawn integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
+                                                       odet_proxies[i])
         end
     end
 
