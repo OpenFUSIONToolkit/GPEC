@@ -303,6 +303,32 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
             end
         end
 
+        # Route B (chunked-Riccati) diagnostic eigenmode + cross-check on the least-stable
+        # eigenvalue. Route A's (legacy EL) result is the trusted one fed to PerturbedEquilibrium;
+        # Route B's u_store is in the Riccati (S, I) gauge — useful for an independent eigenvalue
+        # but not for PE outputs (the piecewise basis corrupts resonant fields).
+        vac_data_riccati = nothing
+        if integration_result.odet_riccati !== nothing
+            vac_data_riccati = free_run!(integration_result.odet_riccati, ctrl, equil, ffit, intr)
+            ela = real(vac_data.et[1])
+            elb = real(vac_data_riccati.et[1])
+            reldiff = abs(ela - elb) / max(abs(ela), eps())
+            if reldiff > 0.10
+                error(
+                    "Route A (legacy EL) and Route B (chunked Riccati) least-stable eigenvalues " *
+                    "disagree by $(round(100*reldiff; digits=2))% — Route A Re(et[1])=$(ela), " *
+                    "Route B Re(et[1])=$(elb). The two routes should match to within ~1% on a " *
+                    "well-resolved equilibrium; >10% indicates a real numerical problem. Try " *
+                    "tightening `eulerlagrange_tolerance` (currently $(ctrl.eulerlagrange_tolerance)) " *
+                    "or adjusting `singfac_min` (currently $(ctrl.singfac_min)) to bring them into agreement."
+                )
+            elseif reldiff > 0.01 && ctrl.verbose
+                @warn "Route A / Route B least-stable eigenvalue disagree by " *
+                      "$(round(100*reldiff; digits=2))% — Route A (legacy EL) Re(et[1])=$(ela), " *
+                      "Route B (chunked Riccati) Re(et[1])=$(elb)"
+            end
+        end
+
         # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
         # Requires propagators from the chunked-Riccati path and wv from free_run!.
         if ctrl.kinetic_factor == 0 && intr.msing > 0 && integration_result.propagators !== nothing
@@ -317,7 +343,8 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version;
+                              vac_data_riccati=ctrl.vac_flag ? vac_data_riccati : nothing)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -407,7 +434,8 @@ function write_outputs_to_HDF5(
     odet::OdeState,
     vac_data::Union{VacuumData,Nothing},
     ffit::Union{FourFitVars,Nothing}=nothing,
-    git_version::String="unknown"
+    git_version::String="unknown";
+    vac_data_riccati::Union{VacuumData,Nothing}=nothing,
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -572,6 +600,20 @@ function write_outputs_to_HDF5(
         out_h5["vacuum/x_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 1] : Float64[]
         out_h5["vacuum/y_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 2] : Float64[]
         out_h5["vacuum/z_wall"] = ctrl.vac_flag ? vac_data.wall_pts[:, 3] : Float64[]
+
+        # Route B (chunked-Riccati) eigenmode diagnostics — energy matrix (wt0),
+        # eigenvectors (columns of wt after free_run!), eigenvalues (et/ep/ev). The
+        # least-stable eigenvalue is cross-checked against Route A during integration.
+        # Only present for integration_method = "ChunkedRiccati"; legacy / kinetic paths
+        # leave vac_data_riccati = nothing.
+        if vac_data_riccati !== nothing
+            out_h5["vacuum/riccati/wt"]                = vac_data_riccati.wt
+            out_h5["vacuum/riccati/wt0"]               = vac_data_riccati.wt0
+            out_h5["vacuum/riccati/ep"]                = vac_data_riccati.ep
+            out_h5["vacuum/riccati/ev"]                = vac_data_riccati.ev
+            out_h5["vacuum/riccati/et"]                = vac_data_riccati.et
+            out_h5["vacuum/riccati/vacuum_eigenvalue"] = vac_data_riccati.vacuum_eigenvalue
+        end
 
         # Write kinetic parameters when kinetic mode is enabled
         if ctrl.kinetic_factor > 0

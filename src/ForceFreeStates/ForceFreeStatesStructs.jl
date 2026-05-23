@@ -589,18 +589,25 @@ OdeState(numpert_total::Int, numsteps_init::Int, numunorms_init::Int, msing::Int
 """
     IntegrationResult
 
-Uniform return type of `forcefreestates_integration`, holding the integrated `OdeState`
-plus optional fundamental-matrix data produced only by the chunked-Riccati path.
+Uniform return type of `forcefreestates_integration`. Holds the trusted (Route A,
+GR-axis-gauge) `OdeState` consumed by PerturbedEquilibrium, plus — for the chunked-Riccati
+path — the parallel Route B's `OdeState` and the fundamental-matrix data needed for the
+Δ' BVP. All Route B fields are `nothing` for the legacy Euler-Lagrange path.
 
 ## Fields
 
-  - `odet::OdeState` - Integrated ODE state, consumed by `free_run!` and PerturbedEquilibrium.
+  - `odet::OdeState` - Route A integrated state (exact GR-axis-gauge eigenmode); the
+    canonical input to `free_run!` and PerturbedEquilibrium.
+  - `odet_riccati` - Route B integrated state (Riccati (S, I) gauge eigenmode);
+    diagnostic-only, used by the least-stable-eigenvalue cross-check (chunked-Riccati path;
+    `nothing` for legacy).
   - `propagators` - Per-chunk fundamental-matrix propagators (chunked-Riccati path; `nothing` for legacy).
   - `chunks` - Integration chunks matching `propagators` (chunked-Riccati path; `nothing` for legacy).
   - `S_at_surface_left` - Riccati S-matrix at each rational surface's left edge (chunked-Riccati path; `nothing` for legacy).
 """
 @kwdef struct IntegrationResult
     odet::OdeState
+    odet_riccati::Any = nothing
     propagators::Any = nothing
     chunks::Any = nothing
     S_at_surface_left::Any = nothing

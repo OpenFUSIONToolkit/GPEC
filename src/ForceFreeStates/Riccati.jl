@@ -771,21 +771,33 @@ function propagate_chunk_state(upper::Array{ComplexF64,3}, lower::Array{ComplexF
 end
 
 """
-    assemble_riccati_s_gauge!(odet, chunks, propagators, ctrl, equil, ffit, intr) -> S_at_surface_left
+    assemble_riccati_walk!(odet, chunks, propagators, ctrl, equil, ffit, intr) -> S_at_surface_left
 
-S-gauge assembly pass of the parallel-FM solution. Applies each chunk propagator in order,
-renormalizing to the (S, I) Riccati form after each chunk (STRIDE `ode_fixup`), and crosses
-singular surfaces with `riccati_cross_ideal_singular_surf!`.
+Serial assembly walk of the chunked-Riccati solution. Walks the chunks in order, applying
+each chunk's fundamental-matrix propagator to the running Riccati state, renormalizing to
+the (S, I) form after each chunk (STRIDE `ode_fixup`), and crossing rational surfaces with
+`riccati_cross_ideal_singular_surf!`.
 
-Its purpose is the Riccati-gauge diagnostics: it returns `S_at_surface_left` (the Riccati
-matrix S at each singular surface's left boundary, the axis BC for the Δ' BVP) and
-populates `odet.ca_l`/`odet.ca_r` and `intr.sing[*]` (Δ', `ua_left`, …) in the (S, I) gauge
-that `PerturbedEquilibrium`'s `SingularCoupling.jl` and `compute_delta_prime_matrix!`
-require. It does NOT produce the canonical `u_store` — that comes from
-`standard_eulerlagrange_pass`. Run on a scratch `OdeState` so its axis-gauge bookkeeping
-does not collide with the canonical odet from the standard pass.
+This single pass produces everything Route B needs:
+
+  - **`u_store` / `ud_store`** — reconstructed directly from each chunk's per-ψ propagator
+    history (`ChunkPropagator.{psi_history,upper_history,lower_history}`). Forward chunks
+    anchor at the chunk start; backward (crossing) chunks anchor at the chunk end via
+    `apply_propagator_inverse!`. `ud_store` is `sing_der!` evaluated on the reconstructed
+    state. This is the Riccati (S, I) gauge `u_store` used only for Route B's diagnostic
+    `free_run!` / eigenvalue cross-check — never fed to PerturbedEquilibrium (the
+    per-chunk renormalization makes the basis piecewise and corrupts PE outputs; see
+    `parallel_eulerlagrange_integration` for the trusted Route A).
+  - **`ca_l`/`ca_r`, `intr.sing[*]` (per-surface Δ', `ua_left`/`ua_right`, …)** — written
+    by `riccati_cross_ideal_singular_surf!` at each crossing, in the (S, I) Riccati gauge
+    that `SingularCoupling.jl` and `compute_delta_prime_matrix!` consume.
+  - **`S_at_surface_left`** — the Riccati S matrix at each surface's left boundary, the
+    well-conditioned axis BC for the Δ' BVP.
+
+On return `odet.step` is one past the last filled index (the convention
+`finalize_canonical_u_store!` expects).
 """
-function assemble_riccati_s_gauge!(
+function assemble_riccati_walk!(
     odet::OdeState, chunks::Vector{IntegrationChunk}, propagators::Vector{ChunkPropagator},
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
     ffit::FourFitVars, intr::ForceFreeStatesInternal
@@ -797,32 +809,52 @@ function assemble_riccati_s_gauge!(
     odet.step = 1
 
     S_at_surface_left = Matrix{ComplexF64}[]
+    du_buf = zeros(ComplexF64, N, N, 2)
+
+    # Save a reconstructed (u, ud) at ψ into u_store; skip a duplicate of the previously
+    # stored ψ (adjacent chunks share a boundary).
+    function store_state!(psi::Float64, u_at_psi::Array{ComplexF64,3}, chunk::IntegrationChunk)
+        if odet.step > 1 && odet.psi_store[odet.step-1] == psi
+            return
+        end
+        if odet.step >= size(odet.u_store, 4)
+            resize_storage!(odet)
+        end
+        odet.psi_store[odet.step] = psi
+        odet.q_store[odet.step] = equil.profiles.q_spline(psi)
+        @views odet.u_store[:, :, :, odet.step] .= u_at_psi
+        sing_der!(du_buf, u_at_psi, (ctrl, equil, ffit, intr, odet, chunk), psi)
+        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+        odet.step += 1
+    end
 
     for (i, chunk) in enumerate(chunks)
-        # Forward chunks: apply Φ_fwd directly. Backward (crossing) chunks: apply the
-        # inverse of the well-conditioned backward propagator via LU solve.
+        prop = propagators[i]
+
+        # Advance the running state across the chunk and pick the history anchor:
+        #   forward  chunk → history maps psi_start → ψ, anchor = state at psi_start;
+        #   backward chunk → history maps psi_end   → ψ, anchor = state at psi_end.
         if chunk.direction == -1
-            apply_propagator_inverse!(odet, propagators[i])
+            apply_propagator_inverse!(odet, prop)
+            anchor = copy(odet.u)
         else
-            apply_propagator!(odet, propagators[i])
+            anchor = copy(odet.u)
+            apply_propagator!(odet, prop)
         end
 
-        # Renorm to (S, I) after every chunk — equivalent to STRIDE's ode_fixup.
+        for k in eachindex(prop.psi_history)
+            u_k = propagate_chunk_state(prop.upper_history[k], prop.lower_history[k], anchor)
+            store_state!(prop.psi_history[k], u_k, chunk)
+        end
+
         renormalize_riccati_inplace!(odet.u, N)
         odet.psifac = chunk.psi_end
         odet.q = equil.profiles.q_spline(odet.psifac)
 
         if chunk.needs_crossing
-            if ctrl.kinetic_factor > 0
-                error("kinetic_factor > 0 not implemented yet in Riccati!")
-            else
-                # Save S at the left boundary of this surface (state is (S, I)).
-                push!(S_at_surface_left, copy(odet.u[:, :, 1]))
-
-                # riccati_cross_ideal_singular_surf! computes ca_l/ca_r and intr.sing[*]
-                # in the (S, I) Riccati gauge and zeros column ipert_res directly.
-                riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
-            end
+            ctrl.kinetic_factor > 0 && error("kinetic_factor > 0 not implemented yet in Riccati!")
+            push!(S_at_surface_left, copy(odet.u[:, :, 1]))
+            riccati_cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
         end
     end
 
@@ -831,28 +863,38 @@ end
 
 """
     parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
-        -> (odet, propagators, chunks, S_at_surface_left)
+        -> (odet, odet_riccati, propagators, chunks, S_at_surface_left)
 
-Parallel fundamental-matrix (propagator) driver for the EL integration. The chunk
-propagators are integrated once (in parallel) and used only for the deferred Δ' BVP and
-S-gauge outputs — `u_store` is built by the standard EL pass so all three integration
-paths produce a bit-identical `u_store`.
+Chunked-Riccati driver — the `integration_method = "ChunkedRiccati"` path, reached via
+`forcefreestates_integration`. Runs two integration routes **concurrently** so the
+wall time is pegged to the slower one (the legacy EL solve, for N ≥ 2 threads) rather
+than the sum:
 
-1. **u_store pass**: `standard_eulerlagrange_pass` runs the standard forward EL sweep on
-   natural chunks (`chunk_el_integration_bounds`), with `integrate_el_region!`'s
-   partition-invariant ContinuousCallback GR firing. Output is the canonical
-   ξ_ψ in the axis basis that `PerturbedEquilibrium` consumes.
-2. **Chunk generation**: `chunk_el_integration_bounds` (bidirectional) + `balance_integration_chunks`.
-3. **Parallel phase**: `integrate_propagator_chunk!` integrates each chunk's fundamental
-   matrix from identity ICs, capturing per-ψ history. `Threads.@threads :static`.
-4. **S-gauge pass** (`assemble_riccati_s_gauge!`, on a scratch `OdeState`): produces the
-   (S, I) Riccati-gauge `ca_l`/`ca_r`, `intr.sing[*]`, and `S_at_surface_left` that the Δ'
-   BVP (`compute_delta_prime_matrix!`) and `SingularCoupling.jl` require.
+- **Route A — legacy Euler-Lagrange** (`Threads.@spawn`, ≈ 1 thread):
+  `standard_eulerlagrange_pass` + `finalize_canonical_u_store!` → `odet`. This is the
+  *trusted* u_store (exact GR-gauge eigenmode) that PerturbedEquilibrium consumes.
+- **Route B — chunked Riccati** (remaining N − 1 threads): the parallel
+  `integrate_propagator_chunk!` phase over balanced bidirectional chunks +
+  `assemble_riccati_walk!` (builds `odet_riccati.u_store` from the chunk propagator
+  histories and writes `intr.sing[*]` Δ' / `ua_*` plus `S_at_surface_left`) + finalize.
 
-This is the `integration_method = "ChunkedRiccati"` path, reached via
-`forcefreestates_integration`. Requires `singfac_min != 0`. `compute_delta_prime_matrix!`
-is called from the main pipeline (after `free_run!`, when the vacuum edge BC is
-available) using the returned propagators/chunks.
+Both routes produce energy / eigenvalue / eigenvector outputs (via `free_run!` in
+`GeneralizedPerturbedEquilibrium.jl`); the least-stable eigenvalue is cross-checked there
+(> 1 % discrepancy → warning, > 10 % → error).
+
+Concurrency safety (default `truncate_at_dW_peak = false`): the two routes share
+`equil` (read-only), `ffit` (`_hint` is a benign perf-only race already incurred by the
+existing parallel chunk loop), and `intr.sing[*]` (Route B writes the Δ' / `ua_*` fields,
+Route A reads only the geometric fields `psifac,m,n,q,q1` — disjoint mutable-struct
+slots). `intr.psilim` is read by both but written by neither when `truncate_at_dW_peak`
+is `false`. With `truncate_at_dW_peak = true`, Route A's finalize writes `intr.psilim`,
+so the routes run sequentially.
+
+After both complete, Route B's S-gauge `ca_l`/`ca_r` are copied onto Route A's `odet`
+so `SingularCoupling.jl` (which expects Riccati-gauge ca paired with the S-gauge
+`intr.sing[*].ua_*`) sees a consistent set. PerturbedEquilibrium and
+`compute_delta_prime_matrix!` consume Route A's `odet` and Route B's `propagators` /
+`chunks` / `S_at_surface_left`.
 
 **Bidirectional integration for large-N accuracy:** the crossing chunk nearest each
 rational surface is integrated *backward* (`direction=-1`); the backward propagator Φ_bwd
@@ -865,19 +907,19 @@ function parallel_eulerlagrange_integration(
 )
     N = intr.numpert_total
 
-    # u_store is built by the standard EL pass on natural (un-balanced) chunks. With the
-    # Phase C ContinuousCallback fix in integrate_el_region!, GR fires at the exact
-    # uratio = ucrit crossing inside each chunk, so the resulting u_store is what the
-    # standard / Riccati / parallel paths all consume from PerturbedEquilibrium.
-    # Delegating to the standard pass here unifies the three paths' u_store basis
-    # without bisecting through balanced sub-chunk propagator histories.
-    odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
+    julia_nthreads = Threads.nthreads()
+    requested_threads = ctrl.integration_threads == 0 ? julia_nthreads : ctrl.integration_threads
+    total_threads = max(1, min(julia_nthreads, requested_threads))
+    # truncate_at_dW_peak=true → Route A's finalize writes intr.psilim (which Route B
+    # reads when generating its chunks). Run sequentially in that (non-default) case.
+    use_concurrent = !ctrl.truncate_at_dW_peak && total_threads >= 2
 
-    # Build balanced sub-chunks for the parallel-FM propagator pass. These feed the Δ'
-    # BVP (compute_delta_prime_matrix!) and the S-gauge ca_l/ca_r outputs, both of
-    # which benefit from load-balanced parallel execution. We use a *throwaway* OdeState
-    # primed at the axis only so chunk_el_integration_bounds reads psifac/ising_start
-    # correctly — odet has already advanced past the edge.
+    # Route A is spawned eagerly when concurrent so Route B starts immediately alongside
+    # it; the Julia scheduler interleaves them across the available threads.
+    routeA_task = use_concurrent ? (Threads.@spawn _route_a_legacy_el(ctrl, equil, ffit, intr)) : nothing
+
+    # Route B: balanced bidirectional chunks → parallel propagator integration → serial
+    # Riccati assembly walk that builds odet_riccati.u_store and populates intr.sing[*].
     chunk_odet = OdeState(N, 1, 1, intr.msing)
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(chunk_odet, ctrl, equil.profiles, intr)
@@ -885,18 +927,18 @@ function parallel_eulerlagrange_integration(
     base_chunks = chunk_el_integration_bounds(chunk_odet, ctrl, intr; bidirectional=true)
     chunks = balance_integration_chunks(base_chunks, ctrl, intr)
     propagators = [ChunkPropagator(N) for _ in chunks]
-
-    julia_nthreads = Threads.nthreads()
     odet_proxies = [OdeState(N, 1, 1, 0) for _ in 1:Threads.maxthreadid()]
-    # integration_threads = 0 → use all available threads; otherwise cap at nthreads().
-    requested_threads = ctrl.integration_threads == 0 ? julia_nthreads : ctrl.integration_threads
-    bvp_threads = max(1, min(julia_nthreads, requested_threads))
 
     if ctrl.verbose
-        @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads thread$(bvp_threads == 1 ? "" : "s")"
+        mode = use_concurrent ? "concurrent (Route A ≈1 thread, Route B on the remaining $(total_threads-1))" : "sequential"
+        @info "   Chunked Riccati: $(length(chunks)) chunks, $total_threads thread$(total_threads == 1 ? "" : "s"), $mode"
     end
 
-    if bvp_threads == 1
+    # Route B parallel phase. `:static` partitions chunks deterministically; output is
+    # bit-identical regardless of thread count (each chunk writes its own propagators[i]).
+    # When Route A is concurrently spawned the scheduler shares the threads — Route A
+    # effectively occupies one, Route B's chunks fill the rest.
+    if total_threads == 1
         for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                         odet_proxies[1])
@@ -908,44 +950,33 @@ function parallel_eulerlagrange_integration(
         end
     end
 
-    psilim_before = intr.psilim
+    odet_riccati = OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+    S_at_surface_left = assemble_riccati_walk!(odet_riccati, chunks, propagators, ctrl, equil, ffit, intr)
+    odet_riccati.total_steps = sum(p -> p.total_steps, odet_proxies)
+    finalize_canonical_u_store!(odet_riccati, ctrl, equil, ffit, intr)
+    odet_riccati.u .= odet_riccati.u_store[:, :, :, end]
+
+    # Route A — fetch the concurrent task, or run it sequentially (truncate_at_dW_peak=true
+    # / single-thread). Sequential truncate=true builds Route B's chunks from the original
+    # psilim; Route A's truncation is therefore felt only by its own odet and the
+    # downstream Δ' BVP edge BC (which uses intr.psilim), not by the already-integrated
+    # propagators.
+    odet = use_concurrent ? fetch(routeA_task) : _route_a_legacy_el(ctrl, equil, ffit, intr)
+
+    # Copy Route B's S-gauge asymptotic coefficients onto Route A's odet so
+    # SingularCoupling.jl sees Riccati-gauge ca paired with the S-gauge intr.sing[*].ua_*
+    # (the standard crossing in Route A wrote axis-gauge ca; overwrite with the S-gauge).
+    odet.ca_l .= odet_riccati.ca_l
+    odet.ca_r .= odet_riccati.ca_r
+
+    return odet, odet_riccati, propagators, chunks, S_at_surface_left
+end
+
+# Route A body, factored out so it can be both `@spawn`'d (concurrent) and called
+# inline (sequential fallback for truncate_at_dW_peak / single-thread).
+function _route_a_legacy_el(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+                            ffit::FourFitVars, intr::ForceFreeStatesInternal)
+    odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
     finalize_canonical_u_store!(odet, ctrl, equil, ffit, intr)
-    # free_run! derives `coeffs` from odet.u and right-multiplies u_store by it — keep them
-    # in the same gauge by anchoring odet.u to the canonical edge state.
-    odet.u .= odet.u_store[:, :, :, end]
-
-    # truncate_at_dW_peak self-consistency for the Δ' BVP: rebuild the straddling chunk's
-    # propagator and drop chunks past the relocated psilim, so compute_delta_prime_matrix!
-    # applies the edge BC at the truncated psilim to a matching propagator set.
-    if ctrl.truncate_at_dW_peak && intr.psilim < psilim_before
-        peak_psi = intr.psilim
-        last_chunk_idx = findlast(c -> c.psi_start < peak_psi, chunks)
-        last_chunk_idx === nothing &&
-            error("truncate_at_dW_peak: peak ψ=$peak_psi lies before all chunk starts")
-        straddling = chunks[last_chunk_idx]
-        if straddling.psi_end > peak_psi
-            chunks[last_chunk_idx] = IntegrationChunk(
-                psi_start=straddling.psi_start, psi_end=peak_psi,
-                needs_crossing=straddling.needs_crossing, ising=straddling.ising,
-                direction=straddling.direction)
-            integrate_propagator_chunk!(propagators[last_chunk_idx], chunks[last_chunk_idx],
-                                        ctrl, equil, ffit, intr, OdeState(N, 1, 1, 0))
-        end
-        if last_chunk_idx < length(chunks)
-            chunks = chunks[1:last_chunk_idx]
-            propagators = propagators[1:last_chunk_idx]
-        end
-    end
-
-    # S-gauge pass: Riccati-gauge ca_l/ca_r, intr.sing[*], and S_at_surface_left for the Δ'
-    # BVP, on a scratch OdeState so its axis-gauge bookkeeping does not disturb the
-    # canonical GR-gauge odet. The standard crossing in the GR pass wrote axis-gauge
-    # ca_l/ca_r into odet; overwrite them with the (S, I) values SingularCoupling.jl needs.
-    odet_s = OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-    S_at_surface_left = assemble_riccati_s_gauge!(odet_s, chunks, propagators, ctrl, equil,
-                                                  ffit, intr)
-    odet.ca_l .= odet_s.ca_l
-    odet.ca_r .= odet_s.ca_r
-
-    return odet, propagators, chunks, S_at_surface_left
+    return odet
 end
