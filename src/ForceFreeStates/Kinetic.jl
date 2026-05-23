@@ -100,17 +100,21 @@ function _compute_fkg_matrices!(
     r3_flat = zeros(ComplexF64, mpsi, np^2)
     ga_flat = zeros(ComplexF64, mpsi, np^2)
 
-    hint = Ref(1)
+    # ψ-loop is embarrassingly parallel: each iteration writes to a unique
+    # ipsi row of the *_flat output arrays. The only thread-shared mutable is
+    # the interpolant bracket-search hint; give each thread its own Ref.
+    thread_hints = [Ref(1) for _ in 1:Threads.maxthreadid()]
 
-    for ipsi in 1:mpsi
+    Threads.@threads for ipsi in 1:mpsi
+        hint = thread_hints[Threads.threadid()]
         psi = xs[ipsi]
 
         # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
         amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
         bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
         cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
-        dmat_full = reshape(ffit.dmats(psi; hint=hint), np, np)
-        emat_full = reshape(ffit.emats(psi; hint=hint), np, np)
+        dmat_full = reshape(ffit.dmats_prim(psi; hint=hint), np, np)
+        emat_full = reshape(ffit.emats_prim(psi; hint=hint), np, np)
         hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
         fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
 
@@ -167,8 +171,16 @@ function _compute_fkg_matrices!(
 
             # paat [Fortran lines 1202-1207]
             temp2 = amat_lu \ b1mat
-            aamat = (amat_lu \ amat_kin)'  # A_kin⁻¹ A_kin = I analytically; kept for numerical consistency with Fortran fourfit.F line 1204
-            umat_diff = I - aamat  # ≈ 0; captures round-off from LU factorization
+            # Fortran sing.f:1004-1008 computes aamat = amat_kin^H · A_kin⁻¹ via
+            #   zgbtrs("C", ..., amatlu, temp2=amat_kin)  → temp2 = A_kin^{-H} · amat_kin
+            #   aamat = CONJG(TRANSPOSE(temp2)) = amat_kin^H · A_kin⁻¹
+            # For non-Hermitian amat_kin (kwmat Hermitian + ktmat anti-Hermitian),
+            # this is NOT the identity. The prior implementation `(amat_lu \ amat_kin)'`
+            # gave aamat = I exactly, zeroing umat_diff and dropping the
+            # `im·psio_over_n · umat_diff · ...` terms from paat, r1mat, r2mat.
+            aamat_temp = amat_lu' \ amat_kin      # = A_kin^{-H} · amat_kin
+            aamat = aamat_temp'                   # = amat_kin^H · A_kin⁻¹
+            umat_diff = I - aamat
             paat_val = (bkaat' * temp2 .- im * psio_over_n .* umat_diff * b1mat)'
 
             # r1mat [Fortran lines 1209-1217]

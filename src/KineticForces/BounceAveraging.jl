@@ -28,9 +28,30 @@ struct BounceData
     wb::Vector{Float64}               # bounce frequency ωb(λ) [rad/s]
     wd::Vector{Float64}               # precession drift ωd(λ) [rad/s]
     dJdJ::Vector{Float64}             # ωb|δJ|²/ro² at each λ (real, for scalar torque)
-    # For matrix path (nothing if scalar-only):
-    wmats_vs_lambda::Union{Nothing, Array{ComplexF64,4}}  # (mpert, mpert, 6, nlmda)
+    # For matrix path (nothing if scalar-only): packed layout (nlmda, nqty_matrix(mpert)).
+    # Consumer fills into fbnce_data[:, 3:end] by direct copy. See `nqty_matrix` for
+    # the 3-Hermitian-triangle + 3-full-block packing (Logan 2015 Eqs 7.30–7.35).
+    wmats_vs_lambda::Union{Nothing, Matrix{ComplexF64}}
 end
+
+
+# ============================================================================
+# Packed layout for kinetic matrix per-λ storage
+# ============================================================================
+# Of the six Logan-2015 matrices (Eqs 7.30–7.35), A = W_Z†W_Z, D = W_X†W_X,
+# and H = W_Y†W_Y are Hermitian; B = W_Z†W_X, C = W_Z†W_Y, E = W_X†W_Y are not.
+# We store only the upper triangle (i ≤ j) for the three Hermitian blocks and
+# the full mpert² for the three non-Hermitian blocks. Block packing order:
+# A-tri, D-tri, H-tri, B-full, C-full, E-full.
+
+"""Number of packed complex entries per λ for the 6 kinetic matrices."""
+@inline nqty_matrix(mpert::Int) = 3 * (mpert * (mpert + 1)) ÷ 2 + 3 * mpert^2
+
+"""Upper-triangle index (1 ≤ i ≤ j ≤ mpert) within a triangular block."""
+@inline _tri_idx(i::Int, j::Int) = (j * (j - 1)) ÷ 2 + i
+
+"""Full-block index (column-major) within a non-Hermitian block."""
+@inline _full_idx(i::Int, j::Int, mpert::Int) = (j - 1) * mpert + i
 
 
 # ============================================================================
@@ -134,7 +155,7 @@ end
 
 Compute bounce-averaged quantities as functions of pitch angle λ.
 This is the core function that sets up all λ-dependent quantities
-needed by the pitch angle ODE integrator.
+needed by the pitch-angle quadrature.
 
 Ports Fortran torque.F90 lines 530-816 (GAR branch).
 
@@ -196,7 +217,7 @@ function compute_bounce_data(
     wd_arr = zeros(Float64, nlmda)
     dJdJ_arr = zeros(Float64, nlmda)
     sigma_arr = zeros(Int, nlmda)
-    wmats_arr = do_matrices ? zeros(ComplexF64, mpert, mpert, 6, nlmda) : nothing
+    wmats_arr = do_matrices ? zeros(ComplexF64, nlmda, nqty_matrix(mpert)) : nothing
 
     # Thermal speed and drift normalization
     bhat = sqrt(2 * T_s / mass) / ro
@@ -231,7 +252,9 @@ function compute_bounce_data(
         dJdJ_arr[ilmda] = dJdJ_val
 
         if do_matrices && !isnothing(wmats_lmda)
-            wmats_arr[:, :, :, ilmda] .= wmats_lmda
+            @inbounds for q in 1:length(wmats_lmda)
+                wmats_arr[ilmda, q] = wmats_lmda[q]
+            end
         end
     end
 
@@ -414,9 +437,10 @@ function _bounce_integrate(
     cum_wb = 0.0
     cum_wd = 0.0
 
-    # Arrays for cumulative integrals (for phase factor computation)
+    # θ-scratch array allocated fresh each call. Pool-based reuse was tried
+    # (AdaptiveArrayPools) but showed no speedup and introduced severe slowdowns
+    # at 2+ threads; plain allocations match Fortran baseline behavior.
     cum_wb_arr = zeros(Float64, ntheta)
-    cum_wd_arr = zeros(Float64, ntheta)
 
     # Action integrand
     jvtheta = zeros(ComplexF64, ntheta)
@@ -425,12 +449,18 @@ function _bounce_integrate(
     wmu_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
     wen_mt = do_matrices ? zeros(ComplexF64, mpert, ntheta) : nothing
 
+    # Pre-allocated scratch for hot-loop tspl evaluation + Fourier-basis buffer
+    # (avoids Vector{Float64}(5) + Vector{ComplexF64}(mpert) allocation per θ
+    # sub-grid point — previously ~256 allocs × 126 inner iters per call).
+    tspl_f = Vector{Float64}(undef, 5)
+    expm = Vector{ComplexF64}(undef, mpert)
+
     for i in 2:ntheta-1  # Edge weights are 0 from powspace
         θ = tdt_pts[i]
         dt = tdt_wts[i]
         θmod = mod(θ, 1.0)
 
-        tspl_f = tspl(θmod)
+        tspl(tspl_f, θmod)
         B_val = tspl_f[1]
         dBdpsi = tspl_f[2]
         # dBdtheta = tspl_f[3]  # not needed here
@@ -459,13 +489,24 @@ function _bounce_integrate(
 
         cum_wb += wb_integrand
         cum_wd += wd_integrand
-        cum_wb_arr[i] = cum_wb
-        cum_wd_arr[i] = cum_wd
+        # Trapezoidal cumulative (matches Fortran spline_int semantics on linear fn):
+        # bspl%fsi(j)/Δx = g_1 + ... + g_{j-1} + g_j/2, so subtract half the current sample.
+        cum_wb_arr[i] = cum_wb - wb_integrand / 2
 
-        # Fourier modes at this θ (Fortran lines 702-708)
-        expm = [exp(im * twopi * m * θ) for m in mfac]
-        dbob = sum(dbob_m_f .* expm)
-        divx = sum(divx_m_f .* expm) * divxfac
+        # Fourier modes at this θ (Fortran lines 702-708) — write into pre-allocated
+        # expm buffer using the ORIGINAL expression order to preserve bit-level parity.
+        @inbounds for mi in 1:mpert
+            expm[mi] = exp(im * twopi * mfac[mi] * θ)
+        end
+        # Replaces `sum(dbob_m_f .* expm)` / `sum(divx_m_f .* expm) * divxfac`
+        # with direct accumulators; same evaluation order as the broadcast + sum.
+        dbob = ComplexF64(0.0)
+        divx = ComplexF64(0.0)
+        @inbounds for mi in 1:mpert
+            dbob += dbob_m_f[mi] * expm[mi]
+            divx += divx_m_f[mi] * expm[mi]
+        end
+        divx *= divxfac
 
         # Action integrand (Fortran line 706-708)
         phase = exp(-twopi * im * n * q * (θ - theta0))
@@ -473,18 +514,26 @@ function _bounce_integrate(
             (divx * sqrt_vpar + dbob * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar) *
             phase
 
-        # W vectors for matrix path (Fortran lines 722-727)
+        # W vectors for matrix path (Fortran lines 722-727). Element-by-element
+        # write preserving original broadcast evaluation order exactly to keep
+        # bit-level parity (matters because downstream quadrature is tolerance-sensitive).
         if do_matrices
-            wmu_mt[:, i] .= dt .* (lmda / bo) .* expm ./ sqrt_vpar .*
-                phase ./ (2 * chi1)
-            wen_mt[:, i] .= dt .* expm ./ (B_val * sqrt_vpar) .*
-                phase ./ (2 * chi1)
+            wmu_pre = dt * (lmda / bo)
+            wen_pre = dt
+            @inbounds for mi in 1:mpert
+                wmu_mt[mi, i] = wmu_pre * expm[mi] / sqrt_vpar * phase / (2 * chi1)
+                wen_mt[mi, i] = wen_pre * expm[mi] / (B_val * sqrt_vpar) * phase / (2 * chi1)
+            end
         end
     end
 
-    # Total bounce integrals
-    total_wb = cum_wb
-    total_wd = cum_wd
+    # Total bounce integrals — Fortran splines over bspl%xs = linspace(0,1,ntheta)
+    # and integrates via spline_int, which is ≈ (1/(ntheta-1)) × Σ f_i. The tdt(2,i)
+    # weights contain dθ/dx so Σ tdt·f is raw Riemann; divide by (ntheta-1) to get
+    # the integral over the unit linear space [0,1] that Fortran produces.
+    nrm = 1.0 / (ntheta - 1)
+    total_wb = cum_wb * nrm
+    total_wd = cum_wd * nrm
 
     if total_wb ≈ 0.0
         # Degenerate case — return zeros
@@ -495,18 +544,35 @@ function _bounce_integrate(
     wbbar = ro * twopi / ((2 - sigma) * total_wb)
     wdbar = ro^2 * bo * wdfac * wbbar * 2 * (2 - sigma) * total_wd
 
-    # Phase factor (Fortran line 750)
-    # Using wb-based phase (electric precession dominates)
-    pl = [exp(-twopi * im * lnq * cum_wb_arr[i] / ((2 - sigma) * total_wb)) for i in 1:ntheta]
-
-    # Bounce-averaged action (Fortran line 752)
-    bjspl = [conj(jvtheta[i]) * (pl[i] + (1 - sigma) / (pl[i] + 1e-30)) for i in 1:ntheta]
-
-    # Cumulative trapezoidal integration of bjspl
+    # Phase factor (Fortran line 750). Ratio cum_wb_arr[i]/total_wb is dimensionless —
+    # (ntheta-1) cancels, no scaling. For do_matrices we keep `pl` as a Vector because
+    # it is referenced below; otherwise we fuse pl + bjspl → bj_integral in a single
+    # pass, avoiding two Vector{ComplexF64}(ntheta) allocations.
+    # Trapezoidal quadrature: boundary samples weighted by 0.5. jvtheta is zero at
+    # i=1 and i=ntheta (loop above runs 2:ntheta-1) so the boundary terms contribute
+    # nothing in practice, but writing the weights explicitly keeps the integration
+    # self-correct if the boundary handling ever changes.
+    pl_denom = (2 - sigma) * total_wb
+    one_minus_sigma = 1 - sigma
     bj_integral = ComplexF64(0.0)
-    for i in 2:ntheta
-        bj_integral += bjspl[i]  # weights already in jvtheta via dt
+    if do_matrices
+        pl = Vector{ComplexF64}(undef, ntheta)
+        @inbounds for i in 1:ntheta
+            pl[i] = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
+        end
+        @inbounds for i in 1:ntheta
+            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
+            bj_integral += w * conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
+        end
+    else
+        pl = nothing
+        @inbounds for i in 1:ntheta
+            pli = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
+            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
+            bj_integral += w * conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + 1e-30))
+        end
     end
+    bj_integral *= nrm
 
     # |δJ|² (Fortran line 756) — division by 2 corrects quadratic form
     dJdJ_val = wbbar * abs(bj_integral)^2 / 2.0 / ro^2
@@ -514,16 +580,21 @@ function _bounce_integrate(
     # Matrix path: bounce-average W vectors and form outer products (Fortran lines 759-793)
     wmats_lmda = nothing
     if do_matrices
-        # Bounce-average W_μ and W_E vectors
+        # Bounce-average W_μ and W_E vectors (Fortran lines 762-767).
+        # Trapezoidal quadrature: boundary samples weighted by 0.5 (wmu_mt and wen_mt
+        # are zero at i=1 and i=ntheta from the 2:ntheta-1 population loop above).
         wmu_ba = zeros(ComplexF64, mpert)
         wen_ba = zeros(ComplexF64, mpert)
-        for i in 2:ntheta-1
-            factor = conj(pl[i]) + (1 - sigma) / (pl[i] + 1e-30)
-            # Note: Fortran uses conj(wmu_mt) * (pl + (1-σ)/pl), then integrates
-            # The conjugate on W is because we want W† later
-            wmu_ba .+= conj.(wmu_mt[:, i]) .* factor
-            wen_ba .+= conj.(wen_mt[:, i]) .* factor
+        @inbounds for i in 1:ntheta
+            w = (i == 1 || i == ntheta) ? 0.5 : 1.0
+            factor = w * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
+            for mi in 1:mpert
+                wmu_ba[mi] += conj(wmu_mt[mi, i]) * factor
+                wen_ba[mi] += conj(wen_mt[mi, i]) * factor
+            end
         end
+        wmu_ba .*= nrm
+        wen_ba .*= nrm
 
         # Reshape as 1×mpert for matrix multiply (Fortran lines 771-772)
         wmmt = reshape(wmu_ba, 1, mpert)
@@ -534,28 +605,46 @@ function _bounce_integrate(
         wymt = wmmt * (3 * smat + ymat) - 2.0 * wemt * smat
         wzmt = wmmt * (3 * tmat + zmat) - 2.0 * wemt * tmat
 
-        # Conjugate transpose for outer products
-        wxmc = conj.(transpose(wxmt))
-        wymc = conj.(transpose(wymt))
-        wzmc = conj.(transpose(wzmt))
-
-        # 6 outer products (Fortran lines 779-784)
-        wmats_lmda = zeros(ComplexF64, mpert, mpert, 6)
-        op_A = wzmc * wzmt  # A: W_Z† W_Z
-        op_B = wzmc * wxmt  # B: W_Z† W_X
-        op_C = wzmc * wymt  # C: W_Z† W_Y
-        op_D = wxmc * wxmt  # D: W_X† W_X
-        op_E = wxmc * wymt  # E: W_X† W_Y
-        op_H = wymc * wymt  # H: W_Y† W_Y
+        # Flatten the 1×mpert row vectors to mpert-vectors for outer-product loops.
+        wx = vec(wxmt)
+        wy = vec(wymt)
+        wz = vec(wzmt)
 
         # Scale by wbbar/ro² (Fortran line 789)
         scale = wbbar / ro^2
-        wmats_lmda[:, :, 1] .= op_A .* scale
-        wmats_lmda[:, :, 2] .= op_B .* scale
-        wmats_lmda[:, :, 3] .= op_C .* scale
-        wmats_lmda[:, :, 4] .= op_D .* scale
-        wmats_lmda[:, :, 5] .= op_E .* scale
-        wmats_lmda[:, :, 6] .= op_H .* scale
+        Mu = (mpert * (mpert + 1)) ÷ 2
+        wmats_lmda = Vector{ComplexF64}(undef, nqty_matrix(mpert))
+
+        # A (Hermitian): upper triangle of W_Z†W_Z, rank-1 → conj(wz[i])·wz[j].
+        off = 0
+        @inbounds for j in 1:mpert, i in 1:j
+            wmats_lmda[off + _tri_idx(i, j)] = conj(wz[i]) * wz[j] * scale
+        end
+        off += Mu
+        # D (Hermitian): upper triangle of W_X†W_X.
+        @inbounds for j in 1:mpert, i in 1:j
+            wmats_lmda[off + _tri_idx(i, j)] = conj(wx[i]) * wx[j] * scale
+        end
+        off += Mu
+        # H (Hermitian): upper triangle of W_Y†W_Y.
+        @inbounds for j in 1:mpert, i in 1:j
+            wmats_lmda[off + _tri_idx(i, j)] = conj(wy[i]) * wy[j] * scale
+        end
+        off += Mu
+        # B (full): W_Z†W_X.
+        @inbounds for j in 1:mpert, i in 1:mpert
+            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wz[i]) * wx[j] * scale
+        end
+        off += mpert^2
+        # C (full): W_Z†W_Y.
+        @inbounds for j in 1:mpert, i in 1:mpert
+            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wz[i]) * wy[j] * scale
+        end
+        off += mpert^2
+        # E (full): W_X†W_Y.
+        @inbounds for j in 1:mpert, i in 1:mpert
+            wmats_lmda[off + _full_idx(i, j, mpert)] = conj(wx[i]) * wy[j] * scale
+        end
     end
 
     return wbbar, wdbar, dJdJ_val, wmats_lmda

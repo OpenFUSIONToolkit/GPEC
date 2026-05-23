@@ -19,7 +19,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp")
+  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp", "pow1")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
   - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)

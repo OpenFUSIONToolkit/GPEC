@@ -52,6 +52,7 @@ using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSe
 using .ForceFreeStates: sing_lim!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
+using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
 const _BANNER = "="^60
@@ -228,7 +229,10 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
             kinetic_file;
             zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
-            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp)
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+            chi1=2π * equil.psio)
     end
 
     # Fit equilibrium quantities to Fourier-spline functions.
@@ -265,6 +269,13 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
                     kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
             make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
                 calculated_source=calculated_cb)
+
+            # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
+            # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
+            # singfac_min == 0 preserves single-chunk behavior.
+            if ctrl.ode_flag && ctrl.singfac_min > 0
+                find_kinetic_singular_surfaces!(ffit, equil, intr)
+            end
         end
 
         # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
@@ -373,7 +384,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         # kf_ctrl and kinetic_profiles were loaded once above the stability block.
         kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
         if @isdefined(pe_state)
-            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr)
+            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
         end
 
         kf_state = KineticForces.KineticForcesState()
@@ -524,8 +535,20 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
-        # Write vacuum data; always write all entries, using empty arrays when not computed
-        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
+        # used to find them. Populated only when kinetic crossings were searched for.
+        out_h5["singular/kinetic/kmsing"] = intr.kmsing
+        out_h5["singular/kinetic/psi"] = [s.psifac for s in intr.kinsing]
+        out_h5["singular/kinetic/q"] = [s.q for s in intr.kinsing]
+        out_h5["singular/kinetic/q1"] = [s.q1 for s in intr.kinsing]
+        out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
+        out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
+        out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
+
+        # Write vacuum data; always write all entries, using empty arrays when not computed.
+        # `et_eigenvector[m, mode]` holds the normalized, phase-fixed total-energy
+        # eigenvectors (columns of the diagonalized `wt = wp + wv`); `wt0` is the raw wt.
+        out_h5["vacuum/et_eigenvector"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
         out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
         out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
@@ -576,8 +599,8 @@ function write_outputs_to_HDF5(
                 out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats)
                 out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats)
             end
-            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats)
-            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats)
+            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats_prim)
+            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats_prim)
             out_h5["matrices/ideal/H"] = _eval_mat_spline(ffit.hmats)
 
             # Ideal derived matrices (F, K, G)

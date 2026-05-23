@@ -78,7 +78,7 @@ function fixed_kinetic_matrices(
 
     # Map component index → ideal matrix spline and Hermiticity
     # (component_index, ideal_spline, is_hermitian)
-    ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats, ffit.emats, ffit.hmats]
+    ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats_prim, ffit.emats_prim, ffit.hmats]
     # Ak, Dk, Hk are Hermitian: X†X is trivially self-adjoint.
     # The thesis (Logan 2015 p.169) lists "Ak, Ck, Hk" but this appears to be a typo
     # for "Ak, Dk, Hk" — confirmed by inspecting Fortran PENTRC output where Ck ≠ Ck†.

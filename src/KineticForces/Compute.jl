@@ -3,63 +3,30 @@
 
 High-level computation functions for KineticForces.
 Orchestrates torque/energy calculations across multiple methods
-using dynamic ODE integration at all levels (ψ, λ, energy).
+using adaptive Gauss-Kronrod quadrature at all levels (ψ, λ, energy).
 """
 
 # ============================================================================
-# Psi integration params
+# Adaptive Gauss-Kronrod ψ integration via QuadGK.BatchIntegrand
 # ============================================================================
 
 """
-    PsiIntegrationParams
+    integrate_psi_quadgk(n, nl, zi, mi, wdfac, divxfac, electron, method,
+                          equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
 
-Parameters for the outer ψ ODE integration.
-Passed to `psi_integrand!` via the ODE solver's `p` field.
-Ports Fortran `tintgrnd` common block variables.
-"""
-mutable struct PsiIntegrationParams
-    n::Int
-    nl::Int
-    zi::Int
-    mi::Int
-    wdfac::Float64
-    divxfac::Float64
-    electron::Bool
-    method::String
-    equil::Any
-    intr::KineticForcesInternal
-    ctrl::KineticForcesControl
-    kinetic_profiles::Equilibrium.KineticProfileSplines
-    # Mutable storage for kinetic matrix accumulation across ℓ harmonics
-    elems::Union{Nothing, Array{ComplexF64,3}}
-    # Growing storage for (ψ, dT/dψ, elems) at each ODE step
-    psi_history::Vector{Float64}
-    torque_history::Vector{ComplexF64}
-    matrix_history::Union{Nothing, Vector{Array{ComplexF64,3}}}
-end
-
-
-# ============================================================================
-# Core ODE-based ψ integration
-# ============================================================================
-
-"""
-    integrate_psi_ode(n, nl, zi, mi, wdfac, divxfac, electron, method,
-                      equil, intr, ctrl, kinetic_profiles; psi_min, psi_max) → NamedTuple
-
-Integrate torque over ψ using adaptive ODE solver.
-Ports Fortran `tintgrl_lsode` from torque.F90 lines 1163-1348.
-
-The ODE state has neq = 2*(1 + 2*nl) real equations: real and imaginary
-parts for each bounce harmonic ℓ ∈ {-nl, ..., nl}.
+Integrate torque over ψ using adaptive Gauss-Kronrod quadrature with
+`QuadGK.BatchIntegrand`. Every integrand evaluation is logged, giving a
+diagnostic T(ψ) profile at no extra cost (the values are computed anyway
+— we just keep them).
 
 # Returns
 NamedTuple with:
 - `total::ComplexF64`: Total integrated torque
-- `torque_profile`: Spline of dT/dψ vs ψ (from ODE trajectory)
+- `torque_profile`: NamedTuple of (psi, dtdpsi, t_cumulative) from evaluation points
 - `matrix_integrated`: Trapezoidal-integrated mpert×mpert×6 matrix (if matrix method)
+- `psi_nsteps::Int`: Number of integrand evaluations
 """
-function integrate_psi_ode(
+function integrate_psi_quadgk(
     n::Int, nl::Int, zi::Int, mi::Int,
     wdfac::Float64, divxfac::Float64, electron::Bool,
     method::String, equil, intr::KineticForcesInternal, ctrl::KineticForcesControl,
@@ -69,118 +36,100 @@ function integrate_psi_ode(
     is_matrix_method = occursin("mm", method)
     mpert = intr.mpert
 
-    neq = 2 * (1 + 2 * nl)
-
-    # Initialize params
-    elems = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
-    matrix_history = is_matrix_method ? Vector{Array{ComplexF64,3}}() : nothing
-
-    params = PsiIntegrationParams(
-        n, nl, zi, mi, wdfac, divxfac, electron, method,
-        equil, intr, ctrl, kinetic_profiles,
-        elems,
-        Float64[], ComplexF64[], matrix_history)
-
-    # Clip integration bounds to equilibrium data range
-    # (Fortran line 1239-1241: clip to sq and xs_m ranges)
-    x0 = max(psi_min, 1e-6)  # avoid axis singularity
-    xout = min(psi_max, 1.0 - 1e-6)
+    # Equilibrium splines are unreliable near the magnetic axis (epsr→0, J→0);
+    # start at psilow to avoid degenerate bounce/drift frequencies.
+    # Cap at intr.psilim (DCON's integration limit): perturbation interpolants only
+    # have data below this, and extrapolation near q=qlim blows up.
+    x0 = max(psi_min, equil.config.psilow)
+    xout = min(psi_max, intr.psilim, 1.0 - 1e-6)
 
     if x0 >= xout
-        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing)
+        return (total=ComplexF64(0.0), torque_profile=nothing, matrix_integrated=nothing, psi_nsteps=0)
     end
 
-    y0 = zeros(neq)
-    prob = ODEProblem(psi_integrand!, y0, (x0, xout), params)
+    # Buffers for the batch callback. The outer ψ-integral is intentionally
+    # serial: QuadGK.BatchIntegrand's refine loop invokes the callback many
+    # times with small batches (~15 nodes per Kronrod rule), and Threads.@threads
+    # fork-join overhead at this granularity dominates the ~40 ms per-ψ work,
+    # producing catastrophic slowdowns at ≥2 threads. Serial `for` inside the
+    # batch matches 1-thread wall time and is the fastest correct option found.
+    tpsi_val = Ref{ComplexF64}(0.0im)
+    wtw_l = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
 
-    # Use Tsit5 (non-stiff) matching Fortran mf=10
-    sol = solve(prob, Tsit5();
-        reltol=ctrl.rtol_xlmda, abstol=ctrl.atol_xlmda,
-        maxiters=10000,
-        # Save at each internal step to capture torque profile
-        save_everystep=true)
+    logged_psi = Float64[]
+    logged_dtdpsi = ComplexF64[]
+    logged_elems = is_matrix_method ? Vector{Array{ComplexF64,3}}() : nothing
 
-    if sol.retcode != :Success
-        @warn "integrate_psi_ode may have issues for method=$method, n=$n" maxlog=3
+    function psi_batch!(y::AbstractVector{ComplexF64}, x::AbstractVector)
+        for k in eachindex(x)
+            psi = Float64(x[k])
+
+            if is_matrix_method && !isnothing(wtw_l)
+                wtw_l .= 0
+            end
+            elems_accum = is_matrix_method ? zeros(ComplexF64, mpert, mpert, 6) : nothing
+
+            total = ComplexF64(0.0)
+            for ell_idx in 1:(1 + 2 * nl)
+                l = ell_idx - 1 - nl
+                if is_matrix_method && !isnothing(wtw_l)
+                    wtw_l .= 0
+                end
+
+                tpsi!(tpsi_val, psi, n, l, zi, mi, wdfac, divxfac,
+                      electron, method, equil, intr, kinetic_profiles;
+                      op_wmats=wtw_l,
+                      atol_xlmda=ctrl.atol_xlmda, rtol_xlmda=ctrl.rtol_xlmda)
+                total += tpsi_val[]
+
+                if is_matrix_method && !isnothing(wtw_l) && !isnothing(elems_accum)
+                    elems_accum .+= wtw_l
+                end
+            end
+
+            y[k] = total
+
+            push!(logged_psi, psi)
+            push!(logged_dtdpsi, total)
+            if is_matrix_method && !isnothing(elems_accum)
+                push!(logged_elems, copy(elems_accum))
+            end
+        end
     end
 
-    # Extract total: sum over all bounce harmonics
-    yf = sol.u[end]
-    total = ComplexF64(0.0)
-    for ell_idx in 1:(1 + 2*nl)
-        total += complex(yf[2*(ell_idx-1)+1], yf[2*(ell_idx-1)+2])
+    bi = QuadGK.BatchIntegrand(psi_batch!, ComplexF64[], Float64[])
+    total, _ = quadgk(bi, x0, xout; atol=ctrl.atol_psi, rtol=ctrl.rtol_psi)
+
+    # Sort logs by ψ for the diagnostic torque profile.
+    perm = sortperm(logged_psi)
+    sorted_psi = logged_psi[perm]
+    sorted_dtdpsi = logged_dtdpsi[perm]
+
+    # Cumulative trapezoidal integration for T(ψ) profile
+    npts = length(sorted_psi)
+    t_cumulative = Vector{ComplexF64}(undef, npts)
+    if npts >= 1
+        t_cumulative[1] = ComplexF64(0.0)
+        for i in 2:npts
+            dpsi = sorted_psi[i] - sorted_psi[i-1]
+            t_cumulative[i] = t_cumulative[i-1] + 0.5 * (sorted_dtdpsi[i-1] + sorted_dtdpsi[i]) * dpsi
+        end
     end
 
-    # Torque profile from saved trajectory (available for diagnostics)
-    torque_profile = nothing
-    if length(params.psi_history) > 2
-        # Store as (psi, dT/dpsi) pairs for later spline fitting if needed
-        torque_profile = (psi=copy(params.psi_history), dtdpsi=copy(params.torque_history))
-    end
+    torque_profile = npts > 1 ? (psi=sorted_psi, dtdpsi=sorted_dtdpsi, t_cumulative=t_cumulative) : nothing
 
-    # Trapezoidal integration of kinetic matrices over ψ
+    # Trapezoidal integration of kinetic matrices over ψ (matrix methods only)
     matrix_integrated = nothing
-    if is_matrix_method && length(params.psi_history) > 1
-        npsi = length(params.psi_history)
+    if is_matrix_method && !isnothing(logged_elems) && length(logged_elems) > 1
+        sorted_elems = logged_elems[perm]
         matrix_integrated = zeros(ComplexF64, mpert, mpert, 6)
-        for i in 2:npsi
-            dpsi = params.psi_history[i] - params.psi_history[i-1]
-            matrix_integrated .+= 0.5 .* (params.matrix_history[i-1] .+ params.matrix_history[i]) .* dpsi
+        for i in 2:npts
+            dpsi = sorted_psi[i] - sorted_psi[i-1]
+            matrix_integrated .+= 0.5 .* (sorted_elems[i-1] .+ sorted_elems[i]) .* dpsi
         end
     end
 
-    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated)
-end
-
-
-"""
-    psi_integrand!(dy, y, p::PsiIntegrationParams, psi)
-
-Outer ψ ODE integrand. At each ψ, loops over bounce harmonics ℓ,
-calls tpsi!() for each, and accumulates results.
-
-Ports Fortran `tintgrnd` subroutine (torque.F90 lines 1356-1459).
-"""
-function psi_integrand!(dy, _, p::PsiIntegrationParams, psi)
-    is_matrix_method = !isnothing(p.elems)
-
-    if is_matrix_method
-        p.elems .= 0
-    end
-
-    # Pre-allocate tpsi output
-    tpsi_val = Ref{ComplexF64}(0.0 + 0.0im)
-    wtw_l = is_matrix_method ? zeros(ComplexF64, p.intr.mpert, p.intr.mpert, 6) : nothing
-
-    total_torque = ComplexF64(0.0)
-
-    for ell_idx in 1:(1 + 2*p.nl)
-        l = ell_idx - 1 - p.nl  # ℓ from -nl to nl
-
-        tpsi!(tpsi_val, psi, p.n, l, p.zi, p.mi, p.wdfac, p.divxfac,
-              p.electron, p.method, p.equil, p.intr, p.kinetic_profiles;
-              op_wmats=wtw_l)
-
-        # Pack real/imag into ODE state
-        dy[2*(ell_idx-1)+1] = real(tpsi_val[])
-        dy[2*(ell_idx-1)+2] = imag(tpsi_val[])
-
-        total_torque += tpsi_val[]
-
-        # Accumulate matrices across ℓ harmonics
-        if is_matrix_method && !isnothing(wtw_l)
-            p.elems .+= wtw_l
-        end
-    end
-
-    # Record trajectory for profile reconstruction
-    push!(p.psi_history, psi)
-    push!(p.torque_history, total_torque)
-    if is_matrix_method
-        push!(p.matrix_history, copy(p.elems))
-    end
-
-    return nothing
+    return (total=total, torque_profile=torque_profile, matrix_integrated=matrix_integrated, psi_nsteps=npts)
 end
 
 
@@ -192,9 +141,9 @@ end
     compute_torque_all_methods!(state::KineticForcesState, intr::KineticForcesInternal,
                                 ctrl::KineticForcesControl, equil, kinetic_profiles)
 
-Calculate torque/energy for all enabled methods using ODE integration.
-For each method, integrates over flux surfaces using adaptive ODE solver
-(replacing former trapezoidal integration on fixed grid).
+Calculate torque/energy for all enabled methods.
+For each method, integrates over flux surfaces using adaptive QuadGK
+quadrature via `integrate_psi_quadgk`.
 For multi-n calculations, loops over toroidal mode numbers and assembles
 block-diagonal kinetic matrices.
 
@@ -241,20 +190,34 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
         total_torque = ComplexF64(0.0)
         npert = max(intr.npert, 1)
 
+        # Capture per-ψ profile and step count from the single-n case (or the
+        # first n when npert > 1) for output diagnostics.
+        psi_grid_out = Float64[]
+        dtdpsi_out = ComplexF64[]
+        t_cum_out = ComplexF64[]
+        psi_nsteps_total = 0
+
         for n_idx in 1:npert
             n = intr.nlow + n_idx - 1
             if n == 0
                 n = ctrl.nn  # fallback to control parameter for single-n
             end
 
-            # Dynamic ODE integration over ψ
-            result = integrate_psi_ode(
+            # Adaptive QuadGK integration over ψ (serial BatchIntegrand)
+            result = integrate_psi_quadgk(
                 n, ctrl.nl, ctrl.zi, ctrl.mi,
                 ctrl.wdfac, ctrl.divxfac, ctrl.electron,
                 method, equil, intr, ctrl, kinetic_profiles;
                 psi_min=ctrl.psilims[1], psi_max=ctrl.psilims[2])
 
             total_torque += result.total
+            psi_nsteps_total += result.psi_nsteps
+
+            if n_idx == 1 && !isnothing(result.torque_profile)
+                psi_grid_out = result.torque_profile.psi
+                dtdpsi_out = result.torque_profile.dtdpsi
+                t_cum_out = result.torque_profile.t_cumulative
+            end
 
             # Insert n-block into full matrix
             if is_matrix_method && !isnothing(result.matrix_integrated) && !isnothing(op_wmats_full)
@@ -264,13 +227,19 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
             end
         end
 
-        total_energy = complex(0.0, imag(total_torque) / (2 * ctrl.nn))
+        # Eq. (19) Logan et al. PoP 20, 122507 (2013): Im(T) = 2n·δW_k, both real quantities.
+        # Store δW in Re slot so downstream code uses real(total_energy).
+        total_energy = complex(imag(total_torque) / (2 * ctrl.nn), 0.0)
 
         result_entry = MethodResult(;
             method=method,
             nn=ctrl.nn,
             total_torque=total_torque,
-            total_energy=total_energy
+            total_energy=total_energy,
+            psi_grid=psi_grid_out,
+            dtdpsi=dtdpsi_out,
+            t_cumulative=t_cum_out,
+            psi_nsteps=psi_nsteps_total,
         )
         state.method_results[method] = result_entry
 

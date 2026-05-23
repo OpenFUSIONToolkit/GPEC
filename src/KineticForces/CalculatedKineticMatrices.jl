@@ -89,14 +89,26 @@ function compute_calculated_kinetic_matrices(
 
     # Loop over flux surfaces and n-blocks, accumulating bounce harmonics into
     # per-n blocks placed on the diagonal of the full np×np block-diagonal matrix.
+    # The ψ-loop is embarrassingly parallel: each iteration writes to a unique
+    # ipsi row of kw_flat/kt_flat. Per-thread copies of kf_intr provide isolated
+    # tpsi_* θ-grid buffers and interpolant hint refs; geometric/profile splines
+    # are read-only and safely shared through deepcopy semantics.
     nl = kf_ctrl.nl
-    full_w = zeros(ComplexF64, mpert, mpert, 6)
-    full_t = zeros(ComplexF64, mpert, mpert, 6)
-    block_w = zeros(ComplexF64, mpert, mpert, 6)
-    block_t = zeros(ComplexF64, mpert, mpert, 6)
+    nthreads = Threads.maxthreadid()
+    thread_intrs   = [deepcopy(kf_intr) for _ in 1:nthreads]
+    thread_full_w  = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
+    thread_full_t  = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
+    thread_block_w = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
+    thread_block_t = [zeros(ComplexF64, mpert, mpert, 6) for _ in 1:nthreads]
 
-    for ipsi in 1:mpsi
-        psi = xs[ipsi]
+    Threads.@threads for ipsi in 1:mpsi
+        tid     = Threads.threadid()
+        intr_t  = thread_intrs[tid]
+        full_w  = thread_full_w[tid]
+        full_t  = thread_full_t[tid]
+        block_w = thread_block_w[tid]
+        block_t = thread_block_t[tid]
+        psi     = xs[ipsi]
         for in_idx in 1:npert
             n = ffs_intr.nlow + in_idx - 1
             fill!(full_w, 0)
@@ -107,7 +119,8 @@ function compute_calculated_kinetic_matrices(
                 compute_kinetic_matrices_at_psi!(
                     block_w, block_t, psi, n, ell,
                     kf_ctrl.zi, kf_ctrl.mi, kf_ctrl.wdfac, kf_ctrl.divxfac,
-                    kf_ctrl.electron, equil, kf_intr, kinetic_profiles,
+                    kf_ctrl.electron, equil, intr_t, kinetic_profiles;
+                    atol_xlmda=kf_ctrl.atol_xlmda, rtol_xlmda=kf_ctrl.rtol_xlmda
                 )
                 full_w .+= block_w
                 full_t .+= block_t

@@ -109,9 +109,12 @@ A mutable struct holding internal state variables for stability calculations.
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
-  - `kmsing::Int` - Number of kinetic singular surfaces (not yet implemented)
+  - `kmsing::Int` - Number of kinetic singular surfaces (det(F̄) near-zeros)
   - `sing::Vector{SingType}` - Vector of ideal singular surface data
-  - `kinsing::Vector{SingType}` - Vector of kinetic singular surface data (not yet implemented)
+  - `kinsing::Vector{SingType}` - Vector of kinetic singular surface data
+  - `kinsing_scan_psi::Vector{Float64}` - ψ grid used by `find_kinetic_singular_surfaces!` for the cond(F̄) scan (empty unless the finder has run)
+  - `kinsing_scan_cond::Vector{Float64}` - cond(F̄) values on that grid; the finder locates peaks that exceed `kinsing_scan_threshold`
+  - `kinsing_scan_threshold::Float64` - Threshold on cond(F̄) used to accept a peak as a kinetic singular surface
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
@@ -136,6 +139,9 @@ A mutable struct holding internal state variables for stability calculations.
     kmsing::Int = 0
     sing::Vector{SingType} = SingType[]
     kinsing::Vector{SingType} = SingType[]
+    kinsing_scan_psi::Vector{Float64} = Float64[]
+    kinsing_scan_cond::Vector{Float64} = Float64[]
+    kinsing_scan_threshold::Float64 = 0.0
     psilim::Float64 = 0.0
     qlim::Float64 = 0.0
     q1lim::Float64 = 0.0
@@ -247,8 +253,13 @@ end
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    dmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    # `dmats_prim`, `emats_prim` are the pre-Schur-reduction geometric forms
+    # (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)).
+    # The `_prim` suffix follows `fmats_prim`. Downstream kinetic FKG Schur complements
+    # consume these primitive forms; the alternate singular-layer path that would need
+    # kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+    dmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    emats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)

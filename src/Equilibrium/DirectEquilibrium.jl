@@ -508,6 +508,9 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
         end
     elseif equil_params.grid_type == "ldp"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    elseif equil_params.grid_type == "pow1"
+        # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
+        [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
@@ -570,7 +573,7 @@ robustness.
 
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
-        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC(; check=false))
+        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
         # Resample ff onto uniform theta grid
@@ -632,7 +635,10 @@ robustness.
     rzphi_ys = collect(theta_nodes)
 
     grid2d = (rzphi_xs, theta_nodes)
-    opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    # Snap periodic endpoint: ff_interp evaluation at theta_nodes[end] may drift by machine eps from theta_nodes[1]
+    @views rzphi_nodes[:, end, :] .= rzphi_nodes[:, 1, :]
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
@@ -697,15 +703,17 @@ robustness.
         end
     end
 
+    @views eqfun_fs_nodes[:, end, :] .= eqfun_fs_nodes[:, 1, :]
+
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
-    params = EquilibriumParameters()
-    params.bt_sign = raw_profile.bt_sign
-
     geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
+
+    params = EquilibriumParameters()
+    params.bt_sign = raw_profile.bt_sign
 
     return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,
