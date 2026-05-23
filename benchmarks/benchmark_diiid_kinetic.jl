@@ -134,9 +134,7 @@ function build_benchmark_tomldir(eq_file::String)
         mer_flag = true
         force_termination = false
 
-        set_psilim_via_dmlim = true
-        dmlim = 0.2
-        psiedge = 1.00
+        psiedge = 1.00                # No edge-scan truncation (dmlim mechanism removed in develop)
         qlow = 1.02
         qhigh = 1e3
         sing_start = 0
