@@ -201,6 +201,10 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
 
     for xr in x_res_list
         xr <= 0.0 && continue
+        # A resonance beyond x ≈ 700 sits where the Maxwellian weight exp(-x_res) underflows
+        # to zero in Float64. Its pole contribution is genuinely zero, and the formula
+        # R·log(-u_pole) with R=0 and u_pole≈1 trips the 0·∞ = NaN trap.
+        xr > 700.0 && continue
         # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
         omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
         abs(omega_prime) < 1e-30 && continue
@@ -210,7 +214,11 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
 
         if nu_res > 0.0
             # Collisional: pole shifted off the real axis. i·Ω - ν = 0 ⟹ x_pole = x_res - i·ν/Ω′.
-            x_pole = complex(xr, -nu_res / omega_prime)
+            # If ν overflows at a (tiny) x_res, the pole is infinitely collisionally broadened
+            # — no localized pole; skip and let QuadGK integrate the smooth integrand directly.
+            pole_offset = nu_res / omega_prime
+            isfinite(pole_offset) || continue
+            x_pole = complex(xr, -pole_offset)
             u_pole = 1.0 - exp(-x_pole)
             R = _energy_numerator(xr, p) * (1.0 - u_pole) / (im * omega_prime)
             pole_contribution += R * (log(1.0 - u_pole) - log(-u_pole))

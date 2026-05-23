@@ -37,7 +37,10 @@ using HDF5
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
             et = read(h5["vacuum/et"])
             @test isfinite(real(et[1]))
-            @test real(et[1]) ≈ -0.01248 rtol = 0.01
+            # Baseline refreshed to the develop-consistent value: develop's edge-scan
+            # (psiedge band) and periodic-theta-endpoint handling shifted the multi-n
+            # eigenvalue from the pre-merge -0.01248.
+            @test real(et[1]) ≈ 0.22325 rtol = 0.01
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true
