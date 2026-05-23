@@ -1638,19 +1638,11 @@ function parallel_eulerlagrange_integration(
 )
     N = intr.numpert_total
 
-    # u_store is built by the standard EL pass on natural (un-balanced) chunks. With the
-    # Phase C ContinuousCallback fix in integrate_el_region!, GR fires at the exact
-    # uratio = ucrit crossing inside each chunk, so the resulting u_store is what the
-    # standard / Riccati / parallel paths all consume from PerturbedEquilibrium.
-    # Delegating to the standard pass here unifies the three paths' u_store basis
-    # without bisecting through balanced sub-chunk propagator histories.
-    odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
-
     # Build balanced sub-chunks for the parallel-FM propagator pass. These feed the Δ'
     # BVP (compute_delta_prime_matrix!) and the S-gauge ca_l/ca_r outputs, both of
-    # which benefit from load-balanced parallel execution. We use a *throwaway* OdeState
+    # which benefit from load-balanced parallel execution. Use a *throwaway* OdeState
     # primed at the axis only so chunk_el_integration_bounds reads psifac/ising_start
-    # correctly — odet has already advanced past the edge.
+    # correctly.
     chunk_odet = OdeState(N, 1, 1, intr.msing)
     if ctrl.sing_start <= 0
         initialize_el_at_axis!(chunk_odet, ctrl, equil.profiles, intr)
@@ -1667,16 +1659,55 @@ function parallel_eulerlagrange_integration(
         @info "   Parallel FM: $(length(chunks)) chunks, $bvp_threads thread$(bvp_threads == 1 ? "" : "s")"
     end
 
+    # Phase A (standard-EL u_store pass — sequential by construction; produces the
+    # canonical GR-basis u_store that PerturbedEquilibrium consumes via Phase C's
+    # ContinuousCallback GR firing in integrate_el_region!) and Phase B (the threaded
+    # chunk-FM propagator integration for the Δ' BVP / S-gauge outputs) have no data
+    # dependence on each other: Phase B's chunks initialize from identity ICs, not
+    # from Phase A's u_store. When more than one thread is available we spawn Phase A
+    # concurrently with Phase B's `@threads :dynamic` loop to cap total wall time at
+    # ~max(Phase A, Phase B / nthreads) instead of paying for them sequentially.
+    local odet
     if bvp_threads == 1
+        odet = standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
         for i in eachindex(chunks)
             integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
                                         odet_proxies[1])
         end
     else
-        Threads.@threads :static for i in eachindex(chunks)
-            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                        odet_proxies[Threads.threadid()])
+        t_A = Threads.@spawn standard_eulerlagrange_pass(ctrl, equil, ffit, intr)
+        # Pin BLAS to 1 thread per Julia worker for the duration of the threaded chunk
+        # integration. Without this, each worker's `mul!` / `ldiv!` / `lu!` inside
+        # `sing_der!` lets OpenBLAS spawn its own threads, oversubscribing the CPU and
+        # killing chunk-loop scaling. Restored in `finally` so Phase D's serial
+        # assemble_riccati_s_gauge! still benefits from BLAS parallelism.
+        prev_blas = LinearAlgebra.BLAS.get_num_threads()
+        LinearAlgebra.BLAS.set_num_threads(1)
+        try
+            # Manual worker pool of (julia_nthreads - 1) tasks sharing an atomic work
+            # counter — same dynamic load-balancing as `@threads :dynamic` (chunk
+            # runtimes vary by ~order of magnitude between crossings and interior),
+            # but with one worker held back for the @spawn'd Phase A above.
+            # `@threads` would saturate all `nthreads` with CPU-bound chunk tasks
+            # that never yield, starving Phase A until @threads completes; reserving
+            # a worker lets Phase A overlap, bringing total ≈
+            # max(Phase A, Phase B / (nthreads − 1)) + Phase C/D.
+            n_chunk_workers = max(1, julia_nthreads - 1)
+            next_chunk = Threads.Atomic{Int}(1)
+            n_chunks = length(chunks)
+            @sync for _ in 1:n_chunk_workers
+                Threads.@spawn while true
+                    i = Threads.atomic_add!(next_chunk, 1)
+                    i > n_chunks && break
+                    integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil,
+                                                ffit, intr,
+                                                odet_proxies[Threads.threadid()])
+                end
+            end
+        finally
+            LinearAlgebra.BLAS.set_num_threads(prev_blas)
         end
+        odet = fetch(t_A)
     end
 
     psilim_before = intr.psilim
