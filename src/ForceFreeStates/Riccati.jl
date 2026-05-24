@@ -1545,6 +1545,169 @@ function propagate_chunk_state(upper::Array{ComplexF64,3}, lower::Array{ComplexF
 end
 
 """
+    solve_chunk_fm(upper, lower, rhs, N) -> Array{ComplexF64,3}
+
+Solve `Φ_chunk · x = rhs` for the (N,N,2) state `x`, where `Φ_chunk` is the 2N×2N chunk
+fundamental matrix assembled from the (upper, lower) identity-IC blocks at one ψ. Used by
+`reconstruct_u_store_via_gr!` to express a backward chunk's inbound state in the chunk-FM
+IC basis.
+"""
+function solve_chunk_fm(upper::Array{ComplexF64,3}, lower::Array{ComplexF64,3},
+                        rhs::Array{ComplexF64,3}, N::Int)
+    Φ = [upper[:, :, 1] lower[:, :, 1]; upper[:, :, 2] lower[:, :, 2]]
+    x = Φ \ [rhs[:, :, 1]; rhs[:, :, 2]]
+    out = similar(rhs)
+    out[:, :, 1] .= @view x[1:N, :]
+    out[:, :, 2] .= @view x[N+1:2N, :]
+    return out
+end
+
+"""
+    gr_right_multiply!(cbase, odet, ifix, N)
+
+Right-multiply `cbase` (an (N,N,2) state) by the Gaussian-reduction matrix `G` of fixup
+`ifix`, reconstructed from `odet.fixfac` / `odet.index` (the same construction `transform_u!`
+uses). `apply_gaussian_reduction!` transforms the running state as `u → u·G`, and the dense
+reconstruction holds `u(ψ) = Φ_chunk(ψ)·cbase`; therefore re-anchoring `cbase` after a GR
+fixup is exactly `cbase → cbase·G`. This is an O(1) right-multiplication — unlike a re-solve
+against `Φ_chunk`, whose 2N×2N inverse is catastrophically ill-conditioned for a chunk that
+spans large solution growth.
+"""
+function gr_right_multiply!(cbase::Array{ComplexF64,3}, odet::OdeState, ifix::Int, N::Int)
+    G = Matrix{ComplexF64}(I, N, N)
+    temp = Matrix{ComplexF64}(undef, N, N)
+    buf = Matrix{ComplexF64}(undef, N, N)
+    mask = trues(N)
+    for isol in 1:N
+        ksol = odet.index[isol, ifix]
+        mask[ksol] = false
+        fill!(temp, 0)
+        for d in 1:N
+            temp[d, d] = 1
+        end
+        for jsol in 1:N
+            if mask[jsol]
+                temp[ksol, jsol] = odet.fixfac[ksol, jsol, ifix]
+            end
+        end
+        mul!(buf, G, temp)
+        G .= buf
+    end
+    @views cbase[:, :, 1] .= cbase[:, :, 1] * G
+    @views cbase[:, :, 2] .= cbase[:, :, 2] * G
+    return cbase
+end
+
+"""
+    _uratio_of(u, unorm0) -> Float64
+
+`max(col_norms ./ unorm0) / min(col_norms ./ unorm0)` for the GR-firing condition, with
+zero-min guard. Same definition as `gr_condition` in `integrate_el_region!`.
+"""
+function _uratio_of(u::AbstractArray{ComplexF64,3}, unorm0::AbstractVector{Float64})
+    N = size(u, 2)
+    min_r = Inf
+    max_r = 0.0
+    @inbounds for i in 1:N
+        s = 0.0
+        @views s = sum(abs2, u[:, i, 1])
+        n = sqrt(s)
+        r = n / unorm0[i]
+        r < min_r && (min_r = r)
+        r > max_r && (max_r = r)
+    end
+    return min_r > 0 ? max_r / min_r : 0.0
+end
+
+"""
+    _fire_gr_at!(odet, ctrl, intr, cbase, N)
+
+Force one GR fixup at the current `odet.u`, mirroring the standard EL `ContinuousCallback`
+`gr_affect!` (`integrate_el_region!`): increments `odet.ifix`, calls
+`apply_gaussian_reduction!`, re-anchors `cbase` via `gr_right_multiply!`, sets
+`odet.unorm0` to the post-GR column norms (filling zero pivots with the geometric mean of
+survivors so the next condition eval stays finite), and clears `odet.new`. Returns `true`
+if the fixup was performed, `false` if `numunorms_init` storage is exhausted.
+"""
+function _fire_gr_at!(odet::OdeState, ctrl::ForceFreeStatesControl,
+                      intr::ForceFreeStatesInternal, cbase::Array{ComplexF64,3}, N::Int)
+    odet.ifix >= ctrl.numunorms_init && return false
+    odet.unorm .= norm.(eachcol(@view odet.u[:, :, 1]))
+    odet.ifix += 1
+    apply_gaussian_reduction!(odet.u, odet, intr, false)
+    gr_right_multiply!(cbase, odet, odet.ifix, N)
+    odet.unorm0 .= norm.(eachcol(@view odet.u[:, :, 1]))
+    nonzero = odet.unorm0 .> 0
+    if any(nonzero) && !all(nonzero)
+        ref = exp(sum(log, odet.unorm0[nonzero]) / count(nonzero))
+        @inbounds for j in eachindex(odet.unorm0)
+            odet.unorm0[j] == 0 && (odet.unorm0[j] = ref)
+        end
+    end
+    odet.new = false
+    return true
+end
+
+"""
+    reconstruct_u_store_via_gr!(odet, chunks, propagators, ctrl, equil, ffit, intr, odet_proxy)
+
+**[WIP / not used in production — see Phase 2 status in `SESSION_STATUS.md`.]**
+
+Intended path: build the canonical `u_store` (ξ_ψ in the Gaussian-reduction axis basis
+that `PerturbedEquilibrium` consumes) directly from the parallel-FM chunk propagators
+without re-running a full serial standard-EL pass. The two structural blockers found
+in the Phase 2 attempt:
+
+1. **Backward (crossing) chunks are ill-conditioned for FM reconstruction.**
+   Crossing chunks are integrated backward (`direction == -1`) for the BVP's
+   well-conditioning, so `Φ_back(psi_start)` is a decayed matrix; mapping the entry
+   state into the chunk-FM IC basis via `solve_chunk_fm` amplifies noise and loses
+   the small solution.
+
+2. **Forward chunks lose small solutions to roundoff inside the chunk FM.** The
+   chunk FM has no intra-chunk GR fixups (it is a raw ODE solution); for chunks
+   where `uratio` exceeds `ucrit` internally the small-solution column is lost in
+   the un-normalized FM, and post-hoc bisection on the saved snapshots cannot
+   recover it.
+
+Fixing both requires `integrate_propagator_chunk!` to thread GR fixups through the
+chunk integration (analogous to `integrate_el_region!`'s `ContinuousCallback`) and
+to record the per-chunk GR matrices for the reconstruction to compose into `cbase`.
+That cascades into `apply_propagator!`, `compute_delta_prime_matrix!`, and
+`assemble_riccati_s_gauge!`, all of which would need to handle GR-augmented chunk
+propagators — a multi-day rewrite tracked for a future session.
+
+The current implementation falls back to running the standard EL chunk integrator
+on the passed `chunks` sequentially. With *natural* chunks (`bidirectional=false,
+no balance`) this is bit-equivalent to `standard_eulerlagrange_pass`; with the
+parallel-FM *balanced sub-chunks* it produces partition-dependent answers because
+the GR `ContinuousCallback`'s `unorm0` anchoring changes when `integrate_el_region!`
+is re-entered. The `propagators` argument is currently unused but kept in the
+signature for the future FM-based reconstruction.
+
+`ca_l`/`ca_r` written by the standard crossing here are in the axis gauge; the caller
+must overwrite them with the S-gauge pass's (S, I) values that `SingularCoupling.jl`
+requires.
+"""
+function reconstruct_u_store_via_gr!(
+    odet::OdeState, chunks::Vector{IntegrationChunk}, propagators::Vector{ChunkPropagator},
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal, odet_proxy::OdeState
+)
+    initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+    odet.new = true
+    odet.ifix = 0
+    odet.step = 1
+
+    for chunk in chunks
+        integrate_el_region!(odet, ctrl, equil, ffit, intr, chunk)
+        if chunk.needs_crossing
+            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+        end
+    end
+end
+
+"""
     assemble_riccati_s_gauge!(odet, chunks, propagators, ctrl, equil, ffit, intr) -> S_at_surface_left
 
 S-gauge assembly pass of the parallel-FM solution. Applies each chunk propagator in order,
@@ -1556,8 +1719,9 @@ matrix S at each singular surface's left boundary, the axis BC for the Δ' BVP) 
 populates `odet.ca_l`/`odet.ca_r` and `intr.sing[*]` (Δ', `ua_left`, …) in the (S, I) gauge
 that `PerturbedEquilibrium`'s `SingularCoupling.jl` and `compute_delta_prime_matrix!`
 require. It does NOT produce the canonical `u_store` — that comes from
-`standard_eulerlagrange_pass`. Run on a scratch `OdeState` so its axis-gauge bookkeeping
-does not collide with the canonical odet from the standard pass.
+`reconstruct_u_store_via_gr!` (Phase 2) or `standard_eulerlagrange_pass` (Phase 1 fallback).
+Run on a scratch `OdeState` so its axis-gauge bookkeeping does not collide with the
+canonical odet.
 """
 function assemble_riccati_s_gauge!(
     odet::OdeState, chunks::Vector{IntegrationChunk}, propagators::Vector{ChunkPropagator},
