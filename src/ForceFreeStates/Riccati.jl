@@ -914,66 +914,81 @@ function parallel_eulerlagrange_integration(
     # reads when generating its chunks). Run sequentially in that (non-default) case.
     use_concurrent = !ctrl.truncate_at_dW_peak && total_threads >= 2
 
-    # Route A is spawned eagerly when concurrent so Route B starts immediately alongside
-    # it; the Julia scheduler interleaves them across the available threads.
-    routeA_task = use_concurrent ? (Threads.@spawn _route_a_legacy_el(ctrl, equil, ffit, intr)) : nothing
+    # Pin BLAS to one thread for the duration of the concurrent section. Otherwise
+    # OpenBLAS's per-call thread pool (often Sys.CPU_THREADS) multiplies with our explicit
+    # Julia parallelism — Route A's spawned BLAS calls + each spawned chunk's BLAS calls
+    # all request the full pool simultaneously, swamping the cores and slowing every task.
+    # Standard nested-parallelism pattern: outer (Julia tasks) is ours, inner (BLAS) is
+    # serial. Skipped in the sequential fallback (single thread / truncate_at_dW_peak).
+    blas_saved = LinearAlgebra.BLAS.get_num_threads()
+    use_concurrent && LinearAlgebra.BLAS.set_num_threads(1)
 
-    # Route B: balanced bidirectional chunks → parallel propagator integration → serial
-    # Riccati assembly walk that builds odet_riccati.u_store and populates intr.sing[*].
-    chunk_odet = OdeState(N, 1, 1, intr.msing)
-    if ctrl.sing_start <= 0
-        initialize_el_at_axis!(chunk_odet, ctrl, equil.profiles, intr)
-    end
-    base_chunks = chunk_el_integration_bounds(chunk_odet, ctrl, intr; bidirectional=true)
-    chunks = balance_integration_chunks(base_chunks, ctrl, intr)
-    propagators = [ChunkPropagator(N) for _ in chunks]
-    # Per-chunk OdeState proxies: scratch state for `sing_der!` side effects (q, ud,
-    # spline_hint, total_steps). Allocating one per chunk lets us `@spawn` each chunk
-    # independently — the scheduler can then interleave Route A's task with the chunks,
-    # which `Threads.@threads :static` would not allow (its partitions don't yield, so a
-    # spawned Route A would have to wait for a partition to finish). Per-chunk (rather
-    # than per-`threadid`) proxies are also safe under Julia 1.8+ task migration, where
-    # `Threads.threadid()` can change mid-task.
-    odet_proxies = [OdeState(N, 1, 1, 0) for _ in eachindex(chunks)]
+    odet, odet_riccati, propagators, chunks, S_at_surface_left = try
+        # Route A is spawned eagerly when concurrent so Route B starts immediately alongside
+        # it; the Julia scheduler interleaves them across the available threads.
+        routeA_task = use_concurrent ? (Threads.@spawn _route_a_legacy_el(ctrl, equil, ffit, intr)) : nothing
 
-    if ctrl.verbose
-        mode = use_concurrent ? "concurrent (Route A ≈1 thread, Route B on the remaining $(total_threads-1))" : "sequential"
-        @info "   Chunked Riccati: $(length(chunks)) chunks, $total_threads thread$(total_threads == 1 ? "" : "s"), $mode"
-    end
-
-    # Route B parallel phase. One `@spawn` per chunk (work-stealing) so the scheduler
-    # naturally overlaps these many short tasks with Route A's one long task. Output is
-    # deterministic regardless of execution order (each chunk writes its own propagators[i]).
-    if total_threads == 1
-        for i in eachindex(chunks)
-            integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                        odet_proxies[i])
+        # Route B: balanced bidirectional chunks → parallel propagator integration → serial
+        # Riccati assembly walk that builds odet_riccati.u_store and populates intr.sing[*].
+        chunk_odet = OdeState(N, 1, 1, intr.msing)
+        if ctrl.sing_start <= 0
+            initialize_el_at_axis!(chunk_odet, ctrl, equil.profiles, intr)
         end
-    else
-        @sync for i in eachindex(chunks)
-            Threads.@spawn integrate_propagator_chunk!(propagators[i], chunks[i], ctrl, equil, ffit, intr,
-                                                       odet_proxies[i])
+        base_chunks = chunk_el_integration_bounds(chunk_odet, ctrl, intr; bidirectional=true)
+        chunks_inner = balance_integration_chunks(base_chunks, ctrl, intr)
+        propagators_inner = [ChunkPropagator(N) for _ in chunks_inner]
+        # Per-chunk OdeState proxies: scratch state for `sing_der!` side effects (q, ud,
+        # spline_hint, total_steps). Allocating one per chunk lets us `@spawn` each chunk
+        # independently — the scheduler can then interleave Route A's task with the chunks,
+        # which `Threads.@threads :static` would not allow (its partitions don't yield, so a
+        # spawned Route A would have to wait for a partition to finish). Per-chunk (rather
+        # than per-`threadid`) proxies are also safe under Julia 1.8+ task migration, where
+        # `Threads.threadid()` can change mid-task.
+        odet_proxies = [OdeState(N, 1, 1, 0) for _ in eachindex(chunks_inner)]
+
+        if ctrl.verbose
+            mode = use_concurrent ? "concurrent (Route A ≈1 thread, Route B on the remaining $(total_threads-1), BLAS pinned to 1)" : "sequential"
+            @info "   Chunked Riccati: $(length(chunks_inner)) chunks, $total_threads thread$(total_threads == 1 ? "" : "s"), $mode"
         end
+
+        # Route B parallel phase. One `@spawn` per chunk (work-stealing) so the scheduler
+        # naturally overlaps these many short tasks with Route A's one long task. Output is
+        # deterministic regardless of execution order (each chunk writes its own propagators_inner[i]).
+        if total_threads == 1
+            for i in eachindex(chunks_inner)
+                integrate_propagator_chunk!(propagators_inner[i], chunks_inner[i], ctrl, equil, ffit, intr,
+                                            odet_proxies[i])
+            end
+        else
+            @sync for i in eachindex(chunks_inner)
+                Threads.@spawn integrate_propagator_chunk!(propagators_inner[i], chunks_inner[i], ctrl, equil, ffit, intr,
+                                                           odet_proxies[i])
+            end
+        end
+
+        odet_riccati_inner = OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
+        S_at_surface_left_inner = assemble_riccati_walk!(odet_riccati_inner, chunks_inner, propagators_inner, ctrl, equil, ffit, intr)
+        odet_riccati_inner.total_steps = sum(p -> p.total_steps, odet_proxies)
+        finalize_canonical_u_store!(odet_riccati_inner, ctrl, equil, ffit, intr)
+        odet_riccati_inner.u .= odet_riccati_inner.u_store[:, :, :, end]
+
+        # Route A — fetch the concurrent task, or run it sequentially (truncate_at_dW_peak=true
+        # / single-thread). Sequential truncate=true builds Route B's chunks from the original
+        # psilim; Route A's truncation is therefore felt only by its own odet and the
+        # downstream Δ' BVP edge BC (which uses intr.psilim), not by the already-integrated
+        # propagators.
+        odet_inner = use_concurrent ? fetch(routeA_task) : _route_a_legacy_el(ctrl, equil, ffit, intr)
+
+        # Copy Route B's S-gauge asymptotic coefficients onto Route A's odet so
+        # SingularCoupling.jl sees Riccati-gauge ca paired with the S-gauge intr.sing[*].ua_*
+        # (the standard crossing in Route A wrote axis-gauge ca; overwrite with the S-gauge).
+        odet_inner.ca_l .= odet_riccati_inner.ca_l
+        odet_inner.ca_r .= odet_riccati_inner.ca_r
+
+        (odet_inner, odet_riccati_inner, propagators_inner, chunks_inner, S_at_surface_left_inner)
+    finally
+        use_concurrent && LinearAlgebra.BLAS.set_num_threads(blas_saved)
     end
-
-    odet_riccati = OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-    S_at_surface_left = assemble_riccati_walk!(odet_riccati, chunks, propagators, ctrl, equil, ffit, intr)
-    odet_riccati.total_steps = sum(p -> p.total_steps, odet_proxies)
-    finalize_canonical_u_store!(odet_riccati, ctrl, equil, ffit, intr)
-    odet_riccati.u .= odet_riccati.u_store[:, :, :, end]
-
-    # Route A — fetch the concurrent task, or run it sequentially (truncate_at_dW_peak=true
-    # / single-thread). Sequential truncate=true builds Route B's chunks from the original
-    # psilim; Route A's truncation is therefore felt only by its own odet and the
-    # downstream Δ' BVP edge BC (which uses intr.psilim), not by the already-integrated
-    # propagators.
-    odet = use_concurrent ? fetch(routeA_task) : _route_a_legacy_el(ctrl, equil, ffit, intr)
-
-    # Copy Route B's S-gauge asymptotic coefficients onto Route A's odet so
-    # SingularCoupling.jl sees Riccati-gauge ca paired with the S-gauge intr.sing[*].ua_*
-    # (the standard crossing in Route A wrote axis-gauge ca; overwrite with the S-gauge).
-    odet.ca_l .= odet_riccati.ca_l
-    odet.ca_r .= odet_riccati.ca_r
 
     return odet, odet_riccati, propagators, chunks, S_at_surface_left
 end

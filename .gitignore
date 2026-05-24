@@ -24,3 +24,5 @@ pestotv
 regression-harness/*.sqlite
 regression-harness/*.sqlite-shm
 regression-harness/*.sqlite-wal
+benchmarks/figures/
+benchmarks/*_results/
