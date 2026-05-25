@@ -803,9 +803,10 @@ more simplistic code with similar performance.
         # ---- Kinetic path with pre-computed FKG matrices ----
         # Load pre-computed kinetic matrices from splines
         # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
-        ffit.amats(vec(amat), psieval; hint=ffit._hint)
-        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
-        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+        # Use odet.ffit_hint (per-thread) instead of ffit._hint (shared, racy in parallel BVP)
+        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
+        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
+        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
 
         # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
         f0mat = similar!(pool, amat)
@@ -818,15 +819,15 @@ more simplistic code with similar performance.
         r3mat_kin = similar!(pool, amat)
         gaat_kin = similar!(pool, amat)
 
-        ffit.f0mats(vec(f0mat), psieval; hint=ffit._hint)
-        ffit.pmats(vec(pmat_kin), psieval; hint=ffit._hint)
-        ffit.paats(vec(paat_kin), psieval; hint=ffit._hint)
-        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit._hint)
-        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit._hint)
-        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit._hint)
-        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit._hint)
-        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit._hint)
-        ffit.gaats(vec(gaat_kin), psieval; hint=ffit._hint)
+        ffit.f0mats(vec(f0mat), psieval; hint=odet.ffit_hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=odet.ffit_hint)
+        ffit.paats(vec(paat_kin), psieval; hint=odet.ffit_hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=odet.ffit_hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=odet.ffit_hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=odet.ffit_hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=odet.ffit_hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=odet.ffit_hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=odet.ffit_hint)
 
         # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
         # Direct LAPACK to avoid the ipiv allocation that lu!/ldiv! would do in this hot loop
@@ -834,10 +835,10 @@ more simplistic code with similar performance.
         LAPACK.getrs!('N', amat, ipiv, bmat)
         LAPACK.getrs!('N', amat, ipiv, cmat)
 
-        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11)
-        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1  [Fortran sing.f lines 1102-1105]
-        # K̄(i,j) = q1*KK + R2                        [lines 1106-1107]
-        # K̄†(i,j) = KK†*q2 + R3                      [lines 1108-1109]
+        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
+        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
+        # K̄(i,j) = q1*KK + R2
+        # K̄†(i,j) = KK†*q2 + R3
         # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
         singfac_direct = acquire!(pool, Float64, Npert)
         singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
@@ -859,7 +860,7 @@ more simplistic code with similar performance.
         gmat .= gaat_kin
 
         # Kinetic ODE (Logan 2015 Eq 7.46): singfac absorbed into F̄/K̄/K̄†, no explicit Q⁻¹
-        # du₁ = F̄⁻¹(u₂ - K̄·u₁)  [Fortran sing.f lines 1200-1215]
+        # du₁ = F̄⁻¹(u₂ - K̄·u₁)
         du1 .= u2
         mul!(tmp_mat, kmat, u1)
         du1 .-= tmp_mat
@@ -867,7 +868,7 @@ more simplistic code with similar performance.
         _, ipiv2, _ = LAPACK.getrf!(fmat_lower)
         LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
 
-        # du₂ = Ḡ†·u₁ + K̄†·du₁  [Fortran sing.f lines 1217-1222]
+        # du₂ = Ḡ†·u₁ + K̄†·du₁  (Logan 2015 Eq C.10-C.11)
         mul!(tmp_mat, gmat, u1)
         du2 .= tmp_mat
         mul!(tmp_mat, kaat_kin, du1)
@@ -875,13 +876,13 @@ more simplistic code with similar performance.
 
     else
         # ---- Ideal path ----
-        # Evaluate matrix splines at the current psi value using shared hint
-        ffit.amats(vec(amat), psieval; hint=ffit._hint)
-        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
-        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
-        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
-        ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
-        ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
+        # Evaluate matrix splines at the current psi (odet.ffit_hint is per-thread)
+        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
+        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
+        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=odet.ffit_hint)
+        ffit.kmats(vec(kmat), psieval; hint=odet.ffit_hint)
+        ffit.gmats(vec(gmat), psieval; hint=odet.ffit_hint)
 
         # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
         LAPACK.potrf!('U', amat)

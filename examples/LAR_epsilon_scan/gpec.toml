@@ -83,7 +83,7 @@ sing_order              = 6        # Truncation order of singular-surface asympt
 
 use_parallel          = true       # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
 parallel_threads      = 2          # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
-populate_dense_xi     = true       # Append serial-EL pass after parallel BVP so HDF5 integration/xi_* carry axis-basis dense ξ for PerturbedEquilibrium
+populate_dense_xi     = false      # No PerturbedEquilibrium section — skip the serial-EL re-run (matches new default)
 truncate_at_dW_peak   = false      # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
 set_psilim_via_dmlim  = false      # FALSE for limited circular / analytical equilibria — rationals sparse, dmlim truncation would chop too much edge
 dmlim                 = 0.2        # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n

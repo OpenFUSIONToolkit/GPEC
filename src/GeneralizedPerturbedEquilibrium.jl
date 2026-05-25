@@ -531,13 +531,7 @@ function write_outputs_to_HDF5(
             out_h5["singular/n"] = n_matrix
         end
 
-        # Per-surface Δ' (`sing.delta_prime`, `sing.delta_prime_col`) was previously
-        # written here, but it is a stub calculation from (ca_r - ca_l) at each
-        # crossing that doesn't agree with the canonical STRIDE BVP Δ' matrix below.
-        # It's retained in `intr.sing[*].delta_prime` for future work but is not
-        # emitted to HDF5 to avoid duplicating an unreliable value next to the
-        # canonical one. Downstream consumers (PE SingularCoupling, regression
-        # harness, Analysis plots) read the BVP matrix diagonal instead.
+        # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
 
         # Write inter-surface Δ' matrix if computed (parallel FM path only).
         # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).

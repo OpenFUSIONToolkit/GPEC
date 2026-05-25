@@ -84,7 +84,11 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
     # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
     # because single long-span propagators may already have cond ~ 10²⁴.
     min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    target_n = max(min_chunks, 4 * Threads.nthreads(), min_bvp_intervals)
+    # Use the effective parallel width (capped by ctrl.parallel_threads) rather than
+    # Threads.nthreads() — otherwise a user on `julia -t 16` who sets parallel_threads=2
+    # for determinism still pays for 4× the requested sub-chunk count.
+    effective_threads = min(Threads.nthreads(), max(ctrl.parallel_threads, 1))
+    target_n = max(min_chunks, 4 * effective_threads, min_bvp_intervals)
 
     result = collect(chunks)
 

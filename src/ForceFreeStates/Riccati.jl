@@ -123,7 +123,18 @@ and U₂ components carry physical information.
 function assemble_fm_matrix(propagators::Vector{ChunkPropagator}, idx_range;
                             condition::Bool=false,
                             T_init::Union{Nothing,Matrix{ComplexF64}}=nothing)
-    N = size(propagators[1].block_upper_ic, 1)
+    # Determine matrix size from T_init if provided (lets us handle empty idx_range and even
+    # an empty propagators list, provided T_init carries the dimension). Otherwise fall back
+    # to the first propagator that actually exists in idx_range, with a final fallback to
+    # propagators[1] when both idx_range and T_init pin nothing down.
+    N = if T_init !== nothing
+        size(T_init, 1) ÷ 2
+    elseif !isempty(idx_range)
+        size(propagators[first(idx_range)].block_upper_ic, 1)
+    else
+        @assert !isempty(propagators) "assemble_fm_matrix: cannot infer N from empty propagators with no T_init"
+        size(propagators[1].block_upper_ic, 1)
+    end
     Phi = T_init !== nothing ? copy(T_init) : Matrix{ComplexF64}(I, 2N, 2N)
     isempty(idx_range) && return Phi
     for i in idx_range
@@ -1335,6 +1346,7 @@ function integrate_propagator_chunk!(
         u_upper[i, i, 1] = 1
     end
     odet_proxy.spline_hint[] = 1
+    odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u_upper, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     prop.block_upper_ic .= sol.u[end]
@@ -1345,6 +1357,7 @@ function integrate_propagator_chunk!(
         u_lower[i, i, 2] = 1
     end
     odet_proxy.spline_hint[] = 1
+    odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u_lower, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     prop.block_lower_ic .= sol.u[end]
@@ -1403,6 +1416,7 @@ function integrate_fm_with_ua_ic(
     u0[:, :, 1] .= ua[:, 1:N, 1]
     u0[:, :, 2] .= ua[:, 1:N, 2]
     odet_proxy.spline_hint[] = 1
+    odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     result[1:N, 1:N]     .= sol.u[end][:, :, 1]
@@ -1412,6 +1426,7 @@ function integrate_fm_with_ua_ic(
     u0[:, :, 1] .= ua[:, N+1:2N, 1]
     u0[:, :, 2] .= ua[:, N+1:2N, 2]
     odet_proxy.spline_hint[] = 1
+    odet_proxy.ffit_hint[] = 1
     prob = ODEProblem(sing_der!, u0, tspan, params)
     sol = solve(prob, Vern9(); reltol=rtol, save_everystep=false, save_end=true)
     result[1:N, N+1:2N]     .= sol.u[end][:, :, 1]

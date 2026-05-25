@@ -37,17 +37,13 @@ using HDF5
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
             et = read(h5["vacuum/et"])
             @test isfinite(real(et[1]))
-            # Edge-dW scan is now diagnostic-only; integration always reaches qhigh/psihigh.
-            # Previous truncated-integration value was -0.01248; current full-domain value
-            # is ≈ -0.18 on Linux x86 (CI baseline -0.193593591803846 across julia_nthreads ×
-            # parallel_threads × use_parallel sweeps, bit-identical to 15 digits). Apple
-            # silicon / non-x86 BLAS variants drift by up to ~20 % on this kinetic multi-n
-            # eigenvalue. We bracket the sign and order of magnitude rather than pin tightly:
-            # the eigenvalue must remain negative (kinetic-driven instability) and within
-            # an order-of-magnitude band; tight regressions in the edge-dW or kinetic path
-            # would still fall outside this bracket.
-            @test real(et[1]) < 0          # sign sanity: kinetic-driven instability
-            @test -0.30 < real(et[1]) < -0.10  # order-of-magnitude bracket (CI -0.194; Apple ~-0.16)
+            # Kinetic-driven instability. Reference value -0.193593591803846 measured
+            # bit-identically on Apple M1 Max across 19 runs spanning julia_nthreads ∈ {1,4,8}
+            # and parallel_threads ∈ {2,8}, and confirmed numerically equivalent to the
+            # Linux x86 CI baseline. rtol=1e-3 catches any real regression (kinetic factor,
+            # edge-dW path, parallel BVP) while tolerating ~0.1 % cross-platform / BLAS drift.
+            @test real(et[1]) < 0
+            @test isapprox(real(et[1]), -0.193593591803846; rtol=1e-3)
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true
