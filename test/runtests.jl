@@ -41,4 +41,6 @@ else
     include("./runtests_dispersion_amr.jl")
     include("./runtests_slayer_runner.jl")
     include("./runtests_fullruns.jl")
+    include("./runtests_coils.jl")
+    include("./runtests_imas.jl")
 end

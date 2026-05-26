@@ -37,11 +37,13 @@ using HDF5
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
             et = read(h5["vacuum/et"])
             @test isfinite(real(et[1]))
-            # Edge-dW scan is now diagnostic-only; integration always reaches qhigh/psihigh.
-            # Previous value (-0.01248) reflected the old truncated-integration behaviour.
-            # rtol is loose because this result is thread-count sensitive (drifts
-            # ~15% between single- and multi-threaded invocations).
-            @test real(et[1]) ≈ -0.18 rtol = 0.2
+            # Kinetic-driven instability. Reference value -0.193593591803846 measured
+            # bit-identically on Apple M1 Max across 19 runs spanning julia_nthreads ∈ {1,4,8}
+            # and parallel_threads ∈ {2,8}, and confirmed numerically equivalent to the
+            # Linux x86 CI baseline. rtol=1e-3 catches any real regression (kinetic factor,
+            # edge-dW path, parallel BVP) while tolerating ~0.1 % cross-platform / BLAS drift.
+            @test real(et[1]) < 0
+            @test isapprox(real(et[1]), -0.193593591803846; rtol=1e-3)
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true

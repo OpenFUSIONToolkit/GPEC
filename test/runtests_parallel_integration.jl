@@ -130,10 +130,16 @@ using TOML
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
 
-        target_n = max(2 * intr.msing + 3, 4 * Threads.nthreads())
+        # Must mirror balance_integration_chunks' internal target_n formula
+        # (src/ForceFreeStates/EulerLagrange.jl). Keep this in sync.
+        target_n = max(2 * intr.msing + 3, 4 * Threads.nthreads(), 8 * (intr.msing + 1) + intr.msing)
 
-        # After balancing, should have at least target_n chunks
-        @test length(balanced) >= min(target_n, length(base_chunks) * 50)
+        # After balancing, chunk count equals target_n: the while-loop adds exactly one
+        # chunk per iteration (a bisection split) and exits when length(result) >= target_n,
+        # so the post-loop count is target_n under normal conditions. (The function can
+        # produce fewer if every remaining chunk is unsplittable — width < 1e-8 — but that
+        # never happens in the regression cases here.)
+        @test length(balanced) == target_n
 
         # First chunk starts at the correct position, last chunk ends at the edge
         @test balanced[1].psi_start ≈ base_chunks[1].psi_start
@@ -248,27 +254,11 @@ using TOML
 
         # Energy eigenvalue matches to 2%
         @test isapprox(et_par, et_std; rtol=0.02)
-
-        # Δ' is populated for every singular surface (finite values)
-        # Note: the FM parallel path computes Δ' from ca_l/ca_r accumulated in (S,I)
-        # normalization (Riccati-style crossings). This differs from the sequential path's
-        # (U1,U2) normalization, so absolute Δ' values are not compared here.
-        @test all(s -> !isempty(s.delta_prime), intr_par.sing)
-        @test all(s -> all(isfinite, s.delta_prime), intr_par.sing)
-
-        # delta_prime_col is populated and has the correct shape (N × n_res_modes)
-        N = intr_par.numpert_total
-        @test all(s -> !isempty(s.delta_prime_col), intr_par.sing)
-        @test all(s -> size(s.delta_prime_col, 1) == N, intr_par.sing)
-        @test all(s -> size(s.delta_prime_col, 2) == length(s.delta_prime), intr_par.sing)
-
-        # Diagonal of delta_prime_col matches delta_prime (consistency check)
-        for s in intr_par.sing
-            ipert_res_vals = 1 .+ s.m .- intr_par.mlow .+ (s.n .- intr_par.nlow) .* intr_par.mpert
-            for (i, ipr) in enumerate(ipert_res_vals)
-                @test s.delta_prime_col[ipr, i] ≈ s.delta_prime[i]  rtol=1e-10
-            end
-        end
+        # Per-surface Δ' assertions were removed: per-surface Δ' is a stub calculation
+        # left in the code for future work but no longer reported, output, or tested.
+        # The STRIDE BVP Δ' matrix (`singular/delta_prime_matrix`) is the canonical
+        # Δ', regression-tested via the DIIID-like fixture which has well-conditioned
+        # values; Solovev is near marginal stability and BVP Δ' is pathological there.
     end
 
     @testset "Parallel FM integration matches standard ODE — DIIID-like example (large N)" begin
@@ -304,15 +294,23 @@ using TOML
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
-            return real(vac.et[1])
+            return real(vac.et[1]), intr
         end
 
-        et_par = run_diiid(true)
+        et_par, intr_par = run_diiid(true)
 
-        # Parallel FM pinned-value regression: the bidirectional fix gives et ≈ 1.29
-        # (was ~1.15 before the fix, off by ~10%). Pin to 1.29 with rtol=0.05 so a
-        # regression in the bidirectional assembly would still be caught.
-        @test isapprox(et_par, 1.29; rtol=0.05)
+        # Parallel FM et[1] regression. The bidirectional fix gives et ≈ 1.5–1.6 with
+        # set_psilim_via_dmlim = true (production diverted convention; DIIID-like example
+        # sets it explicitly). With the previous default (false) this was ≈ 1.29. Single-
+        # point pinning of et_par is platform-sensitive at the few-percent level (BLAS
+        # variant / FP rounding through the BVP solve and outer-plasma Riccati pass shift
+        # the eigenvalue ~5-10 %), so we bracket the eigenvalue rather than pin a tight
+        # value. A true regression of the bidirectional assembly (et ≈ 1.29 or ≈ 2+) still
+        # fails this bracket loudly.
+        @test 1.4 < et_par < 1.7
+        # Per-surface Δ' assertions removed (stub calculation; see Solovev testset
+        # comment above). BVP Δ' matrix regression for DIIID-like is in the
+        # `delta_prime_matrix — STRIDE BVP DIIID-like regression (large N)` testset.
 
         # Cross-path consistency (parallel vs standard) is omitted here: after the
         # edge-dW decoupling, the two paths store the final-state U at different
@@ -361,56 +359,105 @@ using TOML
         @test isapprox(cost_ac, cost_ab + cost_bc; rtol=1e-10)
     end
 
-    @testset "delta_prime_matrix — STRIDE BVP Solovev regression" begin
-        # Verify that the parallel FM path computes a well-formed inter-surface Δ' matrix
-        # via the STRIDE global BVP [Glasser 2018 Phys. Plasmas 25, 032501].
-        # Shape: (2·msing × 2·msing), where index 2j-1 = left side and 2j = right side
-        # of surface j. Each entry is the U₂[ipert_res] response amplitude for one
-        # driving configuration.
-        ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
-        inputs = TOML.parsefile(joinpath(ex, "gpec.toml"))
-        inputs["ForceFreeStates"]["verbose"] = false
-        inputs["ForceFreeStates"]["use_parallel"] = true
-        intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=ex)
-        ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
-            (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
-        eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex)
-        equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
-        intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
-            (Symbol(k) => v for (k, v) in inputs["Wall"])...)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-        intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
-        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
-        intr.mpert = intr.mhigh - intr.mlow + 1
-        intr.mband = intr.mpert - 1
-        intr.numpert_total = intr.mpert * intr.npert
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
-        odet, fm_propagators, fm_chunks, fm_S_left =
-            GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
-        vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.compute_delta_prime_matrix!(
-            intr, fm_propagators, fm_chunks;
-            wv=vac.wv, psio=equil.psio,
-            S_at_surface_left=fm_S_left, ctrl=ctrl, equil=equil, ffit=ffit)
+    # Note: a Solovev BVP Δ' regression testset previously lived here, but the
+    # Solovev fixture (q₀ = 1.9, e = 1.6, close conformal wall) is near marginal
+    # external-kink stability (et[1] ≈ +0.24), where Δ' diverges — the pinned
+    # values were order 10⁵-10¹¹ with |Im/Re| ≫ 1 and didn't track anything
+    # physically meaningful. BVP Δ' regression is concentrated on the DIIID-like
+    # fixture below (intrinsically stable, well-conditioned BVP Δ').
 
-        msing = intr.msing
-        dpm = intr.delta_prime_matrix
+    @testset "ξ functions bit-identical between use_parallel modes (populate_dense_xi)" begin
+        # When `ctrl.use_parallel = true` and `ctrl.populate_dense_xi = true`
+        # (default), `parallel_eulerlagrange_integration` appends a serial
+        # Euler-Lagrange pass and returns that fresh `odet` instead of the
+        # propagator-BVP one.  That dense pass invokes the SAME
+        # `eulerlagrange_integration` code path the serial `use_parallel = false`
+        # benchmark goes through with the SAME `(ctrl, equil, ffit, intr)`
+        # inputs (BVP-only state on `intr` saved/restored across the pass), so
+        # the resulting `psi_store` / `q_store` / `u_store` / `ud_store` /
+        # `crit_store` arrays must be bit-identical to a standalone serial run.
+        # This is a strong correctness guarantee that the dense pass does NOT
+        # perturb the DCON eigenfunction calculation in any way — exactly what
+        # downstream PerturbedEquilibrium / FieldReconstruction needs.
+        #
+        # Run on both the small-N Solovev case and the large-N DIIID-like case
+        # to catch any (m, IC, ψ)-dependent regression.
 
-        # Matrix is populated with correct shape (msing × msing): compute_delta_prime_matrix!
-        # applies the PEST3 four-term subtraction that folds the raw (2·msing × 2·msing) dp_raw
-        # into a per-surface Δ' matrix.
-        @test !isempty(dpm)
-        @test size(dpm) == (msing, msing)
+        function run_and_capture(example_dir, use_parallel; populate_dense_xi=true)
+            inputs = TOML.parsefile(joinpath(example_dir, "gpec.toml"))
+            inputs["ForceFreeStates"]["verbose"] = false
+            inputs["ForceFreeStates"]["use_parallel"] = use_parallel
+            inputs["ForceFreeStates"]["populate_dense_xi"] = populate_dense_xi
+            inputs["ForceFreeStates"]["write_outputs_to_HDF5"] = false
+            intr = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesInternal(; dir_path=example_dir)
+            ctrl = GeneralizedPerturbedEquilibrium.ForceFreeStates.ForceFreeStatesControl(;
+                (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+            eq_config = GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], example_dir)
+            equil = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(eq_config)
+            intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
+                (Symbol(k) => v for (k, v) in inputs["Wall"])...)
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
+            intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+            GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
+            intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+            intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+            intr.mpert = intr.mhigh - intr.mlow + 1
+            intr.mband = intr.mpert - 1
+            intr.numpert_total = intr.mpert * intr.npert
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+            ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+            odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
+            return odet
+        end
 
-        # All elements are finite
-        @test all(isfinite, dpm)
+        # Compare the storage arrays that downstream code reads.  All values
+        # must be EXACTLY equal (no tolerance — the dense pass calls the same
+        # ODE solver with the same inputs as the standalone serial path, so
+        # any nonzero difference indicates a real regression in the dense-pass
+        # machinery).
+        function assert_bit_identical(odet_a, odet_b)
+            @test odet_a.step == odet_b.step
+            @test odet_a.nzero == odet_b.nzero
+            @test length(odet_a.psi_store) == length(odet_b.psi_store)
+            @test length(odet_a.q_store) == length(odet_b.q_store)
+            @test size(odet_a.u_store) == size(odet_b.u_store)
+            @test size(odet_a.ud_store) == size(odet_b.ud_store)
+            @test maximum(abs.(odet_a.psi_store .- odet_b.psi_store))    == 0.0
+            @test maximum(abs.(odet_a.q_store   .- odet_b.q_store))      == 0.0
+            @test maximum(abs.(odet_a.u_store   .- odet_b.u_store))      == 0.0
+            @test maximum(abs.(odet_a.ud_store  .- odet_b.ud_store))     == 0.0
+            @test maximum(abs.(odet_a.crit_store .- odet_b.crit_store))  == 0.0
+        end
 
-        # Diagonal (self-response) elements are non-zero
-        for j in 1:msing
-            @test abs(dpm[j, j]) > 1e-10
+        @testset "Solovev (small N)" begin
+            ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            odet_std = run_and_capture(ex, false)
+            odet_par = run_and_capture(ex, true;  populate_dense_xi=true)
+            assert_bit_identical(odet_std, odet_par)
+        end
+
+        @testset "DIIID-like (large N)" begin
+            ex = joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")
+            odet_std = run_and_capture(ex, false)
+            odet_par = run_and_capture(ex, true;  populate_dense_xi=true)
+            assert_bit_identical(odet_std, odet_par)
+        end
+
+        @testset "populate_dense_xi=false leaves sparse u_store (control)" begin
+            # Sanity-check the opposite mode: with populate_dense_xi=false, the
+            # parallel BVP path stores only chunk-endpoint Riccati snapshots,
+            # so u_store / ud_store / psi_store have strictly fewer entries
+            # than the serial path.  Catching this guarantees the bit-identical
+            # test above is meaningful — it's NOT trivially passing because
+            # both modes accidentally produce the same sparse data.
+            ex = joinpath(@__DIR__, "test_data", "regression_solovev_ideal_example")
+            odet_std    = run_and_capture(ex, false)
+            odet_sparse = run_and_capture(ex, true;  populate_dense_xi=false)
+            @test odet_sparse.step < odet_std.step
+            # ud_store entries inside FM chunks are left at the @kwdef
+            # `undef` initial value when populate_dense_xi=false; ensure the
+            # array IS smaller (sparse).
+            @test length(odet_sparse.psi_store) < length(odet_std.psi_store)
         end
     end
 
@@ -464,6 +511,25 @@ using TOML
         for j in 1:msing
             @test abs(dpm[j, j]) > 1e-10
         end
+
+        # Pinned diagonal `delta_prime_matrix` values for the DIIID-like case (msing = 5),
+        # PEST3-convention self-response Δ' from the STRIDE BVP with vacuum coupling.
+        # Tolerances are split by entry magnitude / |Im|/|Re| ratio (audit V4):
+        #   - dpm[1], dpm[2]: nearly-real entries (|Im|/|Re| < 0.02). Platform-stable; rtol=1e-2.
+        #   - dpm[3]: complex entry with |Im| ≈ |Re| (both ~10). Modest FP sensitivity in the
+        #     PEST3 cancellation. rtol=5e-2 catches sign/normalization regressions while
+        #     accepting ~2-3% imaginary-part drift across BLAS variants.
+        #   - dpm[4], dpm[5]: |Im| is highly sensitive to FP round-off in the PEST3 four-term
+        #     cancellation (dp_raw entries can be 10⁴–10⁵× larger than the result). The
+        #     imaginary part drifts by 2–5× across platforms even with `extended_precision_bvp=true`.
+        #     Pin only the real part tightly; bracket |dpm| to catch sign/normalization errors.
+        @test isapprox(dpm[1, 1], +8.357176e+00 + 2.040534e-02im; rtol=1e-2)
+        @test isapprox(dpm[2, 2], -3.995079e+00 - 5.422822e-02im; rtol=1e-2)
+        @test isapprox(dpm[3, 3], -9.137656e+00 + 7.704888e+00im; rtol=5e-2)
+        @test isapprox(real(dpm[4, 4]), +5.790777e+03; rtol=5e-2)
+        @test isapprox(real(dpm[5, 5]), -2.940021e+02; rtol=5e-2)
+        @test 1e3 < abs(dpm[4, 4]) < 1e5    # |dpm[4,4]| ≈ 6e3; catches sign/normalization errors
+        @test 1e2 < abs(dpm[5, 5]) < 1e3    # |dpm[5,5]| ≈ 3e2; catches sign/normalization errors
     end
 
 end

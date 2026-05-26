@@ -32,6 +32,12 @@ modes = ft(theta_data)          # Complex modes [mpert, 10]
 # Inverse transform: Fourier modes → theta-space
 reconstructed = inverse(ft, modes)
 ```
+
+# Sign convention
+
+The forward transform uses `exp(-imθ)` (Fortran `iscdftf`) for both real- and
+complex-valued input; `inverse` uses `exp(+imθ)` (Fortran `iscdftb`). Hence
+`inverse(ft, ft(data)) ≈ data` for any real- or complex-valued `data`.
 """
 module FourierTransforms
 
@@ -232,18 +238,16 @@ Transforms real-valued data at theta grid points into complex Fourier mode coeff
 
 # Formula
 
-For each mode `l` (corresponding to mode number `m = mlow + l - 1`):
+For each mode `l` (corresponding to mode number `m = mlow + l - 1`), using the
+`exp(-imθ)` convention (Fortran `iscdftf`):
 
 ```
-mode[l] = Σᵢ data[i] * (cos(m*θᵢ + phase) + im*sin(m*θᵢ + phase))
+mode[l] = (1/N) Σᵢ data[i] * exp(-i*(m*θᵢ + phase))
+        = (1/N) Σᵢ data[i] * (cos(m*θᵢ + phase) - im*sin(m*θᵢ + phase))
 ```
 
-This is equivalent to computing:
-```
-real_part[l] = Σᵢ data[i] * cos(m*θᵢ + phase)
-imag_part[l] = Σᵢ data[i] * sin(m*θᵢ + phase)
-mode[l] = complex(real_part[l], imag_part[l])
-```
+Identical convention to the complex-input method, so `inverse(ft, ft(data)) ≈ data`
+holds for both real- and complex-valued `data`.
 
 # Examples
 
@@ -260,23 +264,21 @@ modes = ft(data)       # Matrix{ComplexF64} of size (40, 10)
 ```
 """
 function (ft::FourierTransform)(data::AbstractVecOrMat{<:Real})
-    # Forward transform using matrix multiplication
-    # real_part = data^T * cslth  (or cslth^T * data for vectors)
-    # imag_part = data^T * snlth  (or snlth^T * data for vectors)
-    # Return as complex
+    # Forward transform with 1/N normalization and exp(-imθ) convention (Fortran iscdftf),
+    # identical to the complex-input method below.
 
     if data isa AbstractVector
         # For vector input: [mtheta] → [mpert]
         @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
         real_part = ft.cslth' * data
         imag_part = ft.snlth' * data
-        return complex.(real_part, imag_part)
+        return complex.(real_part, -imag_part) ./ ft.mtheta
     else
         # For matrix input: [mtheta, n] → [mpert, n]
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
         real_part = ft.cslth' * data
         imag_part = ft.snlth' * data
-        return complex.(real_part, imag_part)
+        return complex.(real_part, -imag_part) ./ ft.mtheta
     end
 end
 
@@ -297,29 +299,30 @@ Transforms complex data at theta grid points into complex Fourier mode coefficie
 
 # Formula
 
-For complex input `data = data_real + im*data_imag`, computes:
+For complex input `data = data_real + im*data_imag`, computes using exp(-imθ):
 
 ```
-Re{mode[l]} = Σᵢ (data_real[i]*cos - data_imag[i]*sin)
-Im{mode[l]} = Σᵢ (data_real[i]*sin + data_imag[i]*cos)
+Re{mode[l]} = Σᵢ (data_real[i]*cos + data_imag[i]*sin)
+Im{mode[l]} = Σᵢ (-data_real[i]*sin + data_imag[i]*cos)
 ```
 
 where cos and sin are the basis functions at theta point i for mode l.
+This matches the Fortran `iscdftf` convention: `f_m = (1/N) Σ_j f(θ_j) exp(-i m θ_j)`.
 """
 function (ft::FourierTransform)(data::AbstractVecOrMat{<:Complex})
-    # For complex input, need to handle real and imaginary parts carefully
-    # Forward transform: exp(-i*m*θ) = cos(m*θ) - i*sin(m*θ)
+    # Forward transform with 1/N normalization and exp(-imθ) convention
+    # (matches Fortran iscdftf: f_m = (1/N) Σ_j f_j * exp(-2πi*m*j/N))
 
     if data isa AbstractVector
         @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
-        real_part = ft.cslth' * real.(data) .- ft.snlth' * imag.(data)
-        imag_part = ft.cslth' * imag.(data) .+ ft.snlth' * real.(data)
-        return complex.(real_part, imag_part)
+        real_part = ft.cslth' * real.(data) .+ ft.snlth' * imag.(data)
+        imag_part = -(ft.snlth' * real.(data)) .+ ft.cslth' * imag.(data)
+        return complex.(real_part, imag_part) ./ ft.mtheta
     else
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
-        real_part = ft.cslth' * real.(data) .- ft.snlth' * imag.(data)
-        imag_part = ft.cslth' * imag.(data) .+ ft.snlth' * real.(data)
-        return complex.(real_part, imag_part)
+        real_part = ft.cslth' * real.(data) .+ ft.snlth' * imag.(data)
+        imag_part = -(ft.snlth' * real.(data)) .+ ft.cslth' * imag.(data)
+        return complex.(real_part, imag_part) ./ ft.mtheta
     end
 end
 
@@ -377,22 +380,20 @@ theta_real = real.(inverse(ft, modes))
 ```
 """
 function inverse(ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
-    # Inverse transform with normalization
-    # For mode expansion: f(θ) = Σₗ cₗ * exp(i*m*θ) = Σₗ [Re{cₗ}*cos - Im{cₗ}*sin + i*(Re{cₗ}*sin + Im{cₗ}*cos)]
-
-    dth = 2π / ft.mtheta
+    # Inverse transform without normalization (matches Fortran iscdftb convention)
+    # f(θ) = Σₗ cₗ * exp(i*m*θ)
+    # Round-trip: forward(inverse(x)) = x  (1/N in forward cancels N summation terms)
 
     if modes isa AbstractVector
         @assert length(modes) == ft.mpert "Input vector must have length mpert=$(ft.mpert)"
-        # Real and imaginary parts of reconstructed function
         real_part = ft.cslth * real.(modes) .- ft.snlth * imag.(modes)
         imag_part = ft.cslth * imag.(modes) .+ ft.snlth * real.(modes)
-        return complex.(real_part, imag_part) .* dth
+        return complex.(real_part, imag_part)
     else
         @assert size(modes, 1) == ft.mpert "Input matrix first dimension must be mpert=$(ft.mpert)"
         real_part = ft.cslth * real.(modes) .- ft.snlth * imag.(modes)
         imag_part = ft.cslth * imag.(modes) .+ ft.snlth * real.(modes)
-        return complex.(real_part, imag_part) .* dth
+        return complex.(real_part, imag_part)
     end
 end
 
@@ -481,6 +482,7 @@ end
 ```
 """
 function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Real})
+    # exp(-imθ) convention (Fortran iscdftf), matching the allocating `ft(data::Real)`.
     if data isa AbstractVector
         @assert length(data) == ft.mtheta "Input vector must have length mtheta=$(ft.mtheta)"
         @assert length(output) == ft.mpert "Output vector must have length mpert=$(ft.mpert)"
@@ -490,9 +492,11 @@ function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, 
         real_view = @view real_part[1:2:end]    # Real components
         imag_view = @view real_part[2:2:end]    # Imaginary components
 
-        # In-place computation: real = cslth' * data, imag = snlth' * data
+        # In-place computation: real = cslth' * data, imag = -snlth' * data
         mul!(real_view, ft.cslth', data)
         mul!(imag_view, ft.snlth', data)
+        imag_view .*= -1
+        output ./= ft.mtheta
     else
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
         @assert size(output, 1) == ft.mpert "Output matrix first dimension must be mpert=$(ft.mpert)"
@@ -507,8 +511,8 @@ function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, 
         mul!(real_part, ft.cslth', data)
         mul!(imag_part, ft.snlth', data)
 
-        # Combine into complex output
-        output .= complex.(real_part, imag_part)
+        # Combine into complex output with 1/N normalization
+        output .= complex.(real_part, -imag_part) ./ ft.mtheta
     end
 
     return output
@@ -531,10 +535,10 @@ In-place forward Fourier transform for complex-valued theta-space data.
 
 # Formula
 
-For complex input `data = data_real + im*data_imag`:
+For complex input `data = data_real + im*data_imag`, uses exp(-imθ):
 ```
-Re{mode[l]} = Σᵢ (data_real[i]*cos - data_imag[i]*sin)
-Im{mode[l]} = Σᵢ (data_real[i]*sin + data_imag[i]*cos)
+Re{mode[l]} = Σᵢ (data_real[i]*cos + data_imag[i]*sin)
+Im{mode[l]} = Σᵢ (-data_real[i]*sin + data_imag[i]*cos)
 ```
 """
 function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, data::AbstractVecOrMat{<:Complex})
@@ -548,17 +552,17 @@ function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, 
         temp1 = similar(output, Float64)
         temp2 = similar(output, Float64)
 
-        # Re{mode} = cslth' * real(data) - snlth' * imag(data)
+        # Re{mode} = cslth' * real(data) + snlth' * imag(data)
         mul!(temp1, ft.cslth', real.(data))
         mul!(temp2, ft.snlth', imag.(data))
-        real_part .= temp1 .- temp2
+        real_part .= temp1 .+ temp2
 
-        # Im{mode} = cslth' * imag(data) + snlth' * real(data)
+        # Im{mode} = -snlth' * real(data) + cslth' * imag(data)
         mul!(temp1, ft.cslth', imag.(data))
         mul!(temp2, ft.snlth', real.(data))
-        imag_part .= temp1 .+ temp2
+        imag_part .= temp1 .- temp2
 
-        output .= complex.(real_part, imag_part)
+        output .= complex.(real_part, imag_part) ./ ft.mtheta
     else
         @assert size(data, 1) == ft.mtheta "Input matrix first dimension must be mtheta=$(ft.mtheta)"
         @assert size(output, 1) == ft.mpert "Output matrix first dimension must be mpert=$(ft.mpert)"
@@ -570,17 +574,17 @@ function transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, 
         temp1 = similar(real_part)
         temp2 = similar(real_part)
 
-        # Re{mode} = cslth' * real(data) - snlth' * imag(data)
+        # Re{mode} = cslth' * real(data) + snlth' * imag(data)
         mul!(temp1, ft.cslth', real.(data))
         mul!(temp2, ft.snlth', imag.(data))
-        real_part .= temp1 .- temp2
+        real_part .= temp1 .+ temp2
 
-        # Im{mode} = cslth' * imag(data) + snlth' * real(data)
+        # Im{mode} = -snlth' * real(data) + cslth' * imag(data)
         mul!(temp1, ft.cslth', imag.(data))
         mul!(temp2, ft.snlth', real.(data))
-        imag_part .= temp1 .+ temp2
+        imag_part .= temp1 .- temp2
 
-        output .= complex.(real_part, imag_part)
+        output .= complex.(real_part, imag_part) ./ ft.mtheta
     end
 
     return output
@@ -631,7 +635,7 @@ end
 ```
 """
 function inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTransform, modes::AbstractVecOrMat{<:Complex})
-    dth = 2π / ft.mtheta
+    # Inverse transform without normalization (matches Fortran iscdftb convention)
 
     if modes isa AbstractVector
         @assert length(modes) == ft.mpert "Input vector must have length mpert=$(ft.mpert)"
@@ -646,12 +650,12 @@ function inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTra
         # Re{data} = cslth * real(modes) - snlth * imag(modes)
         mul!(temp1, ft.cslth, real.(modes))
         mul!(temp2, ft.snlth, imag.(modes))
-        real_part .= (temp1 .- temp2) .* dth
+        real_part .= temp1 .- temp2
 
         # Im{data} = cslth * imag(modes) + snlth * real(modes)
         mul!(temp1, ft.cslth, imag.(modes))
         mul!(temp2, ft.snlth, real.(modes))
-        imag_part .= (temp1 .+ temp2) .* dth
+        imag_part .= temp1 .+ temp2
 
         output .= complex.(real_part, imag_part)
     else
@@ -668,12 +672,12 @@ function inverse_transform!(output::AbstractVecOrMat{ComplexF64}, ft::FourierTra
         # Re{data} = cslth * real(modes) - snlth * imag(modes)
         mul!(temp1, ft.cslth, real.(modes))
         mul!(temp2, ft.snlth, imag.(modes))
-        real_part .= (temp1 .- temp2) .* dth
+        real_part .= temp1 .- temp2
 
         # Im{data} = cslth * imag(modes) + snlth * real(modes)
         mul!(temp1, ft.cslth, imag.(modes))
         mul!(temp2, ft.snlth, real.(modes))
-        imag_part .= (temp1 .+ temp2) .* dth
+        imag_part .= temp1 .+ temp2
 
         output .= complex.(real_part, imag_part)
     end
@@ -756,7 +760,7 @@ Computes: `gll[l2, l1] = dθdζ * Σᵢ cs[i, l2] * gil[m00+i, l00+l1]`
 
 # Notes
 
-- The normalization factor `4π^2 / size(cs, 1)` is 2π / mtheta * 2π / nzeta (nzeta = 1 for 2D)
+- The normalization factor `1 / size(cs, 1)` matches the 1/N forward convention
 - This function uses 0-based offset convention (add 1 for Julia indexing)
 - The `cs` matrix should be either `cslth` or `snlth` from a `FourierTransform` object
 # Example
@@ -771,7 +775,7 @@ fourier_inverse_transform!(arr, gil, ft.cslth)
 ```
 """
 function fourier_inverse_transform!(gll::AbstractMatrix{Float64}, gil::AbstractMatrix{Float64}, cs::Matrix{Float64}; row_offset::Int=0, col_offset::Int=0)
-    mul!(gll, cs', view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), 4π^2 / size(cs, 1), 0.0)
+    mul!(gll, cs', view(gil, row_offset+1:row_offset+size(cs, 1), col_offset+1:col_offset+size(cs, 2)), 1.0 / size(cs, 1), 0.0)
 end
 
 end # module FourierTransforms

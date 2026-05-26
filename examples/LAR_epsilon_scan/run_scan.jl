@@ -1,9 +1,11 @@
 #!/usr/bin/env julia
 """
-    run_scan.jl — TJ-model epsilon (inverse aspect ratio) scan
+    run_scan.jl — TJ-analytic ε (inverse aspect ratio) scan
 
-Uses the built-in TJ analytic equilibrium model (eq_type="tj") adapted from
-R. Fitzpatrick's TJ code. No geqdsk files needed.
+Uses the TJ-analytic equilibrium model (eq_type="tj_analytic" /
+"tj_analytic_direct").  The TJ-analytic model follows the profile family of
+R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); no geqdsk files
+are needed.
 
 Usage:
     julia --project=../.. run_scan.jl              # Full scan
@@ -14,13 +16,13 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, "../.."))
 
 using GeneralizedPerturbedEquilibrium
-using GeneralizedPerturbedEquilibrium.Equilibrium: TJConfig, EquilibriumConfig, setup_equilibrium
+using GeneralizedPerturbedEquilibrium.Equilibrium: TJAnalyticConfig, EquilibriumConfig, setup_equilibrium
 using HDF5
 using TOML
 using Printf
 
 # ============================================================================
-# Scan parameters (matching TJ benchmark)
+# Scan parameters (matching the TJ-analytic benchmark of Fitzpatrick's TJ code)
 # ============================================================================
 
 # Aspect-ratio scan: ε grid ends just before the ideal-kink pole at
@@ -39,38 +41,29 @@ const EPSILONS_TEST = [0.2495, 0.4072, 0.5510]
 const SCAN_DIR = @__DIR__
 const OUTPUT_H5 = joinpath(SCAN_DIR, "epsilon_scan.h5")
 
-# TJ benchmark parameters (from TJ/Inputs/Equilibrium.json)
-const QC = 1.5      # On-axis safety factor
-const QA = 3.6      # Edge safety factor
-const PC = 0.001    # Normalized pressure (very low for epsilon scan)
-const MU = 2.0      # Pressure peaking exponent
-const B0 = 12.0     # Toroidal field [T]
-const LAR_A = 1.0   # Minor radius [m] (fixed)
+# All baseline parameters (Equilibrium, TJ_ANALYTIC_INPUT, Wall, ForceFreeStates)
+# live in gpec.toml next to this script — there is no side-car TOML file.
+# The scan below reads gpec.toml once and overrides ONLY
+# `TJ_ANALYTIC_INPUT.lar_r0` per scan point as `lar_r0 = lar_a / ε` before
+# writing the per-point gpec.toml into a tempdir.
+const GPEC_BASE = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
 
 # ============================================================================
 # Run a single epsilon point
 # ============================================================================
 
 function run_single(epsilon::Float64)
-    run_dir = mktempdir(; prefix="gpec_tj_")
+    run_dir = mktempdir(; prefix="gpec_tj_analytic_")
     try
-        # Write TJ config
-        tj_dict = Dict("TJ_INPUT" => Dict(
-            "lar_r0" => LAR_A / epsilon,
-            "lar_a" => LAR_A,
-            "qc" => QC, "qa" => QA, "pc" => PC,
-            "mu" => MU, "B0" => B0,
-            "ma" => 128, "mtau" => 128,
-        ))
-        open(joinpath(run_dir, "tj.toml"), "w") do io; TOML.print(io, tj_dict); end
-
-        config = TOML.parsefile(joinpath(SCAN_DIR, "gpec.toml"))
-        # Option B: use tj_direct (ψ(R,Z) grid + direct-GS solver) rather than
-        # the inverse pipeline.  Required to capture the ideal external-kink
-        # pole (δW_t → 0 as ε → ε_crit); the inverse path bypasses the
-        # line-integrated q and shows no such pole.
-        config["Equilibrium"]["eq_type"] = "tj_direct"
-        config["Equilibrium"]["eq_filename"] = joinpath(run_dir, "tj.toml")
+        # Per-point gpec.toml = baseline gpec.toml with TJ_ANALYTIC_INPUT.lar_r0
+        # overridden.  Switch eq_type to "tj_analytic_direct" so ψ(R, Z) is built
+        # from the TJ-analytic model and processed by the direct-GS
+        # pipeline.  Required to capture the ideal external-kink pole (δW_t →
+        # 0 as ε → ε_crit); the inverse path bypasses the line-integrated q
+        # and shows no such pole.
+        config = deepcopy(GPEC_BASE)
+        config["TJ_ANALYTIC_INPUT"]["lar_r0"] = GPEC_BASE["TJ_ANALYTIC_INPUT"]["lar_a"] / epsilon
+        config["Equilibrium"]["eq_type"] = "tj_analytic_direct"
         config["ForceFreeStates"]["HDF5_filename"] = joinpath(run_dir, "gpec.h5")
         open(joinpath(run_dir, "gpec.toml"), "w") do io; TOML.print(io, config); end
 
@@ -115,13 +108,15 @@ function main()
     test_mode = "--test" in ARGS
     epsilons = test_mode ? EPSILONS_TEST : EPSILONS_FULL
 
-    @info "TJ epsilon scan: $(length(epsilons)) points, B0=$(B0)T, qc=$(QC), qa=$(QA), pc=$(PC)" *
+    tj = GPEC_BASE["TJ_ANALYTIC_INPUT"]
+    @info "TJ-analytic ε scan: $(length(epsilons)) points, B0=$(tj["B0"])T, qc=$(tj["qc"]), qa=$(tj["qa"]), pc=$(tj["pc"])" *
           (test_mode ? " (test mode)" : "")
 
     isfile(OUTPUT_H5) && rm(OUTPUT_H5)
 
+    lar_a = GPEC_BASE["TJ_ANALYTIC_INPUT"]["lar_a"]
     for (i, eps) in enumerate(epsilons)
-        @info "[$(i)/$(length(epsilons))] ε=$eps (R0=$(@sprintf("%.3f", LAR_A/eps)))"
+        @info "[$(i)/$(length(epsilons))] ε=$eps (R0=$(@sprintf("%.3f", lar_a/eps)))"
         result = run_single(eps)
         if result !== nothing
             h5open(OUTPUT_H5, isfile(OUTPUT_H5) ? "r+" : "w") do f

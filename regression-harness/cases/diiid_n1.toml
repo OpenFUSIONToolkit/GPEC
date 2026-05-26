@@ -161,12 +161,16 @@ label = "npert"
 noise_threshold = 0
 order = 61
 
-# Perturbed equilibrium: singular coupling
+# Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
+# previous `perturbed_equilibrium/singular_coupling/delta_prime` track, which
+# was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
+# Per-surface Δ' is now de-emphasized — see PR 178 notes — and SingularCoupling
+# instead reads this BVP matrix diagonal.
 [quantities.delta_prime]
-h5path = "perturbed_equilibrium/singular_coupling/delta_prime"
-type = "complex_vector"
-extract = "all_complex"
-label = "delta prime"
+h5path = "singular/delta_prime_matrix"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "delta prime (BVP diagonal)"
 noise_threshold = 1e-8
 order = 80
 
@@ -194,15 +198,14 @@ label = "||resonant flux||"
 noise_threshold = 1e-8
 order = 83
 
-# Perturbed equilibrium: energies
-[quantities.pe_total_energy]
-h5path = "perturbed_equilibrium/energies/total_energy"
-type = "real_scalar"
-extract = "value"
-label = "PE total energy"
-noise_threshold = 1e-10
-order = 90
+[quantities.resonant_flux_all]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+type = "complex_vector"
+extract = "all_complex"
+label = "resonant flux Phi_res"
+noise_threshold = 1e-8
 
+# Perturbed equilibrium: energies
 [quantities.pe_plasma_energy]
 h5path = "perturbed_equilibrium/energies/plasma_energy"
 type = "real_scalar"
@@ -210,6 +213,30 @@ extract = "value"
 label = "PE plasma energy"
 noise_threshold = 1e-10
 order = 91
+
+[quantities.pe_vacuum_energy]
+h5path = "perturbed_equilibrium/energies/vacuum_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE vacuum energy"
+noise_threshold = 1e-10
+order = 92
+
+[quantities.pe_surface_energy]
+h5path = "perturbed_equilibrium/energies/surface_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE surface energy"
+noise_threshold = 1e-10
+order = 93
+
+[quantities.pe_toroidal_torque]
+h5path = "perturbed_equilibrium/energies/toroidal_torque"
+type = "real_scalar"
+extract = "value"
+label = "PE toroidal torque"
+noise_threshold = 1e-12
+order = 94
 
 # Profiles (checksums)
 [quantities.q_profile]

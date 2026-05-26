@@ -80,11 +80,16 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
     intr.q1lim = profiles.q_deriv(profiles.xs[end]; hint=Ref(profiles.npts_minus_1))
     intr.psilim = equil.config.psihigh
 
-    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent)
-    if ctrl.set_psilim_via_dmlim
-        if ctrl.nn_low != ctrl.nn_high
-            error("Setting psilim via dmlim is only valid for single n runs (nn_low == nn_high).")
-        end
+    # Optionally override qlim based on dmlim (Fortran sas_flag=t equivalent).
+    # Multi-n runs (nn_low != nn_high) are not supported — the "outermost rational + dmlim/n"
+    # cutoff depends on which n is used, so it isn't well-defined. Single-n with nn_low <= 0
+    # (e.g. uninitialized default) is also skipped because the formula divides by nn_low.
+    # Both cases fall back to qhigh / psihigh truncation with a warning.
+    if ctrl.set_psilim_via_dmlim && ctrl.nn_low != ctrl.nn_high
+        @warn "set_psilim_via_dmlim = true is ignored for multi-n runs (nn_low=$(ctrl.nn_low), nn_high=$(ctrl.nn_high)); falling back to qhigh / psihigh truncation."
+    elseif ctrl.set_psilim_via_dmlim && ctrl.nn_low <= 0
+        @warn "set_psilim_via_dmlim = true requires nn_low > 0; got nn_low=$(ctrl.nn_low). Falling back to qhigh / psihigh truncation."
+    elseif ctrl.set_psilim_via_dmlim
         @info "Setting psilim via dmlim: initial qlim = $(@sprintf("%.3f", intr.qlim)), dmlim = $(@sprintf("%.3f", ctrl.dmlim))"
         # Normalize dmlim ∈ [0,1)
         ctrl.dmlim = mod(ctrl.dmlim, 1.0)
@@ -183,8 +188,8 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         vmat[ipert, ipert+intr.numpert_total, 2, 1] = 1
     end
 
-    # Zeroth-order resonant solutions — Fortran sing_vmat uses sig*alpha in the
-    # initial conditions: v_big_ξ' = -(m0(1,1) + sig*α)/m0(1,2) (matching Fortran STRIDE).
+    # Zeroth-order resonant solutions: v_big_ξ' = -(m0(1,1) ± sig·α)/m0(1,2).
+    # Matches Fortran STRIDE sing_vmat (sig·α sign convention separates left vs right side).
     for i in eachindex(r1)
         m0mat_block = m0mat[(2*(i-1)+1):(2*i), (2*(i-1)+1):(2*i)]
         r1_i = r1[i]
@@ -201,31 +206,31 @@ function compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl,
         solve_higher_order_vmat!(vmat, mmat, m0mat, alpha, r1, r2, n1, n2, power, intr, k; sig=sig)
     end
 
-    # Debug dump of m0mat and vmat matching Fortran sing_vmat output.  Gated
-    # behind ctrl.verbose; without the guard this fired for every singular
-    # surface on every integration.
-    if ctrl.verbose
+    # Per-crossing m0mat / vmat diagnostics matching Fortran sing_vmat output.
+    # @debug-only: enable via JULIA_DEBUG=GeneralizedPerturbedEquilibrium.
+    @debug begin
         side_str = sig > 0 ? "right" : "left"
         ipert0 = r1[1]
         N = intr.numpert_total
-        @info "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)"
-        @info @sprintf("  m0mat(1,1)= %+.12e %+.12ei", real(m0mat[1,1]), imag(m0mat[1,1]))
-        @info @sprintf("  m0mat(1,2)= %+.12e %+.12ei", real(m0mat[1,2]), imag(m0mat[1,2]))
-        @info @sprintf("  m0mat(2,1)= %+.12e %+.12ei", real(m0mat[2,1]), imag(m0mat[2,1]))
-        @info @sprintf("  m0mat(2,2)= %+.12e %+.12ei", real(m0mat[2,2]), imag(m0mat[2,2]))
+        msg = "  === sing_asymptotics debug: m=$(singp.m[1]) sig=$sig ($side_str)\n"
+        msg *= @sprintf("  m0mat(1,1)= %+.12e %+.12ei\n", real(m0mat[1,1]), imag(m0mat[1,1]))
+        msg *= @sprintf("  m0mat(1,2)= %+.12e %+.12ei\n", real(m0mat[1,2]), imag(m0mat[1,2]))
+        msg *= @sprintf("  m0mat(2,1)= %+.12e %+.12ei\n", real(m0mat[2,1]), imag(m0mat[2,1]))
+        msg *= @sprintf("  m0mat(2,2)= %+.12e %+.12ei\n", real(m0mat[2,2]), imag(m0mat[2,2]))
         di = m0mat[1,1]*m0mat[2,2] - m0mat[2,1]*m0mat[1,2]
-        @info @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei", real(di), real(alpha[1]), imag(alpha[1]))
-        @info @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d", singp.psifac, r1[1], ipert0)
-        @info @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
-        @info @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
+        msg *= @sprintf("  di= %+.12e, alpha= %+.12e %+.12ei\n", real(di), real(alpha[1]), imag(alpha[1]))
+        msg *= @sprintf("  psifac= %+.12e, r1=%d, ipert0=%d\n", singp.psifac, r1[1], ipert0)
+        msg *= @sprintf("  vmat(ip,ip,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0,2,1]), imag(vmat[ipert0,ipert0,2,1]))
+        msg *= @sprintf("  vmat(ip,ip+N,2,0)= %+.8e %+.8ei\n", real(vmat[ipert0,ipert0+N,2,1]), imag(vmat[ipert0,ipert0+N,2,1]))
         for k in 0:(2*ctrl.sing_order)
-            @info @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei",
+            msg *= @sprintf("  k=%2d vmat(ip,ip,1)=%+.8e %+.8ei vmat(ip,ip,2)=%+.8e %+.8ei\n",
                 k, real(vmat[ipert0,ipert0,1,k+1]), imag(vmat[ipert0,ipert0,1,k+1]),
                 real(vmat[ipert0,ipert0,2,k+1]), imag(vmat[ipert0,ipert0,2,k+1]))
-            @info @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei",
+            msg *= @sprintf("  k=%2d vmat(ip,ip+N,1)=%+.8e %+.8ei vmat(ip,ip+N,2)=%+.8e %+.8ei\n",
                 k, real(vmat[ipert0,ipert0+N,1,k+1]), imag(vmat[ipert0,ipert0+N,1,k+1]),
                 real(vmat[ipert0,ipert0+N,2,k+1]), imag(vmat[ipert0,ipert0+N,2,k+1]))
         end
+        msg
     end
 
     return SingAsymptotics(ctrl.sing_order, alpha, r1, r2, n1, n2, power, vmat, mmat, m0mat)
@@ -798,9 +803,10 @@ more simplistic code with similar performance.
         # ---- Kinetic path with pre-computed FKG matrices ----
         # Load pre-computed kinetic matrices from splines
         # amat/bmat/cmat here are the kinetic-modified A_kin/B_kin/C_kin
-        ffit.amats(vec(amat), psieval; hint=ffit._hint)
-        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
-        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
+        # Use odet.ffit_hint (per-thread) instead of ffit._hint (shared, racy in parallel BVP)
+        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
+        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
+        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
 
         # Load FKG sub-matrices (note: reusing fmat_lower/kmat/gmat as workspace)
         f0mat = similar!(pool, amat)
@@ -813,15 +819,15 @@ more simplistic code with similar performance.
         r3mat_kin = similar!(pool, amat)
         gaat_kin = similar!(pool, amat)
 
-        ffit.f0mats(vec(f0mat), psieval; hint=ffit._hint)
-        ffit.pmats(vec(pmat_kin), psieval; hint=ffit._hint)
-        ffit.paats(vec(paat_kin), psieval; hint=ffit._hint)
-        ffit.kkmats(vec(kkmat_kin), psieval; hint=ffit._hint)
-        ffit.kkaats(vec(kkaat_kin), psieval; hint=ffit._hint)
-        ffit.r1mats(vec(r1mat_kin), psieval; hint=ffit._hint)
-        ffit.r2mats(vec(r2mat_kin), psieval; hint=ffit._hint)
-        ffit.r3mats(vec(r3mat_kin), psieval; hint=ffit._hint)
-        ffit.gaats(vec(gaat_kin), psieval; hint=ffit._hint)
+        ffit.f0mats(vec(f0mat), psieval; hint=odet.ffit_hint)
+        ffit.pmats(vec(pmat_kin), psieval; hint=odet.ffit_hint)
+        ffit.paats(vec(paat_kin), psieval; hint=odet.ffit_hint)
+        ffit.kkmats(vec(kkmat_kin), psieval; hint=odet.ffit_hint)
+        ffit.kkaats(vec(kkaat_kin), psieval; hint=odet.ffit_hint)
+        ffit.r1mats(vec(r1mat_kin), psieval; hint=odet.ffit_hint)
+        ffit.r2mats(vec(r2mat_kin), psieval; hint=odet.ffit_hint)
+        ffit.r3mats(vec(r3mat_kin), psieval; hint=odet.ffit_hint)
+        ffit.gaats(vec(gaat_kin), psieval; hint=odet.ffit_hint)
 
         # A⁻¹B, A⁻¹C via LU (A is non-Hermitian with kinetic contributions)
         # Direct LAPACK to avoid the ipiv allocation that lu!/ldiv! would do in this hot loop
@@ -829,10 +835,10 @@ more simplistic code with similar performance.
         LAPACK.getrs!('N', amat, ipiv, bmat)
         LAPACK.getrs!('N', amat, ipiv, cmat)
 
-        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11)
-        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1  [Fortran sing.f lines 1102-1105]
-        # K̄(i,j) = q1*KK + R2                        [lines 1106-1107]
-        # K̄†(i,j) = KK†*q2 + R3                      [lines 1108-1109]
+        # Build singfac-dependent F̄, K̄, K̄†, Ḡ† matrices (Logan 2015 Appendix C, Eqs C.5-C.11):
+        # F̄(i,j) = q1*f0*q2 - q1*P - P†'*q2 + R1
+        # K̄(i,j) = q1*KK + R2
+        # K̄†(i,j) = KK†*q2 + R3
         # where q1 = (m₁ - n*q), q2 = (m₂ - n*q) — direct singfac, NOT 1/(m-nq) as in ideal path
         singfac_direct = acquire!(pool, Float64, Npert)
         singfac_direct_mat = reshape(singfac_direct, intr.mpert, intr.npert)
@@ -854,7 +860,7 @@ more simplistic code with similar performance.
         gmat .= gaat_kin
 
         # Kinetic ODE (Logan 2015 Eq 7.46): singfac absorbed into F̄/K̄/K̄†, no explicit Q⁻¹
-        # du₁ = F̄⁻¹(u₂ - K̄·u₁)  [Fortran sing.f lines 1200-1215]
+        # du₁ = F̄⁻¹(u₂ - K̄·u₁)
         du1 .= u2
         mul!(tmp_mat, kmat, u1)
         du1 .-= tmp_mat
@@ -862,7 +868,7 @@ more simplistic code with similar performance.
         _, ipiv2, _ = LAPACK.getrf!(fmat_lower)
         LAPACK.getrs!('N', fmat_lower, ipiv2, du1)
 
-        # du₂ = Ḡ†·u₁ + K̄†·du₁  [Fortran sing.f lines 1217-1222]
+        # du₂ = Ḡ†·u₁ + K̄†·du₁  (Logan 2015 Eq C.10-C.11)
         mul!(tmp_mat, gmat, u1)
         du2 .= tmp_mat
         mul!(tmp_mat, kaat_kin, du1)
@@ -870,13 +876,13 @@ more simplistic code with similar performance.
 
     else
         # ---- Ideal path ----
-        # Evaluate matrix splines at the current psi value using shared hint
-        ffit.amats(vec(amat), psieval; hint=ffit._hint)
-        ffit.bmats(vec(bmat), psieval; hint=ffit._hint)
-        ffit.cmats(vec(cmat), psieval; hint=ffit._hint)
-        ffit.fmats_lower(vec(fmat_lower), psieval; hint=ffit._hint)
-        ffit.kmats(vec(kmat), psieval; hint=ffit._hint)
-        ffit.gmats(vec(gmat), psieval; hint=ffit._hint)
+        # Evaluate matrix splines at the current psi (odet.ffit_hint is per-thread)
+        ffit.amats(vec(amat), psieval; hint=odet.ffit_hint)
+        ffit.bmats(vec(bmat), psieval; hint=odet.ffit_hint)
+        ffit.cmats(vec(cmat), psieval; hint=odet.ffit_hint)
+        ffit.fmats_lower(vec(fmat_lower), psieval; hint=odet.ffit_hint)
+        ffit.kmats(vec(kmat), psieval; hint=odet.ffit_hint)
+        ffit.gmats(vec(gmat), psieval; hint=odet.ffit_hint)
 
         # Solve bmat = A⁻¹ * bmat, cmat = A⁻¹ * cmat in-place via Cholesky
         LAPACK.potrf!('U', amat)

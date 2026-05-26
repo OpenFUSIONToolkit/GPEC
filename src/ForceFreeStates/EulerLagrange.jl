@@ -1,23 +1,17 @@
 """
     compute_delta_prime_from_ca!(odet, intr, equil)
 
-Compute the tearing stability parameter Δ' for each singular surface from the
-asymptotic coefficients `ca_l` and `ca_r` accumulated during integration.
+**STUB — not physically valid.** Compute a per-surface Δ' estimate from the asymptotic
+coefficients `ca_l`/`ca_r` using `Δ'[i] = (ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)`.
 
-Uses the diagonal formula Δ'[i] = (ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π² · psio),
-which is correct when the small asymptotic was introduced in column `ipert_res` directly
-(no GR permutation).
+The physically valid tearing-stability Δ' is `ForceFreeStatesInternal.delta_prime_matrix`,
+computed via the STRIDE global BVP in `compute_delta_prime_matrix!`. The per-surface
+ca-based formula here ignores inter-surface coupling and the vacuum BC, and should
+**not** be expected to agree with `delta_prime_matrix`. Retained for reference / future
+work on intra-surface coupling diagnostics.
 
-**Note**: This function is no longer called from any integration driver. Δ' is now computed
-inline inside each crossing function where the correct column index is known:
-- `cross_ideal_singular_surf!` uses `perm_col` (GR-permuted column)
-- `riccati_cross_ideal_singular_surf!` uses the diagonal `ipert_res` (no GR permutation)
-
-Retained for reference and potential use in testing.
-
-This matches the formula in `PerturbedEquilibrium/SingularCoupling.jl` (lines ~197):
-  `delta_prime_val = (rbwp1 - lbwp1) / (twopi * chi1)`
-with `chi1 = 2π·psio`, so the denominators are identical.
+Not called from any integration driver. Used only by tests / benchmarks that exercise
+the stub formula directly.
 """
 function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
     denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
@@ -37,37 +31,33 @@ function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInter
     end
 end
 
+# Empirical log-divergent ODE-cost coefficients (a, b) for each reference point:
+# axis (ψ=0, steep), rational surfaces (ψ=ψ_s, moderate), edge (ψ=ψ_lim, mild).
+# Per reference, the contribution to the cost is (a/b) · |log(1 + b·|ψ-ref|)| evaluated
+# at the interval endpoints. Coefficients are ported from STRIDE's ode_itime cost model
+# (Fortran reference) and unchanged here. Tune only after re-fitting against a per-chunk
+# step-count sweep; touching these affects parallel-chunk load balancing.
+const ODE_COST_AXIS  = (a = 39695.0, b = 212830.0)
+const ODE_COST_RAT   = (a = 17147.0, b = 470710.0)
+const ODE_COST_EDGE  = (a =  1646.0, b =   4683.0)
+
 """
     ode_itime_cost(psi1, psi2, intr) -> Float64
 
-Estimate the relative ODE integration cost for the interval [ψ₁, ψ₂] using the
-empirical log-divergent cost model from STRIDE (Glasser 2018).
-
-The cost is a sum of logarithmic contributions from reference points:
-  - Magnetic axis (ψ_ref = 0): steep divergence, (a,b) = (39695, 212830)
-  - Each rational surface (ψ_ref = ψ_s): moderate divergence, (a,b) = (17147, 470710)
-  - Edge (ψ_ref = ψ_lim): mild divergence, (a,b) = (1646, 4683)
-
-For each reference: cost += (a/b) * |log(1 + b|ψ₂-ref|) - log(1 + b|ψ₁-ref|)|
-
-The cost model is additive for sub-intervals not containing rational surfaces,
-which makes it suitable for equal-cost splitting via bisection.
+Estimate the relative ODE integration cost for the interval [ψ₁, ψ₂] using the empirical
+log-divergent cost model from STRIDE (Glasser 2018). Coefficients are the module constants
+`ODE_COST_AXIS`, `ODE_COST_RAT`, `ODE_COST_EDGE`. The cost is additive for sub-intervals
+not containing rational surfaces, which makes it suitable for equal-cost splitting via
+bisection in `balance_integration_chunks`.
 """
 function ode_itime_cost(psi1::Float64, psi2::Float64, intr::ForceFreeStatesInternal)
-    a_ax, b_ax = 39695.0, 212830.0
-    a_rat, b_rat = 17147.0, 470710.0
-    a_edge, b_edge = 1646.0, 4683.0
+    _logdiv(a, b, x1, x2) = (a / b) * abs(log(1.0 + b * abs(x2)) - log(1.0 + b * abs(x1)))
 
-    cost = (a_ax / b_ax) * abs(log(1.0 + b_ax * abs(psi2)) - log(1.0 + b_ax * abs(psi1)))
-
+    cost = _logdiv(ODE_COST_AXIS.a, ODE_COST_AXIS.b, psi1, psi2)
     for sing in intr.sing
-        ref = sing.psifac
-        cost += (a_rat / b_rat) * abs(log(1.0 + b_rat * abs(psi2 - ref)) - log(1.0 + b_rat * abs(psi1 - ref)))
+        cost += _logdiv(ODE_COST_RAT.a, ODE_COST_RAT.b, psi1 - sing.psifac, psi2 - sing.psifac)
     end
-
-    ref_edge = intr.psilim
-    cost += (a_edge / b_edge) * abs(log(1.0 + b_edge * abs(psi2 - ref_edge)) - log(1.0 + b_edge * abs(psi1 - ref_edge)))
-
+    cost += _logdiv(ODE_COST_EDGE.a, ODE_COST_EDGE.b, psi1 - intr.psilim, psi2 - intr.psilim)
     return cost
 end
 
@@ -94,7 +84,11 @@ function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::Forc
     # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
     # because single long-span propagators may already have cond ~ 10²⁴.
     min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
-    target_n = max(min_chunks, 4 * Threads.nthreads(), min_bvp_intervals)
+    # Use the effective parallel width (capped by ctrl.parallel_threads) rather than
+    # Threads.nthreads() — otherwise a user on `julia -t 16` who sets parallel_threads=2
+    # for determinism still pays for 4× the requested sub-chunk count.
+    effective_threads = min(Threads.nthreads(), max(ctrl.parallel_threads, 1))
+    target_n = max(min_chunks, 4 * effective_threads, min_bvp_intervals)
 
     result = collect(chunks)
 
@@ -214,6 +208,8 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 
     # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
     # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
+    # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
+    # product and is intentionally NOT restored.
     #
     # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
     # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
@@ -473,14 +469,17 @@ function cross_ideal_singular_surf!(
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
-    # Note: Δ' is NOT computed for the standard path. The physical Δ' is a complex
-    # normalization-convention-dependent quantity: the correct value requires the solution
-    # columns to be in the Riccati gauge (U₂=I), which is maintained by the Riccati
-    # renormalization. The standard path's solution columns grow from the axis with an
-    # arbitrary complex phase; dividing by the outer asymptotic coefficient normalizes the
-    # magnitude but not the complex phase, so the result is in a different convention.
-    # Δ' is computed inline in riccati_cross_ideal_singular_surf! for the Riccati and
-    # parallel FM paths, where the renormalization convention is consistent.
+    # Δ' is NOT computed for the standard path. The physical Δ' requires the solution
+    # columns to be in the Riccati gauge (U₂=I), maintained only by Riccati renormalization.
+    # The standard path's solution columns grow from the axis with an arbitrary complex
+    # phase; dividing by the outer asymptotic coefficient normalizes magnitude but not phase,
+    # so the result is in a different convention. The canonical Δ' is the STRIDE BVP matrix
+    # (compute_delta_prime_matrix!) populated by the parallel FM path.
+
+    # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
+    # The earlier sing_der! calls computed du from the pre-trapezoidal, pre-asymptotic u,
+    # leaving odet.ud stale after the u modifications above.
+    sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store values after crossing step and advance
     odet.psi_store[odet.step] = odet.psifac
@@ -537,6 +536,7 @@ function integrate_el_region!(
     q_range = abs(q_end - q_start)
 
     steps_in_segment = Ref(0)
+    du_buffer = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
 
     function segment_callback!(integrator)
         ctrl, _, _, intr, odet, chunk = integrator.p
@@ -546,6 +546,12 @@ function integrate_el_region!(
 
         compute_solution_norms!(integrator.u, odet, ctrl, intr, false)
 
+        # If Gaussian reduction modified u, recompute ud to keep it consistent.
+        # Matches Fortran ode_output.f which calls sing_der before writing euler.bin.
+        if odet.new
+            sing_der!(du_buffer, integrator.u, integrator.p, integrator.t)
+        end
+
         # Save near segment boundaries (symmetric, in q not psi) and every Nth step.
         # The step-count fallback (== 1) guarantees the first step is always saved
         # even for near-degenerate segments where q_range ≈ 0.
@@ -554,7 +560,7 @@ function integrate_el_region!(
         # Always save in the edge scan region so findmax_dW_edge! has dense q coverage.
         in_edge_scan = ctrl.psiedge < intr.psilim && integrator.t >= ctrl.psiedge
 
-        if near_start || near_end || (odet.step % ctrl.save_interval == 0) || in_edge_scan
+        if near_start || near_end || (odet.total_steps % ctrl.save_interval == 0) || in_edge_scan
             if odet.step >= size(odet.u_store, 4)
                 resize_storage!(odet)
             end
