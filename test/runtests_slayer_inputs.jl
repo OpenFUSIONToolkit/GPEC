@@ -66,7 +66,14 @@
     @testset "build_slayer_inputs: returns correct per-surface data" begin
         sings = [_mk_sing(psi=0.3, q=2.0, q1=1.5, m=2, n=1),
                  _mk_sing(psi=0.6, q=3.0, q1=2.5, m=3, n=1)]
-        sl = build_slayer_inputs(equil, sings, profiles; bt=2.0)
+        # dr_val=0.0 bypasses the build_slayer_inputs requirement that sing.restype be
+        # pre-populated by ForceFreeStates.resist_eval_all! — the test sings here are
+        # minimal stubs without restype, so we supply dr_val explicitly.
+        # compute_omega_star=false makes Q_e/Q_i pass through directly from profiles.omega_e/i
+        # rather than being recomputed from n_e/T_e/T_i gradients — required for the Q_e ==
+        # -tauk·omega_e(ψ) identity check below.
+        sl = build_slayer_inputs(equil, sings, profiles; bt=2.0, dr_val=0.0,
+                                  compute_omega_star=false)
 
         @test length(sl) == 2
         @test sl[1] isa SLAYERParameters
@@ -102,21 +109,21 @@
     @testset "build_slayer_inputs: chi_perp/chi_tor as scalars and callables" begin
         sings = [_mk_sing(psi=0.5, q=2.4, q1=1.2, m=2, n=1)]
 
-        # Scalar
+        # Scalar (dr_val=0.0 bypasses the sing.restype requirement; see comment above)
         sl_s = build_slayer_inputs(equil, sings, profiles;
-                                    bt=2.0, chi_perp=2.0, chi_tor=1.5)
+                                    bt=2.0, chi_perp=2.0, chi_tor=1.5, dr_val=0.0)
         # Callable with matching value
         chi_p(psi) = 2.0 + 0.0*psi
         chi_t(psi) = 1.5 + 0.0*psi
         sl_c = build_slayer_inputs(equil, sings, profiles;
-                                    bt=2.0, chi_perp=chi_p, chi_tor=chi_t)
+                                    bt=2.0, chi_perp=chi_p, chi_tor=chi_t, dr_val=0.0)
         @test sl_s[1].P_perp ≈ sl_c[1].P_perp
         @test sl_s[1].P_tor  ≈ sl_c[1].P_tor
 
         # Callable with ψ-dependence changes the result
         chi_p_var(psi) = 1.0 + 10.0 * psi                     # χ⊥(0.5) = 6.0 > 2.0
         sl_var = build_slayer_inputs(equil, sings, profiles;
-                                      bt=2.0, chi_perp=chi_p_var, chi_tor=1.5)
+                                      bt=2.0, chi_perp=chi_p_var, chi_tor=1.5, dr_val=0.0)
         # P_perp = τ_r · χ⊥ / r² grows with χ⊥, so the varying-χ case at
         # ψ=0.5 (χ⊥=6) gives a *larger* P_perp than the scalar χ⊥=2.
         @test sl_var[1].P_perp > sl_s[1].P_perp
@@ -128,7 +135,7 @@
 
         # dc_type=:none and dr_val=0.0 → dc_tmp = 0 regardless of dr_val
         sl_none = build_slayer_inputs(equil, sings, profiles;
-                                       bt=2.0, dc_type=:none)
+                                       bt=2.0, dc_type=:none, dr_val=0.0)
         @test sl_none[1].dc_tmp == 0.0
 
         # dc_type=:rfitzp with dr_val = 0 still gives zero
