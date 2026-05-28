@@ -186,7 +186,7 @@ function _algebraic_coefs(B::Vector{Matrix{ComplexF64}}, R::Vector{RT},
         K2[k+1] = K2acc
         na == 2 || throw(
             ArgumentError(
-                "_algebraic_coefs: companion construction currently implements n_alg == 2 (GGJ floor); n_alg = $na needs confluent-Vandermonde generalization (C_LAYER Phase 4)"
+                "_algebraic_coefs: companion construction currently implements n_alg == 2 (GGJ floor); n_alg = $na needs confluent-Vandermonde generalization"
             )
         )
         # Companion form of the 2×2 algebraic block (Eqs. 32–39).

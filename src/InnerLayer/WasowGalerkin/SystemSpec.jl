@@ -61,7 +61,7 @@ stays concrete.
     For a parity-symmetric model it is derivable from `bc` (a `NEUMANN` component
     is even → `+1`, a `DIRICHLET` component is odd → `-1`); a parity-broken model
     supplies its own (its negative-side asymptotics are then genuinely
-    independent — a C_LAYER Phase-4 input).
+    independent).
 """
 struct SystemSpec{FA,FE,FX,FC,FP,FR}
     n::Int

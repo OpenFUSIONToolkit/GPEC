@@ -11,7 +11,7 @@
 #
 # Hermite elements are cubic (`np = 3`, 4 DOFs/node); the engine asserts this.
 # The algebraic matching uses one large + one small algebraic solution
-# (`n_alg = 2`); a higher matching-mode count is a C_LAYER Phase-4 input.
+# (`n_alg = 2`); a higher matching-mode count would require generalization.
 #
 # Reference: A. H. Glasser, Z. R. Wang & J.-K. Park, Phys. Plasmas 23, 112506 (2016).
 
