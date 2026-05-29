@@ -37,13 +37,14 @@ using HDF5
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
             et = read(h5["vacuum/et"])
             @test isfinite(real(et[1]))
-            # Kinetic-driven instability. Reference value -0.193593591803846 measured
-            # bit-identically on Apple M1 Max across 19 runs spanning julia_nthreads ∈ {1,4,8}
-            # and parallel_threads ∈ {2,8}, and confirmed numerically equivalent to the
-            # Linux x86 CI baseline. rtol=1e-3 catches any real regression (kinetic factor,
-            # edge-dW path, parallel BVP) while tolerating ~0.1 % cross-platform / BLAS drift.
+            # Kinetic-driven instability with full-domain integration (edge-dW scan decoupled
+            # from psilim truncation; see commit 5d5b8eed). Baseline measured on the Linux x86
+            # CI image after merging develop's periodic-endpoint snapping and exp(-imθ)
+            # Fourier-convention fixes. Value is path-independent: serial, parallel, and
+            # parallel+dense all agree to ~1e-7. rtol=1e-2 catches a real regression (kinetic
+            # factor, edge-dW path, parallel BVP) while tolerating cross-platform / BLAS drift.
             @test real(et[1]) < 0
-            @test isapprox(real(et[1]), -0.193593591803846; rtol=1e-3)
+            @test isapprox(real(et[1]), -0.15934995986628245; rtol=1e-2)
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true
