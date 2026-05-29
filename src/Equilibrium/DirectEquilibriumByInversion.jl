@@ -150,7 +150,7 @@ function resample_contour_to_theta_grid!(
     η_ext[n_ext] = η_ext[1] + 2π
     logρ_ext[n_ext] = logρ_ext[1]
 
-    logρ_spl = cubic_interp(η_ext, logρ_ext; bc=PeriodicBC(; check=false))
+    logρ_spl = cubic_interp(η_ext, logρ_ext; bc=PeriodicBC())
 
     # theta_grid is in turns [0, 1]; sample at 2π*θ radians and convert polar → Cartesian.
     # Monotonically increasing η → shared hint gives O(1) lookups per step.
@@ -658,7 +658,10 @@ function equilibrium_solver_by_inversion(
     # Build InverseRunInput — same type consumed by equilibrium_solver(::InverseRunInput)
     rz_in_xs = psi_nodes
     rz_in_ys = theta_grid
-    itp_opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    itp_opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    @views R_table[:, end] .= R_table[:, 1]
+    @views Z_table[:, end] .= Z_table[:, 1]
 
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_table; itp_opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_table; itp_opts2d...)

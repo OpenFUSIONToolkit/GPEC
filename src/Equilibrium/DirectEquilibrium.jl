@@ -570,7 +570,7 @@ robustness.
 
         ff_fs_nodes[end, :] .= ff_fs_nodes[1, :]  # enforce periodic endpoint
 
-        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC(; check=false))
+        ff_interp = cubic_interp(ff_x_nodes, Series(ff_fs_nodes); bc=PeriodicBC())
         ff_deriv = deriv1(ff_interp)
 
         # Resample ff onto uniform theta grid
@@ -632,7 +632,10 @@ robustness.
     rzphi_ys = collect(theta_nodes)
 
     grid2d = (rzphi_xs, theta_nodes)
-    opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+
+    # Snap periodic endpoint: ff_interp evaluation at theta_nodes[end] may drift by machine eps from theta_nodes[1]
+    @views rzphi_nodes[:, end, :] .= rzphi_nodes[:, 1, :]
 
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
@@ -696,6 +699,8 @@ robustness.
             end
         end
     end
+
+    @views eqfun_fs_nodes[:, end, :] .= eqfun_fs_nodes[:, 1, :]
 
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
