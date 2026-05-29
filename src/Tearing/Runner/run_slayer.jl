@@ -147,7 +147,7 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     gamma_Hz = Float64[]
     per_surface_extraction = GrowthRateResult[]
     coupled_extraction = nothing
-    scan_data_list = Any[]
+    scan_data_list = Union{ScanResult,AMRResult}[]
 
     # Helper: compute the pole_threshold actually passed to find_growth_rates.
     # When `control.pole_threshold_adaptive` is true, override with
@@ -163,7 +163,7 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     function _pole_threshold_for(scan)
         control.pole_threshold_adaptive || return control.pole_threshold
         # ScanResult and AMRResult both carry `.Δ` — abstract over both
-        Δ_arr = isdefined(scan, :Δ) ? scan.Δ : nothing
+        Δ_arr = hasproperty(scan, :Δ) ? scan.Δ : nothing
         Δ_arr === nothing && return control.pole_threshold
         finite = filter(z -> isfinite(z) && abs(z) < 1e30, Δ_arr)
         isempty(finite) && return control.pole_threshold

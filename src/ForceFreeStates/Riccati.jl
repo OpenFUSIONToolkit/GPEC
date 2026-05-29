@@ -906,21 +906,6 @@ function pest3_decompose(dp_raw::AbstractMatrix)
 end
 
 """
-    dprime_outer_matrix(dp_raw::AbstractMatrix) -> Matrix
-
-Assemble the 2m×2m outer-region matrix D′ in parity-major ordering
-`[interchange_1..m; tearing_1..m]` by rotating the side-major `dp_raw`
-through `pest3_decompose`. The ordering matches the `det(D' − D(γ)) = 0`
-eigenvalue problem where `D(γ) = blockdiag(Δ_interchange(γ), Δ_tearing(γ))`
-with each inner block m×m diagonal over singular surfaces.
-"""
-function dprime_outer_matrix(dp_raw::AbstractMatrix)
-    blocks = pest3_decompose(dp_raw)
-    return [blocks.A  blocks.B;
-            blocks.Γ  blocks.Δ]
-end
-
-"""
     riccati_der!(du, u, params, psieval)
 
 Evaluate the explicit dual Riccati ODE right-hand side:

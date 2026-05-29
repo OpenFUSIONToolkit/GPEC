@@ -245,8 +245,14 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
                 reltol=reltol, abstol=abstol, maxiters=maxiters,
                 save_everystep=false, dense=false)
 
-    sol.retcode == ReturnCode.Success ||
-        @warn "SLAYER Riccati integration did not return Success" sol.retcode
+    if sol.retcode != ReturnCode.Success
+        # Unconverged solve: return a NaN sentinel so the dispersion scan / AMR
+        # flags this Q-cell (via its isfinite checks) rather than ingesting a
+        # bogus finite Δ built from an unconverged W_end. @debug not @warn: in a
+        # dense Q-plane scan failures cluster near poles and would flood the log.
+        @debug "SLAYER Riccati integration did not return Success" sol.retcode
+        return InnerLayerResponse(ComplexF64(NaN, NaN), zero(ComplexF64))
+    end
 
     # Δ = π / W'(pmin) — single RHS evaluation at the inner endpoint
     W_end = sol.u[end]

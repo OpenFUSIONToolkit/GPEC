@@ -22,10 +22,12 @@
 #   the two quantities live in different bases. The Fortran fix is to
 #   introduce both sets of amplitudes (`C^j_{L,R}` for outer, `d^j_±` for
 #   inner) as explicit unknowns and use the ±1 matching identity as two
-#   extra rows per surface, yielding the 4m × 4m linear system. `CoupledFull`
-#   in this module tries the naive 2m × 2m form and produces a determinant
-#   with structurally-wrong magnitude and topology; this module (Fortran-
-#   faithful) reproduces the Pletzer-Dewar result.
+#   extra rows per surface, yielding the 4m × 4m linear system. A naive
+#   2m × 2m `det(D' − diag(Δ_+, Δ_-))` form cannot work here: it subtracts
+#   the inner Δ (parity ± basis) from the outer D' (side-major L/R basis),
+#   two quantities living in different bases, producing a determinant with
+#   structurally-wrong magnitude and topology. This module (Fortran-faithful)
+#   reproduces the Pletzer-Dewar result.
 #
 # Per surface `k` (1-indexed), the 4 block indices are
 #
@@ -55,11 +57,13 @@ of `SurfaceCoupling` (each containing the inner-layer model and
 parameters), calling `mc(Q)` assembles the 4m × 4m Pletzer-Dewar
 matching matrix and returns `det(mat)`.
 
-Use this instead of `MultiSurfaceCouplingFull` for tearing+interchange
-dispersion: `CoupledFull` was a (structurally-incorrect) 2m × 2m
-`det(D' − D(γ))` form whose determinant topology does not match Fortran;
-`MultiSurfaceCouplingFortran` is the correct Pletzer-Dewar dispersion
-relation.
+This is the correct Pletzer-Dewar dispersion relation for
+tearing+interchange coupling. A naive 2m × 2m `det(D' − D(γ))` form is
+not equivalent: it subtracts the inner Δ (parity ± basis) from the outer
+D' (side-major L/R basis), mixing two different bases. The 4m × 4m
+matching system introduced here keeps the bases separate via the explicit
+`C^j_{L,R}` / `d^j_±` unknowns. For pure-tearing (pressureless SLAYER)
+studies use the reduced m × m `MultiSurfaceCoupling` instead.
 
 # Fields
 

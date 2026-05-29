@@ -227,20 +227,17 @@ formulations).
 
 # Sign convention for diamagnetic frequencies
 
-Follows the Fortran `params.f:154-155` convention
+Both Fortran paths (`params.f:154-155` and `layerinputs.f:558-559`) use
 
 ```
 Q_e = -tauk · ω_*e
 Q_i = -tauk · ω_*i
 ```
 
-**Not** the `layerinputs.f:540-541` convention (which flips the Q_i sign
-— the two Fortran paths are inconsistent with each other and with the
-physics; `layerinputs.f` is a bug that produces same-sign Q_e and Q_i).
-For the standard plasma-physics input where ω_*e is tabulated negative
-and ω_*i positive (electrons and ions drifting in opposite directions),
-this convention produces `Q_e > 0, Q_i < 0`, matching the opposite-drift
-expectation of the dispersion relation.
+For the standard plasma-physics input where ω_*e is tabulated negative and
+ω_*i positive (electrons and ions drifting in opposite directions), this
+produces `Q_e > 0, Q_i < 0`, matching the opposite-drift expectation of the
+dispersion relation.
 """
 function slayer_parameters(;
         n_e::Real, t_e::Real, t_i::Real,
@@ -318,8 +315,8 @@ function slayer_parameters(;
     lu    = tau_r / tau_h
     tauk  = lu^(1.0 / 3.0) * tau_h         # = Qconv
 
-    # Normalized diamagnetic frequencies (layerinputs.f:540-541
-    # convention; see docstring sign convention discussion).
+    # Normalized diamagnetic frequencies. Both Fortran paths (params.f:154-155
+    # and layerinputs.f:558-559) use Q = -tauk·ω; see docstring sign convention.
     Q_e = -tauk * omega_e
     Q_i = -tauk * omega_i
     Q_e_minus_Q_i = Q_e - Q_i

@@ -37,18 +37,18 @@ using HDF5
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
             et = read(h5["vacuum/et"])
             @test isfinite(real(et[1]))
-            # Kinetic-driven instability. Standalone reference value -0.193593591803846
-            # measured bit-identically on Apple M1 Max across 19 runs and confirmed equivalent
-            # on the Linux x86 CI baseline. When this test runs as the LAST entry in the full
-            # Pkg.test() sequence on macOS, the value shifts deterministically to ≈ -0.161,
-            # apparently due to order-dependent state set by earlier suite entries (likely a
-            # mutable default in @kwdef structs or a module-level global; the standalone value
-            # is recovered immediately by running this file alone). Both values represent the
-            # same kinetic-instability physics; we bracket them rather than chase the order
-            # dependence here. A real regression (kinetic factor, edge-dW, parallel BVP) would
-            # fall outside [-0.30, -0.10] or change sign, and the bracket catches that.
-            @test real(et[1]) < 0
-            @test -0.30 < real(et[1]) < -0.10
+            # et[1] is the single unstable, near-marginal kinetic eigenvalue; the rest
+            # of the spectrum is large and positive (stable). Being a small difference
+            # of large plasma/vacuum energies, et[1] is ill-conditioned: @inbounds @simd
+            # floating-point reassociation (active under check-bounds=auto, disabled
+            # under Pkg.test's --check-bounds=yes) perturbs every eigenvalue by ~0.1%,
+            # which the marginal et[1] amplifies to ~17% (-0.1936 vs -0.1612). Both are
+            # the same physics. We pin the well-conditioned eigenvalues tightly and only
+            # bracket the marginal et[1].
+            @test real(et[1]) < 0                            # genuinely unstable
+            @test -0.25 < real(et[1]) < -0.13                # marginal value (FP-reassociation sensitive)
+            @test isapprox(real(et[2]), 17.74; rtol=1e-2)    # well-conditioned stable mode
+            @test isapprox(real(et[3]), 17.49; rtol=1e-2)    # well-conditioned stable mode
         end
         rm(joinpath(ex4, "gpec.h5"); force=true)
         true

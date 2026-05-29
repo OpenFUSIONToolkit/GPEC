@@ -95,9 +95,10 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
         Q_k  = Qc * (ref_tauk / sc.tauk)
         # m×m scalar coupling: use only the tearing channel. The
         # interchange (Glasser-stabilization) channel is carried in the
-        # full 2m×2m dispersion in `CoupledFull.jl`; this reduced form
-        # is equivalent for pressureless SLAYER surfaces (Δ_interchange=0)
-        # and approximate for GGJ surfaces (drops Glasser stabilization).
+        # full 4m×4m dispersion in `CoupledFortranMatch.jl`; this reduced
+        # form is equivalent for pressureless SLAYER surfaces
+        # (Δ_interchange=0) and approximate for GGJ surfaces (drops
+        # Glasser stabilization).
         Δ_k  = solve_inner(sc.model, sc.params, Q_k).tearing * sc.scale
         M[k,k] -= Δ_k + sc.dc
     end

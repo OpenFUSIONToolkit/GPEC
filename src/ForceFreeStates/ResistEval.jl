@@ -97,6 +97,14 @@ standard GGJ formulas.
 # Keyword arguments
 
   - `gamma`  — adiabatic index (default 5/3)
+
+!!! note "Contract"
+    `psifac` must be a genuine interior rational surface (`0 < ψ < 1`) with
+    nonzero `q1`, `p1 = dp/dψ`, and `p`. The GGJ combination divides by these
+    and by `|∇ψ|²` (which → 0 at the axis), so calling on the magnetic axis,
+    a flat-pressure surface, or a zero-shear surface yields `Inf`/`NaN`. This
+    matches the Fortran `resist_eval`, which is only ever invoked on interior
+    rationals.
 """
 function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
                           psifac::Real, q1::Real; gamma::Real=5/3)

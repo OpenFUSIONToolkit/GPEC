@@ -76,6 +76,8 @@ OpenFUSIONToolkit's `bootstrap.py` also selects as the "more accurate"
 option. `form=:sauter` uses the simpler Sauter 1999 Eq. 18d form.
 """
 function coulomb_log_e(n_e::Real, T_e::Real; form::Symbol=:nrl)
+    n_e > 0 || throw(ArgumentError("coulomb_log_e: n_e must be > 0 (got $n_e)"))
+    T_e > 0 || throw(ArgumentError("coulomb_log_e: T_e must be > 0 (got $T_e)"))
     if form === :nrl
         # NRL 2009, n_e in cm⁻³; matches utils_fusion.py:1262-1264
         return 23.5 - log(sqrt(n_e / 1e6) * T_e^(-1.25)) -
@@ -114,6 +116,8 @@ N(Z) = 0.58 + 0.74 / (0.76 + Z)
 """
 function eta_spitzer(n_e::Real, T_e::Real, Z_eff::Real;
                      lnLamb::Union{Real,Nothing}=nothing)
+    T_e > 0   || throw(ArgumentError("eta_spitzer: T_e must be > 0 (got $T_e)"))
+    Z_eff > 0 || throw(ArgumentError("eta_spitzer: Z_eff must be > 0 (got $Z_eff)"))
     lnL = lnLamb === nothing ? coulomb_log_e(n_e, T_e) : Float64(lnLamb)
     sigma_sp = 1.9012e4 * T_e^1.5 / (Z_eff * _N_Z(Z_eff) * lnL)
     return 1.0 / sigma_sp

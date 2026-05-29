@@ -27,9 +27,8 @@ downstream inspection and HDF5 output.
     valid roots, filtered roots). Empty in coupled mode.
   - `coupled_extraction`  -- single `GrowthRateResult` in coupled mode.
     `nothing` otherwise.
-  - `scan_data`           -- `Vector{Any}` of scan results (per-surface in
-    uncoupled, single entry in coupled). Empty unless
-    `control.store_scan == true`.
+  - `scan_data`           -- scan results (per-surface in uncoupled, single
+    entry in coupled). Empty unless `control.store_scan == true`.
 """
 struct SLAYERResult
     enabled::Bool
@@ -41,7 +40,7 @@ struct SLAYERResult
     gamma_Hz::Vector{Float64}
     per_surface_extraction::Vector{GrowthRateResult}
     coupled_extraction::Union{Nothing,GrowthRateResult}
-    scan_data::Vector{Any}
+    scan_data::Vector{Union{ScanResult,AMRResult}}
 end
 
 # Empty result (enabled=false path)
@@ -50,5 +49,6 @@ function empty_slayer_result(control::SLAYERControl)
                         SLAYERParameters[],
                         zeros(ComplexF64, 0, 0),
                         ComplexF64[], Float64[], Float64[],
-                        GrowthRateResult[], nothing, Any[])
+                        GrowthRateResult[], nothing,
+                        Union{ScanResult,AMRResult}[])
 end

@@ -35,7 +35,6 @@ else
     include("./runtests_slayer_inputs.jl")
     include("./runtests_dispersion_residual.jl")
     include("./runtests_dispersion_coupled.jl")
-    include("./runtests_dispersion_coupled_full.jl")
     include("./runtests_dispersion_coupled_fortran.jl")
     include("./runtests_dispersion_scan.jl")
     include("./runtests_dispersion_amr.jl")

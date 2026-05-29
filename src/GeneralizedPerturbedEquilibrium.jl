@@ -341,10 +341,36 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
 
     @info "Force-Free States completed in $(@sprintf("%.3f", time() - ffs_start)) s"
 
-    # Early exit if user only requested force-free states
+    # SLAYER tearing-mode analysis stage. Needs only equil + intr, so it runs in
+    # both the force_termination=true path and the full pipeline. `pe_file` is the
+    # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
+    function _run_slayer_stage(pe_file::Union{String,Nothing})
+        ("SLAYER" in keys(inputs)) || return nothing
+        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+        slayer_ctrl.enabled || return nothing
+        @info "\n  SLAYER\n$_SECTION"
+        slayer_start = time()
+        result = Runner.run_slayer(equil, intr, slayer_ctrl, inputs["SLAYER"];
+            dir_path=intr.dir_path)
+        @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+        h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
+        h5_path = joinpath(intr.dir_path, h5_filename)
+        # Append the slayer/ group; create the file if no prior stage wrote it
+        # (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+        HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+            Runner.write_slayer_hdf5!(f, result)
+        end
+        @info "SLAYER results written to $h5_filename"
+        return result
+    end
+
+    # Early exit if user only requested force-free states (SLAYER still runs).
     if ctrl.force_termination
+        slayer_result = _run_slayer_stage(nothing)
         @info "\n$_BANNER\n  GPEC completed successfully in $(@sprintf("%.3f", time() - total_start)) s\n$_BANNER"
-        return
+        return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
+            vac_data=ctrl.vac_flag ? vac_data : nothing,
+            slayer=slayer_result)
     end
 
     # ----------------------------------------------------------------
@@ -395,36 +421,16 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
 
     # ----------------------------------------------------------------
-    # SLAYER tearing-mode analysis
+    # SLAYER tearing-mode analysis (after PE so it appends to the PE output
+    # file; falls back to the ForceFreeStates file when PE did not run).
     # ----------------------------------------------------------------
-    slayer_result = nothing
-    if "SLAYER" in keys(inputs)
-        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-        if slayer_ctrl.enabled
-            @info "\n  SLAYER\n$_SECTION"
-            slayer_start = time()
-            slayer_result = Runner.run_slayer(
-                equil, intr, slayer_ctrl, inputs["SLAYER"];
-                dir_path=intr.dir_path,
-            )
-            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
-
-            # Append the `slayer/` group to whichever HDF5 file the run
-            # is already writing (PE output file if PE ran, otherwise
-            # the ForceFreeStates file).
-            h5_filename = if "PerturbedEquilibrium" in keys(inputs)
-                pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
-                isempty(pe_out) ? ctrl.HDF5_filename : pe_out
-            else
-                ctrl.HDF5_filename
-            end
-            h5_path = joinpath(intr.dir_path, h5_filename)
-            HDF5.h5open(h5_path, "r+") do f
-                Runner.write_slayer_hdf5!(f, slayer_result)
-            end
-            @info "SLAYER results written to $h5_filename"
-        end
+    pe_file = if "PerturbedEquilibrium" in keys(inputs)
+        pe_out = get(inputs["PerturbedEquilibrium"], "output_filename", "")
+        isempty(pe_out) ? ctrl.HDF5_filename : pe_out
+    else
+        ctrl.HDF5_filename
     end
+    slayer_result = _run_slayer_stage(pe_file)
 
     # ----------------------------------------------------------------
     # Done
