@@ -16,3 +16,4 @@ Pkg.instantiate()
 
 # Build the documentation
 include("docs/make.jl")
+ 
