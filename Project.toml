@@ -1,7 +1,7 @@
 name = "GeneralizedPerturbedEquilibrium"
 uuid = "462872dd-e066-4d2e-b993-6468b5239634"
 license = "MIT"
-authors = ["Nikolas Logan <ncl2128@columbia.edu>", "Jong-Kyu Park <jkpark@snu.ac.kr>", "Matthew Pharr <m.pharr@@protonmail.com>", "Jacob Halpern <jmh2363@columbia.edu>", "Rithik Banerjee <rb3736@columbia.edu>", "Jaebeom Cho <aspire1019@snu.ac.kr>", "Daniel Burgess <dab2245@columbia.edu>"]
+authors = ["Nikolas Logan <ncl2128@columbia.edu>", "Jong-Kyu Park <jkpark@snu.ac.kr>", "Matthew Pharr <m.pharr@protonmail.com>", "Jacob Halpern <jmh2363@columbia.edu>", "Rithik Banerjee <rb3736@columbia.edu>", "Jaebeom Cho <aspire1019@snu.ac.kr>", "Daniel Burgess <dab2245@columbia.edu>", "Min-Gu Yoo <mgyoo86@gmail.com>", "Brendan Lyons <lyonsbc@fusion.gat.com>", "Dylan Brennan <dylanpbrennan@gmail.com>"]
 version = "0.1.0"
 
 [deps]
