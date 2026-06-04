@@ -64,6 +64,10 @@ function bvp_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equi
     psi_axis = odet.psifac
     intr.psilim > psi_axis || error("bvp_eulerlagrange_integration: empty domain ψ ∈ [$psi_axis, $(intr.psilim)]")
 
+    if ctrl.bvp_riccati
+        return _bvp_riccati_integration(ctrl, equil, ffit, intr, odet)
+    end
+
     # Split the domain at each q = m/n surface exactly as the shooting path does. Each chunk is
     # integrated from the running fundamental matrix odet.u; chunks ending on a rational are
     # followed by an asymptotic-basis crossing that sets the IC for the next chunk.
@@ -286,5 +290,168 @@ function _bvp_cross_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl,
     @views odet.u_store[:, :, :, odet.step] .= odet.u
     @views odet.ud_store[:, :, :, odet.step] .= odet.ud
     odet.step += 1
+    return odet
+end
+
+# ======================================================================================
+# Bounded Riccati-W reformulation (issue #251 follow-up).
+#
+# The raw fundamental matrix Y=(U₁,U₂) grows exponentially → the collocation system is
+# ill-conditioned. The Riccati matrix W = U₁U₂⁻¹ stays bounded (W(axis)=0) and satisfies
+#
+#     W' = L12 + L11 W − W L22 − W L21 W                              (matrix Riccati)
+#
+# with the EL operator blocks (derived from sing_der!, ideal path; Q⁻¹ = diag(1/(m−nq))):
+#
+#     L11 = −Q⁻¹ F̄⁻¹ K,  L12 = Q⁻¹ F̄⁻¹ Q⁻¹,  L21 = G − K† F̄⁻¹ K,  L22 = K† F̄⁻¹ Q⁻¹.
+#
+# wp = U₂U₁⁻¹/ψ₀² = W⁻¹/ψ₀². Crucially the W RHS is polynomial in W with ψ-only (concrete)
+# coefficients, so the AutoSparse symbolic tracer CAN see the block-bidiagonal collocation
+# Jacobian (unlike the per-column raw-FM RHS that hides W-dependence inside sing_der!'s
+# LAPACK). Stage R1 here: single no-crossing segment, et only. T-reconstruction of the full
+# u_store and per-segment crossings are the next steps.
+# ======================================================================================
+
+"""
+    _bvp_L_blocks!(L11, L12, L21, L22, Fi, ψ, ctrl, equil, ffit, intr, odet)
+
+Evaluate the four N×N Euler–Lagrange operator blocks at `ψ` (ideal path) into the
+preallocated `L11`/`L12`/`L21`/`L22`, using `Fi` as scratch for `F̄⁻¹`.
+"""
+function _bvp_L_blocks!(L11, L12, L21, L22, Fi, psi::Float64,
+    ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
+
+    N = intr.numpert_total
+    q = equil.profiles.q_spline(psi; hint=odet.spline_hint)
+    singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)'))   # Q⁻¹ diagonal
+
+    fmat = zeros(ComplexF64, N, N)
+    kmat = zeros(ComplexF64, N, N)
+    gmat = zeros(ComplexF64, N, N)
+    ffit.fmats_lower(vec(fmat), psi; hint=odet.ffit_hint)
+    ffit.kmats(vec(kmat), psi; hint=odet.ffit_hint)
+    ffit.gmats(vec(gmat), psi; hint=odet.ffit_hint)
+
+    # Fi = F̄⁻¹ = L⁻† L⁻¹  (fmat is the Cholesky factor L, F̄ = L L†).
+    fill!(Fi, 0)
+    @inbounds for i in 1:N
+        Fi[i, i] = 1
+    end
+    ldiv!(LowerTriangular(fmat), Fi)
+    ldiv!(UpperTriangular(fmat'), Fi)
+
+    FiK = Fi * kmat
+    @. L11 = -singfac * FiK                  # −Q⁻¹ F̄⁻¹ K           (row scale by singfac)
+    @. L12 = singfac * Fi * singfac'         # Q⁻¹ F̄⁻¹ Q⁻¹          (row & column scale)
+    L21 .= gmat .- kmat' * FiK               # G − K† F̄⁻¹ K
+    L22 .= (kmat' * Fi) .* singfac'          # K† F̄⁻¹ Q⁻¹          (column scale by singfac)
+    return nothing
+end
+
+"""
+    _bvp_solve_riccati_W(ctrl, equil, ffit, intr, odet, psi0, psi1) -> (W_edge, sol)
+
+Solve the bounded matrix Riccati BVP `W' = L12 + L11 W − W L22 − W L21 W` over
+`[psi0, psi1]` with `W(psi0) = 0`, returning the edge value `W(psi1)` and the MIRK
+solution. Native-complex MIRK6 with a dense Jacobian (state is N² per node, so this
+fits only at small node counts — see the dense/AutoSparse note at the solve call).
+"""
+function _bvp_solve_riccati_W(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState, psi0::Float64, psi1::Float64)
+
+    N = intr.numpert_total
+    L11 = zeros(ComplexF64, N, N)
+    L12 = zeros(ComplexF64, N, N)
+    L21 = zeros(ComplexF64, N, N)
+    L22 = zeros(ComplexF64, N, N)
+    Fi = zeros(ComplexF64, N, N)
+
+    function f!(dWv, Wv, _p, psi)
+        W = reshape(Wv, N, N)
+        dW = reshape(dWv, N, N)
+        _bvp_L_blocks!(L11, L12, L21, L22, Fi, _psi_value(psi), ctrl, equil, ffit, intr, odet)
+        dW .= L12 .+ L11 * W .- W * L22 .- W * (L21 * W)   # allocating: keeps the tracer/AD path generic
+        return nothing
+    end
+    function bc!(res, u, _p, _t)
+        res .= u(psi0)            # W(psi0) = 0
+        return nothing
+    end
+
+    W0 = zeros(ComplexF64, N * N)
+    prob = BVProblem(f!, bc!, W0, (psi0, psi1))
+    dt = ctrl.bvp_dt > 0 ? ctrl.bvp_dt : (psi1 - psi0) / ctrl.bvp_init_intervals
+    tol = ctrl.eulerlagrange_tolerance
+    # Dense Jacobian — fits only at small node counts (state is N² per node). The block-
+    # bidiagonal sparse Jacobian (AutoSparse) OOMs here: the tracer cannot reduce the pattern
+    # through this RHS. A structured/analytic Kronecker Jacobian is the scaling follow-up.
+    jac_alg = BVPJacobianAlgorithm(; bc_diffmode=AutoFiniteDiff(), nonbc_diffmode=AutoFiniteDiff())
+    alg = MIRK6(; jac_alg=jac_alg, max_num_subintervals=ctrl.bvp_max_intervals)
+    _bvpdbg("Riccati-W solve START dt=$dt adaptive=$(ctrl.bvp_adaptive) tol=$tol")
+    sol = solve(prob, alg; dt=dt, abstol=tol, reltol=tol, adaptive=ctrl.bvp_adaptive)
+    _bvpdbg("Riccati-W solve END nodes=$(length(sol.t)) retcode=$(sol.retcode)")
+    if Symbol(sol.retcode) != :Success
+        @warn "Riccati-W BVP retcode $(sol.retcode) on [$psi0, $psi1]; result may be inaccurate"
+    end
+    W_edge = reshape(Vector{ComplexF64}(sol.u[end]), N, N)
+    return W_edge, sol
+end
+
+"""
+    _bvp_riccati_integration(ctrl, equil, ffit, intr, odet) -> OdeState
+
+Stage R1: bounded Riccati-W collocation on a single no-crossing segment, sufficient to
+extract the energy eigenvalues. Sets `odet.u` so `free_run!` reads `wp = U₂U₁⁻¹ = W⁻¹`
+(via U₁=I, U₂=W⁻¹ at the edge). The dense `u_store` (needed by PerturbedEquilibrium) is a
+follow-up via the bounded `T = U₂U₂(edge)⁻¹` reconstruction; here it holds the edge node only.
+"""
+function _bvp_riccati_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal, odet::OdeState)
+
+    N = intr.numpert_total
+    psi0 = odet.psifac
+    psi1 = intr.psilim
+    n_inside = count(s -> psi0 < s.psifac < psi1, intr.sing)
+    n_inside == 0 || error("Riccati-W BVP (R1): $n_inside internal rational surface(s) in [ψ_axis, ψ_lim]; " *
+                           "segmented Riccati crossings not yet implemented. Use the truncated (no-crossing) domain or use_parallel.")
+
+    W_edge, _ = _bvp_solve_riccati_W(ctrl, equil, ffit, intr, odet, psi0, psi1)
+
+    # Edge fundamental matrix with the correct ratio for wp = U₂U₁⁻¹ = W⁻¹: U₁=I, U₂=W⁻¹.
+    # W is singular at a conjugate point (unstable segment) — fall back to a pseudoinverse and
+    # warn rather than crash; the result is unreliable there (the global W BVP cannot cross a pole).
+    local Winv
+    try
+        Winv = inv(W_edge)
+    catch err
+        err isa LinearAlgebra.SingularException || rethrow()
+        @warn "Riccati-W edge matrix is singular (conjugate point / unstable segment); using pinv — result unreliable."
+        Winv = pinv(W_edge)
+    end
+    fill!(odet.u, 0)
+    @inbounds for i in 1:N
+        odet.u[i, i, 1] = 1
+    end
+    @views odet.u[:, :, 2] .= Winv
+    odet.psifac = psi1
+    odet.q = equil.profiles.q_spline(psi1)
+
+    # Minimal u_store: the edge node (R1 = energies only; full dense u_store is the T-reconstruction step).
+    chunk = IntegrationChunk(; psi_start=psi0, psi_end=psi1, needs_crossing=false, ising=0)
+    params = (ctrl, equil, ffit, intr, odet, chunk)
+    du = zeros(ComplexF64, N, N, 2)
+    sing_der!(du, odet.u, params, psi1)
+    odet.psi_store[1] = psi1
+    odet.q_store[1] = odet.q
+    @views odet.u_store[:, :, :, 1] .= odet.u
+    @views odet.ud_store[:, :, :, 1] .= odet.ud
+    odet.step = 1
+    trim_storage!(odet)
+    odet.nzero = 0   # R1: full Newcomb crossing count needs the dense u_store (T-reconstruction step)
+
+    if ctrl.verbose
+        @info "BVP Riccati-W (R1, energies only) complete over [$(round(psi0; digits=4)), $(round(psi1; digits=4))]"
+    end
     return odet
 end
