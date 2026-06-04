@@ -20,6 +20,7 @@ Markdown.parse(readme)
 - [**API Reference**](vacuum.md) — Detailed function and type documentation for each module
 - [**Citations**](citations.md) — Papers underpinning GPEC's algorithms
 - [**Developer Notes**](developer_notes.md) — Git workflow, commit conventions, and the regression-testing harness
+- [**Introduction Slides**](https://docs.google.com/presentation/d/1Iey7bsvpDG1WDRow24OD0NOWyKYOXMs0U7QLc7Y-wj4/edit?slide=id.g2798d4bd85b_0_15#slide=id.g2798d4bd85b_0_15) - GPEC Introduction Slides
 
 ## Contact
 
