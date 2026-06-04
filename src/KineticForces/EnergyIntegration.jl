@@ -130,9 +130,9 @@ function find_resonance_energies(leff::Float64, wb::Float64, n::Int, we::Float64
     b = leff * wb
     c = n * we
     roots = Float64[]
-    if abs(a) < 1e-30
+    if abs(a) < SINGULAR_EPS
         # Linear case: b·s + c = 0
-        abs(b) < 1e-30 && return roots
+        abs(b) < SINGULAR_EPS && return roots
         s = -c / b
         s > 0.0 && push!(roots, s^2)
     else
@@ -207,7 +207,7 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
         xr > 700.0 && continue
         # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
         omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
-        abs(omega_prime) < 1e-30 && continue
+        abs(omega_prime) < SINGULAR_EPS && continue
 
         u_res = -expm1(-xr)   # 1 - exp(-x_res)
         nu_res = _energy_collision_frequency(xr, p)

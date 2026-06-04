@@ -356,7 +356,30 @@ end
 
 
 """
-Bisect to find θ where v_par = 1 - (λ/bo)*B(θ) = 0.
+    _bisect_vpar(tspl, lmda, bo, θa, θb; tol=1e-12, maxiter=50) → θ
+
+Bisect on `θ ∈ [θa, θb]` to find a bounce point — the angle where the parallel
+velocity vanishes, `v_par(θ) = 1 - (λ/bo) · B(θ) = 0`. The caller is responsible
+for supplying a bracket where `v_par(θa)` and `v_par(θb)` have opposite signs;
+this routine does not check, it just halves toward the sign change.
+
+# Arguments
+- `tspl`: 1D θ-interpolant returning at least `[B(θ), …]` at first index;
+  `tspl(mod(θ, 1.0))[1]` extracts the local field magnitude.
+- `lmda`: pitch-angle parameter λ = μ·bo / E.
+- `bo`: on-axis toroidal field used to normalise λ.
+- `θa, θb`: bracket endpoints (normalised θ ∈ [0,1)); typically straddling a B-peak.
+
+# Keyword arguments
+- `tol`: termination tolerance — exits when either `|v_par(θ_mid)| < tol` or the
+  bracket width `θb − θa < tol`. Default `1e-12` is tight enough that the
+  residual `v_par` is dominated by the spline-evaluation roundoff of `tspl`.
+- `maxiter`: hard iteration cap. Default `50` halves the bracket by ~10⁻¹⁵, well
+  past `tol` on a unit-scale bracket; the cap is a runaway guard rather than the
+  expected exit. On exhaustion the midpoint of the final bracket is returned.
+
+# Returns
+- `θ::Float64`: the converged (or capped) bounce-point angle.
 """
 function _bisect_vpar(tspl, lmda::Float64, bo::Float64, θa::Float64, θb::Float64; tol=1e-12, maxiter=50)
     va = 1.0 - (lmda / bo) * tspl(mod(θa, 1.0))[1]
@@ -562,14 +585,14 @@ function _bounce_integrate(
         end
         @inbounds for i in 1:ntheta
             w = (i == 1 || i == ntheta) ? 0.5 : 1.0
-            bj_integral += w * conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
+            bj_integral += w * conj(jvtheta[i]) * (pl[i] + one_minus_sigma / (pl[i] + SINGULAR_EPS))
         end
     else
         pl = nothing
         @inbounds for i in 1:ntheta
             pli = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
             w = (i == 1 || i == ntheta) ? 0.5 : 1.0
-            bj_integral += w * conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + 1e-30))
+            bj_integral += w * conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + SINGULAR_EPS))
         end
     end
     bj_integral *= nrm
@@ -587,7 +610,7 @@ function _bounce_integrate(
         wen_ba = zeros(ComplexF64, mpert)
         @inbounds for i in 1:ntheta
             w = (i == 1 || i == ntheta) ? 0.5 : 1.0
-            factor = w * (pl[i] + one_minus_sigma / (pl[i] + 1e-30))
+            factor = w * (pl[i] + one_minus_sigma / (pl[i] + SINGULAR_EPS))
             for mi in 1:mpert
                 wmu_ba[mi] += conj(wmu_mt[mi, i]) * factor
                 wen_ba[mi] += conj(wen_mt[mi, i]) * factor
