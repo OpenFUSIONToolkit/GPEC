@@ -1,4 +1,142 @@
 """
+    compute_delta_prime_from_ca!(odet, intr, equil)
+
+**STUB — not physically valid.** Compute a per-surface Δ' estimate from the asymptotic
+coefficients `ca_l`/`ca_r` using `Δ'[i] = (ca_r[i,i,2,s] - ca_l[i,i,2,s]) / (4π²·psio)`.
+
+The physically valid tearing-stability Δ' is `ForceFreeStatesInternal.delta_prime_matrix`,
+computed via the STRIDE global BVP in `compute_delta_prime_matrix!`. The per-surface
+ca-based formula here ignores inter-surface coupling and the vacuum BC, and should
+**not** be expected to agree with `delta_prime_matrix`. Retained for reference / future
+work on intra-surface coupling diagnostics.
+
+Not called from any integration driver. Used only by tests / benchmarks that exercise
+the stub formula directly.
+"""
+function compute_delta_prime_from_ca!(odet::OdeState, intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium)
+    denom = (2π)^2 * equil.psio  # = twopi * chi1 in SingularCoupling.jl
+    for s in 1:intr.msing
+        sing = intr.sing[s]
+        n_modes = length(sing.m)
+        resize!(intr.sing[s].delta_prime, n_modes)
+        for i in 1:n_modes
+            ipert_res = 1 + sing.m[i] - intr.mlow + (sing.n[i] - intr.nlow) * intr.mpert
+            if 1 <= ipert_res <= intr.numpert_total
+                Δca = odet.ca_r[ipert_res, ipert_res, 2, s] - odet.ca_l[ipert_res, ipert_res, 2, s]
+                intr.sing[s].delta_prime[i] = Δca / denom
+            else
+                intr.sing[s].delta_prime[i] = 0.0 + 0.0im
+            end
+        end
+    end
+end
+
+# Empirical log-divergent ODE-cost coefficients (a, b) for each reference point:
+# axis (ψ=0, steep), rational surfaces (ψ=ψ_s, moderate), edge (ψ=ψ_lim, mild).
+# Per reference, the contribution to the cost is (a/b) · |log(1 + b·|ψ-ref|)| evaluated
+# at the interval endpoints. Coefficients are ported from STRIDE's ode_itime cost model
+# (Fortran reference) and unchanged here. Tune only after re-fitting against a per-chunk
+# step-count sweep; touching these affects parallel-chunk load balancing.
+const ODE_COST_AXIS  = (a = 39695.0, b = 212830.0)
+const ODE_COST_RAT   = (a = 17147.0, b = 470710.0)
+const ODE_COST_EDGE  = (a =  1646.0, b =   4683.0)
+
+"""
+    ode_itime_cost(psi1, psi2, intr) -> Float64
+
+Estimate the relative ODE integration cost for the interval [ψ₁, ψ₂] using the empirical
+log-divergent cost model from STRIDE (Glasser 2018). Coefficients are the module constants
+`ODE_COST_AXIS`, `ODE_COST_RAT`, `ODE_COST_EDGE`. The cost is additive for sub-intervals
+not containing rational surfaces, which makes it suitable for equal-cost splitting via
+bisection in `balance_integration_chunks`.
+"""
+function ode_itime_cost(psi1::Float64, psi2::Float64, intr::ForceFreeStatesInternal)
+    _logdiv(a, b, x1, x2) = (a / b) * abs(log(1.0 + b * abs(x2)) - log(1.0 + b * abs(x1)))
+
+    cost = _logdiv(ODE_COST_AXIS.a, ODE_COST_AXIS.b, psi1, psi2)
+    for sing in intr.sing
+        cost += _logdiv(ODE_COST_RAT.a, ODE_COST_RAT.b, psi1 - sing.psifac, psi2 - sing.psifac)
+    end
+    cost += _logdiv(ODE_COST_EDGE.a, ODE_COST_EDGE.b, psi1 - intr.psilim, psi2 - intr.psilim)
+    return cost
+end
+
+"""
+    balance_integration_chunks(chunks, ctrl, intr) -> Vector{IntegrationChunk}
+
+Sub-divide integration chunks to produce a load-balanced set for parallel execution.
+Starts from the output of `chunk_el_integration_bounds` and iteratively splits the
+highest-cost chunk (by `ode_itime_cost`) until the total chunk count reaches
+`max(2*msing + 3, 4 * Threads.nthreads())`.
+
+Each split finds the equal-cost midpoint ψ_mid via bisection:
+  ode_itime_cost(psi_start, psi_mid) ≈ ode_itime_cost(psi_start, psi_end) / 2
+
+Sub-chunks inherit `needs_crossing=false` and `ising=0`. Only the LAST sub-chunk of
+each original chunk retains `needs_crossing=true` and the original `ising`, so the
+rational surface crossing still fires at the correct ψ in the serial assembly phase.
+"""
+function balance_integration_chunks(chunks::Vector{IntegrationChunk}, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
+    min_chunks = 2 * intr.msing + 3
+    # Ensure enough sub-chunks for BVP propagator conditioning: at least 5 non-crossing
+    # sub-chunks per segment (axis→surf₁, surfᵢ→surfᵢ₊₁, surfₙ→edge), plus crossing
+    # chunks. STRIDE uses 33 intervals for comparable problems. Without enough sub-chunks,
+    # assemble_fm_matrix(condition=true) can't keep accumulated products well-conditioned
+    # because single long-span propagators may already have cond ~ 10²⁴.
+    min_bvp_intervals = 8 * (intr.msing + 1) + intr.msing
+    # Use the effective parallel width (capped by ctrl.parallel_threads) rather than
+    # Threads.nthreads() — otherwise a user on `julia -t 16` who sets parallel_threads=2
+    # for determinism still pays for 4× the requested sub-chunk count.
+    effective_threads = min(Threads.nthreads(), max(ctrl.parallel_threads, 1))
+    target_n = max(min_chunks, 4 * effective_threads, min_bvp_intervals)
+
+    result = collect(chunks)
+
+    while length(result) < target_n
+        # Find the highest-cost splittable chunk
+        best_idx = 0
+        best_cost = -Inf
+        for (i, chunk) in enumerate(result)
+            width = chunk.psi_end - chunk.psi_start
+            if width > 1e-8
+                c = ode_itime_cost(chunk.psi_start, chunk.psi_end, intr)
+                if c > best_cost
+                    best_cost = c
+                    best_idx = i
+                end
+            end
+        end
+
+        best_idx == 0 && break  # No more splittable chunks
+
+        chunk = result[best_idx]
+        total_cost = best_cost
+        target_cost = total_cost / 2.0
+
+        # Bisect to find ψ_mid where cost(psi_start, ψ_mid) ≈ target_cost
+        lo, hi = chunk.psi_start, chunk.psi_end
+        for _ in 1:50
+            mid = (lo + hi) / 2.0
+            if ode_itime_cost(chunk.psi_start, mid, intr) < target_cost
+                lo = mid
+            else
+                hi = mid
+            end
+        end
+        psi_mid = (lo + hi) / 2.0
+
+        left = IntegrationChunk(; psi_start=chunk.psi_start, psi_end=psi_mid,
+                                  needs_crossing=false, ising=0, direction=1)
+        right = IntegrationChunk(; psi_start=psi_mid, psi_end=chunk.psi_end,
+                                   needs_crossing=chunk.needs_crossing, ising=chunk.ising,
+                                   direction=chunk.direction)
+        splice!(result, best_idx, [left, right])
+    end
+
+    return result
+end
+
+"""
     eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
 Main driver for integrating the Euler-Lagrange equations across the plasma and detecting singular surfaces.
@@ -20,6 +158,14 @@ restype functionality if we decide to do this
 An OdeState struct containing the final state of the ODE solver after integration is complete.
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
+
+    # Dispatch to parallel or Riccati solver if requested.
+    # Parallel path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
+    if ctrl.use_parallel
+        return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
+    elseif ctrl.use_riccati
+        return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
+    end
 
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -58,20 +204,38 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Deallocate unused storage of integration data.
     # `odet.step` was incremented one past the last filled index in integrate_el_region!.
     odet.step -= 1
-    if ctrl.psiedge < intr.psilim
-        # Find the peak dW in the edge region and truncate integration data there
-        odet.step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
-        trim_storage!(odet)
-        if ctrl.verbose
-            @info "Truncating integration at peak edge dW: ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
-        end
+    trim_storage!(odet)
 
-        # Update u, psilim, and qlim for usage in determining wp and wt
-        intr.psilim = odet.psi_store[end]
-        intr.qlim = odet.q_store[end]
-        odet.u .= odet.u_store[:, :, :, end]
-    else
-        trim_storage!(odet)
+    # Edge-dW scan over [psiedge, psilim] — populates odet.edge_scan for HDF5 output.
+    # The scan mutates odet.psifac and odet.u internally; save/restore them around the call.
+    # findmax_dW_edge! also (re)allocates odet.edge_scan; that field is the diagnostic
+    # product and is intentionally NOT restored.
+    #
+    # Default (ctrl.truncate_at_dW_peak = false): diagnostic-only. Integration domain is
+    # determined solely by qhigh / psihigh / dmlim so Δ' and δW are independent of peak
+    # location. Legacy path (true) reproduces the ode_record_edge heuristic from Fortran
+    # STRIDE — psilim/qlim/u are pulled back to the dW peak. Preserved for experimental
+    # work; see docstring in ForceFreeStatesStructs.jl for the reliability caveats.
+    if ctrl.psiedge < intr.psilim
+        saved_psifac, saved_u = odet.psifac, copy(odet.u)
+        peak_step = findmax_dW_edge!(odet, ctrl, equil, ffit, intr)
+        if ctrl.truncate_at_dW_peak
+            # Legacy: truncate integration data to dW peak (corrupts Δ' and δW).
+            odet.step = peak_step
+            trim_storage!(odet)
+            intr.psilim = odet.psi_store[end]
+            intr.qlim = odet.q_store[end]
+            odet.u .= odet.u_store[:, :, :, end]
+            if ctrl.verbose
+                @info "Truncating integration at peak edge dW (LEGACY — Δ'/δW unreliable): ψ = $((@sprintf "%.3f" odet.psi_store[odet.step])),  q = $((@sprintf "%.3f" odet.q_store[odet.step]))"
+            end
+        else
+            odet.psifac = saved_psifac
+            odet.u .= saved_u
+            if ctrl.verbose
+                @info "Edge-dW peak (diagnostic): ψ = $((@sprintf "%.3f" odet.psi_store[peak_step])),  q = $((@sprintf "%.3f" odet.q_store[peak_step])); integration domain unchanged"
+            end
+        end
     end
 
     # Evaluate stability criterion (critical determinant) of saved solutions
@@ -83,7 +247,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Undo Gaussian reduction to get true solution vectors (for free_run! eigenvector use)
     transform_u!(odet, intr)
 
-    return odet
+    return (odet, nothing, nothing, nothing)
 end
 
 """
@@ -157,7 +321,7 @@ making the integration flow more predictable and easier to parallelize (e.g., fo
 
   - `Vector{IntegrationChunk}` - Array of integration chunks to process
 """
-function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal)
+function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesControl, intr::ForceFreeStatesInternal; bidirectional::Bool=false)
     chunks = IntegrationChunk[]
 
     # Start from current position
@@ -204,7 +368,8 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
                 psi_start=psi_current,
                 psi_end=psi_end,
                 needs_crossing=true,
-                ising=ising_current
+                ising=ising_current,
+                direction = bidirectional ? -1 : 1
             ))
 
             # After crossing, we jump to the other side of the singular surface
@@ -257,13 +422,14 @@ function cross_ideal_singular_surf!(
     # Fixup solution at singular surface
     compute_solution_norms!(odet.u, odet, ctrl, intr, true)
 
-    # Compute asymptotic power series for this singular surface
+    # Compute direction-specific asymptotic power series for this singular surface
     singp = intr.sing[ising]
-    sing_asymp = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr)
-    dpsi = singp.psifac - odet.psifac # ψ_res - ψ
+    sing_asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
+    sing_asymp_left = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=sing_asymp_right.alpha)
+    dpsi = singp.psifac - odet.psifac # ψ_res - ψ (positive)
 
-    # Get asymptotic coefficients before crossing rational surface
-    ua = sing_get_ua(sing_asymp, -dpsi)
+    # Get asymptotic coefficients before crossing (left side)
+    ua = sing_get_ua(sing_asymp_left, dpsi)
     odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
     # Single n: remove largest solution and sub in asymptotics on the other side
@@ -275,14 +441,14 @@ function cross_ideal_singular_surf!(
     if ctrl.kinetic_factor == 0
         # Eliminate the solution with the largest norm (in the same block) for each resonance
         odet.zeroed_idx[odet.ifix] = Int[]
-        for i in eachindex(sing_asymp.r1)
+        for i in eachindex(sing_asymp_right.r1)
             push!(odet.zeroed_idx[odet.ifix], findfirst(j -> (ipert_res[i] - 1) ÷ intr.mpert == (odet.index[j, odet.ifix] - 1) ÷ intr.mpert, 1:intr.numpert_total))
             odet.u[:, odet.index[odet.zeroed_idx[odet.ifix][i], odet.ifix], :] .= 0
         end
     end
 
     # Re-initialize on opposite side of rational surface by approximating solution
-    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising))
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
     du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
     sing_der!(du1, odet.u, params, odet.psifac)
@@ -290,10 +456,10 @@ function cross_ideal_singular_surf!(
     sing_der!(du2, odet.u, params, odet.psifac)
     odet.u .+= (du1 .+ du2) .* dpsi
 
-    # Apply asymptotic solution on other side of singular surface
-    ua = sing_get_ua(sing_asymp, dpsi)
+    # Apply asymptotic solution on other side of singular surface (right side)
+    ua = sing_get_ua(sing_asymp_right, dpsi)
     if ctrl.kinetic_factor == 0
-        for i in eachindex(sing_asymp.r1)
+        for i in eachindex(sing_asymp_right.r1)
             # Zero out the resonant components
             odet.u[ipert_res[i], :, :] .= 0
             # Introduce the small asymptotic resonant solution on the other side of the singular surface
@@ -303,9 +469,16 @@ function cross_ideal_singular_surf!(
     # Get asymptotic coefficients after crossing rational surface
     odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
 
+    # Δ' is NOT computed for the standard path. The physical Δ' requires the solution
+    # columns to be in the Riccati gauge (U₂=I), maintained only by Riccati renormalization.
+    # The standard path's solution columns grow from the axis with an arbitrary complex
+    # phase; dividing by the outer asymptotic coefficient normalizes magnitude but not phase,
+    # so the result is in a different convention. The canonical Δ' is the STRIDE BVP matrix
+    # (compute_delta_prime_matrix!) populated by the parallel FM path.
+
     # Recompute ud from the final post-crossing u so ud_store is consistent with u_store.
-    # The previous sing_der! calls (lines above) computed du from the pre-trapezoidal,
-    # pre-asymptotic u, leaving odet.ud stale after the u modifications.
+    # The earlier sing_der! calls computed du from the pre-trapezoidal, pre-asymptotic u,
+    # leaving odet.ud stale after the u modifications above.
     sing_der!(du1, odet.u, params, odet.psifac)
 
     # Store values after crossing step and advance
@@ -315,7 +488,6 @@ function cross_ideal_singular_surf!(
     odet.ud_store[:, :, :, odet.step] = odet.ud
     odet.step += 1
 end
-
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -402,7 +574,7 @@ function integrate_el_region!(
 
     cb = DiscreteCallback((u, t, integrator) -> true, segment_callback!)
     prob = ODEProblem(sing_der!, odet.u, (chunk.psi_start, chunk.psi_end), (ctrl, equil, ffit, intr, odet, chunk))
-    sol = solve(prob, BS5(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
+    sol = solve(prob, Vern9(); reltol=ctrl.eulerlagrange_tolerance, callback=cb, save_everystep=false, save_end=true)
 
     # Unconditionally save the final step if the callback did not already capture it.
     # Guarantees the pre-crossing (or pre-edge) state is always stored in u_store,

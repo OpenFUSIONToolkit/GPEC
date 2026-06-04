@@ -78,6 +78,16 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
         json_str = JSON.json(pairs)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
+    elseif spec.extract == "diagonal_complex"
+        # Extract the diagonal of a square matrix as a complex array.
+        # Use for tracking per-surface BVP Δ' from singular/delta_prime_matrix.
+        ndims(raw) == 2 && size(raw, 1) == size(raw, 2) ||
+            error("diagonal_complex requires a square 2-D matrix; got size $(size(raw))")
+        diag_vec = [raw[i, i] for i in 1:size(raw, 1)]
+        pairs = [[real(x), imag(x)] for x in diag_vec]
+        json_str = JSON.json(pairs)
+        return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
+
     elseif spec.extract == "checksum"
         bytes = reinterpret(UInt8, vec(collect(raw)))
         hash = bytes2hex(sha256(bytes))

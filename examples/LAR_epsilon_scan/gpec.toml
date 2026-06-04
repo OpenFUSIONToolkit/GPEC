@@ -1,0 +1,93 @@
+# Single-file GPEC configuration for the TJ-analytic ε (inverse aspect ratio)
+# scan.
+#
+# The TJ-analytic equilibrium follows the profile family of
+# R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); we adapt the
+# same f₁ / pressure / shape-ODE parameterization but feed the result
+# through GPEC's own pipeline.
+#
+# The accompanying run_scan.jl reads this file, overrides only the scan
+# parameter (TJ_ANALYTIC_INPUT.lar_r0 = TJ_ANALYTIC_INPUT.lar_a / ε) per point,
+# and writes a fresh gpec.toml into each tempdir.  Every TJ-analytic
+# analytic-equilibrium parameter is embedded in the [TJ_ANALYTIC_INPUT]
+# section below — there is no side-car TOML file.
+
+# ────────────────────────────────────────────────────────────────────────
+#                              Equilibrium
+# ────────────────────────────────────────────────────────────────────────
+# Note: run_scan.jl overrides `eq_type` to "tj_analytic_direct" so the analytic
+# ψ(R,Z) is processed by the direct-GS pipeline.  Required to capture the
+# ideal external-kink pole (δW_t → 0 as ε → ε_crit); the "tj_analytic" inverse
+# path bypasses the line-integrated q and shows no such pole.  The
+# "tj_analytic" value below is a fallback for ad-hoc invocations.
+[Equilibrium]
+eq_type   = "tj_analytic"              # TJ-analytic model (inverse pipeline; overridden to "tj_analytic_direct" by run_scan.jl)
+jac_type  = "hamada"               # Flux-surface Jacobian convention used by the Euler-Lagrange ODE
+grid_type = "ldp"                  # Radial-grid packing strategy (logarithmic, dense near rationals)
+psilow    = 0.01                   # Lower normalized poloidal flux bound (start of integration)
+psihigh   = 0.995                  # Upper normalized poloidal flux bound (end of integration)
+mpsi      = 128                    # Number of radial spline nodes used to discretize ψ
+mtheta    = 512                    # Number of poloidal spline nodes used to discretize θ
+
+# ────────────────────────────────────────────────────────────────────────
+#               TJ-analytic equilibrium parameters
+#               (cf. R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ)
+# ────────────────────────────────────────────────────────────────────────
+# All TJ-analytic parameters are held FIXED except `lar_r0`, which run_scan.jl
+# overrides per scan point as `lar_r0 = lar_a / ε`.  `lar_a` stays fixed at
+# 1 m so each scan point is a self-similar rescaling of the geometry.
+[TJ_ANALYTIC_INPUT]
+lar_r0 = 5.0                       # Major radius R₀ [m]  (baseline ε = 0.2; OVERRIDDEN per scan point by run_scan.jl)
+lar_a  = 1.0                       # Minor radius a  [m]  (plasma half-width at the midplane; fixed across the scan)
+qc     = 1.5                       # On-axis safety factor q(r=0) [dimensionless]
+qa     = 3.6                       # Edge   safety factor q(r=a) [dimensionless]
+pc     = 0.001                     # Normalized on-axis pressure (kept low for the ε scan to isolate geometry effects)
+mu     = 2.0                       # Pressure-profile peaking exponent in p₂(r) = pc·(1−r²)^μ
+B0     = 12.0                      # On-axis toroidal magnetic field strength [T]
+ma     = 128                       # TJ-analytic internal radial grid resolution (shape-ODE nodes)
+mtau   = 128                       # TJ-analytic internal poloidal grid resolution (θ-spline nodes)
+
+# ────────────────────────────────────────────────────────────────────────
+#                                  Wall
+# ────────────────────────────────────────────────────────────────────────
+[Wall]
+shape = "conformal"                # Vacuum wall shape model: scales the plasma boundary by factor `a`
+a     = 20                         # Wall scale-out multiplier; 20× the plasma radius → effectively no wall
+
+# ────────────────────────────────────────────────────────────────────────
+#                            Force-Free States
+# ────────────────────────────────────────────────────────────────────────
+[ForceFreeStates]
+bal_flag = false                   # Skip ballooning stability scan (compute_ballooning_stability!)
+mat_flag = true                    # Construct F, G, K coupling matrices on the radial grid
+ode_flag = true                    # Integrate the ideal-MHD Euler-Lagrange ODE for displacement ξ
+vac_flag = true                    # Compute vacuum response and free-boundary energy eigenvalues
+mer_flag = true                    # Evaluate the Mercier local-stability criterion across ψ
+
+qlow         = 1.02                # Lowest q to include singular surfaces (axis side cutoff)
+qhigh        = 3.6                 # Highest q to include singular surfaces (edge side cutoff)
+sing_start   = 0                   # Start integration at the axis (0) rather than at a singular surface
+
+nn_low       = 1                   # Lower bound of toroidal mode-number range  n ∈ [nn_low, nn_high]
+nn_high      = 1                   # Upper bound of toroidal mode-number range
+delta_mlow   = 8                   # Poloidal-mode padding below the resonant-m band
+delta_mhigh  = 8                   # Poloidal-mode padding above the resonant-m band
+delta_mband  = 0                   # Extra coupling-matrix band width (0 = full mpert × mpert)
+mthvac       = 960                 # Poloidal resolution used by the vacuum-response integrator
+thmax0       = 1                   # Number of poloidal periods spanned by the vacuum coordinate
+
+eulerlagrange_tolerance = 1e-12    # ODE solver relative tolerance for the EL integration
+singfac_min             = 1e-4     # Inner-layer cutoff distance from rational surfaces (chunk boundary)
+ucrit                   = 1e4      # Riccati renormalization threshold (max allowed column norm)
+sing_order              = 6        # Truncation order of singular-surface asymptotic series expansion
+
+use_parallel          = true       # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+parallel_threads      = 2          # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
+populate_dense_xi     = false      # No PerturbedEquilibrium section — skip the serial-EL re-run (matches new default)
+truncate_at_dW_peak   = false      # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
+set_psilim_via_dmlim  = false      # FALSE for limited circular / analytical equilibria — rationals sparse, dmlim truncation would chop too much edge
+dmlim                 = 0.2        # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
+force_termination     = true       # Stop after Force-Free States; do NOT enter Perturbed Equilibrium
+write_outputs_to_HDF5 = true       # Save integration / Δ' / vacuum data to an HDF5 file
+HDF5_filename         = "gpec.h5"  # Output filename (run_scan.jl overrides this per scan point)
+save_interval         = 3          # Save every Nth ODE step into u_store/ud_store (1 = every step)
