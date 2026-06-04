@@ -143,9 +143,7 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
         mer_flag = true
         force_termination = true       # Skip PE+KF post-processing — we only need FFS eigenvalues
 
-        set_psilim_via_dmlim = true
-        dmlim = 0.2
-        psiedge = 1.0
+        psiedge = 1.0                 # No edge-scan truncation (dmlim mechanism removed in develop)
         qlow = 1.02
         qhigh = 1e3
         sing_start = 0
