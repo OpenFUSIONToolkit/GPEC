@@ -285,7 +285,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     save_interval::Int = 3
     force_termination::Bool = false
     use_riccati::Bool = false
-    use_bvp::Bool = false    # Opt-in: MIRK collocation BVP for the fundamental matrix (issue #251). Takes precedence over use_parallel/use_riccati when true. Produces u_store in the axis (EL) basis consumed by free_run!/PerturbedEquilibrium.
+    use_bvp::Bool = false    # Opt-in RESEARCH PROTOTYPE (issue #251): native-complex MIRK6 collocation BVP for the fundamental matrix. Takes precedence over use_parallel/use_riccati. Produces u_store in the axis (EL) basis consumed by free_run!/PerturbedEquilibrium. Validated on small/low-growth domains (Solovev no-crossing: et[1] to 7.7e-5) but the unscaled-FM collocation is ill-conditioned and the Newton solve stalls on larger segments — a bounded-variable (Riccati S/W) reformulation is the recommended fix. NOT production-ready; parallel-FM remains the default.
     bvp_dt::Float64 = 0.0    # Initial MIRK mesh spacing in ψ (0 ⇒ auto: span/bvp_init_intervals). Adaptive defect control refines from here.
     bvp_init_intervals::Int = 40   # Number of uniform mesh intervals (initial mesh when bvp_adaptive, fixed mesh otherwise) when bvp_dt == 0.
     bvp_adaptive::Bool = false     # MIRK defect-control mesh refinement. Default off: the EL system is singular at the axis and adaptive refinement balloons the mesh there. A fixed high-order (MIRK6) mesh is bounded and accurate enough; revisit once axis handling is improved.

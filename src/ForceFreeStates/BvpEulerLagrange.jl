@@ -61,33 +61,37 @@ function bvp_eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equi
     # Axis initialization: sets odet.psifac (Newton on qlow), U₂ = I, ising_start.
     initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
 
-    psi0 = odet.psifac
-    psi1 = intr.psilim
-    psi1 > psi0 || error("bvp_eulerlagrange_integration: empty domain ψ ∈ [$psi0, $psi1]")
+    psi_axis = odet.psifac
+    intr.psilim > psi_axis || error("bvp_eulerlagrange_integration: empty domain ψ ∈ [$psi_axis, $(intr.psilim)]")
 
-    n_inside = count(s -> psi0 < s.psifac < psi1, intr.sing)
-    if n_inside > 0
-        error("bvp_eulerlagrange_integration: $n_inside singular surface(s) inside [ψ_axis, ψ_lim]; " *
-              "multipoint crossing (Stage 2) not yet implemented. Use use_parallel/use_riccati for this case.")
+    # Split the domain at each q = m/n surface exactly as the shooting path does. Each chunk is
+    # integrated from the running fundamental matrix odet.u; chunks ending on a rational are
+    # followed by an asymptotic-basis crossing that sets the IC for the next chunk.
+    chunks = chunk_el_integration_bounds(odet, ctrl, intr)
+    odet.step = 1
+    for chunk in chunks
+        sols = _bvp_solve_segment_columns(ctrl, equil, ffit, intr, odet, chunk)
+        grid = _merge_column_grids(sols, chunk.psi_start, chunk.psi_end)
+        params = (ctrl, equil, ffit, intr, odet, chunk)
+        _materialize_segment!(odet, sols, grid, params, intr)   # appends nodes, advances odet.step
+
+        # Fundamental matrix at the segment end becomes the running state (crossing IC / edge wp).
+        _assemble_fm_at!(odet.u, sols, chunk.psi_end, N)
+        odet.psifac = chunk.psi_end
+        odet.q = equil.profiles.q_spline(chunk.psi_end)
+
+        if chunk.needs_crossing
+            _bvp_cross_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+        end
     end
 
-    # Solve all N columns over the single (no-crossing) segment, then assemble + store.
-    chunk = IntegrationChunk(; psi_start=psi0, psi_end=psi1, needs_crossing=false, ising=0)
-    sols = _bvp_solve_segment_columns(ctrl, equil, ffit, intr, odet, chunk)
-
-    grid = _merge_column_grids(sols, psi0, psi1)
-    params = (ctrl, equil, ffit, intr, odet, chunk)
-    _materialize_odestate_columns!(odet, sols, grid, params, intr)
-
-    # Final edge state for wp = U₂U₁⁻¹.
-    _assemble_fm_at!(odet.u, sols, psi1, N)
-    odet.psifac = psi1
-    odet.q = equil.profiles.q_spline(psi1)
+    odet.step -= 1   # step points one past the last stored node
+    trim_storage!(odet)
 
     odet.nzero = evaluate_stability_criterion!(odet, equil.profiles)
 
     if ctrl.verbose
-        @info "BVP MIRK6 (per-column) complete: $(length(grid)) ψ-nodes over [$(round(psi0; digits=4)), $(round(psi1; digits=4))]"
+        @info "BVP MIRK6 (per-column) complete: $(odet.step) ψ-nodes, $(length(chunks)) segment(s), $(intr.msing) crossing(s)"
     end
 
     return odet
@@ -117,25 +121,14 @@ function _bvp_solve_segment_columns(ctrl::ForceFreeStatesControl, equil::Equilib
     # acceleration is tracked as a follow-up (see PR #256 perf notes).
     jac_alg = BVPJacobianAlgorithm(; bc_diffmode=AutoFiniteDiff(), nonbc_diffmode=AutoFiniteDiff())
 
-    maxcol = haskey(ENV, "BVP_MAXCOL") ? min(N, parse(Int, ENV["BVP_MAXCOL"])) : N
-
     _bvpdbg("segment columns: N=$N domain=[$psi0,$psi1] dt=$dt — entering loop")
     sols = Vector{Any}(undef, N)
     for j in 1:N
         ic = vcat(odet.u[:, j, 1], odet.u[:, j, 2])   # 2N-vector: (U₁ col j ; U₂ col j)
-        _bvpdbg("col $j START")
         tcol = @elapsed sols[j] = _bvp_solve_one_column(ic, psi0, psi1, params, N, dt, tol, jac_alg, ctrl)
-        _bvpdbg("col $j DONE t=$(round(tcol; digits=2))s")
+        _bvpdbg("col $j DONE nodes=$(length(sols[j].t)) retcode=$(sols[j].retcode) t=$(round(tcol; digits=2))s")
         if ctrl.verbose
             @info "BVP col $j/$N: nodes=$(length(sols[j].t)) retcode=$(sols[j].retcode) t=$(round(tcol; digits=2))s"
-            flush(stderr)
-        end
-        if j >= maxcol
-            @warn "BVP_MAXCOL=$maxcol diagnostic cap: solved $j columns, copying for the rest"
-            for k in (j+1):N
-                sols[k] = sols[j]
-            end
-            break
         end
     end
     return sols
@@ -205,33 +198,93 @@ function _assemble_fm_at!(dest::Array{ComplexF64,3}, sols, psi::Float64, N::Int)
 end
 
 """
-    _materialize_odestate_columns!(odet, sols, grid, params, intr)
+    _materialize_segment!(odet, sols, grid, params, intr)
 
-Populate `odet.u_store`, `odet.ud_store`, `odet.psi_store`, `odet.q_store`, and `odet.step`
-from the per-column solutions evaluated on the common `grid`. At each node the derivative
-arrays (`ud[:,:,1] = Ξ'_Ψ`, `ud[:,:,2] = Ξ_s`) are recomputed by [`sing_der!`](@ref) on the
-assembled matrix, matching the shooting path's save contract.
+Append a segment's solution to `odet.u_store` / `odet.ud_store` / `odet.psi_store` /
+`odet.q_store`, advancing `odet.step`. The per-column solutions are evaluated on the common
+`grid`; at each node the derivative arrays (`ud[:,:,1] = Ξ'_Ψ`, `ud[:,:,2] = Ξ_s`) are
+recomputed by [`sing_der!`](@ref) on the assembled matrix, matching the shooting save contract.
 """
-function _materialize_odestate_columns!(odet::OdeState, sols, grid::Vector{Float64}, params, intr::ForceFreeStatesInternal)
+function _materialize_segment!(odet::OdeState, sols, grid::Vector{Float64}, params, intr::ForceFreeStatesInternal)
     N = intr.numpert_total
-    ng = length(grid)
-    while size(odet.u_store, 4) < ng
-        resize_storage!(odet)
-    end
-
     um = zeros(ComplexF64, N, N, 2)
     du = zeros(ComplexF64, N, N, 2)
-    @inbounds for k in 1:ng
-        psi = grid[k]
+    @inbounds for psi in grid
+        if odet.step >= size(odet.u_store, 4)
+            resize_storage!(odet)
+        end
         _assemble_fm_at!(um, sols, psi, N)
         sing_der!(du, um, params, psi)          # fills odet.ud and sets odet.q = q(psi)
-        odet.psi_store[k] = psi
-        odet.q_store[k] = odet.q
-        @views odet.u_store[:, :, :, k] .= um
-        @views odet.ud_store[:, :, :, k] .= odet.ud
+        odet.psi_store[odet.step] = psi
+        odet.q_store[odet.step] = odet.q
+        @views odet.u_store[:, :, :, odet.step] .= um
+        @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+        odet.step += 1
+    end
+    return odet
+end
+
+"""
+    _bvp_cross_singular_surf!(odet, ctrl, equil, ffit, intr, ising)
+
+Cross a `q = m/n` rational surface for the BVP path. Self-contained analogue of
+[`cross_ideal_singular_surf!`](@ref): it reuses the Frobenius/asymptotic machinery
+(`compute_sing_asymptotics`, `sing_get_ua`, `sing_get_ca`) but selects the eliminated
+solution column by largest `‖U₁‖` directly (valid for single-`n`) instead of via the
+Gaussian-reduction bookkeeping the shooting path maintains. On entry `odet.u` holds the
+fundamental matrix just inside the surface (`odet.psifac = ψ_s − δ`); on exit it holds the
+matrix just outside (`ψ_s + δ`), ready as the next segment's IC. Stores `ca_l`/`ca_r` for Δ'.
+"""
+function _bvp_cross_singular_surf!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars, intr::ForceFreeStatesInternal, ising::Int)
+
+    N = intr.numpert_total
+    singp = intr.sing[ising]
+    asymp_right = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=1.0)
+    asymp_left = compute_sing_asymptotics(singp, ctrl, equil, ffit, intr; sig=-1.0, alpha_override=asymp_right.alpha)
+    dpsi = singp.psifac - odet.psifac   # ψ_s − ψ (positive)
+
+    # Asymptotic coefficients just inside the surface.
+    ua = sing_get_ua(asymp_left, dpsi)
+    odet.ca_l[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+
+    ipert_res = 1 .+ singp.m .- intr.mlow .+ (singp.n .- intr.nlow) .* intr.mpert
+
+    # Eliminate the largest-norm solution column for each resonance (single-n: one resonance).
+    jcols = Int[]
+    for _ in eachindex(asymp_right.r1)
+        jmax = argmax([norm(@view odet.u[:, j, 1]) for j in 1:N])
+        push!(jcols, jmax)
+        @views odet.u[:, jmax, :] .= 0
     end
 
-    odet.step = ng
-    trim_storage!(odet)
+    # Trapezoidal predictor across the 2δ gap straddling the surface.
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, ising, 1))
+    du1 = zeros(ComplexF64, N, N, 2)
+    du2 = zeros(ComplexF64, N, N, 2)
+    sing_der!(du1, odet.u, params, odet.psifac)
+    odet.psifac += 2 * dpsi
+    sing_der!(du2, odet.u, params, odet.psifac)
+    odet.u .+= (du1 .+ du2) .* dpsi
+
+    # Inject the small asymptotic solution on the far side into the eliminated columns.
+    ua = sing_get_ua(asymp_right, dpsi)
+    for (i, _) in enumerate(asymp_right.r1)
+        @views odet.u[ipert_res[i], :, :] .= 0
+        @views odet.u[:, jcols[i], :] .= ua[:, ipert_res[i]+N, :]
+    end
+    odet.ca_r[:, :, :, ising] .= sing_get_ca(odet.u, ua, intr)
+    odet.q = equil.profiles.q_spline(odet.psifac)
+
+    # Store the post-crossing point so u_store/ud_store stay contiguous across the gap.
+    if odet.step >= size(odet.u_store, 4)
+        resize_storage!(odet)
+    end
+    sing_der!(du1, odet.u, params, odet.psifac)
+    odet.psi_store[odet.step] = odet.psifac
+    odet.q_store[odet.step] = odet.q
+    @views odet.u_store[:, :, :, odet.step] .= odet.u
+    @views odet.ud_store[:, :, :, odet.step] .= odet.ud
+    odet.step += 1
     return odet
 end

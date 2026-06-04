@@ -7,8 +7,6 @@ using TOML
 using FFTW
 using OrdinaryDiffEq
 using BoundaryValueDiffEqMIRK
-import ADTypes
-import DifferentiationInterface
 using HDF5
 using JLD2
 using FastInterpolations

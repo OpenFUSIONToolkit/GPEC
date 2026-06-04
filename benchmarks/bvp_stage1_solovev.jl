@@ -64,6 +64,7 @@ bvp_over = Dict{String,Any}("use_bvp" => true, "use_parallel" => false, "verbose
 haskey(ENV, "BVP_NINT") && (bvp_over["bvp_init_intervals"] = parse(Int, ENV["BVP_NINT"]))
 haskey(ENV, "BVP_ADAPT") && (bvp_over["bvp_adaptive"] = ENV["BVP_ADAPT"] == "1")
 haskey(ENV, "BVP_TOL") && (bvp_over["eulerlagrange_tolerance"] = parse(Float64, ENV["BVP_TOL"]))
+haskey(ENV, "BVP_MAXITERS") && (bvp_over["bvp_maxiters"] = parse(Int, ENV["BVP_MAXITERS"]))
 bvp_dir = prepare_case(EX_DIR, merge(bvp_over, extra))
 
 const SKIP_REF = haskey(ENV, "BVP_SKIP_REF")

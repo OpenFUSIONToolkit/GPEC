@@ -1,5 +1,25 @@
 # Issue #251 — BVP/MIRK reformulation of the ForceFreeStates Euler–Lagrange integration
 
+> **STATUS (2026-06-04, end of first overnight pass).**
+> - Phase 0 ✅ — branch, `BoundaryValueDiffEqMIRK` dep, native-complex MIRK6 smoke test (3/3), draft PR #256.
+> - Phase 1 ✅ — per-column native-complex MIRK6 path implemented end-to-end (`BvpEulerLagrange.jl`),
+>   `use_bvp` opt-in (default false), reuses `sing_der!`, materializes `OdeState` for `free_run!`.
+> - Stage-1 (no-crossing Solovev) ✅ **VALIDATED**: `et[1]` matches the parallel-FM reference to **7.7e-5**
+>   (ep 1.2e-3, ev 6.9e-3). Formulation + materialization + downstream integration are correct.
+> - Stage-2 crossing implemented (`_bvp_cross_singular_surf!`, faithful to `cross_ideal_singular_surf!`)
+>   but **not validated**: blocked by conditioning (below).
+> - **Blocker (the prototype's empirical answer):** the unscaled fundamental-matrix collocation is
+>   ill-conditioned (the FM growth that shooting's Gaussian reduction / Riccati renormalization control).
+>   The Newton solve hits a conditioning-limited residual floor — `Success` at loose tol on small/low-growth
+>   domains, `Stalled` on full segments. Dense per-column Jacobian is also `O((2N·n)³)` slow. So a naive
+>   linear-FM MIRK collocation is **not production-viable**; parallel-FM stays default.
+> - **Recommended next step:** collocate the bounded Riccati variable `S=U₂U₁⁻¹` (or axis-regular
+>   `W=U₁U₂⁻¹`, `W(axis)=0`) → well-conditioned; recover `u_store` by back-substitution. Add an
+>   `nlsolve`-level iteration cap (fail-fast) and a banded/sparse collocation linear solve.
+> - Default path regression-checked unchanged (`use_bvp=false`).
+
+
+
 **Branch:** `feature/bvp-mirk-eulerlagrange`, off `origin/perf/riccati` (PR #178; safe to assume it merges to `develop` before this lands).
 **Owner of execution:** autonomous Claude Code + sub-agents, overnight, no user interrupts.
 **Driving doc for the whole run.** Re-read this after any context compaction.
