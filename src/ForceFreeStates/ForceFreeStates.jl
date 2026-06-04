@@ -6,6 +6,9 @@ using LinearAlgebra.LAPACK
 using TOML
 using FFTW
 using OrdinaryDiffEq
+using BoundaryValueDiffEqMIRK
+import ADTypes
+import DifferentiationInterface
 using HDF5
 using JLD2
 using FastInterpolations
@@ -31,6 +34,7 @@ include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 include("Riccati.jl")
+include("BvpEulerLagrange.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10

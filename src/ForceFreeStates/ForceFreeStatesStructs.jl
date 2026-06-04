@@ -285,6 +285,12 @@ A mutable struct containing control parameters for stability analysis, set by th
     save_interval::Int = 3
     force_termination::Bool = false
     use_riccati::Bool = false
+    use_bvp::Bool = false    # Opt-in: MIRK collocation BVP for the fundamental matrix (issue #251). Takes precedence over use_parallel/use_riccati when true. Produces u_store in the axis (EL) basis consumed by free_run!/PerturbedEquilibrium.
+    bvp_dt::Float64 = 0.0    # Initial MIRK mesh spacing in ψ (0 ⇒ auto: span/bvp_init_intervals). Adaptive defect control refines from here.
+    bvp_init_intervals::Int = 40   # Number of uniform mesh intervals (initial mesh when bvp_adaptive, fixed mesh otherwise) when bvp_dt == 0.
+    bvp_adaptive::Bool = false     # MIRK defect-control mesh refinement. Default off: the EL system is singular at the axis and adaptive refinement balloons the mesh there. A fixed high-order (MIRK6) mesh is bounded and accurate enough; revisit once axis handling is improved.
+    bvp_max_intervals::Int = 600   # Cap on adaptive subintervals (guards against runaway refinement when bvp_adaptive=true).
+    bvp_maxiters::Int = 1000       # Cap on the collocation nonlinear-solver iterations (bounds non-convergence on ill-conditioned segments).
     use_parallel::Bool = true    # Default on: unlocks singular/delta_prime_matrix (STRIDE BVP Δ' matrix) used by SLAYER/GGJ downstream.
     populate_dense_xi::Bool = false  # When use_parallel=true, set to true ONLY if a PerturbedEquilibrium pipeline will consume dense ξ. Default false avoids the ~1× parallel-BVP serial-EL re-run for non-PE runs (Δ'/vacuum/ideal-stability only). See ForceFreeStatesControl docstring for the full trade-off (et[1] convention differs by ~0.12% on DIIID between populate=true vs false).
     extended_precision_bvp::Bool = true   # Promote Δ' BVP to Complex{Double64}; default on (Float64 drifts the imaginary Δ' by 2–5× on DIIID-class cases).

@@ -159,9 +159,11 @@ An OdeState struct containing the final state of the ODE solver after integratio
 """
 function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
-    # Dispatch to parallel or Riccati solver if requested.
+    # Dispatch to BVP, parallel, or Riccati solver if requested.
     # Parallel path returns (odet, propagators, chunks, S_at_surface_left) for deferred Δ' BVP.
-    if ctrl.use_parallel
+    if ctrl.use_bvp
+        return (bvp_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
+    elseif ctrl.use_parallel
         return parallel_eulerlagrange_integration(ctrl, equil, ffit, intr)
     elseif ctrl.use_riccati
         return (riccati_eulerlagrange_integration(ctrl, equil, ffit, intr), nothing, nothing, nothing)
