@@ -70,7 +70,7 @@ Comparison:
 ```
 """
 
-using Pkg, HDF5, Printf
+using HDF5, Printf
 
 # Parse command-line arguments
 function parse_args(args)
@@ -156,7 +156,10 @@ function checkout_ref(branch, commit)
     end
 end
 
-# Run the example benchmark
+# Run the example benchmark.
+# Each run is a fresh Julia subprocess so that git branch switches take effect
+# (using statement only fires once per process; re-checkout without subprocess restart
+# would silently benchmark the first branch's code for all subsequent branches).
 function run_example_benchmark(example_path, num_runs)
     abs_example_path = abspath(example_path)
     project_root = abspath(joinpath(example_path, "../.."))
@@ -198,12 +201,12 @@ function run_example_benchmark(example_path, num_runs)
         avg_runtime = sum(runtimes) / length(runtimes)
 
         return (
-            eigenvalue = real(et[1]),
-            steps = nsteps,
-            runtime = avg_runtime
+            eigenvalue=real(et[1]),
+            steps=nsteps,
+            runtime=avg_runtime
         )
     finally
-        rm(tmpscript, force=true)
+        rm(tmpscript; force=true)
     end
 end
 
@@ -229,9 +232,9 @@ function benchmark_branches(options)
         checkout_ref(options["branch1"], options["commit1"])
         commit1 = get_commit_hash("HEAD")
         results["branch1"] = (
-            name = options["branch1"],
-            commit = commit1,
-            metrics = run_example_benchmark(options["example"], options["runs"])
+            name=options["branch1"],
+            commit=commit1,
+            metrics=run_example_benchmark(options["example"], options["runs"])
         )
 
         # Benchmark branch 2
@@ -241,9 +244,9 @@ function benchmark_branches(options)
         checkout_ref(options["branch2"], options["commit2"])
         commit2 = get_commit_hash("HEAD")
         results["branch2"] = (
-            name = options["branch2"],
-            commit = commit2,
-            metrics = run_example_benchmark(options["example"], options["runs"])
+            name=options["branch2"],
+            commit=commit2,
+            metrics=run_example_benchmark(options["example"], options["runs"])
         )
 
     finally

@@ -3,7 +3,6 @@
 
     @testset "Vacuum.jl (2D)" begin
 
-        # -------------------------------------------------------------------------
         @testset "VacuumInput" begin
             @testset "default constructor" begin
                 vac = VacuumInput()
@@ -33,7 +32,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "WallShapeSettings" begin
             @testset "default constructor" begin
                 w = WallShapeSettings()
@@ -50,7 +48,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "PlasmaGeometry" begin
             @testset "from VacuumInput" begin
                 inputs = VacuumInput(
@@ -97,7 +94,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "WallGeometry" begin
             _circle_inputs(mtheta) = VacuumInput(
                 mtheta_in=mtheta,
@@ -199,7 +195,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "distribute_to_equal_arc_grid" begin
             @testset "unit circle" begin
                 theta = range(0, step=2π/10, length=10)
@@ -226,7 +221,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "elliptic_integral_k" begin
             @testset "domain errors" begin
                 @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_k(-0.1)
@@ -241,7 +235,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "elliptic_integral_e" begin
             @testset "domain errors" begin
                 @test_throws DomainError GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integral_e(-0.1)
@@ -256,7 +249,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "Pn_minus_half_1997" begin
             @testset "length and finite" begin
                 # Returns P^0 through P^{n+1}, so length n+2
@@ -276,7 +268,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "Pn_minus_half_2007" begin
             @testset "length and finite" begin
                 # Returns P^0 through P^{n+1}, so length n+2
@@ -326,7 +317,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "elliptic_integrals_bulirsch" begin
             @testset "convergence and output" begin
                 K, E, conv, iters = GeneralizedPerturbedEquilibrium.Vacuum.elliptic_integrals_bulirsch(0.5)
@@ -344,7 +334,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "green" begin
             @testset "basic output structure" begin
                 G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1)
@@ -371,7 +360,6 @@
             end
         end
 
-        # -------------------------------------------------------------------------
         @testset "compute_vacuum_response" begin
             _make_inputs(; mtheta=128, mtheta_eq=17, mpert=2, nlow=1, npert=1) = VacuumInput(
                 mtheta_in=mtheta_eq,
@@ -562,7 +550,6 @@
         end
     end
 
-    # -------------------------------------------------------------------------
     # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
     # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
     @testset "Vacuum.jl (3D)" begin

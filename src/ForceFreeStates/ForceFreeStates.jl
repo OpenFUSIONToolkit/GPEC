@@ -9,7 +9,6 @@ using OrdinaryDiffEq
 using HDF5
 using JLD2
 using FastInterpolations
-using FastInterpolations: cubic_interp, deriv1, PeriodicBC, LinearBinary
 using AdaptiveArrayPools
 using Roots
 
@@ -17,6 +16,7 @@ import ..Equilibrium
 import ..Utilities
 import ..Vacuum
 using Printf
+using DoubleFloats
 import StaticArrays: @MMatrix
 
 # Include all necessary files
@@ -26,9 +26,11 @@ include("Bal.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")
 include("Fourfit.jl")
+include("Kinetic.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
+include("Riccati.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10

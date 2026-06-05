@@ -1,3 +1,4 @@
+*.cov
 *.mod
 *.dylib
 *.dll
@@ -14,8 +15,12 @@
 *.jld2
 .gitattributes
 Manifest.toml
-build.log
+*.log
 docs/build/
 anaconda_projects/
 modovmc
 pestotv
+*.csv
+regression-harness/*.sqlite
+regression-harness/*.sqlite-shm
+regression-harness/*.sqlite-wal

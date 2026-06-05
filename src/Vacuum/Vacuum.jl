@@ -1,7 +1,7 @@
 module Vacuum
 
 using TOML, SpecialFunctions, LinearAlgebra, Printf
-using FastInterpolations: cubic_interp, deriv1, PeriodicBC, NaturalBC
+using FastInterpolations
 using FastGaussQuadrature: gausslegendre
 using StaticArrays: SVector
 using SparseArrays
@@ -21,6 +21,7 @@ include("Field.jl")
 export VacuumInput, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
+export PlasmaGeometry
 
 """
     _compute_vacuum_response_single!(
@@ -217,12 +218,13 @@ heap allocations.
     # Allocate storage for the vacuum response matrix and Green's functions
     numpoints = inputs.mtheta * inputs.nzeta
     num_modes = inputs.mpert * inputs.npert
+
     vac = (
-        wv=zeros!(pool, ComplexF64, num_modes, num_modes),
-        grri=zeros!(pool, 2 * numpoints, 2 * num_modes),
-        grre=zeros!(pool, 2 * numpoints, 2 * num_modes),
-        plasma_pts=zeros!(pool, numpoints, 3),
-        wall_pts=zeros!(pool, numpoints, 3)
+        wv=zeros(ComplexF64, num_modes, num_modes),
+        grri=zeros(2 * numpoints, 2 * num_modes),
+        grre=zeros(2 * numpoints, 2 * num_modes),
+        plasma_pts=zeros(numpoints, 3),
+        wall_pts=zeros(numpoints, 3)
     )
 
     compute_vacuum_response!(vac, inputs, wall_settings)

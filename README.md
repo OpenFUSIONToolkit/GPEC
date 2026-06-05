@@ -25,20 +25,6 @@ GeneralizedPerturbedEquilibrium.main(["path/to/directory"])
 
 See [Setup](https://openfusiontoolkit.github.io/GPEC/dev/set_up/) for full installation instructions.
 
-## Developer Notes
+## Contributing
 
-### Git Workflow
-
-This project uses [GitFlow](http://nvie.com/posts/a-successful-git-branching-model):
-
-- Two permanent branches: `main` and `develop`
-- `main` is updated only at release-ready stages
-- Feature branches should come off `develop` and merge back with `--no-ff`
-
-### Commit Message Format
-
-```
-CODE - TAG - Detailed message
-```
-
-Where CODE is the module name (EQUIL, ForceFreeStates, VAC, PERTURBED EQUILIBRIUM, etc.) and TAG describes the type of change (WIP, MINOR, IMPROVEMENT, BUG FIX, NEW FEATURE, REFACTOR, CLEANUP, etc.). This format is used for compiling release notes — tags should be human-readable but are not enforced to a fixed set.
+The Git workflow, commit message conventions, and the regression-testing harness are documented in the [Developer Notes](https://openfusiontoolkit.github.io/GPEC/dev/developer_notes/).

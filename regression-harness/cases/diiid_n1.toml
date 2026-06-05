@@ -1,0 +1,265 @@
+[case]
+name = "diiid_n1"
+description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"
+example_dir = "examples/DIIID-like_ideal_example"
+
+# Energies — leading eigenvalues
+[quantities.et_real]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+order = 10
+
+[quantities.et_imag]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "imag_first"
+label = "total energy Im(et[1])"
+noise_threshold = 1e-10
+order = 11
+
+[quantities.ep_real]
+h5path = "vacuum/ep"
+type = "complex_vector"
+extract = "real_first"
+label = "plasma energy Re(ep[1])"
+noise_threshold = 1e-10
+order = 12
+
+[quantities.ev_real]
+h5path = "vacuum/ev"
+type = "complex_vector"
+extract = "real_first"
+label = "vacuum energy Re(ev[1])"
+noise_threshold = 1e-10
+order = 13
+
+[quantities.vacuum_eigenvalue]
+h5path = "vacuum/vacuum_eigenvalue"
+type = "real_scalar"
+extract = "value"
+label = "vacuum matrix min eigenvalue"
+noise_threshold = 1e-10
+order = 14
+
+# Energies — full eigenvalue arrays
+[quantities.ep_all]
+h5path = "vacuum/ep"
+type = "complex_vector"
+extract = "all_complex"
+label = "plasma energy (all)"
+noise_threshold = 1e-10
+order = 20
+
+[quantities.ev_all]
+h5path = "vacuum/ev"
+type = "complex_vector"
+extract = "all_complex"
+label = "vacuum energy (all)"
+noise_threshold = 1e-10
+order = 21
+
+[quantities.et_all]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "all_complex"
+label = "total energy (all)"
+noise_threshold = 1e-10
+order = 22
+
+# Integration
+[quantities.nstep]
+h5path = "integration/nstep"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (saved)"
+noise_threshold = 0
+order = 30
+
+[quantities.nstep_total]
+h5path = "integration/nstep_total"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (total)"
+noise_threshold = 0
+order = 31
+
+# Equilibrium
+[quantities.q0]
+h5path = "equil/q0"
+type = "real_scalar"
+extract = "value"
+label = "q0"
+noise_threshold = 1e-12
+order = 40
+
+[quantities.q95]
+h5path = "equil/q95"
+type = "real_scalar"
+extract = "value"
+label = "q95"
+noise_threshold = 1e-12
+order = 41
+
+[quantities.betat]
+h5path = "equil/betat"
+type = "real_scalar"
+extract = "value"
+label = "beta_t"
+noise_threshold = 1e-12
+order = 42
+
+[quantities.betan]
+h5path = "equil/betan"
+type = "real_scalar"
+extract = "value"
+label = "beta_n"
+noise_threshold = 1e-12
+order = 43
+
+# Singular surfaces
+[quantities.msing]
+h5path = "singular/msing"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+order = 50
+
+[quantities.sing_psi]
+h5path = "singular/psi"
+type = "real_vector"
+extract = "all_real"
+label = "singular psi locations"
+noise_threshold = 1e-8
+order = 51
+
+[quantities.sing_q]
+h5path = "singular/q"
+type = "real_vector"
+extract = "all_real"
+label = "singular q values"
+noise_threshold = 1e-8
+order = 52
+
+# Mode numbers
+[quantities.mpert]
+h5path = "info/mpert"
+type = "int_scalar"
+extract = "value"
+label = "mpert"
+noise_threshold = 0
+order = 60
+
+[quantities.npert]
+h5path = "info/npert"
+type = "int_scalar"
+extract = "value"
+label = "npert"
+noise_threshold = 0
+order = 61
+
+# Tearing stability Δ' — canonical STRIDE BVP matrix diagonal (replaces the
+# previous `perturbed_equilibrium/singular_coupling/delta_prime` track, which
+# was a per-surface stub computed by SingularCoupling from (rbwp1-lbwp1)/(2π·χ').
+# Per-surface Δ' is now de-emphasized — see PR 178 notes — and SingularCoupling
+# instead reads this BVP matrix diagonal.
+[quantities.delta_prime]
+h5path = "singular/delta_prime_matrix"
+type = "complex_matrix"
+extract = "diagonal_complex"
+label = "delta prime (BVP diagonal)"
+noise_threshold = 1e-8
+order = 80
+
+[quantities.island_half_width]
+h5path = "perturbed_equilibrium/singular_coupling/island_half_width"
+type = "real_vector"
+extract = "all_real"
+label = "island half-widths"
+noise_threshold = 1e-8
+order = 81
+
+[quantities.chirikov_parameter]
+h5path = "perturbed_equilibrium/singular_coupling/chirikov_parameter"
+type = "real_vector"
+extract = "all_real"
+label = "Chirikov parameter"
+noise_threshold = 1e-8
+order = 82
+
+[quantities.resonant_flux]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+type = "complex_vector"
+extract = "norm"
+label = "||resonant flux||"
+noise_threshold = 1e-8
+order = 83
+
+[quantities.resonant_flux_all]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+type = "complex_vector"
+extract = "all_complex"
+label = "resonant flux Phi_res"
+noise_threshold = 1e-8
+
+# Perturbed equilibrium: energies
+[quantities.pe_plasma_energy]
+h5path = "perturbed_equilibrium/energies/plasma_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE plasma energy"
+noise_threshold = 1e-10
+order = 91
+
+[quantities.pe_vacuum_energy]
+h5path = "perturbed_equilibrium/energies/vacuum_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE vacuum energy"
+noise_threshold = 1e-10
+order = 92
+
+[quantities.pe_surface_energy]
+h5path = "perturbed_equilibrium/energies/surface_energy"
+type = "real_scalar"
+extract = "value"
+label = "PE surface energy"
+noise_threshold = 1e-10
+order = 93
+
+[quantities.pe_toroidal_torque]
+h5path = "perturbed_equilibrium/energies/toroidal_torque"
+type = "real_scalar"
+extract = "value"
+label = "PE toroidal torque"
+noise_threshold = 1e-12
+order = 94
+
+# Profiles (checksums)
+[quantities.q_profile]
+h5path = "splines/profiles/q"
+type = "real_vector"
+extract = "checksum"
+label = "q profile (checksum)"
+noise_threshold = 0
+order = 70
+
+[quantities.pressure_profile]
+h5path = "splines/profiles/mu0p"
+type = "real_vector"
+extract = "checksum"
+label = "pressure profile (checksum)"
+noise_threshold = 0
+order = 71
+
+# Runtime
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0
+order = 999

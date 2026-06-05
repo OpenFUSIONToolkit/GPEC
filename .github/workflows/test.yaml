@@ -10,6 +10,11 @@ on:
       - main
       - develop
 
+# needed to allow julia-actions/cache to delete old caches that it has created
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   test:
     name: runtests ${{ matrix.version }} - ${{ matrix.os }}
@@ -18,7 +23,6 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - 'lts' # long-term support (currently 1.10)
           - '1.11'
           - '1.x'  # latest (currently 1.12)
         os:
@@ -26,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
@@ -34,7 +38,7 @@ jobs:
           version: ${{ matrix.version }}
 
       - name: Cache Julia packages
-        uses: julia-actions/cache@v2
+        uses: julia-actions/cache@v3
 
       - name: Build Julia packages
         uses: julia-actions/julia-buildpkg@v1

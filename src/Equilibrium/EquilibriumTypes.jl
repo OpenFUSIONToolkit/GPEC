@@ -14,14 +14,16 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `eq_filename::String` - Path to equilibrium input file
   - `jac_type::String` - Jacobian coordinate type ("hamada", "pest", "equal_arc", "boozer", "park", "other")
   - `power_bp::Int` - Poloidal field power exponent for Jacobian
-  - `power_b::Int` - Toroidal field power exponent for Jacobian
+  - `power_b::Int` - Total field power exponent for Jacobian
   - `power_r::Int` - Major radius power exponent for Jacobian
+  - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("ldp", etc.)
+  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
-  - `mpsi::Int` - Number of radial grid points
+  - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)
+  - `psi_accuracy::Float64` - Target absolute error in q for auto-mpsi (used when mpsi=0 and grid_type="log_asymptotic")
   - `mtheta::Int` - Number of poloidal grid points
   - `newq0::Int` - Override for on-axis safety factor (0 = use input value)
   - `etol::Float64` - Error tolerance for equilibrium solver
@@ -38,58 +40,90 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     power_bp::Int = 0
     power_b::Int = 0
     power_r::Int = 0
+    power_rc::Int = 0
 
-    grid_type::String = "ldp"
+    grid_type::String = "log_asymptotic"
     psilow::Float64 = 1e-2
-    psihigh::Float64 = 0.994
-    mpsi::Int = 128
-    mtheta::Int = 256
+    psihigh::Float64 = 0.9995
+    mpsi::Int = 0
+    psi_accuracy::Float64 = 0.001
+    mtheta::Int = 512
 
     newq0::Int = 0
-    etol::Float64 = 1e-7
+    etol::Float64 = 1e-10
 
     force_termination::Bool = false
     use_galgrid::Bool = true
 
+    # IMAS-specific: expected COCOS convention of the input dd.equilibrium (11=IMAS standard, 2=GPEC internal)
+    imas_cocos::Int = 11
+
     """
     Modified internal constructor that enforces self consistency within the inputs
     """
-    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
-        grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
-        force_termination, use_galgrid)
+    function EquilibriumConfig(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+        grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
+        force_termination, use_galgrid, imas_cocos)
         if jac_type == "hamada"
             @info "Forcing hamada coordinate jacobian exponents: power_*"
-            power_b = 0
-            power_bp = 0
-            power_r = 0
+            power_b = 0;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "pest"
             @info "Forcing pest coordinate jacobian exponents: power_*"
-            power_b = 0
-            power_bp = 0
-            power_r = 2
+            power_b = 0;
+            power_bp = 0;
+            power_r = 2;
+            power_rc = 0
         elseif jac_type == "equal_arc"
             @info "Forcing equal_arc coordinate jacobian exponents: power_*"
-            power_b = 0
-            power_bp = 1
-            power_r = 0
+            power_b = 0;
+            power_bp = 1;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "boozer"
             @info "Forcing boozer coordinate jacobian exponents: power_*"
-            power_b = 2
-            power_bp = 0
-            power_r = 0
+            power_b = 2;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "park"
             @info "Forcing park coordinate jacobian exponents: power_*"
-            power_b = 1
-            power_bp = 0
-            power_r = 0
+            power_b = 1;
+            power_bp = 0;
+            power_r = 0;
+            power_rc = 0
         elseif jac_type == "other"
-            @info "Using manual jacobian exponents: power b, bp, r = $(power_b), $(power_bp), $(power_r)"
-        elseif jac_type != "other"
+            # Normalize to a named type when the powers match, so fast paths are taken.
+            if power_b == 0 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "hamada";
+                @info "Recognized hamada jacobian from power exponents"
+            elseif power_b == 0 && power_bp == 0 && power_r == 2 && power_rc == 0
+                jac_type = "pest";
+                @info "Recognized pest jacobian from power exponents"
+            elseif power_b == 0 && power_bp == 1 && power_r == 0 && power_rc == 0
+                jac_type = "equal_arc";
+                @info "Recognized equal_arc jacobian from power exponents"
+            elseif power_b == 2 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "boozer";
+                @info "Recognized boozer jacobian from power exponents"
+            elseif power_b == 1 && power_bp == 0 && power_r == 0 && power_rc == 0
+                jac_type = "park";
+                @info "Recognized park jacobian from power exponents"
+            else
+                @info "Using manual jacobian exponents: power b, bp, r, rc = $(power_b), $(power_bp), $(power_r), $(power_rc)"
+            end
+        else
             error("Cannot recognize jac_type = $(jac_type)")
         end
-        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r,
-            grid_type, psilow, psihigh, mpsi, mtheta, newq0, etol,
-            force_termination, use_galgrid)
+        if psihigh > 1.0
+            @warn "psihigh = $psihigh exceeds 1.0 (separatrix); clamping to 1.0"
+        end
+        psihigh = min(psihigh, 1.0)
+        return new(eq_type, eq_filename, r0exp, b0exp, jac_type, power_bp, power_b, power_r, power_rc,
+            grid_type, psilow, psihigh, mpsi, psi_accuracy, mtheta, newq0, etol,
+            force_termination, use_galgrid, imas_cocos)
     end
 end
 
@@ -97,12 +131,12 @@ end
 Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 """
 function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
-    # Check for required fields
-    required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(equil_dict, k), required_keys)
-
-    if !isempty(missingkeys)
-        error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
+    # `eq_type` is always required.  `eq_filename` is required for file-based
+    # equilibria (efit, chease, …) but optional for analytic types whose
+    # parameters live in an embedded `[TJ_ANALYTIC_INPUT]` / `[SOL_INPUT]` /
+    # `[LAR_INPUT]` section of the parent gpec.toml.
+    if !haskey(equil_dict, "eq_type")
+        error("Missing required key in [Equilibrium]: eq_type")
     end
 
     # Filter to only known parameters
@@ -119,7 +153,9 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
 
     # Construct validated struct
     config = EquilibriumConfig(; symbolize_keys(config_data)...)
-    if !isabspath(config.eq_filename)
+    # Only resolve `eq_filename` against `base_path` if the user actually
+    # supplied one (otherwise leave the kwdef sentinel for the embedded path).
+    if haskey(config_data, "eq_filename") && !isabspath(config.eq_filename)
         config.eq_filename = normpath(joinpath(base_path, config.eq_filename))
     end
 
@@ -128,7 +164,7 @@ end
 
 """
 Outer constructor for EquilibriumConfig that enables a toml file
-    interface for specifying the configuration settings
+interface for specifying the configuration settings
 
 DEPRECATED: Use [Equilibrium] section in gpec.toml instead
 """
@@ -178,6 +214,8 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     lar_a::Float64 = 1.0
     beta0::Float64 = 1e-3
     q0::Float64 = 1.5
+    qa::Float64 = 3.6        # Edge safety factor (legacy field; not consumed by current sigma_type options)
+    B0::Float64 = 1.0        # On-axis toroidal field [T] (scales F and P)
     p_pres::Float64 = 2.0
     p_sig::Float64 = 1.0
     sigma_type::String = "default"
@@ -194,6 +232,66 @@ function LargeAspectRatioConfig(path::String)
     raw = TOML.parsefile(path)
     input_data = get(raw, "LAR_INPUT", Dict())
     return LargeAspectRatioConfig(; symbolize_keys(input_data)...)
+end
+
+"""
+Outer constructor for LargeAspectRatioConfig from a parsed TOML dictionary.
+Supports embedding the LAR analytic-equilibrium parameters directly in
+`gpec.toml` under `[LAR_INPUT]` instead of a separate `lar.toml`.
+"""
+function LargeAspectRatioConfig(input_dict::Dict{String,Any})
+    return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
+end
+
+"""
+    TJAnalyticConfig(...)
+
+Parameters for the **TJ-analytic** cylindrical large-aspect-ratio equilibrium
+model — a GPEC adaptation of the analytic profile family used by
+R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).  We follow the
+same analytic-profile parameterization (ψ-ODE in dimensionless r/a, f₁
+for q, power-law pressure) for the inner cylindrical core and connect it
+to GPEC's direct-GS pipeline; this is NOT a re-implementation of TJ.
+
+The model uses analytic profiles with exact control of both the on-axis
+and edge safety factors. The q profile is determined by:
+
+    f1(r) = [1 - (1-r²)^ν] / (ν·qc)
+    q(r)  = r² / f1(r)
+
+where ν = qa/qc is the current peaking parameter, qc is the axis q, and qa
+is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
+profile is p₂(r) = pc·(1-r²)^μ.
+
+Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
+"""
+@kwdef mutable struct TJAnalyticConfig
+    lar_r0::Float64 = 10.0     # Major radius R₀ [m]
+    lar_a::Float64 = 1.0       # Minor radius a [m] (ε = a/R₀)
+    qc::Float64 = 1.5          # On-axis safety factor
+    qa::Float64 = 3.6          # Edge safety factor
+    pc::Float64 = 0.001        # Normalized on-axis pressure
+    mu::Float64 = 2.0          # Pressure peaking exponent: p₂ = pc·(1-r²)^μ
+    B0::Float64 = 12.0         # On-axis toroidal field [T]
+    ma::Int = 128              # Radial grid points
+    mtau::Int = 128            # Poloidal grid points
+    zeroth::Bool = false       # If true, suppress Shafranov shift
+end
+
+function TJAnalyticConfig(path::String)
+    raw = TOML.parsefile(path)
+    input_data = get(raw, "TJ_ANALYTIC_INPUT", Dict())
+    return TJAnalyticConfig(; symbolize_keys(input_data)...)
+end
+
+"""
+Outer constructor for TJAnalyticConfig from a parsed TOML dictionary. Supports
+embedding the TJ-analytic equilibrium parameters (cf. R. Fitzpatrick's
+TJ code, https://github.com/rfitzp/TJ) directly in the main `gpec.toml`
+under `[TJ_ANALYTIC_INPUT]`, removing the need for a separate side-car file.
+"""
+function TJAnalyticConfig(input_dict::Dict{String,Any})
+    return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
 
 """
@@ -238,6 +336,15 @@ function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevCon
 end
 
 """
+Outer constructor for SolovevConfig from a parsed TOML dictionary.
+Supports embedding the Solovev analytic-equilibrium parameters directly
+in `gpec.toml` under `[SOL_INPUT]` instead of a separate `sol.toml`.
+"""
+function SolovevConfig(input_dict::Dict{String,Any})
+    return SolovevConfig(; symbolize_keys(input_dict)...)
+end
+
+"""
     DirectRunInput(...)
 
 A container struct that bundles all necessary inputs for the `direct_run` function.
@@ -275,6 +382,7 @@ raw equilibrium data and preparing the initial splines.
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
+  - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -287,6 +395,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
+    bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
 end
 
 """
@@ -411,8 +520,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     kappa::Union{Nothing,Float64} = nothing # Elongation of the plasma cross-section
     delta1::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (upper triangularity)
     delta2::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (lower triangularity)
-    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T]
+    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
+    bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data
@@ -488,11 +598,11 @@ function ProfileSplines(xs::Vector{Float64},
     @assert length(dVdpsi_vals) == npts
     @assert length(q_vals) == npts
 
-    # Create value interpolants with CubicFit BC and LinearBinary search for sequential psi access
-    F_spline = cubic_interp(xs, F_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    P_spline = cubic_interp(xs, P_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
-    q_spline = cubic_interp(xs, q_vals; bc=CubicFit(), extrap=extrap, search=LinearBinary())
+    # Create value interpolants with CubicFit BC (default) for sequential psi access
+    F_spline = cubic_interp(xs, F_vals; extrap=extrap)
+    P_spline = cubic_interp(xs, P_vals; extrap=extrap)
+    dVdpsi_spline = cubic_interp(xs, dVdpsi_vals; extrap=extrap)
+    q_spline = cubic_interp(xs, q_vals; extrap=extrap)
 
     # Create derivative views (these share data with value interpolants, no extra storage)
     F_deriv = deriv1(F_spline)
@@ -524,28 +634,27 @@ This object provides a complete representation of the processed plasma equilibri
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
-
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
+
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
       + `rzphi_ys::Vector{Float64}`: θ coordinates (length mtheta+1)
-
   - **Geometric quantities (rzphi, 4 interpolants):**
     2D cubic interpolants for flux-coordinate mapping with periodic BC in theta.
+
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle ∈ [0, 1]
       + `rzphi_rsquared::CubicInterpolantND`: r_coord² = (R - ro)² + (Z - zo)²
       + `rzphi_offset::CubicInterpolantND`: η/(2π) - θₙₑw (angle offset)
       + `rzphi_nu::CubicInterpolantND`: ν in ϕ = 2πζ + ν(ψ, θ)
       + `rzphi_jac::CubicInterpolantND`: Jacobian
-
   - **Physics quantities (eqfun, 3 interpolants):**
     2D cubic interpolants storing local physics and geometric quantities.
+
       + **x value:** normalized ψ
       + **y value:** SFL poloidal angle θₙₑw
       + `eqfun_B::CubicInterpolantND`: Total magnetic field strength [T]
       + `eqfun_metric1::CubicInterpolantND`: (e₁⋅e₂ + q⋅e₃⋅e₁)/(J⋅B²)
       + `eqfun_metric2::CubicInterpolantND`: (e₂⋅e₃ + q⋅e₃⋅e₃)/(J⋅B²)
-
   - `ro::Float64`: R-coordinate of the magnetic axis [m]
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
