@@ -124,8 +124,11 @@ using TOML
         intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
 
         base_chunks = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
         balanced = GeneralizedPerturbedEquilibrium.ForceFreeStates.balance_integration_chunks(base_chunks, ctrl, intr)
@@ -184,8 +187,11 @@ using TOML
         intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
+
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
 
         # Default (bidirectional=false): all chunks should have direction=+1
         chunks_fwd = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet, ctrl, intr)
@@ -341,11 +347,18 @@ using TOML
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-        intr.mpert = 8; intr.numpert_total = 8
+        intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+        intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
+        intr.mpert = intr.mhigh - intr.mlow + 1
+        intr.mband = intr.mpert - 1
+        intr.numpert_total = intr.mpert * intr.npert
+
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         # Use the first chunk from chunk_el_integration_bounds: guaranteed rational-free interior
-        odet_tmp = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(8, 10, 5, intr.msing)
-        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet_tmp, ctrl, equil.profiles, intr)
+        odet_tmp = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, 10, 5, intr.msing)
+        GeneralizedPerturbedEquilibrium.ForceFreeStates.initialize_el_at_axis!(odet_tmp, ctrl, ffit, equil.profiles, intr)
         chunks_tmp = GeneralizedPerturbedEquilibrium.ForceFreeStates.chunk_el_integration_bounds(odet_tmp, ctrl, intr)
         chunk1 = chunks_tmp[1]
         a = chunk1.psi_start
