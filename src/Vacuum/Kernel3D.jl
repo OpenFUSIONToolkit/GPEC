@@ -430,15 +430,15 @@ function compute_3D_kernel_matrices!(
     INTERP_ORDER::Int,
     Z::AbstractMatrix{ComplexF64}
 )
-    N, P = size(Z) # N = mtheta * nzeta, P = num_modes
-    dθdζ = 4π^2 / N
-    Zt = Matrix{ComplexF64}(transpose(Z))  # [P × M] for contiguous column access
+    num_points, num_modes = size(Z)
+    dθdζ = 4π^2 / num_points
+    Zt = Matrix{ComplexF64}(transpose(Z))  # [num_modes × num_points] for contiguous column access
 
     # Take a view of the corresponding block of the K and G matrices
     col_index = (source isa PlasmaGeometry3D ? 1 : 2)
     row_index = (observer isa PlasmaGeometry3D ? 1 : 2)
-    K_block = view(K, ((row_index-1)*P+1):(row_index*P), ((col_index-1)*P+1):(col_index*P))
-    G_block = view(G, ((row_index-1)*P+1):(row_index*P), :)
+    K_block = view(K, ((row_index-1)*num_modes+1):(row_index*num_modes), ((col_index-1)*num_modes+1):(col_index*num_modes))
+    G_block = view(G, ((row_index-1)*num_modes+1):(row_index*num_modes), :)
 
     # G only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry3D
@@ -453,18 +453,18 @@ function compute_3D_kernel_matrices!(
     (; PATCH_DIM, PATCH_RAD, ANG_DIM, RAD_DIM, Ppou, Gpou, P2G) = quad_data
 
     # Buffers for the projection: column idx_obs holds (kernel row idx_obs) · Z
-    KZt = zeros(ComplexF64, P, N)
-    GZt = zeros(ComplexF64, P, N)
+    KZt = zeros(ComplexF64, num_modes, num_points)
+    GZt = zeros(ComplexF64, num_modes, num_points)
 
     # Allocate thread-local workspaces (one per thread)
     max_threadid = Threads.maxthreadid()
     workspaces = [KernelWorkspace(PATCH_DIM, RAD_DIM, ANG_DIM) for _ in 1:max_threadid]
-    proj_k_all = [zeros(ComplexF64, P) for _ in 1:max_threadid]
-    proj_g_all = [zeros(ComplexF64, P) for _ in 1:max_threadid]
-    is_patch_all = [falses(N) for _ in 1:max_threadid]
+    proj_k_all = [zeros(ComplexF64, num_modes) for _ in 1:max_threadid]
+    proj_g_all = [zeros(ComplexF64, num_modes) for _ in 1:max_threadid]
+    is_patch_all = [falses(num_points) for _ in 1:max_threadid]
 
     # Parallel loop through observer points
-    Threads.@threads for idx_obs in 1:N
+    Threads.@threads for idx_obs in 1:num_points
         # Get thread-local workspace
         ws = workspaces[Threads.threadid()]
         (; r_patch, dr_dθ_patch, dr_dζ_patch, r_polar, dr_dθ_polar, dr_dζ_polar,
@@ -495,7 +495,7 @@ function compute_3D_kernel_matrices!(
         # FAR FIELD: Trapezoidal rule for nonsingular source points
         # Note: kernels return zero for r_src = r_obs
         # ============================================================
-        @inbounds for idx_src in 1:N
+        @inbounds for idx_src in 1:num_points
             is_patch[idx_src] && continue
 
             sr = view(source.r, idx_src, :)
@@ -559,11 +559,11 @@ function compute_3D_kernel_matrices!(
         end
 
         # ── Write projected column to buffer (each idx_obs owns its column) ──
-        @inbounds for p in 1:P
+        @inbounds for p in 1:num_modes
             KZt[p, idx_obs] = proj_k[p]
         end
         if populate_greenfunction
-            @inbounds for p in 1:P
+            @inbounds for p in 1:num_modes
                 GZt[p, idx_obs] = proj_g[p]
             end
         end
@@ -579,8 +579,8 @@ function compute_3D_kernel_matrices!(
 
     # Add the term that comes from the volume integral of Green's identity.
     if typeof(source) == typeof(observer)
-        @inbounds for i in 1:P
-            K_block[i, i] += N
+        @inbounds for i in 1:num_modes
+            K_block[i, i] += num_points
         end
     end
 end

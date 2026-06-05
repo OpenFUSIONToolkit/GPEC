@@ -63,7 +63,7 @@ const GL8_LAGRANGE_STENCILS = precompute_lagrange_stencils(GL8.x)
 
 Compute the **Fourier/Galerkin-projected** 2D vacuum boundary-integral kernel blocks for
 Laplace’s equation in an axisymmetric torus, **without ever forming the dense
-`M×M` “point-to-point” kernel matrices.
+`mtheta×mtheta` “point-to-point” kernel matrices.
 
 This is the fused “evaluate kernel + project” path that the vacuum solver uses:
 
@@ -74,7 +74,7 @@ where:
 
   - `K` is the **double-layer** kernel (normal derivative of the Green’s function),
   - `G` is the **single-layer** kernel (Green’s function itself; only needed for plasma-as-source),
-  - `Z ∈ ℂ^{M×P}` is the complex Fourier basis on the poloidal grid,
+  - `Z ∈ ℂ^{mtheta×num_modes}` is the complex Fourier basis on the poloidal grid,
     and `Zᴴ` is its conjugate transpose.
 
 Rather than computing a full kernel row `K[j, :]` and then multiplying by `Z`, this routine
@@ -82,14 +82,14 @@ projects **on the fly**:
 
   - For each observer node `j`, it accumulates the projected row-vector
     `proj_k = (K[j,:] * weights) · Z` and (optionally) `proj_g = (G[j,:] * weights) · Z`
-    into length-`P` work buffers.
+    into length-`num_modes` work buffers.
 
   - It then performs a **rank-1 update** into the appropriate projected block:
 
         Kc += conj(Z[j, :])' * proj_k
         Gc += conj(Z[j, :])' * proj_g
 
-This reduces peak memory from `O(M^2)` to `O(MP + P^2)` while keeping the same
+This reduces peak memory from `O(mtheta^2)` to `O(mtheta*num_modes + num_modes^2)` while keeping the same
 mathematical discretization.
 
 ## Arguments
@@ -107,8 +107,8 @@ mathematical discretization.
 plasma/wall as observer/source, `Gc` contains two blocks corresponding to plasma/wall as observer.
 This function writes **only one block** to each of `Kc` and `Gc` per call:
 
-  - `Kc_block` is a `P×P` view into `Kc` selected by `(observer isa PlasmaGeometry ? 1 : 2, source isa PlasmaGeometry ? 1 : 2)`.
-  - `Gc_block` is a `P×(2P)` view into `Gc` with the same observer block-row; only the columns
+  - `Kc_block` is a `num_modes×num_modes` view into `Kc` selected by `(observer isa PlasmaGeometry ? 1 : 2, source isa PlasmaGeometry ? 1 : 2)`.
+  - `Gc_block` is a `num_modes×(2*num_modes)` view into `Gc` with the same observer block-row; only the columns
     corresponding to the source being plasma are populated (when `source isa PlasmaGeometry`).
 
 ## Toroidal Green's functions
@@ -148,7 +148,7 @@ This routine is intentionally written to be allocation-light in tight loops:
   - **Projection reuse**: the transpose `Zt = transpose(Z)` is materialized so that “row-accumulate”
     operations `_accum_row!` can access `Z` with contiguous column memory.
   - **Rank-1 assembly**: the final projected update uses `conj(Z[j,:]) ⊗ proj_*` via `_rank1_conj!`,
-    avoiding constructing intermediate `P×P` temporaries.
+    avoiding constructing intermediate `num_modes×num_modes` temporaries.
 
 ## Caveats / limitations
 
@@ -164,16 +164,16 @@ This routine is intentionally written to be allocation-light in tight loops:
     Z::AbstractMatrix{ComplexF64}
 )
 
-    M, P = size(Z) # M = mtheta, P = num_modes
-    Zt = Matrix{ComplexF64}(transpose(Z))  # [P × M] for contiguous column access
-    dtheta = 2π / M
-    theta_grid = range(; start=0, length=M, step=dtheta)
+    mtheta, num_modes = size(Z)
+    Zt = Matrix{ComplexF64}(transpose(Z))  # [num_modes × mtheta] for contiguous column access
+    dtheta = 2π / mtheta
+    theta_grid = range(; start=0, length=mtheta, step=dtheta)
 
     # Take a view of the corresponding block of the grad_greenfunction
     col_idx = (source isa PlasmaGeometry ? 1 : 2)
     row_idx = (observer isa PlasmaGeometry ? 1 : 2)
-    Kc_block = view(Kc, ((row_idx-1)*P+1):(row_idx*P), ((col_idx-1)*P+1):(col_idx*P))
-    Gc_block = view(Gc, ((row_idx-1)*P+1):(row_idx*P), :)
+    Kc_block = view(Kc, ((row_idx-1)*num_modes+1):(row_idx*num_modes), ((col_idx-1)*num_modes+1):(col_idx*num_modes))
+    Gc_block = view(Gc, ((row_idx-1)*num_modes+1):(row_idx*num_modes), :)
 
     # 𝒢ⁿ only needed for plasma as source term (RHS of eqs. 26/27 in Chance 1997)
     populate_greenfunction = source isa PlasmaGeometry
@@ -200,8 +200,8 @@ This routine is intentionally written to be allocation-light in tight loops:
 
     # Precompute source derivatives on the theta grid once used in Simpson integration
     # The Gaussian singular-panel points are off-grid, so those still use spline evaluation directly.
-    dx_dtheta_grid = acquire!(pool, eltype(source.x), M)
-    dz_dtheta_grid = acquire!(pool, eltype(source.z), M)
+    dx_dtheta_grid = acquire!(pool, eltype(source.x), mtheta)
+    dz_dtheta_grid = acquire!(pool, eltype(source.z), mtheta)
 
     # Call in-place API to avoid allocations
     d1_spline_x(dx_dtheta_grid, theta_grid)
@@ -211,11 +211,11 @@ This routine is intentionally written to be allocation-light in tight loops:
     legendre_buf = acquire!(pool, Float64, n + 2)
 
     # Per-observer projection vectors: proj = (kernel row) · Z
-    proj_k = zeros!(pool, ComplexF64, P)
-    proj_g = zeros!(pool, ComplexF64, P)
+    proj_k = zeros!(pool, ComplexF64, num_modes)
+    proj_g = zeros!(pool, ComplexF64, num_modes)
 
     # Loop through observer points
-    for j in 1:M
+    for j in 1:mtheta
         # Get observer coordinates
         x_obs, z_obs, theta_obs = observer.x[j], observer.z[j], theta_grid[j]
 
@@ -228,13 +228,13 @@ This routine is intentionally written to be allocation-light in tight loops:
         # FAR FIELD: Simpson integration for nonsingular source points
         # ============================================================
         # Nonsingular region endpoints are at j±2, so exclude j-1, j, and j+1.
-        @inbounds for k in 1:(M-3)
-            isrc = mod1(j + 1 + k, M)
+        @inbounds for k in 1:(mtheta-3)
+            isrc = mod1(j + 1 + k, mtheta)
             G_n, gradG_n, gradG_0 = green(x_obs, z_obs, source.x[isrc], source.z[isrc], dx_dtheta_grid[isrc], dz_dtheta_grid[isrc], n, legendre_buf; gamma_prefactor)
 
             # Composite Simpson's 1/3 rule weights, excluding singular points
             # Note we set to 4 for even/2 for odd since we index from 1 while the formula assumes indexing from 0
-            wsimpson = dtheta / 3 * ((k == 1 || k == M - 3) ? 1 : (iseven(k) ? 4 : 2))
+            wsimpson = dtheta / 3 * ((k == 1 || k == mtheta - 3) ? 1 : (iseven(k) ? 4 : 2))
 
             # Sum and project contributions to Green's function matrices
             if populate_greenfunction
@@ -250,7 +250,7 @@ This routine is intentionally written to be allocation-light in tight loops:
         # ============================================================
         # Indices of the singularity region, [j-2, j-1, j, j+1, j+2] (allocation-free)
         for (offset_idx, offset) in enumerate(-2:2)
-            sing_idx[offset_idx] = mod1(j + offset + M, M)
+            sing_idx[offset_idx] = mod1(j + offset + mtheta, mtheta)
         end
 
         # Integrate region of length 2 * dtheta on left/right of singularity
@@ -316,8 +316,8 @@ This routine is intentionally written to be allocation-light in tight loops:
     # Add analytic singular integral (second type) to block diagonal [Chance Phys. Plasmas 1997 2161 Table I, eq. 69, 89]
     # The residue term is diagonal in mode space and is scaled by the number of points in Fourier space.
     residue = (observer isa WallGeometry) ? 0.0 : (source isa PlasmaGeometry ? 2.0 : -2.0)
-    @inbounds for i in 1:P
-        Kc_block[i, i] += residue * M
+    @inbounds for i in 1:num_modes
+        Kc_block[i, i] += residue * mtheta
     end
 
     # Since we computed 2π𝒢, divide by 2π to get 𝒢
