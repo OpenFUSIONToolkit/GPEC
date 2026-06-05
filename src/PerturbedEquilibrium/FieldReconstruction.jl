@@ -820,6 +820,18 @@ transformation matrix entries t11/t12/t21/t22/t33 and the Jacobian J_theta, as
 
 These depend only on equilibrium geometry, not on the perturbed field, so they are computed
 once and reused for both the ξ and b reconstructions (Fortran gpeq.f:458-475).
+
+The terms are smooth in ψ, so rather than evaluating the (expensive, 2-D) `rzphi` bicubic at
+every fine u_store ψ (npsi ≈ 1158), the *smooth* rzphi primitives (r², η-offset, J and their
+θ-derivatives) are sampled at the coarse equilibrium ψ-knots (`equil.rzphi_xs`, ≈ mpsi+1) and
+cubic-resampled onto the fine grid — replacing ~6×-redundant 2-D bicubic evaluations with
+cheap 1-D cubic evaluations. θ stays at the DFT resolution.
+
+The ψ-derivatives (dr²/dψ, dη/dψ) are obtained by differentiating the ψ-resample spline, NOT
+by resampling the bicubic's ψ-derivatives directly: the latter are only C¹ in ψ and a cubic
+fit through their knot samples rings badly near the axis/edge. The resampled function values
+reproduce the bicubic exactly on its native knots, so the spline derivative recovers the true
+ψ-derivative to machine precision. The trig / t-matrix assembly is done at the fine grid.
 """
 function _build_rzphi_geometry(
     equil::Equilibrium.PlasmaEquilibrium,
@@ -829,6 +841,39 @@ function _build_rzphi_geometry(
     npsi = length(psi_grid)
     R0 = equil.ro
 
+    knot_psi = collect(equil.rzphi_xs)   # coarse equilibrium ψ-knots
+    nknot = length(knot_psi)
+
+    # Sample the smooth rzphi primitives at the coarse ψ-knots × DFT θ grid, packed into a
+    # single [nknot, 5·mtheta] matrix so one cubic Series interpolant (over ψ) carries every
+    # (primitive, θ) channel. Block o·mtheta .+ (1:mtheta) holds primitive o at all θ.
+    # Channels: r2(0), deta(1), jac(2), dr2_dtheta(3), doff_dtheta(4). The ψ-derivatives of
+    # r2/deta come from differentiating this spline (see below).
+    nch = 5
+    knot_vals = Matrix{Float64}(undef, nknot, nch * mtheta)
+
+    hints = [(Ref(1), Ref(1)) for _ in 1:Threads.maxthreadid()]
+
+    Threads.@threads :static for ik in 1:nknot
+        hint = hints[Threads.threadid()]
+        psi = knot_psi[ik]
+
+        for itheta in 1:mtheta
+            theta = (itheta - 1) / mtheta  # SFL theta ∈ [0, 1)
+            pt = (psi, theta)
+
+            knot_vals[ik, 0*mtheta+itheta] = equil.rzphi_rsquared(pt; hint=hint)
+            knot_vals[ik, 1*mtheta+itheta] = equil.rzphi_offset(pt; hint=hint)
+            knot_vals[ik, 2*mtheta+itheta] = equil.rzphi_jac(pt; hint=hint)
+            knot_vals[ik, 3*mtheta+itheta] = equil.rzphi_rsquared(pt; deriv=DerivOp(0, 1), hint=hint)
+            knot_vals[ik, 4*mtheta+itheta] = equil.rzphi_offset(pt; deriv=DerivOp(0, 1), hint=hint)
+        end
+    end
+
+    # Cubic-in-ψ interpolant of every (primitive, θ) channel; matches the metric-coeff
+    # resampling convention used in `_build_metric_interp`.
+    geom_interp = cubic_interp(knot_psi, Series(knot_vals); bc=CubicFit(), extrap=ExtendExtrap())
+
     t11 = Matrix{Float64}(undef, mtheta, npsi)
     t12 = Matrix{Float64}(undef, mtheta, npsi)
     t21 = Matrix{Float64}(undef, mtheta, npsi)
@@ -836,24 +881,25 @@ function _build_rzphi_geometry(
     t33 = Matrix{Float64}(undef, mtheta, npsi)
     J_theta = Matrix{Float64}(undef, mtheta, npsi)
 
-    hints = [(Ref(1), Ref(1)) for _ in 1:Threads.maxthreadid()]
+    hints1d = [Ref(1) for _ in 1:Threads.maxthreadid()]
 
     Threads.@threads :static for ipsi in 1:npsi
-        hint = hints[Threads.threadid()]
+        h = hints1d[Threads.threadid()]
         psi = psi_grid[ipsi]
+        raw = geom_interp(psi; hint=h)                    # values: r2, deta, jac, dr2_dθ, doff_dθ
+        draw = geom_interp(psi; deriv=DerivOp(1), hint=h) # ψ-derivatives of those channels
 
+        # Assemble the transform matrices at the fine grid (Fortran gpeq.f:458-475). The trig
+        # is evaluated here, not resampled, because deta(ψ) makes c/s oscillate in ψ.
         for itheta in 1:mtheta
-            theta = (itheta - 1) / mtheta  # SFL theta ∈ [0, 1)
-            pt = (psi, theta)
-
-            r2   = equil.rzphi_rsquared(pt; hint=hint)
-            deta = equil.rzphi_offset(pt; hint=hint)
-            jac  = equil.rzphi_jac(pt; hint=hint)
-
-            dr2_dpsi    = equil.rzphi_rsquared(pt; deriv=DerivOp(1, 0), hint=hint)
-            dr2_dtheta  = equil.rzphi_rsquared(pt; deriv=DerivOp(0, 1), hint=hint)
-            doff_dpsi   = equil.rzphi_offset(pt; deriv=DerivOp(1, 0), hint=hint)
-            doff_dtheta = equil.rzphi_offset(pt; deriv=DerivOp(0, 1), hint=hint)
+            theta = (itheta - 1) / mtheta
+            r2 = raw[0*mtheta+itheta]
+            deta = raw[1*mtheta+itheta]
+            jac = raw[2*mtheta+itheta]
+            dr2_dtheta = raw[3*mtheta+itheta]
+            doff_dtheta = raw[4*mtheta+itheta]
+            dr2_dpsi = draw[0*mtheta+itheta]   # d(r2)/dψ
+            doff_dpsi = draw[1*mtheta+itheta]  # d(deta)/dψ
 
             rfac = sqrt(max(0.0, r2))
             eta  = 2π * (theta + deta)
