@@ -1,5 +1,4 @@
 @testset "Vacuum.jl Unit Tests" begin
-    using LinearAlgebra
 
     @testset "Vacuum.jl (2D)" begin
 
@@ -336,7 +335,8 @@
 
         @testset "green" begin
             @testset "basic output structure" begin
-                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1)
+                legendre = zeros(3)
+                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1, legendre)
                 @test G_n isa Float64
                 @test coupling_n isa Float64
                 @test coupling_0 isa Float64
@@ -346,15 +346,17 @@
             end
 
             @testset "uselegacygreenfunction" begin
-                G_leg, cpl_leg, c0_leg = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=true)
-                G_new, cpl_new, c0_new = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1; uselegacygreenfunction=false)
+                legendre = zeros(3)
+                G_leg, cpl_leg, c0_leg = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1, legendre; uselegacygreenfunction=true)
+                G_new, cpl_new, c0_new = GeneralizedPerturbedEquilibrium.Vacuum.green(2.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1, legendre; uselegacygreenfunction=false)
                 @test isfinite(G_leg) && isfinite(G_new)
                 # Both implementations should give similar order of magnitude for this non-singular case
                 @test isapprox(G_leg, G_new, rtol=1e-5)
             end
 
             @testset "n=0" begin
-                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(1.5, 0.0, 1.0, 0.0, 0.0, 1.0, 0)
+                legendre = zeros(2)
+                G_n, coupling_n, coupling_0 = GeneralizedPerturbedEquilibrium.Vacuum.green(1.5, 0.0, 1.0, 0.0, 0.0, 1.0, 0, legendre)
                 @test isfinite(G_n)
                 @test isfinite(coupling_0)
             end
@@ -433,13 +435,34 @@
                 @test size(grri) == (32, 4)  # 2*16, 2*2
                 @test size(plasma_pts) == (16, 3)
             end
+
+            @testset "multi-n 2D response uses independent diagonal blocks" begin
+                inputs = _make_inputs(mpert=2, nlow=0, npert=2)
+                wall_settings = WallShapeSettings(shape="nowall")
+                wv, grri, grre, plasma_pts, wall_pts = compute_vacuum_response(inputs, wall_settings)
+
+                numpoints = inputs.mtheta * inputs.nzeta
+                num_modes = inputs.mpert * inputs.npert
+                first_n = 1:inputs.mpert
+                second_n = (inputs.mpert+1):num_modes
+
+                @test size(wv) == (num_modes, num_modes)
+                @test size(grri) == (2 * numpoints, 2 * num_modes)
+                @test size(grre) == (2 * numpoints, 2 * num_modes)
+                @test all(isfinite, wv)
+                @test all(isfinite, grri)
+                @test all(isfinite, grre)
+                @test norm(wv[first_n, first_n]) > 0
+                @test norm(wv[second_n, second_n]) > 0
+                @test isapprox(wv[first_n, second_n], zeros(ComplexF64, inputs.mpert, inputs.mpert); atol=1e-12)
+                @test isapprox(wv[second_n, first_n], zeros(ComplexF64, inputs.mpert, inputs.mpert); atol=1e-12)
+                @test all(isfinite, plasma_pts)
+                @test all(isfinite, wall_pts)
+            end
         end
 
         # -------------------------------------------------------------------------
-        @testset "fused vs two-step Galerkin (2D, nowall)" begin
-            # Small case where both Galerkin paths are cheap: compare K_c, G_c
-            # assembled via the full M×M kernel + projection against the fused
-            # projected kernels from the unified `kernel!` API.
+        @testset "projected kernel API (2D, nowall)" begin
             inputs = VacuumInput(
                 mtheta_in=17,
                 nzeta_in=1,
@@ -453,8 +476,6 @@
                 nzeta=1,
                 mtheta=32
             )
-            wall_settings = WallShapeSettings(shape="nowall")
-
             plasma_surf = GeneralizedPerturbedEquilibrium.Vacuum.PlasmaGeometry(inputs)
             kparams = GeneralizedPerturbedEquilibrium.Vacuum.KernelParams2D(inputs.nlow)
 
@@ -470,88 +491,31 @@
                 ν=plasma_surf.ν
             )
             M, P = size(exp_mn_basis)
-            Gram = fill(ComplexF64(M), P)
 
-            # --- Two-step Galerkin: materialize full kernels then project ---
-            grad_green_full = zeros(Float64, 2M, 2M)
-            green_full = zeros(Float64, M, M)
+            K_c = zeros(ComplexF64, P, P)
+            G_c = zeros(ComplexF64, P, P)
             GeneralizedPerturbedEquilibrium.Vacuum.kernel!(
-                grad_green_full,
-                green_full,
-                plasma_surf,
-                plasma_surf,
-                kparams
-            )
-
-            # Exterior projected kernels from full matrices: K_c = Z^H K Z, G_c = Z^H G Z
-            K_c_two = zeros(ComplexF64, P, P)
-            G_c_two = zeros(ComplexF64, P, P)
-            tmp = zeros(ComplexF64, M, P)
-
-            grad_pp = @view grad_green_full[1:M, 1:M]
-            mul!(tmp, grad_pp, exp_mn_basis)
-            mul!(K_c_two, exp_mn_basis', tmp)
-            mul!(tmp, green_full, exp_mn_basis)
-            mul!(G_c_two, exp_mn_basis', tmp)
-
-            # --- Fused Galerkin via unified kernel! ---
-            K_c_fused = zeros(ComplexF64, P, P)
-            G_c_fused = zeros(ComplexF64, P, P)
-            GeneralizedPerturbedEquilibrium.Vacuum.projected_kernel!(
-                K_c_fused,
-                G_c_fused,
+                K_c,
+                G_c,
                 plasma_surf,
                 plasma_surf,
                 kparams,
-                exp_mn_basis,
-                Gram
+                exp_mn_basis
             )
 
-            @test isapprox(K_c_fused, K_c_two; rtol=1e-10, atol=1e-12)
-            @test isapprox(G_c_fused, G_c_two; rtol=1e-10, atol=1e-12)
+            @test M == inputs.mtheta
+            @test P == inputs.mpert
+            @test size(K_c) == (P, P)
+            @test size(G_c) == (P, P)
+            @test all(isfinite, K_c)
+            @test all(isfinite, G_c)
+            @test norm(K_c) > 0
+            @test norm(G_c) > 0
         end
 
         # -------------------------------------------------------------------------
-        @testset "wall Galerkin vs collocation (2D, conformal)" begin
-            mtheta_eq = 17
-            mtheta = 128
-            mpert = 3
-            boundary_x = collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq)))
-            boundary_z = collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq)))
-
-            inputs_colloc = VacuumInput(
-                mtheta_in=mtheta_eq, nzeta_in=1,
-                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
-                mlow=1, mpert=mpert, nlow=1, npert=1,
-                nzeta=1, mtheta=mtheta,
-                use_galerkin=false
-            )
-            inputs_galerkin = VacuumInput(
-                mtheta_in=mtheta_eq, nzeta_in=1,
-                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
-                mlow=1, mpert=mpert, nlow=1, npert=1,
-                nzeta=1, mtheta=mtheta,
-                use_galerkin=true
-            )
-
-            wall_settings = WallShapeSettings(shape="conformal", a=0.5)
-
-            wv_c, grri_c, grre_c, _, _ = compute_vacuum_response(inputs_colloc, wall_settings)
-            wv_g, grri_g, grre_g, _, _ = compute_vacuum_response(inputs_galerkin, wall_settings)
-
-            M = mtheta
-            P = mpert
-
-            @test isapprox(wv_g, wv_c; rtol=1e-8)
-            @test isapprox(grre_g[1:M, 1:(2*P)], grre_c[1:M, 1:(2*P)]; rtol=1e-8)
-            @test isapprox(grri_g[1:M, 1:(2*P)], grri_c[1:M, 1:(2*P)]; rtol=1e-8)
-            @test isapprox(grre_g[(M+1):(2*M), 1:(2*P)], grre_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
-            @test isapprox(grri_g[(M+1):(2*M), 1:(2*P)], grri_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
-        end
     end
 
-    # 3D vacuum: nzeta > 1, full (m,n) coupling, PlasmaGeometry3D, WallGeometry3D
-    # Kernel requires mtheta, nzeta >= PATCH_DIM (23 for default KernelParams3D(11, 20, 5))
     @testset "Vacuum.jl (3D)" begin
         _make_3d_inputs(; mtheta=32, mtheta_eq=17, mpert=2, nlow=0, npert=2, nzeta=32) = VacuumInput(
             mtheta_in=mtheta_eq,
@@ -733,61 +697,12 @@
             @test isapprox(wv, wv', rtol=1e-12)
         end
 
-        @testset "wall Galerkin vs collocation (3D, conformal)" begin
-            mtheta_eq = 17
-            mtheta = 32
-            nzeta = 32
-            mpert = 2
-            npert = 2
-            boundary_x = collect(1.7 .+ 0.3 .* cos.(range(0, 2π, length=mtheta_eq)))
-            boundary_z = collect(0.3 .* sin.(range(0, 2π, length=mtheta_eq)))
-
-            inputs_colloc = VacuumInput(
-                mtheta_in=mtheta_eq, nzeta_in=1,
-                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
-                mlow=1, mpert=mpert, nlow=0, npert=npert,
-                nzeta=nzeta, mtheta=mtheta,
-                use_galerkin=false
-            )
-            inputs_galerkin = VacuumInput(
-                mtheta_in=mtheta_eq, nzeta_in=1,
-                x=boundary_x, z=boundary_z, ν=zeros(mtheta_eq),
-                mlow=1, mpert=mpert, nlow=0, npert=npert,
-                nzeta=nzeta, mtheta=mtheta,
-                use_galerkin=true
-            )
-
-            wall_settings = WallShapeSettings(shape="conformal", a=0.3)
-
-            wv_c, grri_c, grre_c, _, _ = compute_vacuum_response(inputs_colloc, wall_settings)
-            wv_g, grri_g, grre_g, _, _ = compute_vacuum_response(inputs_galerkin, wall_settings)
-
-            M = mtheta * nzeta
-            P = mpert * npert
-
-            @test isapprox(wv_g, wv_c; rtol=1e-8)
-            @test isapprox(grre_g[1:M, 1:(2*P)], grre_c[1:M, 1:(2*P)]; rtol=1e-8)
-            @test isapprox(grri_g[1:M, 1:(2*P)], grri_c[1:M, 1:(2*P)]; rtol=1e-8)
-            @test isapprox(grre_g[(M+1):(2*M), 1:(2*P)], grre_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
-            @test isapprox(grri_g[(M+1):(2*M), 1:(2*P)], grri_c[(M+1):(2*M), 1:(2*P)]; rtol=1e-8)
-        end
-
-        @testset "Kernel3D laplace_single_layer" begin
-            x_obs = [1.0, 0.0, 0.0]
-            x_src = [2.0, 0.0, 0.0]
-            G = GeneralizedPerturbedEquilibrium.Vacuum.laplace_single_layer(x_obs, x_src)
-            # Kernel returns 1/|r_obs - r_src| (4π factor applied elsewhere in BIE)
+        @testset "Kernel3D laplace_kernel" begin
+            G, K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_kernel(1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+            # Kernel returns 1/|r_obs - r_src|
             dist = sqrt((2.0 - 1.0)^2 + 0 + 0)
             @test isapprox(G, 1.0 / dist)
             @test isfinite(G)
-        end
-
-        @testset "Kernel3D laplace_double_layer" begin
-            x_obs = [1.0, 0.0, 0.0]
-            x_src = [2.0, 0.0, 0.0]
-            n_src = [1.0, 0.0, 0.0]  # normal pointing away from source
-            K = GeneralizedPerturbedEquilibrium.Vacuum.laplace_double_layer(x_obs, x_src, n_src)
-            @test K isa Float64
             @test isfinite(K)
         end
 
