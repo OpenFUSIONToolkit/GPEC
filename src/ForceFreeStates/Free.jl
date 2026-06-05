@@ -118,7 +118,7 @@ Compute a spline of vacuum response matrices over the range of psi from 'ctrl.ps
 same function as `free_wvmats` in the Fortran code. Currently defaults to 4 spline points per
 q-window minimum.
 """
-function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
+@with_pool pool function free_compute_wv_spline(ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal)
 
     profiles = equil.profiles
 
