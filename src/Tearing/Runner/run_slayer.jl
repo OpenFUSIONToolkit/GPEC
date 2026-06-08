@@ -142,6 +142,10 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     # Per-surface SurfaceCoupling objects
     scs = [_build_surface_coupling(model, params[k], dp[k, k]) for k in 1:n]
 
+    # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
+    # Independent of the dispersion scan / coupling mode — a pure diagnostic.
+    layer_widths = LayerWidths[slayer_layer_thickness(params[k]) for k in 1:n]
+
     Q_root = ComplexF64[]
     omega_Hz = Float64[]
     gamma_Hz = Float64[]
@@ -207,7 +211,7 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     return SLAYERResult(true, control, params, dp,
                          Q_root, omega_Hz, gamma_Hz,
                          per_surface_extraction, coupled_extraction,
-                         scan_data_list)
+                         layer_widths, scan_data_list)
 end
 
 # ---------------------------------------------------------------------

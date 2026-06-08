@@ -197,6 +197,13 @@
                 @test length(read(g["roots/Q_root_real"])) == 1    # coupled
                 @test length(read(g["roots/omega_Hz"]))    == 1
 
+                # Layer-thickness diagnostic: one entry per surface, with
+                # the physical thickness [m] and the drift scale.
+                @test length(read(g["layer_widths/delta_s_m"])) == 2
+                @test all(read(g["layer_widths/delta_s_m"]) .>= 0)
+                @test haskey(g["layer_widths"], "dels_db_real")
+                @test haskey(g["layer_widths"], "d_beta")
+
                 # Ragged diagnostics use flat+offsets encoding
                 @test haskey(g["diagnostics/valid_roots"], "flat_real")
                 @test haskey(g["diagnostics/valid_roots"], "flat_imag")

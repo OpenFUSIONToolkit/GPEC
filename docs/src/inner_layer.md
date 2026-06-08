@@ -16,3 +16,9 @@ Modules = [GeneralizedPerturbedEquilibrium.InnerLayer]
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.GGJ]
 ```
+
+## SLAYER
+
+```@autodocs
+Modules = [GeneralizedPerturbedEquilibrium.InnerLayer.SLAYER]
+```

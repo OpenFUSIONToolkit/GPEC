@@ -40,6 +40,7 @@ function write_slayer_hdf5!(parent::Union{HDF5.File,HDF5.Group},
     _write_settings!(g, result.control)
     _write_per_surface!(g, result.params, result.dp_matrix)
     _write_roots!(g, result)
+    _write_layer_widths!(g, result.layer_widths)
     _write_diagnostics!(g, result)
     if result.control.store_scan && !isempty(result.scan_data)
         _write_scan_data!(g, result)
@@ -110,6 +111,23 @@ function _write_roots!(g, r::SLAYERResult)
     roots["Q_root_imag"] = imag.(r.Q_root)
     roots["omega_Hz"]    = r.omega_Hz
     roots["gamma_Hz"]    = r.gamma_Hz
+    return nothing
+end
+
+# ---------- resistive layer thickness (del_s Riccati) ----------
+function _write_layer_widths!(g, widths::Vector{LayerWidths})
+    lw = create_group(g, "layer_widths")
+    for fname in (:ising, :m, :n)
+        lw[String(fname)] = Int[getfield(w, fname) for w in widths]
+    end
+    # Dimensionless del_s/d_beta and the complex layer thickness, split re/im.
+    lw["dels_db_real"] = Float64[real(w.dels_db) for w in widths]
+    lw["dels_db_imag"] = Float64[imag(w.dels_db) for w in widths]
+    lw["delta_s_real"] = Float64[real(w.delta_s) for w in widths]
+    lw["delta_s_imag"] = Float64[imag(w.delta_s) for w in widths]
+    # Physical thickness [m] and the β-weighted ion drift scale [m].
+    lw["delta_s_m"] = Float64[w.delta_s_m for w in widths]
+    lw["d_beta"]    = Float64[w.d_beta for w in widths]
     return nothing
 end
 

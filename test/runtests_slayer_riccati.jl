@@ -120,4 +120,34 @@
         Δ_deeper  = solve_inner(m, p, Q; pmin=1e-7).tearing
         @test abs(Δ_default - Δ_deeper) < 0.05 * abs(Δ_default)
     end
+
+    @testset "Resistive layer thickness (del_s)" begin
+        p = _ref_params_large_D()
+
+        # riccati_del_s returns the dimensionless δ_s/d_β; must be finite.
+        dels_db = riccati_del_s(p)
+        @test dels_db isa ComplexF64
+        @test isfinite(dels_db)
+
+        lw = slayer_layer_thickness(p)
+        @test lw isa LayerWidths
+        @test lw.ising == p.ising && lw.m == p.m && lw.n == p.n
+
+        # Meters scaling and the magnitude field are self-consistent.
+        @test lw.dels_db == dels_db
+        @test lw.delta_s ≈ dels_db * p.d_beta
+        @test lw.delta_s_m ≈ abs(dels_db * p.d_beta)
+        @test lw.delta_s_m > 0
+
+        # Drift-scale reference is carried through unchanged.
+        @test lw.d_beta == p.d_beta
+
+        # The Riccati width should sit within a few orders of magnitude of
+        # the β-weighted ion scale it is built from (dels_db is O(1)).
+        @test 1e-3 * p.d_beta < lw.delta_s_m < 1e3 * p.d_beta
+
+        # Degenerate integration span (q_start ≤ q_min) returns a NaN
+        # sentinel rather than throwing.
+        @test isnan(riccati_del_s(p; q_start=1e-6, q_min=1e-5))
+    end
 end

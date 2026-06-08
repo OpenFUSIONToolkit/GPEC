@@ -21,6 +21,7 @@ import .GGJ: InnerAsymptoticsCache, mercier_di, mercier_dr, inner_Q, rescale_del
 import .GGJ: glasser_wang_2020_eq55, build_ggj_inputs
 
 import .SLAYER: SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
+import .SLAYER: riccati_del_s, slayer_layer_thickness, LayerWidths
 import .SLAYER: surface_minor_radius, surface_da_dpsi, build_slayer_inputs
 
 export InnerLayerModel, InnerLayerResponse, solve_inner
@@ -30,6 +31,7 @@ export mercier_di, mercier_dr, inner_Q, rescale_delta
 export glasser_wang_2020_eq55, build_ggj_inputs
 
 export SLAYER, SLAYERModel, SLAYERParameters, slayer_parameters, r_based_shear
+export riccati_del_s, slayer_layer_thickness, LayerWidths
 export surface_minor_radius, surface_da_dpsi, build_slayer_inputs
 
 end # module InnerLayer

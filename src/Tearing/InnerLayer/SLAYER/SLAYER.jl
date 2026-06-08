@@ -5,11 +5,17 @@
 # `slayer_growthrate`. Implements the Fitzpatrick (riccati_f)
 # formulation: P_perp / P_tor transport, c_beta compressibility, D_norm
 # normalized ion-skin scale, two-fluid drift coupling via Q_e, Q_i,
-# iota_e. The standard `riccati()` and `riccati_del_s()` Fortran variants
-# are intentionally not ported (use this Fitzpatrick path only).
+# iota_e. The standard `riccati()` growth-rate Fortran variant is not
+# ported (use this Fitzpatrick path for the dispersion relation).
 #
-# Type-parameter `S` of `SLAYERModel{S}` selects the Riccati formulation;
-# only `:fitzpatrick` is implemented at present.
+# The `riccati_del_s` Fortran variant IS ported, but as a standalone
+# layer-thickness diagnostic (`slayer_layer_thickness` in
+# `LayerThickness.jl`) rather than a `solve_inner` dispersion path: it
+# returns the resistive layer thickness in meters at each rational
+# surface, not an alternate growth rate.
+#
+# Type-parameter `S` of `SLAYERModel{S}` selects the Riccati formulation
+# used for the dispersion relation; only `:fitzpatrick` is implemented.
 #
 # `Q = ω + iγ` is passed directly to `solve_inner` rather than stored on
 # the parameter struct.
@@ -36,8 +42,10 @@ Riccati formulation:
   - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default,
     mirrors Fortran `riccati_f` in `delta.f:323-438`)
 
-Future variants (e.g. `:standard`, `:del_s`) may be added but are not
-currently implemented.
+Future dispersion variants (e.g. `:standard`) may be added but are not
+currently implemented. The `del_s` formulation is exposed separately as
+the layer-thickness diagnostic [`slayer_layer_thickness`](@ref), not as
+a dispersion `solve_inner` path.
 """
 struct SLAYERModel{S} <: InnerLayerModel end
 
@@ -45,10 +53,12 @@ SLAYERModel(; variant::Symbol=:fitzpatrick) = SLAYERModel{variant}()
 
 include("LayerParameters.jl")
 include("Riccati.jl")
+include("LayerThickness.jl")
 include("LayerInputs.jl")
 
 export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
+export riccati_del_s, slayer_layer_thickness, LayerWidths
 export surface_minor_radius, surface_da_dpsi, build_slayer_inputs
 export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
 
