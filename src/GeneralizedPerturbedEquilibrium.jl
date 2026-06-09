@@ -13,13 +13,13 @@ include("Vacuum/Vacuum.jl")
 import .Vacuum as Vacuum
 export Vacuum
 
-include("ForceFreeStates/ForceFreeStates.jl")
-import .ForceFreeStates as ForceFreeStates
-export ForceFreeStates
-
 include("InnerLayer/InnerLayer.jl")
 import .InnerLayer as InnerLayer
 export InnerLayer
+
+include("ForceFreeStates/ForceFreeStates.jl")
+import .ForceFreeStates as ForceFreeStates
+export ForceFreeStates
 
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms

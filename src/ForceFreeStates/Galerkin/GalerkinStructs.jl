@@ -138,4 +138,5 @@ struct GalerkinResult
     sing_n::Vector{Int}
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
+    delta_coil::Matrix{ComplexF64}   # (mpert, 2*msing) coil-response block (rpec_flag); empty if not computed
 end
