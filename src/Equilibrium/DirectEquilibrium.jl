@@ -200,11 +200,30 @@ function direct_position!(raw_profile::DirectRunInput)
     # ψ = 0 at the separatrix (after renormalization), and ψ changes sign between the
     # magnetic axis (ψ > 0) and the region outside the plasma (ψ < 0), so Brent is
     # globally convergent within the bracket (start_r, end_r) and needs no restarts.
+    # For limited equilibria whose grid box hugs the LCFS (e.g. some TokaMaker gEQDSKs),
+    # ψ can stay positive out to the grid edge with no sign change to bracket. The separatrix
+    # (ψ = 0) then sits just beyond the grid; extend the bracket outward via the extrapolating
+    # ψ spline until ψ changes sign (capped), so rs is a faithful ψ=0 crossing rather than the
+    # arbitrary grid edge (which lands in the degenerate ψ→0, Bp→0 region and breaks tracing).
+    psi_at(r) = (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi)
     function find_separatrix_crossing(start_r, end_r, label)
-        r_sol = find_zero(
-            r -> (direct_get_bfield!(bfield, r, zo, raw_profile.psi_in, raw_profile.sq_in, sq_in_deriv, raw_profile.psio; derivs=0); bfield.psi),
-            (start_r, end_r), Roots.Brent()
-        )
+        hi = end_r
+        if psi_at(start_r) * psi_at(hi) > 0
+            span = abs(end_r - start_r)
+            step = 0.02 * span
+            hi_max = end_r + sign(end_r - start_r) * 0.5 * span   # cap extrapolation at 50% of the half-width
+            while psi_at(start_r) * psi_at(hi) > 0 && abs(hi - end_r) < abs(hi_max - end_r)
+                hi += sign(end_r - start_r) * step
+            end
+            if psi_at(start_r) * psi_at(hi) > 0
+                @warn "$label: ψ does not change sign even extrapolating to R = $(@sprintf("%.3f", hi)); " *
+                      "using R = $(@sprintf("%.3f", hi)) as the boundary."
+                return hi
+            end
+            @warn "$label: ψ positive to grid edge R = $(@sprintf("%.3f", end_r)) (limited equilibrium); " *
+                  "located ψ=0 by extrapolation in R ∈ (R_edge, $(@sprintf("%.3f", hi)))."
+        end
+        r_sol = find_zero(psi_at, (start_r, hi), Roots.Brent())
         @info "$label separatrix found at R = $(@sprintf("%.3f", r_sol))"
         return r_sol
     end

@@ -118,6 +118,42 @@ function sing_lim!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, 
 end
 
 """
+    sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+
+Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f:1295-1326):
+when `qlow > qmin`, the q < qlow core (including any q ≤ 1 sawtooth/internal-kink surfaces) must be
+excluded from the outer-region Galerkin domain — otherwise the Hermite FEM integrates through those
+ideal singularities without imposing the ideal constraint, contaminating Δ′ at the innermost kept
+surface. A Newton iteration locates ψ where q = qlow; scanning starts from the edge inward for
+robustness in reverse-shear cores. When `qlow ≤ qmin` the axis value is kept.
+"""
+function sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
+    profiles = equil.profiles
+    intr.psilow = profiles.xs[1]   # default: equilibrium axis-side bound
+    ctrl.qlow > equil.params.qmin || return intr.psilow
+
+    # Scan from the edge inward for the first node with q < qlow (robust for reverse-shear q).
+    qy = profiles.q_spline.y
+    jpsi = 1
+    for j in (length(profiles.xs)-1):-1:1
+        if qy[j] < ctrl.qlow
+            jpsi = j
+            break
+        end
+    end
+
+    hint = Ref(jpsi)
+    intr.psilow = find_zero(
+        (psi -> profiles.q_spline(psi; hint=hint) - ctrl.qlow,
+            psi -> profiles.q_deriv(psi; hint=hint)),
+        profiles.xs[jpsi], Roots.Newton()
+    )
+    @info "sing_min: qlow=$(@sprintf("%.3f", ctrl.qlow)) > qmin=$(@sprintf("%.3f", equil.params.qmin)); " *
+          "raising psilow from $(@sprintf("%.5f", profiles.xs[1])) to $(@sprintf("%.5f", intr.psilow)) (excludes q<qlow core)"
+    return intr.psilow
+end
+
+"""
     compute_sing_asymptotics(singp::SingType, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
 Calculate asymptotic vmat and mmat matrices for a singular surface.
@@ -692,6 +728,105 @@ function sing_get_ua(sing_asymp::SingAsymptotics, dpsi::Float64)
     end
 
     return ua
+end
+
+"""
+    sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64) -> dua
+
+Compute the derivative of the asymptotic series solution with respect to the positive distance
+`dpsi = |ψ − ψ_res|`, consistent with `sing_get_ua`. Port of Fortran `sing_get_dua`
+(sing.f:839-906 / sing1.f:643-708). Shape `(numpert_total, 2*numpert_total, 2)`. Used by the
+outer-region Galerkin solver (`gal_extension`, `sing_matvec`).
+
+Direction is carried by the `SingAsymptotics` (left vs right vmat built with sig=∓1), exactly as in
+`sing_get_ua`, so `dpsi` is always positive and the arithmetic is real (no analytic continuation).
+The term-by-term derivative is built via a `power` array tracking each term's total exponent (in
+half-powers of `dpsi`: the 2*sing_order offset, the ∓1 shearing on resonant rows, and the ∓2α on
+resonant columns), then the same shearing/`pfac` restoration and the chain-rule factor `1/(2·dpsi)`
+are applied. The physical d/dψ sign for the left side (ψ = ψ_res − dpsi) is applied by the caller.
+
+### Arguments
+
+  - `sing_asymp::SingAsymptotics`: Pre-computed asymptotic data (must be left- or right-specific)
+  - `dpsi::Float64`: Positive distance from singular surface = |ψ − ψ_res|
+"""
+function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
+
+    r1 = sing_asymp.r1
+    r2 = sing_asymp.r2
+    order = sing_asymp.sing_order
+    sqrtfac = sqrt(dpsi)
+    N = size(sing_asymp.vmat, 1)
+
+    # Per-term total exponent (×2, in half-powers of dpsi). See sing.f:881-885.
+    power = fill(ComplexF64(2 * order), N, 2 * N, 2)
+    power[r1, :, 1] .-= 1
+    power[r1, :, 2] .+= 1
+    for i in eachindex(r1)
+        power[:, r2[2*i-1], :] .-= 2 * sing_asymp.alpha[i]
+        power[:, r2[2*i], :] .+= 2 * sing_asymp.alpha[i]
+    end
+
+    # Power series derivative by Horner's method (sing.f:889-893)
+    dua = sing_asymp.vmat[:, :, :, 2*order+1] .* power
+    for iorder in (2*order-1):-1:0
+        power .-= 1
+        dua .= dua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1] .* power
+    end
+
+    # Restore shearing and resonant powers, then the chain-rule factor 1/(2·dpsi) (sing.f:897-901)
+    for i in eachindex(r1)
+        pfac = dpsi^sing_asymp.alpha[i]
+        dua[:, r2[2*i-1], :] ./= pfac
+        dua[:, r2[2*i], :] .*= pfac
+        dua[r1[i], :, 1] ./= sqrtfac
+        dua[r1[i], :, 2] .*= sqrtfac
+    end
+    dua ./= (2 * dpsi)
+
+    return dua
+end
+
+"""
+    sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua, dua) -> matvec
+
+Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G u)` to the asymptotic
+solutions. Port of Fortran `sing_matvec` (sing.f:1045-1107). Returns `matvec`, shape
+`(numpert_total, size(ua,2))`.
+
+Uses the reduced (Schur-complemented) `ffit.kmats` (= K̄) and `ffit.gmats` (= Ḡ) directly, with the
+**direct** singular factor `singfac = m - n q` applied to `u' = dua[:,:,1]`. The second component
+`ua[:,:,2]` is the canonical momentum `F u' + K u`, so `-dua[:,:,2] = -(F u' + K u)'`.
+
+### Arguments
+
+  - `psi`: flux coordinate; `q`: safety factor at `psi` (passed in to avoid re-evaluating the spline)
+  - `ua`, `dua`: asymptotic solution and its ψ-derivative from `sing_get_ua`/`sing_get_dua`
+"""
+function sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Float64, q::Float64,
+    ua::Array{ComplexF64,3}, dua::Array{ComplexF64,3})
+
+    N = intr.numpert_total
+    msol = size(ua, 2)
+
+    # Direct singular factor (m - n q), NOT 1/(m - n q)
+    sfvec = vec((intr.mlow:intr.mhigh) .- q .* (intr.nlow:intr.nhigh)')
+
+    kmat = Matrix{ComplexF64}(undef, N, N)
+    gmat = Matrix{ComplexF64}(undef, N, N)
+    ffit.kmats(vec(kmat), psi; hint=ffit._hint)
+    ffit.gmats(vec(gmat), psi; hint=ffit._hint)
+    kdag = adjoint(kmat)
+
+    matvec = zeros(ComplexF64, N, msol)
+    d1 = Vector{ComplexF64}(undef, N)
+    for isol in 1:msol
+        @views d1 .= dua[:, isol, 1] .* sfvec          # u' · singfac
+        @views matvec[:, isol] .= kdag * d1            # K̄† (u' · singfac)
+        @views matvec[:, isol] .+= gmat * ua[:, isol, 1]  # + Ḡ u
+        @views matvec[:, isol] .-= dua[:, isol, 2]     # - (F u' + K u)'
+    end
+    return matvec
 end
 
 """

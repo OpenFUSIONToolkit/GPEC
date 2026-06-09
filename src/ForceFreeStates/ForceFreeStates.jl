@@ -11,6 +11,8 @@ using JLD2
 using FastInterpolations
 using AdaptiveArrayPools
 using Roots
+using FastGaussQuadrature: gausslobatto
+using QuadGK: quadgk
 
 import ..Equilibrium
 import ..Utilities
@@ -31,6 +33,12 @@ include("FixedBoundaryStability.jl")
 include("Utils.jl")
 include("Free.jl")
 include("Riccati.jl")
+
+# RDCON outer-region singular Galerkin Δ′ solver (gal_solve port)
+include("Galerkin/GalerkinStructs.jl")
+include("Galerkin/GalerkinGrid.jl")
+include("Galerkin/GalerkinAssembly.jl")
+include("Galerkin/GalerkinSolve.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
