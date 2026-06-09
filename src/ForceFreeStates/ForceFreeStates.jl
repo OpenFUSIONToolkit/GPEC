@@ -17,6 +17,7 @@ using QuadGK: quadgk
 import ..Equilibrium
 import ..Utilities
 import ..Vacuum
+import ..InnerLayer
 using Printf
 using DoubleFloats
 import StaticArrays: @MMatrix
@@ -24,6 +25,7 @@ import StaticArrays: @MMatrix
 # Include all necessary files
 include("ForceFreeStatesStructs.jl")
 include("Mercier.jl")
+include("Resist.jl")
 include("Bal.jl")
 include("EulerLagrange.jl")
 include("Sing.jl")

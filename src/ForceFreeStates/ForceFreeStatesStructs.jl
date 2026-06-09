@@ -313,6 +313,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     gal_dx1dx2_flag::Bool = true    # enable special dx1/dx2 treatment for resonant/extension elements
     gal_sing_order::Int = 6         # base power-series order for the Galerkin singular asymptotics
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
+    gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
     fixed_axis::Bool = false
 end
 

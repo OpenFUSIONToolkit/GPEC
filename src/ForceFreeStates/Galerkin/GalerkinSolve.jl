@@ -70,7 +70,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
         empty2 = Matrix{ComplexF64}(undef, 0, 0)
         return GalerkinResult(Matrix{ComplexF64}(undef, 0, 0), empty2, empty2, empty2, empty2, 0,
-            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[])
+            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2)
     end
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
@@ -100,7 +100,14 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     kl = mpert * (np + 1)
     ku = kl
     ldab = ctrl.gal_solver == "LU" ? 2kl + ku + 1 : kl + 1
-    nsol = 2 * msing
+    # rpec_flag (RDCON, gal.f:148-170): append mpert coil-response columns. Each is a unit source at
+    # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
+    # Cholesky's lower-only edge zeroing can't represent the rpec identity edge, so require LU.
+    ncoil = ctrl.gal_rpec_flag ? mpert : 0
+    if ncoil > 0 && ctrl.gal_solver != "LU"
+        error("galerkin_solve: gal_rpec_flag=true requires gal_solver=\"LU\" (coil edge BC needs the full-band path)")
+    end
+    nsol = 2 * msing + ncoil
     intvl = [GalInterval(zeros(Float64, nx + 1), zeros(Float64, nx + 1), [GalCell(mpert) for _ in 1:nx])
              for _ in 0:msing]
     ws = GalWorkspace(ctrl.gal_solver, nx, ctrl.gal_nq, np, 0, kl, ku, ldab, nsol,
@@ -115,13 +122,25 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     ws.rhs = zeros(ComplexF64, ws.ndim, nsol)
     ws.sol = zeros(ComplexF64, ws.ndim, nsol)
 
-    # Free-boundary edge term wvac·psio² (vac_data.wv is already singfac-scaled at qlim in free_run!)
+    # Free-boundary edge term wvac·psio² (vac_data.wv is already singfac-scaled at qlim in free_run!).
+    # rpec uses a fixed-boundary identity edge (the coil unit sources are injected as RHS below), so the
+    # vacuum block is not applied at the edge in that case — matching Fortran gal_set_boundary rpec branch.
     wv_edge = nothing
-    if ctrl.vac_flag && vac_data !== nothing
+    if ctrl.vac_flag && vac_data !== nothing && ncoil == 0
         wv_edge = Matrix{ComplexF64}(vac_data.wv .* equil.psio^2)
     end
 
     gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
+
+    # rpec_flag: inject unit sources into the coil columns (gal.f:1544-1549). For each poloidal mode
+    # ipert, column (2*msing + ipert) gets a unit at the edge cell's value DOF (ip=3 → Julia index 4).
+    if ncoil > 0
+        edge_cell = ws.intvl[msing+1].cells[ws.nx]
+        for ipert in 1:mpert
+            imap = edge_cell.map[ipert, 4]
+            ws.rhs[imap, 2 * msing + ipert] = 1
+        end
+    end
 
     if get(ENV, "GAL_DEBUG", "") == "1"
         offdbg = ws.solver == "LU" ? ws.kl + ws.ku + 1 : 1
@@ -163,9 +182,11 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
 
     di = [real(-asymps[i].right.alpha[1]^2) for i in 1:msing]
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
+    # Coil-response block (rpec_flag): rows 2*msing+1 : 2*msing+mpert of delta (empty otherwise).
+    delta_coil = ncoil > 0 ? delta[(2*msing+1):(2*msing+ncoil), :] : Matrix{ComplexF64}(undef, 0, 0)
     return GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
         [s.psifac for s in sings], [s.q for s in sings],
-        [s.m[1] for s in sings], [s.n[1] for s in sings], di, alpha)
+        [s.m[1] for s in sings], [s.n[1] for s in sings], di, alpha, delta_coil)
 end
 
 """
@@ -212,5 +233,8 @@ function write_galerkin!(out_h5, result::GalerkinResult)
     out_h5["galerkin/sing_n"] = result.sing_n
     out_h5["galerkin/di"] = result.di
     out_h5["galerkin/alpha"] = result.alpha
+    if !isempty(result.delta_coil)
+        out_h5["galerkin/delta_coil"] = result.delta_coil
+    end
     return nothing
 end
