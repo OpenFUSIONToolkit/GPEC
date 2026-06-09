@@ -365,6 +365,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     hmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     fmats_lower_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     fmats_prim_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)  # primitive F before Schur complement (for kinetic)
+    fmats_gal_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)   # reduced Hermitian F̄ (before Cholesky) for the Galerkin solver
     gmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     kmats_flat = zeros(ComplexF64, mpsi, intr.numpert_total^2)
     g11 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
@@ -497,6 +498,11 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
         kmat .= emat .- (adjoint(kmat) * a_inv_cmat_temp)  # K̃ = E - K†A⁻¹C
         gmat .= hmat .- (adjoint(cmat) * a_inv_cmat_temp)  # G̃ = H - C†A⁻¹C
 
+        # Capture the reduced Hermitian F̄ (full matrix) before it is overwritten by its Cholesky
+        # factor below. The Galerkin solver (gal_get_fkg) needs F̄ directly: F = Q F̄ Qᴴ with
+        # Q = diag(singfac). Mirror of Fortran fmats_gal (fourfit.f:341).
+        @views fmats_gal_flat[ipsi, :] .= vec(fmat)
+
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later
         # and this make computation more efficient via combined forward and back substitution
         # TODO: does F stay Hermitian in the 3D case, allowing us to use the lower representation?
@@ -518,6 +524,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     ffit.hmats = cubic_interp(metric.xs, Series(hmats_flat); ffit.itp_opts...)
     ffit.fmats_lower = cubic_interp(metric.xs, Series(fmats_lower_flat); ffit.itp_opts...)
     ffit.fmats_prim = cubic_interp(metric.xs, Series(fmats_prim_flat); ffit.itp_opts...)
+    ffit.fmats_gal = cubic_interp(metric.xs, Series(fmats_gal_flat); ffit.itp_opts...)
     ffit.gmats = cubic_interp(metric.xs, Series(gmats_flat); ffit.itp_opts...)
     ffit.kmats = cubic_interp(metric.xs, Series(kmats_flat); ffit.itp_opts...)
 

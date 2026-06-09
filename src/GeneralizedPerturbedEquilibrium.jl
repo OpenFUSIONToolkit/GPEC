@@ -49,11 +49,12 @@ import AdaptiveArrayPools: @with_pool
 
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
-using .ForceFreeStates: sing_lim!, sing_find!
+using .ForceFreeStates: sing_lim!, sing_min!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
+using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult
 
 const _BANNER = "="^60
 const _SECTION = "-"^40
@@ -221,6 +222,14 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         end
     end
 
+    # For the outer-region Galerkin solve, exclude the q < qlow core (incl. any q≤1 sawtooth
+    # surfaces) by raising psilow to where q = qlow (RDCON sing_min). Without this, the gal FEM
+    # integrates through the unhandled q≤1 ideal singularity and contaminates Δ′ at the innermost
+    # kept surface when q0 < qlow. No-op (keeps the axis bound) when qlow ≤ qmin.
+    if ctrl.gal_flag
+        sing_min!(intr, ctrl, equil)
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -364,8 +373,15 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         end
     end
 
+    # Outer-region resistive Δ′ matrix via the singular Galerkin method (RDCON gal_solve)
+    gal_data = nothing
+    if ctrl.gal_flag
+        ctrl.mat_flag || error("gal_flag=true requires mat_flag=true (needs the F/G/K matrix splines)")
+        gal_data = galerkin_solve(ctrl, equil, ffit, intr; vac_data=ctrl.vac_flag ? vac_data : nothing)
+    end
+
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version, gal_data)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -480,13 +496,19 @@ function write_outputs_to_HDF5(
     odet::OdeState,
     vac_data::Union{VacuumData,Nothing},
     ffit::Union{FourFitVars,Nothing}=nothing,
-    git_version::String="unknown"
+    git_version::String="unknown",
+    gal_data::Union{GalerkinResult,Nothing}=nothing
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
 
         # Store git version for reproducibility
         out_h5["info/git_version"] = git_version
+
+        # Outer-region Galerkin Δ′ matrix (RDCON), if computed
+        if gal_data !== nothing
+            write_galerkin!(out_h5, gal_data)
+        end
 
         # Store input parameters
         for (key, val) in zip(fieldnames(ForceFreeStatesControl), getfield.(Ref(ctrl), fieldnames(ForceFreeStatesControl)))
