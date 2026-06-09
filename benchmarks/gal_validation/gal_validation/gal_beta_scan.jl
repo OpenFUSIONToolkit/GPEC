@@ -1,0 +1,111 @@
+#!/usr/bin/env julia
+# Gal-enabled TJ-analytic beta (pc) scan: at each pc, run the full GPEC pipeline with gal_flag=true
+# and capture three Δ′ measures per resonant surface (m=2 q=2, m=3 q=3):
+#   gal      = galerkin/pest3_Delta diagonal      (RDCON singular-Galerkin, this port)
+#   stride   = singular/delta_prime_matrix diag   (STRIDE BVP, pr178)
+#   cajump   = (ca_r-ca_l)/((2pi)^2 psio)          (ca-jump, pr178 primary)
+# Reuses examples/LAR_beta_scan/gpec.toml. Writes /tmp/gal_beta_scan_results.h5 + CSV.
+using Pkg
+Pkg.activate(joinpath(@__DIR__, "..", "Projects", "GPEC_dev", "docs", "GPEC_julia"))
+const REPO = "/Users/pharr/Projects/GPEC_dev/docs/GPEC_julia"
+Pkg.activate(REPO)
+using GeneralizedPerturbedEquilibrium
+using HDF5, TOML, Printf
+
+_warped_grid(x0, x1, N; p=2.0) = [x0 + (x1 - x0) * (1 - (1 - i / (N - 1))^p) for i in 0:N-1]
+const PC_FULL = _warped_grid(0.001, 0.1735, 40; p=2.0)
+const PC_TEST = [0.001, 0.05, 0.10, 0.15, 0.17]
+const BASE = TOML.parsefile(joinpath(REPO, "examples", "LAR_beta_scan", "gpec.toml"))
+
+function extract(h5)
+    h5open(h5, "r") do f
+        out = Dict{String,Any}()
+        out["q0"] = read(f, "equil/q0"); out["qmax"] = read(f, "equil/qmax")
+        out["dW_total"] = real(read(f, "vacuum/et")[1])
+        psio = read(f, "equil/psio"); denom = (2pi)^2 * psio
+        mlow = read(f, "info/mlow"); mpert = read(f, "info/mpert"); nlow = read(f, "info/nlow")
+        # surface m-values (STRIDE side)
+        m_s = vec(read(f, "singular/m")); n_s = vec(read(f, "singular/n")); msing = length(m_s)
+        # STRIDE delta_prime_matrix
+        dpm = haskey(f["singular"], "delta_prime_matrix") ? read(f, "singular/delta_prime_matrix") : nothing
+        cal = read(f, "singular/ca_left"); car = read(f, "singular/ca_right")
+        # gal
+        gm = haskey(f, "galerkin") && haskey(f["galerkin"], "sing_m") ? vec(read(f, "galerkin/sing_m")) : Int[]
+        gp = haskey(f, "galerkin") && haskey(f["galerkin"], "pest3_Delta") ? read(f, "galerkin/pest3_Delta") : nothing
+        for (s, m) in enumerate(m_s)
+            key = "m$(m)"
+            # ca-jump
+            ipr = 1 + m - mlow + (n_s[s] - nlow) * mpert
+            out["cajump_$key"] = (car[ipr, ipr, 2, s] - cal[ipr, ipr, 2, s]) / denom
+            # stride
+            out["stride_$key"] = dpm !== nothing && s <= size(dpm, 1) ? dpm[s, s] : NaN + NaN*im
+            # gal (match by m)
+            gi = findfirst(==(m), gm)
+            out["gal_$key"] = (gp !== nothing && gi !== nothing) ? gp[gi, gi] : NaN + NaN*im
+        end
+        return out
+    end
+end
+
+function run_point(pc)
+    dir = mktempdir(; prefix="gal_beta_")
+    try
+        c = deepcopy(BASE)
+        c["TJ_ANALYTIC_INPUT"]["pc"] = pc
+        c["ForceFreeStates"]["gal_flag"] = true
+        c["ForceFreeStates"]["gal_solver"] = "LU"
+        c["ForceFreeStates"]["HDF5_filename"] = joinpath(dir, "gpec.h5")
+        open(joinpath(dir, "gpec.toml"), "w") do io; TOML.print(io, c); end
+        GeneralizedPerturbedEquilibrium.main([dir])
+        return extract(joinpath(dir, "gpec.h5"))
+    catch e
+        @warn "pc=$pc failed" exception=(e, catch_backtrace())
+        return nothing
+    finally
+        rm(dir; force=true, recursive=true)
+    end
+end
+
+pcs = ("--test" in ARGS) ? PC_TEST : PC_FULL
+@info "Gal beta scan: $(length(pcs)) points (ε=0.2, qc=1.5, qa=3.6)"
+results = Tuple{Float64,Dict{String,Any}}[]
+t0 = time()
+for (i, pc) in enumerate(pcs)
+    ti = time()
+    r = run_point(pc)
+    el = time() - ti; tot = time() - t0
+    if r !== nothing
+        push!(results, (pc, r))
+        g2 = get(r, "gal_m2", NaN); s2 = get(r, "stride_m2", NaN)
+        g3 = get(r, "gal_m3", NaN); s3 = get(r, "stride_m3", NaN)
+        @printf("[%2d/%2d] pc=%.5f  q=2: gal=%+9.3f stride=%+9.3f | q=3: gal=%+9.3f stride=%+9.3f  dW=%+.4f  (%.0fs, tot %.0fs)\n",
+            i, length(pcs), pc, real(g2), real(s2), real(g3), real(s3), get(r, "dW_total", NaN), el, tot)
+        flush(stdout)
+    end
+end
+
+# Save
+out_h5 = "/tmp/gal_beta_scan_results.h5"
+isfile(out_h5) && rm(out_h5)
+h5open(out_h5, "w") do f
+    f["pc"] = [r[1] for r in results]
+    for key in ("gal_m2", "stride_m2", "cajump_m2", "gal_m3", "stride_m3", "cajump_m3", "dW_total")
+        vals = [get(r[2], key, NaN+NaN*im) for r in results]
+        if eltype(vals) <: Complex
+            f["$(key)_re"] = real.(vals); f["$(key)_im"] = imag.(vals)
+        else
+            f[key] = Float64.(vals)
+        end
+    end
+end
+open("/tmp/gal_beta_scan_results.csv", "w") do io
+    println(io, "pc,gal_m2,stride_m2,cajump_m2,gal_m3,stride_m3,cajump_m3,dW_total")
+    for (pc, r) in results
+        @printf(io, "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", pc,
+            real(get(r,"gal_m2",NaN)), real(get(r,"stride_m2",NaN)), real(get(r,"cajump_m2",NaN)),
+            real(get(r,"gal_m3",NaN)), real(get(r,"stride_m3",NaN)), real(get(r,"cajump_m3",NaN)),
+            get(r,"dW_total",NaN))
+    end
+end
+@info "Saved /tmp/gal_beta_scan_results.h5 and .csv ($(length(results)) points)"
+println("DONE")
