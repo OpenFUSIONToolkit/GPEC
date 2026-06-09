@@ -631,13 +631,19 @@ robustness.
     # rzphi_ys is a materialized Vector (not the Range) so PlasmaEquilibrium can index it directly
     rzphi_ys = collect(theta_nodes)
 
-    grid2d = (rzphi_xs, theta_nodes)
-    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+    # Use PeriodicBC(endpoint=:exclusive): theta_nodes includes both 0 and 1,
+    # but floating-point round-off from the field-line resampling means the
+    # first and last slices may not be bitwise identical even after copying.
+    # With :exclusive, FastInterpolations treats the data as not repeating the
+    # endpoint and appends a virtual endpoint itself from the Range period.
+    # Drop the repeated last column (theta=1) so the data matches the exclusive convention.
+    grid2d = (rzphi_xs, theta_nodes[1:end-1])
+    opts2d = (bc=(CubicFit(), PeriodicBC(endpoint=:exclusive)), extrap=(ExtendExtrap(), WrapExtrap()))
 
-    rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
-    rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
-    rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
-    rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, :, 4]; opts2d...)
+    rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, 1:end-1, 1]; opts2d...)
+    rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, 1:end-1, 2]; opts2d...)
+    rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, 1:end-1, 3]; opts2d...)
+    rzphi_jac = cubic_interp(grid2d, rzphi_nodes[:, 1:end-1, 4]; opts2d...)
 
     eqfun_fs_nodes = zeros(Float64, mpsi + 1, mtheta + 1, 3)
     v = @MMatrix zeros(Float64, 2, 3)
