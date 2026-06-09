@@ -703,9 +703,9 @@ robustness.
         end
     end
 
-    eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
-    eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
-    eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
+    eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, 1:end-1, 1]; opts2d...)
+    eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, 1:end-1, 2]; opts2d...)
+    eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, 1:end-1, 3]; opts2d...)
 
     return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
         rzphi_xs, rzphi_ys,
