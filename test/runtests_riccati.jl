@@ -162,7 +162,7 @@ end
 
         # Use an initialized OdeState just for spline_hint and chunk bounds
         odet_tmp = FFS.OdeState(N, ctrl.numsteps_init, ctrl.numunorms_init, intr_ric.msing)
-        FFS.initialize_el_at_axis!(odet_tmp, ctrl, equil.profiles, intr_ric)
+        FFS.initialize_el_at_axis!(odet_tmp, ctrl, ffit, equil.profiles, intr_ric)
         chunks = FFS.chunk_el_integration_bounds(odet_tmp, ctrl, intr_ric)
 
         # 30% into each chunk: away from singularities at psi_end
