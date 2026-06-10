@@ -27,6 +27,7 @@ makedocs(;
         "API Reference" => [
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
+            "Stability Analysis" => "stability.md",
             "KineticForces" => "kinetic_forces.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",

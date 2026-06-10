@@ -183,18 +183,19 @@ end
     plot_driven_delta_prime(h5path; save_path=nothing)
 
 Scatter plot of `Re(Δ')` per rational surface vs ψ_N, computed by the perturbed
-equilibrium module (from `singular_coupling/delta_prime`). One marker series per
-toroidal mode n. Integer-valued q rational surfaces are annotated.
+equilibrium module (from `perturbed_equilibrium/singular_coupling/delta_prime`).
+One marker series per toroidal mode n. Integer-valued q rational surfaces are
+annotated.
 
-This is complementary to `Analysis.ForceFreeStates.plot_delta_prime`, which uses the
-FFS asymptotic coefficients. The PE result includes the vacuum Green's function
-contribution.
+This is the forcing-driven Δ' (response to the applied perturbation amplitudes
+in `intr.forcing_modes`); for the equilibrium-intrinsic Δ' from the STRIDE BVP,
+read `singular/delta_prime_matrix` from the HDF5 directly.
 
-Requires `singular_coupling/delta_prime` in the HDF5 file.
+Requires `perturbed_equilibrium/singular_coupling/delta_prime` in the HDF5 file.
 
 ### Arguments
 
-  - `h5path`: Path to a GPEC HDF5 output file with perturbed equilibrium output
+  - `h5path`: Path to a GPEC HDF5 output file
 
 ### Keyword arguments
 
@@ -217,7 +218,7 @@ function plot_driven_delta_prime(h5path; save_path=nothing)
     end
 
     p = plot(; xlabel="Norm. Poloidal Flux", ylabel="Re(Δ')",
-        title="Tearing stability Δ' (PE)", legend=:outertopright,
+        title="Tearing stability Δ' (driven, perturbed equilibrium)", legend=:outertopright,
         left_margin=10Plots.mm, bottom_margin=5Plots.mm)
     hline!(p, [0.0]; linestyle=:dash, color=:black, label=nothing)
 
