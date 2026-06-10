@@ -20,7 +20,8 @@ to compute Delta Prime.
 
 This function modifies `locstab_fs` in place with:
 
-  - Column 1: `det(d0bar) * ψ`
+  - Column 1: `det(d0bar) * ψ` (Mercier interchange `D_I`)
+  - Column 2: resistive interchange `D_R * ψ` (see [`resistive_interchange`](@ref))
   - Column 4: Delta Prime (Δ')
 """
 function compute_ballooning_stability!(
@@ -40,8 +41,10 @@ function compute_ballooning_stability!(
     # Loop over flux surfaces
     for flux_surface_index in 1:num_psi
 
+        psi = plasma_eq.profiles.xs[flux_surface_index]
         coeff_data = prepare_ballooning_coefficients(flux_surface_index, plasma_eq; theta_k=theta_k)
-        locstab_fs[flux_surface_index, 1] = coeff_data.di * plasma_eq.profiles.xs[flux_surface_index]
+        locstab_fs[flux_surface_index, 1] = coeff_data.di * psi
+        locstab_fs[flux_surface_index, 2] = resistive_interchange(flux_surface_index, plasma_eq).dr * psi
 
         if compute_delta_prime && plasma_eq.profiles.xs[flux_surface_index] <= 1.0
             result = integrate_ballooning_ode(
@@ -56,6 +59,71 @@ function compute_ballooning_stability!(
         println("Ballooning analysis complete.")
     end
 
+end
+
+"""
+    resistive_interchange(flux_surface_index, plasma_eq)
+
+Resistive interchange criterion `D_R = D_I + (H - 1/2)²` at a single flux surface
+[Glasser-Greene-Johnson; Glasser Phys. Plasmas 23, 112506 (2016)]. The Mercier
+`D_I` and the intermediate `H` are formed from flux-surface averages of the field
+and metric quantities. Returns a NamedTuple `(di, dr, h)`, all unscaled by ψ.
+
+Note: this evaluates the Mercier `D_I` from the surface-average formulation, which
+is a distinct numerical route from the `det(d0bar)` value reported as `locstab/di`
+by [`compute_ballooning_stability!`](@ref).
+"""
+function resistive_interchange(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
+    profiles = plasma_eq.profiles
+    ntheta = length(plasma_eq.rzphi_ys)
+    ff_fs = zeros(ntheta, 5)
+
+    psi = profiles.xs[flux_surface_index]
+    twopif = profiles.F_spline.y[flux_surface_index]
+    p1 = profiles.P_deriv(psi)
+    v1 = profiles.dVdpsi_spline.y[flux_surface_index]
+    v2 = profiles.dVdpsi_deriv(psi)
+    q = profiles.q_spline.y[flux_surface_index]
+    q1 = profiles.q_deriv(psi)
+    chi1 = 2π * plasma_eq.psio
+
+    for itheta in 1:ntheta
+        theta = plasma_eq.rzphi_ys[itheta]
+
+        f1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[1, flux_surface_index, itheta]
+        f2 = plasma_eq.rzphi_offset.nodal_derivs.partials[1, flux_surface_index, itheta]
+        jac = plasma_eq.rzphi_jac.nodal_derivs.partials[1, flux_surface_index, itheta]
+        fy1 = plasma_eq.rzphi_rsquared.nodal_derivs.partials[3, flux_surface_index, itheta]
+        fy2 = plasma_eq.rzphi_offset.nodal_derivs.partials[3, flux_surface_index, itheta]
+        fy3 = plasma_eq.rzphi_nu.nodal_derivs.partials[3, flux_surface_index, itheta]
+
+        rfac = sqrt(f1)
+        eta = 2π * (theta + f2)
+        r = plasma_eq.ro + rfac * cos(eta)
+
+        v21 = fy1 / (2.0 * rfac * jac)
+        v22 = (1.0 + fy2) * 2π * rfac / jac
+        v23 = fy3 * r / jac
+        v33 = 2π * r / jac
+        bsq = chi1^2 * (v21^2 + v22^2 + (v23 + q * v33)^2)
+        dpsisq = (2π * r)^2 * (v21^2 + v22^2)
+
+        ff_fs[itheta, 1] = bsq / dpsisq
+        ff_fs[itheta, 2] = 1.0 / dpsisq
+        ff_fs[itheta, 3] = 1.0 / bsq
+        ff_fs[itheta, 4] = 1.0 / (bsq * dpsisq)
+        ff_fs[itheta, 5] = bsq
+        @views ff_fs[itheta, :] .*= jac / v1
+    end
+
+    avg = FastInterpolations.integrate(cubic_interp(plasma_eq.rzphi_ys, Series(ff_fs); bc=PeriodicBC()))
+
+    term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]
+    di = -0.25 + term * (1 - term) +
+         p1 * (v1 / (q1 * chi1^2))^2 * avg[1] *
+         (p1 * (avg[3] + (twopif / chi1)^2 * avg[4]) - v2 / v1)
+    h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
+    return (di=di, dr=di + (h - 0.5)^2, h=h)
 end
 
 

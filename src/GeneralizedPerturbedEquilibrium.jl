@@ -248,14 +248,15 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # stability does not need kinetic_profiles, but the post-PE block always
     # does, so we load whenever a [KineticForces] section is present or the
     # stability path requests the calculated source.
-    kf_ctrl = haskey(inputs, "KineticForces") ?
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
@@ -535,18 +536,21 @@ function write_outputs_to_HDF5(
         out_h5["splines/rzphi/nu"] = equil.rzphi_nu.nodal_derivs.partials[1, :, :]
         out_h5["splines/rzphi/jac"] = equil.rzphi_jac.nodal_derivs.partials[1, :, :]
 
-        # Write local stability data; always write all entries, using empty arrays when not computed
+        # Write local stability data; always write all entries, using empty arrays when not computed.
+        # locstab/di = Mercier D_I (det(d0bar)); locstab/dr = resistive interchange D_R;
+        # locstab/ballooning_Delta_prime = high-n ballooning Δ' (distinct from the Riccati
+        # tearing Δ' under perturbed_equilibrium/singular_coupling/delta_prime).
         if ctrl.local_stability_flag
             locstab_xs = intr.locstab.cache.x
             out_h5["locstab/di"] = intr.locstab.y[:, 1] ./ locstab_xs
+            out_h5["locstab/dr"] = intr.locstab.y[:, 2] ./ locstab_xs
         else
             out_h5["locstab/di"] = Float64[]
+            out_h5["locstab/dr"] = Float64[]
         end
-        out_h5["locstab/dr"] = Float64[]
         out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
                                  [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
-        out_h5["locstab/delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
-        out_h5["locstab/ca1"] = Float64[]
+        out_h5["locstab/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually
@@ -618,7 +622,7 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
-        
+
         # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
