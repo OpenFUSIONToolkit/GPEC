@@ -19,7 +19,7 @@ Bundles all necessary settings originally specified in the equil fortran namelis
   - `power_rc::Int` - Minor radius (rfac = √((R-R₀)²+(Z-Z₀)²)) power exponent for Jacobian
   - `r0exp::Float64` - Major radius normalization for CHEASE/EQDSK [m]
   - `b0exp::Float64` - On-axis toroidal field normalization for CHEASE/EQDSK [T]
-  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp")
+  - `grid_type::String` - Grid type for flux surface discretization ("log_asymptotic", "ldp", "pow1")
   - `psilow::Float64` - Lower limit of normalized flux coordinate
   - `psihigh::Float64` - Upper limit of normalized flux coordinate
   - `mpsi::Int` - Number of radial grid points (0 = auto-compute from psi_accuracy)
@@ -47,10 +47,10 @@ Bundles all necessary settings originally specified in the equil fortran namelis
     psihigh::Float64 = 0.9995
     mpsi::Int = 0
     psi_accuracy::Float64 = 0.001
-    mtheta::Int = 256
+    mtheta::Int = 512
 
     newq0::Int = 0
-    etol::Float64 = 1e-7
+    etol::Float64 = 1e-10
 
     force_termination::Bool = false
     use_galgrid::Bool = true
@@ -131,12 +131,12 @@ end
 Outer constructor for EquilibriumConfig from a parsed TOML dictionary
 """
 function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
-    # Check for required fields
-    required_keys = ("eq_filename", "eq_type")
-    missingkeys = filter(k -> !haskey(equil_dict, k), required_keys)
-
-    if !isempty(missingkeys)
-        error("Missing required key(s) in [Equilibrium]: $(join(missingkeys, ", "))")
+    # `eq_type` is always required.  `eq_filename` is required for file-based
+    # equilibria (efit, chease, …) but optional for analytic types whose
+    # parameters live in an embedded `[TJ_ANALYTIC_INPUT]` / `[SOL_INPUT]` /
+    # `[LAR_INPUT]` section of the parent gpec.toml.
+    if !haskey(equil_dict, "eq_type")
+        error("Missing required key in [Equilibrium]: eq_type")
     end
 
     # Filter to only known parameters
@@ -153,7 +153,9 @@ function EquilibriumConfig(equil_dict::Dict{String,Any}, base_path::String="./")
 
     # Construct validated struct
     config = EquilibriumConfig(; symbolize_keys(config_data)...)
-    if !isabspath(config.eq_filename)
+    # Only resolve `eq_filename` against `base_path` if the user actually
+    # supplied one (otherwise leave the kwdef sentinel for the embedded path).
+    if haskey(config_data, "eq_filename") && !isabspath(config.eq_filename)
         config.eq_filename = normpath(joinpath(base_path, config.eq_filename))
     end
 
@@ -212,6 +214,8 @@ A mutable struct holding parameters for the Large Aspect Ratio (LAR) plasma equi
     lar_a::Float64 = 1.0
     beta0::Float64 = 1e-3
     q0::Float64 = 1.5
+    qa::Float64 = 3.6        # Edge safety factor (legacy field; not consumed by current sigma_type options)
+    B0::Float64 = 1.0        # On-axis toroidal field [T] (scales F and P)
     p_pres::Float64 = 2.0
     p_sig::Float64 = 1.0
     sigma_type::String = "default"
@@ -228,6 +232,66 @@ function LargeAspectRatioConfig(path::String)
     raw = TOML.parsefile(path)
     input_data = get(raw, "LAR_INPUT", Dict())
     return LargeAspectRatioConfig(; symbolize_keys(input_data)...)
+end
+
+"""
+Outer constructor for LargeAspectRatioConfig from a parsed TOML dictionary.
+Supports embedding the LAR analytic-equilibrium parameters directly in
+`gpec.toml` under `[LAR_INPUT]` instead of a separate `lar.toml`.
+"""
+function LargeAspectRatioConfig(input_dict::Dict{String,Any})
+    return LargeAspectRatioConfig(; symbolize_keys(input_dict)...)
+end
+
+"""
+    TJAnalyticConfig(...)
+
+Parameters for the **TJ-analytic** cylindrical large-aspect-ratio equilibrium
+model — a GPEC adaptation of the analytic profile family used by
+R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ).  We follow the
+same analytic-profile parameterization (ψ-ODE in dimensionless r/a, f₁
+for q, power-law pressure) for the inner cylindrical core and connect it
+to GPEC's direct-GS pipeline; this is NOT a re-implementation of TJ.
+
+The model uses analytic profiles with exact control of both the on-axis
+and edge safety factors. The q profile is determined by:
+
+    f1(r) = [1 - (1-r²)^ν] / (ν·qc)
+    q(r)  = r² / f1(r)
+
+where ν = qa/qc is the current peaking parameter, qc is the axis q, and qa
+is the edge q. All lengths are normalized to R₀, fields to B₀. The pressure
+profile is p₂(r) = pc·(1-r²)^μ.
+
+Reference: R. Fitzpatrick, TJ code, https://github.com/rfitzp/TJ
+"""
+@kwdef mutable struct TJAnalyticConfig
+    lar_r0::Float64 = 10.0     # Major radius R₀ [m]
+    lar_a::Float64 = 1.0       # Minor radius a [m] (ε = a/R₀)
+    qc::Float64 = 1.5          # On-axis safety factor
+    qa::Float64 = 3.6          # Edge safety factor
+    pc::Float64 = 0.001        # Normalized on-axis pressure
+    mu::Float64 = 2.0          # Pressure peaking exponent: p₂ = pc·(1-r²)^μ
+    B0::Float64 = 12.0         # On-axis toroidal field [T]
+    ma::Int = 128              # Radial grid points
+    mtau::Int = 128            # Poloidal grid points
+    zeroth::Bool = false       # If true, suppress Shafranov shift
+end
+
+function TJAnalyticConfig(path::String)
+    raw = TOML.parsefile(path)
+    input_data = get(raw, "TJ_ANALYTIC_INPUT", Dict())
+    return TJAnalyticConfig(; symbolize_keys(input_data)...)
+end
+
+"""
+Outer constructor for TJAnalyticConfig from a parsed TOML dictionary. Supports
+embedding the TJ-analytic equilibrium parameters (cf. R. Fitzpatrick's
+TJ code, https://github.com/rfitzp/TJ) directly in the main `gpec.toml`
+under `[TJ_ANALYTIC_INPUT]`, removing the need for a separate side-car file.
+"""
+function TJAnalyticConfig(input_dict::Dict{String,Any})
+    return TJAnalyticConfig(; symbolize_keys(input_dict)...)
 end
 
 """
@@ -272,6 +336,15 @@ function SolovevConfig(path::String) # if we use @kwdef, it generates SolovevCon
 end
 
 """
+Outer constructor for SolovevConfig from a parsed TOML dictionary.
+Supports embedding the Solovev analytic-equilibrium parameters directly
+in `gpec.toml` under `[SOL_INPUT]` instead of a separate `sol.toml`.
+"""
+function SolovevConfig(input_dict::Dict{String,Any})
+    return SolovevConfig(; symbolize_keys(input_dict)...)
+end
+
+"""
     DirectRunInput(...)
 
 A container struct that bundles all necessary inputs for the `direct_run` function.
@@ -309,6 +382,7 @@ raw equilibrium data and preparing the initial splines.
   - `zmin::Float64` — Minimum Z-coordinate of the computational grid [m]
   - `zmax::Float64` — Maximum Z-coordinate of the computational grid [m]
   - `psio::Float64` — Total flux difference `|ψ_axis - ψ_boundary|` [Wb/rad]
+  - `bt_sign::Int` — Sign of the toroidal field (+1 or -1); read from fpol sign in EFIT g-files
 """
 mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
@@ -321,6 +395,7 @@ mutable struct DirectRunInput{S<:FastInterpolations.CubicSeriesInterpolant,I2D<:
     zmin::Float64    # Minimum Z-coordinate of the computational grid [m].
     zmax::Float64    # Maximum Z-coordinate of the computational grid [m].
     psio::Float64    # The total flux difference |ψ_axis - ψ_boundary| [Weber / radian].
+    bt_sign::Int     # Sign of the toroidal field: +1 or -1 (from fpol sign in g-file)
 end
 
 """
@@ -445,8 +520,9 @@ A mutable struct containing computed equilibrium parameters and diagnostic flags
     kappa::Union{Nothing,Float64} = nothing # Elongation of the plasma cross-section
     delta1::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (upper triangularity)
     delta2::Union{Nothing,Float64} = nothing # Triangularity of the plasma cross-section (lower triangularity)
-    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T]
+    bt0::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the axis [T] (always positive; sign in bt_sign)
     crnt::Union{Nothing,Float64} = nothing # Plasma current at the axis [A]
+    bt_sign::Int = 1 # Sign of the toroidal field: +1 (positive Bt) or -1 (negative Bt, e.g. DIII-D standard)
     bwall::Union{Nothing,Float64} = nothing # Toroidal magnetic field at the wall [T]
     verbose::Bool = false # Whether to print verbose output
     diagnose_src::Bool = false # Whether to diagnose source data
@@ -542,6 +618,134 @@ function ProfileSplines(xs::Vector{Float64},
 end
 
 """
+    GeometryProfileSplines
+
+Named 1D cubic spline interpolants for flux-surface-averaged geometric quantities.
+Built once during equilibrium construction so they are available to every downstream
+module without per-caller recomputation.
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared ψ axis (matches `rzphi_xs`)
+  - `area_spline`: Flux-surface area ∫ dA(ψ) [m²]
+  - `avg_r_spline`: Surface-average minor radius ⟨r⟩(ψ) [m]
+  - `avg_R_spline`: Surface-average major radius ⟨R⟩(ψ) [m]
+"""
+struct GeometryProfileSplines{S}
+    xs::Vector{Float64}
+    npts::Int
+    npts_minus_1::Int
+    area_spline::S
+    avg_r_spline::S
+    avg_R_spline::S
+end
+
+"""
+    GeometryProfileSplines(xs, area_vals, avg_r_vals, avg_R_vals; extrap=ExtendExtrap())
+
+Construct `GeometryProfileSplines` from arrays of surface-averaged values defined
+on the shared ψ grid `xs`. Uses CubicFit boundary conditions to match `ProfileSplines`.
+"""
+function GeometryProfileSplines(xs::Vector{Float64},
+    area_vals::Vector{Float64},
+    avg_r_vals::Vector{Float64},
+    avg_R_vals::Vector{Float64};
+    extrap::AbstractExtrap=ExtendExtrap())
+    npts = length(xs)
+    @assert length(area_vals) == npts
+    @assert length(avg_r_vals) == npts
+    @assert length(avg_R_vals) == npts
+
+    area_spline = cubic_interp(xs, area_vals; extrap=extrap)
+    avg_r_spline = cubic_interp(xs, avg_r_vals; extrap=extrap)
+    avg_R_spline = cubic_interp(xs, avg_R_vals; extrap=extrap)
+
+    GeometryProfileSplines{typeof(area_spline)}(
+        xs, npts, npts - 1,
+        area_spline, avg_r_spline, avg_R_spline,
+    )
+end
+
+"""
+    KineticProfileSplines
+
+Named 1D cubic spline interpolants for kinetic profiles (densities, temperatures,
+ExB rotation, collisional diagnostics) loaded from an external `kinetic.dat`
+file. Mirrors the `ProfileSplines` pattern: each quantity is its own named
+spline plus a paired derivative view for the species the NTV kernel needs
+(densities and temperatures, used by `wdian`/`wdiat` in `KineticForces/Torque.jl`).
+
+# Fields
+
+  - `xs::Vector{Float64}`: Shared ψ axis (the regular kinetic grid)
+  - `ni_spline`, `ne_spline`: Ion / electron number densities [m⁻³]
+  - `Ti_spline`, `Te_spline`: Ion / electron temperatures [J]
+  - `omegaE_spline`: ExB rotation ω_E [rad/s]
+  - `loglam_spline`: Coulomb logarithm
+  - `nui_spline`, `nue_spline`: Krook collision frequencies [s⁻¹]
+  - `zeff_spline`: Effective charge Z_eff
+  - `ni_deriv`, `ne_deriv`, `Ti_deriv`, `Te_deriv`: Derivative views for ψ-derivative access
+"""
+struct KineticProfileSplines{S,D}
+    xs::Vector{Float64}
+    npts::Int
+    npts_minus_1::Int
+    ni_spline::S
+    ne_spline::S
+    Ti_spline::S
+    Te_spline::S
+    omegaE_spline::S
+    loglam_spline::S
+    nui_spline::S
+    nue_spline::S
+    zeff_spline::S
+    ni_deriv::D
+    ne_deriv::D
+    Ti_deriv::D
+    Te_deriv::D
+end
+
+"""
+    KineticProfileSplines(xs, ni, ne, Ti, Te, omegaE, loglam, nui, nue, zeff;
+                          extrap=ExtendExtrap())
+
+Build the kinetic profile splines from arrays of values defined on the shared
+ψ grid `xs`. Uses CubicFit boundary conditions to match `ProfileSplines`.
+Temperatures must already be in Joules.
+"""
+function KineticProfileSplines(xs::Vector{Float64},
+    ni::Vector{Float64}, ne::Vector{Float64},
+    Ti::Vector{Float64}, Te::Vector{Float64},
+    omegaE::Vector{Float64}, loglam::Vector{Float64},
+    nui::Vector{Float64}, nue::Vector{Float64}, zeff::Vector{Float64};
+    extrap::AbstractExtrap=ExtendExtrap())
+    npts = length(xs)
+    @assert all(length(v) == npts for v in (ni, ne, Ti, Te, omegaE, loglam, nui, nue, zeff))
+
+    ni_spline = cubic_interp(xs, ni; extrap=extrap)
+    ne_spline = cubic_interp(xs, ne; extrap=extrap)
+    Ti_spline = cubic_interp(xs, Ti; extrap=extrap)
+    Te_spline = cubic_interp(xs, Te; extrap=extrap)
+    omegaE_spline = cubic_interp(xs, omegaE; extrap=extrap)
+    loglam_spline = cubic_interp(xs, loglam; extrap=extrap)
+    nui_spline = cubic_interp(xs, nui; extrap=extrap)
+    nue_spline = cubic_interp(xs, nue; extrap=extrap)
+    zeff_spline = cubic_interp(xs, zeff; extrap=extrap)
+
+    ni_deriv = deriv1(ni_spline)
+    ne_deriv = deriv1(ne_spline)
+    Ti_deriv = deriv1(Ti_spline)
+    Te_deriv = deriv1(Te_spline)
+
+    KineticProfileSplines{typeof(ni_spline),typeof(ni_deriv)}(
+        xs, npts, npts - 1,
+        ni_spline, ne_spline, Ti_spline, Te_spline,
+        omegaE_spline, loglam_spline, nui_spline, nue_spline, zeff_spline,
+        ni_deriv, ne_deriv, Ti_deriv, Te_deriv,
+    )
+end
+
+"""
     PlasmaEquilibrium(...)
 
 The final, self-contained result of the equilibrium reconstruction.
@@ -558,6 +762,9 @@ This object provides a complete representation of the processed plasma equilibri
     Named 1D profile splines (F, P, dV/dψ, q) on normalized psi grid.
     Access values at grid points via `profiles.F_spline.y[i]`, etc.
     Access derivatives via `profiles.F_deriv.y[i]` or `profiles.F_deriv(psi)`.
+  - `geometry::GeometryProfileSplines`:
+    Named 1D splines for flux-surface-averaged geometry (area, ⟨r⟩, ⟨R⟩),
+    populated automatically by `compute_geometry_profiles` during construction.
   - **Grid coordinates (shared by all rzphi/eqfun interpolants):**
 
       + `rzphi_xs::Vector{Float64}`: ψ coordinates (length mpsi+1)
@@ -583,10 +790,11 @@ This object provides a complete representation of the processed plasma equilibri
   - `zo::Float64`: Z-coordinate of the magnetic axis [m]
   - `psio::Float64`: Total flux difference |Ψ_axis - Ψ_boundary| [Weber/radian]
 """
-mutable struct PlasmaEquilibrium{P<:ProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
+mutable struct PlasmaEquilibrium{P<:ProfileSplines,G<:GeometryProfileSplines,I2D<:FastInterpolations.CubicInterpolantND}
     config::EquilibriumConfig
     params::EquilibriumParameters
     profiles::P
+    geometry::G
 
     # Grid coordinates (shared by all 2D interpolants)
     rzphi_xs::Vector{Float64}

@@ -280,7 +280,7 @@ function direct_fieldline_int(psifac::Float64, raw_profile::DirectRunInput, ro::
     callback = DiscreteCallback((u, t, i) -> true, refine_affect!; save_positions=(true, false))
 
     prob = ODEProblem{true}(direct_fieldline_der!, u0, (0.0, 2π), params)
-    sol = solve(prob, BS5(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
+    sol = solve(prob, Vern9(); callback=callback, reltol=equil_config.etol, abstol=1e-8, dt=2π / 200, adaptive=true, dense=false)
 
     sol_matrix = reduce(hcat, sol.u::Vector{Vector{Float64}})'
     return hcat(sol.t::Vector{Float64}, sol_matrix), bfield
@@ -508,6 +508,9 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
         end
     elseif equil_params.grid_type == "ldp"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
+    elseif equil_params.grid_type == "pow1"
+        # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
+        [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
@@ -634,6 +637,9 @@ robustness.
     grid2d = (rzphi_xs, theta_nodes)
     opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
+    # Snap periodic endpoint: ff_interp evaluation at theta_nodes[end] may drift by machine eps from theta_nodes[1]
+    @views rzphi_nodes[:, end, :] .= rzphi_nodes[:, 1, :]
+
     rzphi_rsquared = cubic_interp(grid2d, rzphi_nodes[:, :, 1]; opts2d...)
     rzphi_offset = cubic_interp(grid2d, rzphi_nodes[:, :, 2]; opts2d...)
     rzphi_nu = cubic_interp(grid2d, rzphi_nodes[:, :, 3]; opts2d...)
@@ -697,11 +703,19 @@ robustness.
         end
     end
 
+    @views eqfun_fs_nodes[:, end, :] .= eqfun_fs_nodes[:, 1, :]
+
     eqfun_B = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 1]; opts2d...)
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
-    return PlasmaEquilibrium(raw_profile.config, EquilibriumParameters(), profiles,
+    geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
+
+    params = EquilibriumParameters()
+    params.bt_sign = raw_profile.bt_sign
+
+    return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,

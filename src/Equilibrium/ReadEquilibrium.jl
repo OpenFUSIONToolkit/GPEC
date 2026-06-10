@@ -79,6 +79,7 @@ function read_efit(config::EquilibriumConfig)
     end
 
     fpol_data = parse_block(nw)
+    fpol_sign = Int(sign(fpol_data[end]))  # sign of toroidal field (before abs is applied below)
     pres_data = parse_block(nw)
     ffprime_data = parse_block(nw)
     pprime_data = parse_block(nw)
@@ -118,7 +119,7 @@ function read_efit(config::EquilibriumConfig)
     psi_in = cubic_interp((psi_in_xs, psi_in_ys), psi_proc; extrap=ExtendExtrap())
 
     # --- Bundle everything for the solver ---
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign)
 end
 
 
@@ -372,6 +373,9 @@ function read_chease_ascii(config::EquilibriumConfig)
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
 
+    @views R_data[:, end] .= R_data[:, 1]
+    @views Z_data[:, end] .= Z_data[:, 1]
+
     opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; opts2d...)
@@ -432,6 +436,10 @@ function read_imas(config::EquilibriumConfig, dd)
     p_1d = eqt.profiles_1d.pressure   # plasma pressure P(ψ) [Pa], COCOS-independent
     q_1d = eqt.profiles_1d.q          # safety factor, COCOS-independent
 
+    # Capture toroidal-field sign from the boundary F value before abs() below.
+    bt_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
+    bt_sign == 0 && (bt_sign = 1)
+
     nw = length(psi_1d)
     psi_norm_grid = range(0.0, 1.0; length=nw)
 
@@ -478,5 +486,5 @@ function read_imas(config::EquilibriumConfig, dd)
           "\n    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m" *
           "\n    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m"
 
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign)
 end

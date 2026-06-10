@@ -95,9 +95,9 @@ GPEC will eventually implement resistive MHD stability analysis based on:
   - Published: Physics of Plasmas **27**, 122509 (2020)
   - Describes: Asymptotic matching for resistive plasma response
 
-### PENTRC Module (Future Work)
+### KineticForces Module (NTV)
 
-GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroidal viscosity in Realistic geometry Code) functionality from the Fortran GPEC suite. This is described in:
+The KineticForces module (formerly PENTRC) implements neoclassical toroidal viscosity calculations. Based on:
 
 - **Logan & Park (2013)**: "Neoclassical toroidal viscosity in perturbed equilibria with general tokamak geometry"
   - Location: `docs/resources/2013-Logan-Neoclassical_toroidal_viscosity_in_perturbed_equilibria_with_general_tokamak_geometry.pdf`
@@ -107,13 +107,15 @@ GPEC will eventually port the PENTRC (Perturbed Equilibrium Neoclassical Toroida
 - **Logan (2015)**: "Electromagnetic Torque in Tokamaks with Toroidal Asymmetries"
   - Location: `docs/resources/2015-Logan-Electromagnetic_Torque_in_Tokamaks_with_Toroidal_Asymmetries-compressed.pdf`
   - Published: PhD Thesis, Princeton University (2015)
-  - Describes: Complete PENTRC theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
+  - Describes: Complete NTV theory and implementation. **Chapter 7** details the hybrid drift-kinetic MHD eigenfunction calculation: 6 kinetic matrices Ak,Bk,Ck,Dk,Ek,Hk (Eqs 7.30-7.35) as energy-space integrals of perturbed action operators WX,WY,WZ; hybrid Euler-Lagrange equations; resonance splitting/suppression where Fh=(Q-P†)F̄(Q-P)+... shifts singularities away from rational surfaces (Eq 7.46); convergence to ideal limit. **Appendix C** derives the DCON matrix form of the perturbed action (Eqs C.1-C.11) used to compute the kinetic coefficient matrices. **Appendix D** details numerical treatment of integrable singularities in bounce averages.
 
 ### Additional References
 
-- **Various (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
-  - Location: `docs/resources/2009-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
-  - Describes: Neoclassical transport theory
+- **Park et al. (2009)**: "Nonambipolar Transport by Trapped Particles in Tokamaks"
+  - Location: `docs/resources/2009-Park-Nonambipolar_Transport_by_Trapped_Particles_in_Tokamaks.pdf`
+  - Published: Physical Review Letters **102**, 065002 (2009)
+  - Link: https://doi.org/10.1103/PhysRevLett.102.065002
+  - Describes: Trapped-particle nonambipolar transport theory underpinning the NTV calculation
 
 ## Common Commands
 
@@ -199,6 +201,11 @@ julia benchmarks/benchmark_git_branches.jl \
 - Working directory should be clean or changes will be stashed during branch switching
 - Tool requires HDF5.jl for reading euler.h5 output
 - Each benchmark run takes several minutes per branch (includes compilation + warm runs)
+
+**Benchmark script conventions:**
+- Benchmark scripts must reference input data from `examples/` (e.g., `joinpath(@__DIR__, "..", "examples", "DIIID-like_ideal_example")`). Never duplicate example inputs into `benchmarks/`.
+- If a benchmark needs modified TOML settings or a parameter scan, copy inputs to a temporary local directory at runtime — do not commit these copies.
+- All outputs (figures, CSVs, HDF5 files) must be saved into `benchmarks/` itself (or a self-described subdirectory within it, e.g., `benchmarks/coil_scan_results/`). Output files are not committed.
 
 ### Regression Harness
 
@@ -577,6 +584,7 @@ This format is used for compiling release notes, so tags should be human-readabl
 - **Indexing**: The codebase uses 0-based indexing in many places to match Fortran conventions, then converts to 1-based Julia indexing
 - **No step numbering in code comments** - Avoid annotations like "Step 1: do this" followed by "Step 2: do that". These get out of sync as code changes. Just describe the action without numbering.
 - **Documentation coverage** - When adding a new module or submodule with public docstrings, add a corresponding `@autodocs` block in `docs/src/`. Documenter CI will fail with a `missing_docs` error if any exported docstring is not covered. The analysis submodule docs live in `docs/src/analysis.md`.
+- **Docstrings are rendered as Markdown** - Documenter parses docstrings as CommonMark, so `[text](...)` patterns become hyperlinks and will fail CI with `invalid local link/image` if the target doesn't exist. Common pitfall: unit annotations like `[degrees] (or [m] if ...)` parse as `[degrees](or [m] if ...)` — a broken link. Use plain words (`in degrees`) or backticks (`` `[m]` ``) for unit labels inside docstrings. Same rule for bracketed array-shape hints (`[ncoil]`) followed by parentheses. When in doubt, preview with `julia --project=docs docs/make.jl` before pushing.
 - **Keep code comments concise** - A comment should be one line where possible. Do not write multi-line block comments explaining the current session's investigation, what was tried, what was wrong before, or why a specific file/path behaves differently. State what the code does and why at a general level. Example of too much detail: a 6-line block explaining that efit_by_inversion uses psilow>0 while CHEASE starts at 0, that the old code was removed, and that spline spikes result. Preferred: `# Replicate Fortran inverse.f: overwrite deta at axis (r²=0) by extrapolating from innermost surfaces.`
 
 ### Output Files
@@ -586,6 +594,32 @@ This format is used for compiling release notes, so tags should be human-readabl
 ### Current Development Priorities
 - **Perturbed equilibrium module**: Active development of GPEC-style singular coupling analysis
 - **Configuration**: All settings now in unified `gpec.toml` file
+
+### Plotting
+- **Spectrum plots** (any plot with discrete mode numbers m or n on the x-axis) must use `seriestype=:steppre` with a `step_series` helper that pads zeros on both ends. Pattern from `benchmarks/benchmark_coil_ForcingTerms_against_fortran.jl`:
+  ```julia
+  function step_series(m_vals, amps)
+      m_ext   = [m_vals[1] - 1; m_vals; m_vals[end] + 1]
+      amp_ext = [0.0; amps; 0.0]
+      return m_ext, amp_ext
+  end
+  # Usage:
+  m_ext, a_ext = step_series(m_vals, amplitudes)
+  plot!(p, m_ext, a_ext; seriestype=:steppre, lw=2, label="...")
+  ```
+
+### Subagent Consultations
+
+When delegating to specialized agents (julia-performance-optimizer, fast-interpolations-optimizer, fortran-physics-reviewer, clean-code-reviewer, etc.), every prompt **must include an explicit budget** because runaway agents silently consume the user's daily token quota. A single consultation that explores instead of editing has been measured at 167 tool calls / 55 minutes / no return — that is a session-killer. Defaults:
+
+- **Hard cap: ≤ 30 tool uses and ≤ 10 minutes wall time per consultation.** State both numbers in the prompt verbatim ("Budget: ≤30 tool uses, ≤10 min").
+- **Single concrete deliverable.** One file, one function, or one named hotspot list. Not "audit the module."
+- **No exploration phase.** The prompt must hand the agent the file paths and line numbers; the agent's job is to edit, not to map the codebase.
+- **Require an interim status if the work might exceed budget.** Tell the agent: "If you cannot finish within budget, stop and report what was changed and what remains."
+- **Prefer two short focused agents over one open-ended one.** If an investigation needs both performance and interpolation review, run them sequentially with separate ≤30-tool budgets — don't chain them in one long prompt.
+- **Never re-launch a runaway agent.** If an agent hits the API rate limit before returning, do not retry; report the partial state to the user and switch to hand-implementation.
+
+These rules apply to **every** Agent tool invocation, not just performance work.
 
 ### Code Formatting
 

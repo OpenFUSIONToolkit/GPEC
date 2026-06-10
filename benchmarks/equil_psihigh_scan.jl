@@ -17,8 +17,8 @@ Instead, methods are compared against each other, and the divergence of q toward
 the separatrix is tracked as a physical indicator.
 
 et[1] is obtained by running the full ForceFreeStates pipeline (ODE integration +
-free-boundary energy) for each (method, psihigh) combination and reading vacuum/et
-from the HDF5 output.
+free-boundary energy) for each (method, psihigh) combination and reading
+FreeBoundaryStability/eigenmode_energies from the HDF5 output.
 
 Usage:
   julia --project=. benchmarks/equil_psihigh_scan.jl [example_path]
@@ -69,7 +69,7 @@ function run_ffs_et1(config_path::String, eq_type::String, psihigh::Float64)::Fl
         try
             GeneralizedPerturbedEquilibrium.main([tmpdir])
             h5open(joinpath(tmpdir, "gpec.h5"), "r") do h5
-                et = read(h5["vacuum/et"])
+                et = read(h5["FreeBoundaryStability/eigenmode_energies"])
                 return real(et[1])
             end
         catch
