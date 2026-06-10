@@ -27,7 +27,7 @@ end
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
 
 """
-    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10, fft_flag::Bool=true) -> MetricData
+    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10) -> MetricData
 
 Constructs the metric tensor data on a (ψ, θ) grid from an input plasma equilibrium.
 The metric coefficients stored in `metric.fs` include:
@@ -44,7 +44,6 @@ The metric coefficients stored in `metric.fs` include:
 ### Arguments
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
-  - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
 
 ### Returns
 
@@ -56,7 +55,7 @@ The metric coefficients stored in `metric.fs` include:
 Add kinetic metric tensor components for kinetic mode
 Remove mband if we decide to fully deprecate banded matrices
 """
-function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
+function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int)
 
     # TODO: add kinetic metric tensor components
 
@@ -122,6 +121,8 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     end
 
     # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
+    # Faithful Fortran fspline_fit_2 (equil/fspline.f:293): FFT after dropping the duplicated
+    # θ=2π endpoint. The fspline_fit_1 integration variant (idcon.f fft_flag=false) is not implemented.
     metric.fourier_coeffs = Utilities.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
     return metric
 end

@@ -285,7 +285,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = make_metric(equil; mband=intr.mband)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"

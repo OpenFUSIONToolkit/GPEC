@@ -210,7 +210,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `ode_flag::Bool` - Enable ODE integration diagnostics
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mer_flag::Bool` - Enable Mercier stability criterion
-  - `fft_flag::Bool` - Enable Fourier transform analysis
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
@@ -258,7 +257,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     ode_flag::Bool = false
     vac_flag::Bool = false
     mer_flag::Bool = false
-    fft_flag::Bool = false
     mthvac::Int = 480
     nzvac::Int = 1
     sing_start::Int = 0

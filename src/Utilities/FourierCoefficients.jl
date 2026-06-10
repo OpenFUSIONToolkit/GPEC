@@ -73,7 +73,7 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
     @assert mband >= 0 "mband must be non-negative"
 
     # Drop periodic-duplicate endpoint before FFT to match Fortran fspline_fit_2
-    # (math/fspline.f:293 uses `f = fst%fs(:, 0:my-1, iq)`). The equilibrium θ-grids
+    # (equil/fspline.f:293 uses `f = fst%fs(:, 0:my-1, iq)`). The equilibrium θ-grids
     # in this codebase store θ=0 and θ=2π as both endpoints (length mtheta+1);
     # including the duplicate biases the DC coefficient by ~(f(0) − mean)/N.
     has_duplicate = ny_full > 1 && isapprox(ys[end] - ys[1], 2π; rtol=1e-10)
