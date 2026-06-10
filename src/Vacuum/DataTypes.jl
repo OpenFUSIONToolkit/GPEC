@@ -225,10 +225,15 @@ function PlasmaGeometry(inputs::VacuumInput)
     θ_in = range(0.0, 2π; length=inputs.mtheta_in) # VacuumInput uses [0, 2π] grid
     θ_out = range(; start=0, length=inputs.mtheta, step=2π/inputs.mtheta) # VACUUM uses [0, 2π) grid
 
+    # Enforce periodic endpoints before interpolation (floating point may give y[1] ≉ y[end])
+    x_in = copy(inputs.x); x_in[end] = x_in[1]
+    z_in = copy(inputs.z); z_in[end] = z_in[1]
+    ν_in = copy(inputs.ν); ν_in[end] = ν_in[1]
+
     # Use one-shot API with PeriodicBC
-    x = cubic_interp(θ_in, inputs.x, θ_out; bc=PeriodicBC()) # no endpoint handling needed!
-    z = cubic_interp(θ_in, inputs.z, θ_out; bc=PeriodicBC())
-    ν = cubic_interp(θ_in, inputs.ν, θ_out; bc=PeriodicBC())
+    x = cubic_interp(θ_in, x_in, θ_out; bc=PeriodicBC())
+    z = cubic_interp(θ_in, z_in, θ_out; bc=PeriodicBC())
+    ν = cubic_interp(θ_in, ν_in, θ_out; bc=PeriodicBC())
 
     return PlasmaGeometry(x, z, ν)
 end
