@@ -2,21 +2,20 @@
 # src/Utilities/FourierTransforms.jl. The low-level fourier_transform! /
 # fourier_inverse_transform! matrix kernels are already covered in
 # runtests_utilities.jl; this file targets the functor, inverse, in-place,
-# and compute_fourier_coefficients paths that were previously untested.
+# and compute_fourier_coefficients paths.
 #
-# Expected values come from grid orthogonality on the uniform grid
-# θ_i = 2π(i-1)/N (no phase shift, ν = 0):
-#   Σ_i cos(aθ_i)cos(bθ_i) = N/2 if a = ±b ≠ 0, N if a = b = 0, else 0
-#   Σ_i sin(aθ_i)sin(bθ_i) = N/2 if a = b ≠ 0, -N/2 if a = -b ≠ 0, else 0
-#   Σ_i sin(aθ_i)cos(bθ_i) = 0  (over a full period)
-# With the exp(-imθ), 1/N forward convention (Fortran iscdftf) this gives the
-# closed-form mode amplitudes asserted below.
+# Expected mode amplitudes follow from grid orthogonality under the module's
+# exp(-imθ), 1/N forward convention (Fortran iscdftf): on the uniform grid
+# θ_i = 2π(i-1)/N, cos(m0θ) → 0.5 at ±m0, sin(m0θ) → ∓0.5im at ±m0.
 
 using GeneralizedPerturbedEquilibrium.Utilities: FourierTransform, inverse, transform!, inverse_transform!, compute_fourier_coefficients
 using GeneralizedPerturbedEquilibrium.Utilities: empty_FourierCoefficients
 
+const ATOL = 1e-10        # analytic-value comparisons
+const ATOL_TIGHT = 1e-12  # in-place vs allocating / formula-vs-formula checks
+
 @testset "FourierTransform functor" begin
-    atol = 1e-10
+    atol = ATOL
 
     # Mode index l for mode number m (m = mlow + l - 1).
     midx(m, mlow) = m - mlow + 1
@@ -98,7 +97,7 @@ using GeneralizedPerturbedEquilibrium.Utilities: empty_FourierCoefficients
 end
 
 @testset "FourierTransform in-place == allocating" begin
-    atol = 1e-12
+    atol = ATOL_TIGHT
     N, mlow, mpert = 32, -6, 13
     ft = FourierTransform(N, mpert, mlow)
     θ = collect(range(; start=0, length=N, step=2π/N))
@@ -139,36 +138,28 @@ end
 end
 
 @testset "compute_fourier_coefficients" begin
-    atol = 1e-12
+    atol = ATOL_TIGHT
 
-    @testset "2D basis reduces to cos(mθ)/sin(mθ)" begin
-        N, mlow, mpert = 64, -5, 11
-        cosb, sinb = compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))
-        @test size(cosb) == (N, mpert)
-        @test size(sinb) == (N, mpert)
-
-        θ = collect(range(; start=0, length=N, step=2π/N))
-        for (l, m) in enumerate(mlow:(mlow + mpert - 1))
-            @test all(isapprox.(cosb[:, l], cos.(m .* θ); atol))
-            @test all(isapprox.(sinb[:, l], sin.(m .* θ); atol))
-        end
-
-        # The FourierTransform constructor stores exactly this basis.
-        ft = FourierTransform(N, mpert, mlow)
-        @test ft.cslth == cosb
-        @test ft.snlth == sinb
-    end
-
-    @testset "2D phase shift cos(mθ - nν)" begin
+    @testset "2D basis is cos(mθ - nν)/sin(mθ - nν)" begin
+        # Nonzero n and ν exercise the general phase-shifted form and lock both the
+        # grid convention (start=0, step=2π/N) and the -n·ν sign.
         N, mlow, mpert = 32, -3, 7
         n = 2
         ν = collect(range(; start=0.0, length=N, step=0.05))
         cosb, sinb = compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=n, ν=ν)
+        @test size(cosb) == (N, mpert)
+        @test size(sinb) == (N, mpert)
+
         θ = collect(range(; start=0, length=N, step=2π/N))
-        for (l, m) in enumerate(mlow:(mlow + mpert - 1))
+        for (l, m) in enumerate(mlow:(mlow+mpert-1))
             @test all(isapprox.(cosb[:, l], cos.(m .* θ .- n .* ν); atol))
             @test all(isapprox.(sinb[:, l], sin.(m .* θ .- n .* ν); atol))
         end
+
+        # The FourierTransform constructor stores exactly the n=0, ν=0 basis.
+        ft = FourierTransform(N, mpert, mlow)
+        @test ft.cslth == compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))[1]
+        @test ft.snlth == compute_fourier_coefficients(N, mpert, mlow, 1, 1, 1; n_2D=0, ν=zeros(N))[2]
     end
 
     @testset "3D basis shapes" begin
