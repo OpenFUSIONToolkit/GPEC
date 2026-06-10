@@ -11,6 +11,7 @@ import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
+include("FluxSurfaceMetrics.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
 include("DirectEquilibriumArcLength.jl")
@@ -24,6 +25,7 @@ include("KineticProfiles.jl")
 export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
     KineticProfileSplines, load_kinetic_profiles
+export flux_surface_metric, flux_surface_area
 
 # --- Constants ---
 const mu0 = 4π * 1e-7

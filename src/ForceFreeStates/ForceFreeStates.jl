@@ -30,6 +30,7 @@ include("FixedKineticMatrices.jl")
 include("Kinetic.jl")
 include("FixedBoundaryStability.jl")
 include("Utils.jl")
+include("PowerNorm.jl")
 include("Free.jl")
 include("Riccati.jl")
 

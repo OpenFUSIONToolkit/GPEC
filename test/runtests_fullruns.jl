@@ -21,7 +21,8 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex3])
         h5open(joinpath(ex3, "gpec.h5"), "r") do h5
-            et = read(h5["vacuum/et"])
+            # ξ-space (XiNorm) eigenvalues — power-norm collapses these stable modes to ~0, unusable as a regression anchor.
+            et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             @test isfinite(real(et[1]))
             @test real(et[1]) > 0  # Solovev is stable (positive total energy)
             @test real(et[1]) ≈ 16.480 rtol = 0.01
@@ -35,7 +36,8 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex4])
         h5open(joinpath(ex4, "gpec.h5"), "r") do h5
-            et = read(h5["vacuum/et"])
+            # ξ-space (XiNorm) eigenvalues — power-norm collapses these modes to ~0, unusable as a regression anchor.
+            et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             @test isfinite(real(et[1]))
             # et[1] is the single near-marginal kinetic eigenvalue; the rest of the spectrum
             # is large and positive (stable). Being a small difference of large plasma/vacuum
@@ -60,7 +62,7 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex5])
         h5open(joinpath(ex5, "gpec.h5"), "r") do h5
-            et = read(h5["vacuum/et"])
+            et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             # Self-consistent KF→FFS kinetic-MHD eigenvalue with full-strength kinetic
             # matrices (kinetic_factor=1.0). The Julia kinetic-DCON path is validated
             # against Fortran kinetic DCON on the DIIID benchmark to <2% on both Re and
