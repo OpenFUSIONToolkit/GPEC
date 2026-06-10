@@ -36,76 +36,16 @@ This is the √weight function that maps a field component `b(θ)` to its
 power-normalized form `√(J|∇ψ|)·b(θ)` in θ-space.
 """
 function compute_sqrt_jac_delpsi(equil::Equilibrium.PlasmaEquilibrium, psi::Float64, mtheta::Int)
-    ro = equil.ro
     sqrt_jac_delpsi = Vector{Float64}(undef, mtheta)
 
     hint2d = (Ref(1), Ref(1))
     for itheta in 0:(mtheta-1)
         theta = itheta / mtheta  # normalized to [0, 1)
-
-        # Evaluate splines at (psi, theta)
-        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
-        jac = equil.rzphi_jac((psi, theta); hint=hint2d)
-        deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-        deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-
-        rfac = sqrt(abs(r2))
-        eta = 2π * (theta + deta)
-        r = ro + rfac * cos(eta)
-
-        # Metric components for |∇ψ| (same as compute_surface_area in SingularCoupling.jl)
-        w11 = (1.0 + deta_y) * (2π)^2 * rfac * r / jac
-        w12 = -r2_y * π * r / (rfac * jac)
-        delpsi = sqrt(w11^2 + w12^2)
-
-        sqrt_jac_delpsi[itheta+1] = sqrt(abs(jac * delpsi))
+        m = Equilibrium.flux_surface_metric(equil, psi, theta; hint=hint2d)
+        sqrt_jac_delpsi[itheta+1] = sqrt(abs(m.jac * m.delpsi))
     end
 
     return sqrt_jac_delpsi
-end
-
-"""
-    compute_surface_area_local(equil, psi, mtheta) -> Float64
-
-Compute ∫ J·|∇ψ| dθ/mtheta via trapezoidal rule. Local copy of the PE version
-to avoid circular dependency (FFS cannot import PerturbedEquilibrium).
-"""
-function compute_surface_area_local(equil::Equilibrium.PlasmaEquilibrium, psi::Float64, mtheta::Int)
-    ro = equil.ro
-    area = 0.0
-    last_contrib = 0.0
-
-    hint2d = (Ref(1), Ref(1))
-    for itheta in 0:mtheta
-        theta = itheta / mtheta
-
-        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
-        jac = equil.rzphi_jac((psi, theta); hint=hint2d)
-        deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-        deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-
-        rfac = sqrt(abs(r2))
-        eta = 2π * (theta + deta)
-        r = ro + rfac * cos(eta)
-
-        w11 = (1.0 + deta_y) * (2π)^2 * rfac * r / jac
-        w12 = -r2_y * π * r / (rfac * jac)
-        delpsi = sqrt(w11^2 + w12^2)
-
-        contrib = jac * delpsi / mtheta
-        area += contrib
-
-        if itheta == mtheta
-            last_contrib = contrib
-        end
-    end
-
-    # Trapezoidal rule end correction
-    area -= last_contrib
-
-    return area
 end
 
 """
@@ -338,7 +278,7 @@ function free_compute_sqrtamat_spline(ctrl::ForceFreeStatesControl, equil::Equil
         )
 
         sqrtamat = compute_sqrtamat(equil, psi_array[i], ft)
-        jarea = compute_surface_area_local(equil, psi_array[i], mtheta_eq)
+        jarea = Equilibrium.flux_surface_area(equil, psi_array[i], mtheta_eq)
 
         # Flatten sqrtamat into first mpert^2 entries, jarea as last entry
         data_array[i, 1:mpert^2] .= vec(sqrtamat)

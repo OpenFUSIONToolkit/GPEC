@@ -397,10 +397,6 @@ function compute_current_density(
     F_tor = equil.profiles.F_spline(psi)  # Toroidal field function F = R*B_tor times 2π
     q = equil.profiles.q_spline(psi)      # Safety factor
 
-    # Magnetic axis location
-    ro = equil.ro
-    zo = equil.zo
-
     # Number of theta points for integration
     # Match GPEC's mthsurf (typically 101 points from theta=0 to theta=1)
     mthsurf = length(equil.rzphi_xs) - 1
@@ -418,33 +414,13 @@ function compute_current_density(
         # Theta coordinate normalized to [0, 1]
         theta = itheta / mthsurf
 
-        # Evaluate bicubic splines with derivatives at (psi, theta)
-        # New API uses separate interpolants for each component
-        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)           # rfac²
-        deta = equil.rzphi_offset((psi, theta); hint=hint2d)           # angle offset
-        jac = equil.rzphi_jac((psi, theta); hint=hint2d)               # Jacobian
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)  # ∂(rfac²)/∂theta
-        deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)  # ∂(deta)/∂theta
-
-        rfac = sqrt(abs(r2))
-        fy_rfac2 = r2_y
-        fy_deta = deta_y
-
-        # Compute R coordinate (Z not needed for this calculation)
-        eta = twopi * (theta + deta)
-        r = ro + rfac * cos(eta)
-
-        # Compute metric components w(1,1) and w(1,2) for |∇ψ|
-        # These come from the metric tensor in flux coordinates
-        w11 = (1.0 + fy_deta) * twopi^2 * rfac * r / jac
-        w12 = -fy_rfac2 * π * r / (rfac * jac)
-
-        # Flux gradient magnitude |∇ψ|
-        delpsi = sqrt(w11^2 + w12^2)
+        m = Equilibrium.flux_surface_metric(equil, psi, theta; hint=hint2d)
+        jac = m.jac
+        delpsi = m.delpsi  # flux gradient magnitude |∇ψ|
 
         # Magnetic field quantity: sqreqb = (F² + χ₁²|∇ψ|²) / (2πR)²
         # F is toroidal field function (already includes factor of 2π from sq)
-        sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * r)^2
+        sqreqb = (F_tor^2 + chi1^2 * delpsi^2) / (twopi * m.r)^2
 
         # Integrand function
         jcfun = sqreqb / (delpsi^3)
@@ -747,65 +723,9 @@ function compute_surface_area(
     equil::Equilibrium.PlasmaEquilibrium,
     psi::Float64
 )::Float64
-    # Physical constants
-    twopi = 2π
-
-    # Magnetic axis location
-    ro = equil.ro
-    zo = equil.zo
-
-    # Number of theta points for integration
+    # mthsurf matches GPEC's flux-surface theta resolution
     mthsurf = length(equil.rzphi_xs) - 1
-
-    # Integrate around flux surface using trapezoidal rule
-    area = 0.0
-
-    # Storage for last point (needed for trapezoidal rule correction)
-    last_jac = 0.0
-    last_delpsi = 0.0
-
-    hint2d = (Ref(1), Ref(1))  # Shared 2D hint for hot loop optimization
-    for itheta in 0:mthsurf
-        # Theta coordinate normalized to [0, 1]
-        theta = itheta / mthsurf
-
-        # Evaluate bicubic splines with derivatives at (psi, theta)
-        r2 = equil.rzphi_rsquared((psi, theta); hint=hint2d)
-        jac = equil.rzphi_jac((psi, theta); hint=hint2d)
-        deta = equil.rzphi_offset((psi, theta); hint=hint2d)
-        r2_y = equil.rzphi_rsquared((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-        deta_y = equil.rzphi_offset((psi, theta); deriv=DerivOp(0, 1), hint=hint2d)
-
-        # Compute rfac
-        rfac = sqrt(abs(r2))
-        fy_rfac2 = r2_y
-        fy_deta = deta_y
-
-        # Compute R coordinate
-        eta = twopi * (theta + deta)
-        r = ro + rfac * cos(eta)
-
-        # Compute metric components for |∇ψ|
-        w11 = (1.0 + fy_deta) * twopi^2 * rfac * r / jac
-        w12 = -fy_rfac2 * π * r / (rfac * jac)
-
-        # Flux gradient magnitude
-        delpsi = sqrt(w11^2 + w12^2)
-
-        # Accumulate area integral (trapezoidal rule)
-        area += jac * delpsi / mthsurf
-
-        # Store last point for correction
-        if itheta == mthsurf
-            last_jac = jac
-            last_delpsi = delpsi
-        end
-    end
-
-    # Trapezoidal rule end correction
-    area -= last_jac * last_delpsi / mthsurf
-
-    return area
+    return Equilibrium.flux_surface_area(equil, psi, mthsurf)
 end
 
 """
