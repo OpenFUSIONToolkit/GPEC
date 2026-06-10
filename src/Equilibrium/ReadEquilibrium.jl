@@ -210,8 +210,8 @@ function read_chease_binary(config::EquilibriumConfig)
         # Create separate interpolants for R and Z coordinates
         rz_in_xs = xs
         rz_in_ys = range(0, 1; length=mtau) |> collect
-        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
-        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 1]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
+        rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), fs_2d[:, :, 2]; bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
         @info "Finished reading CHEASE equilibrium (Binary)"
         return InverseRunInput(config, sq_in, rz_in_xs, rz_in_ys, rz_in_R, rz_in_Z, ro, zo, psio)
@@ -373,7 +373,10 @@ function read_chease_ascii(config::EquilibriumConfig)
     # Create separate interpolants for R and Z coordinates
     rz_in_xs = xs
 
-    opts2d = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    @views R_data[:, end] .= R_data[:, 1]
+    @views Z_data[:, end] .= Z_data[:, 1]
+
+    opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_data; opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_data; opts2d...)
     @info "Finished reading CHEASE equilibrium. Magnetic axis at (ro=$(@sprintf("%.3f", ro)), zo=$(@sprintf("%.3f", zo))), psio=$(@sprintf("%.3e", psio))"
@@ -434,8 +437,8 @@ function read_imas(config::EquilibriumConfig, dd)
     q_1d = eqt.profiles_1d.q          # safety factor, COCOS-independent
 
     # Capture toroidal-field sign from the boundary F value before abs() below.
-    fpol_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
-    fpol_sign == 0 && (fpol_sign = 1)
+    bt_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
+    bt_sign == 0 && (bt_sign = 1)
 
     nw = length(psi_1d)
     psi_norm_grid = range(0.0, 1.0; length=nw)
@@ -483,5 +486,5 @@ function read_imas(config::EquilibriumConfig, dd)
           "\n    R ∈ [$(round(rmin; sigdigits=4)), $(round(rmax; sigdigits=4))] m" *
           "\n    Z ∈ [$(round(zmin; sigdigits=4)), $(round(zmax; sigdigits=4))] m"
 
-    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, fpol_sign)
+    return DirectRunInput(config, sq_in, psi_in, psi_in_xs, psi_in_ys, rmin, rmax, zmin, zmax, psio, bt_sign)
 end

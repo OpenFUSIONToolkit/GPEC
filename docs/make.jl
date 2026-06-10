@@ -28,12 +28,13 @@ makedocs(;
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",
             "Stability Analysis" => "stability.md",
-            "Utilities" => "utilities.md",
+            "KineticForces" => "kinetic_forces.md",
             "Forcing Terms" => "forcing_terms.md",
             "Perturbed Equilibrium" => "perturbed_equilibrium.md",
             "Inner Layer" => "inner_layer.md",
-            "Analysis" => "analysis.md"
-        ],
+            "Analysis" => "analysis.md",
+            "Utilities" => "utilities.md"
+       ],
         "Citations" => "citations.md",
         "Developer Notes" => "developer_notes.md",
     ],

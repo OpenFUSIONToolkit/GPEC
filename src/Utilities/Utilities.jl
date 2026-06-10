@@ -21,6 +21,7 @@ include("FourierCoefficients.jl")
 include("PhysicalConstants.jl")
 include("KineticProfiles.jl")
 include("NeoclassicalResistivity.jl")
+include("GridUtilities.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients

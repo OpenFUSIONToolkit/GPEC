@@ -170,7 +170,7 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
     # Initialization
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
         # initialize_el_at_singular_surf!(ctrl, equil, intr, odet)
@@ -194,10 +194,13 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
             @info "   ψ = $((@sprintf "%.3f" odet.psifac)),  q = $((@sprintf "%.3f" odet.q)),  steps = $(odet.total_steps)"
         end
 
-        # Cross a rational surface after integration if this chunk requires it
+        # Cross a singular surface after integration if this chunk requires it
         if chunk.needs_crossing
-            # Ideal surface crossings apply only in the ideal (non-kinetic) path.
-            cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            if ctrl.kinetic_factor > 0
+                cross_kinetic_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            else
+                cross_ideal_singular_surf!(odet, ctrl, equil, ffit, intr, chunk.ising)
+            end
         end
     end
 
@@ -251,7 +254,94 @@ function eulerlagrange_integration(ctrl::ForceFreeStatesControl, equil::Equilibr
 end
 
 """
-    initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+    compute_axis_init(ffit, profiles, intr, psi_low) -> (U1_init, U2_init)
+
+Compute axis initial conditions for the Euler-Lagrange ODE via the Frobenius
+leading-coefficient eigenvalue problem [Glasser Phys. Plasmas 2016 112506 Eq. 51]:
+
+    lim_{ψ→0} [ψ M(ψ) − a I] v = 0
+
+For each mode j, solves the 2×2 Frobenius eigenvalue problem for the diagonal block of
+A₀ = ψ_low · M(ψ_low). The eigenvector with Re(a) ≥ 0 is the regular (non-singular)
+Frobenius solution. Returns U₁_init and U₂_init normalized so that U₂_init = I (consistent
+with the N independent solutions convention).
+
+For m≠0 the regular eigenvector has a negligible U₁ component (~ψ_low^(|m|/2)), recovering
+the Glasser [0, I] limit as ψ_low → 0. For m=0 (degenerate a≈0), the regular eigenvector
+is identified by dominant |U₁| component, giving the physically correct constant-displacement
+Frobenius solution and avoiding the spurious logarithmic irregularity.
+"""
+function compute_axis_init(ffit::FourFitVars, profiles::Equilibrium.ProfileSplines,
+        intr::ForceFreeStatesInternal, psi_low::Float64)
+    N    = intr.numpert_total
+    hint = Ref(1)
+
+    # Evaluate stability matrices at psi_low
+    F_lower = zeros(ComplexF64, N, N)
+    kmat    = zeros(ComplexF64, N, N)
+    gmat    = zeros(ComplexF64, N, N)
+    ffit.fmats_lower(vec(F_lower), psi_low; hint=hint)
+    ffit.kmats(vec(kmat),          psi_low; hint=hint)
+    ffit.gmats(vec(gmat),          psi_low; hint=hint)
+
+    # singfac[j] = 1 / (m_j − n_j · q) for each mode j
+    q0      = profiles.q_spline(psi_low; hint=hint)
+    singfac = vec(1.0 ./ ((intr.mlow:intr.mhigh) .- q0 .* (intr.nlow:intr.nhigh)'))
+
+    # F̄⁻¹ = (F_lower · F_lower')⁻¹ via the Cholesky factor
+    Finv = Matrix{ComplexF64}(I, N, N)
+    ldiv!(LowerTriangular(F_lower), Finv)
+    ldiv!(UpperTriangular(F_lower'), Finv)
+
+    U1_init = zeros(ComplexF64, N, N)
+    U2_init = Matrix{ComplexF64}(I, N, N)
+
+    for j in 1:N
+        sf = singfac[j]
+        fi = Finv[j, j]
+        k  = kmat[j, j]
+        kd = conj(k)          # K̄†[j,j]
+        g  = gmat[j, j]
+
+        # 2×2 ODE matrix block for mode j [Glasser 2016 Eq. 22-24, diagonal approximation]
+        m11 = -sf * fi * k
+        m12 =  sf^2 * fi
+        m21 =  g - kd * fi * k
+        m22 =  sf * kd * fi
+
+        # Frobenius matrix A₀_j = ψ_low · M_j [Glasser 2016 Eq. 51]
+        F_eig = eigen([psi_low*m11  psi_low*m12;
+                       psi_low*m21  psi_low*m22])
+        eig_vals = F_eig.values
+        eig_vecs = F_eig.vectors
+
+        # Select the regular eigenvector: larger Re(a) for m≠0.
+        # For degenerate a≈0 (m=0): prefer dominant |U₁| component (regular = constant solution).
+        r1 = real(eig_vals[1])
+        r2 = real(eig_vals[2])
+        i_reg = if abs(r1 - r2) > Base.sqrt(Base.eps(Float64))
+            r1 > r2 ? 1 : 2
+        else
+            abs(eig_vecs[1, 1]) >= abs(eig_vecs[2, 1]) ? 1 : 2
+        end
+
+        v1, v2 = eig_vecs[1, i_reg], eig_vecs[2, i_reg]
+
+        # Normalize so that U₂_init[j,j] = 1. If v₂ ≈ 0 (purely displacement solution),
+        # set U₁=1, U₂=0 instead.
+        if abs(v2) > Base.sqrt(Base.eps(Float64)) * abs(v1)
+            U1_init[j, j] = v1 / v2
+        else
+            U1_init[j, j] =  one(ComplexF64)
+            U2_init[j, j] = zero(ComplexF64)
+        end
+    end
+
+    return U1_init, U2_init
+end
+
+"""
+    initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
 Initialize the OdeState struct for the case of sing_start = 0 (axis initialization).
 Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, and `u`.
@@ -260,7 +350,8 @@ Formerly `ode_axis_init!`. This now only initializes `psifac`, `ising_start`, an
 
 Move ising_start logic to chunk_el_integration_bounds?
 """
-function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
+function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, ffit::FourFitVars,
+        profiles::Equilibrium.ProfileSplines, intr::ForceFreeStatesInternal)
 
     # Default psifac to minimum equilibrium psi value
     odet.psifac = profiles.xs[1]
@@ -284,15 +375,26 @@ function initialize_el_at_axis!(odet::OdeState, ctrl::ForceFreeStatesControl, pr
     # because it depends on the starting psifac which is set here. The logic for sing_start != 0
     # and kinetic mode would also live here when implemented.
     if ctrl.kinetic_factor > 0
-        # No singular surface tracking needed — kinetic terms regularize singularities
-        odet.ising_start = 0
+        # Use kinetic singular surfaces (kinsing) for crossing points
+        odet.ising_start = searchsortedfirst(getfield.(intr.kinsing, :psifac), odet.psifac) - 1
     else
         odet.ising_start = searchsortedfirst(getfield.(intr.sing, :psifac), odet.psifac) - 1
     end
 
-    # Initialize solutions with the identity matrix for U_22 [Glasser Phys. Plasmas 2016 112506 Section VI]
-    for ipert in 1:intr.numpert_total
-        odet.u[ipert, ipert, 2] = 1
+    if ctrl.fixed_axis
+        # Original Glasser initialization: U₁=0, U₂=I [Glasser 2016 §VI].
+        # Constrains the axis displacement ξ^ψ=0 for all modes (fixed magnetic axis).
+        # Retained as a reference/comparison option; the default (fixed_axis=false) is Frobenius.
+        for ipert in 1:intr.numpert_total
+            odet.u[ipert, ipert, 2] = 1
+        end
+    else
+        # Frobenius initialization [Glasser 2016 §VI Eq. 51]: selects the regular
+        # (non-logarithmic) solution for each mode, including the correct constant
+        # displacement solution for the degenerate m=0 case (free magnetic axis).
+        U1_init, U2_init = compute_axis_init(ffit, profiles, intr, odet.psifac)
+        odet.u[:, :, 1] .= U1_init
+        odet.u[:, :, 2] .= U2_init
     end
 end
 
@@ -341,11 +443,68 @@ function chunk_el_integration_bounds(odet::OdeState, ctrl::ForceFreeStatesContro
         return ising
     end
 
+    # Wrapper to find next kinetic singular surface within integration limits
+    # Mirrors Fortran ode.f:185-191 filter: skip kinsing surfaces beyond psilim
+    # or whose resonant mode falls outside the truncation range [mlow, mhigh]
+    function find_next_kinsing!(ising::Int, intr::ForceFreeStatesInternal)
+        ising += 1
+        while ising <= intr.kmsing
+            if intr.psilim < intr.kinsing[ising].psifac
+                break
+            end
+            # Check resonance: n*q should fall within [mlow, mhigh]
+            nq = intr.kinsing[ising].q * minimum(intr.kinsing[ising].n)
+            if intr.mlow <= nq && nq <= intr.mhigh
+                break
+            end
+            ising += 1
+        end
+        return ising
+    end
+
     # -------------------- Create chunks ------------------------
-    if ctrl.kinetic_factor > 0
-        # Single chunk from axis to edge. Kinetic contributions regularize the
-        # F-matrix singularity at rational surfaces (Logan 2015 Eq 7.46), making
-        # them integrable. The adaptive ODE solver handles stiffness automatically.
+    if ctrl.kinetic_factor > 0 && intr.kmsing > 0 && ctrl.singfac_min > 0
+        # Kinetic mode with kinsing surfaces: chunk around each kinetically-displaced
+        # singular surface, mirroring Fortran ode.f:184-201 (kin_flag path).
+        # The ODE's F̄⁻¹ blows up at these locations; the trapezoidal crossing in
+        # cross_kinetic_singular_surf! steps over each singularity.
+        ising_current = find_next_kinsing!(ising_current, intr)
+        while ising_current <= intr.kmsing && intr.psilim >= intr.kinsing[ising_current].psifac && ctrl.singfac_min != 0
+            # Set integration limit to just before the next kinsing surface
+            # Fortran: psimax = kinsing(ising)%psifac - singfac_min / |nn * kinsing(ising)%q1|
+            psi_end = intr.kinsing[ising_current].psifac -
+                      ctrl.singfac_min / abs(minimum(intr.kinsing[ising_current].n) * intr.kinsing[ising_current].q1)
+
+            if psi_current >= psi_end
+                # Surface too close to current position — skip it
+                ising_current = find_next_kinsing!(ising_current, intr)
+                continue
+            end
+
+            push!(chunks, IntegrationChunk(;
+                psi_start=psi_current,
+                psi_end=psi_end,
+                needs_crossing=true,
+                ising=ising_current
+            ))
+
+            # After crossing, jump to the other side of the singular surface
+            dpsi = intr.kinsing[ising_current].psifac - psi_end
+            psi_current = psi_end + 2 * dpsi
+
+            ising_current = find_next_kinsing!(ising_current, intr)
+        end
+
+        # Final chunk to the edge
+        push!(chunks, IntegrationChunk(;
+            psi_start=psi_current,
+            psi_end=(intr.psilim * (1 - eps)),
+            needs_crossing=false,
+            ising=0
+        ))
+    elseif ctrl.kinetic_factor > 0
+        # Kinetic mode with no kinsing surfaces (or singfac_min==0): single chunk.
+        # Kinetic contributions are weak enough that F̄ stays well-conditioned.
         push!(chunks, IntegrationChunk(;
             psi_start=psi_current,
             psi_end=(intr.psilim * (1 - eps)),
@@ -488,6 +647,58 @@ function cross_ideal_singular_surf!(
     odet.ud_store[:, :, :, odet.step] = odet.ud
     odet.step += 1
 end
+
+"""
+    cross_kinetic_singular_surf!(odet, ctrl, equil, ffit, intr, ising)
+
+Cross a kinetically-displaced singular surface using a simple trapezoidal step.
+Matches Fortran `ode_kin_cross` with `con_flag=true` (`ode.f:615-619`): evaluate
+the ODE RHS on both sides of the singularity and take a trapezoidal Euler step
+across. No asymptotic analysis, no Gaussian elimination — the kinetic FKG
+formulation absorbs the ideal singularity and the trapezoidal step handles
+the residual near-singularity.
+
+Much simpler than `cross_ideal_singular_surf!` which requires asymptotic
+power series and solution vector surgery.
+"""
+function cross_kinetic_singular_surf!(
+    odet::OdeState,
+    ctrl::ForceFreeStatesControl,
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffit::FourFitVars,
+    intr::ForceFreeStatesInternal,
+    ising::Int
+)
+    # Normalize solution at singular surface [Fortran: ode_unorm(.TRUE.)]
+    compute_solution_norms!(odet.u, odet, ctrl, intr, true)
+
+    # Trapezoidal step across the kinsing surface [Fortran ode.f:616-619, con_flag=true]
+    ksurf = intr.kinsing[ising]
+    dpsi = ksurf.psifac - odet.psifac
+
+    params = (ctrl, equil, ffit, intr, odet, IntegrationChunk(0.0, 0.0, false, 0))
+    du1 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+    du2 = zeros(ComplexF64, intr.numpert_total, intr.numpert_total, 2)
+
+    sing_der!(du1, odet.u, params, odet.psifac)
+    odet.psifac = ksurf.psifac + dpsi  # symmetric jump to other side
+    sing_der!(du2, odet.u, params, odet.psifac)
+    odet.u .+= (du1 .+ du2) .* dpsi
+
+    # Recompute ud for storage consistency
+    sing_der!(du1, odet.u, params, odet.psifac)
+
+    # Store crossing step
+    if odet.step >= size(odet.u_store, 4)
+        resize_storage!(odet)
+    end
+    odet.psi_store[odet.step] = odet.psifac
+    odet.q_store[odet.step] = odet.q
+    odet.u_store[:, :, :, odet.step] = odet.u
+    odet.ud_store[:, :, :, odet.step] = odet.ud
+    odet.step += 1
+end
+
 
 """
     integrate_el_region!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal, chunk::IntegrationChunk)
@@ -728,6 +939,9 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
+    # Pre-compute sqrtamat + jarea spline for power-normalized eigenvalues
+    es.sqrtamat_spline = free_compute_sqrtamat_spline(ctrl, equil, intr)
+
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
     # Steps where free_compute_total hits a singular wp solve are left as NaN per the EdgeScanState contract.
     for j in 1:N_edge
@@ -740,6 +954,10 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
             es.plasma_energy[j] = result.plasma_energy
             es.vacuum_energy[j] = result.vacuum_energy
             es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
+            es.pn_total_eigenvalue[j] = result.pn_total_eigenvalue
+            es.pn_plasma_energy[j] = result.pn_plasma_energy
+            es.pn_vacuum_energy[j] = result.pn_vacuum_energy
+            es.pn_vacuum_eigenvalue[j] = result.pn_vacuum_eigenvalue
         catch e
             e isa LinearAlgebra.SingularException || rethrow()
         end

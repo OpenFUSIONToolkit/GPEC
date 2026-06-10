@@ -11,15 +11,21 @@ import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
+include("FluxSurfaceMetrics.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
 include("DirectEquilibriumArcLength.jl")
 include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
+include("GeometryProfiles.jl")
+include("KineticProfiles.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
+export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
+    ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
+    KineticProfileSplines, load_kinetic_profiles
+export flux_surface_metric, flux_surface_area
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -475,7 +481,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
-    flux_opts = (bc=(CubicFit(), PeriodicBC(; check=false)), extrap=(ExtendExtrap(), WrapExtrap()))
+    @views flux_fs[:, end, :] .= flux_fs[:, 1, :]
+    flux_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
 
