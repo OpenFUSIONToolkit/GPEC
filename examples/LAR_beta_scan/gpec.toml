@@ -52,11 +52,10 @@ a     = 20                         # Wall scale-out multiplier; 20× the plasma 
 #                            Force-Free States
 # ────────────────────────────────────────────────────────────────────────
 [ForceFreeStates]
-bal_flag = false                   # Skip ballooning stability scan (compute_ballooning_stability!)
+local_stability_flag = true        # Evaluate local D_I (Mercier) and ballooning stability across ψ
 mat_flag = true                    # Construct F, G, K coupling matrices on the radial grid
 ode_flag = true                    # Integrate the ideal-MHD Euler-Lagrange ODE for displacement ξ
 vac_flag = true                    # Compute vacuum response and free-boundary energy eigenvalues
-mer_flag = true                    # Evaluate the Mercier local-stability criterion across ψ
 
 qlow         = 1.02                # Lowest q to include singular surfaces (axis side cutoff)
 qhigh        = 3.6                 # Highest q to include singular surfaces (edge side cutoff)
