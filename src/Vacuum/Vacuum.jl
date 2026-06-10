@@ -21,6 +21,7 @@ include("Field.jl")
 export VacuumInput, WallShapeSettings
 export compute_vacuum_response, compute_vacuum_response!, compute_vacuum_field
 export extract_plasma_surface_at_psi
+export PlasmaGeometry
 
 """
     compute_vacuum_response(inputs::VacuumInput, wall_settings::WallShapeSettings;
@@ -146,6 +147,13 @@ It computes both interior (grri) and exterior (grre) Green's functions for GPEC 
         fourier_inverse_transform!(aii, grre, sin_mn_basis; col_offset=num_modes)
         fourier_inverse_transform!(ari, grre, sin_mn_basis)
         fourier_inverse_transform!(air, grre, cos_mn_basis; col_offset=num_modes)
+
+        # fourier_inverse_transform! uses 1/N normalization; restore the 4π² physics factor
+        # from the vacuum Green's function integral [Chance 2007 eq. 114-118]
+        arr .*= 4π^2
+        aii .*= 4π^2
+        ari .*= 4π^2
+        air .*= 4π^2
 
         # Final form of vacuum response matrix [Chance Phys. Plasmas 2007 052506 eq. 114]
         wv .= complex.(arr .+ aii, air .- ari)

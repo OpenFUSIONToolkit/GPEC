@@ -278,7 +278,11 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[ipsi+1, 1] = f_sq_in_buf[1] * twopi
         sq_fs[ipsi+1, 2] = f_sq_in_buf[2]
         sq_fs[ipsi+1, 3] = spl_fsi[mtheta+1, 3] * twopi * pi # dV/d(psi)
-        sq_fs[ipsi+1, 4] = spl_fsi[mtheta+1, 4] * sq_fs[ipsi+1, 1] / (2 * twopi * psio) # q-profile
+        # Use the input q profile directly (from LAR ODE or CHEASE), matching the
+        # Fortran `inverse_chease4_run` convention (sq%fs(ipsi,4) = sq_in%f(3)).
+        # The field-line-integration-based q formula (spl_fsi * F / (2*twopi*psio))
+        # is inaccurate for cylindrical LAR geometry.
+        sq_fs[ipsi+1, 4] = f_sq_in_buf[3]  # q from input profile
     end
 
     sq = cubic_interp(sq_xs, Series(sq_fs); extrap=ExtendExtrap())
@@ -311,6 +315,8 @@ function equilibrium_solver(input::InverseRunInput)
     qa = f_sq[mpsi+1, 4] + f1_sq_hi[4] * (1 - sq_xs[mpsi+1])
     # Create 2D interpolants for geometric quantities (rzphi)
     rzphi_grid2d = (rzphi_xs, theta_range)
+
+    @views rzphi_fs[:, end, :] .= rzphi_fs[:, 1, :]
 
     rzphi_rsquared = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 1]; itp_opts2d...)
     rzphi_offset = cubic_interp(rzphi_grid2d, rzphi_fs[:, :, 2]; itp_opts2d...)
@@ -365,6 +371,7 @@ function equilibrium_solver(input::InverseRunInput)
     end
     # Create 2D interpolants for physics quantities (eqfun)
     eqfun_grid2d = (eqfun_xs, theta_range)
+    @views eqfun_fs[:, end, :] .= eqfun_fs[:, 1, :]
     eqfun_B = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 1]; itp_opts2d...)
     eqfun_metric1 = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 2]; itp_opts2d...)
     eqfun_metric2 = cubic_interp(eqfun_grid2d, eqfun_fs[:, :, 3]; itp_opts2d...)

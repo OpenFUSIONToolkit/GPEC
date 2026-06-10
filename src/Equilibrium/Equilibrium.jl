@@ -56,13 +56,36 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
             additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
         eq_input = lar_run(eq_config, additional_input)
+    elseif eq_type == "tj_analytic"
+        # TJ-analytic equilibrium (GPEC adaptation of the profile family
+        # used by R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ) fed
+        # through the inverse pipeline.
+        if additional_input === nothing
+            additional_input = TJAnalyticConfig(eq_config.eq_filename)
+        end
+        eq_input = tj_analytic_run(eq_config, additional_input)
+    elseif eq_type == "tj_analytic_direct"
+        # TJ-analytic equilibrium (R. Fitzpatrick's TJ-code profile
+        # family, https://github.com/rfitzp/TJ) fed through the direct-GS
+        # solver: builds ψ(R, Z) on a 2D grid and delegates to the same solver
+        # as `efit`.  Reproduces the full geqdsk-path physics including
+        # higher-order geometric effects that the inverse solver misses.
+        if additional_input === nothing
+            additional_input = TJAnalyticConfig(eq_config.eq_filename)
+        end
+        eq_input = tj_analytic_run_direct(eq_config, additional_input)
     elseif eq_type == "sol"
         if additional_input === nothing
             additional_input = SolovevConfig(eq_config.eq_filename)
         end
         eq_input = sol_run(eq_config, additional_input)
+    elseif eq_type == "imas"
+        if additional_input === nothing
+            error("setup_equilibrium: eq_type=\"imas\" requires an IMASdd.dd passed as additional_input")
+        end
+        eq_input = read_imas(eq_config, additional_input)
     else
-        error("Equilibrium type $(equil_in.eq_type) is not implemented")
+        error("Equilibrium type $(eq_config.eq_type) is not implemented")
     end
 
     if eq_type == "efit_by_inversion"
@@ -114,7 +137,9 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
     end
 
     # Top and bottom separatrix Z extrema via bracketed Brent on ∂z/∂θ = 0.
-    # iside=1 → bottom (θ ∈ [0.5, 1.0]),  iside=2 → top (θ ∈ [0.0, 0.5]).
+    # iside=1 → top (θ ∈ [0.0, 0.5]),  iside=2 → bottom (θ ∈ [0.5, 1.0]).
+    # Matches Fortran convention so (r|z)ext[1] / zsep[1] refer to the top extremum
+    # and (r|z)ext[2] / zsep[2] to the bottom (see equil_out.f::equil_out_sep_find).
     # Splines use PeriodicBC + WrapExtrap, so θ outside [0,1] is valid.
     zsep = zeros(2)
     rext = zeros(2)
@@ -147,8 +172,8 @@ function equilibrium_separatrix_find!(pe::PlasmaEquilibrium)
             return rfac_local * phase1 * cos_phase_local + rfac1 * sin_phase
         end
 
-        theta_lo, theta_hi = (iside == 1) ? (0.5, 1.0) : (0.0, 0.5)
-        side_label = (iside == 1) ? "bottom" : "top"
+        theta_lo, theta_hi = (iside == 1) ? (0.0, 0.5) : (0.5, 1.0)
+        side_label = (iside == 1) ? "top" : "bottom"
         theta = try
             find_zero(z_deriv, (theta_lo, theta_hi), Roots.Brent();
                 atol=1e-12, rtol=1e-12)
@@ -183,10 +208,10 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     # Use separatrix geometry
     rsep, zsep, rext, _ = equilibrium_separatrix_find!(pe)
 
-    rmean = (rsep[2] + rsep[1]) / 2
-    amean = (rsep[2] - rsep[1]) / 2
+    rmean = (rsep[1] + rsep[2]) / 2
+    amean = (rsep[1] - rsep[2]) / 2
     aratio = rmean / amean
-    kappa = (zsep[1] - zsep[2]) / (rsep[2] - rsep[1])
+    kappa = (zsep[1] - zsep[2]) / (rsep[1] - rsep[2])
     delta1 = (rmean - rext[1]) / amean
     delta2 = (rmean - rext[2]) / amean
     dpsi = 1.0 - pe.rzphi_xs[mpsi+1]
@@ -237,30 +262,61 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.crnt = crnt
     pe.params.bwall = bwall
 
-    # Flux surface integrals (using profiles)
+    # Flux surface integrals of profile quantities (used for betat, betap*, betaj)
     P_vals = profiles.P_spline.y
     dVdpsi_vals = profiles.dVdpsi_spline.y
-    hs1 = P_vals .* dVdpsi_vals                   # p * dV/dpsi
-    hs2 = dVdpsi_vals                             # dV/dpsi
-    hs3 = P_vals .^ 2 .* dVdpsi_vals              # p^2 * dV/dpsi
+    hs_pdv   = P_vals .* dVdpsi_vals              # p  * dV/dψ
+    hs_dv    = dVdpsi_vals                        # dV/dψ
+    hs_p2dv  = P_vals .^ 2 .* dVdpsi_vals         # p² * dV/dψ
 
     dpsi_vec = diff(profiles.xs)
-    fsi1 = sum((hs1[1:(end-1)] .+ hs1[2:end]) .* dpsi_vec) / 2
-    fsi2 = sum((hs2[1:(end-1)] .+ hs2[2:end]) .* dpsi_vec) / 2
-    fsi3 = sum((hs3[1:(end-1)] .+ hs3[2:end]) .* dpsi_vec) / 2
+    fsi_pdv  = sum((hs_pdv[1:(end-1)]  .+ hs_pdv[2:end])  .* dpsi_vec) / 2
+    fsi_dv   = sum((hs_dv[1:(end-1)]   .+ hs_dv[2:end])   .* dpsi_vec) / 2
+    fsi_p2dv = sum((hs_p2dv[1:(end-1)] .+ hs_p2dv[2:end]) .* dpsi_vec) / 2
 
     volume = sum((dVdpsi_vals[1:(end-1)] .+ dVdpsi_vals[2:end]) .* dpsi_vec) / 2
 
+    # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
+    # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
+    # the internal inductance li1/li2/li3 (distinct from the p²·dV integrand
+    # that drives betaj).
+    hs_bp2 = zeros(Float64, mpsi + 1)
+    for ipsi in 0:mpsi
+        acc = 0.0
+        for itheta in 0:mtheta
+            r2       = pe.rzphi_rsquared.nodal_derivs.partials[1, ipsi+1, itheta+1]
+            offset   = pe.rzphi_offset.nodal_derivs.partials[1,    ipsi+1, itheta+1]
+            jac      = pe.rzphi_jac.nodal_derivs.partials[1,       ipsi+1, itheta+1]
+            r2_y     = pe.rzphi_rsquared.nodal_derivs.partials[3, ipsi+1, itheta+1]
+            offset_y = pe.rzphi_offset.nodal_derivs.partials[3,    ipsi+1, itheta+1]
+
+            jacfac = π / jac
+            rfac   = sqrt(r2)
+            eta    = 2π * (pe.rzphi_ys[itheta+1] + offset)
+            r      = pe.ro + rfac * cos(eta)
+            v21    = jacfac * r2_y / (2π * rfac)
+            v22    = jacfac * (1 + offset_y) * (2 * rfac)
+            v33    = jacfac * 2π * (r / π)
+            dvsq   = (v21^2 + v22^2) * (v33 * jac^2)^2
+            acc   += dvsq / (r^2) / jac
+        end
+        # Periodic trapezoidal rule on uniform θ grid reduces to a plain mean
+        # because the first and last grid points coincide — matches the int1/int2
+        # pattern used for the edge-surface integrals above.
+        hs_bp2[ipsi+1] = (acc / (mtheta + 1)) * psio^2
+    end
+    fsi_bp2 = sum((hs_bp2[1:(end-1)] .+ hs_bp2[2:end]) .* dpsi_vec) / 2
+
     p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
-    betat = 2 * (fsi1 / fsi2) / bt0^2
-    betaj = 2 * sqrt(fsi3 / fsi2) / bwall^2
-    betan = 100 * amean * bt0 * betat / crnt
-    betap1 = 2 * (fsi1 / fsi2) / bp0^2
-    betap2 = 4 * fsi1 / ((1e6 * mu0 * crnt)^2 * pe.ro)
-    betap3 = 4 * fsi1 / ((1e6 * mu0 * crnt)^2 * rmean)
-    li1 = fsi3 / fsi2 / bp0^2
-    li2 = 2 * fsi3 / ((1e6 * mu0 * crnt)^2 * pe.ro)
-    li3 = 2 * fsi3 / ((1e6 * mu0 * crnt)^2 * rmean)
+    betat  = 2 * (fsi_pdv / fsi_dv) / bt0^2
+    betaj  = 2 * sqrt(fsi_p2dv / fsi_dv) / bwall^2
+    betan  = 100 * amean * bt0 * betat / crnt
+    betap1 = 2 * (fsi_pdv / fsi_dv) / bp0^2
+    betap2 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * pe.ro)
+    betap3 = 4 * fsi_pdv / ((1e6 * mu0 * crnt)^2 * rmean)
+    li1    = fsi_bp2 / fsi_dv / bp0^2
+    li2    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * pe.ro)
+    li3    = 2 * fsi_bp2 / ((1e6 * mu0 * crnt)^2 * rmean)
 
     pe.params.psi0 = psio
     pe.params.psi_axis = pe.psio
@@ -421,6 +477,7 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         end
     end
     # Create flux interpolants for Grad-Shafranov diagnostics
+    @views flux_fs[:, end, :] .= flux_fs[:, 1, :]
     flux_opts = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
     flux1 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 1]; flux_opts...)
     flux2 = cubic_interp((equil.rzphi_xs, equil.rzphi_ys), flux_fs[:, :, 2]; flux_opts...)
@@ -472,6 +529,8 @@ function equilibrium_gse!(equil::PlasmaEquilibrium)
         fs_matrix = zeros(Float64, mtheta + 1, 2)
         fs_matrix[:, 1] = flux_fsx[ipsi, :, 1]
         fs_matrix[:, 2] = source[ipsi, :]
+        # Snap the repeated endpoint exactly equal to the start
+        fs_matrix[end, :] .= fs_matrix[1, :]
 
         # Compute total integral using FastInterpolations native integration
         itp = cubic_interp(equil.rzphi_ys, Series(fs_matrix); bc=PeriodicBC())

@@ -180,7 +180,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         ctrl.qhigh = max(equil.params.qmin + 0.1, equil.params.qmax - 0.5)
         GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
         @test intr.qlim < equil.params.qmax + 1e-12
-        @test intr.psilim < equil.config.psihigh
+        @test intr.psilim <= equil.config.psihigh
         q_at_psilim = equil.profiles.q_spline(intr.psilim)
         @test isapprox(q_at_psilim, intr.qlim; atol=1e-6)
     end

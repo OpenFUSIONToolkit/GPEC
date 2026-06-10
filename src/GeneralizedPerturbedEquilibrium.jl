@@ -17,6 +17,10 @@ include("ForceFreeStates/ForceFreeStates.jl")
 import .ForceFreeStates as ForceFreeStates
 export ForceFreeStates
 
+include("InnerLayer/InnerLayer.jl")
+import .InnerLayer as InnerLayer
+export InnerLayer
+
 include("ForcingTerms/ForcingTerms.jl")
 import .ForcingTerms as ForcingTerms
 export ForcingTerms
@@ -35,6 +39,7 @@ using Printf
 using HDF5
 
 using FastInterpolations
+import IMASdd
 
 import AdaptiveArrayPools: @with_pool
 
@@ -48,7 +53,7 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
-function main(args::Vector{String}=String[])
+function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
 
@@ -71,13 +76,35 @@ function main(args::Vector{String}=String[])
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
-
     ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
 
-    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists
+    # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
+    # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
+    # EITHER point `eq_filename` at a side-car TOML (legacy) OR embed their
+    # parameters directly in gpec.toml under a top-level section:
+    # [TJ_ANALYTIC_INPUT], [SOL_INPUT], [LAR_INPUT].  When the embedded section
+    # is present it takes precedence and the side-car file is not consulted,
+    # so a run is fully described by a single gpec.toml.
+    #
+    # The TJ-analytic equilibrium follows the profile family of
+    # R. Fitzpatrick's TJ code (https://github.com/rfitzp/TJ); see
+    # `Equilibrium.TJAnalyticConfig`.
     if "Equilibrium" in keys(inputs)
         eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], intr.dir_path)
-        equil = Equilibrium.setup_equilibrium(eq_config)
+        # Build additional_input from embedded TOML sections (analytic equilibria) or from
+        # the dd keyword argument (IMAS). These are mutually exclusive at runtime — an
+        # equilibrium is either analytic (TJ/SOL/LAR) or IMAS-fed or read from a file.
+        additional_input = nothing
+        if eq_config.eq_type in ("tj_analytic", "tj_analytic_direct") && haskey(inputs, "TJ_ANALYTIC_INPUT")
+            additional_input = Equilibrium.TJAnalyticConfig(inputs["TJ_ANALYTIC_INPUT"])
+        elseif eq_config.eq_type == "sol" && haskey(inputs, "SOL_INPUT")
+            additional_input = Equilibrium.SolovevConfig(inputs["SOL_INPUT"])
+        elseif eq_config.eq_type == "lar" && haskey(inputs, "LAR_INPUT")
+            additional_input = Equilibrium.LargeAspectRatioConfig(inputs["LAR_INPUT"])
+        elseif eq_config.eq_type == "imas"
+            additional_input = dd
+        end
+        equil = Equilibrium.setup_equilibrium(eq_config, additional_input)
     elseif isfile(joinpath(intr.dir_path, "equil.toml"))
         @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
         equil = Equilibrium.setup_equilibrium(joinpath(intr.dir_path, "equil.toml"))
@@ -173,6 +200,22 @@ function main(args::Vector{String}=String[])
     # Find all singular surfaces in the equilibrium
     sing_find!(intr, equil)
 
+    # Filter out surfaces outside the integration domain [qlow, qlim].
+    # Fortran STRIDE excludes these at the integration level; we remove them
+    # from intr.sing so the Δ' BVP sees only crossable surfaces.
+    if intr.msing > 0
+        qmin_integration = max(ctrl.qlow, equil.params.qmin)
+        n_before = intr.msing
+        keep = [j for j in 1:intr.msing if intr.sing[j].q >= qmin_integration && intr.sing[j].psifac <= intr.psilim]
+        if length(keep) < n_before
+            excluded = setdiff(1:n_before, keep)
+            excluded_mq = [(intr.sing[j].m, intr.sing[j].q) for j in excluded]
+            @info "Filtered $(n_before - length(keep)) singular surface(s) outside integration domain: $(excluded_mq)"
+            intr.sing = intr.sing[keep]
+            intr.msing = length(keep)
+        end
+    end
+
     # Determine poloidal mode numbers
     if ctrl.delta_mlow < 0 || ctrl.delta_mhigh < 0
         error("Negative delta_mlow or delta_mhigh not allowed")
@@ -240,7 +283,7 @@ function main(args::Vector{String}=String[])
         if ctrl.verbose
             @info "Integrating Euler-Lagrange equation"
         end
-        odet = eulerlagrange_integration(ctrl, equil, ffit, intr)
+        odet, fm_propagators, fm_chunks, fm_S_left = eulerlagrange_integration(ctrl, equil, ffit, intr)
         if odet.nzero > 0 && ctrl.verbose
             @warn "Fixed-boundary mode unstable for n = $nstring"
         end
@@ -261,6 +304,18 @@ function main(args::Vector{String}=String[])
             if ctrl.verbose
                 @info "All free-boundary modes stable for n = $nstring"
             end
+        end
+
+        # Compute inter-surface Δ' matrix (STRIDE BVP) using vacuum edge BC.
+        # Requires propagators from parallel FM path and wv from free_run!.
+        if ctrl.kinetic_factor == 0 && intr.msing > 0 && fm_propagators !== nothing
+            if ctrl.verbose
+                @info "Computing Δ' matrix (STRIDE BVP with vacuum coupling)"
+            end
+            ForceFreeStates.compute_delta_prime_matrix!(intr, fm_propagators, fm_chunks;
+                wv=vac_data.wv, psio=equil.psio, debug=ctrl.verbose,
+                S_at_surface_left=fm_S_left,
+                ctrl=ctrl, equil=equil, ffit=ffit)
         end
     end
 
@@ -287,9 +342,15 @@ function main(args::Vector{String}=String[])
     if "PerturbedEquilibrium" in keys(inputs)
         # Read ForcingTerms control parameters
         if "ForcingTerms" in keys(inputs)
+            forcing_raw = inputs["ForcingTerms"]
+            # [[ForcingTerms.coil_set]] becomes a Vector{Dict} — must be excluded from
+            # kwarg splatting and handled separately via coil_sets_raw field
+            coil_sets_raw = Vector{Dict{String,Any}}(get(forcing_raw, "coil_set", Dict{String,Any}[]))
+            scalar_forcing = filter(p -> p.first != "coil_set", forcing_raw)
             ft_ctrl = ForcingTerms.ForcingTermsControl(;
-                (Symbol(k) => v for (k, v) in inputs["ForcingTerms"])...
+                (Symbol(k) => v for (k, v) in scalar_forcing)...
             )
+            ft_ctrl.coil_sets_raw = coil_sets_raw
         else
             ft_ctrl = ForcingTerms.ForcingTermsControl()  # Use defaults
         end
@@ -302,14 +363,15 @@ function main(args::Vector{String}=String[])
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr
+            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
+            metric, ffit
         )
 
         # Write perturbed equilibrium outputs to same HDF5 file
         if pe_ctrl.write_outputs_to_HDF5
             output_file = isempty(pe_ctrl.output_filename) ? ctrl.HDF5_filename : pe_ctrl.output_filename
             PerturbedEquilibrium.write_outputs_to_HDF5(
-                pe_state, pe_intr, pe_ctrl, joinpath(intr.dir_path, output_file)
+                pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
             @info "Results written to $output_file"
         end
@@ -460,6 +522,29 @@ function write_outputs_to_HDF5(
         out_h5["singular/ca_left"] = odet.ca_l
         out_h5["singular/ca_right"] = odet.ca_r
 
+        if intr.msing > 0
+            # Mode numbers at each surface (jagged — pad with 0 to max_modes width)
+            max_modes = maximum(s -> length(s.m), intr.sing)
+            m_matrix = zeros(Int, intr.msing, max_modes)
+            n_matrix = zeros(Int, intr.msing, max_modes)
+            for (s, sing) in enumerate(intr.sing)
+                for i in 1:length(sing.m)
+                    m_matrix[s, i] = sing.m[i]
+                    n_matrix[s, i] = sing.n[i]
+                end
+            end
+            out_h5["singular/m"] = m_matrix
+            out_h5["singular/n"] = n_matrix
+        end
+
+        # Per-surface ca-based Δ' (`sing.delta_prime`) is a stub; only the BVP matrix is emitted (see SingType.delta_prime docstring).
+
+        # Write inter-surface Δ' matrix if computed (parallel FM path only).
+        # Shape: [msing × msing] — PEST3-convention deltap (STRIDE BVP with vacuum coupling).
+        if intr.msing > 0 && !isempty(intr.delta_prime_matrix)
+            out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
+        end
+
         # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
@@ -480,6 +565,7 @@ function write_outputs_to_HDF5(
         out_h5["FreeBoundaryStability/XiNorm/eigenmode_energies"] = ctrl.vac_flag ? vac_data.et : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/eigenmode_plasma_energies"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["FreeBoundaryStability/XiNorm/eigenmode_vacuum_energies"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
+        out_h5["FreeBoundaryStability/XiNorm/vacuum_eigenvalue"] = ctrl.vac_flag ? vac_data.vacuum_eigenvalue : NaN
 
         # Cartesian surface point clouds used downstream for visualisation and
         # perturbed-equilibrium plotting.
@@ -550,6 +636,44 @@ function write_outputs_to_HDF5(
     end
 end
 
-export main
+"""
+    write_imas(dd, result)
+
+Write GPEC stability results into `dd.mhd_linear`. Creates one `toroidal_mode` entry per
+requested toroidal mode number, storing the least-stable (minimum real part) `energy_perturbed`
+for that `n_tor`. For multi-n runs the eigenvalue array `et` is sorted by stability across all
+n-blocks; `n_tor_idx[i]` identifies which n-block eigenvalue `i` belongs to, so each n_tor
+receives the correct least-stable δW regardless of how modes are interleaved in `et`.
+
+The `result` argument is the named tuple returned by `main`.
+"""
+function write_imas(dd, result)
+    result.vac_data === nothing && return
+
+    vac_data = result.vac_data
+    intr = result.intr
+
+    # Top-level metadata
+    dd.mhd_linear.code.name = "GPEC"
+    dd.mhd_linear.ideal_flag = 1
+
+    # Add a time_slice at the current global_time (wipe=false reuses an existing slice
+    # at the same time, or appends a new one if none exists yet)
+    ts = resize!(dd.mhd_linear.time_slice; wipe=false)
+
+    # Write the least-stable energy for each toroidal mode number
+    # n_tor_idx[i] (0-based) identifies which n-block eigenvalue i belongs to.
+    resize!(ts.toroidal_mode, intr.npert)
+    for j in 0:(intr.npert-1)
+        n_indices = findall(==(j), vac_data.n_tor_idx) # indices of eigenvalues in the j-th n-block
+        mode = ts.toroidal_mode[j+1]
+        mode.n_tor = intr.nlow + j
+        mode.energy_perturbed = minimum(real.(vac_data.et[n_indices])) # least-stable energy for this n-toroidal mode
+    end
+
+    return dd
+end
+
+export main, write_imas
 
 end # module GeneralizedPerturbedEquilibrium
