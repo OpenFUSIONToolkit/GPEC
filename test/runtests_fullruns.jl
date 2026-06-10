@@ -62,7 +62,7 @@ using HDF5
     @test begin
         GeneralizedPerturbedEquilibrium.main([ex5])
         h5open(joinpath(ex5, "gpec.h5"), "r") do h5
-            et = read(h5["vacuum/et"])
+            et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             # Self-consistent KF→FFS kinetic-MHD eigenvalue with full-strength kinetic
             # matrices (kinetic_factor=1.0). The Julia kinetic-DCON path is validated
             # against Fortran kinetic DCON on the DIIID benchmark to <2% on both Re and
