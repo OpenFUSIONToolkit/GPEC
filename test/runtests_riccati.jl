@@ -104,7 +104,7 @@ end
                 GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(inputs["Equilibrium"], ex))
 
     intr_tmp = make_solovev_intr(inputs, ctrl, equil, ex)
-    metric   = FFS.make_metric(equil; mband=intr_tmp.mband, fft_flag=ctrl.fft_flag)
+    metric   = FFS.make_metric(equil; mband=intr_tmp.mband)
     ffit     = FFS.make_matrix(equil, intr_tmp, metric)
     N        = intr_tmp.numpert_total
 

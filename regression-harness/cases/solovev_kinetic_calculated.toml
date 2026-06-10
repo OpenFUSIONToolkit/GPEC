@@ -1,0 +1,124 @@
+[case]
+name = "solovev_kinetic_calculated"
+description = "Solovev analytical equilibrium, n=1, kinetic_source=calculated, kinetic_factor=1.0"
+example_dir = "test/test_data/regression_solovev_kinetic_calculated"
+
+# Energies — leading eigenvalues
+[quantities.et_real]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "real_first"
+label = "total energy Re(et[1])"
+noise_threshold = 1e-10
+
+[quantities.et_imag]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "imag_first"
+label = "total energy Im(et[1])"
+noise_threshold = 1e-10
+
+[quantities.ep_real]
+h5path = "vacuum/ep"
+type = "complex_vector"
+extract = "real_first"
+label = "plasma energy Re(ep[1])"
+noise_threshold = 1e-10
+
+[quantities.ev_real]
+h5path = "vacuum/ev"
+type = "complex_vector"
+extract = "real_first"
+label = "vacuum energy Re(ev[1])"
+noise_threshold = 1e-10
+
+# Energies — full eigenvalue arrays
+[quantities.et_all]
+h5path = "vacuum/et"
+type = "complex_vector"
+extract = "all_complex"
+label = "total energy (all)"
+noise_threshold = 1e-10
+
+# Integration
+[quantities.nstep]
+h5path = "integration/nstep"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (saved)"
+noise_threshold = 0
+
+[quantities.nstep_total]
+h5path = "integration/nstep_total"
+type = "int_scalar"
+extract = "value"
+label = "ODE steps (total)"
+noise_threshold = 0
+
+# Equilibrium
+[quantities.q0]
+h5path = "equil/q0"
+type = "real_scalar"
+extract = "value"
+label = "q0"
+noise_threshold = 1e-12
+
+[quantities.q95]
+h5path = "equil/q95"
+type = "real_scalar"
+extract = "value"
+label = "q95"
+noise_threshold = 1e-12
+
+# Singular surfaces
+[quantities.msing]
+h5path = "singular/msing"
+type = "int_scalar"
+extract = "value"
+label = "# singular surfaces"
+noise_threshold = 0
+
+[quantities.sing_psi]
+h5path = "singular/psi"
+type = "real_vector"
+extract = "all_real"
+label = "singular psi locations"
+noise_threshold = 1e-8
+
+[quantities.sing_q]
+h5path = "singular/q"
+type = "real_vector"
+extract = "all_real"
+label = "singular q values"
+noise_threshold = 1e-8
+
+# Kinetic-specific
+[quantities.kinetic_factor]
+h5path = "kinetic/kinetic_factor"
+type = "real_scalar"
+extract = "value"
+label = "kinetic_factor"
+noise_threshold = 0
+
+# Mode numbers
+[quantities.mpert]
+h5path = "info/mpert"
+type = "int_scalar"
+extract = "value"
+label = "mpert"
+noise_threshold = 0
+
+[quantities.npert]
+h5path = "info/npert"
+type = "int_scalar"
+extract = "value"
+label = "npert"
+noise_threshold = 0
+
+# Runtime (special: not from H5)
+[quantities.runtime]
+h5path = ""
+type = "runtime"
+extract = "value"
+label = "Runtime (s)"
+noise_threshold = 0.0

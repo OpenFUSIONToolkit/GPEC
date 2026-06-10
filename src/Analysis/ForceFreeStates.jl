@@ -9,6 +9,7 @@ module ForceFreeStates
 using HDF5
 using LaTeXStrings
 using Plots
+using Printf
 
 """
     plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
@@ -103,8 +104,8 @@ end
 
 Heatmap of energy eigenvector magnitudes vs (m, mode index).
 
-Only `matrix_type=:total` is supported (the total energy eigenvector matrix `Wₜ` is stored in
-`vacuum/wt`). Plasma and vacuum eigenvectors are not stored separately in the HDF5 output.
+Only `matrix_type=:total` is supported (the total energy eigenvectors are stored in
+`vacuum/et_eigenvector`). Plasma and vacuum eigenvectors are not stored separately in the HDF5 output.
 
 Eigenvectors are scaled by χ₁ = 2π ψ₀ × 10⁻³ to match GPEC conventions.
 
@@ -126,7 +127,7 @@ function plot_energy_eigenvectors(h5path; matrix_type=:total, save_path=nothing)
         error("matrix_type=$matrix_type not supported; only :total has eigenvector matrix stored in HDF5 (ep/ev are eigenvalue vectors, not matrices)")
 
     wt, psio, mlow = h5open(h5path, "r") do fid
-        read(fid["vacuum/wt"]), read(fid["equil/psio"]), read(fid["info/mlow"])
+        read(fid["vacuum/et_eigenvector"]), read(fid["equil/psio"]), read(fid["info/mlow"])
     end
 
     isempty(wt) && error("No vacuum data in $h5path; rerun with vac_flag = true")
@@ -362,6 +363,112 @@ function plot_delta_prime(h5path; save_path=nothing)
 end
 
 """
+    plot_cond_fbar(h5path; save_path=nothing, zoom=false)
+
+Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in
+`singular/kinetic/` (populated when ForceFreeStates runs with
+`kinetic_factor > 0`, `ode_flag = true`, `singfac_min > 0`).
+
+`F̄` is the kinetic Euler-Lagrange matrix formed by Schur-reducing the six
+kinetic matrices against the ideal A/B/C/D/E/H blocks (Logan 2015 Appendix
+C). Peaks in `cond(F̄)` locate "kinetically-displaced" singular surfaces —
+roots of `det(F̄)` that are not at ideal rational surfaces. When a peak
+exceeds the threshold stored in `scan_threshold` the ODE integrator stops
+there and steps across trapezoidally, mirroring Fortran `ode_kin_cross`.
+
+The plot overlays the ideal rational surfaces (dotted grey, labelled with
+their q value) and any accepted kinetic singular surfaces (solid crimson).
+If no peak exceeds the threshold, `kmsing = 0` and the kinetic ODE runs as
+a single chunk. This diagnostic is useful for anyone asking *where* the
+kinetic resonances land relative to the ideal ones.
+
+### Arguments
+
+  - `h5path`: Path to a GPEC HDF5 output file produced with kinetic mode enabled
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `zoom`: If `true`, auto-scale the y-axis to the scan data (threshold shown
+    as annotation only); if `false` (default), always include the threshold
+    line in the y-range
+
+### Returns
+
+A `Plots.jl` plot object, or `nothing` if no kinetic scan is stored in the file.
+"""
+function plot_cond_fbar(h5path; save_path=nothing, zoom=false)
+    scan_psi, scan_cond, thr, k_psi, i_psi, i_q, kmsing = h5open(h5path, "r") do fid
+        if !(haskey(fid, "singular") && haskey(fid["singular"], "kinetic"))
+            return Float64[], Float64[], 0.0, Float64[], Float64[], Float64[], 0
+        end
+        kg = fid["singular/kinetic"]
+        (read(kg["scan_psi"]),
+            read(kg["scan_cond"]),
+            read(kg["scan_threshold"]),
+            read(kg["psi"]),
+            read(fid["singular/psi"]),
+            read(fid["singular/q"]),
+            read(kg["kmsing"]))
+    end
+
+    if isempty(scan_psi)
+        @warn "No kinetic-singular-surface scan in $h5path — rerun with kinetic_factor>0, ode_flag=true, singfac_min>0"
+        return nothing
+    end
+
+    finite_cond = filter(isfinite, scan_cond)
+    data_max = isempty(finite_cond) ? 1.0 : maximum(finite_cond)
+    data_min = isempty(finite_cond) ? 1.0 : max(minimum(finite_cond), 1e-3)
+
+    p = plot(scan_psi, scan_cond;
+        yscale=:log10,
+        lw=2,
+        color=:steelblue,
+        label="cond(F̄)",
+        xlabel="Norm. Poloidal Flux",
+        ylabel="cond(F̄)",
+        title="Kinetic F̄ condition number (kmsing = $kmsing)",
+        legend=:topleft,
+        left_margin=12Plots.mm,
+        bottom_margin=4Plots.mm,
+        size=(900, 500)
+    )
+
+    if zoom
+        # Auto-scale y to data and annotate the threshold at the top edge if off-scale.
+        ylims!(p, (data_min / 2, data_max * 3))
+        if thr > 0 && thr > data_max * 3
+            annotate!(p, [(scan_psi[end], data_max * 2.5,
+                text(@sprintf("threshold = %.0e (off-scale)", thr), :right, 9, :red))])
+        elseif thr > 0
+            hline!(p, [thr]; color=:red, linestyle=:dash, lw=1.5,
+                label=@sprintf("threshold = %.0e", thr))
+        end
+    elseif thr > 0
+        hline!(p, [thr]; color=:red, linestyle=:dash, lw=1.5,
+            label=@sprintf("threshold = %.0e", thr))
+    end
+
+    if !isempty(i_psi)
+        vline!(p, i_psi; color=:gray, linestyle=:dot, lw=1,
+            label="ideal rational (q = m/n)")
+        y_label = zoom ? data_max * 1.2 : max(data_max * 1.2, sqrt(data_max * (thr > 0 ? thr : data_max)))
+        for (idx, ps) in enumerate(i_psi)
+            annotate!(p, [(ps, y_label,
+                text(@sprintf("q=%.0f", i_q[idx]), :right, 8, :gray))])
+        end
+    end
+
+    if !isempty(k_psi)
+        vline!(p, k_psi; color=:crimson, lw=1.5, label="accepted kinsing")
+    end
+
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
     plot_ffs_summary(h5path; save_path=nothing)
 
 Four-panel summary of ForceFreeStates (DCON-style) stability results, combining:
@@ -388,7 +495,7 @@ A `Plots.jl` plot object.
 """
 function plot_ffs_summary(h5path; save_path=nothing)
     has_vac = h5open(h5path, "r") do fid
-        haskey(fid, "vacuum/wt") && !isempty(read(fid["vacuum/wt"]))
+        haskey(fid, "vacuum/et_eigenvector") && !isempty(read(fid["vacuum/et_eigenvector"]))
     end
 
     p_crit = plot_fixed_boundary_stability_criterion(h5path)
