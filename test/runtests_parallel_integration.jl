@@ -124,7 +124,7 @@ using TOML
         intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -187,7 +187,7 @@ using TOML
         intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         odet = GeneralizedPerturbedEquilibrium.ForceFreeStates.OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
@@ -248,7 +248,7 @@ using TOML
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.mband = intr.mpert - 1
             intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
@@ -296,7 +296,7 @@ using TOML
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.mband = intr.mpert - 1
             intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
@@ -353,7 +353,7 @@ using TOML
         intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
 
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
 
         # Use the first chunk from chunk_el_integration_bounds: guaranteed rational-free interior
@@ -417,7 +417,7 @@ using TOML
             intr.mpert = intr.mhigh - intr.mlow + 1
             intr.mband = intr.mpert - 1
             intr.numpert_total = intr.mpert * intr.npert
-            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+            metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
             ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
             odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
             return odet
@@ -499,7 +499,7 @@ using TOML
         intr.mpert = intr.mhigh - intr.mlow + 1
         intr.mband = intr.mpert - 1
         intr.numpert_total = intr.mpert * intr.npert
-        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband)
         ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
         odet, fm_propagators, fm_chunks, fm_S_left =
             GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
@@ -536,8 +536,12 @@ using TOML
         #     cancellation (dp_raw entries can be 10⁴–10⁵× larger than the result). The
         #     imaginary part drifts by 2–5× across platforms even with `extended_precision_bvp=true`.
         #     Pin only the real part tightly; bracket |dpm| to catch sign/normalization errors.
-        @test isapprox(dpm[1, 1], +8.357176e+00 + 2.040534e-02im; rtol=1e-2)
-        @test isapprox(dpm[2, 2], -3.995079e+00 - 5.422822e-02im; rtol=1e-2)
+        # dpm[1], dpm[2] re-pinned when FourierCoefficients began dropping the duplicated θ=2π
+        # endpoint before the FFT (faithful Fortran fspline_fit_2, equil/fspline.f:293): the old
+        # un-trimmed FFT double-counted θ=0, biasing the metric DC coefficient. dpm[3]–dpm[5]
+        # shifted too but stay within their wider tolerances.
+        @test isapprox(dpm[1, 1], +8.672812e+00 + 2.139354e-02im; rtol=1e-2)
+        @test isapprox(dpm[2, 2], -3.890689e+00 - 5.121123e-02im; rtol=1e-2)
         @test isapprox(dpm[3, 3], -9.137656e+00 + 7.704888e+00im; rtol=5e-2)
         @test isapprox(real(dpm[4, 4]), +5.790777e+03; rtol=5e-2)
         @test isapprox(real(dpm[5, 5]), -2.940021e+02; rtol=5e-2)

@@ -18,9 +18,13 @@ include("DirectEquilibriumArcLength.jl")
 include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
+include("GeometryProfiles.jl")
+include("KineticProfiles.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
+export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
+    ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
+    KineticProfileSplines, load_kinetic_profiles
 export flux_surface_metric, flux_surface_area
 
 # --- Constants ---
