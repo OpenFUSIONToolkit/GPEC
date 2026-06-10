@@ -294,8 +294,8 @@
             psi = dri.psi_in
 
             # Spline types (using native FastInterpolations)
-            @test sq isa GeneralizedPerturbedEquilibrium.FastInterpolations.CubicSeriesInterpolant
-            @test psi isa GeneralizedPerturbedEquilibrium.FastInterpolations.CubicInterpolantND
+            @test isa(sq, FastInterpolations.CubicSeriesInterpolant)
+            @test isa(psi, FastInterpolations.CubicInterpolantND)
 
             # Domain monotonicity (coordinates are accessed via different paths)
             @test issorted(sq.cache.x)

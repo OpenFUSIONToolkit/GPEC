@@ -1,6 +1,109 @@
 """
-    make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
-                        calculated_source=nothing)
+    _build_x_matrix(mpert, mlow, sigma; hermitian=true)
+
+Build an mpert×mpert X-shaped matrix with diagonal σ and anti-diagonal entries.
+
+If `hermitian=true`, anti-diagonal entries are imaginary: W[i,j] = i·sign(m_i)·σ,
+which preserves W = W† (Hermiticity). This is appropriate for components Ak, Dk, Hk
+which are self-adjoint (X†X form, Logan 2015 Eqs 7.30, 7.33, 7.35).
+
+If `hermitian=false`, anti-diagonal entries are real: W[i,j] = sign(m_i)·σ,
+which breaks Hermiticity (W ≠ W†). This is appropriate for cross-term components Bk, Ck, Ek
+(Eqs 7.31, 7.32, 7.34 of Logan 2015) which are not self-adjoint in general.
+"""
+function _build_x_matrix(mpert::Int, mlow::Int, sigma::Float64; hermitian::Bool=true)
+    W = zeros(ComplexF64, mpert, mpert)
+    for i in 1:mpert
+        m_i = mlow + i - 1
+        W[i, i] = sigma
+
+        # Anti-diagonal: find j such that m_j = -m_i
+        j = -m_i - mlow + 1
+        if 1 <= j <= mpert && i != j
+            if hermitian
+                # Imaginary: W[i,j] = i·sign(m_i)·σ preserves W = W†
+                W[i, j] = im * sign(m_i) * sigma
+            else
+                # Real: W[i,j] = sign(m_i)·σ breaks Hermiticity
+                W[i, j] = sign(m_i) * sigma
+            end
+        end
+    end
+    return W
+end
+
+"""
+    fixed_kinetic_matrices(mpert, mpsi, sigma, mlow, ffit, xs)
+
+Build X-shaped fixed kinetic energy matrices for testing all 6 components.
+
+Populates all 6 components of the W (energy) matrices with X-shaped patterns
+scaled by `sigma` **relative to the Frobenius norm of the corresponding ideal
+matrix** at each ψ. This makes σ a dimensionless perturbation strength that is
+portable across equilibria:
+
+| Component | Matrix | Coupling | Hermitian | Relative to |
+|:--------- |:------ |:-------- |:--------- |:----------- |
+| 1         | Ak     | Wz†·Wz   | Yes       | ‖A(ψ)‖_F    |
+| 2         | Bk     | Wz†·Wx   | No        | ‖B(ψ)‖_F    |
+| 3         | Ck     | Wz†·Wy   | No        | ‖C(ψ)‖_F    |
+| 4         | Dk     | Wx†·Wx   | Yes       | ‖D(ψ)‖_F    |
+| 5         | Ek     | Wx†·Wy   | No        | ‖E(ψ)‖_F    |
+| 6         | Hk     | Wy†·Wy   | Yes       | ‖H(ψ)‖_F    |
+
+Hermitian components use imaginary anti-diagonal entries (i·sign(m)·σ);
+non-Hermitian components use real anti-diagonal entries (sign(m)·σ).
+
+Torque matrices (T) are all zero (torque requires finite rotation frequency).
+
+Returns `(kw_flat, kt_flat)` where each is `(mpsi, mpert^2, 6)`.
+"""
+function fixed_kinetic_matrices(
+    mpert::Int, mpsi::Int, sigma::Float64, mlow::Int,
+    ffit::FourFitVars, xs::Vector{Float64}
+)
+    np = ffit.numpert_total
+    kw_flat = zeros(ComplexF64, mpsi, np^2, 6)
+    kt_flat = zeros(ComplexF64, mpsi, np^2, 6)
+
+    # Map component index → ideal matrix spline and Hermiticity
+    # (component_index, ideal_spline, is_hermitian)
+    ideal_splines = [ffit.amats, ffit.bmats, ffit.cmats, ffit.dmats, ffit.emats, ffit.hmats]
+    # Ak, Dk, Hk are Hermitian: X†X is trivially self-adjoint.
+    # The thesis (Logan 2015 p.169) lists "Ak, Ck, Hk" but this appears to be a typo
+    # for "Ak, Dk, Hk" — confirmed by inspecting Fortran PENTRC output where Ck ≠ Ck†.
+    # Bk, Ck, Ek are cross terms (X†Y) and not Hermitian in general.
+    is_hermitian = [true, false, false, true, false, true]
+
+    # Build unit X-pattern matrices (Hermitian and non-Hermitian variants)
+    X_herm = _build_x_matrix(mpert, mlow, 1.0; hermitian=true)
+    X_nonherm = _build_x_matrix(mpert, mlow, 1.0; hermitian=false)
+
+    hint = Ref(1)
+    for ipsi in 1:mpsi
+        psi = xs[ipsi]
+        for ic in 1:6
+            ideal_mat = reshape(ideal_splines[ic](psi; hint=hint), np, np)
+            norm_ideal = norm(ideal_mat)  # Frobenius norm
+
+            X = is_hermitian[ic] ? X_herm : X_nonherm
+            # Scale: σ × ‖ideal(ψ)‖_F × unit X-pattern
+            # For multi-n, tile the mpert×mpert X-pattern into the np×np block
+            W = zeros(ComplexF64, np, np)
+            for jn in 0:(ffit.numpert_total÷mpert-1)
+                offset = jn * mpert
+                W[(offset+1):(offset+mpert), (offset+1):(offset+mpert)] .= X
+            end
+            W .*= sigma * norm_ideal
+            kw_flat[ipsi, :, ic] .= vec(W)
+        end
+    end
+
+    return kw_flat, kt_flat
+end
+
+"""
+    make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
 
 Construct kinetic energy (W) and torque (T) matrices, store as splines in `ffit`,
 and pre-compute the FKG derived matrices used by `sing_der!`.
@@ -9,24 +112,14 @@ Dispatches on `ctrl.kinetic_source`:
 
   - `"fixed"`: X-shaped test matrices scaled by `ctrl.kinetic_factor` relative to
     ideal matrix Frobenius norms (Ak, Dk, Hk Hermitian; Bk, Ck, Ek non-Hermitian)
-  - `"calculated"`: Compute via the `calculated_source` callback. This is
-    expected to be `KineticForces.compute_calculated_kinetic_matrices` injected
-    by `GeneralizedPerturbedEquilibrium.main`. The callback receives
-    `(ctrl, equil, intr, metric, ffit)` and returns `(kw_flat, kt_flat)` of
-    shape `(mpsi, np^2, 6)`. Callback injection is used because ForceFreeStates
-    is loaded before KineticForces, so a direct import would invert the
-    dependency order.
-
-Both paths apply `ctrl.kinetic_factor` as a global scale before the FKG Schur
-reduction.
+  - `"calculated"`: Compute via PENTRC (not yet implemented)
 """
 function make_kinetic_matrix(
     ctrl::ForceFreeStatesControl,
     equil::Equilibrium.PlasmaEquilibrium,
     ffit::FourFitVars,
     intr::ForceFreeStatesInternal,
-    metric::MetricData;
-    calculated_source::Union{Nothing,Function}=nothing,
+    metric::MetricData
 )
     xs = metric.xs
     mpsi = length(xs)
@@ -35,15 +128,7 @@ function make_kinetic_matrix(
     if ctrl.kinetic_source == "fixed"
         kw_flat, kt_flat = fixed_kinetic_matrices(intr.mpert, mpsi, ctrl.kinetic_factor, intr.mlow, ffit, xs)
     elseif ctrl.kinetic_source == "calculated"
-        isnothing(calculated_source) && error(
-            "kinetic_source=\"calculated\" requires the KineticForces callback. " *
-            "Drive the run via `GeneralizedPerturbedEquilibrium.main` instead of " *
-            "calling make_kinetic_matrix directly, or pass " *
-            "`calculated_source=KineticForces.compute_calculated_kinetic_matrices` explicitly."
-        )
-        kw_flat, kt_flat = calculated_source(ctrl, equil, intr, metric, ffit)
-        kw_flat .*= ctrl.kinetic_factor
-        kt_flat .*= ctrl.kinetic_factor
+        error("kinetic_source=\"calculated\" not yet implemented — requires PENTRC module")
     else
         error("Unknown kinetic_source: $(ctrl.kinetic_source). Must be \"fixed\" or \"calculated\"")
     end
@@ -100,21 +185,17 @@ function _compute_fkg_matrices!(
     r3_flat = zeros(ComplexF64, mpsi, np^2)
     ga_flat = zeros(ComplexF64, mpsi, np^2)
 
-    # ψ-loop is embarrassingly parallel: each iteration writes to a unique
-    # ipsi row of the *_flat output arrays. The only thread-shared mutable is
-    # the interpolant bracket-search hint; give each thread its own Ref.
-    thread_hints = [Ref(1) for _ in 1:Threads.maxthreadid()]
+    hint = Ref(1)
 
-    Threads.@threads for ipsi in 1:mpsi
-        hint = thread_hints[Threads.threadid()]
+    for ipsi in 1:mpsi
         psi = xs[ipsi]
 
         # Evaluate ideal and kinetic matrices from splines (full np×np, block-diagonal in n)
         amat_full = reshape(ffit.amats(psi; hint=hint), np, np)
         bmat_full = reshape(ffit.bmats(psi; hint=hint), np, np)
         cmat_full = reshape(ffit.cmats(psi; hint=hint), np, np)
-        dmat_full = reshape(ffit.dmats_prim(psi; hint=hint), np, np)
-        emat_full = reshape(ffit.emats_prim(psi; hint=hint), np, np)
+        dmat_full = reshape(ffit.dmats(psi; hint=hint), np, np)
+        emat_full = reshape(ffit.emats(psi; hint=hint), np, np)
         hmat_full = reshape(ffit.hmats(psi; hint=hint), np, np)
         fmat_prim_full = reshape(ffit.fmats_prim(psi; hint=hint), np, np)
 
@@ -171,16 +252,8 @@ function _compute_fkg_matrices!(
 
             # paat [Fortran lines 1202-1207]
             temp2 = amat_lu \ b1mat
-            # Fortran sing.f:1004-1008 computes aamat = amat_kin^H · A_kin⁻¹ via
-            #   zgbtrs("C", ..., amatlu, temp2=amat_kin)  → temp2 = A_kin^{-H} · amat_kin
-            #   aamat = CONJG(TRANSPOSE(temp2)) = amat_kin^H · A_kin⁻¹
-            # For non-Hermitian amat_kin (kwmat Hermitian + ktmat anti-Hermitian),
-            # this is NOT the identity. The prior implementation `(amat_lu \ amat_kin)'`
-            # gave aamat = I exactly, zeroing umat_diff and dropping the
-            # `im·psio_over_n · umat_diff · ...` terms from paat, r1mat, r2mat.
-            aamat_temp = amat_lu' \ amat_kin      # = A_kin^{-H} · amat_kin
-            aamat = aamat_temp'                   # = amat_kin^H · A_kin⁻¹
-            umat_diff = I - aamat
+            aamat = (amat_lu \ amat_kin)'  # A_kin⁻¹ A_kin = I analytically; kept for numerical consistency with Fortran fourfit.F line 1204
+            umat_diff = I - aamat  # ≈ 0; captures round-off from LU factorization
             paat_val = (bkaat' * temp2 .- im * psio_over_n .* umat_diff * b1mat)'
 
             # r1mat [Fortran lines 1209-1217]

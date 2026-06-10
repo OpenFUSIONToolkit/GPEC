@@ -86,8 +86,6 @@ function compute_plasma_response!(
         metric, ffit, ctrl
     )
 
-    npsi = size(ForceFreeStates_results.u_store, 4)
-    state.psi_grid = ForceFreeStates_results.psi_store[1:npsi]
     state.xi_modes = xi_modes
     state.b_modes  = b_modes
 

@@ -15,7 +15,6 @@ module Utilities
 
 include("FourierTransforms.jl")
 include("FourierCoefficients.jl")
-include("GridUtilities.jl")
 
 using .FourierTransforms
 export FourierTransform, inverse, compute_fourier_coefficients

@@ -115,9 +115,6 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
   - `toroidal_torque` - -2·n·Im( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ / 4 )
 """
 @kwdef mutable struct PerturbedEquilibriumState
-    # Radial grid (FFS ODE integration ψ_n values) [npsi]
-    psi_grid::Vector{Float64} = Float64[]
-
     # Response fields in mode space [npsi, mpert]
     xi_modes::Union{Nothing, NamedTuple} = nothing
     b_modes::Union{Nothing, NamedTuple} = nothing

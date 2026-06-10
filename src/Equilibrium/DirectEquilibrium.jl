@@ -508,9 +508,6 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
         end
     elseif equil_params.grid_type == "ldp"
         [psilow + (psihigh - psilow) * sin((ipsi / mpsi) * (π / 2))^2 for ipsi in 0:mpsi]
-    elseif equil_params.grid_type == "pow1"
-        # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
-        [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
@@ -709,13 +706,9 @@ robustness.
     eqfun_metric1 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 2]; opts2d...)
     eqfun_metric2 = cubic_interp(grid2d, eqfun_fs_nodes[:, :, 3]; opts2d...)
 
-    geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
-        rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
-
     params = EquilibriumParameters()
     params.bt_sign = raw_profile.bt_sign
-
-    return PlasmaEquilibrium(raw_profile.config, params, profiles, geometry,
+    return PlasmaEquilibrium(raw_profile.config, params, profiles,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
