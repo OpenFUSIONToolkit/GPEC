@@ -29,6 +29,10 @@ include("PerturbedEquilibrium/PerturbedEquilibrium.jl")
 import .PerturbedEquilibrium as PerturbedEquilibrium
 export PerturbedEquilibrium
 
+include("KineticForces/KineticForces.jl")
+import .KineticForces as KineticForces
+export KineticForces
+
 include("Analysis/Analysis.jl")
 import .Analysis as Analysis
 export Analysis
@@ -48,6 +52,7 @@ using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSe
 using .ForceFreeStates: sing_lim!, sing_find!
 using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
+using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
 
 const _BANNER = "="^60
@@ -243,6 +248,31 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
+    # Build KineticForces control and load kinetic profiles once — reused by
+    # both the stability kinetic callback (via `calculated_cb` below) and the
+    # post-PE torque diagnostics block. The `"fixed"` kinetic source path in
+    # stability does not need kinetic_profiles, but the post-PE block always
+    # does, so we load whenever a [KineticForces] section is present or the
+    # stability path requests the calculated source.
+    kf_ctrl = haskey(inputs, "KineticForces") ?
+        KineticForces.KineticForcesControl(;
+            (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
+        KineticForces.KineticForcesControl()
+
+    kinetic_profiles = nothing
+    needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
+        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+    if needs_kinetic_profiles
+        kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
+        kinetic_profiles = Equilibrium.load_kinetic_profiles(
+            kinetic_file;
+            zi=kf_ctrl.zi, zimp=kf_ctrl.zimp,
+            mi=kf_ctrl.mi, mimp=kf_ctrl.mimp,
+            density_factor=kf_ctrl.density_factor, temperature_factor=kf_ctrl.temperature_factor,
+            ExB_rotation_factor=kf_ctrl.ExB_rotation_factor, toroidal_rotation_factor=kf_ctrl.toroidal_rotation_factor,
+            chi1=2π * equil.psio)
+    end
+
     # Fit equilibrium quantities to Fourier-spline functions.
     if ctrl.mat_flag || ctrl.ode_flag
         if ctrl.verbose
@@ -255,7 +285,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+        metric = make_metric(equil; mband=intr.mband)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -268,7 +298,22 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
             if ctrl.verbose
                 @info "Computing kinetic matrices (source: $(ctrl.kinetic_source), factor: $(ctrl.kinetic_factor))"
             end
-            make_kinetic_matrix(ctrl, equil, ffit, intr, metric)
+            # Inject the KineticForces callback so the "calculated" source can
+            # invoke compute_calculated_kinetic_matrices without ForceFreeStates
+            # importing KineticForces (which would invert the load order).
+            calculated_cb = (c, e, i, m, f) ->
+                KineticForces.compute_calculated_kinetic_matrices(
+                    c, e, i, m, f;
+                    kf_ctrl=kf_ctrl, kinetic_profiles=kinetic_profiles)
+            make_kinetic_matrix(ctrl, equil, ffit, intr, metric;
+                calculated_source=calculated_cb)
+
+            # Find kinetically-displaced singular surfaces (zeros of det(F̄)) for ODE crossings.
+            # Matches Fortran ksing_find (sing.f:1486-1616). singfac_min > 0 gates crossings;
+            # singfac_min == 0 preserves single-chunk behavior.
+            if ctrl.ode_flag && ctrl.singfac_min > 0
+                find_kinetic_singular_surfaces!(ffit, equil, intr)
+            end
         end
 
         # NOTE: Asymptotic calculations for ideal ForceFreeStates are now computed on-demand during
@@ -378,6 +423,31 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     end
 
     @info "Perturbed Equilibrium completed in $(@sprintf("%.3f", time() - pe_start)) s"
+
+    # ----------------------------------------------------------------
+    # KineticForces (Neoclassical Toroidal Viscosity)
+    # ----------------------------------------------------------------
+    if "KineticForces" in keys(inputs)
+        @info "\n  KineticForces\n$_SECTION"
+        kf_start = time()
+
+        # kf_ctrl and kinetic_profiles were loaded once above the stability block.
+        kf_intr = KineticForces.KineticForcesInternal(equil; verbose=kf_ctrl.verbose)
+        if @isdefined(pe_state)
+            KineticForces.set_perturbation_data!(kf_intr, pe_state, intr, equil, metric)
+        end
+
+        kf_state = KineticForces.KineticForcesState()
+        KineticForces.compute_torque_all_methods!(kf_state, kf_intr, kf_ctrl, equil, kinetic_profiles)
+
+        if kf_ctrl.write_outputs_to_HDF5
+            h5open(joinpath(intr.dir_path, kf_ctrl.HDF5_filename), "cw") do h5file
+                KineticForces.write_to_hdf5!(h5file, kf_state)
+            end
+        end
+
+        @info "KineticForces completed in $(@sprintf("%.3f", time() - kf_start)) s"
+    end
 
     # ----------------------------------------------------------------
     # Done
@@ -538,8 +608,20 @@ function write_outputs_to_HDF5(
             out_h5["singular/delta_prime_matrix"] = intr.delta_prime_matrix
         end
 
-        # Write vacuum data; always write all entries, using empty arrays when not computed
-        out_h5["vacuum/wt"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
+        # Write kinetic singular surface data (det(F̄) near-zeros) and the cond(F̄) scan
+        # used to find them. Populated only when kinetic crossings were searched for.
+        out_h5["singular/kinetic/kmsing"] = intr.kmsing
+        out_h5["singular/kinetic/psi"] = [s.psifac for s in intr.kinsing]
+        out_h5["singular/kinetic/q"] = [s.q for s in intr.kinsing]
+        out_h5["singular/kinetic/q1"] = [s.q1 for s in intr.kinsing]
+        out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
+        out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
+        out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
+
+        # Write vacuum data; always write all entries, using empty arrays when not computed.
+        # `et_eigenvector[m, mode]` holds the normalized, phase-fixed total-energy
+        # eigenvectors (columns of the diagonalized `wt = wp + wv`); `wt0` is the raw wt.
+        out_h5["vacuum/et_eigenvector"] = ctrl.vac_flag ? vac_data.wt : ComplexF64[]
         out_h5["vacuum/wt0"] = ctrl.vac_flag ? vac_data.wt0 : ComplexF64[]
         out_h5["vacuum/ep"] = ctrl.vac_flag ? vac_data.ep : ComplexF64[]
         out_h5["vacuum/ev"] = ctrl.vac_flag ? vac_data.ev : ComplexF64[]
@@ -590,8 +672,8 @@ function write_outputs_to_HDF5(
                 out_h5["matrices/ideal/B"] = _eval_mat_spline(ffit.bmats)
                 out_h5["matrices/ideal/C"] = _eval_mat_spline(ffit.cmats)
             end
-            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats)
-            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats)
+            out_h5["matrices/ideal/D"] = _eval_mat_spline(ffit.dmats_prim)
+            out_h5["matrices/ideal/E"] = _eval_mat_spline(ffit.emats_prim)
             out_h5["matrices/ideal/H"] = _eval_mat_spline(ffit.hmats)
 
             # Ideal derived matrices (F, K, G)
