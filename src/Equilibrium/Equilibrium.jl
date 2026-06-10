@@ -11,15 +11,21 @@ import StaticArrays: @MMatrix, SVector
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
+include("FluxSurfaceMetrics.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
 include("DirectEquilibriumArcLength.jl")
 include("DirectEquilibriumByInversion.jl")
 include("InverseEquilibrium.jl")
 include("AnalyticEquilibrium.jl")
+include("GeometryProfiles.jl")
+include("KineticProfiles.jl")
 
 # --- Expose types and functions to the user ---
-export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters, ProfileSplines
+export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParameters,
+    ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
+    KineticProfileSplines, load_kinetic_profiles
+export flux_surface_metric, flux_surface_area
 
 # --- Constants ---
 const mu0 = 4π * 1e-7
@@ -54,6 +60,24 @@ function setup_equilibrium(eq_config::EquilibriumConfig, additional_input=nothin
             additional_input = LargeAspectRatioConfig(eq_config.eq_filename)
         end
         eq_input = lar_run(eq_config, additional_input)
+    elseif eq_type == "tj_analytic"
+        # TJ-analytic equilibrium (GPEC adaptation of the profile family
+        # used by R. Fitzpatrick's TJ code, https://github.com/rfitzp/TJ) fed
+        # through the inverse pipeline.
+        if additional_input === nothing
+            additional_input = TJAnalyticConfig(eq_config.eq_filename)
+        end
+        eq_input = tj_analytic_run(eq_config, additional_input)
+    elseif eq_type == "tj_analytic_direct"
+        # TJ-analytic equilibrium (R. Fitzpatrick's TJ-code profile
+        # family, https://github.com/rfitzp/TJ) fed through the direct-GS
+        # solver: builds ψ(R, Z) on a 2D grid and delegates to the same solver
+        # as `efit`.  Reproduces the full geqdsk-path physics including
+        # higher-order geometric effects that the inverse solver misses.
+        if additional_input === nothing
+            additional_input = TJAnalyticConfig(eq_config.eq_filename)
+        end
+        eq_input = tj_analytic_run_direct(eq_config, additional_input)
     elseif eq_type == "sol"
         if additional_input === nothing
             additional_input = SolovevConfig(eq_config.eq_filename)
