@@ -67,10 +67,6 @@ using HDF5
             # Im of et[1] (PR #112). Here the Solovev value is the regression anchor:
             # Re(et[1]) is a large, well-conditioned eigenvalue (pinned tight); Im(et[1])
             # is the kinetic damping rate, which is more FP-sensitive (bracketed loosely).
-            # The Im bracket is 8%: dropping the duplicated θ=2π endpoint before the metric
-            # FFT (faithful fspline_fit_2, equil/fspline.f:293) plus Julia-version FP spread
-            # moves this damping rate across -0.675 (macOS / Linux x86 1.x) … -0.755 (Linux
-            # x86 1.11); Re(et[1]) stays well within 1%, so it remains the tight guard.
             @test isfinite(real(et[1]))
             @test isfinite(imag(et[1]))
             @test real(et[1]) ≈ 15.888 rtol = 0.01
