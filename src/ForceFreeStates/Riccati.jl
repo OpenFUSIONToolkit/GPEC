@@ -76,7 +76,10 @@ After renormalization (at crossing or when norms exceed ucrit):
 This is compatible with downstream code (which uses U₁/U₂ ratio):
   - Free.jl:     wp = u[:,:,2] / u[:,:,1] = I · S⁻¹ = P  ✓  (post-renorm)
   - FixedBoundaryStability.jl: crit = min_eigval(u[:,:,1] / u[:,:,2]) = min_eigval(S)  ✓
-  - Axis init:   S(ψ₀) = 0  (initialize_el_at_axis! sets u[:,:,1]=0, u[:,:,2]=I)  ✓
+  - Axis init:   determined by `ctrl.fixed_axis`. When `true`, U₁=0, U₂=I → S(ψ₀)=0 (original
+    Glasser fixed-axis BC). When `false` (default), Frobenius eigenvalue init [Glasser 2016 Eq. 51]
+    sets U₂=I and U₁ to the regular Frobenius eigenvector per mode → S(ψ₀) = U₁_Frobenius is
+    nonzero in general. Riccati S-evolution remains well-defined either way.
 
 ## Key Differences from Standard Integration
 
@@ -1223,8 +1226,7 @@ function riccati_eulerlagrange_integration(
     # Initialization — same as eulerlagrange_integration
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
-        # axis init sets u[:,:,1]=0, u[:,:,2]=I → S=0 at axis ✓
+        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
     else
@@ -1554,7 +1556,7 @@ function parallel_eulerlagrange_integration(
     ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium,
     ffit::FourFitVars, intr::ForceFreeStatesInternal
 )
-    odet = _initialize_parallel_odet(ctrl, equil, intr)
+    odet = _initialize_parallel_odet(ctrl, equil, ffit, intr)
     chunks, propagators, odet_proxies = _setup_parallel_chunks_and_proxies(odet, ctrl, intr)
     bvp_threads = max(1, min(Threads.nthreads(), ctrl.parallel_threads))
     _log_parallel_start(ctrl, odet, equil, chunks, bvp_threads)
@@ -1589,10 +1591,11 @@ end
 # Build odet and initialize at the magnetic axis. Same path as serial eulerlagrange_integration.
 function _initialize_parallel_odet(ctrl::ForceFreeStatesControl,
                                    equil::Equilibrium.PlasmaEquilibrium,
+                                   ffit::FourFitVars,
                                    intr::ForceFreeStatesInternal)
     odet = OdeState(intr.numpert_total, ctrl.numsteps_init, ctrl.numunorms_init, intr.msing)
     if ctrl.sing_start <= 0
-        initialize_el_at_axis!(odet, ctrl, equil.profiles, intr)
+        initialize_el_at_axis!(odet, ctrl, ffit, equil.profiles, intr)
     elseif ctrl.sing_start <= intr.msing
         error("sing_start > 0 not implemented yet!")
     else
