@@ -21,6 +21,7 @@ Forcing Data:
   - `forcing_data_format::String` - Format: "ascii", "hdf5", or "coil"
 
 Coil settings (used when `forcing_data_format = "coil"`):
+
   - `machine::String` - Machine name prefix for .dat files (e.g. "d3d")
   - `dat_dir::String` - Directory containing .dat files; defaults to bundled `coil_geometries/`
   - `mtheta_coil::Int` - Poloidal grid resolution for boundary field evaluation (default: 480)
@@ -51,8 +52,9 @@ Data structure for a single forcing mode.
   - `m::Int` - Poloidal mode number
   - `amplitude::ComplexF64` - Complex amplitude in unit-norm convention (= Fortran Phi_x,
     T·m² per unit-norm cell) after loading. File inputs are tagged by their input convention:
-      - `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
-      - `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
+
+      + `"normal_field_T"`: B·n̂ in Tesla (2π-angle); converted to unit-norm on load
+      + `"sfl_flux_Wb"`: SFL flux in 2π-angle convention; multiplied by (2π)² on load
 """
 Base.@kwdef mutable struct ForcingMode
     n::Int = 0
@@ -67,24 +69,28 @@ Load forcing data from ASCII or HDF5 file. Returns the normalization tag read
 from the file (or `"normal_field_T"` by default if no tag is present).
 
 **Normalization tags** (set in the file, not in the TOML):
-- `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
-  Most intuitive for users; converted to unit-norm (Phi_x) on load.
-- `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
-  Multiplied by (2π)² on load to reach unit-norm (Phi_x).
+
+  - `"normal_field_T"` (default): Fourier modes of B·n̂ [Tesla], 2π-angle convention.
+    Most intuitive for users; converted to unit-norm (Phi_x) on load.
+  - `"sfl_flux_Wb"`: SFL flux R×(B_R·∂Z/∂θ - B_Z·∂R/∂θ) [T·m²], 2π-angle convention.
+    Multiplied by (2π)² on load to reach unit-norm (Phi_x).
 
 **ASCII format** — optional `# normalization: <tag>` header line, then data rows:
+
 ```
 # normalization: normal_field_T
 1  2  0.5  0.1
 1  3  0.3  -0.2
 ```
+
 Columns: n, m, real(amplitude), [optional] imag(amplitude)
 
 **HDF5 format** — optional root attribute `normalization` (string), plus datasets:
-- `"n"`: Integer array of toroidal mode numbers
-- `"m"`: Integer array of poloidal mode numbers
-- `"amplitude_real"`: Real parts of amplitudes
-- `"amplitude_imag"`: Imaginary parts of amplitudes (optional, default 0)
+
+  - `"n"`: Integer array of toroidal mode numbers
+  - `"m"`: Integer array of poloidal mode numbers
+  - `"amplitude_real"`: Real parts of amplitudes
+  - `"amplitude_imag"`: Imaginary parts of amplitudes (optional, default 0)
 """
 function load_forcing_data!(
     forcing_modes::Vector{ForcingMode},

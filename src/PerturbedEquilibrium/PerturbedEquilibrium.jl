@@ -14,7 +14,7 @@ import ..ForceFreeStates
 import ..ForceFreeStates: OdeState, VacuumData, ForceFreeStatesInternal, FourFitVars, MetricData
 import ..Vacuum
 import ..ForcingTerms
-import ..ForcingTerms: ForcingMode, load_forcing_data!, convert_forcing_normalization!
+import ..ForcingTerms: ForcingMode, CoilSet, load_forcing_data!, convert_forcing_normalization!
 import ..Utilities
 import ..Utilities.FourierTransforms
 import DelimitedFiles: readdlm
@@ -86,7 +86,12 @@ function compute_perturbed_equilibrium(
     if isempty(intr.forcing_modes)
         if ft_ctrl.forcing_data_format == "coil"
             cfg = ForcingTerms.CoilConfig(ft_ctrl)
-            coil_sets = ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow)
+            # Reuse preloaded coil geometry (gpec.h5 rerun with `--coil-source coils`)
+            # when present; otherwise build it from the TOML coil-set config. Either
+            # way, retain it on `intr.coil_sets` for the rerun snapshot writer.
+            coil_sets = isempty(intr.coil_sets) ?
+                        ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow) : intr.coil_sets
+            intr.coil_sets = coil_sets
             for n in ffs_intr.nlow:ffs_intr.nhigh
                 modes_n = ForcingMode[]
                 ForcingTerms.compute_coil_forcing_modes!(

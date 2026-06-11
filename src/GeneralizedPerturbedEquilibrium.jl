@@ -120,6 +120,11 @@ already read from the source HDF5 snapshot, so `compute_perturbed_equilibrium`
 does not have to touch the original `forcing.dat` path. When `nothing`, the
 ForcingTerms data is loaded from disk at snapshot time (if PerturbedEquilibrium
 is enabled) so it still ends up in `input/raw_inputs/forcing_terms/`.
+
+`preloaded_coil_sets` similarly lets the rerun path inject coil geometry read from
+`input/raw_inputs/coils/` so a coil run can be replayed (recomputing the field
+against the current equilibrium) without the original `.dat`/`.h5` files. The coil
+geometry actually used by the run is always written back into `input/raw_inputs/coils/`.
 """
 function main_with_inputs(
     inputs::Dict{String,Any},
@@ -128,6 +133,7 @@ function main_with_inputs(
     path::String,
     git_version::String;
     preloaded_forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    preloaded_coil_sets::Union{Nothing,Vector{ForcingTerms.CoilSet}}=nothing
 )
     total_start = time()
 
@@ -220,7 +226,7 @@ function main_with_inputs(
                 path,
                 ft_ctrl_snapshot.forcing_data_file,
                 ft_ctrl_snapshot.forcing_data_format,
-                ctrl.verbose,
+                ctrl.verbose
             )
         end
     end
@@ -342,14 +348,15 @@ function main_with_inputs(
     # stability does not need kinetic_profiles, but the post-PE block always
     # does, so we load whenever a [KineticForces] section is present or the
     # stability path requests the calculated source.
-    kf_ctrl = haskey(inputs, "KineticForces") ?
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
@@ -501,6 +508,12 @@ function main_with_inputs(
             pe_intr.forcing_modes = copy(forcing_modes_snapshot)
         end
 
+        # Inject preloaded coil geometry (gpec.h5 replay with `--coil-source coils`)
+        # so the coil field is recomputed from stored geometry without the .dat/.h5 file.
+        if preloaded_coil_sets !== nothing
+            pe_intr.coil_sets = copy(preloaded_coil_sets)
+        end
+
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
@@ -515,6 +528,12 @@ function main_with_inputs(
                 pe_state, pe_intr, joinpath(intr.dir_path, output_file)
             )
             @info "Results written to $output_file"
+        end
+
+        # Snapshot the coil geometry actually used into the gpec.h5 output so the run
+        # is replayable from the output file alone (see `main_from_h5 --coil-source coils`).
+        if ctrl.write_outputs_to_HDF5 && !isempty(pe_intr.coil_sets)
+            _write_coil_snapshot!(joinpath(intr.dir_path, ctrl.HDF5_filename), pe_intr.coil_sets)
         end
     end
 
@@ -578,7 +597,7 @@ function write_outputs_to_HDF5(
     ffit::Union{FourFitVars,Nothing}=nothing,
     git_version::String="unknown",
     inputs::Union{Nothing,Dict{String,Any}}=nothing,
-    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing,
+    forcing_modes::Union{Nothing,Vector{ForcingTerms.ForcingMode}}=nothing
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -722,7 +741,7 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
-        
+
         # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
@@ -812,6 +831,22 @@ function write_outputs_to_HDF5(
             end
         end
     end
+end
+
+"""
+    _write_coil_snapshot!(h5_path::String, coil_sets::Vector{CoilSet})
+
+Append the coil geometry used by a run into `input/raw_inputs/coils/` of an existing
+gpec.h5 file (opened in append mode), so the run can be replayed from the output alone.
+One subgroup per coil set; see `ForcingTerms.save_coils_to_h5`.
+"""
+function _write_coil_snapshot!(h5_path::String, coil_sets::Vector{ForcingTerms.CoilSet})
+    isfile(h5_path) || return nothing
+    h5open(h5_path, "r+") do out_h5
+        haskey(out_h5, "input/raw_inputs/coils") && return nothing
+        ForcingTerms.save_coils_to_h5(coil_sets, create_group(out_h5, "input/raw_inputs/coils"))
+    end
+    return nothing
 end
 
 """

@@ -99,6 +99,79 @@ stored in `equil.rzphi_nu`. This matches Fortran's `phi = -helicity*(twopi*czeta
 For DIII-D (Bt < 0, Ip > 0 → helicity = -1), ν ranges from about -3.4 to +3.4 radians at the
 boundary — omitting it completely scrambles the Fourier mode decomposition.
 
+### Coil geometry sources
+
+Each `[[ForcingTerms.coil_set]]` block supplies one coil set from one of several sources,
+selected by `source`. Shifts and tilts (`shiftx/y/z`, `tiltx/y/z`, `n_tilt`, ...) apply to
+every source, so analytic coils can be perturbed exactly like file-based ones.
+
+```toml
+# Legacy ASCII .dat file (unchanged; resolves to {dat_dir}/{machine}_{name}.dat)
+[[ForcingTerms.coil_set]]
+name = "il"
+currents = [1e4, 1e4, 1e4, 1e4, 1e4, 1e4]
+
+# Modern HDF5 file; `name` selects one set from a multi-set file (omit if it holds one)
+[[ForcingTerms.coil_set]]
+source = "file"
+h5_file = "/path/to/my_coils.h5"
+name = "il"
+currents = [1e4, 1e4, 1e4, 1e4, 1e4, 1e4]
+
+# Analytic PF hoop — a horizontal circle; tilt breaks axisymmetry to give n ≠ 0 forcing
+[[ForcingTerms.coil_set]]
+source = "pf_hoop"
+radius = 1.8
+height = 0.9
+currents = [5e3]
+tiltx = [2.0]
+
+# Analytic window-pane (picture-frame) array; rz_corners are two opposite [R, Z] corners
+[[ForcingTerms.coil_set]]
+source = "window_pane"
+ncoil_gen = 8
+rz_corners = [[2.2, -0.6], [2.2, 0.6]]
+gap_fraction = 0.15
+currents = [1e3, -1e3, 1e3, -1e3, 1e3, -1e3, 1e3, -1e3]
+
+# Analytic helical array on a circular cross-section torus (pitch = m/n)
+[[ForcingTerms.coil_set]]
+source = "helical"
+R0 = 1.7
+a = 0.6
+m_hel = 4
+n_hel = 1
+n_coils = 4
+currents = [1e3, 1e3, 1e3, 1e3]
+```
+
+### HDF5 coil geometry format
+
+A coil HDF5 file stores one **subgroup per coil set** under a parent group (default `coils`),
+so a single file can hold many sets and the reader ignores any unrelated content elsewhere:
+
+```
+<group>/<set_name>/x         Float64[ncoil, s, nsec]   Cartesian metres
+<group>/<set_name>/y         Float64[ncoil, s, nsec]
+<group>/<set_name>/z         Float64[ncoil, s, nsec]
+<group>/<set_name>/currents  Float64[ncoil]            (optional)
+<group>/<set_name>  attr nw  Float64                   (winding multiplier; default 1.0)
+```
+
+Use `convert_coil_dat_to_h5` / `convert_coil_h5_to_dat` to migrate legacy files, and
+`read_coil_h5` / `write_coil_h5` for direct I/O.
+
+### Rerun snapshot
+
+When a coil run writes `gpec.h5`, the coil geometry actually used (after shifts/tilts and with
+currents) is captured under `input/raw_inputs/coils/`. The run can then be replayed with
+`main_from_h5` even if the original `.dat`/`.h5` files are gone:
+
+- `--coil-source forcing-modes` (default) recomputes the field from the stored TOML coil config
+  (needs the original geometry files to be present).
+- `--coil-source coils` recomputes the field from the geometry stored in `gpec.h5`, so no
+  original files are required — and the equilibrium may be overridden on replay.
+
 ## Comparison with Fortran GPEC
 
 | Quantity | Julia convention | Fortran GPEC convention |
