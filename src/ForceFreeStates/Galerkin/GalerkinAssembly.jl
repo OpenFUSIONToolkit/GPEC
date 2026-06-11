@@ -304,9 +304,9 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         return out
     end
 
-    # QuadGK replaces Fortran's LSODE accumulation. Use a moderate relative tolerance with an
-    # evaluation cap (analogous to Fortran's gnstep limit) so a near-singular integrand cannot hang.
-    raw, qerr = quadgk(integrand, x0, x1l; rtol=1e-8, atol=1e-30, maxevals=20000)
+    # QuadGK replaces Fortran's LSODE accumulation. Match Fortran's LSODE tolerance (gal_tol, 1e-10)
+    # with an evaluation cap (analogous to Fortran's gnstep limit) so a near-singular integrand cannot hang.
+    raw, qerr = quadgk(integrand, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=20000)
     if get(ENV, "GAL_DEBUG", "") == "1"
         @info "  resonant jsing=$jsing side=$(cell.extra) qerr=$(qerr) res1=$(raw[1]) res2=$(raw[2])"
     end
