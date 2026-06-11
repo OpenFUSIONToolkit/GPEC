@@ -21,6 +21,7 @@ if !isempty(ARGS)
     end
 else
     include("./runtests_utilities.jl")
+    include("./runtests_fouriertransforms.jl")
     include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
     include("./runtests_eulerlagrange.jl")
