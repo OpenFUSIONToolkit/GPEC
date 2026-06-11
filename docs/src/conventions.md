@@ -193,12 +193,8 @@ of RH configurations when interfacing with VACUUM.
 ## Field Amplitudes and Units
 
 GPEC reports perturbed magnetic fields as Fourier spectra on flux surfaces. The spectrum of a field
-on a surface depends on how the Fourier integrand is weighted by the surface-area element, so a
-normalization must be fixed for the reported amplitudes to be meaningful. GPEC normalizes by the
-*scalar* area of the surface, which leaves every reported field amplitude in units of **tesla** and
-independent of the working (magnetic) coordinate. The two amplitudes users most often confuse — the
-**resonant field** and the **power-normalized field** — are both in tesla for this reason. The
-coordinate-invariance of these weightings is established in Pharr (2026) (see [Citations](citations.md)).
+on a surface depends on in general on the coordinate system used. However, certain resonant components on rational surfaces or the 2-norm of the Fourier coefficient vector on any surface can be made coordinate-independent if the proper area weighting is used within the Fourier decomposition. The
+coordinate-invariance of the weightings used in GPEC is established in Pharr (2026) (see [Citations](citations.md)). In each case, we normalize the harmonics by scalar area factors in such a way that the units are always Tesla. 
 
 ### Resonant Field
 
@@ -235,16 +231,6 @@ The ``\sqrt{A}`` weighting is the unique one for which the spectrum transforms u
 working coordinates, so the power-normalized amplitudes — and quantities derived from them, such as
 the singular values of the resonant coupling matrix — are coordinate-invariant.
 
-### Units of Reported Quantities
-
-| Quantity | Meaning | Unit |
-|----------|---------|------|
-| `resonant_flux` | resonant field ``\Phi^r/A^r`` at each rational surface | T |
-| power-normalized field | ``\sqrt{A}``-weighted normal-field spectrum (above) | T |
-| `delta_prime` (``\Delta'``) | tearing-stability index, normalized-flux convention | dimensionless |
-| `island_half_width` | penetrated magnetic-island half-width | ``\sqrt{\psi_N}`` (root normalized poloidal flux) |
-| `chirikov_parameter` | island-overlap ratio between neighbouring surfaces | dimensionless |
-| `permeability` (``P``) | plasma-response operator ``\Lambda L^{-1}`` | dimensionless |
 
 ## Rotation Velocity Conventions (KineticForces)
 
