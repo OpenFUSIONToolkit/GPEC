@@ -433,9 +433,12 @@ function read_imas(config::EquilibriumConfig, dd)
     # Extract 1D profiles, converting psi from COCOS 11 to internal
     psi_1d = eqt.profiles_1d.psi .* cocos_factor
     f_1d = eqt.profiles_1d.f          # F(ψ) = R·Bt [T·m], COCOS-independent
-    bt_sign = Int(sign(f_1d[end]))    # sign of toroidal field (before abs is applied below)
     p_1d = eqt.profiles_1d.pressure   # plasma pressure P(ψ) [Pa], COCOS-independent
     q_1d = eqt.profiles_1d.q          # safety factor, COCOS-independent
+
+    # Capture toroidal-field sign from the boundary F value before abs() below.
+    bt_sign = isempty(f_1d) ? 1 : Int(sign(f_1d[end]))
+    bt_sign == 0 && (bt_sign = 1)
 
     nw = length(psi_1d)
     psi_norm_grid = range(0.0, 1.0; length=nw)
