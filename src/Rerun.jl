@@ -239,17 +239,6 @@ function rebuild_equilibrium_input(eq_config::Equilibrium.EquilibriumConfig, raw
 end
 
 """
-    equilibrium_config_to_dict(eq_config) -> Dict{String,Any}
-
-Serialize an `EquilibriumConfig` back into a plain dict keyed by field name. Used to
-synthesize a complete `[Equilibrium]` section when a run was configured via the deprecated
-`equil.toml`, so the gpec.h5 snapshot is self-contained and rerunnable.
-"""
-function equilibrium_config_to_dict(eq_config::Equilibrium.EquilibriumConfig)
-    return Dict{String,Any}(String(f) => getfield(eq_config, f) for f in fieldnames(typeof(eq_config)))
-end
-
-"""
     build_inputs_from_h5(args::Vector{String})
         -> (inputs, eq_config, additional_input, output_dir, current_git, preloaded_forcing)
 

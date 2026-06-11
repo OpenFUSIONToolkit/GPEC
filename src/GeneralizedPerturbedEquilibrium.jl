@@ -100,17 +100,8 @@ equilibria (efit, chease) that `setup_equilibrium` reads from disk.
 function build_inputs_from_toml(path::String; dd::Union{IMASdd.dd,Nothing}=nothing)
     inputs = TOML.parsefile(joinpath(path, "gpec.toml"))
 
-    if "Equilibrium" in keys(inputs)
-        eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
-    elseif isfile(joinpath(path, "equil.toml"))
-        @warn "Reading from equil.toml is deprecated. Please move [EQUIL_CONTROL] and [EQUIL_OUTPUT] sections to [Equilibrium] in gpec.toml"
-        eq_config = Equilibrium.EquilibriumConfig(joinpath(path, "equil.toml"))
-        # Populate [Equilibrium] from the constructed config so the snapshot TOML blob is
-        # complete and rerunnable — the deprecated equil.toml is not stored in gpec.h5.
-        inputs["Equilibrium"] = equilibrium_config_to_dict(eq_config)
-    else
-        error("No equilibrium configuration found. Add [Equilibrium] section to gpec.toml")
-    end
+    haskey(inputs, "Equilibrium") || error("No [Equilibrium] section in gpec.toml")
+    eq_config = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], path)
 
     # LAR/Solovev carry their parameters in a separate auxiliary TOML referenced
     # by eq_filename. Merge those parameters into the in-memory `inputs` dict so
