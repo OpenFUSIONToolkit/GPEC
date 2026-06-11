@@ -24,7 +24,7 @@ makedocs(;
         "Home" => "index.md",
         "Setup" => "set_up.md",
         "Workflow" => "workflow.md",
-        "Sign Conventions" => "sign_conventions.md",
+        "Conventions Reference" => "conventions.md",
         "API Reference" => [
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",

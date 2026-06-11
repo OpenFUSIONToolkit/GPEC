@@ -1,7 +1,7 @@
-# Sign Conventions Reference
+# Conventions Reference
 
-This page is a comprehensive reference for the sign and coordinate conventions used
-throughout GPEC. Understanding them is essential for interpreting outputs, interfacing with
+This page is a comprehensive reference for the sign, coordinate, and field-amplitude conventions
+used throughout GPEC. Understanding them is essential for interpreting outputs, interfacing with
 other codes, and correctly setting up perturbed-equilibrium and kinetic calculations.
 
 These conventions are inherited from the Fortran GPEC suite and are GPEC-native: they predate
@@ -189,6 +189,62 @@ conjugate is taken.
 
 The VACUUM code uses CCW ``\phi`` and downward-outboard ``\theta``. GPEC uses the complex conjugate
 of RH configurations when interfacing with VACUUM.
+
+## Field Amplitudes and Units
+
+GPEC reports perturbed magnetic fields as Fourier spectra on flux surfaces. The spectrum of a field
+on a surface depends on how the Fourier integrand is weighted by the surface-area element, so a
+normalization must be fixed for the reported amplitudes to be meaningful. GPEC normalizes by the
+*scalar* area of the surface, which leaves every reported field amplitude in units of **tesla** and
+independent of the working (magnetic) coordinate. The two amplitudes users most often confuse — the
+**resonant field** and the **power-normalized field** — are both in tesla for this reason. The
+coordinate-invariance of these weightings is established in Pharr (2026) (see [Citations](citations.md)).
+
+### Resonant Field
+
+The resonant field is the pitch-resonant (``m = nq``) Fourier component of the perturbed flux at a
+rational surface, divided by the **scalar area** ``A^r`` of that surface:
+
+```math
+b^r = \frac{\Phi^r}{A^r} \qquad [\mathrm{T}].
+```
+
+Dividing the resonant flux ``\Phi^r`` by the surface area turns it into a genuine field amplitude
+that is invariant under changes of the poloidal-angle (working) coordinate. This is the quantity
+reported as `resonant_flux`.
+
+### Power-Normalized Field
+
+The power-normalized field is the Fourier spectrum of the square-root-area-weighted normal field
+``\sqrt{\mathcal{J}\,|\nabla\psi|}\,(\mathbf{b}\cdot\hat{\mathbf{n}})``, divided by the scalar
+``\sqrt{A}`` of the surface:
+
+```math
+\tilde{b}_m = \frac{1}{\sqrt{A}}\oint \sqrt{\mathcal{J}\,|\nabla\psi|}\;
+(\mathbf{b}\cdot\hat{\mathbf{n}})\, e^{-i m\theta}\, d\theta \qquad [\mathrm{T}].
+```
+
+The name comes from Parseval's theorem: the sum of its squared mode amplitudes equals the
+area-averaged squared normal field — the surface-averaged field "power",
+
+```math
+\sum_m |\tilde{b}_m|^2 = \big\langle (\mathbf{b}\cdot\hat{\mathbf{n}})^2 \big\rangle.
+```
+
+The ``\sqrt{A}`` weighting is the unique one for which the spectrum transforms unitarily between
+working coordinates, so the power-normalized amplitudes — and quantities derived from them, such as
+the singular values of the resonant coupling matrix — are coordinate-invariant.
+
+### Units of Reported Quantities
+
+| Quantity | Meaning | Unit |
+|----------|---------|------|
+| `resonant_flux` | resonant field ``\Phi^r/A^r`` at each rational surface | T |
+| power-normalized field | ``\sqrt{A}``-weighted normal-field spectrum (above) | T |
+| `delta_prime` (``\Delta'``) | tearing-stability index, normalized-flux convention | dimensionless |
+| `island_half_width` | penetrated magnetic-island half-width | ``\sqrt{\psi_N}`` (root normalized poloidal flux) |
+| `chirikov_parameter` | island-overlap ratio between neighbouring surfaces | dimensionless |
+| `permeability` (``P``) | plasma-response operator ``\Lambda L^{-1}`` | dimensionless |
 
 ## Rotation Velocity Conventions (KineticForces)
 

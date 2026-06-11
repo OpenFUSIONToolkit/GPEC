@@ -66,6 +66,14 @@ Establishes the self-consistent plasma response calculation. Derives the permeab
 
 ---
 
+> M. Pharr, E. Bursch, N. C. Logan, P. Lunia, J.-K. Park, and C. Paz-Soldan, "Coordinate-invariant flux-surface Fourier analysis in tokamaks,"
+> Preprint (2026).
+> [arXiv:2606.02901](https://arxiv.org/abs/2606.02901)
+
+Establishes the area weightings that make flux-surface Fourier spectra of perturbed fields coordinate-invariant. Shows that normalizing the resonant flux by the scalar surface area (the resonant field) and the square-root-area-weighted normal field by the scalar square-root area (the power-normalized field) leaves both quantities in tesla and independent of the magnetic working coordinate. The reference for the field-amplitude conventions reported by the `PerturbedEquilibrium` module — see the [Conventions Reference](conventions.md).
+
+---
+
 ## InnerLayer Module
 
 > A. H. Glasser, Z. R. Wang, and J.-K. Park, "Computation of resistive instabilities by matched asymptotic expansions,"
