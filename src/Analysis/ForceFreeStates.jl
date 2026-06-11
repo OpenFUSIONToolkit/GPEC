@@ -368,6 +368,59 @@ function plot_delta_prime(h5path; save_path=nothing)
 end
 
 """
+    plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+
+Plot the BALOO-style infinite-n ballooning stability diagram: the experimental
+pressure gradient α (solid) and the first stability boundary α_crit (dashed) versus
+normalized poloidal flux ψ_N. Surfaces where the experimental α lies above the boundary
+are ballooning-unstable. Reads `locstab/psi`, `locstab/alpha`, and
+`locstab/alpha_critical` (populated when ForceFreeStates runs with
+`local_stability_flag = true`).
+
+### Arguments
+
+  - `h5path`: Path to a GPEC HDF5 output file (e.g. `"gpec.h5"`)
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `psi_min`: Lower ψ_N axis limit; set near the edge (e.g. `0.9`) to focus on the
+    pedestal (default: `0.0`)
+
+### Returns
+
+A `Plots.jl` plot object.
+"""
+function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
+    psi, alpha, alpha_crit = h5open(h5path, "r") do fid
+        haskey(fid, "locstab/alpha") || return (Float64[], Float64[], Float64[])
+        read(fid["locstab/psi"]), read(fid["locstab/alpha"]), read(fid["locstab/alpha_critical"])
+    end
+
+    isempty(alpha) && return plot(; title="No local stability data (set local_stability_flag)", legend=false)
+
+    p = plot(;
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
+    )
+
+    # Mask non-finite α_crit so always-stable surfaces leave a gap rather than a spike.
+    exp_mask = isfinite.(alpha)
+    crit_mask = isfinite.(alpha_crit)
+    plot!(p, psi[exp_mask], alpha[exp_mask]; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, psi[crit_mask], alpha_crit[crit_mask]; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
+
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
     plot_cond_fbar(h5path; save_path=nothing, zoom=false)
 
 Plot `cond(F̄)` vs ψ from the kinetic-singular-surface scan stored in

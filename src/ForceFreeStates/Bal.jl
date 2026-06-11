@@ -673,6 +673,115 @@ function scan_delta_prime_map(
     )
 end
 
+"""
+    critical_ballooning_alpha(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
+
+First infinite-n ballooning stability boundary at one flux surface: holding the
+equilibrium magnetic shear fixed (`corr_qprime = 0`), find the critical pressure
+gradient `α` at which the marginal ballooning Δ' first crosses zero as `α` increases
+from zero. `α` is linear in `dp/dψ`, so the search is over a scaling of the reference
+gradient and the boundary maps directly to `α_crit = α_ref * scale_crit`.
+
+The `α = 0` (zero pressure gradient) point is ballooning stable; its Δ' sign defines
+the stable side, and the first scaling at which Δ' flips away from it is the boundary.
+
+Returns `(alpha_crit, alpha_scale_crit, found)`. When no crossing exists within
+`max_alpha_scale` (always stable, or second-stability access) `alpha_crit = NaN` and
+`found = false`.
+"""
+function critical_ballooning_alpha(
+    psi_idx::Int,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    max_alpha_scale::Float64=8.0,
+    n_scan::Int=24,
+    tol::Float64=1e-3
+)
+    ref = salpha_reference(psi_idx, plasma_eq)
+
+    # Δ' as a function of the α scaling at fixed magnetic shear.
+    delta_at(scale) = ballooning_delta_prime(
+        psi_idx,
+        plasma_eq;
+        corr_qprime=0.0,
+        corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
+        theta_k=theta_k
+    ).delta_prime
+
+    stable_sign = sign(delta_at(0.0))
+    if stable_sign == 0.0
+        return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
+    end
+
+    # Scan α upward and bracket the first scaling where Δ' leaves the stable side.
+    prev_scale = 0.0
+    lo = NaN
+    hi = NaN
+    for k in 1:n_scan
+        scale = max_alpha_scale * k / n_scan
+        d = delta_at(scale)
+        if isfinite(d) && sign(d) != stable_sign
+            lo = prev_scale
+            hi = scale
+            break
+        end
+        prev_scale = scale
+    end
+
+    isnan(hi) && return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
+
+    # Bisect the bracket to the requested tolerance.
+    while (hi - lo) > tol
+        mid = 0.5 * (lo + hi)
+        d = delta_at(mid)
+        if !isfinite(d) || sign(d) == stable_sign
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    scale_crit = 0.5 * (lo + hi)
+
+    return (alpha_crit=ref.alpha_ref * scale_crit, alpha_scale_crit=scale_crit, found=true)
+end
+
+"""
+    ballooning_alpha_boundary(ctrl, plasma_eq; theta_k=0.0)
+
+Profile driver for the BALOO-style ballooning stability diagram. Loops over flux
+surfaces returning the experimental pressure gradient `alpha` (from
+[`salpha_reference`](@ref)) and the first stability boundary `alpha_critical` (from
+[`critical_ballooning_alpha`](@ref)) versus normalized flux `psi`. Surfaces whose
+experimental `alpha` exceeds `alpha_critical` are ballooning-unstable.
+
+Per-surface failures and surfaces with no boundary within range are returned as `NaN`.
+"""
+function ballooning_alpha_boundary(
+    ctrl::ForceFreeStatesControl,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0
+)
+    xs = plasma_eq.profiles.xs
+    npsi = length(xs)
+    psi = Vector{Float64}(xs)
+    alpha = fill(NaN, npsi)
+    alpha_critical = fill(NaN, npsi)
+
+    for i in 1:npsi
+        xs[i] > 1.0 && continue
+        try
+            alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
+            alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k).alpha_crit
+        catch err
+            if ctrl.verbose
+                @warn "ballooning alpha boundary failed" psi_idx = i exception = err
+            end
+        end
+    end
+
+    return (psi=psi, alpha=alpha, alpha_critical=alpha_critical)
+end
+
 # ======================================================================
 #   ODE Integration
 #   Integrates the ideal marginal ballooning equations

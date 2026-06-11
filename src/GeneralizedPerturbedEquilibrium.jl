@@ -50,7 +50,7 @@ import AdaptiveArrayPools: @with_pool
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_find!
-using .ForceFreeStates: compute_ballooning_stability!
+using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
@@ -163,8 +163,11 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # ballooning coefficient system and the local ballooning result.
     profiles_xs = equil.profiles.xs
     locstab_fs = zeros(Float64, length(profiles_xs), 5)
+    ballooning_boundary = (psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
     if ctrl.local_stability_flag
         compute_ballooning_stability!(ctrl, locstab_fs, equil)
+        # First ballooning stability boundary (α vs ψ_N) for BALOO-style diagnostics.
+        ballooning_boundary = ballooning_alpha_boundary(ctrl, equil)
     end
     # Fit data to splines
     intr.locstab = cubic_interp(profiles_xs, Series(locstab_fs); extrap=ExtendExtrap())
@@ -360,7 +363,7 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     end
 
     if ctrl.write_outputs_to_HDF5
-        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version)
+        write_outputs_to_HDF5(ctrl, equil, intr, odet, ctrl.vac_flag ? vac_data : nothing, ffit, git_version; ballooning_boundary=ballooning_boundary)
         @info "Results written to $(ctrl.HDF5_filename)"
     end
 
@@ -475,7 +478,8 @@ function write_outputs_to_HDF5(
     odet::OdeState,
     vac_data::Union{VacuumData,Nothing},
     ffit::Union{FourFitVars,Nothing}=nothing,
-    git_version::String="unknown"
+    git_version::String="unknown";
+    ballooning_boundary=(psi=Float64[], alpha=Float64[], alpha_critical=Float64[])
 )
 
     h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "w") do out_h5
@@ -551,6 +555,11 @@ function write_outputs_to_HDF5(
         out_h5["singular/di0"] = (ctrl.local_stability_flag && !isempty(intr.sing)) ?
                                  [intr.locstab(sing.psifac)[1] / sing.psifac for sing in intr.sing] : Float64[]
         out_h5["locstab/ballooning_Delta_prime"] = ctrl.local_stability_flag ? intr.locstab.y[:, 4] : Float64[]
+
+        # First ballooning stability boundary: experimental α vs critical α (BALOO-style).
+        out_h5["locstab/psi"] = ballooning_boundary.psi
+        out_h5["locstab/alpha"] = ballooning_boundary.alpha
+        out_h5["locstab/alpha_critical"] = ballooning_boundary.alpha_critical
 
         # Write integration data
         # TODO: technically this should only be written if ode_flag is true, but that's going to get deprecated eventually

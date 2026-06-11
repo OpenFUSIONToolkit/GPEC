@@ -185,8 +185,22 @@ display(p_zero)
 zero_path = joinpath(@__DIR__, "salpha_zero_contours.png")
 Plots.savefig(p_zero, zero_path)
 
+# BALOO-style first ballooning stability boundary: experimental α vs critical α
+p_baloo = Analysis.ForceFreeStates.plot_ballooning_alpha_boundary(h5path)
+display(p_baloo)
+baloo_path = joinpath(@__DIR__, "ballooning_alpha_boundary.png")
+Plots.savefig(p_baloo, baloo_path)
+
 println("Saved figures:")
-for p in
-    (joinpath(@__DIR__, "equilibrium_summary.png"), joinpath(@__DIR__, "ffs_summary.png"), joinpath(@__DIR__, "pe_summary.png"), salpha_path, localstab_path, maps_path, zero_path)
+for p in (
+    joinpath(@__DIR__, "equilibrium_summary.png"),
+    joinpath(@__DIR__, "ffs_summary.png"),
+    joinpath(@__DIR__, "pe_summary.png"),
+    salpha_path,
+    localstab_path,
+    maps_path,
+    zero_path,
+    baloo_path
+)
     println("  ", p)
 end
