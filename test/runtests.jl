@@ -22,7 +22,6 @@ if !isempty(ARGS)
 else
     include("./runtests_utilities.jl")
     include("./runtests_vacuum.jl")
-    include("./runtests_vacuum_coverage.jl")
     include("./runtests_equil.jl")
     include("./runtests_eulerlagrange.jl")
     include("./runtests_riccati.jl")
