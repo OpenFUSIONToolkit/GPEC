@@ -606,8 +606,8 @@ function plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
         bottom_margin=5Plots.mm
     )
     plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
-    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, linestyle=:dash, label="1st stability boundary")
-    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, linestyle=:dash, label="2nd stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, marker=:circle, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, marker=:circle, label="2nd stability boundary")
     isnothing(save_path) || savefig(p, save_path)
     return p
 end
