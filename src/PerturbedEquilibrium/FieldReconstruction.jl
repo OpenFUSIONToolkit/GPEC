@@ -126,7 +126,8 @@ function reconstruct_physical_fields(
     mthsurf = length(equil.rzphi_ys) - 1
     thetas_for_avg = [(k - 1) / mthsurf for k in 1:mthsurf]
     Jb_psi_modes = similar(b_psi_modes)
-    for ipsi in 1:npsi
+    # Surfaces are independent; :static keeps threadid() stable for any per-thread state.
+    Threads.@threads :static for ipsi in 1:npsi
         psi = psi_grid[ipsi]
         hint2d = (Ref(1), Ref(1))
         area = 0.0
@@ -152,11 +153,15 @@ function reconstruct_physical_fields(
     # R,Z,φ cylindrical components (Fortran gpeq_rzphi)
     # ξ: uses J-weighted psi (xwp from gpeq_contra) and regularized theta (xmt)
     # b: uses raw psi (bwp from gpeq_sol, no Jacobian convolution) and regularized theta (bmt)
+    # Build the (ψ,θ) flux→cylindrical geometry once and reuse it for both ξ and b: the
+    # transform matrices depend only on equilibrium geometry, not on the perturbed field.
     mlow = ffs_intr.mlow
-    xi_R, xi_Z, xi_phi = _compute_rzphi_modes(
-        equil, psi_grid, mlow, size(xi_psi_modes, 2), xwp_modes, xmt_modes, xvz_modes)
-    b_R, b_Z, b_phi = _compute_rzphi_modes(
-        equil, psi_grid, mlow, size(b_psi_modes, 2), b_psi_modes, b_theta_reg, bvz_modes)
+    mpert_rz = size(xi_psi_modes, 2)
+    mtheta_rz = max(2 * (abs(mlow) + mpert_rz), 512)
+    ft_rz = Utilities.FourierTransforms.FourierTransform(mtheta_rz, mpert_rz, mlow)
+    rzphi_geom = _build_rzphi_geometry(equil, psi_grid, mtheta_rz)
+    xi_R, xi_Z, xi_phi = _apply_rzphi_transform(rzphi_geom, ft_rz, mtheta_rz, xwp_modes, xmt_modes, xvz_modes)
+    b_R, b_Z, b_phi = _apply_rzphi_transform(rzphi_geom, ft_rz, mtheta_rz, b_psi_modes, b_theta_reg, bvz_modes)
 
     xi_modes = (
         psi   = xi_psi_modes,
@@ -227,7 +232,8 @@ function sum_eigenmode_contributions(
     xi_psi_modes  = zeros(ComplexF64, npsi, mpert)
     xi_psi1_modes = zeros(ComplexF64, npsi, mpert)
     xi_s_modes    = zeros(ComplexF64, npsi, mpert)
-    for ipsi in 1:npsi
+    # Surfaces are independent; threaded over ψ (run with `julia -t N` or JULIA_NUM_THREADS).
+    Threads.@threads :static for ipsi in 1:npsi
         # u_store[:,:,1] = Ξ_ψ (radial displacement)
         mul!(view(xi_psi_modes, ipsi, :),
              ForceFreeStates_results.u_store[:, :, 1, ipsi],
@@ -276,7 +282,7 @@ function compute_perturbed_field_modes(
     nn = ffs_intr.nlow
     chi1 = 2π * equil.psio
 
-    for ipsi in 1:npsi
+    Threads.@threads :static for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
         q1 = equil.profiles.q_deriv(psi_norm)
@@ -344,16 +350,25 @@ function compute_clebsch_displacements(
         return clebsch_psi, clebsch_psi1, clebsch_alpha
     end
 
-    # Pre-allocate buffers for matrix operations
-    amat = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    bmat = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    cmat_buf = Matrix{ComplexF64}(undef, numpert_total, numpert_total)
-    xmp1_vec = Vector{ComplexF64}(undef, mpert)
-    xms_vec  = Vector{ComplexF64}(undef, mpert)
+    # Per-thread workspaces: matrix ops and spline hints are not safe to share across threads.
+    # Size by maxthreadid() and index by threadid() under :static scheduling (GPEC convention).
+    nt = Threads.maxthreadid()
+    amat_bufs = [Matrix{ComplexF64}(undef, numpert_total, numpert_total) for _ in 1:nt]
+    bmat_bufs = [Matrix{ComplexF64}(undef, numpert_total, numpert_total) for _ in 1:nt]
+    cmat_bufs = [Matrix{ComplexF64}(undef, numpert_total, numpert_total) for _ in 1:nt]
+    xmp1_vecs = [Vector{ComplexF64}(undef, mpert) for _ in 1:nt]
+    xms_vecs = [Vector{ComplexF64}(undef, mpert) for _ in 1:nt]
+    hints = [Ref(1) for _ in 1:nt]
 
-    hint = Ref(1)
+    Threads.@threads :static for ipsi in 1:npsi
+        tid = Threads.threadid()
+        amat = amat_bufs[tid]
+        bmat = bmat_bufs[tid]
+        cmat_buf = cmat_bufs[tid]
+        xmp1_vec = xmp1_vecs[tid]
+        xms_vec = xms_vecs[tid]
+        hint = hints[tid]
 
-    for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
 
@@ -416,7 +431,7 @@ function compute_modified_field_modes(
     b_theta_reg = zeros(ComplexF64, npsi, mpert)
     b_zeta_reg  = zeros(ComplexF64, npsi, mpert)
 
-    for ipsi in 1:npsi
+    Threads.@threads :static for ipsi in 1:npsi
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
         q1 = equil.profiles.q_deriv(psi_norm)
@@ -476,18 +491,26 @@ function compute_contra_displacements(
     xwt_modes = zeros(ComplexF64, npsi, mpert)
     xwz_modes = zeros(ComplexF64, npsi, mpert)
 
-    # Pre-allocate Fourier coefficient vectors
-    jmat  = Vector{ComplexF64}(undef, 2 * mband + 1)
-    jmat1 = Vector{ComplexF64}(undef, 2 * mband + 1)
+    # Per-thread Fourier coefficient vectors and spline hints (not safe to share across threads).
+    vlen = 2 * mband + 1
+    nt = Threads.maxthreadid()
+    jmat_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    jmat1_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    jmat_hints = [Ref(1) for _ in 1:nt]
+    jmat1_hints = [Ref(1) for _ in 1:nt]
 
     # Build cubic spline interpolants for Jacobian Fourier coefficients (quantities 7, 8).
     # Matches Fortran cspline_eval(metric%cs, psi, 0) which interpolates smoothly.
     jmat_interp  = _build_metric_interp(fc, 7)
     jmat1_interp = _build_metric_interp(fc, 8)
-    jmat_hint  = Ref(1)
-    jmat1_hint = Ref(1)
 
-    for ipsi in 1:npsi
+    Threads.@threads :static for ipsi in 1:npsi
+        tid = Threads.threadid()
+        jmat = jmat_bufs[tid]
+        jmat1 = jmat1_bufs[tid]
+        jmat_hint = jmat_hints[tid]
+        jmat1_hint = jmat1_hints[tid]
+
         psi_norm = psi_grid[ipsi]
         q = equil.profiles.q_spline(psi_norm)
 
@@ -545,7 +568,7 @@ function compute_contra_displacements(
     xmt_modes = copy(xwt_modes)
     xmz_modes = copy(xwz_modes)
     if reg_spot > 0
-        for ipsi in 1:npsi
+        Threads.@threads :static for ipsi in 1:npsi
             psi_norm = psi_grid[ipsi]
             q = equil.profiles.q_spline(psi_norm)
             for ipert in 1:mpert
@@ -600,20 +623,31 @@ function compute_cova_components(
     bvt_modes = zeros(ComplexF64, npsi, mpert)
     bvz_modes = zeros(ComplexF64, npsi, mpert)
 
-    # Pre-allocate metric Fourier coefficient vectors
-    g11 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g22 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g33 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g23 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g31 = Vector{ComplexF64}(undef, 2 * mband + 1)
-    g12 = Vector{ComplexF64}(undef, 2 * mband + 1)
+    # Per-thread metric Fourier coefficient vectors and spline hints (not safe to share).
+    vlen = 2 * mband + 1
+    nt = Threads.maxthreadid()
+    g11_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g22_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g33_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g23_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g31_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g12_bufs = [Vector{ComplexF64}(undef, vlen) for _ in 1:nt]
+    g_hints_bufs = [[Ref(1) for _ in 1:6] for _ in 1:nt]
 
     # Build cubic spline interpolants for metric tensor Fourier coefficients (quantities 1-6).
     # Matches Fortran cspline_eval(metric%cs, psi, 0) which interpolates smoothly.
     g_interps = [_build_metric_interp(fc, qty) for qty in 1:6]
-    g_hints = [Ref(1) for _ in 1:6]
 
-    for ipsi in 1:npsi
+    Threads.@threads :static for ipsi in 1:npsi
+        tid = Threads.threadid()
+        g11 = g11_bufs[tid]
+        g22 = g22_bufs[tid]
+        g33 = g33_bufs[tid]
+        g23 = g23_bufs[tid]
+        g31 = g31_bufs[tid]
+        g12 = g12_bufs[tid]
+        g_hints = g_hints_bufs[tid]
+
         psi_norm = psi_grid[ipsi]
 
         # Interpolate metric tensor Fourier coefficients at this psi
@@ -737,7 +771,7 @@ function compute_b_n_xi_n_modes(
     phase_fwd  = [exp( twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
     phase_back = [exp(-twopi * im * m_vals[ipert] * thetas[k]) for k in 1:mthsurf, ipert in 1:mpert]
 
-    for ipsi in 1:npsi
+    Threads.@threads :static for ipsi in 1:npsi
         psi = ForceFreeStates_results.psi_store[ipsi]
         hint2d_psi = (Ref(1), Ref(1))
 
@@ -778,70 +812,94 @@ function compute_b_n_xi_n_modes(
 end
 
 """
-    _compute_rzphi_modes(equil, psi_grid, mlow, mpert,
-        psi_input, theta_input, cova_zeta_input) -> (R_modes, Z_modes, phi_modes)
+    _build_rzphi_geometry(equil, psi_grid, mtheta) -> NamedTuple of [mtheta, npsi] arrays
 
-Convert mode-space perturbation from flux coordinates (ψ,θ,ζ) to cylindrical (R,Z,φ).
+Build the (ψ,θ) flux→cylindrical transformation geometry on the DFT θ grid: the
+transformation matrix entries t11/t12/t21/t22/t33 and the Jacobian J_theta, as
+`[mtheta, npsi]` arrays (one column per flux surface).
 
-Implements Fortran `gpeq_rzphi` (gpeq.f:439-501):
-    R(θ)   = (t11·psi_input + t12·theta_input) / J
-    Z(θ)   = (t21·psi_input + t22·theta_input) / J
-    φ(θ)   = t33 · cova_zeta_input
+These depend only on equilibrium geometry, not on the perturbed field, so they are computed
+once and reused for both the ξ and b reconstructions (Fortran gpeq.f:458-475).
 
-Returns mode-space arrays (npsi × mpert) in SFL coordinates. The pointwise product with
-geometry generates harmonics beyond mpert; users needing fuller resolution should increase
-the mode count or use `Analysis.PerturbedEquilibriumModes.modes_to_theta` post-hoc.
+The terms are smooth in ψ, so rather than evaluating the (expensive, 2-D) `rzphi` bicubic at
+every fine u_store ψ (npsi ≈ 1158), the *smooth* rzphi primitives (r², η-offset, J and their
+θ-derivatives) are sampled at the coarse equilibrium ψ-knots (`equil.rzphi_xs`, ≈ mpsi+1) and
+cubic-resampled onto the fine grid — replacing ~6×-redundant 2-D bicubic evaluations with
+cheap 1-D cubic evaluations. θ stays at the DFT resolution.
 
-The caller passes different inputs for ξ vs b (see `reconstruct_physical_fields`).
+The ψ-derivatives (dr²/dψ, dη/dψ) are obtained by differentiating the ψ-resample spline, NOT
+by resampling the bicubic's ψ-derivatives directly: the latter are only C¹ in ψ and a cubic
+fit through their knot samples rings badly near the axis/edge. The resampled function values
+reproduce the bicubic exactly on its native knots, so the spline derivative recovers the true
+ψ-derivative to machine precision. The trig / t-matrix assembly is done at the fine grid.
 """
-function _compute_rzphi_modes(
+function _build_rzphi_geometry(
     equil::Equilibrium.PlasmaEquilibrium,
     psi_grid::Vector{Float64},
-    mlow::Int, mpert::Int,
-    psi_input::Matrix{ComplexF64},
-    theta_input::Matrix{ComplexF64},
-    cova_zeta_input::Matrix{ComplexF64}
+    mtheta::Int
 )
     npsi = length(psi_grid)
     R0 = equil.ro
 
-    # Theta grid for DFT — matches Fortran mthsurf
-    mtheta = max(2 * (abs(mlow) + mpert), 512)
-    ft = Utilities.FourierTransforms.FourierTransform(mtheta, mpert, mlow)
+    knot_psi = collect(equil.rzphi_xs)   # coarse equilibrium ψ-knots
+    nknot = length(knot_psi)
 
-    R_modes   = zeros(ComplexF64, npsi, mpert)
-    Z_modes   = zeros(ComplexF64, npsi, mpert)
-    phi_modes = zeros(ComplexF64, npsi, mpert)
-    R_fun     = zeros(ComplexF64, mtheta)
-    Z_fun     = zeros(ComplexF64, mtheta)
-    phi_fun   = zeros(ComplexF64, mtheta)
+    # Sample the smooth rzphi primitives at the coarse ψ-knots × DFT θ grid, packed into a
+    # single [nknot, 5·mtheta] matrix so one cubic Series interpolant (over ψ) carries every
+    # (primitive, θ) channel. Block o·mtheta .+ (1:mtheta) holds primitive o at all θ.
+    # Channels: r2(0), deta(1), jac(2), dr2_dtheta(3), doff_dtheta(4). The ψ-derivatives of
+    # r2/deta come from differentiating this spline (see below).
+    nch = 5
+    knot_vals = Matrix{Float64}(undef, nknot, nch * mtheta)
 
-    # Pre-allocate theta-space buffers
-    t11 = Vector{Float64}(undef, mtheta)
-    t12 = Vector{Float64}(undef, mtheta)
-    t21 = Vector{Float64}(undef, mtheta)
-    t22 = Vector{Float64}(undef, mtheta)
-    t33 = Vector{Float64}(undef, mtheta)
-    J_theta = Vector{Float64}(undef, mtheta)
+    hints = [(Ref(1), Ref(1)) for _ in 1:Threads.maxthreadid()]
 
-    hint = (Ref(1), Ref(1))
+    Threads.@threads :static for ik in 1:nknot
+        hint = hints[Threads.threadid()]
+        psi = knot_psi[ik]
 
-    for ipsi in 1:npsi
-        psi = psi_grid[ipsi]
-
-        # Compute transformation matrix at each theta point (Fortran gpeq.f:458-475)
         for itheta in 1:mtheta
             theta = (itheta - 1) / mtheta  # SFL theta ∈ [0, 1)
             pt = (psi, theta)
 
-            r2   = equil.rzphi_rsquared(pt; hint=hint)
-            deta = equil.rzphi_offset(pt; hint=hint)
-            jac  = equil.rzphi_jac(pt; hint=hint)
+            knot_vals[ik, 0*mtheta+itheta] = equil.rzphi_rsquared(pt; hint=hint)
+            knot_vals[ik, 1*mtheta+itheta] = equil.rzphi_offset(pt; hint=hint)
+            knot_vals[ik, 2*mtheta+itheta] = equil.rzphi_jac(pt; hint=hint)
+            knot_vals[ik, 3*mtheta+itheta] = equil.rzphi_rsquared(pt; deriv=DerivOp(0, 1), hint=hint)
+            knot_vals[ik, 4*mtheta+itheta] = equil.rzphi_offset(pt; deriv=DerivOp(0, 1), hint=hint)
+        end
+    end
 
-            dr2_dpsi    = equil.rzphi_rsquared(pt; deriv=DerivOp(1, 0), hint=hint)
-            dr2_dtheta  = equil.rzphi_rsquared(pt; deriv=DerivOp(0, 1), hint=hint)
-            doff_dpsi   = equil.rzphi_offset(pt; deriv=DerivOp(1, 0), hint=hint)
-            doff_dtheta = equil.rzphi_offset(pt; deriv=DerivOp(0, 1), hint=hint)
+    # Cubic-in-ψ interpolant of every (primitive, θ) channel; matches the metric-coeff
+    # resampling convention used in `_build_metric_interp`.
+    geom_interp = cubic_interp(knot_psi, Series(knot_vals); bc=CubicFit(), extrap=ExtendExtrap())
+
+    t11 = Matrix{Float64}(undef, mtheta, npsi)
+    t12 = Matrix{Float64}(undef, mtheta, npsi)
+    t21 = Matrix{Float64}(undef, mtheta, npsi)
+    t22 = Matrix{Float64}(undef, mtheta, npsi)
+    t33 = Matrix{Float64}(undef, mtheta, npsi)
+    J_theta = Matrix{Float64}(undef, mtheta, npsi)
+
+    hints1d = [Ref(1) for _ in 1:Threads.maxthreadid()]
+
+    Threads.@threads :static for ipsi in 1:npsi
+        h = hints1d[Threads.threadid()]
+        psi = psi_grid[ipsi]
+        raw = geom_interp(psi; hint=h)                    # values: r2, deta, jac, dr2_dθ, doff_dθ
+        draw = geom_interp(psi; deriv=DerivOp(1), hint=h) # ψ-derivatives of those channels
+
+        # Assemble the transform matrices at the fine grid (Fortran gpeq.f:458-475). The trig
+        # is evaluated here, not resampled, because deta(ψ) makes c/s oscillate in ψ.
+        for itheta in 1:mtheta
+            theta = (itheta - 1) / mtheta
+            r2 = raw[0*mtheta+itheta]
+            deta = raw[1*mtheta+itheta]
+            jac = raw[2*mtheta+itheta]
+            dr2_dtheta = raw[3*mtheta+itheta]
+            doff_dtheta = raw[4*mtheta+itheta]
+            dr2_dpsi = draw[0*mtheta+itheta]   # d(r2)/dψ
+            doff_dpsi = draw[1*mtheta+itheta]  # d(deta)/dψ
 
             rfac = sqrt(max(0.0, r2))
             eta  = 2π * (theta + deta)
@@ -857,13 +915,55 @@ function _compute_rzphi_modes(
                 v11 = 0.0; v12 = 0.0; v21 = 0.0; v22 = 0.0
             end
 
-            t11[itheta] = c * v11 - s * v12
-            t12[itheta] = c * v21 - s * v22
-            t21[itheta] = s * v11 + c * v12
-            t22[itheta] = s * v21 + c * v22
-            t33[itheta] = -1.0 / (2π * R_here)
-            J_theta[itheta] = jac
+            t11[itheta, ipsi] = c * v11 - s * v12
+            t12[itheta, ipsi] = c * v21 - s * v22
+            t21[itheta, ipsi] = s * v11 + c * v12
+            t22[itheta, ipsi] = s * v21 + c * v22
+            t33[itheta, ipsi] = -1.0 / (2π * R_here)
+            J_theta[itheta, ipsi] = jac
         end
+    end
+
+    return (; t11, t12, t21, t22, t33, J_theta)
+end
+
+"""
+    _apply_rzphi_transform(geom, ft, mtheta, psi_input, theta_input, cova_zeta_input)
+        -> (R_modes, Z_modes, phi_modes)
+
+Apply a prebuilt `_build_rzphi_geometry` cache to one perturbed field, converting it from
+flux coordinates (ψ,θ,ζ) to cylindrical (R,Z,φ) in mode space (Fortran `gpeq_rzphi`):
+
+    R(θ) = (t11·ξ^ψ + t12·ξ^θ) / J,  Z(θ) = (t21·ξ^ψ + t22·ξ^θ) / J,  φ(θ) = t33·ξ_ζ
+
+Returns mode-space arrays (npsi × mpert) in SFL coordinates. The pointwise product with
+geometry generates harmonics beyond mpert; users needing fuller resolution should increase
+the mode count or use `Analysis.PerturbedEquilibriumModes.modes_to_theta` post-hoc.
+
+The caller passes different inputs for ξ vs b (see `reconstruct_physical_fields`).
+"""
+function _apply_rzphi_transform(
+    geom,
+    ft::Utilities.FourierTransforms.FourierTransform,
+    mtheta::Int,
+    psi_input::Matrix{ComplexF64},
+    theta_input::Matrix{ComplexF64},
+    cova_zeta_input::Matrix{ComplexF64}
+)
+    npsi, mpert = size(psi_input)
+
+    R_modes   = zeros(ComplexF64, npsi, mpert)
+    Z_modes   = zeros(ComplexF64, npsi, mpert)
+    phi_modes = zeros(ComplexF64, npsi, mpert)
+
+    # Per-thread theta-space buffers; the immutable `ft` functor and `geom` are shared read-only.
+    fun_bufs = [(R=zeros(ComplexF64, mtheta), Z=zeros(ComplexF64, mtheta), P=zeros(ComplexF64, mtheta)) for _ in 1:Threads.maxthreadid()]
+
+    Threads.@threads :static for ipsi in 1:npsi
+        buf = fun_bufs[Threads.threadid()]
+        R_fun = buf.R
+        Z_fun = buf.Z
+        phi_fun = buf.P
 
         # Inverse DFT: modes → theta-space
         psi_fun  = Utilities.FourierTransforms.inverse(ft, view(psi_input, ipsi, :))
@@ -872,19 +972,19 @@ function _compute_rzphi_modes(
 
         # Pointwise transformation (Fortran gpeq_rzphi, gpeq.f:484-489)
         for itheta in 1:mtheta
-            J = J_theta[itheta]
+            J = geom.J_theta[itheta, ipsi]
             xwp = psi_fun[itheta]
             xwt = theta_fn[itheta]
             xvz = zeta_fn[itheta]
 
             if abs(J) > 1e-30
-                R_fun[itheta] = (t11[itheta] * xwp + t12[itheta] * xwt) / J
-                Z_fun[itheta] = (t21[itheta] * xwp + t22[itheta] * xwt) / J
+                R_fun[itheta] = (geom.t11[itheta, ipsi] * xwp + geom.t12[itheta, ipsi] * xwt) / J
+                Z_fun[itheta] = (geom.t21[itheta, ipsi] * xwp + geom.t22[itheta, ipsi] * xwt) / J
             else
                 R_fun[itheta] = zero(ComplexF64)
                 Z_fun[itheta] = zero(ComplexF64)
             end
-            phi_fun[itheta] = t33[itheta] * xvz
+            phi_fun[itheta] = geom.t33[itheta, ipsi] * xvz
         end
 
         # Forward DFT: theta-space → modes

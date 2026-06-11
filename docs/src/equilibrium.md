@@ -146,4 +146,4 @@ println("Built LAR equilibrium with a = ", lorcfg.lar_a)
 
 ## See also
 
-- `docs/src/vacuum.md` — coupling between equilibrium and vacuum solvers
+- `docs/src/stability.md` — ideal MHD stability analysis built on top of the equilibrium
