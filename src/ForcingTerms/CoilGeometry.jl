@@ -80,7 +80,7 @@ Analytic-source parameters (used only for the matching `source`):
   - `phi0`: toroidal angle offset of the first generated coil [rad]
   - `R0`, `a`: helical torus major radius and minor (circle) radius [m]
   - `m_hel`, `n_hel`: helical poloidal/toroidal mode numbers setting the pitch
-  - `theta_lo`, `theta_hi`: helical poloidal extent [rad] (full turn if `theta_hi-theta_lo == 2π`)
+  - `theta_lo`, `theta_hi`: helical poloidal extent in radians; a full turn when `theta_hi-theta_lo == 2π`
   - `n_coils`: number of helical coils in the array
   - `offset`: helical coil radial offset from the torus surface [m]
   - `nsec_gen`: optional override of the generated point count per coil

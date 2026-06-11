@@ -23,12 +23,12 @@ Coil geometry can also be stored in HDF5, which is the modern format and the one
 the self-contained `gpec.h5` rerun snapshot. One file holds one **subgroup per coil set**
 under a parent group (default `coils`), and any unrelated content in the file is ignored:
 
-```
-<group>/<set_name>/x         Float64[ncoil, s, nsec]   Cartesian metres
-<group>/<set_name>/y         Float64[ncoil, s, nsec]
-<group>/<set_name>/z         Float64[ncoil, s, nsec]
-<group>/<set_name>/currents  Float64[ncoil]            (optional)
-<group>/<set_name>  attr nw  Float64                   (winding multiplier; default 1.0)
+```text
+<group>/<set_name>/x         Float64 ncoil×s×nsec   Cartesian metres
+<group>/<set_name>/y         Float64 ncoil×s×nsec
+<group>/<set_name>/z         Float64 ncoil×s×nsec
+<group>/<set_name>/currents  Float64 ncoil          optional
+<group>/<set_name>  attr nw  Float64                winding multiplier, default 1.0
 ```
 
 The bundled device library is kept as `.dat` files (human-readable and diff-able in git);

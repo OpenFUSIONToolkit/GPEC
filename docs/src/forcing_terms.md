@@ -150,12 +150,12 @@ currents = [1e3, 1e3, 1e3, 1e3]
 A coil HDF5 file stores one **subgroup per coil set** under a parent group (default `coils`),
 so a single file can hold many sets and the reader ignores any unrelated content elsewhere:
 
-```
-<group>/<set_name>/x         Float64[ncoil, s, nsec]   Cartesian metres
-<group>/<set_name>/y         Float64[ncoil, s, nsec]
-<group>/<set_name>/z         Float64[ncoil, s, nsec]
-<group>/<set_name>/currents  Float64[ncoil]            (optional)
-<group>/<set_name>  attr nw  Float64                   (winding multiplier; default 1.0)
+```text
+<group>/<set_name>/x         Float64 ncoil×s×nsec   Cartesian metres
+<group>/<set_name>/y         Float64 ncoil×s×nsec
+<group>/<set_name>/z         Float64 ncoil×s×nsec
+<group>/<set_name>/currents  Float64 ncoil          optional
+<group>/<set_name>  attr nw  Float64                winding multiplier, default 1.0
 ```
 
 Use `convert_coil_dat_to_h5` / `convert_coil_h5_to_dat` to migrate legacy files, and
