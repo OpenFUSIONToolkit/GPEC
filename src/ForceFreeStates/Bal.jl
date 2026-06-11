@@ -798,6 +798,7 @@ function second_critical_ballooning_alpha(
     n_scan::Int=20,
     tol::Float64=1e-3
 )
+    alpha_scale_crit1 >= max_alpha_scale && return NaN
     ref = salpha_reference(psi_idx, plasma_eq)
     delta_at(scale) = ballooning_delta_prime(
         psi_idx, plasma_eq; corr_qprime=0.0, corr_pprime=ref.pprime_norm_ref * (scale - 1.0)
@@ -830,8 +831,7 @@ Profile driver returning the experimental pressure gradient `alpha`, the first s
 boundary `alpha_critical1`, and the second (upper) stability boundary `alpha_critical2`
 versus normalized flux `psi`. Calls [`critical_ballooning_alpha`](@ref) and
 [`second_critical_ballooning_alpha`](@ref) at each surface. Arrays contain `NaN` where
-no boundary exists; plotting these arrays directly leaves natural gaps over always-stable
-surfaces without requiring explicit masking.
+no boundary exists.
 """
 function ballooning_alpha_boundaries(
     ctrl::ForceFreeStatesControl,

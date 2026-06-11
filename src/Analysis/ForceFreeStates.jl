@@ -410,11 +410,10 @@ function plot_ballooning_alpha_boundary(h5path; save_path=nothing, psi_min=0.0)
         bottom_margin=5Plots.mm
     )
 
-    # Mask non-finite α_crit so always-stable surfaces leave a gap rather than a spike.
-    exp_mask = isfinite.(alpha)
-    crit_mask = isfinite.(alpha_crit)
-    plot!(p, psi[exp_mask], alpha[exp_mask]; lw=2, color=:black, label="Experimental gradient")
-    plot!(p, psi[crit_mask], alpha_crit[crit_mask]; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
+    # NaN entries leave natural gaps over always-stable surfaces; isfinite masking would
+    # wrongly connect across such gaps with a straight line.
+    plot!(p, psi, alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, psi, alpha_crit; lw=2, linestyle=:dash, color=:red, label="1st stability boundary")
 
     isnothing(save_path) || savefig(p, save_path)
     return p
