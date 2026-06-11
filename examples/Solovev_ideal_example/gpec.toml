@@ -7,7 +7,7 @@ power_b = 0                             # Toroidal field power exponent for Jaco
 power_r = 0                             # Major radius power exponent for Jacobian
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.99999                       # Upper limit of normalized flux coordinate
+psihigh = 0.9995                        # Upper limit of normalized flux coordinate
 mpsi = 128                              # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
@@ -16,6 +16,12 @@ force_termination = false               # Terminate after equilibrium setup (ski
 
 
 [Wall]
+# Close conformal wall is required to stabilize this Solovev fixture's n=1 external kink:
+# with nowall, et[1] = -6.8 (strongly unstable); with this wall, et[1] = +0.24 (barely stable).
+# The plasma is near marginal stability, so the BVP Δ' matrix values are pathological
+# (dpm magnitudes ~ 10¹¹, |Im/Re| ≫ 1). This fixture's role is integration-pipeline
+# smoke testing + et[1] regression, NOT BVP Δ' regression — DIIID-like is the canonical
+# Δ'-matrix fixture (stable et[1] = +1.6, clean BVP Δ').
 shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
@@ -25,16 +31,18 @@ dw = 0.5                                # Triangularity parameter for wall shape
 tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
-# [PerturbedEquilibrium]
-# # Uncomment this section to enable perturbed equilibrium calculations
-# forcing_data_file = "forcing.dat"      # Path to forcing data (n, m, real, imag)
-# forcing_data_format = "ascii"          # "ascii" or "hdf5"
-# fixed_boundary = false                 # Fixed boundary flag
-# output_eigenmodes = true               # Output mode fields as b-fields
-# compute_response = true                # Compute plasma response
-# compute_singular_coupling = true       # Compute singular coupling metrics
-# verbose = true                         # Enable verbose logging
-# write_outputs_to_HDF5 = true           # Write outputs to HDF5
+[ForcingTerms]
+forcing_data_file = "forcing.dat"       # Manual mode table (n, m, real, imag)
+forcing_data_format = "ascii"           # "ascii" or "hdf5"
+
+[PerturbedEquilibrium]
+fixed_boundary = false                  # Fixed boundary flag
+output_eigenmodes = true                # Output mode fields as b-fields
+compute_response = true                 # Compute plasma response
+compute_singular_coupling = true        # Compute singular coupling metrics
+verbose = true                          # Enable verbose logging
+write_outputs_to_HDF5 = true            # Write outputs to HDF5
+reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
 
 [ForceFreeStates]
 bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
@@ -43,8 +51,7 @@ ode_flag = true               # Integrate ODE's for determining stability of int
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
 
-set_psilim_via_dmlim = false  # Safety factor (q) limit determined as q_ir+dmlim...
-dmlim = 0.2                   # See sas_flag
+psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
@@ -65,12 +72,11 @@ ucrit = 1e3                   # Maximum fraction of solutions allowed before re-
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
 save_interval = 3            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
-[WALL]
-shape = "conformal"           # String selecting wall shape ["nowall", "conformal", "elliptical", "dee", "mod_dee", "from_file"]
-a = 0.2415                    # The distance of the wall from the plasma in units of major radius (conformal), or minor radius parameter (others).
-aw = 0.05                     # Half-thickness of the wall.
-bw = 1.5                      # Elongation.
-cw = 0                        # Offset of the center of the wall from the major radius.
-dw = 0.5                      # Triangularity
-tw = 0.05                     # Sharpness of the corners of the wall. Try 0.05 as a good initial value.
-equal_arc_wall = true         # Flag to enforce equal arcs distribution of the nodes on the wall. Best results unless the wall is very close to the plasma.
+# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
+use_parallel          = true   # Parallel FM-propagator BVP — ~5× faster than serial EL on this delta_m-expanded grid even though Δ' is pathological on this near-marginal Solovev (kept on for speed, not for Δ' validation)
+parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
+populate_dense_xi     = true   # REQUIRED for PerturbedEquilibrium (this TOML has a [PerturbedEquilibrium] section). Default is false; PE-using configs must set true when use_parallel=true.
+truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
+set_psilim_via_dmlim  = false  # FALSE for limited circular / analytical equilibria — rationals sparse, dmlim truncation would chop too much edge
+dmlim                 = 0.2    # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
+

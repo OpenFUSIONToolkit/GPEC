@@ -660,6 +660,9 @@ function equilibrium_solver_by_inversion(
     rz_in_ys = theta_grid
     itp_opts2d = (bc=(CubicFit(), PeriodicBC()), extrap=(ExtendExtrap(), WrapExtrap()))
 
+    @views R_table[:, end] .= R_table[:, 1]
+    @views Z_table[:, end] .= Z_table[:, 1]
+
     rz_in_R = cubic_interp((rz_in_xs, rz_in_ys), R_table; itp_opts2d...)
     rz_in_Z = cubic_interp((rz_in_xs, rz_in_ys), Z_table; itp_opts2d...)
 

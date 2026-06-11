@@ -21,10 +21,17 @@ if !isempty(ARGS)
     end
 else
     include("./runtests_utilities.jl")
+    include("./runtests_fouriertransforms.jl")
     include("./runtests_vacuum.jl")
     include("./runtests_equil.jl")
     include("./runtests_eulerlagrange.jl")
+    include("./runtests_riccati.jl")
+    include("./runtests_parallel_integration.jl")
     include("./runtests_sing.jl")
+    include("./runtests_tj_analytic.jl")
+    include("./runtests_kinetic.jl")
     include("./runtests_fullruns.jl")
+    include("./runtests_coils.jl")
+    include("./runtests_imas.jl")
     include("./runtests_rerun_from_h5.jl")
 end

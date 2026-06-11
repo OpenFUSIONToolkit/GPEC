@@ -7,7 +7,7 @@ power_b = 0                             # Toroidal field power exponent for Jaco
 power_r = 0                             # Major radius power exponent for Jacobian
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.99999                       # Upper limit of normalized flux coordinate
+psihigh = 0.9995                        # Upper limit of normalized flux coordinate
 mpsi = 128                              # Number of radial grid points
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
@@ -21,8 +21,7 @@ ode_flag = true               # Integrate ODE's for determining stability of int
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
 
-set_psilim_via_dmlim = false  # Safety factor (q) limit determined as q_ir+dmlim...
-dmlim = 0.2                   # See sas_flag
+psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
 qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
@@ -44,7 +43,16 @@ ucrit = 1e3                   # Maximum fraction of solutions allowed before re-
 force_wv_symmetry = true      # Forces vacuum energy matrix symmetry
 save_interval = 3            # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
 
+# Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
+use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
+parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
+populate_dense_xi     = false  # No PerturbedEquilibrium section — skip the serial-EL re-run (matches new default)
+truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
+set_psilim_via_dmlim  = false  # FALSE for limited circular / analytical equilibria — rationals sparse, dmlim truncation would chop too much edge
+dmlim                 = 0.2    # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
+
 [Wall]
+# See examples/Solovev_ideal_example/gpec.toml for the rationale behind the close conformal wall.
 shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
@@ -52,7 +60,7 @@ bw = 1.5                                # Elongation parameter for wall shapes
 cw = 0                                  # Offset of wall center from major radius
 dw = 0.5                                # Triangularity parameter for wall shapes
 tw = 0.05                               # Sharpness of wall corners (try 0.05 as initial value)
-equal_arc_wall = false                   # Equal arc length distribution of nodes on wall
+equal_arc_wall = false                  # Equal arc length distribution of nodes on wall
 
 # [PerturbedEquilibrium]
 # # Uncomment this section to enable perturbed equilibrium calculations

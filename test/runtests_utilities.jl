@@ -69,8 +69,8 @@
 
             fourier_inverse_transform!(gll, gil, cs)
 
-            # gll = (4π²/mtheta) * cs' * gil  →  gll[1,1] = (4π²/4) * sum_i cs[i,1]*gil[i,1] = π² * 10
-            expected = 10.0 * (4π^2 / mtheta)
+            # gll = (1/mtheta) * cs' * gil  →  gll[1,1] = (1/4) * sum_i cs[i,1]*gil[i,1] = 10/4
+            expected = 10.0 / mtheta
             @test isapprox(gll[1, 1], expected)
             @test isapprox(gll[2, 1], 0.0)
         end

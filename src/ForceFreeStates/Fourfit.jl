@@ -27,7 +27,7 @@ end
 MetricData(mpsi::Int, mtheta::Int) = MetricData(; mpsi, mtheta)
 
 """
-    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10, fft_flag::Bool=true) -> MetricData
+    make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int=10) -> MetricData
 
 Constructs the metric tensor data on a (ψ, θ) grid from an input plasma equilibrium.
 The metric coefficients stored in `metric.fs` include:
@@ -44,7 +44,6 @@ The metric coefficients stored in `metric.fs` include:
 ### Arguments
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
-  - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
 
 ### Returns
 
@@ -56,7 +55,7 @@ The metric coefficients stored in `metric.fs` include:
 Add kinetic metric tensor components for kinetic mode
 Remove mband if we decide to fully deprecate banded matrices
 """
-function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag::Bool)
+function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int)
 
     # TODO: add kinetic metric tensor components
 
@@ -122,9 +121,200 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
     end
 
     # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
+    # Faithful Fortran fspline_fit_2 (equil/fspline.f:293): FFT after dropping the duplicated
+    # θ=2π endpoint. The fspline_fit_1 integration variant (idcon.f fft_flag=false) is not implemented.
     metric.fourier_coeffs = Utilities.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
     return metric
 end
+
+"""
+    build_kinetic_metric_matrices(equil, intr, metric) → NamedTuple
+
+Compute the 5 kinetic geometric matrices (s, t, x, y, z) needed by
+`KineticForces.BounceAveraging` for kinetic W vector outer products.
+These encode the coupling between magnetic perturbation modes and
+the equilibrium geometry.
+
+Ports Fortran `dcon_interface.f` lines 895-1013 (`idcon_action_matrices`).
+
+# Steps
+1. Compute 8 `fmodb` quantities on the (ψ,θ) grid from equilibrium geometry
+2. Fourier decompose via `Utilities.FourierCoefficients`
+3. Assemble mpert×mpert matrices from Fourier bands at each ψ
+4. Create `CubicSeriesInterpolant`s over ψ
+
+# Returns
+NamedTuple `(smats, tmats, xmats, ymats, zmats)` of `CubicSeriesInterpolant`s,
+each mapping ψ → flattened mpert² complex vector.
+
+Reference: [Logan et al., Phys. Plasmas 20, 122507 (2013)]
+"""
+function build_kinetic_metric_matrices(equil::Equilibrium.PlasmaEquilibrium,
+                                       intr::ForceFreeStatesInternal,
+                                       metric::MetricData)
+    mpsi = metric.mpsi
+    mtheta = metric.mtheta
+    chi1 = 2π * equil.psio
+
+    # Allocate fmodb grid: 8 quantities on (ψ,θ)
+    fmodb_fs = zeros(Float64, mpsi, mtheta, 8)
+
+    # Temporary for contravariant basis vectors (Fortran style, WITHOUT /jac)
+    v = @MMatrix zeros(Float64, 3, 3)
+    hint = Ref(1)
+
+    for ipsi in 1:mpsi
+        psi = metric.xs[ipsi]
+        p1 = equil.profiles.P_deriv(psi; hint=hint)
+        q = equil.profiles.q_spline.y[ipsi]
+
+        for jtheta in 1:mtheta
+            # Grid point values via nodal_derivs (same grid as make_metric)
+            r_coord_sq = equil.rzphi_rsquared.nodal_derivs.partials[1, ipsi, jtheta]
+            eta_offset = equil.rzphi_offset.nodal_derivs.partials[1, ipsi, jtheta]
+            jac = equil.rzphi_jac.nodal_derivs.partials[1, ipsi, jtheta]
+            jac1 = equil.rzphi_jac.nodal_derivs.partials[2, ipsi, jtheta]
+
+            rfac = sqrt(r_coord_sq)
+            theta_norm = equil.rzphi_ys[jtheta]
+            eta = 2π * (theta_norm + eta_offset)
+            rs = equil.ro + rfac * cos(eta)  # R coordinate
+
+            # ∂/∂ψ and ∂/∂θ of (r², offset, nu)
+            fx1 = equil.rzphi_rsquared.nodal_derivs.partials[2, ipsi, jtheta]
+            fx2 = equil.rzphi_offset.nodal_derivs.partials[2, ipsi, jtheta]
+            fx3 = equil.rzphi_nu.nodal_derivs.partials[2, ipsi, jtheta]
+            fy1 = equil.rzphi_rsquared.nodal_derivs.partials[3, ipsi, jtheta]
+            fy2 = equil.rzphi_offset.nodal_derivs.partials[3, ipsi, jtheta]
+            fy3 = equil.rzphi_nu.nodal_derivs.partials[3, ipsi, jtheta]
+
+            # Contravariant basis vectors WITHOUT /jac (matches Fortran dcon_interface.f:925-931)
+            v[1, 1] = fx1 / (2.0 * rfac)
+            v[1, 2] = fx2 * 2π * rfac
+            v[1, 3] = fx3 * rs
+            v[2, 1] = fy1 / (2.0 * rfac)
+            v[2, 2] = (1.0 + fy2) * 2π * rfac
+            v[2, 3] = fy3 * rs
+            v[3, 3] = 2π * rs
+
+            # Raw g^ij (Fortran dcon_interface.f:933-937)
+            g12 = v[1,1]*v[2,1] + v[1,2]*v[2,2] + v[1,3]*v[2,3]
+            g13 = v[3,3] * v[1,3]
+            g22 = v[2,1]^2 + v[2,2]^2 + v[2,3]^2
+            g23 = v[2,3] * v[3,3]
+            g33 = v[3,3]^2
+
+            # B field and derivatives
+            B = equil.eqfun_B.nodal_derivs.partials[1, ipsi, jtheta]
+            dBdpsi = equil.eqfun_B.nodal_derivs.partials[2, ipsi, jtheta]
+            dBdtheta = equil.eqfun_B.nodal_derivs.partials[3, ipsi, jtheta]
+            b2h = B^2 / 2
+            b2hp = B * dBdpsi
+            b2ht = B * dBdtheta
+
+            # θ-derivatives of eqfun metric quantities (Fortran eqfun%fy(2), eqfun%fy(3))
+            eqfun_fy2 = equil.eqfun_metric1.nodal_derivs.partials[3, ipsi, jtheta]
+            eqfun_fy3 = equil.eqfun_metric2.nodal_derivs.partials[3, ipsi, jtheta]
+
+            # 8 fmodb quantities (Fortran dcon_interface.f:939-948)
+            fmodb_fs[ipsi, jtheta, 1] = jac * (p1 + b2hp) -
+                chi1^2 * b2ht * (g12 + q * g13) / (jac * b2h * 2)  # sband
+            fmodb_fs[ipsi, jtheta, 2] =
+                chi1^2 * b2ht * (g23 + q * g33) / (jac * b2h * 2)  # tband
+            fmodb_fs[ipsi, jtheta, 3] = jac * b2h * 2               # xband
+            fmodb_fs[ipsi, jtheta, 4] = jac1 * b2h * 2 -
+                chi1^2 * b2h * 2 * eqfun_fy2                        # yband1
+            fmodb_fs[ipsi, jtheta, 5] =
+                -2π * chi1^2 / jac * (g12 + q * g13)                # yband2
+            fmodb_fs[ipsi, jtheta, 6] =
+                chi1^2 * b2h * 2 * eqfun_fy3                        # zband1
+            fmodb_fs[ipsi, jtheta, 7] =
+                2π * chi1^2 / jac * (g23 + q * g33)                 # zband2
+            fmodb_fs[ipsi, jtheta, 8] =
+                2π * chi1^2 / jac * (g22 + q * g23)                 # zband3
+        end
+    end
+
+    # Fourier decompose (same approach as metric)
+    fmodb_fc = Utilities.FourierCoefficients(metric.xs, metric.ys, fmodb_fs, intr.mband)
+
+    # Allocate flat storage for mpert×mpert matrices at each ψ
+    smats_flat = zeros(ComplexF64, mpsi, intr.mpert^2)
+    tmats_flat = zeros(ComplexF64, mpsi, intr.mpert^2)
+    xmats_flat = zeros(ComplexF64, mpsi, intr.mpert^2)
+    ymats_flat = zeros(ComplexF64, mpsi, intr.mpert^2)
+    zmats_flat = zeros(ComplexF64, mpsi, intr.mpert^2)
+
+    # Fourier band storage
+    mid = intr.mband + 1
+    sband = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    tband = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    xband = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    yband1 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    yband2 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    zband1 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    zband2 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+    zband3 = Vector{ComplexF64}(undef, 2 * intr.mband + 1)
+
+    for ipsi in 1:mpsi
+        q = equil.profiles.q_spline.y[ipsi]
+
+        # Extract Fourier bands (Fortran dcon_interface.f:963-979)
+        for m in 0:intr.mband
+            sband[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 1)
+            tband[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 2)
+            xband[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 3)
+            yband1[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 4)
+            yband2[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 5)
+            zband1[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 6)
+            zband2[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 7)
+            zband3[mid-m] = Utilities.get_complex_coeff(fmodb_fc, ipsi, m, 8)
+        end
+        for k in 1:intr.mband
+            sband[mid+k] = conj(sband[mid-k])
+            tband[mid+k] = conj(tband[mid-k])
+            xband[mid+k] = conj(xband[mid-k])
+            yband1[mid+k] = conj(yband1[mid-k])
+            yband2[mid+k] = conj(yband2[mid-k])
+            zband1[mid+k] = conj(zband1[mid-k])
+            zband2[mid+k] = conj(zband2[mid-k])
+            zband3[mid+k] = conj(zband3[mid-k])
+        end
+
+        # Assemble mpert×mpert matrices (Fortran dcon_interface.f:981-997)
+        # Single-n: use nlow as the toroidal mode number
+        n = intr.nlow
+        for m1 in intr.mlow:intr.mhigh
+            ipert = m1 - intr.mlow + 1
+            nq = n * q
+            for dm in max(1-ipert, -intr.mband):min(intr.mpert-ipert, intr.mband)
+                m2 = m1 + dm
+                singfac2 = m2 - nq
+                jpert = ipert + dm
+                dmidx = dm + mid
+                iflat = ipert + (jpert - 1) * intr.mpert
+
+                smats_flat[ipsi, iflat] = sband[dmidx]
+                tmats_flat[ipsi, iflat] = tband[dmidx]
+                xmats_flat[ipsi, iflat] = xband[dmidx]
+                ymats_flat[ipsi, iflat] = yband1[dmidx] + im * singfac2 * yband2[dmidx]
+                zmats_flat[ipsi, iflat] = zband1[dmidx] +
+                    im * (m2 * zband2[dmidx] + n * zband3[dmidx])
+            end
+        end
+    end
+
+    # Create CubicSeriesInterpolants over ψ
+    itp_opts = (; extrap=ExtendExtrap())
+    smats = cubic_interp(metric.xs, Series(smats_flat); itp_opts...)
+    tmats = cubic_interp(metric.xs, Series(tmats_flat); itp_opts...)
+    xmats = cubic_interp(metric.xs, Series(xmats_flat); itp_opts...)
+    ymats = cubic_interp(metric.xs, Series(ymats_flat); itp_opts...)
+    zmats = cubic_interp(metric.xs, Series(zmats_flat); itp_opts...)
+
+    return (; smats, tmats, xmats, ymats, zmats)
+end
+
 
 """
     make_matrix(metric::MetricData, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal) -> FourFitVars
@@ -323,8 +513,8 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     ffit.amats = cubic_interp(metric.xs, Series(amats_flat); ffit.itp_opts...)
     ffit.bmats = cubic_interp(metric.xs, Series(bmats_flat); ffit.itp_opts...)
     ffit.cmats = cubic_interp(metric.xs, Series(cmats_flat); ffit.itp_opts...)
-    ffit.dmats = cubic_interp(metric.xs, Series(dmats_flat); ffit.itp_opts...)
-    ffit.emats = cubic_interp(metric.xs, Series(emats_flat); ffit.itp_opts...)
+    ffit.dmats_prim = cubic_interp(metric.xs, Series(dmats_flat); ffit.itp_opts...)
+    ffit.emats_prim = cubic_interp(metric.xs, Series(emats_flat); ffit.itp_opts...)
     ffit.hmats = cubic_interp(metric.xs, Series(hmats_flat); ffit.itp_opts...)
     ffit.fmats_lower = cubic_interp(metric.xs, Series(fmats_lower_flat); ffit.itp_opts...)
     ffit.fmats_prim = cubic_interp(metric.xs, Series(fmats_prim_flat); ffit.itp_opts...)

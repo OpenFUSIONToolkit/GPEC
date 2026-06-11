@@ -3,6 +3,23 @@ Reporter: formats comparison tables for stdout output.
 """
 
 """
+Compress a stored error message into a single-line snippet for the report
+banner. Picks the most informative line (a Julia ERROR/UndefVarError if
+present) and truncates to keep the report compact.
+"""
+function _short_err(msg)::String
+    (msg === nothing || msg === missing) && return "(no message)"
+    s = String(msg)
+    isempty(strip(s)) && return "(empty)"
+    lines = filter(!isempty, strip.(split(s, '\n')))
+    isempty(lines) && return "(empty)"
+    pick = something(findfirst(l -> startswith(l, "ERROR:") || occursin("Error", l), lines),
+                     length(lines))
+    line = lines[pick]
+    return length(line) > 200 ? line[1:200] * "..." : line
+end
+
+"""
 Format a value for display. Returns an unpadded string.
 """
 function format_value(q::NamedTuple)::String
@@ -74,46 +91,56 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
         println("ERROR: No results for ref 2 ($(ref2.name))")
         return
     end
-    if !info1.success
-        println("FAILED at ref 1 ($(ref1.name) @ $(info1.commit_short)): $(info1.error_msg)")
-        return
-    end
-    if !info2.success
-        println("FAILED at ref 2 ($(ref2.name) @ $(info2.commit_short)): $(info2.error_msg)")
-        return
-    end
 
-    q1_all = get_quantities(db, ref1.commit_hash, case_spec.name)
-    q2_all = get_quantities(db, ref2.commit_hash, case_spec.name)
+    failed1 = !info1.success
+    failed2 = !info2.success
+
+    q1_all = failed1 ? Dict{String,NamedTuple}() :
+             get_quantities(db, ref1.commit_hash, case_spec.name)
+    q2_all = failed2 ? Dict{String,NamedTuple}() :
+             get_quantities(db, ref2.commit_hash, case_spec.name)
 
     # Pre-compute all rows: (label, v1, v2, diff, status)
     header = ["Quantity", ref1.name, ref2.name, "Diff", "Status"]
     rows = Vector{Vector{String}}()
     n_ok = 0; n_changed = 0; n_missing = 0
 
+    # Helper: pick the value-cell text for one ref/quantity, accounting for
+    # whole-ref failure (which should render as "FAILED" rather than "N/A").
+    cell = (failed::Bool, qs::Dict, qname::String) -> begin
+        failed && return "FAILED"
+        return haskey(qs, qname) ? format_value(qs[qname]) : "N/A"
+    end
+    runtime_cell = (failed::Bool, qs::Dict, qname::String) -> begin
+        failed && return "FAILED"
+        (haskey(qs, qname) && qs[qname].value_real !== nothing) ?
+            @sprintf("%.1fs", qs[qname].value_real) : "N/A"
+    end
+
     for spec in case_spec.quantities
         qname = spec.name
 
-        if !haskey(q1_all, qname) && !haskey(q2_all, qname)
+        # Skip silently only when neither ref has the quantity AND neither failed
+        # (a failed ref still gets a row with FAILED markers).
+        if !failed1 && !failed2 && !haskey(q1_all, qname) && !haskey(q2_all, qname)
             n_missing += 1
             continue
         end
 
         if spec.type == "runtime"
-            v1 = (haskey(q1_all, qname) && q1_all[qname].value_real !== nothing) ?
-                 @sprintf("%.1fs", q1_all[qname].value_real) : "N/A"
-            v2 = (haskey(q2_all, qname) && q2_all[qname].value_real !== nothing) ?
-                 @sprintf("%.1fs", q2_all[qname].value_real) : "N/A"
+            v1 = runtime_cell(failed1, q1_all, qname)
+            v2 = runtime_cell(failed2, q2_all, qname)
             push!(rows, [spec.label, v1, v2, "", "--"])
             continue
         end
 
         has1 = haskey(q1_all, qname)
         has2 = haskey(q2_all, qname)
-        if !has1 || !has2
-            v1 = has1 ? format_value(q1_all[qname]) : "N/A"
-            v2 = has2 ? format_value(q2_all[qname]) : "N/A"
-            push!(rows, [spec.label, v1, v2, "", "N/A"])
+        if failed1 || failed2 || !has1 || !has2
+            v1 = cell(failed1, q1_all, qname)
+            v2 = cell(failed2, q2_all, qname)
+            status_label = (failed1 || failed2) ? "FAILED" : "N/A"
+            push!(rows, [spec.label, v1, v2, "", status_label])
             n_missing += 1
             continue
         end
@@ -143,8 +170,16 @@ function report_two_ref_comparison(db::SQLite.DB, case_spec::CaseSpec,
     println("="^total_w)
     date1 = length(info1.commit_date) >= 10 ? info1.commit_date[1:10] : info1.commit_date
     date2 = length(info2.commit_date) >= 10 ? info2.commit_date[1:10] : info2.commit_date
-    println("Ref 1: $(ref1.name)  @ $(info1.commit_short) ($date1)")
-    println("Ref 2: $(ref2.name)  @ $(info2.commit_short) ($date2)")
+    tag1 = failed1 ? " (FAILED)" : ""
+    tag2 = failed2 ? " (FAILED)" : ""
+    println("Ref 1: $(ref1.name)  @ $(info1.commit_short) ($date1)$tag1")
+    println("Ref 2: $(ref2.name)  @ $(info2.commit_short) ($date2)$tag2")
+    if failed1
+        println("  Ref 1 error: $(_short_err(info1.error_msg))")
+    end
+    if failed2
+        println("  Ref 2 error: $(_short_err(info2.error_msg))")
+    end
     println("-"^total_w)
 
     _print_row(header, widths)
@@ -169,6 +204,7 @@ One row per quantity, one column per ref.
 function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
                           refs::Vector{ResolvedRef})
     run_infos = [get_run_info(db, ref.commit_hash, case_spec.name) for ref in refs]
+    failed_mask = [info === nothing || !info.success for info in run_infos]
     all_qs = [begin
         info = run_infos[i]
         (info !== nothing && info.success) ? get_quantities(db, refs[i].commit_hash, case_spec.name) : Dict{String,NamedTuple}()
@@ -191,8 +227,10 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
 
     for spec in case_spec.quantities
         qname = spec.name
+        any_failed = any(failed_mask)
         any_present = any(haskey(qs, qname) for qs in all_qs)
-        if !any_present
+        # Skip silently only when nothing is present and nothing failed.
+        if !any_failed && !any_present
             n_missing += 1
             continue
         end
@@ -200,9 +238,14 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
         row = [spec.label]
 
         if spec.type == "runtime"
-            for qs in all_qs
-                val = (haskey(qs, qname) && qs[qname].value_real !== nothing) ?
-                      @sprintf("%.1fs", qs[qname].value_real) : "N/A"
+            for (i, qs) in enumerate(all_qs)
+                val = if failed_mask[i]
+                    "FAILED"
+                elseif haskey(qs, qname) && qs[qname].value_real !== nothing
+                    @sprintf("%.1fs", qs[qname].value_real)
+                else
+                    "N/A"
+                end
                 push!(row, val)
             end
             if show_diff
@@ -213,11 +256,17 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
             continue
         end
 
-        for qs in all_qs
-            push!(row, haskey(qs, qname) ? format_value(qs[qname]) : "N/A")
+        for (i, qs) in enumerate(all_qs)
+            if failed_mask[i]
+                push!(row, "FAILED")
+            else
+                push!(row, haskey(qs, qname) ? format_value(qs[qname]) : "N/A")
+            end
         end
 
         if show_diff
+            last_failed = failed_mask[end]
+            prev_failed = failed_mask[end-1]
             q_last = haskey(all_qs[end], qname) ? all_qs[end][qname] : nothing
             q_prev = haskey(all_qs[end-1], qname) ? all_qs[end-1][qname] : nothing
             if q_last !== nothing && q_prev !== nothing
@@ -228,6 +277,10 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
                 if status == "OK"; n_ok += 1
                 elseif contains(status, "CHANGED"); n_changed += 1
                 else; n_missing += 1; end
+            elseif last_failed || prev_failed
+                push!(row, "")
+                push!(row, "FAILED")
+                n_missing += 1
             else
                 push!(row, "N/A")
                 push!(row, "N/A")
@@ -257,6 +310,9 @@ function report_multi_ref(db::SQLite.DB, case_spec::CaseSpec,
             date_str = length(info.commit_date) >= 10 ? info.commit_date[1:10] : info.commit_date
             status_str = info.success ? "" : " (FAILED)"
             println("Ref $(i): $(ref.name)  @ $(info.commit_short) ($date_str)$status_str")
+            if !info.success
+                println("  Ref $(i) error: $(_short_err(info.error_msg))")
+            end
         else
             println("Ref $(i): $(ref.name)  (no data)")
         end

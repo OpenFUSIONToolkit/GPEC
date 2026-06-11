@@ -37,6 +37,12 @@ and data dumping.
         @views vac_data.wv[:, ipert] .*= singfac[ipert]
     end
 
+    # Least stable eigenvalue of the vacuum matrix alone (should be PSD; clamp numerical noise to zero)
+    vac_data.vacuum_eigenvalue = max(0.0, minimum(real.(eigvals(Hermitian(vac_data.wv)))))
+
+    # Preserve wp in vac_data so it can be written to HDF5 as W_plasma
+    vac_data.wp .= wp
+
     # Compute complex energy eigenvalues and vectors
     vac_data.wt .= wp .+ vac_data.wv
     vac_data.wt0 .= vac_data.wt
@@ -45,10 +51,15 @@ and data dumping.
     eindex = sortperm(real.(vac_data.et); rev=true)
 
     etemp .= vac_data.et
-    # Rearrange wt columns for descending real eigenvalues
+    # Rearrange wt columns for ascending real eigenvalues (most unstable first)
     for ipert in 1:numpert_total
-        vac_data.wt[:, ipert] .= Ev.vectors[:, eindex[numpert_total+1-ipert]]
-        vac_data.et[ipert] = etemp[eindex[numpert_total+1-ipert]]
+        orig = eindex[numpert_total+1-ipert]
+        vac_data.wt[:, ipert] .= Ev.vectors[:, orig]
+        vac_data.et[ipert] = etemp[orig]
+        # Store which n this eigenvector corresponds to (needed to write IMAS data)
+        # This relies on the block diagonal matrix structure due to n decoupling in tokamaks
+        imax = argmax(abs.(Ev.vectors[:, orig]))
+        vac_data.n_tor_idx[ipert] = (imax - 1) ÷ mpert
     end
 
     # Normalize eigenfunction and energy.
@@ -82,6 +93,21 @@ and data dumping.
         vac_data.ep[ipert] = wpt[ipert, ipert]
         vac_data.ev[ipert] = wvt[ipert, ipert]
     end
+
+    # Eigenspectrum of W_Φ at psilim — Jacobian-invariant energy values; see PowerNorm.jl.
+    # Computed directly here (no spline); spline is used by the edge scan.
+    mtheta_eq = length(equil.rzphi_ys)
+    ft_pn = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, mlow)
+    sqrtamat_pn = compute_sqrtamat(equil, psilim, ft_pn)
+    jarea_pn = Equilibrium.flux_surface_area(equil, psilim, mtheta_eq)
+    pn_result = compute_power_norm_eigenvalues(vac_data.wt0, wp, vac_data.wv, sqrtamat_pn, jarea_pn, equil, psilim, intr; all_eigenvalues=true)
+    vac_data.pn_et .= pn_result.pn_et_all
+    vac_data.pn_ep .= pn_result.pn_ep_all
+    vac_data.pn_ev .= pn_result.pn_ev_all
+    vac_data.pn_wt0 .= pn_result.wt_pn
+    vac_data.pn_wp .= pn_result.wp_pn
+    vac_data.pn_wv .= pn_result.wv_pn
+    vac_data.pn_wt .= pn_result.pn_eigenvectors
 
     # Normalize eigenvectors based on scaled wt
     coeffs = odet.u[:, :, 1, end] \ (vac_data.wt .* (2π * equil.psio * 1e-3))
@@ -193,6 +219,10 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
 
     # Compute total energy matrix and eigen-decomposition
     wt .= wp .+ wv
+
+    # Save wt before eigen (which overwrites the input) for power-norm computation
+    wt_saved = copy(wt)
+
     Ev = eigen(wt)
 
     # Sort eigenvalues by descending real part
@@ -231,5 +261,17 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     # negative. Clamp to zero to enforce the physical constraint.
     vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv))))) / norm)
 
-    return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue)
+    # Eigenspectrum of W_Φ — Jacobian-invariant energy values; see PowerNorm.jl.
+    # Evaluate sqrtamat + jarea from the pre-computed spline.
+    mpert = intr.mpert
+    sqrtamat_flat = Vector{ComplexF64}(undef, mpert^2 + 1)
+    es.sqrtamat_spline(sqrtamat_flat, odet.psifac; hint=es.sqrtamat_hint)
+    sqrtamat_local = reshape(@view(sqrtamat_flat[1:mpert^2]), mpert, mpert)
+    jarea_local = real(sqrtamat_flat[end])
+
+    pn_result = compute_power_norm_eigenvalues(wt_saved, wp, wv, sqrtamat_local, jarea_local, equil, odet.psifac, intr)
+
+    return (total_eigenvalue=eigenvalues[1], plasma_energy=plasma_energy, vacuum_energy=vacuum_energy, vacuum_eigenvalue=vacuum_eigenvalue,
+        pn_total_eigenvalue=pn_result.pn_total_eigenvalue, pn_plasma_energy=pn_result.pn_plasma_energy, pn_vacuum_energy=pn_result.pn_vacuum_energy,
+        pn_vacuum_eigenvalue=pn_result.pn_vacuum_eigenvalue)
 end
