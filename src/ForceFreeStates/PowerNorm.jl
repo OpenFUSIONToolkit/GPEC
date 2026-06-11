@@ -28,76 +28,9 @@ area-integral precision floor ~1e-6):
   - The eigenspectrum of `W_Φ`.
 """
 
-"""
-    compute_sqrt_jac_delpsi(equil, psi, mtheta) -> Vector{Float64}
-
-Compute √(J·|∇ψ|) at `mtheta` equally-spaced θ points on the flux surface at `psi`.
-This is the √weight function that maps a field component `b(θ)` to its
-power-normalized form `√(J|∇ψ|)·b(θ)` in θ-space.
-"""
-function compute_sqrt_jac_delpsi(equil::Equilibrium.PlasmaEquilibrium, psi::Float64, mtheta::Int)
-    sqrt_jac_delpsi = Vector{Float64}(undef, mtheta)
-
-    hint2d = (Ref(1), Ref(1))
-    for itheta in 0:(mtheta-1)
-        theta = itheta / mtheta  # normalized to [0, 1)
-        m = Equilibrium.flux_surface_metric(equil, psi, theta; hint=hint2d)
-        sqrt_jac_delpsi[itheta+1] = sqrt(abs(m.jac * m.delpsi))
-    end
-
-    return sqrt_jac_delpsi
-end
-
-"""
-    compute_sqrtamat(equil, psi, ft) -> Matrix{ComplexF64}
-
-Build the √A convolution matrix `sqrtamat`. Produces a Hermitian Toeplitz matrix
-with entries sqrtamat[m',k] = ŵ_{m_k − m'} where ŵ_n = (1/N)Σ w_j exp(+inθ_j) and
-w(θ) = √(J·|∇ψ|).
-
-Operationally, sqrtamat is the mode-space √weight operator: for a field b with
-Fourier coefficients b_fft, it satisfies the identity
-  `‖sqrtamat·b_fft‖² = N² · ∫ |b|² · J|∇ψ| dθ`
-which is Jacobian-invariant on a given flux surface (see
-`scripts/test_power_norm_invariance.jl`).
-
-The backward step uses exp(−imθ)/(1/N) normalization paired with the Julia
-forward FT exp(+imθ) so that round-trip = identity and the convolution
-structure is correct.
-"""
-function compute_sqrtamat(
-    equil::Equilibrium.PlasmaEquilibrium,
-    psi::Float64,
-    ft::Utilities.FourierTransforms.FourierTransform
-)
-    mpert = ft.mpert
-    mtheta = ft.mtheta
-
-    sqrt_jdp = compute_sqrt_jac_delpsi(equil, psi, mtheta)
-    sqrtamat = zeros(ComplexF64, mpert, mpert)
-
-    e_k = zeros(ComplexF64, mpert)
-    for k in 1:mpert
-        e_k .= 0.0
-        e_k[k] = 1.0 + 0.0im
-
-        # Standard backward FT: f(θ_j) = (1/N) Σ_m c_m exp(-imθ_j)
-        # exp(-imθ) = cos(mθ) - i·sin(mθ), so:
-        #   Re(f) = (1/N)(cslth·Re(c) + snlth·Im(c))
-        #   Im(f) = (1/N)(cslth·Im(c) - snlth·Re(c))
-        real_part = (ft.cslth * real.(e_k) .+ ft.snlth * imag.(e_k)) ./ mtheta
-        imag_part = (ft.cslth * imag.(e_k) .- ft.snlth * real.(e_k)) ./ mtheta
-        theta_vec = complex.(real_part, imag_part)
-
-        # Multiply pointwise by √(J·|∇ψ|) in theta-space
-        theta_vec .*= sqrt_jdp
-
-        # Forward FT: theta-space → mode-space (exp(+imθ), Julia convention)
-        sqrtamat[:, k] .= ft(theta_vec)
-    end
-
-    return sqrtamat
-end
+# The √weight building blocks `compute_sqrt_jac_delpsi`, `compute_sqrtamat`, and the
+# `control_surface_ptof` operator now live in `Equilibrium/CoordinateInvariant.jl` so the
+# ForceFreeStates and PerturbedEquilibrium modules share one coordinate-invariant definition.
 
 """
     compute_power_norm_eigenvalues(wt, wp, wv, sqrtamat, jarea, equil, psi, intr; all_eigenvalues=false)
@@ -277,7 +210,7 @@ function free_compute_sqrtamat_spline(ctrl::ForceFreeStatesControl, equil::Equil
             psii, Roots.Newton()
         )
 
-        sqrtamat = compute_sqrtamat(equil, psi_array[i], ft)
+        sqrtamat = Equilibrium.compute_sqrtamat(equil, psi_array[i], ft)
         jarea = Equilibrium.flux_surface_area(equil, psi_array[i], mtheta_eq)
 
         # Flatten sqrtamat into first mpert^2 entries, jarea as last entry

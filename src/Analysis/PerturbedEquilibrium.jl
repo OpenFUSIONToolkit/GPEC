@@ -18,13 +18,14 @@ function _has_pe_data(h5path, key)
 end
 
 """
-    plot_resonant_flux(h5path; save_path=nothing)
+    plot_resonant_field_amplitude(h5path; save_path=nothing)
 
-Scatter plot of `|Φ_res|` per rational surface vs ψ_N. One marker series per toroidal
-mode n. Integer-valued q rational surfaces are annotated.
+Scatter plot of the resonant field `|b^r|` per rational surface vs ψ_N. One marker series
+per toroidal mode n. Integer-valued q rational surfaces are annotated. The resonant field
+`b^r = Φ^r/A^r` is the resonant flux normalized by the scalar surface area, in tesla [Pharr 2026].
 
 Requires the perturbed equilibrium module to have been run and
-`singular_coupling/resonant_flux` to be present in the HDF5 file.
+`singular_coupling/resonant_field` to be present in the HDF5 file.
 
 ### Arguments
 
@@ -38,29 +39,29 @@ Requires the perturbed equilibrium module to have been run and
 
 A `Plots.jl` plot object.
 """
-function plot_resonant_flux(h5path; save_path=nothing)
+function plot_resonant_field_amplitude(h5path; save_path=nothing)
     base = "perturbed_equilibrium/singular_coupling/"
-    _has_pe_data(h5path, base * "resonant_flux") ||
-        return plot(; title="No resonant flux data — run with perturbed equilibrium enabled", legend=false)
+    _has_pe_data(h5path, base * "resonant_field") ||
+        return plot(; title="No resonant field data — run with perturbed equilibrium enabled", legend=false)
 
-    resonant_flux, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
-        read(fid[base * "resonant_flux"]),
+    resonant_field, rational_psi, rational_q, rational_n = h5open(h5path, "r") do fid
+        read(fid[base * "resonant_field"]),
         read(fid[base * "rational_psi"]),
         read(fid[base * "rational_q"]),
         read(fid[base * "rational_n"])
     end
 
-    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|Φ_res|",
-        title="Resonant flux |Φ_res| per surface", legend=:outertopright,
+    p = plot(; xlabel="Norm. Poloidal Flux", ylabel="|b^r| [T]",
+        title="Resonant field |b^r| per surface", legend=:outertopright,
         left_margin=10Plots.mm, bottom_margin=5Plots.mm)
 
     for nn in unique(rational_n)
         mask = rational_n .== nn
-        scatter!(p, rational_psi[mask], abs.(resonant_flux[mask]);
+        scatter!(p, rational_psi[mask], abs.(resonant_field[mask]);
             label="n=$nn", markersize=7, markerstrokewidth=0)
         for k in findall(mask)
             abs(rational_q[k] - round(rational_q[k])) < 0.05 || continue
-            annotate!(p, rational_psi[k], abs(resonant_flux[k]),
+            annotate!(p, rational_psi[k], abs(resonant_field[k]),
                 text("  q=$(round(Int, rational_q[k]))", 8, :left, :black))
         end
     end
@@ -244,13 +245,13 @@ end
 
 Five-panel summary of resonant coupling quantities at each rational surface vs ψ_N:
 
-  - `|Φ_res|`: resonant flux (`plot_resonant_flux`)
+  - `|b^r|`: resonant field (`plot_resonant_field_amplitude`)
   - `Re(Δ')`: tearing stability parameter (`plot_driven_delta_prime`)
   - `|I_res|`: resonant current
   - `w/2`: island half-width (`plot_island_widths`)
   - `K`: Chirikov overlap parameter (`plot_chirikov_parameter`)
 
-Inspired by `plot_resonant_field.py` from OMFIT GPEC.
+Inspired by `plot_resonant_flux.py` from OMFIT GPEC.
 
 ### Arguments
 
@@ -265,7 +266,7 @@ Inspired by `plot_resonant_field.py` from OMFIT GPEC.
 A `Plots.jl` plot object.
 """
 function plot_resonant_field(h5path; save_path=nothing)
-    p1 = plot_resonant_flux(h5path)
+    p1 = plot_resonant_field_amplitude(h5path)
     p2 = plot_driven_delta_prime(h5path)
     p3 = _plot_resonant_current(h5path)
     p4 = plot_island_widths(h5path)
@@ -421,7 +422,7 @@ end
 
 Three-panel composite summary of perturbed equilibrium results:
 
-  - Top-left: Resonant flux per surface (`plot_resonant_flux`)
+  - Top-left: Resonant field per surface (`plot_resonant_field_amplitude`)
   - Top-right: Edge |b_ψ| spectrum
   - Bottom: ξ_ψ mode spectrogram (`plot_mode_spectrogram`)
 
@@ -438,7 +439,7 @@ Three-panel composite summary of perturbed equilibrium results:
 A `Plots.jl` plot object.
 """
 function plot_perturbed_equilibrium_summary(h5path; save_path=nothing)
-    p_islands  = plot_resonant_flux(h5path)
+    p_islands  = plot_resonant_field_amplitude(h5path)
     p_bpsi     = _plot_bpsi_edge_spectrum(h5path)
     p_spectro  = plot_mode_spectrogram(h5path; component=:xi_psi)
 

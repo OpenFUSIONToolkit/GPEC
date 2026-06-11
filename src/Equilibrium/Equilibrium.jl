@@ -8,10 +8,12 @@ using TOML
 using FastInterpolations
 using AdaptiveArrayPools
 import StaticArrays: @MMatrix, SVector
+import ..Utilities
 
 # --- Internal Module Structure ---
 include("EquilibriumTypes.jl")
 include("FluxSurfaceMetrics.jl")
+include("CoordinateInvariant.jl")
 include("ReadEquilibrium.jl")
 include("DirectEquilibrium.jl")
 include("DirectEquilibriumArcLength.jl")
@@ -26,6 +28,7 @@ export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParam
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
     KineticProfileSplines, load_kinetic_profiles
 export flux_surface_metric, flux_surface_area
+export compute_sqrt_jac_delpsi, compute_sqrtamat, control_surface_ptof
 
 # --- Constants ---
 const mu0 = 4π * 1e-7

@@ -299,6 +299,79 @@ function calc_permeability(
 end
 
 """
+    build_control_surface_ptof(
+        equil::Equilibrium.PlasmaEquilibrium,
+        ffs_intr::ForceFreeStatesInternal
+    )::Matrix{ComplexF64}
+
+Build the numpert_total × numpert_total power-norm-field → flux operator `ptof` at the
+control surface (psilim). The mpert × mpert single-n block (Equilibrium.control_surface_ptof)
+is repeated block-diagonally over the `npert` toroidal harmonics, matching the
+numpert_total mode ordering used by the response matrices.
+
+`ptof` maps a power-normalized control-surface field `b̃` to the coordinate flux harmonics
+`Φ`: `Φ = ptof · b̃`. It is the operator users need to recover the flux-space matrices from
+the stored coordinate-invariant (field-space) ones — see `field_space_response_matrices`.
+[Pharr 2026]
+"""
+function build_control_surface_ptof(
+    equil::Equilibrium.PlasmaEquilibrium,
+    ffs_intr::ForceFreeStatesInternal
+)::Matrix{ComplexF64}
+    mpert = ffs_intr.mpert
+    npert = ffs_intr.npert
+    Npert = ffs_intr.numpert_total
+
+    mtheta_eq = length(equil.rzphi_ys)
+    ft = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, ffs_intr.mlow)
+    ptof_block = Equilibrium.control_surface_ptof(equil, ffs_intr.psilim, ft)
+
+    npert == 1 && return Matrix{ComplexF64}(ptof_block)
+
+    ptof_full = zeros(ComplexF64, Npert, Npert)
+    for in in 1:npert
+        r = ((in - 1) * mpert + 1):(in * mpert)
+        ptof_full[r, r] .= ptof_block
+    end
+    return ptof_full
+end
+
+"""
+    field_space_response_matrices(
+        plasma_inductance, surface_inductance, permeability, reluctance, ptof
+    )::NamedTuple
+
+Express the control-surface response matrices in the coordinate-invariant power-normalized
+field (b̃) space, given the flux-space matrices and the `ptof` operator (`Φ = ptof·b̃`).
+
+The matrices fall into two algebraic classes:
+  - **Operators** (map flux → flux): permeability `P` (Φ_tot = P·Φ_x) transforms by similarity
+    `P̃ = ptof⁻¹·P·ptof`. Its singular values are coordinate-invariant.
+  - **Quadratic generators** (energy = Φ†·G⁻¹·Φ): inductances `Λ`, `L` transform by congruence
+    `G̃ = ptof⁻¹·G·ptof⁻†`; the inverse-inductance-like reluctance `ϱ` (energy = Φ†·ϱ·Φ)
+    transforms as `ϱ̃ = ptof†·ϱ·ptof`. Their spectra are coordinate-invariant.
+
+These rules are mutually consistent: `P̃ = Λ̃·L̃⁻¹ = ptof⁻¹·Λ·L⁻¹·ptof = ptof⁻¹·P·ptof`, and
+`ϱ̃ = L̃⁻¹·(Λ̃−L̃)·L̃⁻¹`. To recover the flux-space forms, invert each map with the stored
+`ptof` (e.g. `P_flux = ptof·P̃·ptof⁻¹`, `L_flux = ptof·L̃·ptof†`). [Pharr 2026]
+"""
+function field_space_response_matrices(
+    plasma_inductance::Matrix{ComplexF64},
+    surface_inductance::Matrix{ComplexF64},
+    permeability::Matrix{ComplexF64},
+    reluctance::Matrix{ComplexF64},
+    ptof::Matrix{ComplexF64}
+)::NamedTuple
+    ptof_inv = inv(ptof)
+    return (
+        plasma_inductance=ptof_inv * plasma_inductance * ptof_inv',
+        surface_inductance=ptof_inv * surface_inductance * ptof_inv',
+        permeability=ptof_inv * permeability * ptof,
+        reluctance=ptof' * reluctance * ptof
+    )
+end
+
+"""
     map_forcing_to_eigenmodes(
         forcing_modes::Vector{ForcingMode},
         intr::ForceFreeStatesInternal

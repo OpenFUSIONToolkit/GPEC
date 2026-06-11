@@ -54,14 +54,21 @@ function compute_plasma_response!(
     L_inv = inv(surface_inductance)
     reluctance = L_inv * (plasma_inductance - surface_inductance) * L_inv
 
-    # Store control surface matrices in state for HDF5 output
-    state.plasma_inductance  = plasma_inductance
-    state.surface_inductance = surface_inductance
-    state.permeability       = permeability
-    state.reluctance         = reluctance
-
-    # Store permeability in internal state for singular coupling use
+    # Store permeability in internal state for singular coupling / field reconstruction.
+    # These consumers operate on the physical control-surface flux Φ_x, so the internal
+    # copy stays in flux space; only the stored/output matrices are conformed below.
     intr.plasma_response = permeability
+
+    # Conform the control-surface matrices to the coordinate-invariant power-normalized
+    # field (b̃) space for output (issue #233 / Pharr 2026). The flux-space forms are
+    # recoverable from the stored `ptof` operator (Φ = ptof·b̃) — see Utils.jl output docs.
+    ptof = build_control_surface_ptof(equil, ffs_intr)
+    field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, ptof)
+    state.plasma_inductance           = field_mats.plasma_inductance
+    state.surface_inductance          = field_mats.surface_inductance
+    state.permeability                = field_mats.permeability
+    state.reluctance                  = field_mats.reluctance
+    state.control_surface_field_operator = ptof
 
     forcing_vector  = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
     response_vector = compute_plasma_response_vector(permeability, forcing_vector)

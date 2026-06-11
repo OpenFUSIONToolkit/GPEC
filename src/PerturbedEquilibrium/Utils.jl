@@ -66,13 +66,19 @@ perturbed_equilibrium/
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
+├── response_matrices/        # [numpert_total × numpert_total], power-normalized field (b̃) space
+│   ├── plasma_inductance     # Λ̃ = ptof⁻¹·Λ·ptof⁻†
+│   ├── surface_inductance    # L̃ = ptof⁻¹·L·ptof⁻†
+│   ├── permeability          # P̃ = ptof⁻¹·P·ptof  (P = Λ·L⁻¹)
+│   ├── reluctance            # ϱ̃ = ptof†·ϱ·ptof
+│   └── powernorm_field_to_flux_operator  # ptof = sqrtamat·√jarea; recover flux via Φ = ptof·b̃
 ├── singular_coupling/
-│   ├── C_resonant_flux      # [n_rational × numpert_total] coupling matrix
+│   ├── C_resonant_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant field b^r=Φ^r/A^r [T])
 │   ├── C_resonant_current
 │   ├── C_island_width_sq
 │   ├── C_penetrated_field
 │   ├── C_delta_prime
-│   ├── resonant_flux        # [n_rational] applied vector = C · amp_vec
+│   ├── resonant_field       # [n_rational] applied vector = C̃ · b̃_x (resonant field b^r [T])
 │   ├── resonant_current
 │   ├── island_width_sq
 │   ├── penetrated_field
@@ -108,12 +114,15 @@ function write_outputs_to_HDF5(
         !isempty(state.forcing_vec)  && (pe_group["forcing_vec"]  = state.forcing_vec)
         !isempty(state.response_vec) && (pe_group["response_vec"] = state.response_vec)
 
-        # Control surface matrices [numpert_total × numpert_total]
+        # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
+        # power-normalized field (b̃) space. Recover flux space with the stored ptof operator
+        # (Φ = ptof·b̃): e.g. P_flux = ptof·P̃·ptof⁻¹, L_flux = ptof·L̃·ptof†. [Pharr 2026]
         mat_group = haskey(pe_group, "response_matrices") ? pe_group["response_matrices"] : create_group(pe_group, "response_matrices")
         !isempty(state.plasma_inductance)  && (mat_group["plasma_inductance"]  = state.plasma_inductance)
         !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
         !isempty(state.permeability)       && (mat_group["permeability"]       = state.permeability)
         !isempty(state.reluctance)         && (mat_group["reluctance"]         = state.reluctance)
+        !isempty(state.control_surface_field_operator) && (mat_group["powernorm_field_to_flux_operator"] = state.control_surface_field_operator)
 
         # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
@@ -174,14 +183,14 @@ function write_outputs_to_HDF5(
         coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")
 
         # Coupling matrices [n_rational × numpert_total]
-        !isempty(state.C_resonant_flux)    && (coupling_group["C_resonant_flux"]    = state.C_resonant_flux)
+        !isempty(state.C_resonant_field)   && (coupling_group["C_resonant_field"]   = state.C_resonant_field)
         !isempty(state.C_resonant_current) && (coupling_group["C_resonant_current"] = state.C_resonant_current)
         !isempty(state.C_island_width_sq)  && (coupling_group["C_island_width_sq"]  = state.C_island_width_sq)
         !isempty(state.C_penetrated_field) && (coupling_group["C_penetrated_field"] = state.C_penetrated_field)
         !isempty(state.C_delta_prime)      && (coupling_group["C_delta_prime"]      = state.C_delta_prime)
 
         # Applied resonant vectors [n_rational]
-        !isempty(state.resonant_flux)      && (coupling_group["resonant_flux"]      = state.resonant_flux)
+        !isempty(state.resonant_field)     && (coupling_group["resonant_field"]     = state.resonant_field)
         !isempty(state.resonant_current)   && (coupling_group["resonant_current"]   = state.resonant_current)
         !isempty(state.island_width_sq)    && (coupling_group["island_width_sq"]    = state.island_width_sq)
         !isempty(state.penetrated_field)   && (coupling_group["penetrated_field"]   = state.penetrated_field)

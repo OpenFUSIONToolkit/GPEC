@@ -327,7 +327,7 @@ function load_julia_outputs(h5_path::String)
         julia["rational_q"]         = haskey(f, "$sc/rational_q")         ? read(f, "$sc/rational_q")         : Float64[]
         julia["rational_n"]         = haskey(f, "$sc/rational_n")         ? read(f, "$sc/rational_n")         : Int[]
         julia["rational_m_res"]     = haskey(f, "$sc/rational_m_res")     ? read(f, "$sc/rational_m_res")     : Int[]
-        julia["resonant_flux"]      = haskey(f, "$sc/resonant_flux")      ? read(f, "$sc/resonant_flux")      : ComplexF64[]
+        julia["resonant_field"]     = haskey(f, "$sc/resonant_field")     ? read(f, "$sc/resonant_field")     : ComplexF64[]
         julia["resonant_current"]   = haskey(f, "$sc/resonant_current")   ? read(f, "$sc/resonant_current")   : ComplexF64[]
         julia["island_half_width"]  = haskey(f, "$sc/island_half_width")  ? read(f, "$sc/island_half_width")  : Float64[]
         julia["chirikov_parameter"] = haskey(f, "$sc/chirikov_parameter") ? read(f, "$sc/chirikov_parameter") : Float64[]
@@ -754,7 +754,7 @@ function build_comparison_table(fort, julia, fortran_dir, bench_dir, nn)
         row   = find_julia_row(julia, q_int, nn)
 
         jp_r  = (row > 0 && !isempty(julia["rational_psi"]))     ? julia["rational_psi"][row]        : NaN
-        j_phi = (row > 0 && !isempty(julia["resonant_flux"]))    ? abs(julia["resonant_flux"][row])   : NaN
+        j_phi = (row > 0 && !isempty(julia["resonant_field"]))   ? abs(julia["resonant_field"][row])  : NaN
         j_wisl= (row > 0 && !isempty(julia["island_half_width"])) ? 2*julia["island_half_width"][row] : NaN
         j_kch = (row > 0 && !isempty(julia["chirikov_parameter"])) ? julia["chirikov_parameter"][row]  : NaN
 
@@ -974,7 +974,7 @@ function generate_plots(fort, julia, bench_dir, nn)
     # Phi_res (resonant flux / area)
     f_phires_vals = isempty(fort["Phi_res"]) ? Float64[] : abs.(fort["Phi_res"])
     j_phires_psi  = julia["rational_psi"]
-    j_phires_vals = isempty(julia["resonant_flux"]) ? Float64[] : abs.(julia["resonant_flux"])
+    j_phires_vals = isempty(julia["resonant_field"]) ? Float64[] : abs.(julia["resonant_field"])
     p9 = _singcoup_panel("|Φ_res| [T]", "|Φ_res| vs ψ  (n=$nn)",
                           f_psi_rat, f_phires_vals, f_q_labels,
                           j_phires_psi, j_phires_vals)

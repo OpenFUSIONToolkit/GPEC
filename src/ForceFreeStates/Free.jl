@@ -98,7 +98,7 @@ and data dumping.
     # Computed directly here (no spline); spline is used by the edge scan.
     mtheta_eq = length(equil.rzphi_ys)
     ft_pn = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, mlow)
-    sqrtamat_pn = compute_sqrtamat(equil, psilim, ft_pn)
+    sqrtamat_pn = Equilibrium.compute_sqrtamat(equil, psilim, ft_pn)
     jarea_pn = Equilibrium.flux_surface_area(equil, psilim, mtheta_eq)
     pn_result = compute_power_norm_eigenvalues(vac_data.wt0, wp, vac_data.wv, sqrtamat_pn, jarea_pn, equil, psilim, intr; all_eigenvalues=true)
     vac_data.pn_et .= pn_result.pn_et_all

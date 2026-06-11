@@ -85,7 +85,7 @@ Response fields (mode space):
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
 Matches Fortran `C_f_x_out`, `C_i_x_out`, etc. (shape [mode_C, m_out]).
-  - `C_resonant_flux`    - Φ_r/A coupling (singcoup row 1)
+  - `C_resonant_field`   - Φ_r/A^r coupling (resonant field b^r in tesla; singcoup row 1) [Pharr 2026]
   - `C_resonant_current` - Resonant current coupling (singcoup row 2)
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
   - `C_penetrated_field` - Penetrated field coupling (singcoup row 4)
@@ -93,7 +93,7 @@ Matches Fortran `C_f_x_out`, `C_i_x_out`, etc. (shape [mode_C, m_out]).
 
 Applied resonant vectors [n_rational] = C · forcing_amplitudes.
 Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
-  - `resonant_flux`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
+  - `resonant_field`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
 
 Diagnostics [n_rational]:
   - `island_half_width::Vector{Float64}` - w/2 = sqrt(|island_width_sq|) from applied forcing
@@ -102,11 +102,15 @@ Diagnostics [n_rational]:
 Metadata [n_rational] — identifies each (surface, n) row:
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
-Control surface matrices [numpert_total × numpert_total]:
-  - `plasma_inductance` - Lambda (wt0-based plasma inductance)
-  - `surface_inductance` - L (vacuum surface inductance from Green's functions)
-  - `permeability` - P = Lambda * L^{-1} (plasma response matrix, Phi_tot = P * Phi_x)
-  - `reluctance` - Rho = L^{-1} * (Lambda - L) * L^{-1}
+Control surface matrices [numpert_total × numpert_total], stored in the coordinate-invariant
+power-normalized field (b̃) space (issue #233 / Pharr 2026). Recover the flux-space forms with
+the `control_surface_field_operator` (`ptof`, Φ = ptof·b̃): e.g. `P_flux = ptof·P̃·ptof⁻¹`,
+`L_flux = ptof·L̃·ptof†`.
+  - `plasma_inductance` - Λ̃ = ptof⁻¹·Λ·ptof⁻† (wt0-based plasma inductance, congruence)
+  - `surface_inductance` - L̃ = ptof⁻¹·L·ptof⁻† (vacuum surface inductance, congruence)
+  - `permeability` - P̃ = ptof⁻¹·P·ptof (plasma response operator P=Λ·L⁻¹, similarity)
+  - `reluctance` - ϱ̃ = ptof†·ϱ·ptof (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
+  - `control_surface_field_operator` - ptof = sqrtamat·√jarea at psilim (field → flux recovery operator)
 
 Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ inductances):
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
@@ -125,14 +129,14 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
     xi_n_modes::Union{Nothing, Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
 
     # Coupling matrices [n_rational × numpert_total]
-    C_resonant_flux::Matrix{ComplexF64}     = zeros(ComplexF64, 0, 0)
+    C_resonant_field::Matrix{ComplexF64}    = zeros(ComplexF64, 0, 0)
     C_resonant_current::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
     C_island_width_sq::Matrix{ComplexF64}   = zeros(ComplexF64, 0, 0)
     C_penetrated_field::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
     C_delta_prime::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)
 
     # Applied resonant vectors [n_rational] = C · amp_vec
-    resonant_flux::Vector{ComplexF64}       = ComplexF64[]
+    resonant_field::Vector{ComplexF64}      = ComplexF64[]
     resonant_current::Vector{ComplexF64}    = ComplexF64[]
     island_width_sq::Vector{ComplexF64}     = ComplexF64[]
     penetrated_field::Vector{ComplexF64}    = ComplexF64[]
@@ -154,10 +158,11 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
     response_vec::Vector{ComplexF64}  = ComplexF64[]  # Phi_tot = P * Phi_x: total plasma response
 
     # Control surface matrices [numpert_total × numpert_total]
-    plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Lambda
-    surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L
-    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P = Lambda * L^{-1}
-    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # Rho = L^{-1}*(Lambda-L)*L^{-1}
+    plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
+    surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L̃ (field space)
+    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = ptof⁻¹·Λ·L⁻¹·ptof
+    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = ptof†·L⁻¹·(Λ−L)·L⁻¹·ptof
+    control_surface_field_operator::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # ptof: field → flux recovery
 
     # Energies — see the struct docstring for formulas
     vacuum_energy::Float64   = 0.0

@@ -62,10 +62,10 @@ Matching Fortran GPEC output: `C_f_x_out` (coupling matrix) and `Phi_res`, `w_is
 Populates `state` with:
 
   Coupling matrices `[n_rational × numpert_total]` — C[row, j] = coupling when forcing mode j has unit amplitude:
-  - `C_resonant_flux`, `C_resonant_current`, `C_island_width_sq`, `C_penetrated_field`, `C_delta_prime`
+  - `C_resonant_field`, `C_resonant_current`, `C_island_width_sq`, `C_penetrated_field`, `C_delta_prime`
 
   Applied resonant vectors `[n_rational]` = C · amp_vec:
-  - `resonant_flux`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
+  - `resonant_field`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
 
   Diagnostics `[n_rational]`: `island_half_width`, `chirikov_parameter`
 
@@ -125,7 +125,7 @@ function compute_singular_coupling_metrics!(
     ctrl.verbose && @info "Found $n_rational resonant (surface, n) pairs"
 
     # Phase 2: Allocate output arrays
-    state.C_resonant_flux      = zeros(ComplexF64, n_rational, numpert_total)
+    state.C_resonant_field     = zeros(ComplexF64, n_rational, numpert_total)
     state.C_resonant_current   = zeros(ComplexF64, n_rational, numpert_total)
     state.C_island_width_sq    = zeros(ComplexF64, n_rational, numpert_total)
     state.C_penetrated_field   = zeros(ComplexF64, n_rational, numpert_total)
@@ -229,19 +229,28 @@ function compute_singular_coupling_metrics!(
             bwp1_l = 2π * im * chi1 * (singfac_l * xsp1_l - nn * q1_l * xsp_l)
             bwp1_r = 2π * im * chi1 * (singfac_r * xsp1_r - nn * q1_r * xsp_r)
             jump_vec[k] = bwp1_r - bwp1_l
-            # C_penetrated_field: midpoint of b^ψ at lpsi/rpsi divided by area.
-            # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi
+            # C_penetrated_field: midpoint of b^ψ at lpsi/rpsi divided by the scalar surface area.
+            # Matches Fortran gpout_resp: gpeq_interp_singsurf evaluates bwp_mn at respsi.
+            # LHS normalization audit (#233): the resonant flux Φ^r divided by the scalar area A^r
+            # is a genuine field amplitude in tesla and is coordinate-invariant [Pharr 2026; cf.
+            # the resonant-field definition in the Conventions Reference].
             b_l = chi1 * singfac_l * 2π * im * xsp_l
             b_r = chi1 * singfac_r * 2π * im * xsp_r
             state.C_penetrated_field[row, k] = (b_l + b_r) / 2 / area
         end
 
+        # LHS normalization audit (#233) — output scalar coordinate-invariance per row:
+        #  - Δ' (1/length): the resonant-surface jump in ∂b^ψ/∂ψ over 2π·χ₁; the tearing index is
+        #    coordinate-invariant (its sign/zero-crossing set the stability boundary) [Glasser 2016].
+        #  - resonant (shielding) current: j_c already integrates jac·|∇ψ| over the surface, so the
+        #    Jacobian weighting is carried inside j_c — no separate area factor needed.
+        #  - resonant flux → field: Φ^r/A^r [T], invariant [Park 2008; Pharr 2026].
         state.C_delta_prime[row, :]      = jump_vec ./ (twopi * chi1)
         state.C_resonant_current[row, :] = jump_vec .* (-j_c / (twopi * m_res))
-        # Matches Fortran gpout_resp: singflx = L·fkaxmn, singbnoflxs = singflx/area,
+        # Matches Fortran gpout_resp: singflx = L·fkaxmn, resonant field = singflx/area,
         # islandhwids = 4·singflx/(2π·shear·q·chi1)
         singflx_pre = (L_mm / (twopi * nn)) .* state.C_resonant_current[row, :]
-        state.C_resonant_flux[row, :] = singflx_pre ./ area
+        state.C_resonant_field[row, :] = singflx_pre ./ area
         if abs(shear) > 1e-10
             state.C_island_width_sq[row, :] = (4.0 / (twopi * shear * sing_surf.q * chi1)) .* singflx_pre
         end
@@ -258,18 +267,31 @@ function compute_singular_coupling_metrics!(
         end
     end
 
-    # Phase 4: Apply forcing amplitudes → R = C · amp_vec
-    amp_vec = zeros(ComplexF64, numpert_total)
+    # Phase 4: Apply forcing amplitudes → R = C · Φ_x. The applied resonant scalars are
+    # physical, coordinate-invariant quantities, so evaluate them from the flux-space C and
+    # the physical forcing Φ_x (bit-identical to pre-conform values).
+    forcing_flux = zeros(ComplexF64, numpert_total)
     for mode in intr.forcing_modes
         j = findfirst(k -> intr.m_modes[k] == mode.m && intr.n_modes[k] == mode.n, 1:numpert_total)
-        isnothing(j) || (amp_vec[j] = mode.amplitude)
+        isnothing(j) || (forcing_flux[j] = mode.amplitude)
     end
 
-    state.resonant_flux    = state.C_resonant_flux    * amp_vec
-    state.resonant_current = state.C_resonant_current * amp_vec
-    state.island_width_sq  = state.C_island_width_sq  * amp_vec
-    state.penetrated_field = state.C_penetrated_field * amp_vec
-    state.delta_prime      = state.C_delta_prime      * amp_vec
+    state.resonant_field   = state.C_resonant_field   * forcing_flux
+    state.resonant_current = state.C_resonant_current * forcing_flux
+    state.island_width_sq  = state.C_island_width_sq  * forcing_flux
+    state.penetrated_field = state.C_penetrated_field * forcing_flux
+    state.delta_prime      = state.C_delta_prime      * forcing_flux
+
+    # Conform the stored coupling-matrix input basis to the coordinate-invariant power-normalized
+    # field (b̃) space (#233 / Pharr 2026): C̃ = C·ptof, so each stored row acts on the applied
+    # field b̃_x (Φ_x = ptof·b̃_x) and its singular values become coordinate-invariant. Done after
+    # the applied-vector evaluation above so those physical scalars carry no round-trip noise.
+    ptof = build_control_surface_ptof(equil, ffs_intr)
+    state.C_resonant_field   = state.C_resonant_field   * ptof
+    state.C_resonant_current = state.C_resonant_current * ptof
+    state.C_island_width_sq  = state.C_island_width_sq  * ptof
+    state.C_penetrated_field = state.C_penetrated_field * ptof
+    state.C_delta_prime      = state.C_delta_prime      * ptof
 
     # Phase 5: Island diagnostics from applied resonant vectors
     compute_island_diagnostics!(state, n_rational)

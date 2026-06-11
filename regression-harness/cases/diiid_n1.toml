@@ -190,19 +190,19 @@ label = "Chirikov parameter"
 noise_threshold = 1e-8
 order = 82
 
-[quantities.resonant_flux]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+[quantities.resonant_field]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_field"
 type = "complex_vector"
 extract = "norm"
-label = "||resonant flux||"
+label = "||resonant field||"
 noise_threshold = 1e-8
 order = 83
 
-[quantities.resonant_flux_all]
-h5path = "perturbed_equilibrium/singular_coupling/resonant_flux"
+[quantities.resonant_field_all]
+h5path = "perturbed_equilibrium/singular_coupling/resonant_field"
 type = "complex_vector"
 extract = "all_complex"
-label = "resonant flux Phi_res"
+label = "resonant field b^r"
 noise_threshold = 1e-8
 
 # Perturbed equilibrium: energies
