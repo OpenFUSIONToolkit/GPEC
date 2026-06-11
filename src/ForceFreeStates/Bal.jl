@@ -782,6 +782,90 @@ function ballooning_alpha_boundary(
     return (psi=psi, alpha=alpha, alpha_critical=alpha_critical)
 end
 
+"""
+    second_critical_ballooning_alpha(psi_idx, plasma_eq, alpha_scale_crit1; max_alpha_scale=8.0, n_scan=20, tol=1e-3)
+
+Second (upper) ballooning stability boundary at one flux surface via bisection. Starting
+above the first crossing at `alpha_scale_crit1` (as returned by [`critical_ballooning_alpha`](@ref)),
+scans upward to find where Δ' returns to the stable side. Returns the physical critical α,
+or `NaN` if no second crossing exists within `max_alpha_scale`.
+"""
+function second_critical_ballooning_alpha(
+    psi_idx::Int,
+    plasma_eq::Equilibrium.PlasmaEquilibrium,
+    alpha_scale_crit1::Float64;
+    max_alpha_scale::Float64=8.0,
+    n_scan::Int=20,
+    tol::Float64=1e-3
+)
+    ref = salpha_reference(psi_idx, plasma_eq)
+    delta_at(scale) = ballooning_delta_prime(
+        psi_idx, plasma_eq; corr_qprime=0.0, corr_pprime=ref.pprime_norm_ref * (scale - 1.0)
+    ).delta_prime
+    stable_sign = sign(delta_at(0.0))
+    stable_sign == 0 && return NaN
+    lo2 = NaN; hi2 = NaN
+    prev_scale = alpha_scale_crit1
+    for k in 1:n_scan
+        scale = alpha_scale_crit1 + (max_alpha_scale - alpha_scale_crit1) * k / n_scan
+        d = delta_at(scale)
+        if isfinite(d) && sign(d) == stable_sign
+            lo2 = prev_scale; hi2 = scale; break
+        end
+        prev_scale = scale
+    end
+    isnan(hi2) && return NaN
+    while (hi2 - lo2) > tol
+        mid = 0.5 * (lo2 + hi2)
+        d = delta_at(mid)
+        (!isfinite(d) || sign(d) != stable_sign) ? (lo2 = mid) : (hi2 = mid)
+    end
+    return ref.alpha_ref * 0.5 * (lo2 + hi2)
+end
+
+"""
+    ballooning_alpha_boundaries(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0)
+
+Profile driver returning the experimental pressure gradient `alpha`, the first stability
+boundary `alpha_critical1`, and the second (upper) stability boundary `alpha_critical2`
+versus normalized flux `psi`. Calls [`critical_ballooning_alpha`](@ref) and
+[`second_critical_ballooning_alpha`](@ref) at each surface. Arrays contain `NaN` where
+no boundary exists; plotting these arrays directly leaves natural gaps over always-stable
+surfaces without requiring explicit masking.
+"""
+function ballooning_alpha_boundaries(
+    ctrl::ForceFreeStatesControl,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    max_alpha_scale::Float64=8.0
+)
+    xs = plasma_eq.profiles.xs
+    npsi = length(xs)
+    psi = Vector{Float64}(xs)
+    alpha = fill(NaN, npsi)
+    alpha_critical1 = fill(NaN, npsi)
+    alpha_critical2 = fill(NaN, npsi)
+
+    for i in 1:npsi
+        xs[i] > 1.0 && continue
+        try
+            alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
+            r1 = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale)
+            r1.found || continue
+            alpha_critical1[i] = r1.alpha_crit
+            alpha_critical2[i] = second_critical_ballooning_alpha(
+                i, plasma_eq, r1.alpha_scale_crit; max_alpha_scale=max_alpha_scale
+            )
+        catch err
+            if ctrl.verbose
+                @warn "ballooning alpha boundaries failed" psi_idx=i exception=err
+            end
+        end
+    end
+
+    return (psi=psi, alpha=alpha, alpha_critical1=alpha_critical1, alpha_critical2=alpha_critical2)
+end
+
 # ======================================================================
 #   ODE Integration
 #   Integrates the ideal marginal ballooning equations

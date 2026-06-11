@@ -573,4 +573,44 @@ function plot_ffs_summary(h5path; save_path=nothing)
     return p
 end
 
+"""
+    plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
+
+Plot the BALOO-style infinite-n ballooning stability diagram with first and second stability
+boundaries: experimental α (solid black), 1st stability boundary α_crit1 (dashed red), and
+2nd stability boundary α_crit2 (dashed blue) versus ψ_N. `NaN` entries in the boundary
+arrays leave natural gaps over always-stable surfaces without requiring explicit masking.
+
+### Arguments
+
+  - `bnd`: NamedTuple with fields `psi`, `alpha`, `alpha_critical1`, `alpha_critical2`
+    (as returned by `ForceFreeStates.ballooning_alpha_boundaries`)
+
+### Keyword arguments
+
+  - `save_path`: If provided, save the figure to this path (default: `nothing`)
+  - `psi_min`: Lower ψ_N axis limit (default: `0.0`)
+
+### Returns
+
+A `Plots.jl` plot object.
+"""
+function plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
+    p = plot(;
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm
+    )
+    plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, linestyle=:dash, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, linestyle=:dash, label="2nd stability boundary")
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
 end # module ForceFreeStates

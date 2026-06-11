@@ -50,7 +50,7 @@ import AdaptiveArrayPools: @with_pool
 # Import ForceFreeStates types and functions needed for main
 using .ForceFreeStates: ForceFreeStatesInternal, ForceFreeStatesControl, DebugSettings, VacuumData, OdeState, FourFitVars
 using .ForceFreeStates: sing_lim!, sing_find!
-using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary
+using .ForceFreeStates: compute_ballooning_stability!, ballooning_alpha_boundary, ballooning_alpha_boundaries
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
