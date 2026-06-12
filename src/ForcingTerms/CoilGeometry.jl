@@ -50,8 +50,10 @@ A coil set comes from one of several sources, selected by `source`:
   - `""` or `"file"`: read a geometry file — `.dat` (legacy ASCII) or `.h5` (modern), chosen
     by extension. The file path comes from `dat_file`/`h5_file` or the `machine`+`name` convention.
   - `"pf_hoop"`: an analytic horizontal circular loop (`radius`, `height`).
-  - `"window_pane"`: an analytic axis-aligned rectangular picture-frame array
-    (`ncoil_gen`, `rz_corners`, `gap_fraction`, `phi0`).
+  - `"window_pane"`: an analytic rectangular picture-frame array, placed EITHER by explicit
+    corners (`rz_corners`) OR by physical standoff from the plasma surface (`standoff`,
+    `poloidal_angle`, `poloidal_length`, `poloidal_tilt`); shared toroidal layout via
+    `ncoil_gen`, `gap_fraction`, `phi0`.
   - `"helical"`: an analytic helical array on a circular cross-section torus
     (`R0`, `a`, `m_hel`, `n_hel`, `theta_lo`, `theta_hi`, `n_coils`, `gap_fraction`, `phi0`, `offset`).
 
@@ -75,15 +77,22 @@ Analytic-source parameters (used only for the matching `source`):
 
   - `radius`, `height`: PF hoop circle radius and Z height [m]
   - `ncoil_gen`: number of generated coils (window-pane / helical arrays)
-  - `rz_corners`: window-pane cross-section as two opposite `[R, Z]` corners [m]
+  - `rz_corners`: window-pane cross-section as two opposite `[R, Z]` corners in m (corner mode)
   - `gap_fraction`: toroidal gap between adjacent coils as a fraction of their spacing
   - `phi0`: toroidal angle offset of the first generated coil [rad]
   - `R0`, `a`: helical torus major radius and minor (circle) radius [m]
   - `m_hel`, `n_hel`: helical poloidal/toroidal mode numbers setting the pitch
-  - `theta_lo`, `theta_hi`: helical poloidal extent in radians; a full turn when `theta_hi-theta_lo == 2π`
+  - `theta_lo`, `theta_hi`: helical poloidal extent in degrees; a full turn when `theta_hi-theta_lo == 360`
   - `n_coils`: number of helical coils in the array
   - `offset`: helical coil radial offset from the torus surface [m]
   - `nsec_gen`: optional override of the generated point count per coil
+
+Window-pane standoff placement (alternative to `rz_corners`; needs an equilibrium):
+
+  - `standoff`: outward-normal distance from the control surface to the frame center [m]
+  - `poloidal_angle`: cylindrical poloidal angle of the frame center, in degrees
+  - `poloidal_length`: poloidal leg span (corner-to-corner) along the surface tangent [m]
+  - `poloidal_tilt`: extra tilt of the legs in degrees; 0 means tangential to the surface
 """
 Base.@kwdef struct CoilSetConfig
     name::String = ""
@@ -115,10 +124,16 @@ Base.@kwdef struct CoilSetConfig
     m_hel::Int = 0
     n_hel::Int = 0
     theta_lo::Float64 = 0.0
-    theta_hi::Float64 = 2π
+    theta_hi::Float64 = 360.0
     n_coils::Int = 0
     offset::Float64 = 0.0
     nsec_gen::Int = 0
+
+    # Window-pane standoff placement (alternative to rz_corners)
+    standoff::Float64 = NaN
+    poloidal_angle::Float64 = NaN
+    poloidal_length::Float64 = 0.0
+    poloidal_tilt::Float64 = 0.0
 end
 
 """
@@ -196,10 +211,14 @@ function _parse_coil_set_config(d::Dict{String,Any})
         m_hel=get(d, "m_hel", 0),
         n_hel=get(d, "n_hel", 0),
         theta_lo=Float64(get(d, "theta_lo", 0.0)),
-        theta_hi=Float64(get(d, "theta_hi", 2π)),
+        theta_hi=Float64(get(d, "theta_hi", 360.0)),
         n_coils=get(d, "n_coils", 0),
         offset=Float64(get(d, "offset", 0.0)),
-        nsec_gen=get(d, "nsec_gen", 0)
+        nsec_gen=get(d, "nsec_gen", 0),
+        standoff=Float64(get(d, "standoff", NaN)),
+        poloidal_angle=Float64(get(d, "poloidal_angle", NaN)),
+        poloidal_length=Float64(get(d, "poloidal_length", 0.0)),
+        poloidal_tilt=Float64(get(d, "poloidal_tilt", 0.0))
     )
 end
 
@@ -289,6 +308,101 @@ function make_pf_hoop(; radius::Real, height::Real, nsec::Int=361, name::String=
 end
 
 """
+    surface_point_and_normal(equil, theta_cyl; psi=equil.rzphi_xs[end]) -> (R, Z, nR, nZ)
+
+Locate the control-surface point at cylindrical poloidal angle `theta_cyl` (radians) and return
+it with the outward unit normal `(nR, nZ)` in the R-Z plane.
+
+The flux-surface splines are parametrized by the SFL angle `theta_sfl`, related to the cylindrical
+angle by `theta_cyl = 2π*(theta_sfl + rzphi_offset(psi, theta_sfl))`. Since the offset is a small
+smooth perturbation, `theta_sfl` is recovered by a damped fixed-point iteration. The tangent is
+taken by central-differencing `R(theta_sfl), Z(theta_sfl)`, and the normal `(dZ/dθ, -dR/dθ)` is
+normalized and oriented outward (positive dot with `(R-ro, Z-zo)`), matching the normal-flux
+convention of `project_normal_flux!`.
+"""
+function surface_point_and_normal(equil, theta_cyl::Real; psi::Real=equil.rzphi_xs[end])
+    hint = (Ref(1), Ref(1))
+    target = mod(theta_cyl / (2π), 1.0)  # normalized cylindrical angle in [0,1)
+
+    # Solve theta_cyl/2π = theta_sfl + offset(theta_sfl) for theta_sfl (offset slope ≪ 1).
+    theta_sfl = target
+    for _ in 1:50
+        off = equil.rzphi_offset((psi, mod(theta_sfl, 1.0)); hint=hint)
+        residual = mod(theta_sfl + off - target, 1.0)
+        residual -= round(residual)  # wrap to (-0.5, 0.5]
+        abs(residual) < 1e-13 && break
+        theta_sfl -= residual
+    end
+    theta_sfl = mod(theta_sfl, 1.0)
+
+    point(tn) = begin
+        tw = mod(tn, 1.0)
+        r_minor = sqrt(equil.rzphi_rsquared((psi, tw); hint=hint))
+        tc = 2π * (tw + equil.rzphi_offset((psi, tw); hint=hint))
+        (equil.ro + r_minor * cos(tc), equil.zo + r_minor * sin(tc))
+    end
+
+    R, Z = point(theta_sfl)
+    h = 1.0e-5
+    Rp, Zp = point(theta_sfl + h)
+    Rm, Zm = point(theta_sfl - h)
+    dR = (Rp - Rm) / (2h)
+    dZ = (Zp - Zm) / (2h)
+
+    nR, nZ = dZ, -dR
+    nrm = hypot(nR, nZ)
+    nR /= nrm
+    nZ /= nrm
+    if nR * (R - equil.ro) + nZ * (Z - equil.zo) < 0  # force outward orientation
+        nR, nZ = -nR, -nZ
+    end
+    return (R, Z, nR, nZ)
+end
+
+"""
+    make_window_pane_standoff(equil; standoff, poloidal_angle, poloidal_length,
+                              poloidal_tilt=0.0, ncoil, gap_fraction=0.0, phi0=0.0,
+                              name="window_pane") -> CoilSet
+
+Build a window-pane array placed by physical standoff instead of explicit corners. The frame
+center sits `standoff` [m] along the outward surface normal at cylindrical `poloidal_angle`
+(degrees); its poloidal legs span `poloidal_length` [m] along the surface tangent, rotated by
+`poloidal_tilt` (degrees, 0 = tangential). The control surface is the boundary
+`equil.rzphi_xs[end]`. Toroidal layout (`ncoil`, `gap_fraction`, `phi0`) and the leg/arc
+construction are delegated to [`make_window_pane`](@ref).
+
+The poloidal legs wind in the same sense as `make_window_pane`'s `c1 -> c2` ordering (lower-Z to
+higher-Z at the outboard midplane), so positive current produces positive `b_n_x` near the coil,
+matching the corner-built window pane.
+"""
+function make_window_pane_standoff(equil; standoff::Real, poloidal_angle::Real,
+    poloidal_length::Real, poloidal_tilt::Real=0.0, ncoil::Int,
+    gap_fraction::Real=0.0, phi0::Real=0.0, name::String="window_pane")
+    poloidal_length > 0 || error("make_window_pane_standoff: poloidal_length must be > 0 (got $poloidal_length)")
+
+    R, Z, nR, nZ = surface_point_and_normal(equil, deg2rad(poloidal_angle))
+
+    # Frame center: standoff along the outward normal.
+    Rc = R + standoff * nR
+    Zc = Z + standoff * nZ
+
+    # Tangent: +90° rotation of the outward normal, so the poloidal leg runs lower-Z -> higher-Z
+    # at the outboard midplane, matching make_window_pane's c1->c2 winding (positive current ->
+    # positive b_n_x near the coil). Rotated by poloidal_tilt in the R-Z plane.
+    tR, tZ = -nZ, nR
+    c, s = cos(deg2rad(poloidal_tilt)), sin(deg2rad(poloidal_tilt))
+    uR = c * tR - s * tZ
+    uZ = s * tR + c * tZ
+
+    half = poloidal_length / 2
+    c1 = [Rc - half * uR, Zc - half * uZ]
+    c2 = [Rc + half * uR, Zc + half * uZ]
+
+    return make_window_pane(; ncoil=ncoil, rz_corners=[c1, c2],
+        gap_fraction=gap_fraction, phi0=phi0, name=name)
+end
+
+"""
     make_window_pane(; ncoil, rz_corners, gap_fraction=0.0, phi0=0.0,
                        np_pol=20, np_tor=40, name="window_pane") -> CoilSet
 
@@ -371,7 +485,7 @@ function make_window_pane(; ncoil::Int, rz_corners::AbstractVector,
 end
 
 """
-    make_helical(; R0, a, m, n, theta_lo=0.0, theta_hi=2π, n_coils,
+    make_helical(; R0, a, m, n, theta_lo=0.0, theta_hi=360.0, n_coils,
                    gap_fraction=0.0, phi0=0.0, offset=0.0, npts=720,
                    name="helical") -> CoilSet
 
@@ -379,13 +493,14 @@ Build an array of `n_coils` analytic helical coils wound on a circular cross-sec
 of major radius `R0` and minor radius `a` [m], offset radially outward by `offset` [m].
 The helical pitch is set by the poloidal/toroidal mode numbers `m`/`n` via `ζ = (m/n)·θ + φ`.
 
-For a full poloidal turn (`theta_hi - theta_lo == 2π`) each coil is a single helical strand.
-For a partial poloidal range the coil is closed into a loop with two helical legs joined by
-toroidal arcs (matching OMFIT `form_helical_array.py`). `npts` sets the strand resolution.
+The poloidal extent `theta_lo`/`theta_hi` is in degrees. For a full poloidal turn
+(`theta_hi - theta_lo == 360`) each coil is a single helical strand. For a partial poloidal
+range the coil is closed into a loop with two helical legs joined by toroidal arcs (matching
+OMFIT `form_helical_array.py`). `npts` sets the strand resolution.
 Currents are zeroed; `load_coil_sets` fills them.
 """
 function make_helical(; R0::Real, a::Real, m::Int, n::Int,
-    theta_lo::Real=0.0, theta_hi::Real=2π, n_coils::Int,
+    theta_lo::Real=0.0, theta_hi::Real=360.0, n_coils::Int,
     gap_fraction::Real=0.0, phi0::Real=0.0, offset::Real=0.0,
     npts::Int=720, name::String="helical")
     R0 > 0 || error("make_helical: R0 must be > 0 (got $R0)")
@@ -393,6 +508,10 @@ function make_helical(; R0::Real, a::Real, m::Int, n::Int,
     n != 0 || error("make_helical: n must be nonzero (sets the helical pitch m/n)")
     n_coils >= 1 || error("make_helical: n_coils must be >= 1 (got $n_coils)")
     0.0 <= gap_fraction < 1.0 || error("make_helical: gap_fraction must be in [0, 1) (got $gap_fraction)")
+
+    # User-facing poloidal extent is in degrees; the internal winding math works in radians.
+    theta_lo = deg2rad(theta_lo)
+    theta_hi = deg2rad(theta_hi)
 
     pitch = m / n
     rr = a + offset
@@ -812,15 +931,34 @@ analytic generators (`pf_hoop`/`window_pane`/`helical`) or a geometry file
 (`.h5` → [`read_coil_h5`](@ref), else `.dat` → [`read_coil_dat`](@ref)). Currents and
 shifts/tilts are applied by the caller, so all sources share the same downstream path.
 """
-function _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig)
+function _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig; equil=nothing)
     if sc.source == "pf_hoop"
         kw = sc.nsec_gen > 0 ? (; nsec=sc.nsec_gen) : (;)
         return make_pf_hoop(; radius=sc.radius, height=sc.height,
             name=isempty(sc.name) ? "pf_hoop" : sc.name, kw...)
     elseif sc.source == "window_pane"
-        return make_window_pane(; ncoil=sc.ncoil_gen, rz_corners=sc.rz_corners,
-            gap_fraction=sc.gap_fraction, phi0=sc.phi0,
-            name=isempty(sc.name) ? "window_pane" : sc.name)
+        has_corners = !isempty(sc.rz_corners)
+        has_standoff = !isnan(sc.standoff) && !isnan(sc.poloidal_angle)
+        if has_corners && has_standoff
+            error("window_pane: provide EITHER rz_corners (corner mode) OR " *
+                  "standoff+poloidal_angle (standoff mode), not both")
+        elseif has_standoff
+            equil === nothing &&
+                error("window_pane standoff mode (standoff/poloidal_angle) requires an equilibrium; " *
+                      "pass `equil` to load_coil_sets, or use rz_corners for corner mode")
+            return make_window_pane_standoff(equil; standoff=sc.standoff,
+                poloidal_angle=sc.poloidal_angle, poloidal_length=sc.poloidal_length,
+                poloidal_tilt=sc.poloidal_tilt, ncoil=sc.ncoil_gen,
+                gap_fraction=sc.gap_fraction, phi0=sc.phi0,
+                name=isempty(sc.name) ? "window_pane" : sc.name)
+        elseif has_corners
+            return make_window_pane(; ncoil=sc.ncoil_gen, rz_corners=sc.rz_corners,
+                gap_fraction=sc.gap_fraction, phi0=sc.phi0,
+                name=isempty(sc.name) ? "window_pane" : sc.name)
+        else
+            error("window_pane: supply rz_corners (corner mode) or " *
+                  "standoff+poloidal_angle (standoff mode)")
+        end
     elseif sc.source == "helical"
         kw = sc.nsec_gen > 0 ? (; npts=sc.nsec_gen) : (;)
         return make_helical(; R0=sc.R0, a=sc.a, m=sc.m_hel, n=sc.n_hel,
@@ -844,18 +982,19 @@ function _build_raw_coil_set(cfg::CoilConfig, sc::CoilSetConfig)
 end
 
 """
-    load_coil_sets(cfg::CoilConfig, n_tilt::Int) -> Vector{CoilSet}
+    load_coil_sets(cfg::CoilConfig, n_tilt::Int; equil=nothing) -> Vector{CoilSet}
 
 Build all coil sets from config (file or analytic source), apply currents and
 shifts/tilts, and return ready-to-use coil data. `n_tilt` is the toroidal mode number
-for modulated perturbations (typically the run's n).
+for modulated perturbations (typically the run's n). `equil` is required only when a
+`window_pane` set uses standoff placement (it locates the surface point and normal).
 """
-function load_coil_sets(cfg::CoilConfig, n_tilt::Int)
+function load_coil_sets(cfg::CoilConfig, n_tilt::Int; equil=nothing)
     isempty(cfg.coil_sets) && error("No coil sets specified in [ForcingTerms] configuration")
 
     coil_sets = CoilSet[]
     for set_cfg in cfg.coil_sets
-        cs_raw = _build_raw_coil_set(cfg, set_cfg)
+        cs_raw = _build_raw_coil_set(cfg, set_cfg; equil=equil)
 
         # Set currents (pad or truncate to ncoil)
         ncoil = cs_raw.ncoil
@@ -883,5 +1022,6 @@ end
 export CoilSet, CoilSetConfig, CoilConfig
 export read_coil_dat, apply_transforms, load_coil_sets
 export make_pf_hoop, make_window_pane, make_helical
+export make_window_pane_standoff, surface_point_and_normal
 export read_coil_h5, write_coil_h5, write_coil_dat, save_coils_to_h5, load_coils_from_h5_group!
 export convert_coil_dat_to_h5, convert_coil_h5_to_dat

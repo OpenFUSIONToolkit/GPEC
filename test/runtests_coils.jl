@@ -369,15 +369,58 @@ end
     rminor = sqrt.((Rcyl .- R0) .^ 2 .+ cs.z .^ 2)
     @test all(isapprox.(rminor, a; atol=1e-9))
 
-    # Partial poloidal range: closed loop with offset
+    # Partial poloidal range: closed loop with offset (theta in degrees)
     cp = ForcingTerms.make_helical(; R0=R0, a=a, m=3, n=1, n_coils=n_coils,
-        theta_lo=-0.4, theta_hi=0.4, offset=0.05)
+        theta_lo=-25.0, theta_hi=25.0, offset=0.05)
     for j in 1:n_coils
         @test cp.x[j, 1, 1] ≈ cp.x[j, 1, end] atol = 1e-9
         @test cp.z[j, 1, 1] ≈ cp.z[j, 1, end] atol = 1e-9
     end
 
     @test_throws ErrorException ForcingTerms.make_helical(; R0=R0, a=a, m=2, n=0, n_coils=2)
+end
+
+@testset "Analytic coils: window_pane standoff" begin
+    equil_dir = joinpath(@__DIR__, "..", "examples", "Solovev_ideal_example")
+    inputs = TOML.parsefile(joinpath(equil_dir, "gpec.toml"))
+    equil = Equilibrium.setup_equilibrium(Equilibrium.EquilibriumConfig(inputs["Equilibrium"], equil_dir))
+
+    # surface_point_and_normal: outboard midplane (poloidal_angle = 0)
+    R0, Z0, nR0, nZ0 = ForcingTerms.surface_point_and_normal(equil, 0.0)
+    @test isapprox(Z0, equil.zo; atol=1e-3)
+    @test R0 > equil.ro
+    @test isapprox(hypot(nR0, nZ0), 1.0; atol=1e-9)   # unit normal
+    @test nR0 > 0 && isapprox(nZ0, 0.0; atol=1e-3)     # points outward in +R
+
+    # Top of the surface (poloidal_angle = 90°): normal points up
+    _, Ztop, nRtop, nZtop = ForcingTerms.surface_point_and_normal(equil, deg2rad(90.0))
+    @test Ztop > equil.zo
+    @test nZtop > 0
+
+    # make_window_pane_standoff: frame center sits ~standoff outside the surface
+    standoff = 0.2
+    cs = ForcingTerms.make_window_pane_standoff(equil; standoff=standoff, poloidal_angle=0.0,
+        poloidal_length=0.6, ncoil=2)
+    @test cs.ncoil == 2 && cs.s == 1
+    # Centroid of the first frame, in (R, Z)
+    Rc = mean(sqrt.(cs.x[1, 1, :] .^ 2 .+ cs.y[1, 1, :] .^ 2))
+    Zc = mean(cs.z[1, 1, :])
+    @test isapprox(Rc, R0 + standoff; atol=0.05)
+    @test isapprox(Zc, Z0; atol=0.05)
+
+    # With poloidal_tilt=0 at the outboard midplane the legs are ~vertical: corners differ in Z
+    cs1 = ForcingTerms.make_window_pane_standoff(equil; standoff=standoff, poloidal_angle=0.0,
+        poloidal_length=0.6, ncoil=1)
+    Zspan = maximum(cs1.z[1, 1, :]) - minimum(cs1.z[1, 1, :])
+    Rspan = maximum(sqrt.(cs1.x[1, 1, :] .^ 2 .+ cs1.y[1, 1, :] .^ 2)) -
+            minimum(sqrt.(cs1.x[1, 1, :] .^ 2 .+ cs1.y[1, 1, :] .^ 2))
+    @test Zspan > Rspan
+
+    # Winding convention: the first poloidal leg (points 1:np_pol, the c1->c2 leg) runs
+    # lower-Z -> higher-Z, matching make_window_pane's c1->c2 ordering, so +current -> +b_n_x
+    # near the coil (same sense as the corner-built window pane).
+    np_pol = 20  # make_window_pane default
+    @test cs1.z[1, 1, np_pol] > cs1.z[1, 1, 1]
 end
 
 # ---------------------------------------------------------------------------
@@ -460,6 +503,24 @@ end
 
     @test_throws ErrorException ForcingTerms.load_coil_sets(
         ForcingTerms.CoilConfig(; coil_sets=[ForcingTerms.CoilSetConfig(; source="bogus")]), 1)
+
+    # window_pane standoff mode requires an equilibrium
+    cfg_standoff = ForcingTerms.CoilConfig(;
+        coil_sets=[
+            ForcingTerms.CoilSetConfig(; source="window_pane", ncoil_gen=2,
+                standoff=0.2, poloidal_angle=0.0, poloidal_length=0.6, currents=[1.0, -1.0])
+        ]
+    )
+    @test_throws ErrorException ForcingTerms.load_coil_sets(cfg_standoff, 1)
+
+    # Supplying both rz_corners and standoff is ambiguous
+    cfg_both = ForcingTerms.CoilConfig(;
+        coil_sets=[
+            ForcingTerms.CoilSetConfig(; source="window_pane", ncoil_gen=2,
+                rz_corners=[[2.2, -0.5], [2.2, 0.5]], standoff=0.2, poloidal_angle=0.0)
+        ]
+    )
+    @test_throws ErrorException ForcingTerms.load_coil_sets(cfg_both, 1)
 end
 
 @testset "Coil HDF5 group: save/load round-trip" begin

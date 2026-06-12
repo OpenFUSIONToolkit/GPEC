@@ -90,7 +90,7 @@ function compute_perturbed_equilibrium(
             # when present; otherwise build it from the TOML coil-set config. Either
             # way, retain it on `intr.coil_sets` for the rerun snapshot writer.
             coil_sets = isempty(intr.coil_sets) ?
-                        ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow) : intr.coil_sets
+                        ForcingTerms.load_coil_sets(cfg, ffs_intr.nlow; equil=equil) : intr.coil_sets
             intr.coil_sets = coil_sets
             for n in ffs_intr.nlow:ffs_intr.nhigh
                 modes_n = ForcingMode[]

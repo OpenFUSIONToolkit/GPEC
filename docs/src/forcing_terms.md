@@ -126,7 +126,7 @@ height = 0.9
 currents = [5e3]
 tiltx = [2.0]
 
-# Analytic window-pane (picture-frame) array; rz_corners are two opposite [R, Z] corners
+# Analytic window-pane (picture-frame) array — corner mode: two opposite [R, Z] corners
 [[ForcingTerms.coil_set]]
 source = "window_pane"
 ncoil_gen = 8
@@ -134,7 +134,22 @@ rz_corners = [[2.2, -0.6], [2.2, 0.6]]
 gap_fraction = 0.15
 currents = [1e3, -1e3, 1e3, -1e3, 1e3, -1e3, 1e3, -1e3]
 
-# Analytic helical array on a circular cross-section torus (pitch = m/n)
+# Analytic window-pane — standoff mode: placed by physical distance off the plasma surface.
+# The frame center sits `standoff` m along the outward surface normal at cylindrical
+# `poloidal_angle` (degrees); legs span `poloidal_length` m, tilted by `poloidal_tilt`
+# (degrees, 0 = tangential). Requires an equilibrium (the main forcing pipeline supplies it).
+[[ForcingTerms.coil_set]]
+source = "window_pane"
+ncoil_gen = 2
+standoff = 0.25
+poloidal_angle = 0.0
+poloidal_length = 1.2
+poloidal_tilt = 0.0
+gap_fraction = 0.15
+currents = [1e4, -1e4]
+
+# Analytic helical array on a circular cross-section torus (pitch = m/n).
+# theta_lo/theta_hi (poloidal extent, degrees) default to a full 0–360 turn.
 [[ForcingTerms.coil_set]]
 source = "helical"
 R0 = 1.7
