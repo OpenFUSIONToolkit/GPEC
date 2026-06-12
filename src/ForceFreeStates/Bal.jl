@@ -676,19 +676,15 @@ end
 """
     ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
 
-Locate every genuine marginal-stability crossing of the ballooning Δ' along the
-pressure-gradient scaling `α/α_exp ∈ [0, max_alpha_scale]` at fixed magnetic shear.
+Locate the marginal-stability crossings of the ballooning Δ' along the pressure-gradient
+scaling `α/α_exp ∈ [0, max_alpha_scale]` at fixed magnetic shear. Marching up from the
+ballooning-stable `α = 0` anchor, every sign change between scan samples is bisected to
+`tol`; sign changes with endpoint `|Δ'|` far above the anchor magnitude are Δ' pole
+crossings (not marginal points) and are skipped. The first crossing is the first
+stability boundary, the second the second-stability boundary, and so on.
 
-Δ' changes sign at marginal points (zeros) but also at its poles (y → 0 in the matching
-ratio), which are not stability boundaries; between a pole pair the sign of Δ' is
-inverted relative to the actual stability. Every sign change found by the `n_scan`-point
-scan is therefore bisected to `tol` and classified by |Δ'| at the converged bracket:
-small (below |Δ'(α=0)|) means a genuine zero, diverging means a pole. Logical stability
-flips only at genuine zeros.
-
-Returns `(scales, alphas, directions, reference)` where `directions[k] = +1` for a
-stable→unstable crossing and `-1` for unstable→stable, and `alphas = alpha_ref * scales`.
-Surfaces that never cross return empty vectors.
+Returns `(scales, alphas, reference)` with `alphas = alpha_ref * scales`, ordered in
+increasing α. Surfaces that never cross return empty vectors.
 """
 function ballooning_alpha_crossings(
     psi_idx::Int,
@@ -700,59 +696,59 @@ function ballooning_alpha_crossings(
 )
     ref = salpha_reference(psi_idx, plasma_eq)
 
-    # Δ' as a function of the α scaling at fixed magnetic shear.
-    delta_at(scale) = ballooning_delta_prime(
-        psi_idx,
-        plasma_eq;
-        corr_qprime=0.0,
-        corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
-        theta_k=theta_k
-    ).delta_prime
-
-    scales = Float64[]
-    directions = Int[]
-    d0 = delta_at(0.0)
-    stable_sign = sign(d0)
-    if stable_sign == 0.0 || !isfinite(d0)
-        return (scales=scales, alphas=Float64[], directions=directions, reference=ref)
+    # Δ' as a function of the α scaling at fixed magnetic shear. Failed evaluations
+    # (extreme corrections can break the coefficient assembly) count as non-stable
+    # samples and are rejected by the crossing classification, like in scan_delta_prime_map.
+    delta_at(scale) = try
+        ballooning_delta_prime(
+            psi_idx,
+            plasma_eq;
+            corr_qprime=0.0,
+            corr_pprime=ref.pprime_norm_ref * (scale - 1.0),
+            theta_k=theta_k
+        ).delta_prime
+    catch
+        NaN
     end
-    pole_mag = abs(d0)
 
-    on_stable_sign(d) = isfinite(d) && sign(d) == stable_sign
+    samples = collect(range(0.0, max_alpha_scale; length=n_scan + 1))
+    scales = _ballooning_marginal_crossings(delta_at, samples, tol)
 
-    is_stable = true        # logical stability; flips only at genuine zeros
-    prev_class = true       # sign class of the previous sample; flips at zeros AND poles
-    prev_scale = 0.0
-    for k in 1:n_scan
-        scale = max_alpha_scale * k / n_scan
-        cur_class = on_stable_sign(delta_at(scale))
-        if cur_class != prev_class
-            lo = prev_scale
-            hi = scale
-            while (hi - lo) > tol
-                mid = 0.5 * (lo + hi)
-                on_stable_sign(delta_at(mid)) == prev_class ? (lo = mid) : (hi = mid)
-            end
-            d_chk = delta_at(0.5 * (lo + hi))
-            if isfinite(d_chk) && abs(d_chk) < pole_mag
-                push!(scales, 0.5 * (lo + hi))
-                push!(directions, is_stable ? +1 : -1)
-                is_stable = !is_stable
-            end
+    return (scales=scales, alphas=ref.alpha_ref .* scales, reference=ref)
+end
+
+# March along `samples` (monotone, either direction) from the stable anchor at
+# `samples[1]`, returning every sign change of `delta_at` between finite samples,
+# bisected to `tol`. Sign changes whose endpoint magnitudes exceed pole_cap*|Δ'_anchor|
+# are Δ' pole crossings (not marginal points) and are skipped; on an adequately fine
+# scan all remaining crossings are genuine marginal zeros, ordered from the anchor.
+function _ballooning_marginal_crossings(delta_at, samples, tol; pole_cap=3.0)
+    vals = [delta_at(x) for x in samples]
+    k0 = findfirst(v -> isfinite(v) && v != 0.0, vals)
+    isnothing(k0) && return Float64[]
+    d_anchor = abs(vals[k0])
+    locs = Float64[]
+    for k in k0:length(samples)-1
+        a, b = vals[k], vals[k+1]
+        (isfinite(a) && isfinite(b) && sign(a) != sign(b)) || continue
+        max(abs(a), abs(b)) > pole_cap * d_anchor && continue
+        lo, hi = samples[k], samples[k+1]
+        while abs(hi - lo) > tol
+            mid = 0.5 * (lo + hi)
+            dm = delta_at(mid)
+            (isfinite(dm) && sign(dm) == sign(a)) ? (lo = mid) : (hi = mid)
         end
-        prev_class = cur_class
-        prev_scale = scale
+        push!(locs, 0.5 * (lo + hi))
     end
-
-    return (scales=scales, alphas=ref.alpha_ref .* scales, directions=directions, reference=ref)
+    return locs
 end
 
 """
     critical_ballooning_alpha(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
 
-First infinite-n ballooning stability boundary at one flux surface: the lowest genuine
-stable→unstable Δ' zero from [`ballooning_alpha_crossings`](@ref). `α` is linear in
-`dp/dψ`, so the boundary maps directly to `α_crit = α_ref * scale_crit`.
+First infinite-n ballooning stability boundary at one flux surface: the lowest Δ' zero
+from [`ballooning_alpha_crossings`](@ref). `α` is linear in `dp/dψ`, so the boundary
+maps directly to `α_crit = α_ref * scale_crit`.
 
 Returns `(alpha_crit, alpha_scale_crit, found)`. When no crossing exists within
 `max_alpha_scale` (always stable, or second-stability access) `alpha_crit = NaN` and
@@ -767,9 +763,8 @@ function critical_ballooning_alpha(
     tol::Float64=1e-3
 )
     cr = ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan, tol=tol)
-    k1 = findfirst(==(1), cr.directions)
-    isnothing(k1) && return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
-    return (alpha_crit=cr.alphas[k1], alpha_scale_crit=cr.scales[k1], found=true)
+    isempty(cr.scales) && return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
+    return (alpha_crit=cr.alphas[1], alpha_scale_crit=cr.scales[1], found=true)
 end
 
 """
@@ -812,11 +807,10 @@ end
 """
     second_critical_ballooning_alpha(psi_idx, plasma_eq, alpha_scale_crit1; max_alpha_scale=8.0, n_scan=24, tol=1e-3)
 
-Second (upper) ballooning stability boundary at one flux surface: the first genuine
-unstable→stable Δ' zero above `alpha_scale_crit1` (as returned by
-[`critical_ballooning_alpha`](@ref)), from [`ballooning_alpha_crossings`](@ref).
-Returns the physical critical α, or `NaN` if no such crossing exists within
-`max_alpha_scale`.
+Second (upper) ballooning stability boundary at one flux surface: the first Δ' zero
+above `alpha_scale_crit1` (as returned by [`critical_ballooning_alpha`](@ref)), from
+[`ballooning_alpha_crossings`](@ref). Returns the physical critical α, or `NaN` if no
+such crossing exists within `max_alpha_scale`.
 """
 function second_critical_ballooning_alpha(
     psi_idx::Int,
@@ -828,7 +822,7 @@ function second_critical_ballooning_alpha(
 )
     alpha_scale_crit1 >= max_alpha_scale && return NaN
     cr = ballooning_alpha_crossings(psi_idx, plasma_eq; max_alpha_scale=max_alpha_scale, n_scan=n_scan, tol=tol)
-    k2 = findfirst(k -> cr.directions[k] == -1 && cr.scales[k] > alpha_scale_crit1, eachindex(cr.directions))
+    k2 = findfirst(>(alpha_scale_crit1), cr.scales)
     return isnothing(k2) ? NaN : cr.alphas[k2]
 end
 
@@ -836,16 +830,14 @@ end
     ballooning_alpha_boundaries(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24)
 
 Profile driver returning the experimental pressure gradient `alpha`, the first stability
-boundary `alpha_critical1`, and the second (upper) stability boundary `alpha_critical2`
-versus normalized flux `psi`. At each surface [`ballooning_alpha_crossings`](@ref)
-enumerates the genuine Δ' zeros; `alpha_critical1` is the lowest stable→unstable
-crossing and `alpha_critical2` the first unstable→stable crossing above it (the top of
-the same unstable band, even when further bands exist at higher α). Arrays contain
-`NaN` where no boundary exists.
+boundary `alpha_critical1` (lowest Δ' zero), and the second stability boundary
+`alpha_critical2` (next zero above it) versus normalized flux `psi`, from
+[`ballooning_alpha_crossings`](@ref) at each surface. Arrays contain `NaN` where no
+boundary exists.
 
-`n_scan` sets the coarse-scan resolution of the crossing search. Increase it when Δ'
-poles create narrow false-sign windows that a coarse scan can step into, which shows up
-as isolated outliers on otherwise smooth boundary curves.
+`n_scan` sets the scan resolution of the crossing search; crossings closer together
+than the scan step can be missed, which shows up as isolated outliers on otherwise
+smooth boundary curves.
 """
 function ballooning_alpha_boundaries(
     ctrl::ForceFreeStatesControl,
@@ -866,11 +858,9 @@ function ballooning_alpha_boundaries(
         try
             cr = ballooning_alpha_crossings(i, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan)
             alpha[i] = cr.reference.alpha_ref
-            k1 = findfirst(==(1), cr.directions)
-            isnothing(k1) && continue
-            alpha_critical1[i] = cr.alphas[k1]
-            k2 = findnext(==(-1), cr.directions, k1 + 1)
-            isnothing(k2) || (alpha_critical2[i] = cr.alphas[k2])
+            isempty(cr.alphas) && continue
+            alpha_critical1[i] = cr.alphas[1]
+            length(cr.alphas) >= 2 && (alpha_critical2[i] = cr.alphas[2])
         catch err
             if ctrl.verbose
                 @warn "ballooning alpha boundaries failed" psi_idx=i exception=err
@@ -879,6 +869,97 @@ function ballooning_alpha_boundaries(
     end
 
     return (psi=psi, alpha=alpha, alpha_critical1=alpha_critical1, alpha_critical2=alpha_critical2)
+end
+
+"""
+    ballooning_qprime_crossings(psi_idx, plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_scan=24, tol=1e-3)
+
+Locate the marginal-stability crossings of the ballooning Δ' along the magnetic shear
+scaling `q'/q'_exp ∈ [min_qprime_scale, max_qprime_scale]` at the fixed experimental
+pressure gradient — the q'-channel counterpart of [`ballooning_alpha_crossings`](@ref).
+The march starts from the first-regime-stable high shear end (`max_qprime_scale`) and
+proceeds downward; sign changes are bisected and Δ' pole crossings skipped exactly as
+in the α scan, so the first crossing is the critical q' and the second the re-entry to
+stability at lower (or reversed) shear.
+
+Returns `(scales, qprimes, reference)` where `qprimes = qprime_norm_ref * scales` is in
+`dq/dpsi_norm` units, ordered in decreasing q'.
+"""
+function ballooning_qprime_crossings(
+    psi_idx::Int,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    min_qprime_scale::Float64=-2.0,
+    max_qprime_scale::Float64=4.0,
+    n_scan::Int=24,
+    tol::Float64=1e-3
+)
+    ref = salpha_reference(psi_idx, plasma_eq)
+
+    # Δ' as a function of the q' scaling at the experimental pressure gradient. Failed
+    # evaluations (reversed-shear corrections can break the coefficient assembly) count
+    # as non-stable samples and are rejected by the crossing classification.
+    delta_at(scale) = try
+        ballooning_delta_prime(
+            psi_idx,
+            plasma_eq;
+            corr_qprime=ref.qprime_norm_ref * (scale - 1.0),
+            corr_pprime=0.0,
+            theta_k=theta_k
+        ).delta_prime
+    catch
+        NaN
+    end
+
+    samples = collect(range(max_qprime_scale, min_qprime_scale; length=n_scan + 1))
+    scales = _ballooning_marginal_crossings(delta_at, samples, tol)
+
+    return (scales=scales, qprimes=ref.qprime_norm_ref .* scales, reference=ref)
+end
+
+"""
+    ballooning_qprime_boundaries(ctrl, plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_scan=24)
+
+Profile driver returning the experimental shear profile `qprime` (`dq/dpsi_norm`), the
+critical shear `qprime_critical1` below which the surface is ballooning unstable at the
+experimental pressure gradient (first crossing marching down from `max_qprime_scale`),
+and `qprime_critical2`, the next crossing at lower (or reversed) shear, versus
+normalized flux `psi`, from [`ballooning_qprime_crossings`](@ref) at each surface.
+Arrays contain `NaN` where no boundary exists.
+"""
+function ballooning_qprime_boundaries(
+    ctrl::ForceFreeStatesControl,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    min_qprime_scale::Float64=-2.0,
+    max_qprime_scale::Float64=4.0,
+    n_scan::Int=24
+)
+    xs = plasma_eq.profiles.xs
+    npsi = length(xs)
+    psi = Vector{Float64}(xs)
+    qprime = fill(NaN, npsi)
+    qprime_critical1 = fill(NaN, npsi)
+    qprime_critical2 = fill(NaN, npsi)
+
+    for i in 1:npsi
+        xs[i] > 1.0 && continue
+        try
+            cr = ballooning_qprime_crossings(
+                i, plasma_eq; theta_k=theta_k, min_qprime_scale=min_qprime_scale, max_qprime_scale=max_qprime_scale, n_scan=n_scan
+            )
+            qprime[i] = cr.reference.qprime_norm_ref
+            isempty(cr.qprimes) && continue
+            qprime_critical1[i] = cr.qprimes[1]
+            length(cr.qprimes) >= 2 && (qprime_critical2[i] = cr.qprimes[2])
+        catch err
+            if ctrl.verbose
+                @warn "ballooning qprime boundaries failed" psi_idx=i exception=err
+            end
+        end
+    end
+
+    return (psi=psi, qprime=qprime, qprime_critical1=qprime_critical1, qprime_critical2=qprime_critical2)
 end
 
 """
@@ -923,6 +1004,53 @@ function ballooning_delta_prime_map(
     end
 
     return (psi=psi, alpha_scales=alpha_scales, alpha_ref=alpha_ref, delta_prime=delta_prime)
+end
+
+"""
+    ballooning_qprime_delta_prime_map(ctrl, plasma_eq; theta_k=0.0, min_qprime_scale=-2.0, max_qprime_scale=4.0, n_qprime=61, max_surfaces=40)
+
+Map the ballooning Δ' over the (ψ_N, q') plane at the fixed experimental pressure
+gradient: at each flux surface, scan the magnetic shear scaling from `min_qprime_scale`
+to `max_qprime_scale` times the experimental q' — the q'-channel counterpart of
+[`ballooning_delta_prime_map`](@ref). The flux grid is thinned to at most
+`max_surfaces` surfaces to bound the cost.
+
+Returns a NamedTuple `(psi, qprime_scales, qprime_ref, delta_prime)` where
+`delta_prime` is `[n_surf × n_qprime]` with `NaN` on failed surfaces; physical
+`q' = qprime_ref * scale` in `dq/dpsi_norm` units.
+"""
+function ballooning_qprime_delta_prime_map(
+    ctrl::ForceFreeStatesControl,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    min_qprime_scale::Float64=-2.0,
+    max_qprime_scale::Float64=4.0,
+    n_qprime::Int=61,
+    max_surfaces::Int=40
+)
+    xs = plasma_eq.profiles.xs
+    idx_all = [i for i in eachindex(xs) if xs[i] <= 1.0]
+    stride = max(1, length(idx_all) ÷ max_surfaces)
+    idx = idx_all[1:stride:end]
+
+    qprime_scales = collect(range(min_qprime_scale, max_qprime_scale; length=n_qprime))
+    psi = Float64[xs[i] for i in idx]
+    qprime_ref = fill(NaN, length(idx))
+    delta_prime = fill(NaN, length(idx), n_qprime)
+
+    for (k, i) in enumerate(idx)
+        try
+            res = scan_delta_prime_map(i, plasma_eq; ctrl=ctrl, theta_k=theta_k, s_scales=qprime_scales, alpha_scales=[1.0])
+            qprime_ref[k] = res.reference.qprime_norm_ref
+            delta_prime[k, :] .= vec(res.delta_prime)
+        catch err
+            if ctrl.verbose
+                @warn "ballooning qprime delta-prime map failed" psi_idx=i exception=err
+            end
+        end
+    end
+
+    return (psi=psi, qprime_scales=qprime_scales, qprime_ref=qprime_ref, delta_prime=delta_prime)
 end
 
 # ======================================================================
