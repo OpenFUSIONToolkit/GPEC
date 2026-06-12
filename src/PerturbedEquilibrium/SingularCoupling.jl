@@ -283,15 +283,15 @@ function compute_singular_coupling_metrics!(
     state.delta_prime      = state.C_delta_prime      * forcing_flux
 
     # Conform the stored coupling-matrix input basis to the coordinate-invariant root-area-weighted
-    # field (b̃) space (#233 / Pharr 2026): C̃ = C·ptof, so each stored row acts on the applied
-    # field b̃_x (Φ_x = ptof·b̃_x) and its singular values become coordinate-invariant. Done after
+    # field (b̃) space (#233 / Pharr 2026): C̃ = C·rootareafield_to_flux, so each stored row acts on the applied
+    # field b̃_x (Φ_x = rootareafield_to_flux·b̃_x) and its singular values become coordinate-invariant. Done after
     # the applied-vector evaluation above so those physical scalars carry no round-trip noise.
-    ptof = build_control_surface_ptof(equil, ffs_intr)
-    state.C_resonant_area_weighted_field   = state.C_resonant_area_weighted_field   * ptof
-    state.C_resonant_current = state.C_resonant_current * ptof
-    state.C_island_width_sq  = state.C_island_width_sq  * ptof
-    state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * ptof
-    state.C_delta_prime      = state.C_delta_prime      * ptof
+    rootareafield_to_flux = build_control_surface_rootareafield_to_flux(equil, ffs_intr)
+    state.C_resonant_area_weighted_field   = state.C_resonant_area_weighted_field   * rootareafield_to_flux
+    state.C_resonant_current = state.C_resonant_current * rootareafield_to_flux
+    state.C_island_width_sq  = state.C_island_width_sq  * rootareafield_to_flux
+    state.C_penetrated_area_weighted_field = state.C_penetrated_area_weighted_field * rootareafield_to_flux
+    state.C_delta_prime      = state.C_delta_prime      * rootareafield_to_flux
 
     # Phase 5: Island diagnostics from applied resonant vectors
     compute_island_diagnostics!(state, n_rational)

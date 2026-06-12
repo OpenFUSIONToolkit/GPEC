@@ -61,14 +61,14 @@ function compute_plasma_response!(
 
     # Conform the control-surface matrices to the coordinate-invariant root-area-weighted
     # field (b̃) space for output (issue #233 / Pharr 2026). The flux-space forms are
-    # recoverable from the stored `ptof` operator (Φ = ptof·b̃) — see Utils.jl output docs.
-    ptof = build_control_surface_ptof(equil, ffs_intr)
-    field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, ptof)
+    # recoverable from the stored `rootareafield_to_flux` operator (Φ = rootareafield_to_flux·b̃) — see Utils.jl output docs.
+    rootareafield_to_flux = build_control_surface_rootareafield_to_flux(equil, ffs_intr)
+    field_mats = field_space_response_matrices(plasma_inductance, surface_inductance, permeability, reluctance, rootareafield_to_flux)
     state.plasma_inductance           = field_mats.plasma_inductance
     state.surface_inductance          = field_mats.surface_inductance
     state.permeability                = field_mats.permeability
     state.reluctance                  = field_mats.reluctance
-    state.control_surface_field_operator = ptof
+    state.control_surface_field_operator = rootareafield_to_flux
 
     forcing_vector  = map_forcing_to_eigenmodes(intr.forcing_modes, ffs_intr)
     response_vector = compute_plasma_response_vector(permeability, forcing_vector)

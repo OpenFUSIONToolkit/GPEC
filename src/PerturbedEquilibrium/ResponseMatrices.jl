@@ -299,22 +299,22 @@ function calc_permeability(
 end
 
 """
-    build_control_surface_ptof(
+    build_control_surface_rootareafield_to_flux(
         equil::Equilibrium.PlasmaEquilibrium,
         ffs_intr::ForceFreeStatesInternal
     )::Matrix{ComplexF64}
 
-Build the numpert_total × numpert_total root-area-weighted field → flux operator `ptof` at the
-control surface (psilim). The mpert × mpert single-n block (Equilibrium.control_surface_ptof)
+Build the numpert_total × numpert_total root-area-weighted field → flux operator `rootareafield_to_flux` at the
+control surface (psilim). The mpert × mpert single-n block (Equilibrium.control_surface_rootareafield_to_flux)
 is repeated block-diagonally over the `npert` toroidal harmonics, matching the
 numpert_total mode ordering used by the response matrices.
 
-`ptof` maps a root-area-weighted control-surface field `b̃` to the coordinate flux harmonics
-`Φ`: `Φ = ptof · b̃`. It is the operator users need to recover the flux-space matrices from
+`rootareafield_to_flux` maps a root-area-weighted control-surface field `b̃` to the coordinate flux harmonics
+`Φ`: `Φ = rootareafield_to_flux · b̃`. It is the operator users need to recover the flux-space matrices from
 the stored coordinate-invariant (field-space) ones — see `field_space_response_matrices`.
 [Pharr 2026]
 """
-function build_control_surface_ptof(
+function build_control_surface_rootareafield_to_flux(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal
 )::Matrix{ComplexF64}
@@ -324,50 +324,50 @@ function build_control_surface_ptof(
 
     mtheta_eq = length(equil.rzphi_ys)
     ft = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, ffs_intr.mlow)
-    ptof_block = Equilibrium.control_surface_ptof(equil, ffs_intr.psilim, ft)
+    rootareafield_to_flux_block = Equilibrium.control_surface_rootareafield_to_flux(equil, ffs_intr.psilim, ft)
 
-    npert == 1 && return Matrix{ComplexF64}(ptof_block)
+    npert == 1 && return Matrix{ComplexF64}(rootareafield_to_flux_block)
 
-    ptof_full = zeros(ComplexF64, Npert, Npert)
+    rootareafield_to_flux_full = zeros(ComplexF64, Npert, Npert)
     for in in 1:npert
         r = ((in - 1) * mpert + 1):(in * mpert)
-        ptof_full[r, r] .= ptof_block
+        rootareafield_to_flux_full[r, r] .= rootareafield_to_flux_block
     end
-    return ptof_full
+    return rootareafield_to_flux_full
 end
 
 """
     field_space_response_matrices(
-        plasma_inductance, surface_inductance, permeability, reluctance, ptof
+        plasma_inductance, surface_inductance, permeability, reluctance, rootareafield_to_flux
     )::NamedTuple
 
 Express the control-surface response matrices in the coordinate-invariant root-area-weighted
-field (b̃) space, given the flux-space matrices and the `ptof` operator (`Φ = ptof·b̃`).
+field (b̃) space, given the flux-space matrices and the `rootareafield_to_flux` operator (`Φ = rootareafield_to_flux·b̃`).
 
 The matrices fall into two algebraic classes:
   - **Operators** (map flux → flux): permeability `P` (Φ_tot = P·Φ_x) transforms by similarity
-    `P̃ = ptof⁻¹·P·ptof`. Its singular values are coordinate-invariant.
+    `P̃ = rootareafield_to_flux⁻¹·P·rootareafield_to_flux`. Its singular values are coordinate-invariant.
   - **Quadratic generators** (energy = Φ†·G⁻¹·Φ): inductances `Λ`, `L` transform by congruence
-    `G̃ = ptof⁻¹·G·ptof⁻†`; the inverse-inductance-like reluctance `ϱ` (energy = Φ†·ϱ·Φ)
-    transforms as `ϱ̃ = ptof†·ϱ·ptof`. Their spectra are coordinate-invariant.
+    `G̃ = rootareafield_to_flux⁻¹·G·rootareafield_to_flux⁻†`; the inverse-inductance-like reluctance `ϱ` (energy = Φ†·ϱ·Φ)
+    transforms as `ϱ̃ = rootareafield_to_flux†·ϱ·rootareafield_to_flux`. Their spectra are coordinate-invariant.
 
-These rules are mutually consistent: `P̃ = Λ̃·L̃⁻¹ = ptof⁻¹·Λ·L⁻¹·ptof = ptof⁻¹·P·ptof`, and
-`ϱ̃ = L̃⁻¹·(Λ̃−L̃)·L̃⁻¹`. To recover the flux-space forms, invert each map with the stored
-`ptof` (e.g. `P_flux = ptof·P̃·ptof⁻¹`, `L_flux = ptof·L̃·ptof†`). [Pharr 2026]
+Writing `R ≡ rootareafield_to_flux` for brevity, these rules are mutually consistent:
+`P̃ = Λ̃·L̃⁻¹ = R⁻¹·Λ·L⁻¹·R = R⁻¹·P·R`, and `ϱ̃ = L̃⁻¹·(Λ̃−L̃)·L̃⁻¹`. To recover the flux-space
+forms, invert each map with the stored `R` (e.g. `P_flux = R·P̃·R⁻¹`, `L_flux = R·L̃·R†`). [Pharr 2026]
 """
 function field_space_response_matrices(
     plasma_inductance::Matrix{ComplexF64},
     surface_inductance::Matrix{ComplexF64},
     permeability::Matrix{ComplexF64},
     reluctance::Matrix{ComplexF64},
-    ptof::Matrix{ComplexF64}
+    rootareafield_to_flux::Matrix{ComplexF64}
 )::NamedTuple
-    ptof_inv = inv(ptof)
+    rootareafield_to_flux_inv = inv(rootareafield_to_flux)
     return (
-        plasma_inductance=ptof_inv * plasma_inductance * ptof_inv',
-        surface_inductance=ptof_inv * surface_inductance * ptof_inv',
-        permeability=ptof_inv * permeability * ptof,
-        reluctance=ptof' * reluctance * ptof
+        plasma_inductance=rootareafield_to_flux_inv * plasma_inductance * rootareafield_to_flux_inv',
+        surface_inductance=rootareafield_to_flux_inv * surface_inductance * rootareafield_to_flux_inv',
+        permeability=rootareafield_to_flux_inv * permeability * rootareafield_to_flux,
+        reluctance=rootareafield_to_flux' * reluctance * rootareafield_to_flux
     )
 end
 

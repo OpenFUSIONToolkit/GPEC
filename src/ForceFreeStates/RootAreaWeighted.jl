@@ -10,8 +10,8 @@ on the choice of straight-field-line coordinate.
 
 Transformation chain:
   - T = diag(i·2π·χ₁·singfac) converts ξ → flux (χ₁ = 2π·ψ₀, singfac = m − n·q).
-  - ptof = sqrtamat·√jarea converts the root-area-weighted field → flux.
-  - M = T⁻¹·ptof maps Φ → ξ.
+  - rootareafield_to_flux = sqrtamat·√jarea converts the root-area-weighted field → flux.
+  - M = T⁻¹·rootareafield_to_flux maps Φ → ξ.
 
 What is **NOT** invariant across Jacobian choices (see
 `scripts/test_power_norm_invariance.jl` for numerical proof):
@@ -29,7 +29,7 @@ area-integral precision floor ~1e-6):
 """
 
 # The √weight building blocks `compute_sqrt_jac_delpsi`, `compute_sqrtamat`, and the
-# `control_surface_ptof` operator now live in `Equilibrium/CoordinateInvariant.jl` so the
+# `control_surface_rootareafield_to_flux` operator now live in `Equilibrium/CoordinateInvariant.jl` so the
 # ForceFreeStates and PerturbedEquilibrium modules share one coordinate-invariant definition.
 
 """
@@ -39,9 +39,9 @@ Transform W from ξ-space to root-area-weighted flux Φ-space and eigendecompose
 
 The transformation chain:
   1. T = diag(i·2π·χ₁·singfac) converts ξ → flux (singfac = m − n·q).
-  2. ptof = sqrtamat·√jarea converts the root-area-weighted field → flux.
-  3. M = T⁻¹·ptof maps Φ → ξ (root-area-weighted to displacement).
-  4. W_Φ = M†·W·M = ptof†·T⁻†·W·T⁻¹·ptof.
+  2. rootareafield_to_flux = sqrtamat·√jarea converts the root-area-weighted field → flux.
+  3. M = T⁻¹·rootareafield_to_flux maps Φ → ξ (root-area-weighted to displacement).
+  4. W_Φ = M†·W·M = rootareafield_to_flux†·T⁻†·W·T⁻¹·rootareafield_to_flux.
 
 Only the eigenspectrum of W_Φ is physically invariant across Jacobian choices —
 it is the coordinate-independent energy. The eigenvectors in this basis are
@@ -96,23 +96,23 @@ function compute_rootarea_eigenvalues(
         T_diag_inv[i] = 1.0 / (im * 2π * chi1 * singfac[i])
     end
 
-    # ptof = sqrtamat * sqrt(jarea): root-area-weighted field → flux
+    # rootareafield_to_flux = sqrtamat * sqrt(jarea): root-area-weighted field → flux
     # For multi-n, expand mpert×mpert sqrtamat to Npert×Npert block-diagonal
-    ptof_block = sqrtamat .* sqrt(jarea)
+    rootareafield_to_flux_block = sqrtamat .* sqrt(jarea)
     if npert == 1
-        ptof_full = ptof_block
+        rootareafield_to_flux_full = rootareafield_to_flux_block
     else
-        ptof_full = zeros(ComplexF64, Npert, Npert)
+        rootareafield_to_flux_full = zeros(ComplexF64, Npert, Npert)
         for in in 1:npert
             r = ((in - 1) * mpert + 1):(in * mpert)
-            ptof_full[r, r] .= ptof_block
+            rootareafield_to_flux_full[r, r] .= rootareafield_to_flux_block
         end
     end
 
-    # M = diag(T_inv) · ptof: row-scale ptof by T_inv (maps Φ → ξ)
-    M = similar(ptof_full)
+    # M = diag(T_inv) · rootareafield_to_flux: row-scale rootareafield_to_flux by T_inv (maps Φ → ξ)
+    M = similar(rootareafield_to_flux_full)
     for i in 1:Npert
-        M[i, :] .= T_diag_inv[i] .* ptof_full[i, :]
+        M[i, :] .= T_diag_inv[i] .* rootareafield_to_flux_full[i, :]
     end
 
     # Transform energy matrices: W_Φ = M† · W · M

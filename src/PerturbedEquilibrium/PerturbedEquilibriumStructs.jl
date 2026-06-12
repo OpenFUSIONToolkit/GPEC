@@ -104,13 +104,13 @@ Metadata [n_rational] — identifies each (surface, n) row:
 
 Control surface matrices [numpert_total × numpert_total], stored in the coordinate-invariant
 root-area-weighted field (b̃) space (issue #233 / Pharr 2026). Recover the flux-space forms with
-the `control_surface_field_operator` (`ptof`, Φ = ptof·b̃): e.g. `P_flux = ptof·P̃·ptof⁻¹`,
-`L_flux = ptof·L̃·ptof†`.
-  - `plasma_inductance` - Λ̃ = ptof⁻¹·Λ·ptof⁻† (wt0-based plasma inductance, congruence)
-  - `surface_inductance` - L̃ = ptof⁻¹·L·ptof⁻† (vacuum surface inductance, congruence)
-  - `permeability` - P̃ = ptof⁻¹·P·ptof (plasma response operator P=Λ·L⁻¹, similarity)
-  - `reluctance` - ϱ̃ = ptof†·ϱ·ptof (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
-  - `control_surface_field_operator` - ptof = sqrtamat·√jarea at psilim (field → flux recovery operator)
+the `control_surface_field_operator` (`rootareafield_to_flux`, Φ = rootareafield_to_flux·b̃): e.g. `P_flux = rootareafield_to_flux·P̃·rootareafield_to_flux⁻¹`,
+`L_flux = rootareafield_to_flux·L̃·rootareafield_to_flux†`.
+  - `plasma_inductance` - Λ̃ = rootareafield_to_flux⁻¹·Λ·rootareafield_to_flux⁻† (wt0-based plasma inductance, congruence)
+  - `surface_inductance` - L̃ = rootareafield_to_flux⁻¹·L·rootareafield_to_flux⁻† (vacuum surface inductance, congruence)
+  - `permeability` - P̃ = rootareafield_to_flux⁻¹·P·rootareafield_to_flux (plasma response operator P=Λ·L⁻¹, similarity)
+  - `reluctance` - ϱ̃ = rootareafield_to_flux†·ϱ·rootareafield_to_flux (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
+  - `control_surface_field_operator` - rootareafield_to_flux = sqrtamat·√jarea at psilim (field → flux recovery operator)
 
 Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ inductances):
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
@@ -160,9 +160,9 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
     # Control surface matrices [numpert_total × numpert_total]
     plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
     surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L̃ (field space)
-    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = ptof⁻¹·Λ·L⁻¹·ptof
-    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = ptof†·L⁻¹·(Λ−L)·L⁻¹·ptof
-    control_surface_field_operator::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # ptof: field → flux recovery
+    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = rootareafield_to_flux⁻¹·Λ·L⁻¹·rootareafield_to_flux
+    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = rootareafield_to_flux†·L⁻¹·(Λ−L)·L⁻¹·rootareafield_to_flux
+    control_surface_field_operator::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # rootareafield_to_flux: field → flux recovery
 
     # Energies — see the struct docstring for formulas
     vacuum_energy::Float64   = 0.0

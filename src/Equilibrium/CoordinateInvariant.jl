@@ -9,10 +9,10 @@ ForceFreeStates and PerturbedEquilibrium modules.
 
 The central operator is
 
-    ptof = sqrtamat · √jarea
+    rootareafield_to_flux = sqrtamat · √jarea
 
 which maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
-`Φ = ptof · b̃` (so `b̃ = ptof⁻¹ · Φ`). The singular values of any operator
+`Φ = rootareafield_to_flux · b̃` (so `b̃ = rootareafield_to_flux⁻¹ · Φ`). The singular values of any operator
 expressed in the `b̃` basis are independent of the straight-field-line
 (working) coordinate.
 
@@ -92,20 +92,20 @@ function compute_sqrtamat(
 end
 
 """
-    control_surface_ptof(equil, psi, ft) -> Matrix{ComplexF64}
+    control_surface_rootareafield_to_flux(equil, psi, ft) -> Matrix{ComplexF64}
 
-Build the root-area-weighted field → flux operator `ptof = sqrtamat · √jarea` at the flux
+Build the root-area-weighted field → flux operator `rootareafield_to_flux = sqrtamat · √jarea` at the flux
 surface `psi`, where `jarea = ∫ J|∇ψ| dθ` is the scalar flux-surface area.
 
-`ptof` maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
-`Φ = ptof · b̃`. To express a flux-space operator/generator in the coordinate-invariant
+`rootareafield_to_flux` maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
+`Φ = rootareafield_to_flux · b̃`. To express a flux-space operator/generator in the coordinate-invariant
 `b̃` basis (and back) use:
-  - operator   `Ã = ptof⁻¹ · A · ptof`     (e.g. permeability `Φ_tot = A·Φ_x`)
-  - generator  `G̃ = ptof⁻¹ · G · ptof⁻†`   (e.g. inductance, energy = Φ†·G⁻¹·Φ)
-  - row map    `C̃ = C · ptof`              (e.g. coupling, scalar = C·Φ_x)
+  - operator   `Ã = rootareafield_to_flux⁻¹ · A · rootareafield_to_flux`     (e.g. permeability `Φ_tot = A·Φ_x`)
+  - generator  `G̃ = rootareafield_to_flux⁻¹ · G · rootareafield_to_flux⁻†`   (e.g. inductance, energy = Φ†·G⁻¹·Φ)
+  - row map    `C̃ = C · rootareafield_to_flux`              (e.g. coupling, scalar = C·Φ_x)
 The singular values / spectrum in the `b̃` basis are coordinate-invariant.
 """
-function control_surface_ptof(
+function control_surface_rootareafield_to_flux(
     equil::PlasmaEquilibrium,
     psi::Float64,
     ft::Utilities.FourierTransforms.FourierTransform

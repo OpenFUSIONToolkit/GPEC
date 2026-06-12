@@ -67,11 +67,11 @@ perturbed_equilibrium/
 │   ├── b_theta
 │   └── b_zeta
 ├── response_matrices/        # [numpert_total × numpert_total], root-area-weighted field (b̃) space
-│   ├── plasma_inductance     # Λ̃ = ptof⁻¹·Λ·ptof⁻†
-│   ├── surface_inductance    # L̃ = ptof⁻¹·L·ptof⁻†
-│   ├── permeability          # P̃ = ptof⁻¹·P·ptof  (P = Λ·L⁻¹)
-│   ├── reluctance            # ϱ̃ = ptof†·ϱ·ptof
-│   └── rootarea_field_to_flux_operator  # ptof = sqrtamat·√jarea; recover flux via Φ = ptof·b̃
+│   ├── plasma_inductance     # Λ̃ = rootareafield_to_flux⁻¹·Λ·rootareafield_to_flux⁻†
+│   ├── surface_inductance    # L̃ = rootareafield_to_flux⁻¹·L·rootareafield_to_flux⁻†
+│   ├── permeability          # P̃ = rootareafield_to_flux⁻¹·P·rootareafield_to_flux  (P = Λ·L⁻¹)
+│   ├── reluctance            # ϱ̃ = rootareafield_to_flux†·ϱ·rootareafield_to_flux
+│   └── rootarea_field_to_flux_operator  # rootareafield_to_flux = sqrtamat·√jarea; recover flux via Φ = rootareafield_to_flux·b̃
 ├── singular_coupling/
 │   ├── C_resonant_area_weighted_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant area-weighted field b^r=Φ^r/A^r [T])
 │   ├── C_resonant_current
@@ -115,8 +115,8 @@ function write_outputs_to_HDF5(
         !isempty(state.response_vec) && (pe_group["response_vec"] = state.response_vec)
 
         # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
-        # root-area-weighted field (b̃) space. Recover flux space with the stored ptof operator
-        # (Φ = ptof·b̃): e.g. P_flux = ptof·P̃·ptof⁻¹, L_flux = ptof·L̃·ptof†. [Pharr 2026]
+        # root-area-weighted field (b̃) space. Recover flux space with the stored operator
+        # R ≡ rootareafield_to_flux (Φ = R·b̃): e.g. P_flux = R·P̃·R⁻¹, L_flux = R·L̃·R†. [Pharr 2026]
         mat_group = haskey(pe_group, "response_matrices") ? pe_group["response_matrices"] : create_group(pe_group, "response_matrices")
         !isempty(state.plasma_inductance)  && (mat_group["plasma_inductance"]  = state.plasma_inductance)
         !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
