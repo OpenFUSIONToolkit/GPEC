@@ -28,7 +28,7 @@ export setup_equilibrium, EquilibriumConfig, PlasmaEquilibrium, EquilibriumParam
     ProfileSplines, GeometryProfileSplines, compute_geometry_profiles,
     KineticProfileSplines, load_kinetic_profiles
 export flux_surface_metric, flux_surface_area
-export compute_sqrt_jac_delpsi, compute_sqrtamat, control_surface_rootareafield_to_flux
+export compute_sqrt_jac_delpsi, compute_sqrtamat, rootarea_to_area_weight, area_to_rootarea_weight
 
 # --- Constants ---
 const mu0 = 4π * 1e-7

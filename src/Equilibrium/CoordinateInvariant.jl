@@ -3,18 +3,23 @@ Coordinate-invariant (root-area-weighted field) flux-surface operators.
 
 These building blocks implement the √area weighting of Pharr (2026),
 "Coordinate-invariant flux-surface Fourier analysis in tokamaks". They are the
-single source of truth for the map between a flux-surface field component and its
-root-area-weighted (coordinate-invariant) field representation, shared by the
-ForceFreeStates and PerturbedEquilibrium modules.
+single source of truth for translating a flux-surface field component between the
+three Pharr field representations (all in tesla), shared by the ForceFreeStates and
+PerturbedEquilibrium modules:
 
-The central operator is
+  - `b`  bare / normal field         (Fourier weight W = 1)
+  - `b̃`  root-area-weighted field    (W = √(J|∇ψ|)) — the coordinate-invariant field
+  - `b̄`  area-weighted field         (W = J|∇ψ|)
 
-    rootareafield_to_flux = sqrtamat · √jarea
+With `Σ ≡ sqrtamat` (the mpert×mpert √weight convolution) and the scalar surface area
+`A ≡ jarea = ∫ J|∇ψ| dθ`, the mode-space vectors are related by
 
-which maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
-`Φ = rootareafield_to_flux · b̃` (so `b̃ = rootareafield_to_flux⁻¹ · Φ`). The singular values of any operator
-expressed in the `b̃` basis are independent of the straight-field-line
-(working) coordinate.
+    b̃ = Σ·b,     b̄ = (Σ/√A)·b̃,     Φ = A·b̄ = Σ·√A·b̃     (poloidal flux, weber)
+
+The √-weight (`b̃`) basis is the one in which an operator's singular values / spectra are
+independent of the straight-field-line (working) coordinate; `b` and `b̄` are not
+coordinate-invariant and are provided only as field/flux recovery views. Poloidal flux is
+recovered, when ever needed, as the scalar product `Φ = A·b̄` — it is never stored.
 
 See `scripts/test_power_norm_invariance.jl` for the numerical invariance proof of
 the underlying √weight identity and angle map.
@@ -92,25 +97,40 @@ function compute_sqrtamat(
 end
 
 """
-    control_surface_rootareafield_to_flux(equil, psi, ft) -> Matrix{ComplexF64}
+    rootarea_to_area_weight(equil, psi, ft) -> Matrix{ComplexF64}
 
-Build the root-area-weighted field → flux operator `rootareafield_to_flux = sqrtamat · √jarea` at the flux
-surface `psi`, where `jarea = ∫ J|∇ψ| dθ` is the scalar flux-surface area.
+Build the root-area-weighted → area-weighted field operator `Σ/√A = sqrtamat ./ √jarea` at the
+flux surface `psi`, where `jarea = ∫ J|∇ψ| dθ` is the scalar flux-surface area. It maps the
+coordinate-invariant root-area-weighted field `b̃` to the area-weighted field `b̄`: `b̄ = (Σ/√A)·b̃`
+(both in tesla). Poloidal flux is the scalar product `Φ = A·b̄` (so `Φ = Σ·√A·b̃`), recovered only
+when a user supplies/requests flux — it is never stored.
 
-`rootareafield_to_flux` maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
-`Φ = rootareafield_to_flux · b̃`. To express a flux-space operator/generator in the coordinate-invariant
-`b̃` basis (and back) use:
-  - operator   `Ã = rootareafield_to_flux⁻¹ · A · rootareafield_to_flux`     (e.g. permeability `Φ_tot = A·Φ_x`)
-  - generator  `G̃ = rootareafield_to_flux⁻¹ · G · rootareafield_to_flux⁻†`   (e.g. inductance, energy = Φ†·G⁻¹·Φ)
-  - row map    `C̃ = C · rootareafield_to_flux`              (e.g. coupling, scalar = C·Φ_x)
-The singular values / spectrum in the `b̃` basis are coordinate-invariant.
+The √-weight (`b̃`) basis is the one in which operator singular values / spectra are independent of
+the straight-field-line (working) coordinate — see `field_space_response_matrices`. `b̄` is *not*
+coordinate-invariant; it is only a field/flux recovery view. [Pharr 2026]
 """
-function control_surface_rootareafield_to_flux(
+function rootarea_to_area_weight(
     equil::PlasmaEquilibrium,
     psi::Float64,
     ft::Utilities.FourierTransforms.FourierTransform
 )
     sqrtamat = compute_sqrtamat(equil, psi, ft)
     jarea = flux_surface_area(equil, psi, ft.mtheta)
-    return sqrtamat .* sqrt(jarea)
+    return sqrtamat ./ sqrt(jarea)
+end
+
+"""
+    area_to_rootarea_weight(equil, psi, ft) -> Matrix{ComplexF64}
+
+Inverse of [`rootarea_to_area_weight`](@ref): the area-weighted → root-area-weighted field operator
+`√A·Σ⁻¹ = √jarea · inv(sqrtamat)`, mapping `b̄ → b̃` (`b̃ = √A·Σ⁻¹·b̄`). [Pharr 2026]
+"""
+function area_to_rootarea_weight(
+    equil::PlasmaEquilibrium,
+    psi::Float64,
+    ft::Utilities.FourierTransforms.FourierTransform
+)
+    sqrtamat = compute_sqrtamat(equil, psi, ft)
+    jarea = flux_surface_area(equil, psi, ft.mtheta)
+    return sqrt(jarea) .* inv(sqrtamat)
 end

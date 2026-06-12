@@ -1,58 +1,57 @@
 """
-Root-area-weighted flux eigenvalue computation for the FFS edge scan.
+Root-area-weighted field eigenvalue computation for the FFS edge scan.
 
-Transforms the energy matrix W from ξ-space into root-area-weighted flux Φ-space and
-returns the eigenvalues of `W_Φ = M†·W·M`. The **eigenvalues** (energies) are
-coordinate-invariant: energy is a physically meaningful scalar and does not depend
-on the choice of straight-field-line coordinate.
+Transforms the energy matrix W from ξ-space into the coordinate-invariant root-area-weighted
+field (b̃) space and returns the eigenvalues of the scaled quadratic form `c·W_t` (energies).
+The **eigenvalues** (energies) are coordinate-invariant: energy is a physically meaningful
+scalar and does not depend on the choice of straight-field-line coordinate.
 
-    dW = ξ†·W·ξ = Φ†·M†·W·M·Φ
+    dW = ξ†·W·ξ = c·b̃†·(M†·W·M)·b̃ = c·b̃†·W_t·b̃
 
-Transformation chain:
-  - T = diag(i·2π·χ₁·singfac) converts ξ → flux (χ₁ = 2π·ψ₀, singfac = m − n·q).
-  - rootareafield_to_flux = sqrtamat·√jarea converts the root-area-weighted field → flux.
-  - M = T⁻¹·rootareafield_to_flux maps Φ → ξ.
+Transformation chain (no poloidal flux Φ appears — it would only be the scalar product `Φ = A·b̄`):
+  - T = diag(i·2π·χ₁·singfac) converts ξ → flux-like amplitude (χ₁ = 2π·ψ₀, singfac = m − n·q).
+  - Σ = sqrtamat is the √weight (the bare → root-area-weighted field map).
+  - M = T⁻¹·Σ maps the root-area-weighted field b̃ → ξ.
+  - c = jarea = ∫ J|∇ψ| dθ is the scalar surface area carrying the energy's area normalization.
 
 What is **NOT** invariant across Jacobian choices (see
 `scripts/test_power_norm_invariance.jl` for numerical proof):
   - ξ itself (W is Jacobian-dependent).
-  - Φ itself — T depends on the m-labelling of the chosen Jacobian, so
-    ‖Φ‖ = ‖M⁻¹ξ‖ drifts with Jacobian.
-  - The θ-space field reconstructed from Φ.
+  - The θ-space field reconstructed from the eigenvector.
 
 What **IS** invariant (verified numerically in the test script, within the
 area-integral precision floor ~1e-6):
   - Flux-surface area A = ∫ J|∇ψ| dθ.
   - The √weight operator identity ‖sqrtamat·b_fft‖² = N²·∫|b|²·J|∇ψ| dθ.
   - The angle-map convmat (b_jac2 = convmat·b_jac1) to machine precision.
-  - The eigenspectrum of `W_Φ`.
+  - The eigenspectrum of `c·W_t`.
 """
 
-# The √weight building blocks `compute_sqrt_jac_delpsi`, `compute_sqrtamat`, and the
-# `control_surface_rootareafield_to_flux` operator now live in `Equilibrium/CoordinateInvariant.jl` so the
-# ForceFreeStates and PerturbedEquilibrium modules share one coordinate-invariant definition.
+# The √weight building blocks `compute_sqrt_jac_delpsi`, `compute_sqrtamat`, and the field-translation
+# operators now live in `Equilibrium/CoordinateInvariant.jl` so the ForceFreeStates and
+# PerturbedEquilibrium modules share one coordinate-invariant definition.
 
 """
     compute_rootarea_eigenvalues(wt, wp, wv, sqrtamat, jarea, equil, psi, intr; all_eigenvalues=false)
 
-Transform W from ξ-space to root-area-weighted flux Φ-space and eigendecompose.
+Transform W from ξ-space to the root-area-weighted field (b̃) space and eigendecompose.
 
 The transformation chain:
-  1. T = diag(i·2π·χ₁·singfac) converts ξ → flux (singfac = m − n·q).
-  2. rootareafield_to_flux = sqrtamat·√jarea converts the root-area-weighted field → flux.
-  3. M = T⁻¹·rootareafield_to_flux maps Φ → ξ (root-area-weighted to displacement).
-  4. W_Φ = M†·W·M = rootareafield_to_flux†·T⁻†·W·T⁻¹·rootareafield_to_flux.
+  1. T = diag(i·2π·χ₁·singfac) converts ξ → flux-like amplitude (singfac = m − n·q).
+  2. Σ = sqrtamat is the √weight (bare → root-area-weighted field).
+  3. M = T⁻¹·Σ maps the root-area-weighted field b̃ → ξ.
+  4. Energy matrix = c·W_t = c·M†·W·M with the scalar c = jarea (the surface area).
 
-Only the eigenspectrum of W_Φ is physically invariant across Jacobian choices —
+Only the eigenspectrum of `c·W_t` is physically invariant across Jacobian choices —
 it is the coordinate-independent energy. The eigenvectors in this basis are
 normalized under Julia's `eigen` (‖v‖₂ = 1) rather than the ∫|b|²dA = 1
-convention, so `v` should not be reused as a physical Φ-space mode shape — here
+convention, so `v` should not be reused as a physical b̃-space mode shape — here
 it is only used to split λ = v†Wt v into ⟨v,Wp v⟩ + ⟨v,Wv v⟩, both of which are
 spectrally invariant because Wp + Wv = Wt.
 
-Returns the standard eigenvalues of W_Φ sorted ascending (most negative/unstable
+Returns the standard eigenvalues of `c·W_t` sorted ascending (most negative/unstable
 first), matching the ξ-space convention in `free_run!` and `free_compute_total`.
-Also returns `rootA_vacuum_eigenvalue = max(0, λ_min(Hermitian(wv_Φ)))` — the Φ-space
+Also returns `rootA_vacuum_eigenvalue = max(0, λ_min(Hermitian(c·wv_t)))` — the b̃-space
 counterpart of the ξ-space `vacuum_eigenvalue` diagnostic.
 Returns NaN when any singfac ≈ 0 (rational surface crossing makes T singular).
 """
@@ -90,37 +89,37 @@ function compute_rootarea_eigenvalues(
         end
     end
 
-    # T = diag(i·2π·chi1·singfac): ξ → flux
+    # T = diag(i·2π·chi1·singfac): ξ → flux-like amplitude
     T_diag_inv = Vector{ComplexF64}(undef, Npert)
     for i in 1:Npert
         T_diag_inv[i] = 1.0 / (im * 2π * chi1 * singfac[i])
     end
 
-    # rootareafield_to_flux = sqrtamat * sqrt(jarea): root-area-weighted field → flux
-    # For multi-n, expand mpert×mpert sqrtamat to Npert×Npert block-diagonal
-    rootareafield_to_flux_block = sqrtamat .* sqrt(jarea)
-    if npert == 1
-        rootareafield_to_flux_full = rootareafield_to_flux_block
-    else
-        rootareafield_to_flux_full = zeros(ComplexF64, Npert, Npert)
+    # √weight operator Σ = sqrtamat maps the bare field → root-area-weighted field b̃.
+    # For multi-n, expand the mpert×mpert block to Npert×Npert block-diagonal.
+    sqrtamat_full = sqrtamat
+    if npert != 1
+        sqrtamat_full = zeros(ComplexF64, Npert, Npert)
         for in in 1:npert
             r = ((in - 1) * mpert + 1):(in * mpert)
-            rootareafield_to_flux_full[r, r] .= rootareafield_to_flux_block
+            sqrtamat_full[r, r] .= sqrtamat
         end
     end
 
-    # M = diag(T_inv) · rootareafield_to_flux: row-scale rootareafield_to_flux by T_inv (maps Φ → ξ)
-    M = similar(rootareafield_to_flux_full)
+    # M = diag(T_inv) · Σ: row-scale Σ by T_inv (maps the root-area-weighted field b̃ → ξ)
+    M = similar(sqrtamat_full)
     for i in 1:Npert
-        M[i, :] .= T_diag_inv[i] .* rootareafield_to_flux_full[i, :]
+        M[i, :] .= T_diag_inv[i] .* sqrtamat_full[i, :]
     end
 
-    # Transform energy matrices: W_Φ = M† · W · M
-    wt_rootA = M' * wt * M
-    wp_rootA = M' * wp * M
-    wv_rootA = M' * wv * M
+    # Energy is the b̃ quadratic form scaled by the scalar surface area c = jarea:
+    #   dW = c·b̃†·W_t·b̃,   W_t = M†·W·M,   c = jarea  [Pharr 2026, Eq. for coordinate-invariant energy]
+    # Folding the scalar c here keeps the eigenspectrum (the coordinate-invariant energy) physical [J].
+    wt_rootA = jarea .* (M' * wt * M)
+    wp_rootA = jarea .* (M' * wp * M)
+    wv_rootA = jarea .* (M' * wv * M)
 
-    # Smallest eigenvalue of the vacuum matrix alone in Φ-space, clamped to zero.
+    # Smallest eigenvalue of the vacuum matrix alone in b̃-space, clamped to zero.
     # wv_rootA should be PSD by congruence of the PSD ξ-space wv; numerical noise
     # can make the smallest eigenvalue slightly negative.
     rootA_vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv_rootA))))))
@@ -152,7 +151,7 @@ function compute_rootarea_eigenvalues(
 
         # Phase convention: rotate each column so its largest-magnitude entry is real-positive
         # (matches the ξ-space convention in free_run!). Magnitudes are preserved since the
-        # eigenvectors come from Julia's `eigen` with ‖v‖₂ = 1, the natural Φ-space norm.
+        # eigenvectors come from Julia's `eigen` with ‖v‖₂ = 1, the natural b̃-space norm.
         for isol in 1:Npert
             imax = argmax(abs.(@view rootA_eigenvectors[:, isol]))
             phase = abs(rootA_eigenvectors[imax, isol]) / rootA_eigenvectors[imax, isol]

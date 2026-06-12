@@ -102,17 +102,27 @@ Diagnostics [n_rational]:
 Metadata [n_rational] — identifies each (surface, n) row:
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
-Control surface matrices [numpert_total × numpert_total], stored in the coordinate-invariant
-root-area-weighted field (b̃) space (issue #233 / Pharr 2026). Recover the flux-space forms with
-the `control_surface_field_operator` (`rootareafield_to_flux`, Φ = rootareafield_to_flux·b̃): e.g. `P_flux = rootareafield_to_flux·P̃·rootareafield_to_flux⁻¹`,
-`L_flux = rootareafield_to_flux·L̃·rootareafield_to_flux†`.
-  - `plasma_inductance` - Λ̃ = rootareafield_to_flux⁻¹·Λ·rootareafield_to_flux⁻† (wt0-based plasma inductance, congruence)
-  - `surface_inductance` - L̃ = rootareafield_to_flux⁻¹·L·rootareafield_to_flux⁻† (vacuum surface inductance, congruence)
-  - `permeability` - P̃ = rootareafield_to_flux⁻¹·P·rootareafield_to_flux (plasma response operator P=Λ·L⁻¹, similarity)
-  - `reluctance` - ϱ̃ = rootareafield_to_flux†·ϱ·rootareafield_to_flux (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
-  - `control_surface_field_operator` - rootareafield_to_flux = sqrtamat·√jarea at psilim (field → flux recovery operator)
+Control-surface forcing/response spectra [numpert_total], in the three Pharr (2026) field
+representations (all tesla; no flux/weber is stored):
+  - `forcing_b`/`response_b` - bare normal field b (Σ⁻¹·b̃)
+  - `forcing_b_rootarea`/`response_b_rootarea` - root-area-weighted field b̃ (coordinate-invariant)
+  - `forcing_b_area`/`response_b_area` - area-weighted field b̄ (= S·b̃; flux is Φ = A·b̄)
 
-Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ inductances):
+Control surface matrices [numpert_total × numpert_total], stored in the coordinate-invariant
+root-area-weighted field (b̃) space (issue #233 / Pharr 2026). Writing `S ≡ rootarea_to_area_weight`
+(b̃→b̄) and `A ≡ surface_area`, the brief internal flux-conform operator is `R = S·A` (Φ = R·b̃).
+Recover the area-weighted (b̄) forms by conforming with `S` (e.g. `L_b̄ = S·L̃·S†`); recover flux
+with `Φ = A·b̄`.
+  - `plasma_inductance` - Λ̃ = R⁻¹·Λ·R⁻† (wt0-based plasma inductance, congruence)
+  - `surface_inductance` - L̃ = R⁻¹·L·R⁻† (vacuum surface inductance, congruence)
+  - `permeability` - P̃ = R⁻¹·P·R (plasma response operator P=Λ·L⁻¹, similarity)
+  - `reluctance` - ϱ̃ = R†·ϱ·R (ϱ = L⁻¹·(Λ−L)·L⁻¹, congruence)
+  - `rootarea_to_area_weight` - S = Σ/√A at psilim (b̃→b̄ recovery operator)
+  - `surface_area` - scalar A = ∫J|∇ψ|dθ at psilim (flux recovery Φ = A·b̄)
+
+Energies (Joules; Fortran gpout convention). Congruence-invariant scalars
+(energy = Φ†·G⁻¹·Φ = b̃†·G̃⁻¹·b̃), evaluated from the brief internal flux vectors Φ_x, Φ_tot with the
+well-conditioned flux-space inductances L, Λ:
   - `vacuum_energy`  - Re( ⟨Φ_x,  L⁻¹·Φ_x⟩ ) / 4   (energy to perturb the vacuum)
   - `surface_energy` - Re( ⟨Φ_tot, L⁻¹·Φ_tot⟩ ) / 4 (energy at the control surface)
   - `plasma_energy`  - Re( ⟨Φ_tot, Λ⁻¹·Φ_tot⟩ ) / 4 (energy to perturb the plasma; Fortran's "total energy")
@@ -153,16 +163,21 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
     rational_n::Vector{Int}                 = Int[]
     rational_surface_idx::Vector{Int}       = Int[]
 
-    # Control surface perturbation vectors [numpert_total]
-    forcing_vec::Vector{ComplexF64}   = ComplexF64[]  # Phi_x: external forcing in eigenmode basis
-    response_vec::Vector{ComplexF64}  = ComplexF64[]  # Phi_tot = P * Phi_x: total plasma response
+    # Control-surface forcing/response spectra in the three Pharr field representations [numpert_total], tesla
+    forcing_b::Vector{ComplexF64}           = ComplexF64[]  # bare normal field b (forcing Φ_x)
+    forcing_b_rootarea::Vector{ComplexF64}  = ComplexF64[]  # root-area-weighted field b̃ (coordinate-invariant)
+    forcing_b_area::Vector{ComplexF64}      = ComplexF64[]  # area-weighted field b̄
+    response_b::Vector{ComplexF64}          = ComplexF64[]  # bare normal field b (response Φ_tot = P·Φ_x)
+    response_b_rootarea::Vector{ComplexF64} = ComplexF64[]  # root-area-weighted field b̃
+    response_b_area::Vector{ComplexF64}     = ComplexF64[]  # area-weighted field b̄
 
-    # Control surface matrices [numpert_total × numpert_total]
+    # Control surface matrices [numpert_total × numpert_total], root-area-weighted field (b̃) space
     plasma_inductance::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)  # Λ̃ (field space)
     surface_inductance::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # L̃ (field space)
-    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = rootareafield_to_flux⁻¹·Λ·L⁻¹·rootareafield_to_flux
-    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = rootareafield_to_flux†·L⁻¹·(Λ−L)·L⁻¹·rootareafield_to_flux
-    control_surface_field_operator::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # rootareafield_to_flux: field → flux recovery
+    permeability::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)  # P̃ = R⁻¹·Λ·L⁻¹·R
+    reluctance::Matrix{ComplexF64}         = zeros(ComplexF64, 0, 0)  # ϱ̃ = R†·L⁻¹·(Λ−L)·L⁻¹·R
+    rootarea_to_area_weight::Matrix{ComplexF64} = zeros(ComplexF64, 0, 0)  # S = Σ/√A at psilim: b̃→b̄ recovery operator
+    surface_area::Float64 = 0.0  # scalar control-surface area A = ∫J|∇ψ|dθ (flux: Φ = A·b̄; conform R = S·A)
 
     # Energies — see the struct docstring for formulas
     vacuum_energy::Float64   = 0.0

@@ -299,75 +299,83 @@ function calc_permeability(
 end
 
 """
-    build_control_surface_rootareafield_to_flux(
+    build_control_surface_rootarea_to_area_weight(
         equil::Equilibrium.PlasmaEquilibrium,
         ffs_intr::ForceFreeStatesInternal
-    )::Matrix{ComplexF64}
+    )::Tuple{Matrix{ComplexF64}, Float64}
 
-Build the numpert_total × numpert_total root-area-weighted field → flux operator `rootareafield_to_flux` at the
-control surface (psilim). The mpert × mpert single-n block (Equilibrium.control_surface_rootareafield_to_flux)
-is repeated block-diagonally over the `npert` toroidal harmonics, matching the
-numpert_total mode ordering used by the response matrices.
+Build the numpert_total × numpert_total root-area-weighted → area-weighted field operator
+`S = Σ/√A` at the control surface (psilim), and return it together with the scalar surface area
+`A = jarea`. The mpert × mpert single-n block (Equilibrium.rootarea_to_area_weight) is repeated
+block-diagonally over the `npert` toroidal harmonics, matching the numpert_total mode ordering used
+by the response matrices.
 
-`rootareafield_to_flux` maps a root-area-weighted control-surface field `b̃` to the coordinate flux harmonics
-`Φ`: `Φ = rootareafield_to_flux · b̃`. It is the operator users need to recover the flux-space matrices from
-the stored coordinate-invariant (field-space) ones — see `field_space_response_matrices`.
-[Pharr 2026]
+`S` maps a root-area-weighted control-surface field `b̃` to the area-weighted field `b̄`
+(`b̄ = S·b̃`); poloidal flux is the scalar product `Φ = A·b̄` (so the b̃→flux conform operator is
+`R = S·A`, used only internally). `S` and `A` are the recovery aids users need to express the stored
+coordinate-invariant (b̃) matrices in the area-weighted field or recover flux — see
+`field_space_response_matrices`. [Pharr 2026]
 """
-function build_control_surface_rootareafield_to_flux(
+function build_control_surface_rootarea_to_area_weight(
     equil::Equilibrium.PlasmaEquilibrium,
     ffs_intr::ForceFreeStatesInternal
-)::Matrix{ComplexF64}
+)::Tuple{Matrix{ComplexF64}, Float64}
     mpert = ffs_intr.mpert
     npert = ffs_intr.npert
     Npert = ffs_intr.numpert_total
 
     mtheta_eq = length(equil.rzphi_ys)
     ft = Utilities.FourierTransforms.FourierTransform(mtheta_eq, mpert, ffs_intr.mlow)
-    rootareafield_to_flux_block = Equilibrium.control_surface_rootareafield_to_flux(equil, ffs_intr.psilim, ft)
+    S_block = Equilibrium.rootarea_to_area_weight(equil, ffs_intr.psilim, ft)
+    jarea = Equilibrium.flux_surface_area(equil, ffs_intr.psilim, mtheta_eq)
 
-    npert == 1 && return Matrix{ComplexF64}(rootareafield_to_flux_block)
+    npert == 1 && return (Matrix{ComplexF64}(S_block), jarea)
 
-    rootareafield_to_flux_full = zeros(ComplexF64, Npert, Npert)
+    S_full = zeros(ComplexF64, Npert, Npert)
     for in in 1:npert
         r = ((in - 1) * mpert + 1):(in * mpert)
-        rootareafield_to_flux_full[r, r] .= rootareafield_to_flux_block
+        S_full[r, r] .= S_block
     end
-    return rootareafield_to_flux_full
+    return (S_full, jarea)
 end
 
 """
     field_space_response_matrices(
-        plasma_inductance, surface_inductance, permeability, reluctance, rootareafield_to_flux
+        plasma_inductance, surface_inductance, permeability, reluctance,
+        rootarea_to_area_weight, jarea
     )::NamedTuple
 
 Express the control-surface response matrices in the coordinate-invariant root-area-weighted
-field (b̃) space, given the flux-space matrices and the `rootareafield_to_flux` operator (`Φ = rootareafield_to_flux·b̃`).
+field (b̃) space, given the flux-space matrices, the b̃→b̄ operator `S = rootarea_to_area_weight`,
+and the scalar surface area `jarea`. The brief internal flux-conform operator is `R = S·jarea`
+(`Φ = R·b̃`); poloidal flux never leaves this function.
 
 The matrices fall into two algebraic classes:
   - **Operators** (map flux → flux): permeability `P` (Φ_tot = P·Φ_x) transforms by similarity
-    `P̃ = rootareafield_to_flux⁻¹·P·rootareafield_to_flux`. Its singular values are coordinate-invariant.
+    `P̃ = R⁻¹·P·R`. Its singular values are coordinate-invariant.
   - **Quadratic generators** (energy = Φ†·G⁻¹·Φ): inductances `Λ`, `L` transform by congruence
-    `G̃ = rootareafield_to_flux⁻¹·G·rootareafield_to_flux⁻†`; the inverse-inductance-like reluctance `ϱ` (energy = Φ†·ϱ·Φ)
-    transforms as `ϱ̃ = rootareafield_to_flux†·ϱ·rootareafield_to_flux`. Their spectra are coordinate-invariant.
+    `G̃ = R⁻¹·G·R⁻†`; the inverse-inductance-like reluctance `ϱ` (energy = Φ†·ϱ·Φ) transforms as
+    `ϱ̃ = R†·ϱ·R`. Their spectra are coordinate-invariant.
 
-Writing `R ≡ rootareafield_to_flux` for brevity, these rules are mutually consistent:
-`P̃ = Λ̃·L̃⁻¹ = R⁻¹·Λ·L⁻¹·R = R⁻¹·P·R`, and `ϱ̃ = L̃⁻¹·(Λ̃−L̃)·L̃⁻¹`. To recover the flux-space
-forms, invert each map with the stored `R` (e.g. `P_flux = R·P̃·R⁻¹`, `L_flux = R·L̃·R†`). [Pharr 2026]
+These rules are mutually consistent: `P̃ = Λ̃·L̃⁻¹ = R⁻¹·Λ·L⁻¹·R = R⁻¹·P·R`, and
+`ϱ̃ = L̃⁻¹·(Λ̃−L̃)·L̃⁻¹`. To recover the area-weighted (`b̄`) forms, conform with `S` instead of `R`
+(e.g. `L_b̄ = S·L̃·S†`); recover flux with the scalar `A`: `Φ = A·b̄`. [Pharr 2026]
 """
 function field_space_response_matrices(
     plasma_inductance::Matrix{ComplexF64},
     surface_inductance::Matrix{ComplexF64},
     permeability::Matrix{ComplexF64},
     reluctance::Matrix{ComplexF64},
-    rootareafield_to_flux::Matrix{ComplexF64}
+    rootarea_to_area_weight::Matrix{ComplexF64},
+    jarea::Float64
 )::NamedTuple
-    rootareafield_to_flux_inv = inv(rootareafield_to_flux)
+    R = rootarea_to_area_weight .* jarea   # b̃→flux conform operator Σ·√A = (Σ/√A)·A
+    R_inv = inv(R)
     return (
-        plasma_inductance=rootareafield_to_flux_inv * plasma_inductance * rootareafield_to_flux_inv',
-        surface_inductance=rootareafield_to_flux_inv * surface_inductance * rootareafield_to_flux_inv',
-        permeability=rootareafield_to_flux_inv * permeability * rootareafield_to_flux,
-        reluctance=rootareafield_to_flux' * reluctance * rootareafield_to_flux
+        plasma_inductance=R_inv * plasma_inductance * R_inv',
+        surface_inductance=R_inv * surface_inductance * R_inv',
+        permeability=R_inv * permeability * R,
+        reluctance=R' * reluctance * R
     )
 end
 

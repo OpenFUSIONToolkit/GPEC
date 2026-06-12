@@ -58,6 +58,8 @@ perturbed_equilibrium/
 │   ├── n              # Toroidal mode numbers
 │   ├── m              # Poloidal mode numbers
 │   └── amplitude      # ComplexF64 forcing amplitudes
+├── forcing_b / forcing_b_root_area / forcing_b_area      # control-surface forcing spectrum (b, b̃, b̄) [numpert_total], tesla
+├── response_b / response_b_root_area / response_b_area   # control-surface response spectrum (b, b̃, b̄) [numpert_total], tesla
 ├── response/
 │   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
 │   ├── xi_psi_J       # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
@@ -66,12 +68,13 @@ perturbed_equilibrium/
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
-├── response_matrices/        # [numpert_total × numpert_total], root-area-weighted field (b̃) space
-│   ├── plasma_inductance     # Λ̃ = rootareafield_to_flux⁻¹·Λ·rootareafield_to_flux⁻†
-│   ├── surface_inductance    # L̃ = rootareafield_to_flux⁻¹·L·rootareafield_to_flux⁻†
-│   ├── permeability          # P̃ = rootareafield_to_flux⁻¹·P·rootareafield_to_flux  (P = Λ·L⁻¹)
-│   ├── reluctance            # ϱ̃ = rootareafield_to_flux†·ϱ·rootareafield_to_flux
-│   └── rootarea_field_to_flux_operator  # rootareafield_to_flux = sqrtamat·√jarea; recover flux via Φ = rootareafield_to_flux·b̃
+├── response_matrices/        # [numpert_total × numpert_total], root-area-weighted field (b̃) space; R = S·A
+│   ├── plasma_inductance     # Λ̃ = R⁻¹·Λ·R⁻†
+│   ├── surface_inductance    # L̃ = R⁻¹·L·R⁻†
+│   ├── permeability          # P̃ = R⁻¹·P·R  (P = Λ·L⁻¹)
+│   ├── reluctance            # ϱ̃ = R†·ϱ·R
+│   ├── rootarea_to_area_weight_operator  # S = Σ/√A at psilim; recover area-weighted field b̄ = S·b̃
+│   └── surface_area          # scalar A = ∫J|∇ψ|dθ; recover flux via Φ = A·b̄
 ├── singular_coupling/
 │   ├── C_resonant_area_weighted_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant area-weighted field b^r=Φ^r/A^r [T])
 │   ├── C_resonant_current
@@ -110,19 +113,26 @@ function write_outputs_to_HDF5(
         forcing_group["m"]         = [mode.m for mode in intr.forcing_modes]
         forcing_group["amplitude"] = [mode.amplitude for mode in intr.forcing_modes]
 
-        # Control surface perturbation vectors (Phi_x and Phi_tot = P*Phi_x)
-        !isempty(state.forcing_vec)  && (pe_group["forcing_vec"]  = state.forcing_vec)
-        !isempty(state.response_vec) && (pe_group["response_vec"] = state.response_vec)
+        # Control-surface forcing/response spectra in the three Pharr field representations
+        # (all tesla; flux/weber is never stored). b̃ = root-area-weighted (coordinate-invariant).
+        !isempty(state.forcing_b)           && (pe_group["forcing_b"]            = state.forcing_b)
+        !isempty(state.forcing_b_rootarea)  && (pe_group["forcing_b_root_area"]  = state.forcing_b_rootarea)
+        !isempty(state.forcing_b_area)      && (pe_group["forcing_b_area"]       = state.forcing_b_area)
+        !isempty(state.response_b)          && (pe_group["response_b"]           = state.response_b)
+        !isempty(state.response_b_rootarea) && (pe_group["response_b_root_area"] = state.response_b_rootarea)
+        !isempty(state.response_b_area)     && (pe_group["response_b_area"]      = state.response_b_area)
 
         # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
-        # root-area-weighted field (b̃) space. Recover flux space with the stored operator
-        # R ≡ rootareafield_to_flux (Φ = R·b̃): e.g. P_flux = R·P̃·R⁻¹, L_flux = R·L̃·R†. [Pharr 2026]
+        # root-area-weighted field (b̃) space. Recover the area-weighted field b̄ with the stored
+        # operator S ≡ rootarea_to_area_weight (b̄ = S·b̃): e.g. L_b̄ = S·L̃·S†; recover flux with the
+        # scalar surface_area A: Φ = A·b̄  (internally R = S·A, Φ = R·b̃). [Pharr 2026]
         mat_group = haskey(pe_group, "response_matrices") ? pe_group["response_matrices"] : create_group(pe_group, "response_matrices")
         !isempty(state.plasma_inductance)  && (mat_group["plasma_inductance"]  = state.plasma_inductance)
         !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
         !isempty(state.permeability)       && (mat_group["permeability"]       = state.permeability)
         !isempty(state.reluctance)         && (mat_group["reluctance"]         = state.reluctance)
-        !isempty(state.control_surface_field_operator) && (mat_group["rootarea_field_to_flux_operator"] = state.control_surface_field_operator)
+        !isempty(state.rootarea_to_area_weight) && (mat_group["rootarea_to_area_weight_operator"] = state.rootarea_to_area_weight)
+        (state.surface_area != 0.0)        && (mat_group["surface_area"]       = state.surface_area)
 
         # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
