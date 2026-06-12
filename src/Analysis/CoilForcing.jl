@@ -284,6 +284,14 @@ exponential into the `ν` correction times `e^{i n·hel·φ}`.
     and magnitude are physical. Pass `helicity` to override `sign(Bt)·sign(Ip)` if the toroidal
     tracking is wrong for your machine.
 
+!!! note "Band-limited reconstruction"
+
+    The field is reconstructed only from the supplied `m` modes, so it is band-limited to that
+    poloidal range. A source placed within ~one grid cell of the surface makes the field
+    near-singular and the truncated series rings (Gibbs oscillation — e.g. a spurious dip where a
+    single lobe is expected). Keep coils at a realistic standoff from the boundary, or widen the
+    `m` range, for a clean reconstruction.
+
 ### Keyword arguments
 
   - `mtheta`, `nphi`: poloidal/toroidal grid resolution
