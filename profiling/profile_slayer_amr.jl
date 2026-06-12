@@ -19,8 +19,8 @@
 #       --out /tmp/profile_slayer.txt
 #
 # The case dir must contain `julia/gpec.toml`, `julia/slayer.in`, the staged
-# geqdsk, and `julia/tmp.gpeckf` — i.e. anything `run_julia_betascan.jl`
-# expects. Re-using an existing scan dir avoids restaging.
+# geqdsk, and `julia/tmp.gpeckf`. Re-using an existing scan dir avoids
+# restaging.
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 
@@ -36,13 +36,7 @@ BLAS.set_num_threads(1)
 @info "BLAS threads=1; Julia threads=$(Threads.nthreads())"
 
 # -------------------------------------------------------------------------
-# Re-use the betascan driver's namelist parser via include() — keeps a
-# single source of truth for input parsing.
-const BETASCAN_DRIVER = abspath(joinpath(@__DIR__, "..", "..",
-    "CTM-processing", "SLAYER_coupling_paper",
-    "coupled_deltacrit_betascan", "lib", "run_julia_betascan.jl"))
-# We don't actually need to include() since this script is self-contained,
-# but mark the dependency for posterity.
+# Self-contained namelist + geqdsk-header parsing (no external driver needed).
 
 function _parse_g_line(line::AbstractString, n::Int=5, width::Int=16)
     [parse(Float64, strip(line[(k-1)*width+1 : min(k*width, length(line))]))

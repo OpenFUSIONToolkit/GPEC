@@ -71,7 +71,7 @@
     end
 
     @testset "Static (rotation=0) equivalent to Fortran delta1, delta2 assembly" begin
-        # Replicate Fortran match.f:498-507 literally for msing=2 and
+        # Replicate the Fortran match routine literally for msing=2 and
         # synthetic inner values; confirm Julia assembly agrees.
         dp_raw = ComplexF64[
             10.0  0.1  0.2  0.3 ;

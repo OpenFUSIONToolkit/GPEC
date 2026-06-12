@@ -58,8 +58,9 @@ function _run_scan(f, control::SLAYERControl)
         if !isempty(control.boxes)
             # Multi-box stripe layout. Pole magnitude threshold for the
             # activity check is derived from a coarse 16×6 sample of the
-            # union of all boxes — matches the validate_multi_box.jl driver
-            # behaviour. 10 × median(|Δ|) is the project default.
+            # union of all boxes, using 10 × median(|Δ|) (median is robust
+            # to near-pole sample inflation; see the adaptive threshold note
+            # below).
             ω_lo = minimum(b[1] for b in control.boxes)
             ω_hi = maximum(b[2] for b in control.boxes)
             γ_lo = minimum(b[3] for b in control.boxes)
@@ -94,20 +95,18 @@ end
 # Surface-coupling builder — dispatches on model type to thread the
 # correct `scale` and `tauk` through the Dispersion API.
 # ---------------------------------------------------------------------
-function _build_surface_coupling(model, params::SLAYERParameters, dp_diag)
-    # For both SLAYER and GGJ models, `surface_coupling` has a method that
-    # auto-fills scale and tauk based on the parameter type — SLAYER uses
-    # lu^(1/3) and params.tauk; GGJ defaults to 1.0/1.0.
-    if model isa SLAYERModel
-        return surface_coupling(model, params, dp_diag; dc=params.dc_tmp)
-    else
-        # For GGJ we need GGJParameters — SLAYER params don't map there.
-        # This path exists only for type-compatibility; calling it in
-        # practice raises at the surface_coupling dispatch level.
-        error("_build_surface_coupling: non-SLAYER inner models require " *
-              "an upstream GGJParameters conversion that is not yet " *
-              "implemented. Use inner_model=:slayer_fitzpatrick.")
-    end
+# SLAYER: scale = lu^(1/3), tauk from the surface, dc from the χ‖ proxy.
+function _build_surface_coupling(model::SLAYERModel, params::SLAYERParameters,
+                                  dp_diag)
+    return surface_coupling(model, params, dp_diag; dc=params.dc_tmp)
+end
+
+# GGJ: scale = 1.0 (rescale_delta applied inside solve_inner), tauk = 1.0,
+# dc = 0 (the 4m×4m Pletzer-Dewar residual carries interchange stabilization
+# natively). See the GGJ `surface_coupling` method.
+function _build_surface_coupling(model::GGJModel, params::GGJParameters,
+                                  dp_diag)
+    return surface_coupling(model, params, dp_diag)
 end
 
 # ---------------------------------------------------------------------
@@ -124,7 +123,7 @@ equilibrium-driven `build_slayer_inputs` step — use this when the
 parameters are already known (e.g. in unit tests or when rebuilding
 from cached HDF5 output).
 """
-function run_slayer_from_inputs(params::Vector{SLAYERParameters},
+function run_slayer_from_inputs(params::AbstractVector{<:InnerLayerParameters},
                                  dp_matrix::AbstractMatrix,
                                  control::SLAYERControl)
     validate(control)
@@ -144,7 +143,11 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
 
     # Per-surface resistive layer thickness [m] via the del_s Riccati solve.
     # Independent of the dispersion scan / coupling mode — a pure diagnostic.
-    layer_widths = LayerWidths[slayer_layer_thickness(params[k]) for k in 1:n]
+    # SLAYER-only: the del_s Riccati is defined on SLAYERParameters. GGJ
+    # surfaces carry no analogous layer-thickness diagnostic, so leave it empty.
+    layer_widths = eltype(params) <: SLAYERParameters ?
+        LayerWidths[slayer_layer_thickness(params[k]) for k in 1:n] :
+        LayerWidths[]
 
     Q_root = ComplexF64[]
     omega_Hz = Float64[]
@@ -162,8 +165,7 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     # of magnitude (and `|mean|` further collapses on oscillating residuals
     # whose phases cancel in the complex sum). 10 × median(|Δ|) reflects
     # "10× the typical residual magnitude" with median robust to both
-    # pathologies. See CONVENTIONS.md §7 and the DIII-D 147131 βₚ=0.07
-    # debugging session that motivated the switch.
+    # pathologies.
     function _pole_threshold_for(scan)
         control.pole_threshold_adaptive || return control.pole_threshold
         # ScanResult and AMRResult both carry `.Δ` — abstract over both
@@ -175,14 +177,21 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
     end
 
     if control.coupling_mode === :uncoupled
-        for sc in scs
+        for (k, sc) in enumerate(scs)
             scan = _run_scan(sc, control)
             pthr = _pole_threshold_for(scan)
             gr   = find_growth_rates(scan, sc.tauk;
                     pole_threshold=pthr,
                     filter_above_poles=control.filter_above_poles,
                     filter_outside_re=control.filter_outside_re,
-                    gap_kHz_threshold=control.gap_kHz_threshold)
+                    gap_kHz_threshold=control.gap_kHz_threshold,
+                    residual=control.polish_roots ? sc : nothing,
+                    validity_rtol=control.validity_rtol)
+            :no_root in gr.warning_flags && @warn(
+                "SLAYER: no usable growth-rate root found for surface " *
+                "m=$(params[k].m), n=$(params[k].n); reported γ=0 is a " *
+                "placeholder, not a physical result — check scan grid / " *
+                "pole_threshold.")
             push!(Q_root, gr.Q_root)
             push!(omega_Hz, gr.omega_Hz)
             push!(gamma_Hz, gr.gamma_Hz)
@@ -196,11 +205,21 @@ function run_slayer_from_inputs(params::Vector{SLAYERParameters},
         scan = _run_scan(mc, control)
         pthr = _pole_threshold_for(scan)
         ref_tauk = scs[1].tauk
+        # Coupled path: no root polishing / validity gate. The m×m coupled
+        # determinant det(D'−D(Q)) is ill-conditioned (its magnitude floors well
+        # above zero), so |det|-based polishing is a no-op and the residual-scale
+        # gate is unreliable. A σ_min-based coupled refinement is a dev follow-up;
+        # for now the coupled determinant uses the raw contour extraction (the
+        # BLAS pin in the scan still makes it thread-deterministic).
         gr = find_growth_rates(scan, ref_tauk;
                 pole_threshold=pthr,
                 filter_above_poles=control.filter_above_poles,
                 filter_outside_re=control.filter_outside_re,
                 gap_kHz_threshold=control.gap_kHz_threshold)
+        :no_root in gr.warning_flags && @warn(
+            "SLAYER: no usable growth-rate root found for the coupled " *
+            "$(m_use)-surface determinant; reported γ=0 is a placeholder, " *
+            "not a physical result — check scan grid / pole_threshold.")
         push!(Q_root, gr.Q_root)
         push!(omega_Hz, gr.omega_Hz)
         push!(gamma_Hz, gr.gamma_Hz)
@@ -241,17 +260,30 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl,
 
     profiles = _load_profiles(control, toml_section, dir_path)
 
-    bt = control.bt === nothing ? equil.config.b0exp : control.bt
-    params = build_slayer_inputs(equil, ffs_intr.sing, profiles;
-                                  bt=bt,
-                                  mu_i=control.mu_i,
-                                  zeff=control.zeff,
-                                  chi_perp=control.chi_perp,
-                                  chi_tor=control.chi_tor,
-                                  dr_val=control.dr_val,
-                                  dgeo_val=control.dgeo_val,
-                                  dc_type=control.dc_type,
-                                  theta=control.theta_sample)
+    if control.inner_model in (:ggj_shooting, :ggj_galerkin)
+        # EXPERIMENTAL: the GGJ inner-layer models are not yet validated in the
+        # tearing-γ dispersion root-find. The path runs end-to-end but its
+        # growth rates should not be trusted until the post-merge validation
+        # issue is closed.
+        @warn("SLAYER: inner_model=$(control.inner_model) (GGJ) is EXPERIMENTAL " *
+              "in the tearing-γ dispersion solver and not yet validated — " *
+              "treat the resulting growth rates as unverified.")
+        params = build_ggj_inputs(equil, ffs_intr.sing, profiles;
+                                   mu_i=control.mu_i,
+                                   zeff=control.zeff)
+    else
+        bt = control.bt === nothing ? equil.config.b0exp : control.bt
+        params = build_slayer_inputs(equil, ffs_intr.sing, profiles;
+                                      bt=bt,
+                                      mu_i=control.mu_i,
+                                      zeff=control.zeff,
+                                      chi_perp=control.chi_perp,
+                                      chi_tor=control.chi_tor,
+                                      dr_val=control.dr_val,
+                                      dgeo_val=control.dgeo_val,
+                                      dc_type=control.dc_type,
+                                      theta=control.theta_sample)
+    end
 
     # Δ' matrix: prefer the parallel-FM STRIDE-style full matrix; fall
     # back to a diagonal built from each SingType's scalar delta_prime.

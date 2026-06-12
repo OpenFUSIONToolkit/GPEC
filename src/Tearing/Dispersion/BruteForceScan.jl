@@ -65,10 +65,20 @@ function brute_force_scan(f, Q_re_range::NTuple{2,<:Real},
     Q = ComplexF64[(qr + qi*im) for qr in re_axis, qi in im_axis]
     Δ = Matrix{ComplexF64}(undef, nre, nim)
     if threaded
-        Threads.@threads for j in 1:nim
-            for i in 1:nre
-                Δ[i, j] = f(Q[i, j])
+        # Pin BLAS to one thread for the parallel region — `f(Q)` calls `det()`,
+        # and concurrent multithreaded-BLAS calls give non-reproducible
+        # reductions that can flip the extracted root run-to-run. The residual
+        # matrices are tiny, so single-threaded BLAS costs nothing here.
+        _blas0 = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            Threads.@threads for j in 1:nim
+                for i in 1:nre
+                    Δ[i, j] = f(Q[i, j])
+                end
             end
+        finally
+            BLAS.set_num_threads(_blas0)
         end
     else
         for j in 1:nim, i in 1:nre

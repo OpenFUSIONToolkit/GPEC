@@ -5,8 +5,8 @@
 # plus the dimensional conversion factors needed to translate normalized
 # frequencies and Δ values back to physical units.
 #
-# Constructor `SLAYERParameters(; ...)` ports `params.f::SUBROUTINE
-# params` (modified): no pr, no pe, no ds (those entered only the
+# Constructor `SLAYERParameters(; ...)` ports the Fortran SLAYER `params`
+# subroutine (modified): no pr, no pe, no ds (those entered only the
 # legacy `riccati()` / `riccati_del_s()` paths which are not implemented
 # here). Q is not stored — it is passed directly to `solve_inner`.
 
@@ -53,7 +53,7 @@ and `ρ_s`-based `ds` parameters are intentionally absent — the
 The complex normalized growth rate `Q = ω + iγ` is **not** stored here;
 it is passed as a separate argument to `solve_inner`.
 """
-Base.@kwdef struct SLAYERParameters
+Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     # Surface identity
     ising::Int = 0
     m::Int     = 0
@@ -90,8 +90,8 @@ Base.@kwdef struct SLAYERParameters
     dc_type::Symbol    = :none
 end
 
-# Allowed dc_type values (ports the Fortran `dc_type` SELECT CASE in
-# params.f:230-242). `:none` reproduces the default `dc_tmp = 0` branch.
+# Allowed dc_type values (ports the Fortran `dc_type` SELECT CASE in the
+# params routine). `:none` reproduces the default `dc_tmp = 0` branch.
 const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
 
 """
@@ -112,7 +112,7 @@ respect to ψ_norm or both with respect to physical ψ — the conversion
 factor cancels in the ratio).
 
 This is the Julia analogue of the conversion `s_Fitz = s_psiN · r_s /
-(psi_N · da_dpsiN)` performed at `layerinputs.f:488`.
+(psi_N · da_dpsiN)` performed in the Fortran SLAYER `layerinputs` routine.
 """
 function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
     da_dpsi != 0 || throw(ArgumentError("r_based_shear: da/dψ must be non-zero"))
@@ -121,7 +121,7 @@ function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
 end
 
 # Internal: solve the Wd self-consistency loop for the chi_parallel-based
-# critical Δ. Ports params.f:204-246. Returns dc_tmp as a Float64.
+# critical Δ. Ports the Fortran params routine. Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
                         chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
                         rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
@@ -181,8 +181,8 @@ end
         -> SLAYERParameters
 
 Build a `SLAYERParameters` for one rational surface from dimensional
-equilibrium and kinetic-profile inputs. Mirrors `params.f::SUBROUTINE
-params` restricted to the Fitzpatrick (`riccati_f`) path: drops the
+equilibrium and kinetic-profile inputs. Mirrors the Fortran SLAYER
+`params` subroutine restricted to the Fitzpatrick (`riccati_f`) path: drops the
 magnetic Prandtl `pr`, electron Prandtl `pe`, and ρ_s-based `ds` (those
 parameters entered only the legacy `riccati()` and `riccati_del_s()`
 formulations).
@@ -227,7 +227,7 @@ formulations).
 
 # Sign convention for diamagnetic frequencies
 
-Both Fortran paths (`params.f:154-155` and `layerinputs.f:558-559`) use
+Both Fortran SLAYER paths (the `params` and `layerinputs` routines) use
 
 ```
 Q_e = -tauk · ω_*e
@@ -259,7 +259,7 @@ function slayer_parameters(;
     lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
 
     # Resistivity closure.  SpitzerModel + :wesson reproduces the legacy
-    # params.f:95 formula η = 1.65e-9 · lnΛ / (T_e/keV)^1.5 to within the
+    # Fortran formula η = 1.65e-9 · lnΛ / (T_e/keV)^1.5 to within the
     # Sauter-vs-Wesson Zeff=1 agreement (~1%); other models apply the
     # Sauter/Redl F_33 correction.
     if resistivity_model isa SpitzerModel
@@ -282,14 +282,13 @@ function slayer_parameters(;
                                ft_here, nue_here; lnLamb=lnLamb)
     end
 
-    # Basic plasma quantities (params.f:93-97)
+    # Basic plasma quantities
     tau = t_i / t_e
     rho = mu_i * M_P * n_e
 
-    # Electron-electron collision time and Spitzer-Härm conductivity
-    # (params.f:103-111). T_e enters in eV; the chag^(-2.5) factor in
-    # the denominator absorbs the eV→J conversion (see params.f
-    # comments for derivation).
+    # Electron-electron collision time and Spitzer-Härm conductivity.
+    # T_e enters in eV; the chag^(-2.5) factor in the denominator absorbs
+    # the eV→J conversion.
     tau_ee_num   = 6.0 * sqrt(2.0) * π^1.5 *
                    EPS_0^2 * sqrt(M_E) * t_e^1.5
     tau_ee_denom = lnLamb * E_CHG^2.5 * n_e
@@ -301,7 +300,7 @@ function slayer_parameters(;
     sigma_par   = sigma_par_1 * sigma_par_2
 
     # Characteristic field, Alfven speed, length scales, fundamental
-    # timescales (params.f:119-126).
+    # timescales.
     rho_s = 1.02e-4 * sqrt(mu_i * t_e) / bt                 # ion Larmor [m]
     d_i   = sqrt((mu_i * M_P) / (n_e * E_CHG^2 * MU_0))     # ion skin depth [m]
 
@@ -311,33 +310,33 @@ function slayer_parameters(;
     tau_h = R0 * sqrt(MU_0 * rho) / (n * sval_r * bt)
     tau_r = MU_0 * rs^2 * sigma_par                          # Fitzpatrick
 
-    # Lundquist number and Q-conversion factor (params.f:136, 143-144)
+    # Lundquist number and Q-conversion factor
     lu    = tau_r / tau_h
     tauk  = lu^(1.0 / 3.0) * tau_h         # = Qconv
 
-    # Normalized diamagnetic frequencies. Both Fortran paths (params.f:154-155
-    # and layerinputs.f:558-559) use Q = -tauk·ω; see docstring sign convention.
+    # Normalized diamagnetic frequencies. Both Fortran SLAYER paths (the
+    # params and layerinputs routines) use Q = -tauk·ω; see docstring sign convention.
     Q_e = -tauk * omega_e
     Q_i = -tauk * omega_i
     Q_e_minus_Q_i = Q_e - Q_i
     iota_e = Q_e_minus_Q_i == 0 ? 0.0 : Q_e / Q_e_minus_Q_i
 
-    # Plasma beta and compressibility (params.f:164-165)
+    # Plasma beta and compressibility
     lbeta  = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
     c_beta = sqrt(lbeta / (1.0 + lbeta))
 
-    # Effective Prandtl-like transport ratios (params.f:177-182)
+    # Effective Prandtl-like transport ratios
     tau_perp = rs^2 / chi_perp
     P_perp   = tau_r / tau_perp
     tau_tor  = rs^2 / chi_tor
     P_tor    = tau_r / tau_tor
 
-    # Normalized beta-related width and Δ-normalization (params.f:187-192)
+    # Normalized beta-related width and Δ-normalization
     d_beta  = c_beta * d_i
     D_norm  = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(tau / (1.0 + tau))
     delta_n = lu^(1.0 / 3.0) / rs
 
-    # Critical-Δ offset from chi_parallel matching (params.f:204-246)
+    # Critical-Δ offset from chi_parallel matching
     dc_tmp = _solve_dc_tmp(; dc_type=dc_type, dr_val=dr_val, dgeo_val=dgeo_val,
                             chi_perp=chi_perp, t_e=t_e, zeff=zeff,
                             tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,

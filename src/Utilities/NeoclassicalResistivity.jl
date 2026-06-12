@@ -43,8 +43,6 @@ physics when the same `NeoResistivityModel` is selected.
 """
 module NeoclassicalResistivity
 
-using ..PhysicalConstants: MU_0, M_E, M_P, E_CHG, EPS_0
-
 export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
 export coulomb_log_e, eta_spitzer, trapped_fraction, trapped_fraction_eps
 export nu_star_e, eta_neoclassical
@@ -86,7 +84,7 @@ function coulomb_log_e(n_e::Real, T_e::Real; form::Symbol=:nrl)
         # Sauter 1999 Eq. 18d; matches utils_fusion.py:1255
         return 31.3 - log(sqrt(n_e) / T_e)
     elseif form === :wesson
-        # Legacy Wesson form used by previous Julia code & SLAYER's params.f
+        # Legacy Wesson form used by previous Julia code & SLAYER
         return 24.0 + 3.0 * log(10.0) - 0.5 * log(n_e) + log(T_e)
     else
         throw(ArgumentError("coulomb_log_e: unknown form=$form " *

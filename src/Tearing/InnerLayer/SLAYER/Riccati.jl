@@ -1,8 +1,8 @@
 # Riccati.jl
 #
 # Inner-layer Δ via the Fitzpatrick (`riccati_f`) Riccati ODE. Ports the
-# Fortran SLAYER `riccati_f` / `w_der_f` / `jac_f` from delta.f:323-494
-# under the simplifying assumptions that have been agreed for this Julia
+# Fortran SLAYER `riccati_f` / `w_der_f` / `jac_f` routines under the
+# simplifying assumptions that have been adopted for this Julia
 # port:
 #
 #   - PeOhmOnly_flag = .TRUE.  (Fortran default; the alternate path is
@@ -15,16 +15,16 @@
 # `solve_inner` rather than carried on the parameter struct. All other
 # inputs come from `SLAYERParameters` (see `LayerParameters.jl`).
 #
-# Returns the parity-projected matching data as `SVector{2,ComplexF64}`
-# in `(Δ, 0)` form so callers can treat SLAYER and GGJ interchangeably
-# through the shared `InnerLayerModel` interface. SLAYER's inner-layer
-# dispersion relation produces a single complex Δ, hence the second slot
-# is unused.
+# Returns the parity-projected matching data as an `InnerLayerResponse`
+# with only the `tearing` channel populated so callers can treat SLAYER and
+# GGJ interchangeably through the shared `InnerLayerModel` interface.
+# SLAYER's inner-layer dispersion relation produces a single complex Δ
+# (the tearing channel); the interchange channel is zero.
 
 using OrdinaryDiffEq
 
 # ---------------------------------------------------------------------
-# Coefficient evaluation (port of w_der_f, delta.f:461-494).
+# Coefficient evaluation (port of the Fortran w_der_f routine).
 #
 # All x-independent quantities are bundled in `_RiccatiConsts` and computed
 # once per `solve_inner` call (see line ~200). The hot RHS / Jacobian
@@ -68,13 +68,12 @@ end
     denom = c.Q_plus_iQe + p2
 
     fA       = p2 / denom
-    # Use the original numerator-subtracts-twice-p² form rather than the
-    # algebraic identity 1 − 2·fA. The two are mathematically equal but the
+    # Use the numerator-subtracts-twice-p² form rather than the algebraic
+    # identity 1 − 2·fA. The two are mathematically equal, but the
     # integrator's adaptive stepping near marginal stability compounds
-    # ULP-level differences in fA' over thousands of steps; the original
-    # form preserves agreement to ≤1e-5 vs the frozen baseline, the
-    # identity drifted to ~3e-3 relative (within abs-tolerance, but tighter
-    # is better).
+    # ULP-level differences in fA' over thousands of steps; this form keeps
+    # the result tighter than the identity, which drifts to ~3e-3 relative
+    # (within abs-tolerance, but tighter is better).
     fA_prime = (denom - 2 * p2) / denom
 
     fB = c.A + c.B * p2 + c.C * p4
@@ -94,7 +93,7 @@ end
     return -(fA_prime / x) * W - W * W / x + (fB / (fA * fC)) * (x * x * x)
 end
 
-# Analytic Jacobian (port of jac_f, delta.f:442-455). The full RHS has
+# Analytic Jacobian (port of the Fortran jac_f routine). The full RHS has
 # both the explicit (fA'/p, fB·p³) terms and the W² term; for the
 # Jacobian only the W-dependent pieces survive. Returns a scalar — the
 # 1×1 Jacobian of the scalar ODE.
@@ -106,8 +105,8 @@ end
 end
 
 # ---------------------------------------------------------------------
-# Boundary-condition selection (port of riccati_f initialisation,
-# delta.f:369-400). Two regimes selected by D_norm² vs.
+# Boundary-condition selection (port of the Fortran riccati_f
+# initialisation). Two regimes selected by D_norm² vs.
 # iota_e·P_perp/P_tor^(2/3).
 # ---------------------------------------------------------------------
 
@@ -118,9 +117,9 @@ function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
     Pperp_over_Ptor23 = p.P_perp / p.P_tor^(2 / 3)
 
     if D2 > p.iota_e * Pperp_over_Ptor23
-        # Large-D_norm branch (delta.f:373-387). Note: in the Fortran
-        # expression ((P_tor·D²)/(iota_e·P_tor·P_perp))^(1/4) the
-        # P_tor factor cancels — preserved here for traceability.
+        # Large-D_norm branch. Note: in the Fortran expression
+        # ((P_tor·D²)/(iota_e·P_tor·P_perp))^(1/4) the P_tor factor
+        # cancels — preserved here for traceability.
         p_start = max(((p.P_tor * D2) / (p.iota_e * p.P_tor * p.P_perp))^0.25,
                       p_floor)
 
@@ -136,7 +135,7 @@ function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
         W_bound = xk - sqrt_bk * p_start
         return p_start, W_bound, :large_D
     else
-        # Small-D_norm branch (delta.f:389-399).
+        # Small-D_norm branch.
         p_start = max(1.0 / p.P_tor^(1 / 6), p_floor)
 
         ak = -(Q + im * p.Q_e)
@@ -160,17 +159,17 @@ end
                 pmin=1e-6, p_floor=6.0,
                 reltol=1e-10, abstol=1e-10,
                 maxiters=50_000,
-                solver=Rodas5P(autodiff=false)) -> SVector{2,ComplexF64}
+                solver=Rodas5P(autodiff=false)) -> InnerLayerResponse
 
 Solve the Fitzpatrick SLAYER inner-layer Riccati ODE for the complex
-normalized growth rate `Q = ω + iγ`. Returns `SVector(Δ, 0+0im)` so the
-result is interface-compatible with `GGJModel.solve_inner` (which
-returns a parity-projected pair); SLAYER produces a single Δ, hence the
-second slot is zero.
+normalized growth rate `Q = ω + iγ`. Returns an `InnerLayerResponse` with
+`tearing = Δ` and `interchange = 0`, so the result is interface-compatible
+with `GGJModel.solve_inner` (which populates both channels); SLAYER's
+pressureless layer produces only the tearing channel.
 
 # Algorithm
 
-Ports `riccati_f` (delta.f:323-438) with PeOhmOnly + parflow off and
+Ports the Fortran `riccati_f` routine with PeOhmOnly + parflow off and
 pe=0. Integrates `dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` from a
 large `p_start` (selected by `_riccati_f_initial` according to whether
 `D_norm² ≷ iota_e·P_perp/P_tor^(2/3)`) inward to `pmin`, then computes
@@ -187,21 +186,18 @@ finite-difference fallback is fast enough for the 1-equation system.
 **Note on solver swaps:** sub-percent floating-point differences between
 ODE solvers cascade through the outer AMR's cell-flagging decisions
 (`ContourSearchAMR.jl::_crosses_zero`) and produce **structurally
-different** AMR cell trees. An empirical comparison (April 2026) found
-KenCarp4 ~10% faster per call than Rodas5P on the TJ coupled_rfitzp at
-βₚ=0.07 case under the scalar form, but the same case classified
-**43 valid roots / 34 poles** under KenCarp4 versus **26 / 27** under
-Rodas5P. The "best Q_root" (most-unstable γ) agreed to 2.1e-5 relative,
-but the secondary root structure differed substantially. So solver
-choice is not just a per-call optimization — it affects the downstream
-root/pole inventory. Future solver swaps need to be validated against
-the topology fields (`n_valid_roots`, `n_poles`), not just γ.
+different** AMR cell trees. Swapping the ODE solver has been observed to
+change the classified root/pole inventory substantially even when the
+most-unstable γ agrees to within ~1e-5 relative. So solver choice is not
+just a per-call optimization — it affects the downstream root/pole
+inventory. Future solver swaps need to be validated against the topology
+fields (`n_valid_roots`, `n_poles`), not just γ.
 
 # Keyword arguments
 
   - `pmin`     -- inner-layer cutoff (Fortran `xmin = 1e-6`)
   - `p_floor`  -- floor on `p_start` (Fortran `MAX(my_p, 6.0)`)
-  - `reltol`,`abstol`,`maxiters` -- LSODE defaults from delta.f:354-363
+  - `reltol`,`abstol`,`maxiters` -- LSODE defaults from the Fortran SLAYER
   - `solver`   -- any OrdinaryDiffEq algorithm; pass `Tsit5()` for the
     non-stiff path (rarely needed for `riccati_f`)
 """
@@ -213,17 +209,15 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
                      abstol::Real=1e-10,
                      maxiters::Integer=50_000,
                      solver=Rodas5P(autodiff=false))
-    # Wick-rotation: Fortran SLAYER (`growthrates.f:337,340`) applies
-    # `g_tmp = q_in * ifac` with `ifac = +i` (`sglobal.f:105`). Empirically,
-    # Julia's Riccati behaves as `J_Ric(p) = F_Ric(-conj(p))` — i.e. the
-    # Julia integration is a reflected-about-Im-axis version of Fortran's.
-    # To make `Julia_det(Q) = Fortran_det(Q)` at every plot-Q, we feed
-    # the Riccati `Q_c = im·conj(Q)`, which yields `-conj(Q_c) = im·Q`
-    # — exactly Fortran's internal `g_tmp`. Verified against fortran_scans.h5
-    # vs julia_scans.h5 at TJ ε=0.001: median (Re, Im) ratios ≈ (1.01, 1.02).
-    # Root-cause audit of why Julia's Riccati runs the Im-reflected branch
-    # (suspected: sign in boundary-condition branch selector or in Δ₋/Δ₊
-    # parity) is tracked in CONVENTIONS.md §4 TODO.
+    # Wick-rotation: Fortran SLAYER applies `g_tmp = q_in * ifac` with
+    # `ifac = +i`. Empirically, Julia's Riccati behaves as
+    # `J_Ric(p) = F_Ric(-conj(p))` — i.e. the Julia integration is a
+    # reflected-about-Im-axis version of Fortran's. To make
+    # `Julia_det(Q) = Fortran_det(Q)` at every plot-Q, we feed the Riccati
+    # `Q_c = im·conj(Q)`, which yields `-conj(Q_c) = im·Q` — exactly
+    # Fortran's internal `g_tmp`. This is an empirically-validated sign
+    # convention (γ on the imaginary axis, +γ unstable, matching Park's
+    # convention); the underlying sign equivalence is not yet fully derived.
     Q_c = im * conj(ComplexF64(Q))
 
     # Boundary condition at p_start

@@ -30,7 +30,7 @@ Fields are the same as the Fortran `resist_type`:
 The complex growth rate `γ` is **not** stored here; it is passed as a
 separate argument to `solve_inner`.
 """
-Base.@kwdef struct GGJParameters
+Base.@kwdef struct GGJParameters <: InnerLayerParameters
     E::Float64
     F::Float64
     G::Float64

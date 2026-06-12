@@ -1,8 +1,8 @@
 # ContourSearchAMR.jl
 #
 # Cell-based adaptive mesh refinement scanner of the complex Q plane. Port
-# of the Fortran `dispersion_AMR_v2` (growthrates.f:367-533) and its helpers
-# `get_or_compute_v2`, `check_cell_crossing_sub`, `subdivide_cell_sub`.
+# of the Fortran `dispersion_AMR_v2` and its helpers `get_or_compute_v2`,
+# `check_cell_crossing_sub`, `subdivide_cell_sub`.
 #
 # Each `AMRCell` is an axis-aligned rectangle holding its 4 corner Q values
 # and the corresponding Δ values evaluated by the user-supplied residual
@@ -22,7 +22,7 @@
 # extraction in `GrowthRateExtraction.jl` exploits) plus the flat
 # (Q::Vector, Δ::Vector) of all unique evaluations.
 
-# Corner ordering matches the Fortran convention (growthrates.f:431-436):
+# Corner ordering matches the Fortran convention:
 # 1 = BL, 2 = BR, 3 = TL, 4 = TR.
 
 """
@@ -45,17 +45,26 @@ end
 
 Output of `amr_scan`.
 
-| field    | meaning                                                       |
-|----------|---------------------------------------------------------------|
-| `cells`  | Final list of `AMRCell` after all refinement passes           |
-| `Q`      | Flat `Vector{ComplexF64}` of every unique residual evaluation |
-| `Δ`      | Corresponding `Vector{ComplexF64}` of residual values         |
+| field       | meaning                                                    |
+|-------------|------------------------------------------------------------|
+| `cells`     | Final list of `AMRCell` after all refinement passes        |
+| `Q`         | Flat `Vector{ComplexF64}` of every unique residual eval    |
+| `Δ`         | Corresponding `Vector{ComplexF64}` of residual values      |
+| `truncated` | `true` if `max_cells` was hit and remaining refinement     |
+|             | passes were skipped (`max_cells_action=:warn_truncate`).   |
+|             | A `true` result is NOT fully converged — distinguish it    |
+|             | from a converged scan in convergence studies.              |
 """
 struct AMRResult
     cells::Vector{AMRCell}
     Q::Vector{ComplexF64}
     Δ::Vector{ComplexF64}
+    truncated::Bool
 end
+
+# Back-compat constructor: a scan that ran to completion is not truncated.
+AMRResult(cells::Vector{AMRCell}, Q::Vector{ComplexF64}, Δ::Vector{ComplexF64}) =
+    AMRResult(cells, Q, Δ, false)
 
 # Hash-cached residual evaluator. Returns the cached Δ value if `q` is
 # already known, otherwise evaluates `f(q)`, stores it, and returns it.
@@ -88,8 +97,20 @@ function _bulk_eval_into_cache!(cache::Dict{ComplexF64,ComplexF64}, f,
     isempty(new_qs) && return
     new_vals = Vector{ComplexF64}(undef, length(new_qs))
     if parallel && Threads.nthreads() > 1
-        Threads.@threads for k in eachindex(new_qs)
-            new_vals[k] = ComplexF64(f(new_qs[k]))
+        # Pin BLAS to one thread for the Julia-level parallel region. The
+        # residual `f(Q)` calls `det()` (LAPACK); concurrent multithreaded-BLAS
+        # calls from several Julia threads give non-reproducible reductions that
+        # perturb `f` at the ULP level — enough to flip the extracted root
+        # between near-degenerate solutions run-to-run. The residual matrices are
+        # tiny (≤ a few ×msing), so single-threaded BLAS costs nothing here.
+        _blas0 = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            Threads.@threads for k in eachindex(new_qs)
+                new_vals[k] = ComplexF64(f(new_qs[k]))
+            end
+        finally
+            BLAS.set_num_threads(_blas0)
         end
     else
         @inbounds for k in eachindex(new_qs)
@@ -104,7 +125,15 @@ end
 
 # Sign-crossing test: does `vals` straddle zero? Used in both Re and Im
 # directions on a cell's 4 corners (mirrors check_cell_crossing_sub).
-@inline _crosses_zero(vals) = minimum(vals) * maximum(vals) <= 0
+@inline function _crosses_zero(vals)
+    # A non-finite corner (NaN/Inf) marks a divergence — typically a pole, where
+    # the inner-layer solver returns a NaN sentinel. Flag such cells as active so
+    # they are refined / pre-screened rather than silently dropped: a NaN corner
+    # makes both the product test below and the `abs >= threshold` pole check
+    # evaluate to false, which would hide the pole region entirely.
+    any(!isfinite, vals) && return true
+    return minimum(vals) * maximum(vals) <= 0
+end
 
 # Subdivide a parent cell into 4 quadrants, evaluating Δ at the 5
 # midpoints (BM, TM, LM, RM, MM) via the hash cache.
@@ -177,8 +206,11 @@ evaluations.
   - `parallel`       -- evaluate `f` in parallel via `Threads.@threads` within
     each phase (initial grid + each refinement pass). Defaults to `true`
     when more than one Julia thread is available. Per-call evaluations of
-    `f` must be thread-safe. Cache updates and cell-list construction stay
-    serial, so the result is deterministic regardless of thread count.
+    `f` must be thread-safe. The result is deterministic regardless of thread
+    count: cache updates and cell-list construction stay serial, AND BLAS is
+    pinned to one thread during the parallel region so the `det()`-based
+    residual does not pick up non-reproducible multithreaded-LAPACK reductions
+    (which otherwise flip the extracted root between near-degenerate solutions).
 """
 function amr_scan(f, Q_re_range::NTuple{2,<:Real},
                   Q_im_range::NTuple{2,<:Real};
@@ -315,7 +347,7 @@ function amr_scan(f, Q_re_range::NTuple{2,<:Real},
         Δ[k] = d
     end
 
-    return AMRResult(cells, Q, Δ)
+    return AMRResult(cells, Q, Δ, truncated)
 end
 
 # =============================================================================
@@ -597,4 +629,5 @@ Wrap the aggregated cells/Q/Δ from a multi-box scan as a plain `AMRResult` so
 it can be passed directly to `find_growth_rates(::AMRResult, tauk; ...)`.
 """
 as_amr_result(mbres::MultiBoxAMRResult) =
-    AMRResult(mbres.cells, mbres.Q, mbres.Δ)
+    AMRResult(mbres.cells, mbres.Q, mbres.Δ,
+              any(r -> r !== nothing && r.truncated, mbres.box_results))

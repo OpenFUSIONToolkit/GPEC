@@ -3,8 +3,8 @@
 # Build per-surface `SLAYERParameters` from an in-memory `PlasmaEquilibrium`,
 # the `SingType` rational-surface data produced by `ForceFreeStates`, and a
 # `KineticProfiles` object. Replaces the STRIDE-NetCDF path that the Fortran
-# SLAYER (`layerinputs.f`) uses — julia_GPEC already holds everything we
-# need in memory.
+# SLAYER `layerinputs` routine uses — julia_GPEC already holds everything
+# we need in memory.
 #
 # Geometry extraction:
 #   - Minor radius at the outboard midplane (θ = 0) via
@@ -69,7 +69,7 @@ geometry (minor radius, r-based shear, q, dq/dψ, R₀) from the in-memory
 `equil::PlasmaEquilibrium` and kinetic data (n_e, T_e, T_i, ω, ω\\_\\*e,
 ω\\_\\*i) from `profiles::KineticProfiles`.
 
-This is the Julia analogue of the Fortran SLAYER `layerinputs.f` path,
+This is the Julia analogue of the Fortran SLAYER `layerinputs` path,
 without the intermediate STRIDE NetCDF round-trip.
 
 # Arguments
@@ -100,10 +100,10 @@ without the intermediate STRIDE NetCDF round-trip.
     which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar /
     vector / callable to override.
 
-    **NOTE on Fortran/STRIDE divergence**: Fortran STRIDE
-    (`stride_netcdf.f:100`) writes the netcdf variable `dr_rational` as
-    `locstab%f(1)/respsi`, where component 1 of `locstab` is actually
-    `D_I × ψ` (Mercier, see `dcon/mercier.f:95-96`). The intended index
+    **NOTE on Fortran/STRIDE divergence**: Fortran STRIDE writes the
+    netcdf variable `dr_rational` as `locstab%f(1)/respsi`, where
+    component 1 of `locstab` is actually `D_I × ψ` (the DCON Mercier
+    index). The intended index
     is 2 (= `D_R × ψ`); using 1 silently substitutes the Mercier index
     `D_I = E + F + H − 1/4` for `D_R`. They differ by `(H − 1/2)²`,
     which is non-trivial on shaped equilibria (~factor 3 on DIII-D).
@@ -187,8 +187,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         surface_da_dpsi(equil, ψ; theta=theta)
     end
 
-    # Per-surface ω_*e, ω_*i from spline derivatives — port of Fortran
-    # `slayer/layerinputs.f:456-459`. When `compute_omega_star=true` we
+    # Per-surface ω_*e, ω_*i from spline derivatives — port of the Fortran
+    # SLAYER `layerinputs` routine. When `compute_omega_star=true` we
     # override any ω_*e/ω_*i carried in `profiles`. Main-ion density is
     # taken equal to the electron density (quasi-neutrality, matching the
     # staging step).

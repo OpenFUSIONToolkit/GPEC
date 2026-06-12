@@ -1,10 +1,9 @@
 # GrowthRateExtraction.jl
 #
-# Julia port of CTM-processing/shared/find_growthrates.py: extract tearing
-# growth-rate eigenvalues from a 2D Q-plane scan by finding intersections of
-# the Re(Δ)=0 and Im(Δ)=0 contours, classifying each intersection as a root
-# or pole, and applying the "outside Re=0 contour, above pole" filter for
-# spurious upper-branch roots.
+# Extracts tearing-mode growth rates by contour intersection (Re=0 ∩ Im=0) on a
+# complex Q-plane scan: finds intersections of the Re(Δ)=0 and Im(Δ)=0 contours,
+# classifies each intersection as a root or pole, and applies the "outside Re=0
+# contour, above pole" filter for spurious upper-branch roots.
 #
 # This PR (5/9) handles the regular-grid path via Contour.jl. PR 6 will add
 # a scattered-data path (triangulation) for AMR scans.
@@ -43,7 +42,13 @@ Output of `find_growth_rates`.
 | `omega_Hz_secondary` | physical ω of the secondary root, or 0 if none         |
 | `gamma_Hz_secondary` | physical γ of the secondary root, or 0 if none         |
 | `warning_flags`      | `Vector{Symbol}` of warnings raised on `Q_root`:       |
-|                      | `:geom`, `:gap`. Empty if root is clean.               |
+|                      | `:geom`, `:gap` (root accepted with caveat);           |
+|                      | `:spurious` when ≥1 contour near-miss was dropped by    |
+|                      | the validity gate (parked in `filtered_roots`); or     |
+|                      | `:no_root` when NO usable root was found (`Q_root` is   |
+|                      | `NaN`; `omega_Hz`/`gamma_Hz` fall back to 0 — check     |
+|                      | this flag to tell that apart from a true γ≈0 result).   |
+|                      | Empty if root is clean.                                 |
 | `valid_roots`        | All non-pole intersections that survived pole filter   |
 | `poles`              | Intersections classified as poles                      |
 | `filtered_roots`     | Intersections rejected by the above-pole/outside-Re    |
@@ -99,6 +104,20 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
   - `gap_kHz_threshold` -- if the highest-γ root is unstable (γ > 0) AND its
     γ exceeds the next root by more than this many kHz, it is flagged as
     a `:gap` warning. Default 1.0 kHz.
+  - `residual` -- optional dispersion-residual callable `f(Q::Complex)`. When
+    supplied, each contour-intersection root is POLISHED to the true zero of
+    `f` by a bounded, neighbour-aware local solve (see `_polish_root`), making
+    the extracted root resolution- and thread-independent. `nothing` (default)
+    reports the raw marching-squares estimate, which is sensitive to grid and
+    floating-point rounding.
+  - `polish_maxit` -- max polish iterations per root (default 20). Each costs a
+    handful of `f` evaluations; failures fall back to the unpolished point.
+  - `validity_rtol` -- with `residual` supplied, a polished root is kept only if
+    `|residual| < validity_rtol · median(|Δ|)` (default 1e-3). Intersections
+    that don't polish to a true zero (contour near-misses, or surfaces whose
+    Δ' BVP failed → `|Δ'|` huge and uncancellable) are dropped from
+    `valid_roots`, parked in `filtered_roots`, and flagged `:spurious`. If every
+    candidate is spurious, the result carries `:no_root`.
 
 # Spurious-root recursion
 
@@ -121,7 +140,10 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
                            pole_threshold::Real=10.0,
                            filter_above_poles::Bool=true,
                            filter_outside_re::Bool=true,
-                           gap_kHz_threshold::Real=1.0)
+                           gap_kHz_threshold::Real=1.0,
+                           residual=nothing,
+                           polish_maxit::Integer=20,
+                           validity_rtol::Real=1e-3)
     return _extract_growth_rates(scan.re_axis, scan.im_axis, scan.Δ,
                                   Float64(tauk);
                                   re_target=Float64(re_target),
@@ -129,7 +151,11 @@ function find_growth_rates(scan::ScanResult, tauk::Real;
                                   pole_threshold=Float64(pole_threshold),
                                   filter_above_poles=filter_above_poles,
                                   filter_outside_re=filter_outside_re,
-                                  gap_kHz_threshold=Float64(gap_kHz_threshold))
+                                  gap_kHz_threshold=Float64(gap_kHz_threshold),
+                                  residual=residual,
+                                  polish_maxit=Int(polish_maxit),
+                                  validity_scale=_residual_scale(scan.Δ),
+                                  validity_rtol=Float64(validity_rtol))
 end
 
 """
@@ -152,14 +178,21 @@ function find_growth_rates(amr::AMRResult, tauk::Real;
                            pole_threshold::Real=10.0,
                            filter_above_poles::Bool=true,
                            filter_outside_re::Bool=true,
-                           gap_kHz_threshold::Real=1.0)
+                           gap_kHz_threshold::Real=1.0,
+                           residual=nothing,
+                           polish_maxit::Integer=20,
+                           validity_rtol::Real=1e-3)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
                                       re_target=Float64(re_target),
                                       im_target=Float64(im_target),
                                       pole_threshold=Float64(pole_threshold),
                                       filter_above_poles=filter_above_poles,
                                       filter_outside_re=filter_outside_re,
-                                      gap_kHz_threshold=Float64(gap_kHz_threshold))
+                                      gap_kHz_threshold=Float64(gap_kHz_threshold),
+                                      residual=residual,
+                                      polish_maxit=Int(polish_maxit),
+                                      validity_scale=_residual_scale(amr.Δ),
+                                      validity_rtol=Float64(validity_rtol))
 end
 
 # ---------------------------------------------------------------------
@@ -394,6 +427,120 @@ function _is_gap_spurious(sorted_roots::Vector{ComplexF64}, idx::Int,
     return (γ_idx - γ_next) > gap_kHz_threshold
 end
 
+# ---------------------------------------------------------------------
+# Root polishing (isolate-then-polish).
+#
+# The contour scan only *locates* roots to the grid/cell resolution: the
+# marching-squares intersection is a linear estimate of where Re(f)=0 and
+# Im(f)=0 cross, so the residual there is small only relative to the scan's
+# huge dynamic range, not zero. Its exact position is sensitive to ULP-level
+# jitter in the sampled `f` values (BLAS/thread reduction order), which can
+# shift the reported γ between near-degenerate estimates of the SAME root.
+#
+# `_polish_root` refines one contour intersection to the actual zero of `f`
+# by bounded minimization of `|f(Q)|`, so the reported root becomes
+# resolution- and thread-independent. It is a no-op-or-better layer: any
+# failure (non-finite, no decrease, pole approach) falls back to the
+# unpolished contour point.
+# ---------------------------------------------------------------------
+
+# Median contour-segment length — a robust proxy for the local grid/cell
+# resolution, used to cap how far a polish may move a root.
+function _median_segment_length(re_paths::Vector{Vector{ComplexF64}},
+                                 im_paths::Vector{Vector{ComplexF64}})
+    lens = Float64[]
+    for paths in (re_paths, im_paths), p in paths
+        @inbounds for i in 1:length(p)-1
+            push!(lens, abs(p[i+1] - p[i]))
+        end
+    end
+    isempty(lens) && return 0.0
+    sort!(lens)
+    return lens[cld(length(lens), 2)]
+end
+
+# Trust-region radius for polishing the intersection at `pts[idx]`. Capped by
+# `nn_frac` × distance to the NEAREST other intersection (root OR pole), so a
+# polished root can never migrate into a neighbour's basin — `nn_frac < 0.5`
+# guarantees, by the triangle inequality, that the result stays strictly
+# closer to its own contour point than to any other. Also capped at a few grid
+# cells (`k_cell·h`) so refinement only corrects the discretization error.
+function _polish_trust_radius(pts::Vector{ComplexF64}, idx::Int, h_grid::Real;
+                               k_cell::Float64=3.0, nn_frac::Float64=0.45)
+    p0 = pts[idx]
+    d_nn = Inf
+    @inbounds for j in eachindex(pts)
+        j == idx && continue
+        d = abs(pts[j] - p0)
+        d < d_nn && (d_nn = d)
+    end
+    r_cell = k_cell * Float64(h_grid)
+    r = isfinite(d_nn) ? min(r_cell, nn_frac * d_nn) : r_cell
+    return r > 0 ? r : r_cell
+end
+
+# Bounded Gauss-Newton minimization of |f(Q)| within a disk of radius `R`
+# around `Q0`. Returns (Q_best, n_evals, improved). `improved == false` ⇒
+# Q0 is returned unchanged (hard fallback). Secant derivative + trust-region
+# projection + |f|-decrease backtracking keep it strictly "improve-or-no-op":
+# it cannot diverge, jump to another root, or be pulled into a pole.
+function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
+                       tol_step::Float64=1e-12, tol_f::Float64=1e-8)
+    (R > 0) || return (Q0, 0, false)
+    f0 = ComplexF64(f(Q0)); nev = 1
+    isfinite(f0) || return (Q0, nev, false)
+    a0 = abs(f0)
+    a0 == 0 && return (Q0, nev, false)
+
+    # Second point for the secant slope: a small real offset scaled to R.
+    Qk, fk = Q0, f0
+    Qp = Q0 + complex(max(R * 1e-3, eps(Float64)), 0.0)
+    fp = ComplexF64(f(Qp)); nev += 1
+    Qbest, abest = Q0, a0
+
+    for _ in 1:maxit
+        df = (Qp == Qk) ? ComplexF64(0) : (fp - fk) / (Qp - Qk)
+        (isfinite(df) && abs(df) > 0) || break
+        step = -fk / df                                   # zero of local linear model
+        Qt = Qk + step
+        if abs(Qt - Q0) > R                               # project into trust region
+            Qt = Q0 + R * (Qt - Q0) / abs(Qt - Q0)
+        end
+        ft = ComplexF64(f(Qt)); nev += 1
+        bt = 0
+        while (!isfinite(ft) || abs(ft) >= abest) && bt < 3      # backtrack on no-decrease
+            Qt = Qk + 0.5 * (Qt - Qk)
+            (abs(Qt - Q0) <= R) || break
+            ft = ComplexF64(f(Qt)); nev += 1
+            bt += 1
+        end
+        if isfinite(ft) && abs(ft) < abest
+            Qp, fp = Qk, fk
+            Qk, fk = Qt, ft
+            Qbest, abest = Qt, abs(ft)
+            (abs(step) < tol_step * (abs(Qk) + tol_step) || abest < tol_f * a0) && break
+        else
+            break                                          # no further decrease → stop
+        end
+    end
+    return (abest < a0 ? Qbest : Q0, nev, abest < a0)
+end
+
+# Median |Δ| over the finite scan values — the "typical residual magnitude"
+# reference for the validity gate. A genuine root drives the polished |residual|
+# orders of magnitude below this; a near-miss stays near it.
+function _residual_scale(Δ)
+    a = Float64[]
+    for z in Δ
+        az = abs(z)
+        (isfinite(az) && az < 1e30) && push!(a, az)
+    end
+    isempty(a) && return 0.0
+    sort!(a)
+    n = length(a)
+    return isodd(n) ? a[(n + 1) ÷ 2] : 0.5 * (a[n ÷ 2] + a[n ÷ 2 + 1])
+end
+
 function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                         im_paths::Vector{Vector{ComplexF64}},
                         im_re_vals::Vector{Vector{Float64}},
@@ -401,13 +548,31 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                         pole_threshold::Float64,
                         filter_above_poles::Bool,
                         filter_outside_re::Bool,
-                        gap_kHz_threshold::Float64=1.0)
+                        gap_kHz_threshold::Float64=1.0,
+                        residual=nothing,
+                        polish_maxit::Int=20,
+                        validity_scale::Float64=0.0,
+                        validity_rtol::Float64=1e-3)
     raw_intersections = _all_intersections(re_paths, im_paths)
 
-    poles      = ComplexF64[]
-    candidates = Tuple{ComplexF64,Bool}[]    # (pt, on_top_half_re_flag)
+    poles         = ComplexF64[]
+    candidates    = Tuple{ComplexF64,Bool}[]    # (pt, on_top_half_re_flag)
+    spurious_roots = ComplexF64[]               # polished, but |residual| ≫ 0
 
-    for pt in raw_intersections
+    # Isolate-then-polish: when a residual callable is supplied, refine each
+    # (non-pole) contour intersection to the true zero of `f`. Trust radii are
+    # capped by the spacing to neighbouring intersections so closely-spaced
+    # coupled roots stay coherently bound to their own contour crossing.
+    do_polish = residual !== nothing
+    h_grid    = do_polish ? _median_segment_length(re_paths, im_paths) : 0.0
+    # Validity gate: a genuine root drives |residual| ≈ 0; a spurious contour
+    # near-miss (e.g. a surface whose STRIDE Δ' BVP failed → |Δ'| huge and
+    # uncancellable by the inner layer) leaves |residual| stuck near the typical
+    # scan magnitude. Only active when polishing AND a scale is supplied.
+    do_gate = do_polish && validity_scale > 0
+    polish_evals = 0
+
+    for (i_pt, pt) in enumerate(raw_intersections)
         # --- 1. classify as pole or root via local Re-magnitude on Im contour
         best_im_path_idx, best_im_vert_idx, _ =
             _closest_polyline_vertex(im_paths, pt)
@@ -426,6 +591,25 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         if is_pole
             push!(poles, pt)
             continue
+        end
+
+        # --- 1b. polish this (non-pole) intersection to the true zero of `f`,
+        # bounded to a neighbour-aware trust region (no-op on failure).
+        if do_polish
+            R = _polish_trust_radius(raw_intersections, i_pt, h_grid)
+            pt, nev, _ = _polish_root(residual, pt, R; maxit=polish_maxit)
+            polish_evals += nev
+            # --- 1c. validity gate: drop intersections that don't polish to a
+            # true zero (|residual| stays ≫ 0 relative to the scan scale). These
+            # are contour near-misses / failed-BVP surfaces, not real roots.
+            if do_gate
+                rmag = abs(ComplexF64(residual(pt)))
+                polish_evals += 1
+                if !(rmag < validity_rtol * validity_scale)   # NaN ⇒ spurious
+                    push!(spurious_roots, pt)
+                    continue
+                end
+            end
         end
 
         # --- 2. "+γ step inside Re contour" flag for spurious-upper-branch filter
@@ -472,10 +656,11 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
 
     # --- 3. pole + closed-loop filter (legacy), then geom + gap recursion (new)
     valid_roots    = ComplexF64[c[1] for c in candidates]
-    filtered_roots = ComplexF64[]
+    filtered_roots = copy(spurious_roots)     # gate-rejected near-misses kept here
     Q_root         = ComplexF64(NaN, NaN)
     Q_root_2nd     = ComplexF64(NaN, NaN)
     warning_flags  = Symbol[]
+    isempty(spurious_roots) || push!(warning_flags, :spurious)
 
     if !isempty(valid_roots)
         order = sortperm(valid_roots; by=q -> -imag(q))
@@ -501,22 +686,16 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             #   :gap  — candidate is unstable AND >1 kHz above next root
             #           (isolated γ peak — spurious outlier signature)
             #
-            # Policy (post-2026-05-08): WARN, DO NOT DISCARD.  Empirically
-            # the both-flags-fire criterion was too aggressive in the
-            # kink-approach regime where valid roots become sparse — a
-            # 2–3 kHz γ separation between the dominant unstable root and
-            # the next-stable root is the GENUINE dispersion structure
-            # (not a "lone peak" artifact), but :gap fires regardless.
-            # Concrete failure case: coupled_n2_rfitzp β_N=2.7502 in the
-            # shaped β-scan, where the (ω=−22.67, γ=+0.088) root was
-            # discarded as spurious; the post-hoc smoothness override in
-            # plots/plot_betascan.py:apply_chooser_overrides has been
-            # successfully recovering it but it shouldn't have to.
-            # Now: every candidate is accepted with whatever warnings
-            # apply, and downstream tools (chooser_overrides, contour
-            # plotters) see the same valid_roots regardless of flag
-            # combination.  filtered_roots is preserved for the legacy
-            # above-pole + outside-Re reject branch only.
+            # Policy: WARN, DO NOT DISCARD. The both-flags-fire criterion
+            # is too aggressive in the kink-approach regime where valid
+            # roots become sparse — a few-kHz γ separation between the
+            # dominant unstable root and the next-stable root can be
+            # genuine dispersion structure rather than a "lone peak"
+            # artifact, yet :gap fires regardless. So every candidate is
+            # accepted with whatever warnings apply, and downstream tools
+            # see the same valid_roots regardless of flag combination.
+            # filtered_roots is preserved for the legacy above-pole +
+            # outside-Re reject branch only.
             geom_flag = _is_geom_spurious(cand, re_paths)
             gap_flag  = _is_gap_spurious(sorted_pts, k, tauk,
                                           gap_kHz_threshold)
@@ -536,6 +715,13 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             end
         end
     end
+
+    # No usable root: either the scan produced no zero-crossing intersections
+    # (`valid_roots` empty) or every candidate was rejected by the legacy
+    # above-pole filter (`chosen_idx == 0`). Flag this explicitly so callers
+    # can distinguish a genuine marginally-stable result (γ ≈ 0) from a failed
+    # extraction — both otherwise surface as `gamma_Hz == 0.0` below.
+    isnan(real(Q_root)) && push!(warning_flags, :no_root)
 
     omega_Hz = isnan(real(Q_root)) ? 0.0 : real(Q_root) / tauk
     gamma_Hz = isnan(imag(Q_root)) ? 0.0 : imag(Q_root) / tauk
@@ -560,7 +746,11 @@ function _extract_growth_rates(re_axis::Vector{Float64},
                                 pole_threshold::Float64,
                                 filter_above_poles::Bool,
                                 filter_outside_re::Bool,
-                                gap_kHz_threshold::Float64=1.0)
+                                gap_kHz_threshold::Float64=1.0,
+                                residual=nothing,
+                                polish_maxit::Int=20,
+                                validity_scale::Float64=0.0,
+                                validity_rtol::Float64=1e-3)
     re_field = real.(Δ_grid)
     im_field = imag.(Δ_grid)
 
@@ -576,7 +766,11 @@ function _extract_growth_rates(re_axis::Vector{Float64},
                           pole_threshold=pole_threshold,
                           filter_above_poles=filter_above_poles,
                           filter_outside_re=filter_outside_re,
-                          gap_kHz_threshold=gap_kHz_threshold)
+                          gap_kHz_threshold=gap_kHz_threshold,
+                          residual=residual,
+                          polish_maxit=polish_maxit,
+                          validity_scale=validity_scale,
+                          validity_rtol=validity_rtol)
 end
 
 # ---------------------------------------------------------------------
@@ -722,7 +916,11 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
                                      pole_threshold::Float64,
                                      filter_above_poles::Bool,
                                      filter_outside_re::Bool,
-                                     gap_kHz_threshold::Float64=1.0)
+                                     gap_kHz_threshold::Float64=1.0,
+                                     residual=nothing,
+                                     polish_maxit::Int=20,
+                                     validity_scale::Float64=0.0,
+                                     validity_rtol::Float64=1e-3)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
     length(Q) >= 3 ||
@@ -754,5 +952,9 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
                           pole_threshold=pole_threshold,
                           filter_above_poles=filter_above_poles,
                           filter_outside_re=filter_outside_re,
-                          gap_kHz_threshold=gap_kHz_threshold)
+                          gap_kHz_threshold=gap_kHz_threshold,
+                          residual=residual,
+                          polish_maxit=polish_maxit,
+                          validity_scale=validity_scale,
+                          validity_rtol=validity_rtol)
 end

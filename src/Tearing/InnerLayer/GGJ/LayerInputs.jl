@@ -8,7 +8,7 @@
 # `solve_inner` needs, with τ_A / τ_R built from kinetic profiles using the
 # same Spitzer resistivity and mass-density formulas SLAYER uses.
 #
-# Deliberately does *not* mirror the Fortran `rdcon/resist.f` hardcoded
+# Deliberately does *not* mirror the Fortran RDCON `resist_eval` hardcoded
 # `ne = 1e14 cm⁻³, te = 3 keV` PARAMETER defaults. The kinetic content
 # enters through `profiles` alone; this keeps GGJ and SLAYER using
 # bit-identical plasma inputs when both are driven by the same
@@ -43,8 +43,8 @@ timescales are derived from the `KineticProfiles` at `sing.psifac`:
 The mode number `n` is taken from `sings[k].n[1]` (first resonant mode at
 the surface). `χ₁ = 2π · psio`. The `v1_scale` kwarg is an optional
 multiplicative factor on `V'` in the τ_A denominator — matches the
-Fortran `sing%restype%v1 = v1 / volume` normalization option from
-`rdcon/resist.f:144`; default `1.0` means use the raw `V'`.
+Fortran `sing%restype%v1 = v1 / volume` normalization option in RDCON
+`resist_eval`; default `1.0` means use the raw `V'`.
 
 # Resistivity model
 
@@ -100,16 +100,16 @@ function build_ggj_inputs(equil, sings, profiles::KineticProfiles;
         end
         rho = mu_i * M_P * n_e
 
-        # Alfvén time at the rational surface (resist.f:136-137)
+        # Alfvén time at the rational surface (RDCON resist_eval)
         n_tor = Int(sing.n[1])
         v1    = rg.v1_local * v1_scale
         taua  = sqrt(rho * rg.M * MU_0) /
                 abs(2π * n_tor * sing.q1 * chi1 / v1)
 
-        # Resistive diffusion time (resist.f:138)
+        # Resistive diffusion time (RDCON resist_eval)
         taur  = (rg.avg_bsq_over_dpsisq / rg.avg_bsq) * MU_0 / eta_use
 
-        # dV/dψ normalized by total plasma volume (Fortran resist.f:144
+        # dV/dψ normalized by total plasma volume (Fortran RDCON resist_eval
         # `sing%restype%v1 = v1/volume`). This is the `v1` consumed by
         # `rescale_delta` as v1^(2p1); NOT the raw V' used in τ_A above.
         equil.params.volume === nothing &&

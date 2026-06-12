@@ -36,7 +36,7 @@ downstream inspection and HDF5 output.
 struct SLAYERResult
     enabled::Bool
     control::SLAYERControl
-    params::Vector{SLAYERParameters}
+    params::AbstractVector{<:InnerLayerParameters}
     dp_matrix::Matrix{ComplexF64}
     Q_root::Vector{ComplexF64}
     omega_Hz::Vector{Float64}

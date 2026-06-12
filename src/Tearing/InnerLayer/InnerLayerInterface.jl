@@ -15,6 +15,16 @@ Implementations live in submodules of `InnerLayer`, e.g. `InnerLayer.GGJ`.
 abstract type InnerLayerModel end
 
 """
+    InnerLayerParameters
+
+Abstract supertype for the per-surface physical-parameter structs consumed by
+the inner-layer models (`SLAYERParameters`, `GGJParameters`). Lets the
+dispersion runner and HDF5 output dispatch generically over a vector of
+single-model parameters.
+"""
+abstract type InnerLayerParameters end
+
+"""
     InnerLayerResponse
 
 Parity-projected inner-layer matching data at one rational surface. The two

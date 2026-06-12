@@ -5,7 +5,7 @@
 # downstream callers need to turn geometry into τ_A / τ_R with kinetic
 # profiles.
 #
-# Port of Fortran `rdcon/resist.f::resist_eval` (geometric part only).
+# Port of Fortran RDCON `resist_eval` (geometric part only).
 # Unlike the Fortran, this routine produces *only* the pure-equilibrium
 # quantities; kinetic timescales (τ_A, τ_R) are built on top in the
 # downstream `build_ggj_inputs` helper using the same KineticProfiles that
@@ -83,7 +83,7 @@ end
 """
     resist_geometry(equil, psifac, q1; gamma=5/3) -> ResistGeometry
 
-Port of Fortran `rdcon/resist.f::resist_eval` restricted to the
+Port of Fortran RDCON `resist_eval` restricted to the
 pure-equilibrium geometric coefficients. Integrates the 6 theta integrands
 at the given flux surface and combines them into E, F, G, H, K, M via the
 standard GGJ formulas.
@@ -175,7 +175,7 @@ function resist_geometry(equil::Equilibrium.PlasmaEquilibrium,
     eps_local = R_major > 0 ? 0.5 * (R_max - R_min) / R_major : 0.0
     f_trap = Utilities.NeoclassicalResistivity.trapped_fraction(avg_B, avg[5], B_min, B_max)
 
-    # GGJ coefficients (resist.f:107-125)
+    # GGJ coefficients (Fortran RDCON resist_eval)
     E_coef = p1 * v1 / (q1 * chi1^2)^2 * avg[1] *
              (twopif * q1 * chi1 / avg[5] - v2)
     F_coef = (p1 * v1 / (q1 * chi1^2))^2 *

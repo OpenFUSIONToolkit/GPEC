@@ -79,7 +79,7 @@ function _write_settings!(g, ctrl::SLAYERControl)
 end
 
 # ---------- per-surface layer parameters ----------
-function _write_per_surface!(g, params::Vector{SLAYERParameters},
+function _write_per_surface!(g, params::AbstractVector{SLAYERParameters},
                               dp_matrix::Matrix{ComplexF64})
     ps = create_group(g, "per_surface")
 
@@ -104,6 +104,21 @@ function _write_per_surface!(g, params::Vector{SLAYERParameters},
     return nothing
 end
 
+# GGJ per-surface parameters carry the geometric coefficients (E,F,G,H,K,M)
+# and resistive/Alfvén times rather than the SLAYER dimensionless set.
+function _write_per_surface!(g, params::AbstractVector{GGJParameters},
+                              dp_matrix::Matrix{ComplexF64})
+    ps = create_group(g, "per_surface")
+    ps["ising"] = Int[p.ising for p in params]
+    for fname in (:E, :F, :G, :H, :K, :M, :taua, :taur, :v1)
+        ps[String(fname)] = Float64[getfield(p, fname) for p in params]
+    end
+    dp = create_group(ps, "dp_matrix")
+    dp["real"] = real.(dp_matrix)
+    dp["imag"] = imag.(dp_matrix)
+    return nothing
+end
+
 # ---------- eigenvalue roots ----------
 function _write_roots!(g, r::SLAYERResult)
     roots = create_group(g, "roots")
@@ -111,6 +126,13 @@ function _write_roots!(g, r::SLAYERResult)
     roots["Q_root_imag"] = imag.(r.Q_root)
     roots["omega_Hz"]    = r.omega_Hz
     roots["gamma_Hz"]    = r.gamma_Hz
+    # `no_root[k] == 1` flags entries where the extraction found NO usable
+    # root (Q_root is NaN; omega_Hz/gamma_Hz are 0 placeholders, not a true
+    # γ≈0 result). Aligned element-wise with Q_root/omega_Hz/gamma_Hz.
+    extractions = r.coupled_extraction !== nothing ? [r.coupled_extraction] :
+                  r.per_surface_extraction
+    roots["no_root"] = Int[(:no_root in gr.warning_flags) ? 1 : 0
+                           for gr in extractions]
     return nothing
 end
 
@@ -198,5 +220,6 @@ function _write_single_scan!(g, data::AMRResult)
     g["Delta_real"] = real.(data.Δ)
     g["Delta_imag"] = imag.(data.Δ)
     g["n_cells"]    = length(data.cells)
+    g["truncated"]  = Int(data.truncated)
     return nothing
 end

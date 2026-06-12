@@ -24,3 +24,6 @@ pestotv
 regression-harness/*.sqlite
 regression-harness/*.sqlite-shm
 regression-harness/*.sqlite-wal
+scratch/
+.claude/worktrees/
+.claude/agent-memory/

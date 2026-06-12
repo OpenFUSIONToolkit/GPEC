@@ -13,9 +13,13 @@
 #                                                  extraction (Re=0 ∩ Im=0)
 #   - `amr_scan`            (PR 6)              -- adaptive Q-plane refinement
 #
-# All root-finding is done by 2D contour intersection on Nyquist-style Q-plane
-# scans (`find_growth_rates`); no local Newton/secant iteration is performed.
-# This module only provides the residual building blocks that the scans evaluate.
+# Roots are ISOLATED by 2D contour intersection on Nyquist-style Q-plane scans
+# (`find_growth_rates`, Re=0 ∩ Im=0), then optionally POLISHED to the true zero
+# of the residual by a bounded, neighbour-aware local solve (pass the residual
+# callable to `find_growth_rates`). Polishing makes the extracted root
+# resolution- and thread-independent; without it the reported root is the
+# marching-squares estimate, sensitive to grid/rounding. This module provides
+# both the residual building blocks and the scan/extraction machinery.
 #
 # The per-surface residual at one rational surface is
 #

@@ -851,7 +851,7 @@ end
 Rotate the raw 2m×2m outer-region matching matrix `dp_raw` (side-major
 ordering `[L_s1, R_s1, L_s2, R_s2, …]`) into the Pletzer–Dewar 1991 parity
 blocks. Given rows and columns paired by surface (odd index = left, even
-index = right), the Fortran `rdcon/gal.f:1723-1743` combination is
+index = right), the Fortran RDCON parity combination is
 
 ```
 A'(i,j) = RR + RL + LR + LL    (even-i, even-j)   — interchange↔interchange
@@ -864,7 +864,7 @@ where `RR = dp_raw[2i, 2j]`, `RL = dp_raw[2i, 2j−1]`,
 `LR = dp_raw[2i−1, 2j]`, `LL = dp_raw[2i−1, 2j−1]`. Each block is m×m.
 
 Matches Fortran exactly — no ½ prefactor (Pletzer–Dewar multiply by ½, but
-Fortran `gal.f:1746-1749` leaves it commented out and our Julia port follows
+the Fortran RDCON code leaves it commented out and our Julia port follows
 Fortran to keep the benchmark bit-identical; the prefactor cancels in
 `det(D' − D(γ)) = 0`).
 
@@ -1705,7 +1705,7 @@ function _log_parallel_start(ctrl::ForceFreeStatesControl, odet::OdeState,
 end
 
 # Integrate each chunk's FM propagator from identity IC. Serial when bvp_threads == 1
-# (bit-deterministic; ~20% slower than 2-thread on DIII-D 147131 but immune to thread-
+# (bit-deterministic; ~20% slower than 2-thread but immune to thread-
 # schedule sensitivity). Parallel uses :static scheduler so Threads.threadid() returns a
 # stable index into odet_proxies. If a parallel run ever diverges on a delicate equilibrium,
 # drop to parallel_threads = 1 rather than use_parallel = false — the latter is silently wrong.

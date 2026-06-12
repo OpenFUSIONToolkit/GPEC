@@ -31,7 +31,9 @@ using ..Utilities
 using ..Utilities: KineticProfiles, kinetic_profiles_from_toml,
                     kinetic_profiles_from_h5
 using ..InnerLayer
-using ..InnerLayer: SLAYERModel, SLAYERParameters, GGJModel, build_slayer_inputs,
+using ..InnerLayer: InnerLayerParameters,
+                     SLAYERModel, SLAYERParameters, build_slayer_inputs,
+                     GGJModel, GGJParameters, build_ggj_inputs,
                      LayerWidths, slayer_layer_thickness
 using ..Dispersion
 using ..Dispersion: SurfaceCoupling, surface_coupling,

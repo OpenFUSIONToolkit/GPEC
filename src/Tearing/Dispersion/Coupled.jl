@@ -1,8 +1,8 @@
 # Coupled.jl
 #
 # Multi-surface coupled tearing dispersion residual `det(M(Q))` for the
-# Fortran SLAYER `coupling_flag = .TRUE.` path (`dispersion_det`,
-# growthrates.f:190-279). Brought together with the per-surface
+# Fortran SLAYER `coupling_flag = .TRUE.` path (`dispersion_det`).
+# Brought together with the per-surface
 # `SurfaceCoupling` (PR 3) so a brute-force or AMR scan in PRs 5-6 can
 # evaluate either residual through the same Q-callable interface.
 #
@@ -15,7 +15,8 @@
 #   det = mc(Q::ComplexF64)
 #
 # At each evaluation, for k = 1 .. msing_max, the inner-layer Δ is computed
-# at a Q rescaled by `tauk_ref / tauk_k` (mirrors growthrates.f:246), then
+# at a Q rescaled by `tauk_ref / tauk_k` (mirrors the Fortran SLAYER
+# `dispersion_det`), then
 # subtracted (with the dc offset) from the diagonal of an `msing_max ×
 # msing_max` upper-left submatrix of `dp_matrix`. The off-diagonal Δ'
 # couplings are passed through unchanged.
@@ -56,8 +57,7 @@ length `length(surfaces)` (it is the same matrix returned by
 # Keyword arguments
 
   - `ref_idx`   -- index of the reference surface whose `tauk` defines the
-    Q normalization. Defaults to `1` (Fortran convention,
-    growthrates.f:246).
+    Q normalization. Defaults to `1` (Fortran SLAYER convention).
   - `msing_max` -- number of surfaces from the front of `surfaces` to
     include in the determinant. Defaults to `min(3, length(surfaces))`:
     Δ' off-diagonal couplings beyond the third surface tend to be erratic
@@ -100,6 +100,11 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
         # (Δ_interchange=0) and approximate for GGJ surfaces (drops
         # Glasser stabilization).
         Δ_k  = solve_inner(sc.model, sc.params, Q_k).tearing * sc.scale
+        # The inner-layer solver returns NaN when the Riccati integration fails
+        # (clustered near poles). Propagate it as the residual so the scan flags
+        # this Q-cell via its isfinite checks, rather than feeding NaN into the
+        # LU factorization where it silently contaminates the whole determinant.
+        isfinite(Δ_k) || return ComplexF64(NaN, NaN)
         M[k,k] -= Δ_k + sc.dc
     end
     return det(M)

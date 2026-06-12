@@ -29,7 +29,7 @@
 
     @testset "Constructor scale defaults" begin
         # SLAYER: scale = lu^(1/3) so the dimensionless Δ from riccati_f
-        # is mapped to outer ψ-units (Fortran growthrates.f:217-218,260)
+        # is mapped to outer ψ-units (Fortran SLAYER growthrates routine)
         p_sl  = _slayer_ref()
         sc_sl = surface_coupling(SLAYERModel(), p_sl, -1.0 + 0.0im)
         @test sc_sl.scale ≈ p_sl.lu^(1/3)

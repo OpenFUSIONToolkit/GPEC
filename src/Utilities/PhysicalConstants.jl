@@ -9,7 +9,7 @@ All quantities in SI units.
 """
 module PhysicalConstants
 
-# Match sglobal.f exactly so cross-code numerical comparison is meaningful.
+# Match the Fortran GPEC/SLAYER sglobal_mod values exactly so cross-code numerical comparison is meaningful.
 const MU_0  = 4.0e-7 * π            # vacuum permeability         [H/m]
 const M_E   = 9.1094e-31            # electron mass               [kg]
 const M_P   = 1.6726e-27            # proton mass                 [kg]

@@ -101,7 +101,7 @@
         @test sl[1].lu != sl[2].lu
         @test sl[1].tauk != sl[2].tauk
 
-        # Q_e, Q_i follow the layerinputs.f sign convention
+        # Q_e, Q_i follow the SLAYER layerinputs sign convention
         @test sl[1].Q_e == -sl[1].tauk * profiles.omega_e(0.3)
         @test sl[1].Q_i == -sl[1].tauk * profiles.omega_i(0.3)
     end

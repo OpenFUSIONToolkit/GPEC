@@ -25,7 +25,7 @@ module SLAYER
 using LinearAlgebra
 using StaticArrays
 
-import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner
+import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner, ..InnerLayerParameters
 using ...Utilities.PhysicalConstants
 using ...Utilities.NeoclassicalResistivity
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
@@ -40,7 +40,7 @@ SLAYER inner-layer model selector. The type parameter `S` selects the
 Riccati formulation:
 
   - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default,
-    mirrors Fortran `riccati_f` in `delta.f:323-438`)
+    mirrors the Fortran `riccati_f` routine)
 
 Future dispersion variants (e.g. `:standard`) may be added but are not
 currently implemented. The `del_s` formulation is exposed separately as

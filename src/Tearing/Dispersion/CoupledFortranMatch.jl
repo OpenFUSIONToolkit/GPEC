@@ -144,7 +144,8 @@ function multi_surface_coupling_fortran(surfaces::AbstractVector{<:SurfaceCoupli
 end
 
 # Assemble and return det(mat) where mat is the 4·msing_max × 4·msing_max
-# Pletzer-Dewar matching matrix. Direct port of match.f:460-520 (fulldomain=0).
+# Pletzer-Dewar matching matrix. Direct port of the Fortran `match_delta`
+# routine (fulldomain=0 branch).
 function (mc::MultiSurfaceCouplingFortran)(Q::Number)
     m = mc.msing_max
     s2 = 2m
@@ -153,7 +154,7 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
     ref_tauk = mc.surfaces[mc.ref_idx].tauk
 
     # Allocate the matching matrix and fill the lower-left 2m × 2m block
-    # with transpose(dp_raw[1:s2, 1:s2]) — exact port of match.f:461.
+    # with transpose(dp_raw[1:s2, 1:s2]) — exact port of `match_delta`.
     mat = zeros(ComplexF64, s4, s4)
     @views mat[s2+1:s4, 1:s2] .= transpose(mc.dp_raw[1:s2, 1:s2])
 
@@ -165,7 +166,7 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
         idx3 = idx1 + s2       # d^k_+
         idx4 = idx2 + s2       # d^k_-
 
-        # Per-surface Q shift — match.f:472: guess_modify = Q + i·n·rotation[k].
+        # Per-surface Q shift — Fortran guess_modify = Q + i·n·rotation[k].
         # Also apply ref_tauk / sc.tauk rescaling (we keep the SurfaceCoupling
         # tauk normalization that SLAYER needs; GGJ has tauk=1 so it's a no-op).
         Q_k = Qc * (ref_tauk / sc.tauk) + 1im * mc.ntor * mc.rotation[k]
@@ -177,7 +178,7 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
         #
         # sc.scale converts inner-basis Δ to outer units (1.0 for GGJ since
         # rescale_delta is applied inside solve_inner; S^(1/3) for SLAYER).
-        # NOTE: match.f::match_delta (fulldomain=0, lines 508-519) does
+        # NOTE: the Fortran `match_delta` (fulldomain=0 branch) does
         # NOT add any Δ_crit offset here — delta1,delta2 are the raw
         # inner-layer outputs. The full 4m×4m Pletzer-Dewar residual
         # includes the interchange channel, which provides Glasser
@@ -187,6 +188,11 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
         # error (no corresponding term in Fortran) and is removed here.
         delta1 = resp.interchange * sc.scale
         delta2 = resp.tearing     * sc.scale
+        # The inner-layer solver returns NaN when the Riccati integration fails
+        # (clustered near poles). Propagate it as the residual so the scan flags
+        # this Q-cell via its isfinite checks, rather than feeding NaN into the
+        # LU factorization where it silently contaminates the whole determinant.
+        (isfinite(delta1) && isfinite(delta2)) || return ComplexF64(NaN, NaN)
 
         # --- Upper-left 2×2 block: per-surface identity on C_{L,R} ---
         mat[idx1, idx1] = 1
@@ -203,7 +209,6 @@ function (mc::MultiSurfaceCouplingFortran)(Q::Number)
         # --- Lower-right 2×2 block: inner Δ matching ---
         #   d^k_+ eqn: -Δ_int·d^k_+ + Δ_tear·d^k_- + (outer D' terms) = 0
         #   d^k_- eqn: -Δ_int·d^k_+ - Δ_tear·d^k_- + (outer D' terms) = 0
-        # (match.f:504-507)
         mat[idx3, idx3] = -delta1
         mat[idx3, idx4] =  delta2
         mat[idx4, idx3] = -delta1

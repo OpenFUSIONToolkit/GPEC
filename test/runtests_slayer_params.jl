@@ -3,7 +3,7 @@
     using GeneralizedPerturbedEquilibrium.Utilities: MU_0, M_E, M_P, E_CHG, EPS_0
 
     # Reference inputs: a simple deuterium plasma case suitable for
-    # hand-checking the params.f formulas.
+    # hand-checking the SLAYER params formulas.
     function _ref_kwargs(; dr_val=0.0, dc_type=:none)
         return (
             n_e = 5.0e19, t_e = 1000.0, t_i = 1000.0,
@@ -38,9 +38,9 @@
         # Q_e − Q_i = −tauk·5e3 = Q_i (since Q_e = 2·Q_i) ⇒ iota_e = Q_e/Q_i = 2
         @test p.iota_e ≈ 2.0
 
-        # Sign convention check (layerinputs.f:540-541)
+        # Sign convention check (SLAYER layerinputs)
         @test p.Q_e == -p.tauk * 1.0e4
-        @test p.Q_i == -p.tauk * 5.0e3    # params.f convention: Q_i = −tauk·ω*i
+        @test p.Q_i == -p.tauk * 5.0e3    # SLAYER params convention: Q_i = −tauk·ω*i
 
         # Spitzer resistivity follows η = 1.65e-9·lnΛ/(T_e/1keV)^1.5
         # with lnΛ = 24 + 3 ln 10 − 0.5 ln n_e + ln T_e.
@@ -77,7 +77,7 @@
     @testset "Test 1b: dc_tmp formulas activate when dr_val ≠ 0" begin
         # All four dc_type branches must produce finite, non-NaN values
         # and respect the signs/structure of the formulas in
-        # params.f:230-242.
+        # the SLAYER params dc_tmp formulas.
         p_none = slayer_parameters(; _ref_kwargs(dr_val=0.01, dc_type=:none)...)
         @test p_none.dc_tmp == 0.0   # :none ignores dr_val
 
