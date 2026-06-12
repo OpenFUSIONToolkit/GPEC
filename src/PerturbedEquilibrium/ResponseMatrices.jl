@@ -304,12 +304,12 @@ end
         ffs_intr::ForceFreeStatesInternal
     )::Matrix{ComplexF64}
 
-Build the numpert_total × numpert_total power-norm-field → flux operator `ptof` at the
+Build the numpert_total × numpert_total root-area-weighted field → flux operator `ptof` at the
 control surface (psilim). The mpert × mpert single-n block (Equilibrium.control_surface_ptof)
 is repeated block-diagonally over the `npert` toroidal harmonics, matching the
 numpert_total mode ordering used by the response matrices.
 
-`ptof` maps a power-normalized control-surface field `b̃` to the coordinate flux harmonics
+`ptof` maps a root-area-weighted control-surface field `b̃` to the coordinate flux harmonics
 `Φ`: `Φ = ptof · b̃`. It is the operator users need to recover the flux-space matrices from
 the stored coordinate-invariant (field-space) ones — see `field_space_response_matrices`.
 [Pharr 2026]
@@ -341,7 +341,7 @@ end
         plasma_inductance, surface_inductance, permeability, reluctance, ptof
     )::NamedTuple
 
-Express the control-surface response matrices in the coordinate-invariant power-normalized
+Express the control-surface response matrices in the coordinate-invariant root-area-weighted
 field (b̃) space, given the flux-space matrices and the `ptof` operator (`Φ = ptof·b̃`).
 
 The matrices fall into two algebraic classes:

@@ -59,7 +59,7 @@ function compute_plasma_response!(
     # copy stays in flux space; only the stored/output matrices are conformed below.
     intr.plasma_response = permeability
 
-    # Conform the control-surface matrices to the coordinate-invariant power-normalized
+    # Conform the control-surface matrices to the coordinate-invariant root-area-weighted
     # field (b̃) space for output (issue #233 / Pharr 2026). The flux-space forms are
     # recoverable from the stored `ptof` operator (Φ = ptof·b̃) — see Utils.jl output docs.
     ptof = build_control_surface_ptof(equil, ffs_intr)

@@ -1,17 +1,17 @@
 """
-Coordinate-invariant (power-normalized field) flux-surface operators.
+Coordinate-invariant (root-area-weighted field) flux-surface operators.
 
 These building blocks implement the √area weighting of Pharr (2026),
 "Coordinate-invariant flux-surface Fourier analysis in tokamaks". They are the
 single source of truth for the map between a flux-surface field component and its
-power-normalized (coordinate-invariant) field representation, shared by the
+root-area-weighted (coordinate-invariant) field representation, shared by the
 ForceFreeStates and PerturbedEquilibrium modules.
 
 The central operator is
 
     ptof = sqrtamat · √jarea
 
-which maps a power-normalized field `b̃` to the coordinate flux harmonics `Φ`:
+which maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
 `Φ = ptof · b̃` (so `b̃ = ptof⁻¹ · Φ`). The singular values of any operator
 expressed in the `b̃` basis are independent of the straight-field-line
 (working) coordinate.
@@ -25,7 +25,7 @@ the underlying √weight identity and angle map.
 
 Compute √(J·|∇ψ|) at `mtheta` equally-spaced θ points on the flux surface at `psi`.
 This is the √weight function that maps a field component `b(θ)` to its
-power-normalized form `√(J|∇ψ|)·b(θ)` in θ-space.
+root-area-weighted form `√(J|∇ψ|)·b(θ)` in θ-space.
 """
 function compute_sqrt_jac_delpsi(equil::PlasmaEquilibrium, psi::Float64, mtheta::Int)
     sqrt_jac_delpsi = Vector{Float64}(undef, mtheta)
@@ -94,10 +94,10 @@ end
 """
     control_surface_ptof(equil, psi, ft) -> Matrix{ComplexF64}
 
-Build the power-norm-field → flux operator `ptof = sqrtamat · √jarea` at the flux
+Build the root-area-weighted field → flux operator `ptof = sqrtamat · √jarea` at the flux
 surface `psi`, where `jarea = ∫ J|∇ψ| dθ` is the scalar flux-surface area.
 
-`ptof` maps a power-normalized field `b̃` to the coordinate flux harmonics `Φ`:
+`ptof` maps a root-area-weighted field `b̃` to the coordinate flux harmonics `Φ`:
 `Φ = ptof · b̃`. To express a flux-space operator/generator in the coordinate-invariant
 `b̃` basis (and back) use:
   - operator   `Ã = ptof⁻¹ · A · ptof`     (e.g. permeability `Φ_tot = A·Φ_x`)

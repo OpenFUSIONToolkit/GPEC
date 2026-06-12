@@ -24,6 +24,7 @@ makedocs(;
         "Home" => "index.md",
         "Setup" => "set_up.md",
         "Workflow" => "workflow.md",
+        "Field Conventions" => "field_conventions.md",
         "API Reference" => [
             "Vacuum" => "vacuum.md",
             "Equilibrium" => "equilibrium.md",

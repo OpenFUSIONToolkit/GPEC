@@ -1,7 +1,7 @@
 """
-Power-normalized flux eigenvalue computation for the FFS edge scan.
+Root-area-weighted flux eigenvalue computation for the FFS edge scan.
 
-Transforms the energy matrix W from ξ-space into power-normalized flux Φ-space and
+Transforms the energy matrix W from ξ-space into root-area-weighted flux Φ-space and
 returns the eigenvalues of `W_Φ = M†·W·M`. The **eigenvalues** (energies) are
 coordinate-invariant: energy is a physically meaningful scalar and does not depend
 on the choice of straight-field-line coordinate.
@@ -10,7 +10,7 @@ on the choice of straight-field-line coordinate.
 
 Transformation chain:
   - T = diag(i·2π·χ₁·singfac) converts ξ → flux (χ₁ = 2π·ψ₀, singfac = m − n·q).
-  - ptof = sqrtamat·√jarea converts the power-normalized field → flux.
+  - ptof = sqrtamat·√jarea converts the root-area-weighted field → flux.
   - M = T⁻¹·ptof maps Φ → ξ.
 
 What is **NOT** invariant across Jacobian choices (see
@@ -33,14 +33,14 @@ area-integral precision floor ~1e-6):
 # ForceFreeStates and PerturbedEquilibrium modules share one coordinate-invariant definition.
 
 """
-    compute_power_norm_eigenvalues(wt, wp, wv, sqrtamat, jarea, equil, psi, intr; all_eigenvalues=false)
+    compute_rootarea_eigenvalues(wt, wp, wv, sqrtamat, jarea, equil, psi, intr; all_eigenvalues=false)
 
-Transform W from ξ-space to power-normalized flux Φ-space and eigendecompose.
+Transform W from ξ-space to root-area-weighted flux Φ-space and eigendecompose.
 
 The transformation chain:
   1. T = diag(i·2π·χ₁·singfac) converts ξ → flux (singfac = m − n·q).
-  2. ptof = sqrtamat·√jarea converts the power-normalized field → flux.
-  3. M = T⁻¹·ptof maps Φ → ξ (power-norm to displacement).
+  2. ptof = sqrtamat·√jarea converts the root-area-weighted field → flux.
+  3. M = T⁻¹·ptof maps Φ → ξ (root-area-weighted to displacement).
   4. W_Φ = M†·W·M = ptof†·T⁻†·W·T⁻¹·ptof.
 
 Only the eigenspectrum of W_Φ is physically invariant across Jacobian choices —
@@ -52,11 +52,11 @@ spectrally invariant because Wp + Wv = Wt.
 
 Returns the standard eigenvalues of W_Φ sorted ascending (most negative/unstable
 first), matching the ξ-space convention in `free_run!` and `free_compute_total`.
-Also returns `pn_vacuum_eigenvalue = max(0, λ_min(Hermitian(wv_Φ)))` — the Φ-space
+Also returns `rootA_vacuum_eigenvalue = max(0, λ_min(Hermitian(wv_Φ)))` — the Φ-space
 counterpart of the ξ-space `vacuum_eigenvalue` diagnostic.
 Returns NaN when any singfac ≈ 0 (rational surface crossing makes T singular).
 """
-function compute_power_norm_eigenvalues(
+function compute_rootarea_eigenvalues(
     wt::AbstractMatrix{ComplexF64},
     wp::AbstractMatrix{ComplexF64},
     wv::AbstractMatrix{ComplexF64},
@@ -81,12 +81,12 @@ function compute_power_norm_eigenvalues(
         if all_eigenvalues
             nan_vec = fill(complex(NaN), Npert)
             nan_mat = fill(complex(NaN), Npert, Npert)
-            return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
-                pn_vacuum_eigenvalue=NaN, pn_et_all=nan_vec, pn_ep_all=nan_vec, pn_ev_all=nan_vec,
-                wt_pn=nan_mat, wp_pn=nan_mat, wv_pn=nan_mat, pn_eigenvectors=nan_mat)
+            return (rootA_total_eigenvalue=complex(NaN), rootA_plasma_energy=complex(NaN), rootA_vacuum_energy=complex(NaN),
+                rootA_vacuum_eigenvalue=NaN, rootA_et_all=nan_vec, rootA_ep_all=nan_vec, rootA_ev_all=nan_vec,
+                wt_rootA=nan_mat, wp_rootA=nan_mat, wv_rootA=nan_mat, rootA_eigenvectors=nan_mat)
         else
-            return (pn_total_eigenvalue=complex(NaN), pn_plasma_energy=complex(NaN), pn_vacuum_energy=complex(NaN),
-                pn_vacuum_eigenvalue=NaN)
+            return (rootA_total_eigenvalue=complex(NaN), rootA_plasma_energy=complex(NaN), rootA_vacuum_energy=complex(NaN),
+                rootA_vacuum_eigenvalue=NaN)
         end
     end
 
@@ -96,7 +96,7 @@ function compute_power_norm_eigenvalues(
         T_diag_inv[i] = 1.0 / (im * 2π * chi1 * singfac[i])
     end
 
-    # ptof = sqrtamat * sqrt(jarea): power-norm field → flux
+    # ptof = sqrtamat * sqrt(jarea): root-area-weighted field → flux
     # For multi-n, expand mpert×mpert sqrtamat to Npert×Npert block-diagonal
     ptof_block = sqrtamat .* sqrt(jarea)
     if npert == 1
@@ -116,18 +116,18 @@ function compute_power_norm_eigenvalues(
     end
 
     # Transform energy matrices: W_Φ = M† · W · M
-    wt_pn = M' * wt * M
-    wp_pn = M' * wp * M
-    wv_pn = M' * wv * M
+    wt_rootA = M' * wt * M
+    wp_rootA = M' * wp * M
+    wv_rootA = M' * wv * M
 
     # Smallest eigenvalue of the vacuum matrix alone in Φ-space, clamped to zero.
-    # wv_pn should be PSD by congruence of the PSD ξ-space wv; numerical noise
+    # wv_rootA should be PSD by congruence of the PSD ξ-space wv; numerical noise
     # can make the smallest eigenvalue slightly negative.
-    pn_vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv_pn))))))
+    rootA_vacuum_eigenvalue = real(max(0.0, minimum(real.(eigvals(Hermitian(wv_rootA))))))
 
-    # Eigendecompose the total energy in power-norm space. Only the eigenspectrum
+    # Eigendecompose the total energy in root-area-weighted space. Only the eigenspectrum
     # is Jacobian-invariant; the eigenvectors are coordinate-dependent.
-    Ev = eigen(wt_pn)
+    Ev = eigen(wt_rootA)
     eigenvalues = Ev.values
     vectors = Ev.vectors
 
@@ -137,41 +137,41 @@ function compute_power_norm_eigenvalues(
     # λ = v†Wt v = v†Wp v + v†Wv v ; the plasma/vacuum split is the projection
     # onto the same eigenvector and is therefore also Jacobian-invariant.
     if all_eigenvalues
-        pn_et_all = Vector{ComplexF64}(undef, Npert)
-        pn_ep_all = Vector{ComplexF64}(undef, Npert)
-        pn_ev_all = Vector{ComplexF64}(undef, Npert)
-        pn_eigenvectors = Matrix{ComplexF64}(undef, Npert, Npert)
+        rootA_et_all = Vector{ComplexF64}(undef, Npert)
+        rootA_ep_all = Vector{ComplexF64}(undef, Npert)
+        rootA_ev_all = Vector{ComplexF64}(undef, Npert)
+        rootA_eigenvectors = Matrix{ComplexF64}(undef, Npert, Npert)
 
         for i in 1:Npert
             v = vectors[:, eindex[Npert+1-i]]
-            pn_eigenvectors[:, i] .= v
-            pn_et_all[i] = eigenvalues[eindex[Npert+1-i]]
-            pn_ep_all[i] = dot(v, wp_pn * v)
-            pn_ev_all[i] = dot(v, wv_pn * v)
+            rootA_eigenvectors[:, i] .= v
+            rootA_et_all[i] = eigenvalues[eindex[Npert+1-i]]
+            rootA_ep_all[i] = dot(v, wp_rootA * v)
+            rootA_ev_all[i] = dot(v, wv_rootA * v)
         end
 
         # Phase convention: rotate each column so its largest-magnitude entry is real-positive
         # (matches the ξ-space convention in free_run!). Magnitudes are preserved since the
         # eigenvectors come from Julia's `eigen` with ‖v‖₂ = 1, the natural Φ-space norm.
         for isol in 1:Npert
-            imax = argmax(abs.(@view pn_eigenvectors[:, isol]))
-            phase = abs(pn_eigenvectors[imax, isol]) / pn_eigenvectors[imax, isol]
-            @view(pn_eigenvectors[:, isol]) .*= phase
+            imax = argmax(abs.(@view rootA_eigenvectors[:, isol]))
+            phase = abs(rootA_eigenvectors[imax, isol]) / rootA_eigenvectors[imax, isol]
+            @view(rootA_eigenvectors[:, isol]) .*= phase
         end
 
-        return (pn_total_eigenvalue=pn_et_all[1], pn_plasma_energy=pn_ep_all[1], pn_vacuum_energy=pn_ev_all[1],
-            pn_vacuum_eigenvalue=pn_vacuum_eigenvalue,
-            pn_et_all=pn_et_all, pn_ep_all=pn_ep_all, pn_ev_all=pn_ev_all,
-            wt_pn=wt_pn, wp_pn=wp_pn, wv_pn=wv_pn, pn_eigenvectors=pn_eigenvectors)
+        return (rootA_total_eigenvalue=rootA_et_all[1], rootA_plasma_energy=rootA_ep_all[1], rootA_vacuum_energy=rootA_ev_all[1],
+            rootA_vacuum_eigenvalue=rootA_vacuum_eigenvalue,
+            rootA_et_all=rootA_et_all, rootA_ep_all=rootA_ep_all, rootA_ev_all=rootA_ev_all,
+            wt_rootA=wt_rootA, wp_rootA=wp_rootA, wv_rootA=wv_rootA, rootA_eigenvectors=rootA_eigenvectors)
     else
         idx = eindex[Npert]
         v = vectors[:, idx]
-        pn_total = eigenvalues[idx]
-        pn_plasma = ComplexF64(dot(v, wp_pn * v))
-        pn_vacuum = ComplexF64(dot(v, wv_pn * v))
+        rootA_total = eigenvalues[idx]
+        rootA_plasma = ComplexF64(dot(v, wp_rootA * v))
+        rootA_vacuum = ComplexF64(dot(v, wv_rootA * v))
 
-        return (pn_total_eigenvalue=pn_total, pn_plasma_energy=pn_plasma, pn_vacuum_energy=pn_vacuum,
-            pn_vacuum_eigenvalue=pn_vacuum_eigenvalue)
+        return (rootA_total_eigenvalue=rootA_total, rootA_plasma_energy=rootA_plasma, rootA_vacuum_energy=rootA_vacuum,
+            rootA_vacuum_eigenvalue=rootA_vacuum_eigenvalue)
     end
 end
 

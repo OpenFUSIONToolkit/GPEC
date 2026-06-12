@@ -939,7 +939,7 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
     # Create a rough spline for wv matrix between psiedge -> psilim so we can approximate dW
     es.wvmat = free_compute_wv_spline(ctrl, equil, intr)
 
-    # Pre-compute sqrtamat + jarea spline for power-normalized eigenvalues
+    # Pre-compute sqrtamat + jarea spline for root-area-weighted eigenvalues
     es.sqrtamat_spline = free_compute_sqrtamat_spline(ctrl, equil, intr)
 
     # Loop with compact index j into EdgeScanState; ODE index is edge_start + j - 1.
@@ -954,10 +954,10 @@ function findmax_dW_edge!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::E
             es.plasma_energy[j] = result.plasma_energy
             es.vacuum_energy[j] = result.vacuum_energy
             es.vacuum_eigenvalue[j] = result.vacuum_eigenvalue
-            es.pn_total_eigenvalue[j] = result.pn_total_eigenvalue
-            es.pn_plasma_energy[j] = result.pn_plasma_energy
-            es.pn_vacuum_energy[j] = result.pn_vacuum_energy
-            es.pn_vacuum_eigenvalue[j] = result.pn_vacuum_eigenvalue
+            es.rootA_total_eigenvalue[j] = result.rootA_total_eigenvalue
+            es.rootA_plasma_energy[j] = result.rootA_plasma_energy
+            es.rootA_vacuum_energy[j] = result.rootA_vacuum_energy
+            es.rootA_vacuum_eigenvalue[j] = result.rootA_vacuum_eigenvalue
         catch e
             e isa LinearAlgebra.SingularException || rethrow()
         end

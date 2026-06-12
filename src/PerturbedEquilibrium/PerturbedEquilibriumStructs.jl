@@ -78,22 +78,22 @@ Results from perturbed equilibrium calculations.
 
 Response fields (mode space):
   - `xi_modes::Union{Nothing, NamedTuple}` - Displacement (psi, theta, zeta) [npsi, mpert]
-  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, psi_area=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, mpert]
+  - `b_modes::Union{Nothing, NamedTuple}` - Magnetic field; psi=b^ψ, b_psi_area_weighted=b^ψ/⟨J·|∇ψ|⟩_θ, theta/zeta=unregularized, theta_reg/zeta_reg=regularized [npsi, mpert]
   - `b_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal field b_n [npsi, mpert]
   - `xi_n_modes::Union{Nothing, Matrix{ComplexF64}}` - Physical normal displacement xi_n [npsi, mpert]
 
 Coupling matrices [n_rational × numpert_total] — one row per resonant (surface, n) pair.
 Each row maps the full applied field to the resonant response at that surface.
 Matches Fortran `C_f_x_out`, `C_i_x_out`, etc. (shape [mode_C, m_out]).
-  - `C_resonant_field`   - Φ_r/A^r coupling (resonant field b^r in tesla; singcoup row 1) [Pharr 2026]
+  - `C_resonant_area_weighted_field`   - Φ_r/A^r coupling (resonant area-weighted field b^r in tesla; singcoup row 1) [Pharr 2026]
   - `C_resonant_current` - Resonant current coupling (singcoup row 2)
   - `C_island_width_sq`  - (w/2)² coupling (singcoup row 3)
-  - `C_penetrated_field` - Penetrated field coupling (singcoup row 4)
+  - `C_penetrated_area_weighted_field` - Penetrated area-weighted field coupling (singcoup row 4)
   - `C_delta_prime`      - Δ' coupling (singcoup row 5)
 
 Applied resonant vectors [n_rational] = C · forcing_amplitudes.
 Matches Fortran `Phi_res`, `w_isl`, `K_isl`, `Delta`.
-  - `resonant_field`, `resonant_current`, `island_width_sq`, `penetrated_field`, `delta_prime`
+  - `resonant_area_weighted_field`, `resonant_current`, `island_width_sq`, `penetrated_area_weighted_field`, `delta_prime`
 
 Diagnostics [n_rational]:
   - `island_half_width::Vector{Float64}` - w/2 = sqrt(|island_width_sq|) from applied forcing
@@ -103,7 +103,7 @@ Metadata [n_rational] — identifies each (surface, n) row:
   - `rational_psi`, `rational_q`, `rational_m_res`, `rational_n`, `rational_surface_idx`
 
 Control surface matrices [numpert_total × numpert_total], stored in the coordinate-invariant
-power-normalized field (b̃) space (issue #233 / Pharr 2026). Recover the flux-space forms with
+root-area-weighted field (b̃) space (issue #233 / Pharr 2026). Recover the flux-space forms with
 the `control_surface_field_operator` (`ptof`, Φ = ptof·b̃): e.g. `P_flux = ptof·P̃·ptof⁻¹`,
 `L_flux = ptof·L̃·ptof†`.
   - `plasma_inductance` - Λ̃ = ptof⁻¹·Λ·ptof⁻† (wt0-based plasma inductance, congruence)
@@ -129,17 +129,17 @@ Energies (Fortran gpout convention; Φ_x external flux, Φ_tot total flux, L/Λ 
     xi_n_modes::Union{Nothing, Matrix{ComplexF64}} = nothing  # physical normal displacement xi_n [npsi, mpert]
 
     # Coupling matrices [n_rational × numpert_total]
-    C_resonant_field::Matrix{ComplexF64}    = zeros(ComplexF64, 0, 0)
+    C_resonant_area_weighted_field::Matrix{ComplexF64}    = zeros(ComplexF64, 0, 0)
     C_resonant_current::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
     C_island_width_sq::Matrix{ComplexF64}   = zeros(ComplexF64, 0, 0)
-    C_penetrated_field::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
+    C_penetrated_area_weighted_field::Matrix{ComplexF64}  = zeros(ComplexF64, 0, 0)
     C_delta_prime::Matrix{ComplexF64}       = zeros(ComplexF64, 0, 0)
 
     # Applied resonant vectors [n_rational] = C · amp_vec
-    resonant_field::Vector{ComplexF64}      = ComplexF64[]
+    resonant_area_weighted_field::Vector{ComplexF64}      = ComplexF64[]
     resonant_current::Vector{ComplexF64}    = ComplexF64[]
     island_width_sq::Vector{ComplexF64}     = ComplexF64[]
-    penetrated_field::Vector{ComplexF64}    = ComplexF64[]
+    penetrated_area_weighted_field::Vector{ComplexF64}    = ComplexF64[]
     delta_prime::Vector{ComplexF64}         = ComplexF64[]
 
     # Diagnostics [n_rational]

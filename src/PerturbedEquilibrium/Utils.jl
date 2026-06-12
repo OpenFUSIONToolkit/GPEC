@@ -61,27 +61,27 @@ perturbed_equilibrium/
 ├── response/
 │   ├── xi_psi         # Radial displacement ξ^ψ = ξ·∇ψ (ComplexF64 [npsi, mpert])
 │   ├── xi_psi_J       # J·ξ^ψ Jacobian-weighted (from gpeq_contra)
-│   ├── psi_area       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, mpert])
+│   ├── b_psi_area_weighted       # b^ψ / ⟨J·|∇ψ|⟩_θ area-normalized (ComplexF64 [npsi, mpert])
 │   ├── b_n            # Physical normal field b_n (ComplexF64 [npsi, mpert])
 │   ├── xi_n           # Physical normal displacement xi_n (ComplexF64 [npsi, mpert])
 │   ├── b_theta
 │   └── b_zeta
-├── response_matrices/        # [numpert_total × numpert_total], power-normalized field (b̃) space
+├── response_matrices/        # [numpert_total × numpert_total], root-area-weighted field (b̃) space
 │   ├── plasma_inductance     # Λ̃ = ptof⁻¹·Λ·ptof⁻†
 │   ├── surface_inductance    # L̃ = ptof⁻¹·L·ptof⁻†
 │   ├── permeability          # P̃ = ptof⁻¹·P·ptof  (P = Λ·L⁻¹)
 │   ├── reluctance            # ϱ̃ = ptof†·ϱ·ptof
-│   └── powernorm_field_to_flux_operator  # ptof = sqrtamat·√jarea; recover flux via Φ = ptof·b̃
+│   └── rootarea_field_to_flux_operator  # ptof = sqrtamat·√jarea; recover flux via Φ = ptof·b̃
 ├── singular_coupling/
-│   ├── C_resonant_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant field b^r=Φ^r/A^r [T])
+│   ├── C_resonant_area_weighted_field     # [n_rational × numpert_total] coupling matrix (b̃-space input, resonant area-weighted field b^r=Φ^r/A^r [T])
 │   ├── C_resonant_current
 │   ├── C_island_width_sq
-│   ├── C_penetrated_field
+│   ├── C_penetrated_area_weighted_field
 │   ├── C_delta_prime
-│   ├── resonant_field       # [n_rational] applied vector = C̃ · b̃_x (resonant field b^r [T])
+│   ├── resonant_area_weighted_field       # [n_rational] applied vector = C̃ · b̃_x (resonant area-weighted field b^r [T])
 │   ├── resonant_current
 │   ├── island_width_sq
-│   ├── penetrated_field
+│   ├── penetrated_area_weighted_field
 │   ├── delta_prime
 │   ├── island_half_width    # [n_rational] Float64
 │   ├── chirikov_parameter
@@ -115,21 +115,21 @@ function write_outputs_to_HDF5(
         !isempty(state.response_vec) && (pe_group["response_vec"] = state.response_vec)
 
         # Control surface matrices [numpert_total × numpert_total], in coordinate-invariant
-        # power-normalized field (b̃) space. Recover flux space with the stored ptof operator
+        # root-area-weighted field (b̃) space. Recover flux space with the stored ptof operator
         # (Φ = ptof·b̃): e.g. P_flux = ptof·P̃·ptof⁻¹, L_flux = ptof·L̃·ptof†. [Pharr 2026]
         mat_group = haskey(pe_group, "response_matrices") ? pe_group["response_matrices"] : create_group(pe_group, "response_matrices")
         !isempty(state.plasma_inductance)  && (mat_group["plasma_inductance"]  = state.plasma_inductance)
         !isempty(state.surface_inductance) && (mat_group["surface_inductance"] = state.surface_inductance)
         !isempty(state.permeability)       && (mat_group["permeability"]       = state.permeability)
         !isempty(state.reluctance)         && (mat_group["reluctance"]         = state.reluctance)
-        !isempty(state.control_surface_field_operator) && (mat_group["powernorm_field_to_flux_operator"] = state.control_surface_field_operator)
+        !isempty(state.control_surface_field_operator) && (mat_group["rootarea_field_to_flux_operator"] = state.control_surface_field_operator)
 
         # Response fields (ComplexF64 directly)
         response_group = haskey(pe_group, "response") ? pe_group["response"] : create_group(pe_group, "response")
         have_xi = !isnothing(state.xi_modes)
         have_b  = have_xi && !isnothing(state.b_modes)
         response_group["xi_psi"]    = have_xi ? state.xi_modes.psi      : ComplexF64[]
-        response_group["psi_area"]  = have_b  ? state.b_modes.psi_area : ComplexF64[]
+        response_group["b_psi_area_weighted"]  = have_b  ? state.b_modes.b_psi_area_weighted : ComplexF64[]
         response_group["b_theta"]   = have_b  ? state.b_modes.theta    : ComplexF64[]
         response_group["b_zeta"]    = have_b  ? state.b_modes.zeta     : ComplexF64[]
         response_group["b_n"]       = !isnothing(state.b_n_modes)  ? state.b_n_modes  : ComplexF64[]
@@ -183,17 +183,17 @@ function write_outputs_to_HDF5(
         coupling_group = haskey(pe_group, "singular_coupling") ? pe_group["singular_coupling"] : create_group(pe_group, "singular_coupling")
 
         # Coupling matrices [n_rational × numpert_total]
-        !isempty(state.C_resonant_field)   && (coupling_group["C_resonant_field"]   = state.C_resonant_field)
+        !isempty(state.C_resonant_area_weighted_field)   && (coupling_group["C_resonant_area_weighted_field"]   = state.C_resonant_area_weighted_field)
         !isempty(state.C_resonant_current) && (coupling_group["C_resonant_current"] = state.C_resonant_current)
         !isempty(state.C_island_width_sq)  && (coupling_group["C_island_width_sq"]  = state.C_island_width_sq)
-        !isempty(state.C_penetrated_field) && (coupling_group["C_penetrated_field"] = state.C_penetrated_field)
+        !isempty(state.C_penetrated_area_weighted_field) && (coupling_group["C_penetrated_area_weighted_field"] = state.C_penetrated_area_weighted_field)
         !isempty(state.C_delta_prime)      && (coupling_group["C_delta_prime"]      = state.C_delta_prime)
 
         # Applied resonant vectors [n_rational]
-        !isempty(state.resonant_field)     && (coupling_group["resonant_field"]     = state.resonant_field)
+        !isempty(state.resonant_area_weighted_field)     && (coupling_group["resonant_area_weighted_field"]     = state.resonant_area_weighted_field)
         !isempty(state.resonant_current)   && (coupling_group["resonant_current"]   = state.resonant_current)
         !isempty(state.island_width_sq)    && (coupling_group["island_width_sq"]    = state.island_width_sq)
-        !isempty(state.penetrated_field)   && (coupling_group["penetrated_field"]   = state.penetrated_field)
+        !isempty(state.penetrated_area_weighted_field)   && (coupling_group["penetrated_area_weighted_field"]   = state.penetrated_area_weighted_field)
         !isempty(state.delta_prime)        && (coupling_group["delta_prime"]        = state.delta_prime)
         !isempty(state.island_half_width)  && (coupling_group["island_half_width"]  = state.island_half_width)
         !isempty(state.chirikov_parameter) && (coupling_group["chirikov_parameter"] = state.chirikov_parameter)

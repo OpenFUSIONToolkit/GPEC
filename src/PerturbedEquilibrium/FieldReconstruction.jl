@@ -59,7 +59,7 @@ Tuple of (xi_modes, b_modes) NamedTuples:
 - `xi_modes.zeta_reg`: ξ^ζ regularized (= xmz, from gpeq_contra with reg_spot smoothing)
 - `xi_modes.cova_psi/theta/zeta`: covariant displacement (from gpeq_cova)
 - `b_modes.psi`: b^ψ [npsi, mpert]
-- `b_modes.psi_area`: b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
+- `b_modes.b_psi_area_weighted`: b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n computation)
 - `b_modes.theta`: b^θ [npsi, mpert]
 - `b_modes.zeta`: b^ζ [npsi, mpert]
 - `b_modes.theta_reg/zeta_reg`: regularized b^θ, b^ζ (from gpeq_sol with reg_spot smoothing)
@@ -180,7 +180,7 @@ function reconstruct_physical_fields(
     )
     b_modes = (
         psi       = b_psi_modes,      # b^ψ (no Jacobian) — used for b_n normal projection
-        psi_area  = Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
+        b_psi_area_weighted  = Jb_psi_modes,     # b^ψ / ⟨J·|∇ψ|⟩_θ (area-normalized, for b_n)
         theta     = b_theta_modes,    # b^θ unregularized
         zeta      = b_zeta_modes,     # b^ζ unregularized
         theta_reg = b_theta_reg,      # b^θ regularized (from gpeq_sol with reg_spot)

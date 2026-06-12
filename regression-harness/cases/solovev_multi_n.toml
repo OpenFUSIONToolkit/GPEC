@@ -3,12 +3,12 @@ name = "solovev_multi_n"
 description = "Solovev analytical equilibrium, multi-n, ideal stability"
 example_dir = "examples/Solovev_ideal_example_multi_n"
 
-# Energies — leading eigenvalues at the final truncation (psilim). eigenmode_* are now power-normalized (Φ-space, Jacobian-invariant); ξ-space counterparts live under FreeBoundaryStability/XiNorm/ and are not tracked.
+# Energies — leading eigenvalues at the final truncation (psilim). eigenmode_* are now root-area-weighted (Φ-space, Jacobian-invariant); ξ-space counterparts live under FreeBoundaryStability/XiNorm/ and are not tracked.
 [quantities.et_real]
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "Power Normalized total energy Re(et[1])"
+label = "root-area-weighted total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
 
@@ -16,7 +16,7 @@ order = 10
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
-label = "Power Normalized total energy Im(et[1])"
+label = "root-area-weighted total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
 
@@ -33,7 +33,7 @@ order = 14
 h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "Power Normalized plasma energy (all)"
+label = "root-area-weighted plasma energy (all)"
 noise_threshold = 1e-10
 order = 20
 
@@ -41,7 +41,7 @@ order = 20
 h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "Power Normalized vacuum energy (all)"
+label = "root-area-weighted vacuum energy (all)"
 noise_threshold = 1e-10
 order = 21
 
@@ -49,7 +49,7 @@ order = 21
 h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "Power Normalized total energy (all)"
+label = "root-area-weighted total energy (all)"
 noise_threshold = 1e-10
 order = 22
 
