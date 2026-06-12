@@ -222,8 +222,12 @@ environment variable; it is not a runtime parameter.
 
 ## API Reference
 
+The Galerkin Δ′ solver (`src/ForceFreeStates/Galerkin/`) is documented separately in
+`docs/src/galerkin.md`.
+
 ```@autodocs
 Modules = [GeneralizedPerturbedEquilibrium.ForceFreeStates]
+Pages = ["ForceFreeStates.jl", "ForceFreeStatesStructs.jl", "Mercier.jl", "Resist.jl", "Bal.jl", "EulerLagrange.jl", "Sing.jl", "Fourfit.jl", "Kinetic.jl", "FixedBoundaryStability.jl", "Utils.jl", "Free.jl", "Riccati.jl"]
 ```
 
 ## Example usage
@@ -306,6 +310,7 @@ end
 
 ## See also
 
+- `docs/src/galerkin.md` — RDCON outer-region Galerkin Δ′ solver (part of this module)
 - `docs/src/equilibrium.md` — build the `PlasmaEquilibrium` object required by this module
 - `docs/src/vacuum.md` — vacuum response computed from the EL solution in `free_run!`
 - `docs/src/perturbed_equilibrium.md` — downstream singular coupling analysis using Δ'
