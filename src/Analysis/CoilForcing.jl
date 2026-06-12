@@ -267,18 +267,22 @@ field on the plasma boundary, ready to colour [`plot_surface_3d`](@ref).
 arbitrary (e.g. applied normal field `b_n_x`, total `b_n`, displacement `xi_n`); the caller
 supplies whichever modes they want to view.
 
-The transform follows `Analysis.PerturbedEquilibriumModes.modes_to_theta` / `theta_to_thetaphi`
-(the gpec.h5 control-surface path): `f(θ) = Σ_m amp_m e^{i m θ}`, the SFL→machine-angle correction
-`e^{i n ν(ψ,θ)}` from `equil.rzphi_nu`, then `c(θ,φ) = Re[f(θ) e^{i n φ}]`.
+The transform inverts the SFL Fourier decomposition used by `ForcingTerms.fourier_decompose_bn`:
+`f(θ) = Σ_m amp_m e^{i m θ}`, the per-θ correction `e^{i n ν(ψ,θ)}` from `equil.rzphi_nu`, then the
+toroidal extension in the **machine angle** `c(θ,φ) = -Re[f(θ) e^{i n·hel·φ}]`. The `e^{i n·hel·φ}`
+follows from the SFL→machine map `φ = -hel(2π ζ + ν)` (`ζ` the SFL toroidal angle the modes were
+decomposed against); substituting `2π ζ = -hel·φ - ν` is what turns the decomposition's `ζ`
+exponential into the `ν` correction times `e^{i n·hel·φ}`.
 
 !!! note "Sign / helicity convention"
 
-    The toroidal handedness and overall sign are chosen so that, for applied coil fields
-    (`b_n_x`), **a positive coil current produces positive (blue) `b_n_x` directly beneath the
-    coil** — verified against coil currents on DIII-D (`helicity = sign(Bt)·sign(Ip) > 0`). This
-    is the opposite handedness from a naive copy of the legacy Python `plot_control_3d`, which
-    mis-tracks the coil toroidally. Pass `helicity` to override `sign(Bt)·sign(Ip)` if the
-    field/coil colours disagree for your machine.
+    The reconstruction tracks the source coil **toroidally** (the field lobe sits at the coil's φ),
+    carried by `helicity = sign(Bt)·sign(Ip)` in `e^{i n·hel·φ}` (`equil.rzphi_nu`/`equil.params`).
+    The leading `-` is a display orientation so that **a positive (blue) coil current reads as a
+    positive (blue) `b_n_x` lobe beneath it** — GPEC's outward-normal flux is intrinsically negative
+    there, so the overall sign is the blue-coil↔blue-surface convention while the spatial structure
+    and magnitude are physical. Pass `helicity` to override `sign(Bt)·sign(Ip)` if the toroidal
+    tracking is wrong for your machine.
 
 ### Keyword arguments
 
@@ -302,7 +306,12 @@ function control_surface_scalar(equil, modes, n::Int; mtheta::Int=180, nphi::Int
     ft = FourierTransform(mtheta, mpert, m_low)
     f = inverse(ft, vec)
 
-    # SFL→machine toroidal-angle correction e^{i n ν(ψ,θ)}
+    # SFL→machine toroidal-angle correction e^{i n ν(ψ,θ)}. The modes are decomposed on the SFL
+    # grid against e^{-i(m θ - n ζ)}, with the machine angle φ = -hel(2π ζ + ν) (see CoilFourier
+    # `sample_boundary_grid`). Substituting 2π ζ = -hel φ - ν into the inverse turns the ζ
+    # exponential into e^{i n ν(θ)} e^{i n hel φ}: the per-θ ν enters the field, hel sets the
+    # toroidal handedness, and the real field reconstructs faithfully — so a positive (blue) coil
+    # current yields positive (blue) b_n_x directly beneath the coil with no extra sign flip.
     hel = isnothing(helicity) ? _equil_helicity(equil) : helicity
     hint = (Ref(1), Ref(1))
     for i in 1:mtheta
@@ -310,15 +319,17 @@ function control_surface_scalar(equil, modes, n::Int; mtheta::Int=180, nphi::Int
         ν = equil.rzphi_nu((psi_b, θ); hint=hint)
         f[i] *= exp(im * n * ν)
     end
-    # Conjugate for the toroidal handedness that makes the field track its source coil; the
-    # condition is the opposite of the legacy Python (verified empirically, see note above).
-    hel < 0 && (f = conj.(f))
 
-    # θ→φ extension: c(θ,φ) = Re[ f(θ) e^{i n φ} ]. The leading − sets the convention that a
-    # positive coil current drives positive (blue) b_n_x directly beneath the coil.
+    # θ→φ extension in the machine angle: c(θ,φ) = -Re[ f(θ) e^{i n hel φ} ]. The reconstruction
+    # tracks the source coil toroidally (the lobe sits at the coil's φ); the leading − is a display
+    # orientation that makes a positive (blue) coil current read as a positive (blue) b_n_x lobe
+    # beneath it. GPEC's outward-normal flux is intrinsically negative there, so this overall sign
+    # is the blue-coil↔blue-surface convention — the spatial structure and magnitude are physical.
+    # It is a constant flip (not helicity-dependent): the normal-projection sign is set by geometry,
+    # while hel only carries the toroidal handedness, already in the exponential.
     c = zeros(Float64, mtheta, nphi)
     for k in 1:nphi
-        ph = exp(im * n * (k - 1) * 2π / nphi)
+        ph = exp(im * n * hel * (k - 1) * 2π / nphi)
         for i in 1:mtheta
             c[i, k] = -real(f[i] * ph)
         end
