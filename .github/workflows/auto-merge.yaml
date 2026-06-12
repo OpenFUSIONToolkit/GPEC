@@ -17,10 +17,10 @@ jobs:
     if: github.event.action == 'labeled' && github.event.label.name == 'auto-merge'
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge (squash)
+      - name: Enable auto-merge (merge commit)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"
+        run: gh pr merge --auto --merge "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"
 
   disable-auto-merge:
     name: Disable auto-merge

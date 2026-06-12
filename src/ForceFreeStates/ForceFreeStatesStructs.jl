@@ -149,7 +149,12 @@ A mutable struct holding internal state variables for stability calculations.
   - `xlmda_out::Bool` - Flag to output eigenvalue data (not yet implemented)
   - `sol_base::Int` - Base index for solution vectors (not yet implemented)
   - `msing::Int` - Number of ideal singular surfaces
+  - `kmsing::Int` - Number of kinetic singular surfaces (det(F̄) near-zeros)
   - `sing::Vector{SingType}` - Vector of ideal singular surface data
+  - `kinsing::Vector{SingType}` - Vector of kinetic singular surface data
+  - `kinsing_scan_psi::Vector{Float64}` - ψ grid used by `find_kinetic_singular_surfaces!` for the cond(F̄) scan (empty unless the finder has run)
+  - `kinsing_scan_cond::Vector{Float64}` - cond(F̄) values on that grid; the finder locates peaks that exceed `kinsing_scan_threshold`
+  - `kinsing_scan_threshold::Float64` - Threshold on cond(F̄) used to accept a peak as a kinetic singular surface
   - `psilim::Float64` - Flux limit for integration
   - `qlim::Float64` - Safety factor at psilim
   - `q1lim::Float64` - Safety factor derivative at psilim
@@ -171,7 +176,12 @@ A mutable struct holding internal state variables for stability calculations.
     xlmda_out::Bool = false
     sol_base::Int = 50
     msing::Int = 0
+    kmsing::Int = 0
     sing::Vector{SingType} = SingType[]
+    kinsing::Vector{SingType} = SingType[]
+    kinsing_scan_psi::Vector{Float64} = Float64[]
+    kinsing_scan_cond::Vector{Float64} = Float64[]
+    kinsing_scan_threshold::Float64 = 0.0
     psilim::Float64 = 0.0
     psilow::Float64 = 0.0   # lower integration bound; raised above the axis by sing_min! when qlow > qmin (RDCON gal)
     qlim::Float64 = 0.0
@@ -201,7 +211,6 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `ode_flag::Bool` - Enable ODE integration diagnostics
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mer_flag::Bool` - Enable Mercier stability criterion
-  - `fft_flag::Bool` - Enable Fourier transform analysis
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
@@ -249,7 +258,6 @@ A mutable struct containing control parameters for stability analysis, set by th
     ode_flag::Bool = false
     vac_flag::Bool = false
     mer_flag::Bool = false
-    fft_flag::Bool = false
     mthvac::Int = 480
     nzvac::Int = 1
     sing_start::Int = 0
@@ -323,8 +331,13 @@ end
     amats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     bmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     cmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    dmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
-    emats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    # `dmats_prim`, `emats_prim` are the pre-Schur-reduction geometric forms
+    # (D = χ₁·(g23 + q·g33·m/n); E = (-χ₁/n)·(q'·χ₁·g33 - 2π·i·χ₁·g31·singfac + jθ·I)).
+    # The `_prim` suffix follows `fmats_prim`. Downstream kinetic FKG Schur complements
+    # consume these primitive forms; the alternate singular-layer path that would need
+    # kinetic-added overwrites of D and E is not implemented here (see Kinetic.jl).
+    dmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
+    emats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     hmats::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_lower::S = _empty_series_interp_complex(numpert_total^2, itp_opts)
     fmats_prim::S = _empty_series_interp_complex(numpert_total^2, itp_opts)  # primitive F before Schur complement (for kinetic)
@@ -390,9 +403,12 @@ Populated in `Free.jl`.
   - `numpoints::Int` - Total number of points in the vacuum calculation (mthvac * nzvac)
   - `numpert_total::Int` - Total number of modes (mpert × npert)
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput) - only needed for GPEC functionality currently
-  - `wt::Array{ComplexF64, 2}` - Toroidal vacuum response matrix (numpert_total × numpert_total)
-  - `wt0::Array{ComplexF64, 2}` - Reference toroidal vacuum matrix (numpert_total × numpert_total)
-  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total)
+  - `wt::Array{ComplexF64, 2}` - Free-boundary eigenvector matrix after diagonalising W (numpert_total × numpert_total). Columns are the eigenmodes sorted most-unstable first. **ξ-space.**
+  - `wt0::Array{ComplexF64, 2}` - Free-boundary total-energy matrix W = wp + wv before diagonalisation (numpert_total × numpert_total). **ξ-space.**
+  - `wp::Array{ComplexF64, 2}` - Plasma energy matrix (numpert_total × numpert_total). **ξ-space.**
+  - `wv::Array{ComplexF64, 2}` - Vacuum energy matrix (numpert_total × numpert_total). **ξ-space.**
+  - `pn_wt0, pn_wp, pn_wv::Array{ComplexF64,2}` - Power-normalized flux (Φ-space) counterparts of `wt0`, `wp`, `wv` at the plasma edge (see PowerNorm.jl). Jacobian-invariant up to the M†·W·M transform.
+  - `pn_wt::Array{ComplexF64,2}` - Φ-space eigenvector matrix of `pn_wt0` (columns sorted most-unstable first, phase-normalized so each column's largest-magnitude entry is real-positive).
   - `ep::Vector{ComplexF64}` - Plasma eigenvalues
   - `ev::Vector{ComplexF64}` - Vacuum eigenvalues
   - `et::Vector{ComplexF64}` - Total eigenvalues of plasma + vacuum
@@ -410,12 +426,25 @@ Populated in `Free.jl`.
 
     wt::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wt0::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
+    wp::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     wv::Array{ComplexF64,2} = Array{ComplexF64}(undef, numpert_total, numpert_total)
     ep::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     ev::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     et::Vector{ComplexF64} = Vector{ComplexF64}(undef, numpert_total)
     n_tor_idx::Vector{Int} = zeros(Int, numpert_total)
     vacuum_eigenvalue::Float64 = NaN
+
+    # Power-normalized flux eigenvalues (Jacobian-invariant)
+    pn_et::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    pn_ep::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+    pn_ev::Vector{ComplexF64} = fill(complex(NaN), numpert_total)
+
+    # Power-normalized flux matrices at the plasma edge (Jacobian-invariant).
+    pn_wt0::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    pn_wp::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    pn_wv::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+    pn_wt::Array{ComplexF64,2} = fill(complex(NaN), numpert_total, numpert_total)
+
     grri::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     grre::Array{Float64,2} = Array{Float64}(undef, 2 * numpoints, 2 * numpert_total)
     plasma_pts::Array{Float64,2} = Array{Float64}(undef, numpoints, 3)
@@ -428,14 +457,18 @@ VacuumData(numpoints::Int, numpert_total::Int, mthvac::Int) = VacuumData(; numpo
 EdgeScanState
 
 Holds the state and results for the edge dW stability scan over ψ ∈ [psiedge, psilim].
-Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `edge_scan/`.
+Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `EdgeScan/`
+(power-norm values) and `EdgeScan/XiNorm/` (ξ-space values, for benchmarking).
 
 ## Fields
 
   - `wvmat` - Precomputed wv matrix spline (raw, no singfac); singfac applied analytically in `free_compute_total`.
   - `wv_hint::Base.RefValue{Int}` - Search hint for wvmat spline (different grid from equilibrium profiles).
+  - `sqrtamat_spline` - Precomputed √A convolution matrix + surface area spline for power-norm eigenvalues.
+  - `sqrtamat_hint::Base.RefValue{Int}` - Search hint for sqrtamat spline.
   - `psi, q` - ψ and q values at each edge scan step.
-  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - Energy components at each step (NaN for failed steps).
+  - `total_eigenvalue, plasma_energy, vacuum_energy, vacuum_eigenvalue` - ξ-space energy components at each step (NaN for failed steps). Kept for Fortran benchmarking.
+  - `pn_total_eigenvalue, pn_plasma_energy, pn_vacuum_energy, pn_vacuum_eigenvalue` - Power-normalized flux (Φ-space) energies (Jacobian-invariant; NaN for failed/singular steps). These are the values written to `EdgeScan/` by default.
 """
 @kwdef mutable struct EdgeScanState
     numpert_total::Int
@@ -445,13 +478,23 @@ Initialized and populated by `findmax_dW_edge!`; results written to HDF5 under `
     wvmat::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2)
     wv_hint::Base.RefValue{Int} = Ref(1)
 
-    # Scan results (written to HDF5 under edge_scan/; NaN where free_compute_total raised SingularException)
+    # Power-norm sqrtamat + jarea spline (mpert^2 + 1 series: flattened sqrtamat then jarea)
+    sqrtamat_spline::CubicSeriesInterpolant{Float64,ComplexF64} = _empty_series_interp_complex(numpert_total^2 + 1)
+    sqrtamat_hint::Base.RefValue{Int} = Ref(1)
+
+    # Scan results (written to HDF5 under EdgeScan/; NaN where free_compute_total raised SingularException)
     psi::Vector{Float64} = Vector{Float64}(undef, N_edge)
     q::Vector{Float64} = Vector{Float64}(undef, N_edge)
     total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
     vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
+
+    # Power-normalized flux eigenvalues (Jacobian-invariant)
+    pn_total_eigenvalue::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    pn_plasma_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    pn_vacuum_energy::Vector{ComplexF64} = fill(complex(NaN), N_edge)
+    pn_vacuum_eigenvalue::Vector{Float64} = fill(NaN, N_edge)
 end
 
 EdgeScanState(numpert_total::Int, N_edge::Int) = EdgeScanState(; numpert_total, N_edge)

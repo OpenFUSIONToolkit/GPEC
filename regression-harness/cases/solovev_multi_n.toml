@@ -3,53 +3,53 @@ name = "solovev_multi_n"
 description = "Solovev analytical equilibrium, multi-n, ideal stability"
 example_dir = "examples/Solovev_ideal_example_multi_n"
 
-# Energies — leading eigenvalues
+# Energies — leading eigenvalues at the final truncation (psilim). eigenmode_* are now power-normalized (Φ-space, Jacobian-invariant); ξ-space counterparts live under FreeBoundaryStability/XiNorm/ and are not tracked.
 [quantities.et_real]
-h5path = "vacuum/et"
+h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "real_first"
-label = "total energy Re(et[1])"
+label = "Power Normalized total energy Re(et[1])"
 noise_threshold = 1e-10
 order = 10
 
 [quantities.et_imag]
-h5path = "vacuum/et"
+h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "imag_first"
-label = "total energy Im(et[1])"
+label = "Power Normalized total energy Im(et[1])"
 noise_threshold = 1e-10
 order = 11
 
 [quantities.vacuum_eigenvalue]
-h5path = "vacuum/vacuum_eigenvalue"
+h5path = "FreeBoundaryStability/XiNorm/vacuum_eigenvalue"
 type = "real_scalar"
 extract = "value"
-label = "vacuum matrix min eigenvalue"
+label = "vacuum matrix min eigenvalue (XiNorm)"
 noise_threshold = 1e-10
 order = 14
 
 # Energies — full eigenvalue arrays
 [quantities.ep_all]
-h5path = "vacuum/ep"
+h5path = "FreeBoundaryStability/eigenmode_plasma_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "plasma energy (all)"
+label = "Power Normalized plasma energy (all)"
 noise_threshold = 1e-10
 order = 20
 
 [quantities.ev_all]
-h5path = "vacuum/ev"
+h5path = "FreeBoundaryStability/eigenmode_vacuum_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "vacuum energy (all)"
+label = "Power Normalized vacuum energy (all)"
 noise_threshold = 1e-10
 order = 21
 
 [quantities.et_all]
-h5path = "vacuum/et"
+h5path = "FreeBoundaryStability/eigenmode_energies"
 type = "complex_vector"
 extract = "all_complex"
-label = "total energy (all)"
+label = "Power Normalized total energy (all)"
 noise_threshold = 1e-10
 order = 22
 

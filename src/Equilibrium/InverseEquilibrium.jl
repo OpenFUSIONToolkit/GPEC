@@ -175,6 +175,11 @@ function equilibrium_solver(input::InverseRunInput)
             mpsi = 128
         end
         sq_xs = psilow .+ (psihigh - psilow) .* (sin.(range(0.0, 1.0; length=mpsi+1) .* (π/2))) .^ 2
+    elseif grid_type == "pow1"
+        if mpsi == 0
+            mpsi = 128
+        end
+        sq_xs = [psilow + (psihigh - psilow) * (3(i / mpsi) - (i / mpsi)^3) / 2 for i in 0:mpsi]
     else
         error("Unsupported grid_type: $grid_type")
     end
@@ -386,10 +391,14 @@ function equilibrium_solver(input::InverseRunInput)
         sq_fs[:, 4]   # q values
     )
 
+    geometry = compute_geometry_profiles(rzphi_xs, rzphi_ys,
+        rzphi_rsquared, rzphi_offset, rzphi_jac, ro)
+
     return PlasmaEquilibrium(
         input.config,
         EquilibriumParameters(),
         profiles,
+        geometry,
         rzphi_xs, rzphi_ys,
         rzphi_rsquared, rzphi_offset, rzphi_nu, rzphi_jac,
         eqfun_B, eqfun_metric1, eqfun_metric2,
