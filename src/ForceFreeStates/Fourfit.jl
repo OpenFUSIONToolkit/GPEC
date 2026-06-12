@@ -44,7 +44,10 @@ The metric coefficients stored in `metric.fs` include:
 ### Arguments
 
   - `mband::Int`: Number of Fourier modes to retain in the metric representation.
-  - `fft_flag::Bool`: If `true`, enables use of Fourier fitting for storing metric coefficients.
+  - `fft_flag::Bool`: Poloidal Fourier method for the metric coefficients. `false` (default in
+    `ForceFreeStatesControl`, matching Fortran) uses an alias-free periodic-spline quadrature, so
+    Δ′ is essentially independent of `mtheta`. `true` uses a bare FFT, which aliases the
+    non-band-limited metric and makes Δ′ converge only as `mtheta` grows.
 
 ### Returns
 
@@ -121,8 +124,8 @@ function make_metric(equil::Equilibrium.PlasmaEquilibrium; mband::Int, fft_flag:
         end
     end
 
-    # --- Compute Fourier coefficients (no spline overhead since we only access at grid points) ---
-    metric.fourier_coeffs = Utilities.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband)
+    # --- Compute Fourier coefficients of the metric (FFT or alias-free spline quadrature) ---
+    metric.fourier_coeffs = Utilities.FourierCoefficients(metric.xs, metric.ys, metric.fs, mband; fft_flag=fft_flag)
     return metric
 end
 

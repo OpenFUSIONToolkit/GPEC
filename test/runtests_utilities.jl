@@ -30,6 +30,41 @@
         @test out[3] == c2  # Mode 2 is at index 3 (0-indexed mode)
     end
 
+    @testset "FourierCoefficients spline quadrature (fft_flag=false)" begin
+        @info "Testing alias-free spline-quadrature Fourier path (port of Fortran fspline_fit_1)"
+        U = GeneralizedPerturbedEquilibrium.Utilities
+
+        # Closed θ grid [0, 2π] with ntheta = N+1 points (last duplicates θ=0), as make_metric supplies.
+        Nlo = 16
+        ys = collect(range(0.0, 2π; length=Nlo + 1))
+
+        # (a) Band-limited f = 1.7 + 0.4 sin(2θ) + cos(3θ): spline recovers c0=1.7, c2=-0.2i, c3=0.5.
+        fb = reshape(1.7 .+ 0.4 .* sin.(2 .* ys) .+ cos.(3 .* ys), 1, Nlo + 1, 1)
+        fcb = U.FourierCoefficients([0.0], ys, fb, 5; fft_flag=false)
+        @test isapprox(real(U.get_complex_coeff(fcb, 1, 0, 1)), 1.7; atol=1e-3)
+        @test isapprox(U.get_complex_coeff(fcb, 1, 2, 1), -0.2im; atol=2e-3)
+        @test isapprox(U.get_complex_coeff(fcb, 1, 3, 1), 0.5 + 0im; atol=2e-3)
+
+        # (b) Non-band-limited f = 1/(a - cosθ) has analytic c_m = r^m / sqrt(a^2-1),
+        #     r = a - sqrt(a^2-1). The spline is alias-free; the bare FFT aliases badly at coarse N.
+        a = 1.2
+        r = a - sqrt(a^2 - 1); s = 1 / sqrt(a^2 - 1)
+        fnb = reshape(1.0 ./ (a .- cos.(ys)), 1, Nlo + 1, 1)
+        fc_spl = U.FourierCoefficients([0.0], ys, fnb, 6; fft_flag=false)
+        fc_fft = U.FourierCoefficients([0.0], ys, fnb, 6; fft_flag=true)
+        spline_err = maximum(abs(real(U.get_complex_coeff(fc_spl, 1, m, 1)) - s * r^m) for m in 0:6)
+        fft_err = maximum(abs(real(U.get_complex_coeff(fc_fft, 1, m, 1)) - s * r^m) for m in 0:6)
+        @test spline_err < 3e-3            # accurate even at N=16
+        @test spline_err < fft_err / 20    # and dramatically better than the aliased FFT
+
+        # (c) Convergence: refining the grid drives the spline error toward zero.
+        ys2 = collect(range(0.0, 2π; length=64 + 1))
+        fnb2 = reshape(1.0 ./ (a .- cos.(ys2)), 1, 65, 1)
+        fc_spl2 = U.FourierCoefficients([0.0], ys2, fnb2, 6; fft_flag=false)
+        spline_err2 = maximum(abs(real(U.get_complex_coeff(fc_spl2, 1, m, 1)) - s * r^m) for m in 0:6)
+        @test spline_err2 < 1e-5
+    end
+
     @testset "FourierTransforms" begin
         @info "Testing fourier_transform! and fourier_inverse_transform! from Utilities module"
         using GeneralizedPerturbedEquilibrium.Utilities: fourier_transform!, fourier_inverse_transform!
