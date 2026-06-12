@@ -674,22 +674,23 @@ function scan_delta_prime_map(
 end
 
 """
-    critical_ballooning_alpha(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
+    ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
 
-First infinite-n ballooning stability boundary at one flux surface: holding the
-equilibrium magnetic shear fixed (`corr_qprime = 0`), find the critical pressure
-gradient `α` at which the marginal ballooning Δ' first crosses zero as `α` increases
-from zero. `α` is linear in `dp/dψ`, so the search is over a scaling of the reference
-gradient and the boundary maps directly to `α_crit = α_ref * scale_crit`.
+Locate every genuine marginal-stability crossing of the ballooning Δ' along the
+pressure-gradient scaling `α/α_exp ∈ [0, max_alpha_scale]` at fixed magnetic shear.
 
-The `α = 0` (zero pressure gradient) point is ballooning stable; its Δ' sign defines
-the stable side, and the first scaling at which Δ' flips away from it is the boundary.
+Δ' changes sign at marginal points (zeros) but also at its poles (y → 0 in the matching
+ratio), which are not stability boundaries; between a pole pair the sign of Δ' is
+inverted relative to the actual stability. Every sign change found by the `n_scan`-point
+scan is therefore bisected to `tol` and classified by |Δ'| at the converged bracket:
+small (below |Δ'(α=0)|) means a genuine zero, diverging means a pole. Logical stability
+flips only at genuine zeros.
 
-Returns `(alpha_crit, alpha_scale_crit, found)`. When no crossing exists within
-`max_alpha_scale` (always stable, or second-stability access) `alpha_crit = NaN` and
-`found = false`.
+Returns `(scales, alphas, directions, reference)` where `directions[k] = +1` for a
+stable→unstable crossing and `-1` for unstable→stable, and `alphas = alpha_ref * scales`.
+Surfaces that never cross return empty vectors.
 """
-function critical_ballooning_alpha(
+function ballooning_alpha_crossings(
     psi_idx::Int,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
@@ -708,41 +709,67 @@ function critical_ballooning_alpha(
         theta_k=theta_k
     ).delta_prime
 
-    stable_sign = sign(delta_at(0.0))
-    if stable_sign == 0.0
-        return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
+    scales = Float64[]
+    directions = Int[]
+    d0 = delta_at(0.0)
+    stable_sign = sign(d0)
+    if stable_sign == 0.0 || !isfinite(d0)
+        return (scales=scales, alphas=Float64[], directions=directions, reference=ref)
     end
+    pole_mag = abs(d0)
 
-    # Scan α upward and bracket the first scaling where Δ' leaves the stable side.
+    on_stable_sign(d) = isfinite(d) && sign(d) == stable_sign
+
+    is_stable = true        # logical stability; flips only at genuine zeros
+    prev_class = true       # sign class of the previous sample; flips at zeros AND poles
     prev_scale = 0.0
-    lo = NaN
-    hi = NaN
     for k in 1:n_scan
         scale = max_alpha_scale * k / n_scan
-        d = delta_at(scale)
-        if isfinite(d) && sign(d) != stable_sign
+        cur_class = on_stable_sign(delta_at(scale))
+        if cur_class != prev_class
             lo = prev_scale
             hi = scale
-            break
+            while (hi - lo) > tol
+                mid = 0.5 * (lo + hi)
+                on_stable_sign(delta_at(mid)) == prev_class ? (lo = mid) : (hi = mid)
+            end
+            d_chk = delta_at(0.5 * (lo + hi))
+            if isfinite(d_chk) && abs(d_chk) < pole_mag
+                push!(scales, 0.5 * (lo + hi))
+                push!(directions, is_stable ? +1 : -1)
+                is_stable = !is_stable
+            end
         end
+        prev_class = cur_class
         prev_scale = scale
     end
 
-    isnan(hi) && return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
+    return (scales=scales, alphas=ref.alpha_ref .* scales, directions=directions, reference=ref)
+end
 
-    # Bisect the bracket to the requested tolerance.
-    while (hi - lo) > tol
-        mid = 0.5 * (lo + hi)
-        d = delta_at(mid)
-        if !isfinite(d) || sign(d) == stable_sign
-            lo = mid
-        else
-            hi = mid
-        end
-    end
-    scale_crit = 0.5 * (lo + hi)
+"""
+    critical_ballooning_alpha(psi_idx, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24, tol=1e-3)
 
-    return (alpha_crit=ref.alpha_ref * scale_crit, alpha_scale_crit=scale_crit, found=true)
+First infinite-n ballooning stability boundary at one flux surface: the lowest genuine
+stable→unstable Δ' zero from [`ballooning_alpha_crossings`](@ref). `α` is linear in
+`dp/dψ`, so the boundary maps directly to `α_crit = α_ref * scale_crit`.
+
+Returns `(alpha_crit, alpha_scale_crit, found)`. When no crossing exists within
+`max_alpha_scale` (always stable, or second-stability access) `alpha_crit = NaN` and
+`found = false`.
+"""
+function critical_ballooning_alpha(
+    psi_idx::Int,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    max_alpha_scale::Float64=8.0,
+    n_scan::Int=24,
+    tol::Float64=1e-3
+)
+    cr = ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan, tol=tol)
+    k1 = findfirst(==(1), cr.directions)
+    isnothing(k1) && return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
+    return (alpha_crit=cr.alphas[k1], alpha_scale_crit=cr.scales[k1], found=true)
 end
 
 """
@@ -783,61 +810,49 @@ function ballooning_alpha_boundary(
 end
 
 """
-    second_critical_ballooning_alpha(psi_idx, plasma_eq, alpha_scale_crit1; max_alpha_scale=8.0, n_scan=20, tol=1e-3)
+    second_critical_ballooning_alpha(psi_idx, plasma_eq, alpha_scale_crit1; max_alpha_scale=8.0, n_scan=24, tol=1e-3)
 
-Second (upper) ballooning stability boundary at one flux surface via bisection. Starting
-above the first crossing at `alpha_scale_crit1` (as returned by [`critical_ballooning_alpha`](@ref)),
-scans upward to find where Δ' returns to the stable side. Returns the physical critical α,
-or `NaN` if no second crossing exists within `max_alpha_scale`.
+Second (upper) ballooning stability boundary at one flux surface: the first genuine
+unstable→stable Δ' zero above `alpha_scale_crit1` (as returned by
+[`critical_ballooning_alpha`](@ref)), from [`ballooning_alpha_crossings`](@ref).
+Returns the physical critical α, or `NaN` if no such crossing exists within
+`max_alpha_scale`.
 """
 function second_critical_ballooning_alpha(
     psi_idx::Int,
     plasma_eq::Equilibrium.PlasmaEquilibrium,
     alpha_scale_crit1::Float64;
     max_alpha_scale::Float64=8.0,
-    n_scan::Int=20,
+    n_scan::Int=24,
     tol::Float64=1e-3
 )
     alpha_scale_crit1 >= max_alpha_scale && return NaN
-    ref = salpha_reference(psi_idx, plasma_eq)
-    delta_at(scale) = ballooning_delta_prime(
-        psi_idx, plasma_eq; corr_qprime=0.0, corr_pprime=ref.pprime_norm_ref * (scale - 1.0)
-    ).delta_prime
-    stable_sign = sign(delta_at(0.0))
-    stable_sign == 0 && return NaN
-    lo2 = NaN; hi2 = NaN
-    prev_scale = alpha_scale_crit1
-    for k in 1:n_scan
-        scale = alpha_scale_crit1 + (max_alpha_scale - alpha_scale_crit1) * k / n_scan
-        d = delta_at(scale)
-        if isfinite(d) && sign(d) == stable_sign
-            lo2 = prev_scale; hi2 = scale; break
-        end
-        prev_scale = scale
-    end
-    isnan(hi2) && return NaN
-    while (hi2 - lo2) > tol
-        mid = 0.5 * (lo2 + hi2)
-        d = delta_at(mid)
-        (!isfinite(d) || sign(d) != stable_sign) ? (lo2 = mid) : (hi2 = mid)
-    end
-    return ref.alpha_ref * 0.5 * (lo2 + hi2)
+    cr = ballooning_alpha_crossings(psi_idx, plasma_eq; max_alpha_scale=max_alpha_scale, n_scan=n_scan, tol=tol)
+    k2 = findfirst(k -> cr.directions[k] == -1 && cr.scales[k] > alpha_scale_crit1, eachindex(cr.directions))
+    return isnothing(k2) ? NaN : cr.alphas[k2]
 end
 
 """
-    ballooning_alpha_boundaries(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0)
+    ballooning_alpha_boundaries(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_scan=24)
 
 Profile driver returning the experimental pressure gradient `alpha`, the first stability
 boundary `alpha_critical1`, and the second (upper) stability boundary `alpha_critical2`
-versus normalized flux `psi`. Calls [`critical_ballooning_alpha`](@ref) and
-[`second_critical_ballooning_alpha`](@ref) at each surface. Arrays contain `NaN` where
-no boundary exists.
+versus normalized flux `psi`. At each surface [`ballooning_alpha_crossings`](@ref)
+enumerates the genuine Δ' zeros; `alpha_critical1` is the lowest stable→unstable
+crossing and `alpha_critical2` the first unstable→stable crossing above it (the top of
+the same unstable band, even when further bands exist at higher α). Arrays contain
+`NaN` where no boundary exists.
+
+`n_scan` sets the coarse-scan resolution of the crossing search. Increase it when Δ'
+poles create narrow false-sign windows that a coarse scan can step into, which shows up
+as isolated outliers on otherwise smooth boundary curves.
 """
 function ballooning_alpha_boundaries(
     ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
     theta_k::Float64=0.0,
-    max_alpha_scale::Float64=8.0
+    max_alpha_scale::Float64=8.0,
+    n_scan::Int=24
 )
     xs = plasma_eq.profiles.xs
     npsi = length(xs)
@@ -849,13 +864,13 @@ function ballooning_alpha_boundaries(
     for i in 1:npsi
         xs[i] > 1.0 && continue
         try
-            alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
-            r1 = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale)
-            r1.found || continue
-            alpha_critical1[i] = r1.alpha_crit
-            alpha_critical2[i] = second_critical_ballooning_alpha(
-                i, plasma_eq, r1.alpha_scale_crit; max_alpha_scale=max_alpha_scale
-            )
+            cr = ballooning_alpha_crossings(i, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan)
+            alpha[i] = cr.reference.alpha_ref
+            k1 = findfirst(==(1), cr.directions)
+            isnothing(k1) && continue
+            alpha_critical1[i] = cr.alphas[k1]
+            k2 = findnext(==(-1), cr.directions, k1 + 1)
+            isnothing(k2) || (alpha_critical2[i] = cr.alphas[k2])
         catch err
             if ctrl.verbose
                 @warn "ballooning alpha boundaries failed" psi_idx=i exception=err
@@ -864,6 +879,50 @@ function ballooning_alpha_boundaries(
     end
 
     return (psi=psi, alpha=alpha, alpha_critical1=alpha_critical1, alpha_critical2=alpha_critical2)
+end
+
+"""
+    ballooning_delta_prime_map(ctrl, plasma_eq; theta_k=0.0, max_alpha_scale=8.0, n_alpha=61, max_surfaces=40)
+
+Map the ballooning Δ' over the (ψ_N, α) plane at fixed magnetic shear: at each flux
+surface, scan the pressure-gradient scaling from 0 to `max_alpha_scale` times the
+experimental α. The flux grid is thinned to at most `max_surfaces` surfaces to bound
+the cost (each point is one ballooning ODE solve).
+
+Returns a NamedTuple `(psi, alpha_scales, alpha_ref, delta_prime)` where `delta_prime`
+is `[n_surf × n_alpha]` with `NaN` on failed surfaces; physical `α = alpha_ref * scale`.
+"""
+function ballooning_delta_prime_map(
+    ctrl::ForceFreeStatesControl,
+    plasma_eq::Equilibrium.PlasmaEquilibrium;
+    theta_k::Float64=0.0,
+    max_alpha_scale::Float64=8.0,
+    n_alpha::Int=61,
+    max_surfaces::Int=40
+)
+    xs = plasma_eq.profiles.xs
+    idx_all = [i for i in eachindex(xs) if xs[i] <= 1.0]
+    stride = max(1, length(idx_all) ÷ max_surfaces)
+    idx = idx_all[1:stride:end]
+
+    alpha_scales = collect(range(0.0, max_alpha_scale; length=n_alpha))
+    psi = Float64[xs[i] for i in idx]
+    alpha_ref = fill(NaN, length(idx))
+    delta_prime = fill(NaN, length(idx), n_alpha)
+
+    for (k, i) in enumerate(idx)
+        try
+            res = scan_delta_prime_map(i, plasma_eq; ctrl=ctrl, theta_k=theta_k, s_scales=[1.0], alpha_scales=alpha_scales)
+            alpha_ref[k] = res.reference.alpha_ref
+            delta_prime[k, :] .= vec(res.delta_prime)
+        catch err
+            if ctrl.verbose
+                @warn "ballooning delta-prime map failed" psi_idx=i exception=err
+            end
+        end
+    end
+
+    return (psi=psi, alpha_scales=alpha_scales, alpha_ref=alpha_ref, delta_prime=delta_prime)
 end
 
 # ======================================================================

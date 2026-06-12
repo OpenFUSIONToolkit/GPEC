@@ -10,6 +10,7 @@ using HDF5
 using LaTeXStrings
 using Plots
 using Printf
+using Statistics: quantile
 
 """
     plot_mode_displacement(h5path; modes=1:5, save_path=nothing)
@@ -608,6 +609,73 @@ function plot_ballooning_alpha_boundaries(bnd; save_path=nothing, psi_min=0.0)
     plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
     plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, marker=:circle, label="1st stability boundary")
     plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, marker=:circle, label="2nd stability boundary")
+    isnothing(save_path) || savefig(p, save_path)
+    return p
+end
+
+"""
+    plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
+
+Same diagram drawn over a heatmap of the signed Δ' from
+`ForceFreeStates.ballooning_delta_prime_map`: each surface's Δ'(α) is oriented by the
+sign of its α=0 (stable) value so that positive is stable everywhere, regridded from
+its native physical α = α_ref*scale onto a shared uniform α axis, and shown with the
+Δ'=0 contour, the extracted boundaries, and the scan cap `max_alpha_scale*α_exp`.
+Color limits are set to the 90th percentile of |Δ'| so the pole regions inside the
+unstable band do not wash out the marginal structure.
+"""
+function plot_ballooning_alpha_boundaries(bnd, dpmap; save_path=nothing, psi_min=0.0)
+    psi = dpmap.psi
+    scales = dpmap.alpha_scales
+    alpha_ref = dpmap.alpha_ref
+    signed = dpmap.delta_prime .* sign.(dpmap.delta_prime[:, 1])
+
+    finite_aref = filter(isfinite, alpha_ref)
+    isempty(finite_aref) && error("delta-prime map contains no valid surfaces")
+    alpha_axis = collect(range(0.0, maximum(finite_aref) * scales[end]; length=200))
+    z = fill(NaN, length(alpha_axis), length(psi))
+    for i in eachindex(psi)
+        (isfinite(alpha_ref[i]) && alpha_ref[i] > 0.0) || continue
+        a_surf = alpha_ref[i] .* scales
+        for (j, a) in enumerate(alpha_axis)
+            a > a_surf[end] && break
+            k = min(searchsortedlast(a_surf, a), length(a_surf) - 1)
+            k < 1 && continue
+            t = (a - a_surf[k]) / (a_surf[k+1] - a_surf[k])
+            z[j, i] = (1 - t) * signed[i, k] + t * signed[i, k+1]
+        end
+    end
+
+    # Color limits track the unstable-side magnitudes; deep stable values and pole
+    # regions clamp at the ends instead of washing out the marginal band.
+    finite_z = abs.(filter(isfinite, vec(z)))
+    finite_neg = abs.(filter(x -> isfinite(x) && x < 0.0, vec(z)))
+    lim = isempty(finite_neg) ? (isempty(finite_z) ? 1.0 : quantile(finite_z, 0.9)) : quantile(finite_neg, 0.95)
+    lim = max(lim, eps(Float64))
+
+    p = heatmap(
+        psi,
+        alpha_axis,
+        z;
+        c=cgrad(:RdBu),
+        clims=(-lim, lim),
+        # Leading newline offsets the rotated title clear of the colorbar tick labels (GR quirk)
+        colorbar_title="\n" * L"\Delta' \times \mathrm{sign}(\Delta'_{\alpha=0})",
+        xlims=(psi_min, 1),
+        xlabel=L"\psi_N",
+        ylabel=L"\alpha",
+        title="Infinite-n ballooning stability",
+        framestyle=:box,
+        legend=:topleft,
+        left_margin=10Plots.mm,
+        bottom_margin=5Plots.mm,
+        right_margin=15Plots.mm
+    )
+    contour!(p, psi, alpha_axis, z; levels=[0.0], color=:black, linewidth=1, colorbar_entry=false)
+    plot!(p, bnd.psi, bnd.alpha; lw=2, color=:black, label="Experimental gradient")
+    plot!(p, bnd.psi, bnd.alpha_critical1; lw=2, color=:red, linestyle=:dash, label="1st stability boundary")
+    plot!(p, bnd.psi, bnd.alpha_critical2; lw=2, color=:blue, linestyle=:dash, label="2nd stability boundary")
+    plot!(p, psi, scales[end] .* alpha_ref; lw=2, color=:gray, linestyle=:dot, label="scan cap")
     isnothing(save_path) || savefig(p, save_path)
     return p
 end

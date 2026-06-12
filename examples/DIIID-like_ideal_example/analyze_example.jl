@@ -209,9 +209,10 @@ for geqdsk_file in geqdsk_cases
     zero_path = joinpath(@__DIR__, "salpha_zero_contours_$(case_label).png")
     Plots.savefig(p_zero, zero_path)
 
-    # BALOO-style α vs ψ stability boundaries (1st and 2nd)
+    # BALOO-style α vs ψ stability boundaries (1st and 2nd) over the Δ'(ψ, α) map
     bnd = ForceFreeStates.ballooning_alpha_boundaries(ctrl, equil)
-    p_alpha_bnd = Analysis.ForceFreeStates.plot_ballooning_alpha_boundaries(bnd)
+    dpmap = ForceFreeStates.ballooning_delta_prime_map(ctrl, equil)
+    p_alpha_bnd = Analysis.ForceFreeStates.plot_ballooning_alpha_boundaries(bnd, dpmap)
     display(p_alpha_bnd)
     alpha_bnd_path = joinpath(@__DIR__, "alpha_stability_boundary_$(case_label).png")
     Plots.savefig(p_alpha_bnd, alpha_bnd_path)
