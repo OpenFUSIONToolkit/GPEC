@@ -64,11 +64,14 @@ using HDF5
         h5open(joinpath(ex5, "gpec.h5"), "r") do h5
             et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
             # Self-consistent KF→FFS kinetic-MHD eigenvalue with full-strength kinetic
-            # matrices (kinetic_factor=1.0). The Julia kinetic-DCON path is validated
-            # against Fortran kinetic DCON on the DIIID benchmark to <2% on both Re and
-            # Im of et[1] (PR #112). Here the Solovev value is the regression anchor:
-            # Re(et[1]) is a large, well-conditioned eigenvalue (pinned tight); Im(et[1])
-            # is the kinetic damping rate, which is more FP-sensitive (bracketed loosely).
+            # matrices (kinetic_factor=1.0). This Solovev value is physics-validated
+            # against Fortran kinetic DCON on the SAME equilibrium + kinetic profile
+            # (mode band matched to mpert=8): Fortran W_t[1] = 15.619 - 0.660i vs Julia
+            # 15.888 - 0.711i — Re 1.7%, Im 7.6% (issue #227, reproduce with
+            # benchmarks/benchmark_solovev_kinetic_stability.jl). Re(et[1]) is large and
+            # well-conditioned (pinned tight); Im(et[1]) is the kinetic damping rate,
+            # more FP-sensitive (bracketed loosely). The pre-PV `ximag` value (34.176)
+            # was not physical; the PV+residue energy integral gives the correct result.
             @test isfinite(real(et[1]))
             @test isfinite(imag(et[1]))
             @test real(et[1]) ≈ 15.888 rtol = 0.01
