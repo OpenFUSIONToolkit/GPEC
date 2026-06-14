@@ -11,8 +11,8 @@ Single source of truth for the NTV calculation methods. Each entry is a NamedTup
 - `doc`   — one-line description printed in verbose output
 
 The method names/docs and the `Compute.jl` enable list are all derived from this
-tuple, and `Torque.jl` routes on `kind`, so the 18 methods are enumerated in exactly
-one place. To add a method: append an entry here and add the matching `*_flag` field
+tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place. 
+To add a method: append an entry here and add the matching `*_flag` field
 to `KineticForcesControl`.
 """
 const METHOD_REGISTRY = (
