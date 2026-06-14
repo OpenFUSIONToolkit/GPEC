@@ -100,6 +100,15 @@ end
 # ============================================================================
 # Internal State/Working Variables
 # ============================================================================
+
+# Concrete type of the geometric-matrix interpolants built by
+# `ForceFreeStates.build_kinetic_metric_matrices`, derived from a representative
+# `cubic_interp` call so the 7-parameter `CubicSeriesInterpolant{...}` need not be
+# spelled out. Used to concretely type the smats..zmats fields below so the per-ψ
+# `intr.smats(psi)` reads in `Torque.jl` are statically dispatched, not boxed
+# `Any` calls (issue #247).
+const GeomInterp = typeof(cubic_interp(collect(0.0:0.25:1.0), Series(zeros(ComplexF64, 5, 1)); extrap=ExtendExtrap()))
+
 """
     KineticForcesInternal
 
@@ -164,11 +173,11 @@ this struct.
 
     # Raw geometric matrices for kinetic W vector construction
     # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
-    smats::Any = nothing           # CubicSeriesInterpolant, mpert² series over ψ
-    tmats::Any = nothing
-    xmats::Any = nothing
-    ymats::Any = nothing
-    zmats::Any = nothing
+    smats::Union{Nothing,GeomInterp} = nothing   # CubicSeriesInterpolant, mpert² series over ψ
+    tmats::Union{Nothing,GeomInterp} = nothing
+    xmats::Union{Nothing,GeomInterp} = nothing
+    ymats::Union{Nothing,GeomInterp} = nothing
+    zmats::Union{Nothing,GeomInterp} = nothing
 
     # Clebsch displacement vectors for mode-coupled dW contraction
     xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ_ψ, ξ_+, ξ_-]
