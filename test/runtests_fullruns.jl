@@ -81,4 +81,28 @@ using HDF5
         rm(joinpath(ex5, "gpec.h5"); force=true)
         true
     end
+
+    ex6 = joinpath(@__DIR__, "test_data", "regression_solovev_kinetic_nuzero")
+    @info "Running Solovev self-consistent kinetic-MHD example (kinetic_source=calculated, nutype=zero)"
+    @test begin
+        GeneralizedPerturbedEquilibrium.main([ex6])
+        h5open(joinpath(ex6, "gpec.h5"), "r") do h5
+            et = read(h5["FreeBoundaryStability/XiNorm/eigenmode_energies"])
+            # Collisionless (nutype="zero") calculated kinetic-MHD eigenvalue. The collisionless
+            # energy integral runs in real x-space over [0, 72] (Fortran PENTRC convention) with
+            # an analytic principal-value + residue and a regular-part limit on the resonance
+            # poles (issue #281). Re(et[1]) must sit essentially on the harmonic value 15.888
+            # (collisions are a small perturbation to the real energy); Im(et[1]) is the
+            # resonant (Landau ∓iπ) damping rate, smaller in magnitude than the harmonic
+            # -0.711 because the collisional broadening contribution is dropped.
+            @test isfinite(real(et[1]))
+            @test isfinite(imag(et[1]))
+            @test real(et[1]) > 0
+            @test real(et[1]) ≈ 15.885 rtol = 0.01    # ≈ harmonic 15.888 (small-ν limit)
+            @test imag(et[1]) < 0                       # resonant kinetic damping
+            @test imag(et[1]) ≈ -0.482 rtol = 0.10
+        end
+        rm(joinpath(ex6, "gpec.h5"); force=true)
+        true
+    end
 end

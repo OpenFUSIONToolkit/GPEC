@@ -86,6 +86,31 @@ For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
 end
 
 """
+    _energy_numerator_deriv(x::Float64, p::EnergyParams) → ComplexF64
+
+x-derivative dN/dx of `_energy_numerator`, used for the analytic regular-part
+limit of the collisionless integrand at a resonance pole. CGL is excluded — the
+collisionless real-pole path never carries a CGL numerator (CGL has no pole).
+"""
+@inline function _energy_numerator_deriv(x::Float64, p::EnergyParams)::ComplexF64
+    sx = sqrt(x)
+    x15 = x * sx            # x^1.5
+    x25 = x * x15           # x^2.5
+    if p.f0type == "maxwellian"
+        a = p.we + p.wn + p.wt * (x - 1.5)
+        nn = ComplexF64(a * x25)
+        dn = ComplexF64(p.wt * x25 + a * 2.5 * x15)   # d/dx[(…)·x^2.5]
+    elseif p.f0type == "jkp"
+        a = p.we + p.wn + p.wt * 2
+        nn = ComplexF64(a * x25)
+        dn = ComplexF64(a * 2.5 * x15)
+    else
+        error("_energy_numerator_deriv supports maxwellian and jkp")
+    end
+    return p.qt ? dn * (x - 2.5) + nn : dn   # d/dx[N·(x-2.5)] = N′·(x-2.5) + N
+end
+
+"""
     _energy_integrand_real(x::Float64, p::EnergyParams) → ComplexF64
 
 Physical energy integrand in x-space, N(x)·exp(-x)/denom(x), evaluated on the
@@ -152,6 +177,27 @@ end
 const X_ENERGY_MAX = 72.0
 
 """
+    _collisionless_regular_part(xr, p, leff, wb, n, wd) → ComplexF64
+
+Laurent regular part (finite limit at `x → x_res`) of the pole-subtracted
+collisionless integrand `N(x)·exp(-x)/(i·Ω(x)) − R/(x − x_res)`, with
+`Ω(x) = leff·wb·√x + n·(we+wd·x)` and `R = N(x_res)·exp(-x_res)/(i·Ω′)`.
+
+Writing `h(x) = N(x)·exp(-x)`, the limit is
+`[h′(x_res) − h(x_res)·Ω″/(2Ω′)] / (i·Ω′)`, with `h′ = (N′ − N)·exp(-x)`,
+`Ω′ = leff·wb/(2√x) + n·wd`, `Ω″ = −leff·wb/(4·x^{3/2})`.
+"""
+@inline function _collisionless_regular_part(xr::Float64, p::EnergyParams, leff::Float64,
+                                                 wb::Float64, n::Int, wd::Float64)::ComplexF64
+    sx = sqrt(xr)
+    op = leff * wb / (2.0 * sx) + n * wd          # Ω′(x_res)
+    opp = -leff * wb / (4.0 * xr * sx)            # Ω″(x_res)
+    nn = _energy_numerator(xr, p)                 # N(x_res)
+    dn = _energy_numerator_deriv(xr, p)           # N′(x_res)
+    return exp(-xr) * ((dn - nn) - nn * opp / (2.0 * op)) / (im * op)
+end
+
+"""
     _integrate_energy_collisionless(p, leff, wb, n, we, wd, atol, rtol) → ComplexF64
 
 Collisionless (ν ≡ 0) energy integral in **real x-space** over `[0, X_ENERGY_MAX]`,
@@ -160,11 +206,12 @@ pole `x_res ∈ (0, X_ENERGY_MAX)` is removed analytically by principal-value +
 residue (Sokhotski-Plemelj, causal ν→0⁺ branch ∓iπ following sign Ω′), leaving a
 smooth integrand for QuadGK.
 
-The collisionless pole sits on the real axis. In x-space it stays a
-well-conditioned `O(1)` number, so the pole subtraction and its breakpoint behave
-cleanly. The `u = 1-exp(-x)` substitution used for the collisional path
-(`integrate_energy`) compresses tail poles toward `u=1`, where the subtraction is
-numerically unresolvable — hence the dedicated real-space branch here.
+The pole is on the real axis, so the resonance denominator
+`Ω(x) = leff·wb·√x + n·(we+wd·x)` — a difference of `O(10⁴)` terms — rounds to
+exactly `0` over a ~ULP-wide window around the pole, where the physical term is
+`0/0`. There QuadGK is handed the analytic regular-part limit
+(`_collisionless_regular_part`) instead. (The collisional path keeps the
+`u = 1-exp(-x)` substitution, whose off-axis complex pole has none of these issues.)
 """
 function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Float64,
                                              n::Int, we::Float64, wd::Float64,
@@ -182,7 +229,8 @@ function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Flo
         abs(omega_prime) < SINGULAR_EPS && continue
         # Residue of N(x)·exp(-x)/(i·Ω(x)) at x_res, where Ω ≈ Ω′·(x - x_res) near the pole.
         R = _energy_numerator(xr, p) * exp(-xr) / (im * omega_prime)
-        # Causal (ν→0⁺) add-back: ∫₀^xmax R/(x - x_res) dx = R·[log(xmax - x_res) - log(x_res) ∓ iπ].
+        # Causal (ν→0⁺) add-back ∫₀^xmax R/(x - x_res) dx = R·[log(xmax - x_res) - log(x_res) ∓ iπ]:
+        # the ν→0⁺ retarded limit of Fortran's ximag>0 contour (energy.f90); ∓ sign from sign(Ω′).
         pole_contribution += R * (log(X_ENERGY_MAX - xr) - log(xr) - im * π * sign(omega_prime))
         push!(x_poles, xr)
         push!(residues, R)
@@ -196,6 +244,20 @@ function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Flo
         @inbounds for k in 1:npole
             val -= residues[k] / (x - x_poles[k])
         end
+        # Inside a pole's flat-Ω window the physical term is 0/0 → val non-finite. Replace
+        # it with the analytic regular-part limit of the nearest pole (the other poles'
+        # subtractions stay finite and are kept).
+        if !isfinite(val)
+            k = 1
+            @inbounds for j in 2:npole
+                abs(x - x_poles[j]) < abs(x - x_poles[k]) && (k = j)
+            end
+            val = _collisionless_regular_part(x_poles[k], p, leff, wb, n, wd)
+            @inbounds for j in 1:npole
+                j == k && continue
+                val -= residues[j] / (x - x_poles[j])
+            end
+        end
         return val
     end
 
@@ -205,8 +267,9 @@ function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Flo
     end
 
     # Resonance locations as QuadGK breakpoints so the smooth-but-sharp integrand
-    # is resolved near each pole.
-    breaks = unique!(sort!(x_poles))
+    # is resolved near each pole. Sort a copy — `x_poles` must stay aligned with
+    # `residues`, which the integrand pairs by index.
+    breaks = unique(sort(x_poles))
     smooth_val, _ = quadgk(integrand, 0.0, breaks..., X_ENERGY_MAX; atol=atol, rtol=rtol)
     return smooth_val + pole_contribution
 end

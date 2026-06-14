@@ -217,6 +217,24 @@
             @test collisionless ≈ small_nu rtol=1e-3
         end
 
+        @testset "collisionless tail-pole resonance (regression: was NaN)" begin
+            # Resonance deep in the Maxwellian tail (x_res ≈ 56): n·wd·s² + leff·wb·s + n·we = 0
+            # with wb=1e3, wd=5e2, we=-3.5483e4 ⟹ s=√56, x_res≈56. Under the old u-space pole
+            # handling u_res = 1-exp(-56) rounds to 1.0, tripping 0·(-Inf)=NaN. The real-x-space
+            # branch keeps x_res a well-conditioned O(1) number, and the resonance contribution
+            # (∝ exp(-56)) is negligible so the result equals the ν→0⁺ limit (issue #281).
+            args = (0.0, 2.0e3, -3.5483e4, 5.0e2, 1.0e3)
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            @test KF.find_resonance_energies(1.0, 1.0e3, 1, -3.5483e4, 5.0e2)[1] ≈ 56.0 rtol = 1e-2
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(real(collisionless))
+            @test isfinite(imag(collisionless))
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
         @testset "xr > 700 Maxwellian-underflow guard" begin
             # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900 > 700.
             # The pole sits where exp(-x_res) underflows; subtraction trips 0·log(-1) = NaN
