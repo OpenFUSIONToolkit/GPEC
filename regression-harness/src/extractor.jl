@@ -70,12 +70,14 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
 
     elseif spec.extract == "all_real"
         arr = Float64.(real.(raw))
-        json_str = JSON.json(arr)
+        # allownan: SLAYER γ/Q_root are NaN when no dispersion root is found —
+        # a legitimate state to record so a future root appearing flags a diff.
+        json_str = JSON.json(arr; allownan=true)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif spec.extract == "all_complex"
         pairs = [[real(x), imag(x)] for x in raw]
-        json_str = JSON.json(pairs)
+        json_str = JSON.json(pairs; allownan=true)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif spec.extract == "diagonal_complex"
@@ -85,7 +87,7 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
             error("diagonal_complex requires a square 2-D matrix; got size $(size(raw))")
         diag_vec = [raw[i, i] for i in 1:size(raw, 1)]
         pairs = [[real(x), imag(x)] for x in diag_vec]
-        json_str = JSON.json(pairs)
+        json_str = JSON.json(pairs; allownan=true)
         return ExtractedQuantity(name, label, nothing, nothing, json_str, "json_array", threshold)
 
     elseif spec.extract == "checksum"
@@ -98,9 +100,14 @@ function apply_extraction(spec::QuantitySpec, raw)::ExtractedQuantity
     end
 end
 
-"""Compute absolute difference between two JSON-parsed elements (scalars, pairs, or nested arrays)."""
+"""
+Compute absolute difference between two JSON-parsed elements (scalars, pairs, or nested arrays).
+"""
 function _json_element_diff(a, b)::Float64
     if a isa Number && b isa Number
+        # Two NaN values denote the same "no result" state (e.g. SLAYER
+        # Q_root when no dispersion root is found) — treat as identical.
+        (isnan(Float64(a)) && isnan(Float64(b))) && return 0.0
         return abs(Float64(a) - Float64(b))
     elseif a isa Vector && b isa Vector
         return sqrt(sum(_json_element_diff(ai, bi)^2 for (ai, bi) in zip(a, b)))
@@ -109,9 +116,14 @@ function _json_element_diff(a, b)::Float64
     end
 end
 
-"""Compute absolute value/magnitude of a JSON-parsed element."""
+"""
+Compute absolute value/magnitude of a JSON-parsed element.
+"""
 function _json_element_abs(x)::Float64
     if x isa Number
+        # NaN denotes a "no result" state (e.g. SLAYER Q_root with no root);
+        # treat as 0 magnitude so it doesn't poison a vector's reference norm.
+        isnan(Float64(x)) && return 0.0
         return abs(Float64(x))
     elseif x isa Vector
         return sqrt(sum(_json_element_abs(xi)^2 for xi in x))
@@ -162,8 +174,8 @@ function compare_values(q1::NamedTuple, q2::NamedTuple)
         if t1 === nothing || t2 === nothing
             return (NaN, NaN, "N/A")
         end
-        arr1 = JSON.parse(t1)
-        arr2 = JSON.parse(t2)
+        arr1 = JSON.parse(t1; allownan=true)
+        arr2 = JSON.parse(t2; allownan=true)
         if length(arr1) != length(arr2)
             return (NaN, NaN, "CHANGED (length)")
         end
