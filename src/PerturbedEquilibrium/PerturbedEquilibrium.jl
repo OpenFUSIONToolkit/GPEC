@@ -23,6 +23,7 @@ import DelimitedFiles: readdlm
 include("PerturbedEquilibriumStructs.jl")
 include("ResponseMatrices.jl")
 include("FieldReconstruction.jl")
+include("EnergyReconstructionRealSpace.jl")
 include("Response.jl")
 include("SingularCoupling.jl")
 include("Utils.jl")
