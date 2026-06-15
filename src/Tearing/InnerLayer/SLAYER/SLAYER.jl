@@ -29,9 +29,9 @@ import ..InnerLayerModel, ..InnerLayerResponse, ..solve_inner, ..InnerLayerParam
 using ...Utilities.PhysicalConstants
 using ...Utilities.NeoclassicalResistivity
 using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
-    SauterNeoModel, RedlNeoModel,
-    coulomb_log_e, eta_spitzer, trapped_fraction_eps, nu_star_e,
-    eta_neoclassical
+    SpitzerHarmModel, SauterNeoModel, RedlNeoModel,
+    coulomb_log_e, eta_spitzer, tau_ee_spitzer_harm, eta_spitzer_harm,
+    trapped_fraction_eps, nu_star_e, eta_neoclassical
 
 """
     SLAYERModel{S} <: InnerLayerModel
@@ -60,6 +60,6 @@ export SLAYERModel, SLAYERParameters, slayer_parameters
 export r_based_shear
 export riccati_del_s, slayer_layer_thickness, LayerWidths
 export surface_minor_radius, surface_da_dpsi, build_slayer_inputs
-export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
+export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, RedlNeoModel
 
 end # module SLAYER

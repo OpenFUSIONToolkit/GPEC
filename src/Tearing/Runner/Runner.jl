@@ -29,19 +29,19 @@ using HDF5
 
 using ..Utilities
 using ..Utilities: KineticProfiles, kinetic_profiles_from_toml,
-                    kinetic_profiles_from_h5
+    kinetic_profiles_from_h5
 using ..InnerLayer
-using ..InnerLayer: InnerLayerParameters,
-                     SLAYERModel, SLAYERParameters, build_slayer_inputs,
-                     GGJModel, GGJParameters, build_ggj_inputs,
-                     LayerWidths, slayer_layer_thickness
+using ..InnerLayer: InnerLayerParameters, InnerLayerResponse, solve_inner,
+    SLAYERModel, SLAYERParameters, build_slayer_inputs,
+    GGJModel, GGJParameters, build_ggj_inputs,
+    LayerWidths, slayer_layer_thickness
 using ..Dispersion
 using ..Dispersion: SurfaceCoupling, surface_coupling,
-                     MultiSurfaceCoupling, multi_surface_coupling,
-                     ScanResult, brute_force_scan,
-                     AMRResult, amr_scan,
-                     MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
-                     GrowthRateResult, find_growth_rates
+    MultiSurfaceCoupling, multi_surface_coupling,
+    ScanResult, brute_force_scan,
+    AMRResult, amr_scan,
+    MultiBoxAMRResult, multi_box_amr_scan, as_amr_result,
+    GrowthRateResult, find_growth_rates
 
 include("Control.jl")
 include("Result.jl")
@@ -50,7 +50,7 @@ include("HDF5Output.jl")
 
 export SLAYERControl, slayer_control_from_toml, validate
 export SLAYERResult, empty_slayer_result
-export run_slayer, run_slayer_from_inputs
+export run_slayer, run_slayer_from_inputs, ggj_inner_deltas
 export write_slayer_hdf5!
 
 end # module Runner

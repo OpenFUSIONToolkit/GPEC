@@ -38,8 +38,9 @@ export KineticProfiles, kinetic_profiles_from_toml, kinetic_profiles_from_h5
 
 using .NeoclassicalResistivity
 export NeoclassicalResistivity
-export NeoResistivityModel, SpitzerModel, SauterNeoModel, RedlNeoModel
-export coulomb_log_e, eta_spitzer, trapped_fraction, trapped_fraction_eps
+export NeoResistivityModel, SpitzerModel, SpitzerHarmModel, SauterNeoModel, RedlNeoModel
+export coulomb_log_e, eta_spitzer, tau_ee_spitzer_harm, eta_spitzer_harm
+export trapped_fraction, trapped_fraction_eps
 export nu_star_e, eta_neoclassical
 
 end # module Utilities

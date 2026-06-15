@@ -10,9 +10,9 @@
 
     # Load the bundled Solovev example equilibrium once for all tests.
     dir_path = joinpath(dirname(@__DIR__), "examples", "Solovev_ideal_example")
-    inputs   = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
-    eq_cfg   = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
-    equil    = Equilibrium.setup_equilibrium(eq_cfg)
+    inputs = TOML.parsefile(joinpath(dir_path, "gpec.toml"))
+    eq_cfg = Equilibrium.EquilibriumConfig(inputs["Equilibrium"], dir_path)
+    equil = Equilibrium.setup_equilibrium(eq_cfg)
 
     @testset "resist_geometry: returns finite values with expected signs" begin
         # Pick a few interior surfaces; compute q1 from the equilibrium
@@ -27,11 +27,11 @@
             end
             # Geometric averages are positive
             @test rg.avg_bsq_over_dpsisq > 0
-            @test rg.avg_bsq             > 0
+            @test rg.avg_bsq > 0
             # Mass factor M > 0 (denominator in G and K)
             @test rg.M > 0
             # Pressure is positive on this Solovev equilibrium
-            @test rg.p_local  > 0
+            @test rg.p_local > 0
             @test rg.v1_local > 0
         end
     end
@@ -55,8 +55,8 @@
             di_from_mercier = di_psi_spline(psi) / psi
 
             # Both methods compute D_I via different combinations of the
-            # same theta integrals; agreement should be at the spline /
-            # numerical-integration noise floor (~1e-4 relative)
+            # same theta integrals; agreement is set by the spline /
+            # numerical-integration noise floor (relative tolerance 1e-3).
             @test abs(di_from_ggj - di_from_mercier) < 1e-3 * abs(di_from_mercier)
         end
     end
@@ -65,22 +65,22 @@
         # Build a couple of synthetic SingTypes, run the populator, verify
         # restype goes from nothing to ResistGeometry on each.
         dq = deriv_view(equil.profiles.q_spline, 1)
-        s1 = SingType(psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
-                       q=2.0, q1=dq(0.3),
-                       grri=zeros(Float64,0,0), grre=zeros(Float64,0,0),
-                       delta_prime=ComplexF64[],
-                       delta_prime_col=zeros(ComplexF64,0,0),
-                       ua_left=zeros(ComplexF64,0,0,0),
-                       ua_right=zeros(ComplexF64,0,0,0),
-                       psi_ua_left=0.0, psi_ua_right=0.0)
-        s2 = SingType(psifac=0.7, rho=sqrt(0.7), m=[3], n=[1],
-                       q=3.0, q1=dq(0.7),
-                       grri=zeros(Float64,0,0), grre=zeros(Float64,0,0),
-                       delta_prime=ComplexF64[],
-                       delta_prime_col=zeros(ComplexF64,0,0),
-                       ua_left=zeros(ComplexF64,0,0,0),
-                       ua_right=zeros(ComplexF64,0,0,0),
-                       psi_ua_left=0.0, psi_ua_right=0.0)
+        s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
+            q=2.0, q1=dq(0.3),
+            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
+            delta_prime=ComplexF64[],
+            delta_prime_col=zeros(ComplexF64, 0, 0),
+            ua_left=zeros(ComplexF64, 0, 0, 0),
+            ua_right=zeros(ComplexF64, 0, 0, 0),
+            psi_ua_left=0.0, psi_ua_right=0.0)
+        s2 = SingType(; psifac=0.7, rho=sqrt(0.7), m=[3], n=[1],
+            q=3.0, q1=dq(0.7),
+            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
+            delta_prime=ComplexF64[],
+            delta_prime_col=zeros(ComplexF64, 0, 0),
+            ua_left=zeros(ComplexF64, 0, 0, 0),
+            ua_right=zeros(ComplexF64, 0, 0, 0),
+            psi_ua_left=0.0, psi_ua_right=0.0)
 
         @test s1.restype === nothing
         @test s2.restype === nothing
@@ -108,14 +108,14 @@
             omega_i=fill(5.0e3, length(psi_pts)))
 
         dq = deriv_view(equil.profiles.q_spline, 1)
-        s1 = SingType(psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
-                       q=2.0, q1=dq(0.3),
-                       grri=zeros(Float64,0,0), grre=zeros(Float64,0,0),
-                       delta_prime=ComplexF64[],
-                       delta_prime_col=zeros(ComplexF64,0,0),
-                       ua_left=zeros(ComplexF64,0,0,0),
-                       ua_right=zeros(ComplexF64,0,0,0),
-                       psi_ua_left=0.0, psi_ua_right=0.0)
+        s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
+            q=2.0, q1=dq(0.3),
+            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
+            delta_prime=ComplexF64[],
+            delta_prime_col=zeros(ComplexF64, 0, 0),
+            ua_left=zeros(ComplexF64, 0, 0, 0),
+            ua_right=zeros(ComplexF64, 0, 0, 0),
+            psi_ua_left=0.0, psi_ua_right=0.0)
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
 
@@ -150,14 +150,14 @@
             n_e=fill(5.0e19, n), T_e=fill(1000.0, n), T_i=fill(1000.0, n),
             omega=fill(0.0, n), omega_e=fill(1.0e4, n), omega_i=fill(5.0e3, n))
 
-        s_unpop = SingType(psifac=0.5, rho=sqrt(0.5), m=[2], n=[1],
-                            q=2.0, q1=1.0,
-                            grri=zeros(Float64,0,0), grre=zeros(Float64,0,0),
-                            delta_prime=ComplexF64[],
-                            delta_prime_col=zeros(ComplexF64,0,0),
-                            ua_left=zeros(ComplexF64,0,0,0),
-                            ua_right=zeros(ComplexF64,0,0,0),
-                            psi_ua_left=0.0, psi_ua_right=0.0)
+        s_unpop = SingType(; psifac=0.5, rho=sqrt(0.5), m=[2], n=[1],
+            q=2.0, q1=1.0,
+            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
+            delta_prime=ComplexF64[],
+            delta_prime_col=zeros(ComplexF64, 0, 0),
+            ua_left=zeros(ComplexF64, 0, 0, 0),
+            ua_right=zeros(ComplexF64, 0, 0, 0),
+            psi_ua_left=0.0, psi_ua_right=0.0)
         @test s_unpop.restype === nothing
         @test_throws ArgumentError build_ggj_inputs(equil, [s_unpop], profiles)
     end
@@ -173,14 +173,14 @@
             omega_i=fill(0.0, length(psi_pts)))
 
         dq = deriv_view(equil.profiles.q_spline, 1)
-        s1 = SingType(psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
-                       q=2.0, q1=dq(0.3),
-                       grri=zeros(Float64,0,0), grre=zeros(Float64,0,0),
-                       delta_prime=ComplexF64[],
-                       delta_prime_col=zeros(ComplexF64,0,0),
-                       ua_left=zeros(ComplexF64,0,0,0),
-                       ua_right=zeros(ComplexF64,0,0,0),
-                       psi_ua_left=0.0, psi_ua_right=0.0)
+        s1 = SingType(; psifac=0.3, rho=sqrt(0.3), m=[2], n=[1],
+            q=2.0, q1=dq(0.3),
+            grri=zeros(Float64, 0, 0), grre=zeros(Float64, 0, 0),
+            delta_prime=ComplexF64[],
+            delta_prime_col=zeros(ComplexF64, 0, 0),
+            ua_left=zeros(ComplexF64, 0, 0, 0),
+            ua_right=zeros(ComplexF64, 0, 0, 0),
+            psi_ua_left=0.0, psi_ua_right=0.0)
         intr = ForceFreeStates.ForceFreeStatesInternal(; sing=[s1], msing=1)
         ForceFreeStates.resist_eval_all!(intr, equil)
         gs = build_ggj_inputs(equil, intr.sing, profiles; mu_i=2.0)
@@ -188,7 +188,7 @@
         # Verify D_I < 0 so the GGJ shooting solver doesn't bail
         @test mercier_di(gs[1]) < 0
 
-        Δ = solve_inner(GGJModel(solver=:shooting), gs[1], 0.01 + 0.0im)
+        Δ = solve_inner(GGJModel(; solver=:shooting), gs[1], 0.01 + 0.0im)
         @test Δ isa InnerLayerResponse
         @test isfinite(Δ.tearing)
         @test isfinite(Δ.interchange)

@@ -1,19 +1,21 @@
 @testset "SLAYER LayerParameters" begin
     using GeneralizedPerturbedEquilibrium.InnerLayer
     using GeneralizedPerturbedEquilibrium.Utilities: MU_0, M_E, M_P, E_CHG, EPS_0
+    using GeneralizedPerturbedEquilibrium.Utilities: SpitzerModel, SpitzerHarmModel,
+        SauterNeoModel
 
     # Reference inputs: a simple deuterium plasma case suitable for
     # hand-checking the SLAYER params formulas.
     function _ref_kwargs(; dr_val=0.0, dc_type=:none)
         return (
-            n_e = 5.0e19, t_e = 1000.0, t_i = 1000.0,
-            omega = 0.0, omega_e = 1.0e4, omega_i = 5.0e3,
-            qval = 2.0, sval_r = 1.0, bt = 2.0,
-            rs = 0.5, R0 = 1.7, mu_i = 2.0, zeff = 1.0,
-            chi_perp = 1.0, chi_tor = 1.0,
-            m = 2, n = 1,
-            dr_val = dr_val, dgeo_val = 0.5, dc_type = dc_type,
-            ising = 3,
+            n_e=5.0e19, t_e=1000.0, t_i=1000.0,
+            omega=0.0, omega_e=1.0e4, omega_i=5.0e3,
+            qval=2.0, sval_r=1.0, bt=2.0,
+            rs=0.5, R0=1.7, mu_i=2.0, zeff=1.0,
+            chi_perp=1.0, chi_tor=1.0,
+            m=2, n=1,
+            dr_val=dr_val, dgeo_val=0.5, dc_type=dc_type,
+            ising=3
         )
     end
 
@@ -42,17 +44,32 @@
         @test p.Q_e == -p.tauk * 1.0e4
         @test p.Q_i == -p.tauk * 5.0e3    # SLAYER params convention: Q_i = −tauk·ω*i
 
-        # Spitzer resistivity follows η = 1.65e-9·lnΛ/(T_e/1keV)^1.5
-        # with lnΛ = 24 + 3 ln 10 − 0.5 ln n_e + ln T_e.
-        lnLamb_expected = 24.0 + 3.0 * log(10.0) - 0.5 * log(5.0e19) + log(1000.0)
-        eta_expected    = 1.65e-9 * lnLamb_expected / (1000.0 / 1e3)^1.5
-        @test p.eta ≈ eta_expected rtol = 1e-12
+        # Default resistivity closure is neoclassical (Sauter F_33). The
+        # trapped-particle correction raises η above plain Spitzer at the
+        # same lnΛ: η_neo = η_Sp / F_33 with F_33 ∈ (0,1).
+        p_spitzer = slayer_parameters(; _ref_kwargs()...,
+            resistivity_model=SpitzerModel(), lnLambda_form=:nrl)
+        @test p.eta > p_spitzer.eta
+        @test 1.1 < p.eta / p_spitzer.eta < 4.0    # banana-regime F_33 ≈ 0.3–0.9
+
+        # Legacy Fitzpatrick/TJ path: the Spitzer-Härm σ_∥ closure agrees with
+        # the old Wesson 1.65e-9 form to ~2.3% (the two are independent Spitzer
+        # formulas), so this is a genuine cross-check, not a tautology.
+        lnLamb_wesson = 24.0 + 3.0 * log(10.0) - 0.5 * log(5.0e19) + log(1000.0)
+        eta_wesson = 1.65e-9 * lnLamb_wesson / (1000.0 / 1e3)^1.5
+        p_legacy = slayer_parameters(; _ref_kwargs()...,
+            resistivity_model=SpitzerHarmModel(), lnLambda_form=:wesson)
+        @test p_legacy.eta ≈ eta_wesson rtol = 3e-2
+
+        # τ_R = μ₀ r_s² / η holds for whichever closure was selected.
+        @test p.tau_r ≈ MU_0 * p.rs^2 / p.eta rtol = 1e-12
+        @test p_legacy.tau_r ≈ MU_0 * p_legacy.rs^2 / p_legacy.eta rtol = 1e-12
 
         # Mass density and Alfvén time (independent of conductivity).
-        rho_expected   = 2.0 * M_P * 5.0e19
+        rho_expected = 2.0 * M_P * 5.0e19
         tau_h_expected = 1.7 * sqrt(MU_0 * rho_expected) / (1 * 1.0 * 2.0)
         # tauk = S^(1/3) · τ_H = (τ_R/τ_H)^(1/3)·τ_H = τ_R^(1/3)·τ_H^(2/3)
-        @test p.tauk ≈ p.lu^(1/3) * tau_h_expected rtol = 1e-12
+        @test p.tauk ≈ p.lu^(1 / 3) * tau_h_expected rtol = 1e-12
         @test p.tauk^3 / tau_h_expected^2 ≈ p.tau_r rtol = 1e-12
 
         # Lundquist number is large positive
@@ -78,12 +95,12 @@
         # All four dc_type branches must produce finite, non-NaN values
         # and respect the signs/structure of the formulas in
         # the SLAYER params dc_tmp formulas.
-        p_none = slayer_parameters(; _ref_kwargs(dr_val=0.01, dc_type=:none)...)
+        p_none = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:none)...)
         @test p_none.dc_tmp == 0.0   # :none ignores dr_val
 
-        p_lar  = slayer_parameters(; _ref_kwargs(dr_val=0.01, dc_type=:lar)...)
-        p_rf   = slayer_parameters(; _ref_kwargs(dr_val=0.01, dc_type=:rfitzp)...)
-        p_tor  = slayer_parameters(; _ref_kwargs(dr_val=0.01, dc_type=:toroidal)...)
+        p_lar = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:lar)...)
+        p_rf = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:rfitzp)...)
+        p_tor = slayer_parameters(; _ref_kwargs(; dr_val=0.01, dc_type=:toroidal)...)
 
         @test isfinite(p_lar.dc_tmp)
         @test isfinite(p_rf.dc_tmp)
@@ -91,17 +108,17 @@
         # dr_val > 0 with the (-dr_val) prefactor ⇒ negative dc_tmp for
         # :lar, :rfitzp, :toroidal branches.
         @test p_lar.dc_tmp < 0
-        @test p_rf.dc_tmp  < 0
+        @test p_rf.dc_tmp < 0
         @test p_tor.dc_tmp < 0
 
         # Sign flips with sign of dr_val
         p_lar_neg = slayer_parameters(;
-            _ref_kwargs(dr_val=-0.01, dc_type=:lar)...)
+            _ref_kwargs(; dr_val=-0.01, dc_type=:lar)...)
         @test sign(p_lar_neg.dc_tmp) == -sign(p_lar.dc_tmp)
 
         # Reject unknown dc_type
         @test_throws ArgumentError slayer_parameters(;
-            _ref_kwargs(dr_val=0.01, dc_type=:bogus)...)
+            _ref_kwargs(; dr_val=0.01, dc_type=:bogus)...)
     end
 
     @testset "Test 1c: SLAYERParameters direct kwarg construction" begin
@@ -110,10 +127,10 @@
         p = SLAYERParameters(;
             tau=1.0, lu=1e7, c_beta=0.1, D_norm=2.0,
             P_perp=10.0, P_tor=10.0,
-            Q_e=-1.0, Q_i=0.5, iota_e=2.0/3.0,
+            Q_e=-1.0, Q_i=0.5, iota_e=2.0 / 3.0,
             tauk=1e-4, tau_r=10.0, delta_n=400.0,
             rs=0.5, R0=1.7, bt=2.0, sval_r=1.0,
-            eta=2.5e-8, d_beta=4e-3,
+            eta=2.5e-8, d_beta=4e-3
         )
         @test p.tau == 1.0
         @test p.dc_tmp == 0.0
@@ -136,8 +153,8 @@
         #          = 2αψ / (1+αψ).
         a0, q0, alpha = 0.6, 1.2, 1.5
         for psi in (0.1, 0.4, 0.7, 0.95)
-            a       = a0 * sqrt(psi)
-            q       = q0 * (1 + alpha * psi)
+            a = a0 * sqrt(psi)
+            q = q0 * (1 + alpha * psi)
             dq_dpsi = q0 * alpha
             da_dpsi = a0 / (2 * sqrt(psi))
             expected = 2 * alpha * psi / (1 + alpha * psi)

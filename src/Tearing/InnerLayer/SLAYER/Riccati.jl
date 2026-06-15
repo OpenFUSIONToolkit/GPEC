@@ -46,16 +46,16 @@ struct _RiccatiConsts
 end
 
 @inline function _build_riccati_consts(p::SLAYERParameters, Q::ComplexF64)
-    Q_plus_iQe  = Q + im * p.Q_e
-    Q_plus_iQi  = Q + im * p.Q_i
-    D2          = p.D_norm * p.D_norm
+    Q_plus_iQe = Q + im * p.Q_e
+    Q_plus_iQi = Q + im * p.Q_i
+    D2 = p.D_norm * p.D_norm
     return _RiccatiConsts(
         Q_plus_iQe,
         Q * Q_plus_iQi,                                   # A
         Q_plus_iQi * (p.P_perp + p.P_tor),                # B
         p.P_perp * p.P_tor,                               # C
         p.P_perp + Q_plus_iQi * D2,                       # E
-        p.P_tor * D2 / p.iota_e,                          # G
+        p.P_tor * D2 / p.iota_e                          # G
     )
 end
 
@@ -63,11 +63,11 @@ end
 # pre-built `_RiccatiConsts` so each call costs only a handful of muls/adds
 # plus one complex division (the fA = p²/denom).
 @inline function _riccati_f_coeffs(c::_RiccatiConsts, x::Real)
-    p2    = x * x
-    p4    = p2 * p2
+    p2 = x * x
+    p4 = p2 * p2
     denom = c.Q_plus_iQe + p2
 
-    fA       = p2 / denom
+    fA = p2 / denom
     # Use the numerator-subtracts-twice-p² form rather than the algebraic
     # identity 1 − 2·fA. The two are mathematically equal, but the
     # integrator's adaptive stepping near marginal stability compounds
@@ -98,7 +98,7 @@ end
 # Jacobian only the W-dependent pieces survive. Returns a scalar — the
 # 1×1 Jacobian of the scalar ODE.
 @inline function _riccati_f_jac(W::Number, consts::_RiccatiConsts, x::Real)
-    p2    = x * x
+    p2 = x * x
     denom = consts.Q_plus_iQe + p2
     fA_prime = (denom - 2 * p2) / denom
     return -(fA_prime / x) - 2 * W / x
@@ -112,7 +112,7 @@ end
 
 # Returns (p_start, W_at_p_start, branch) where `branch ∈ (:large_D, :small_D)`.
 function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
-                             p_floor::Real=6.0)
+    p_floor::Real=6.0)
     D2 = p.D_norm * p.D_norm
     Pperp_over_Ptor23 = p.P_perp / p.P_tor^(2 / 3)
 
@@ -121,14 +121,15 @@ function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
         # ((P_tor·D²)/(iota_e·P_tor·P_perp))^(1/4) the P_tor factor
         # cancels — preserved here for traceability.
         p_start = max(((p.P_tor * D2) / (p.iota_e * p.P_tor * p.P_perp))^0.25,
-                      p_floor)
+            p_floor)
 
         ak = -(Q + im * p.Q_e)
         bk = (p.iota_e * p.P_perp * p.P_tor) / (p.P_tor * D2)
         ck = bk * (1 + (Q + im * p.Q_i) * ((p.P_tor + p.P_perp) /
-                                            (p.P_tor * p.P_perp))
-                     - (p.P_perp + (Q + im * p.Q_i) * D2) *
-                       (p.iota_e / (p.P_tor * D2)))
+                                           (p.P_tor * p.P_perp))
+                   -
+                   (p.P_perp + (Q + im * p.Q_i) * D2) *
+                   (p.iota_e / (p.P_tor * D2)))
         sqrt_bk = sqrt(bk)
         xk = (ck - sqrt_bk * (1 - sqrt_bk * ak)) / (2 * sqrt_bk)
 
@@ -202,22 +203,29 @@ fields (`n_valid_roots`, `n_poles`), not just γ.
     non-stiff path (rarely needed for `riccati_f`)
 """
 function solve_inner(::SLAYERModel{:fitzpatrick},
-                     p::SLAYERParameters, Q::Number;
-                     pmin::Real=1e-6,
-                     p_floor::Real=6.0,
-                     reltol::Real=1e-10,
-                     abstol::Real=1e-10,
-                     maxiters::Integer=50_000,
-                     solver=Rodas5P(autodiff=false))
-    # Wick-rotation: Fortran SLAYER applies `g_tmp = q_in * ifac` with
-    # `ifac = +i`. Empirically, Julia's Riccati behaves as
-    # `J_Ric(p) = F_Ric(-conj(p))` — i.e. the Julia integration is a
-    # reflected-about-Im-axis version of Fortran's. To make
-    # `Julia_det(Q) = Fortran_det(Q)` at every plot-Q, we feed the Riccati
-    # `Q_c = im·conj(Q)`, which yields `-conj(Q_c) = im·Q` — exactly
-    # Fortran's internal `g_tmp`. This is an empirically-validated sign
-    # convention (γ on the imaginary axis, +γ unstable, matching Park's
-    # convention); the underlying sign equivalence is not yet fully derived.
+    p::SLAYERParameters, Q::Number;
+    pmin::Real=1e-6,
+    p_floor::Real=6.0,
+    reltol::Real=1e-10,
+    abstol::Real=1e-10,
+    maxiters::Integer=50_000,
+    solver=Rodas5P(; autodiff=false))
+    # Convention bridge between our scan plane and Fitzpatrick's layer
+    # eigenvalue. We scan in the Park plane `Q = ω + iγ` (+γ on the +imag
+    # axis). Fitzpatrick's normalized eigenvalue is `ĝ = (γ − iω)·τ_k` in
+    # the co-rotating frame (TJ Layer.tex Eqs. 44, 108–109: γ = Re(ĝ)/τ_k,
+    # ω = −Im(ĝ)/τ_k), so +γ sits on his +real axis. The two planes differ
+    # by a pure −90° rotation, `ĝ = −i·Q` — relabeling which axis is growth,
+    # no physics.
+    #
+    # The layer ODE coefficients (Layer.tex Eqs. 57–59, 91–92) are analytic
+    # in ĝ with Q_e, Q_i, D, P_⊥, P_φ all real, so Schwarz reflection gives
+    # `Δ̂_s(conj ĝ) = conj(Δ̂_s(ĝ))`. We feed `Q_c = i·conj(Q) = conj(−i·Q)
+    # = conj(ĝ)`, hence evaluate `conj(Δ̂_s(ĝ))`. Conjugation maps zeros to
+    # zeros, so the extracted growth-rate roots are identical to those of
+    # Δ̂_s(ĝ); it only reflects the off-root residual surface, which aligns
+    # our integration-path orientation with the Fortran SLAYER internal
+    # `g_tmp = i·Q` so |Δ| contours match plot-Q for plot-Q.
     Q_c = im * conj(ComplexF64(Q))
 
     # Boundary condition at p_start
@@ -236,8 +244,8 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     f = ODEFunction{false}(_riccati_f_rhs; jac=_riccati_f_jac)
     prob = ODEProblem(f, u0, (p_start, pmin), rhs_params)
     sol = solve(prob, solver;
-                reltol=reltol, abstol=abstol, maxiters=maxiters,
-                save_everystep=false, dense=false)
+        reltol=reltol, abstol=abstol, maxiters=maxiters,
+        save_everystep=false, dense=false)
 
     if sol.retcode != ReturnCode.Success
         # Unconverged solve: return a NaN sentinel so the dispersion scan / AMR

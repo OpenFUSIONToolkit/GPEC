@@ -35,6 +35,11 @@ constructor.
   - `dr_val`, `dgeo_val`  -- critical-Δ formula inputs
   - `theta_sample` -- poloidal angle at which to sample minor radius
     (default 0.0, outboard midplane)
+  - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
+    (default, neoclassical F_33), `:redl`, `:spitzer` (Sauter 18a, no
+    trapped correction), or `:spitzer_harm` (legacy Fitzpatrick/TJ σ_∥)
+  - `lnLambda_form` -- Coulomb-log form: `:nrl` (default), `:sauter`, or
+    `:wesson` (legacy; pair with `:spitzer_harm` to reproduce old SLAYER)
 
 # Scan grid (used for both brute-force and AMR initial mesh)
 
@@ -76,27 +81,29 @@ constructor.
 @kwdef struct SLAYERControl
     enabled::Bool = false
 
-    inner_model::Symbol   = :slayer_fitzpatrick
-    scan_mode::Symbol     = :amr
+    inner_model::Symbol = :slayer_fitzpatrick
+    scan_mode::Symbol = :amr
     coupling_mode::Symbol = :uncoupled
-    dc_type::Symbol       = :none
-    msing_max::Int        = 3
+    dc_type::Symbol = :none
+    msing_max::Int = 3
 
     bt::Union{Float64,Nothing} = nothing
-    mu_i::Float64     = 2.0
-    zeff::Float64     = 1.0
+    mu_i::Float64 = 2.0
+    zeff::Float64 = 1.0
     chi_perp::Float64 = 1.0
-    chi_tor::Float64  = 1.0
-    dr_val::Float64   = 0.0
+    chi_tor::Float64 = 1.0
+    dr_val::Float64 = 0.0
     dgeo_val::Float64 = 0.0
     theta_sample::Float64 = 0.0
+    resistivity_model::Symbol = :sauter
+    lnLambda_form::Symbol = :nrl
 
     Q_re_range::Tuple{Float64,Float64} = (-10.0, 10.0)
     Q_im_range::Tuple{Float64,Float64} = (-2.0, 5.0)
     nre::Int = 41
     nim::Int = 31
 
-    amr_passes::Int    = 4
+    amr_passes::Int = 4
     amr_max_cells::Int = 10_000_000
 
     # Multi-box stripe layout. When non-empty, `scan_mode=:amr` dispatches to
@@ -107,13 +114,13 @@ constructor.
     # layout for DIII-D-style equilibria (with kHz/Q given by the per-surface
     # τ_k) is built externally by the driver, converted to Q-units, and
     # passed in here.
-    boxes::Vector{NTuple{4, Float64}} = NTuple{4, Float64}[]
+    boxes::Vector{NTuple{4,Float64}} = NTuple{4,Float64}[]
     multi_box_prescreen_n::Int = 25         # pre-screen grid resolution per box
 
-    pole_threshold::Float64    = 10.0
+    pole_threshold::Float64 = 10.0
     pole_threshold_adaptive::Bool = false
-    filter_above_poles::Bool   = true
-    filter_outside_re::Bool    = true
+    filter_above_poles::Bool = true
+    filter_outside_re::Bool = true
     gap_kHz_threshold::Float64 = 1.0       # forwarded to find_growth_rates
     # Refine each contour-intersection root to the true zero of the dispersion
     # residual (isolate-then-polish). Makes the extracted γ resolution- and
@@ -128,34 +135,42 @@ constructor.
     validity_rtol::Float64 = 1e-3
 
     profile_source::Symbol = :inline
-    profile_file::String   = ""
-    profile_group::String  = "/"
+    profile_file::String = ""
+    profile_group::String = "/"
 
     store_scan::Bool = false
 end
 
-const _VALID_INNER_MODELS   = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
-const _VALID_SCAN_MODES     = (:amr, :brute_force)
+const _VALID_INNER_MODELS = (:slayer_fitzpatrick, :ggj_shooting, :ggj_galerkin)
+const _VALID_SCAN_MODES = (:amr, :brute_force)
 const _VALID_COUPLING_MODES = (:uncoupled, :coupled)
-const _VALID_DC_TYPES       = (:none, :lar, :rfitzp, :toroidal)
+const _VALID_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
 const _VALID_PROFILE_SOURCES = (:inline, :h5)
+const _VALID_RESISTIVITY_MODELS = (:sauter, :redl, :spitzer, :spitzer_harm)
+const _VALID_LNLAMBDA_FORMS = (:nrl, :sauter, :wesson)
 
 function validate(ctrl::SLAYERControl)
-    ctrl.inner_model   in _VALID_INNER_MODELS   ||
+    ctrl.inner_model in _VALID_INNER_MODELS ||
         throw(ArgumentError("SLAYERControl: inner_model=$(ctrl.inner_model) " *
-                             "not in $(_VALID_INNER_MODELS)"))
-    ctrl.scan_mode     in _VALID_SCAN_MODES     ||
+                            "not in $(_VALID_INNER_MODELS)"))
+    ctrl.scan_mode in _VALID_SCAN_MODES ||
         throw(ArgumentError("SLAYERControl: scan_mode=$(ctrl.scan_mode) " *
-                             "not in $(_VALID_SCAN_MODES)"))
+                            "not in $(_VALID_SCAN_MODES)"))
     ctrl.coupling_mode in _VALID_COUPLING_MODES ||
         throw(ArgumentError("SLAYERControl: coupling_mode=$(ctrl.coupling_mode) " *
-                             "not in $(_VALID_COUPLING_MODES)"))
-    ctrl.dc_type       in _VALID_DC_TYPES       ||
+                            "not in $(_VALID_COUPLING_MODES)"))
+    ctrl.dc_type in _VALID_DC_TYPES ||
         throw(ArgumentError("SLAYERControl: dc_type=$(ctrl.dc_type) " *
-                             "not in $(_VALID_DC_TYPES)"))
+                            "not in $(_VALID_DC_TYPES)"))
     ctrl.profile_source in _VALID_PROFILE_SOURCES ||
         throw(ArgumentError("SLAYERControl: profile_source=$(ctrl.profile_source) " *
-                             "not in $(_VALID_PROFILE_SOURCES)"))
+                            "not in $(_VALID_PROFILE_SOURCES)"))
+    ctrl.resistivity_model in _VALID_RESISTIVITY_MODELS ||
+        throw(ArgumentError("SLAYERControl: resistivity_model=$(ctrl.resistivity_model) " *
+                            "not in $(_VALID_RESISTIVITY_MODELS)"))
+    ctrl.lnLambda_form in _VALID_LNLAMBDA_FORMS ||
+        throw(ArgumentError("SLAYERControl: lnLambda_form=$(ctrl.lnLambda_form) " *
+                            "not in $(_VALID_LNLAMBDA_FORMS)"))
     ctrl.msing_max >= 1 ||
         throw(ArgumentError("SLAYERControl: msing_max=$(ctrl.msing_max) must be ≥ 1"))
     ctrl.nre >= 2 && ctrl.nim >= 2 ||
@@ -167,7 +182,7 @@ end
 
 # Helper: coerce range-like values to a 2-tuple of Float64
 _as_range(x::NTuple{2,<:Real}) = (Float64(x[1]), Float64(x[2]))
-_as_range(x::AbstractVector)   = begin
+_as_range(x::AbstractVector) = begin
     length(x) == 2 || throw(ArgumentError("range must be length 2, got length $(length(x))"))
     (Float64(x[1]), Float64(x[2]))
 end
@@ -191,12 +206,12 @@ function slayer_control_from_toml(section::AbstractDict)
             haskey(v, "nre") && (flat["nre"] = v["nre"])
             haskey(v, "nim") && (flat["nim"] = v["nim"])
         elseif k == "amr" && v isa AbstractDict
-            haskey(v, "passes")    && (flat["amr_passes"]    = v["passes"])
+            haskey(v, "passes") && (flat["amr_passes"] = v["passes"])
             haskey(v, "max_cells") && (flat["amr_max_cells"] = v["max_cells"])
         elseif k == "growth_rate_filter" && v isa AbstractDict
-            haskey(v, "pole_threshold")     && (flat["pole_threshold"]     = v["pole_threshold"])
+            haskey(v, "pole_threshold") && (flat["pole_threshold"] = v["pole_threshold"])
             haskey(v, "filter_above_poles") && (flat["filter_above_poles"] = v["filter_above_poles"])
-            haskey(v, "filter_outside_re")  && (flat["filter_outside_re"]  = v["filter_outside_re"])
+            haskey(v, "filter_outside_re") && (flat["filter_outside_re"] = v["filter_outside_re"])
         elseif k == "profiles"
             # Profiles are handled separately by the runner; skip here
             continue
@@ -207,18 +222,18 @@ function slayer_control_from_toml(section::AbstractDict)
 
     # Validate keys against the struct fields
     field_names = Set(String.(fieldnames(SLAYERControl)))
-    unknown     = [k for k in keys(flat) if !(k in field_names)]
+    unknown = [k for k in keys(flat) if !(k in field_names)]
     isempty(unknown) ||
         throw(ArgumentError("slayer_control_from_toml: unknown keys " *
-                             "$(unknown) in [SLAYER] section. Known: " *
-                             "$(sort(collect(field_names)))."))
+                            "$(unknown) in [SLAYER] section. Known: " *
+                            "$(sort(collect(field_names)))."))
 
     # Coerce types where needed
     kwargs = Dict{Symbol,Any}()
     for (k, v) in flat
         sym = Symbol(k)
         if sym in (:inner_model, :scan_mode, :coupling_mode, :dc_type,
-                   :profile_source)
+            :profile_source, :resistivity_model, :lnLambda_form)
             kwargs[sym] = v isa Symbol ? v : Symbol(String(v))
         elseif sym in (:Q_re_range, :Q_im_range)
             kwargs[sym] = _as_range(v)
@@ -232,8 +247,8 @@ function slayer_control_from_toml(section::AbstractDict)
                 let bb = collect(Float64, b)
                     length(bb) == 4 ||
                         throw(ArgumentError("SLAYER.boxes entry must have 4 " *
-                                             "elements (omega_lo, omega_hi, " *
-                                             "gamma_lo, gamma_hi); got $b"))
+                                            "elements (omega_lo, omega_hi, " *
+                                            "gamma_lo, gamma_hi); got $b"))
                     (bb[1], bb[2], bb[3], bb[4])
                 end
                 for b in v

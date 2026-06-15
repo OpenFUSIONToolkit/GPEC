@@ -24,7 +24,7 @@ export Tearing
 # directly; the canonical nested path is `Tearing.{InnerLayer,Dispersion,Runner}`.
 import .Tearing.InnerLayer as InnerLayer
 import .Tearing.Dispersion as Dispersion
-import .Tearing.Runner     as Runner
+import .Tearing.Runner as Runner
 export InnerLayer, Dispersion, Runner
 
 include("ForcingTerms/ForcingTerms.jl")
@@ -268,14 +268,15 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # stability does not need kinetic_profiles, but the post-PE block always
     # does, so we load whenever a [KineticForces] section is present or the
     # stability path requests the calculated source.
-    kf_ctrl = haskey(inputs, "KineticForces") ?
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
@@ -390,22 +391,33 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # HDF5 file PE wrote (to append into), or `nothing` if PE did not run.
     function _run_slayer_stage(pe_file::Union{String,Nothing})
         ("SLAYER" in keys(inputs)) || return nothing
-        slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
-        slayer_ctrl.enabled || return nothing
-        @info "\n  SLAYER\n$_SECTION"
-        slayer_start = time()
-        result = Runner.run_slayer(equil, intr, slayer_ctrl, inputs["SLAYER"];
-            dir_path=intr.dir_path)
-        @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
-        h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
-        h5_path = joinpath(intr.dir_path, h5_filename)
-        # Append the slayer/ group; create the file if no prior stage wrote it
-        # (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
-        HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
-            Runner.write_slayer_hdf5!(f, result)
+        # SLAYER is a post-processing diagnostic. A failure here must not
+        # discard the equilibrium / stability / PE results already computed,
+        # so the whole stage is guarded: on error we log loudly and return
+        # `nothing` for the `slayer` field rather than propagating.
+        try
+            slayer_ctrl = Runner.slayer_control_from_toml(inputs["SLAYER"])
+            slayer_ctrl.enabled || return nothing
+            @info "\n  SLAYER\n$_SECTION"
+            slayer_start = time()
+            result = Runner.run_slayer(equil, intr, slayer_ctrl, inputs["SLAYER"];
+                dir_path=intr.dir_path)
+            @info "SLAYER completed in $(@sprintf("%.3f", time() - slayer_start)) s"
+            h5_filename = pe_file === nothing ? ctrl.HDF5_filename : pe_file
+            h5_path = joinpath(intr.dir_path, h5_filename)
+            # Append the slayer/ group; create the file if no prior stage wrote
+            # it (e.g. write_outputs_to_HDF5 disabled) rather than failing on "r+".
+            HDF5.h5open(h5_path, isfile(h5_path) ? "r+" : "w") do f
+                Runner.write_slayer_hdf5!(f, result)
+            end
+            @info "SLAYER results written to $h5_filename"
+            return result
+        catch err
+            @error "SLAYER stage failed; continuing without tearing results. " *
+                   "Equilibrium / stability / PE outputs are unaffected." exception =
+                (err, catch_backtrace())
+            return nothing
         end
-        @info "SLAYER results written to $h5_filename"
-        return result
     end
 
     # Early exit if user only requested force-free states (SLAYER still runs).
@@ -509,8 +521,8 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # TODO: Do not allow perturbed equilibrium calculations if zero crossings are found
 
     return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet,
-            vac_data=ctrl.vac_flag ? vac_data : nothing,
-            slayer=slayer_result)
+        vac_data=ctrl.vac_flag ? vac_data : nothing,
+        slayer=slayer_result)
 
 end
 
@@ -667,17 +679,17 @@ function write_outputs_to_HDF5(
             # downstream consumers (Tearing.InnerLayer.GGJ.build_ggj_inputs)
             # can reconstruct τ_A / τ_R from any kinetic-profile source.
             if all(s -> s.restype !== nothing, intr.sing)
-                out_h5["singular/E"]                  = [s.restype.E    for s in intr.sing]
-                out_h5["singular/F"]                  = [s.restype.F    for s in intr.sing]
-                out_h5["singular/G"]                  = [s.restype.G    for s in intr.sing]
-                out_h5["singular/H"]                  = [s.restype.H    for s in intr.sing]
-                out_h5["singular/K"]                  = [s.restype.K    for s in intr.sing]
-                out_h5["singular/M"]                  = [s.restype.M    for s in intr.sing]
+                out_h5["singular/E"] = [s.restype.E for s in intr.sing]
+                out_h5["singular/F"] = [s.restype.F for s in intr.sing]
+                out_h5["singular/G"] = [s.restype.G for s in intr.sing]
+                out_h5["singular/H"] = [s.restype.H for s in intr.sing]
+                out_h5["singular/K"] = [s.restype.K for s in intr.sing]
+                out_h5["singular/M"] = [s.restype.M for s in intr.sing]
                 out_h5["singular/avg_bsq_over_dpsisq"] = [s.restype.avg_bsq_over_dpsisq for s in intr.sing]
-                out_h5["singular/avg_bsq"]            = [s.restype.avg_bsq             for s in intr.sing]
-                out_h5["singular/p_local"]            = [s.restype.p_local  for s in intr.sing]
-                out_h5["singular/p1_local"]           = [s.restype.p1_local for s in intr.sing]
-                out_h5["singular/v1_local"]           = [s.restype.v1_local for s in intr.sing]
+                out_h5["singular/avg_bsq"] = [s.restype.avg_bsq for s in intr.sing]
+                out_h5["singular/p_local"] = [s.restype.p_local for s in intr.sing]
+                out_h5["singular/p1_local"] = [s.restype.p1_local for s in intr.sing]
+                out_h5["singular/v1_local"] = [s.restype.v1_local for s in intr.sing]
             end
         end
 

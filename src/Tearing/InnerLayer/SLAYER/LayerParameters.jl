@@ -24,7 +24,7 @@ and `ρ_s`-based `ds` parameters are intentionally absent — the
 `riccati_f` formulation uses `P_perp`, `P_tor`, and `D_norm` instead.
 
 | field      | meaning                                                           |
-|------------|-------------------------------------------------------------------|
+|:---------- |:----------------------------------------------------------------- |
 | `ising`    | Singular-surface index (traceability only)                        |
 | `m`, `n`   | Poloidal / toroidal mode numbers at this surface                  |
 | `tau`      | T_i / T_e                                                         |
@@ -45,7 +45,7 @@ and `ρ_s`-based `ds` parameters are intentionally absent — the
 | `sval_r`   | r-based magnetic shear r_s · (dq/dr) / q (Fitzpatrick convention) |
 | `dr_val`   | Radial width parameter at surface (input to dc_tmp)               |
 | `dgeo_val` | Geometric Δ (Shafranov shift factor)                              |
-| `eta`      | Spitzer resistivity [Ω·m]                                         |
+| `eta`      | Parallel resistivity entering τ_R = μ₀r_s²/η [Ω·m]                |
 | `d_beta`   | Beta-weighted ion length scale c_β · d_i [m]                      |
 | `dc_tmp`   | Critical-Δ offset from chi_parallel matching                      |
 | `dc_type`  | Selector for `dc_tmp` formula                                     |
@@ -56,8 +56,8 @@ it is passed as a separate argument to `solve_inner`.
 Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     # Surface identity
     ising::Int = 0
-    m::Int     = 0
-    n::Int     = 0
+    m::Int = 0
+    n::Int = 0
 
     # Normalized layer parameters consumed by riccati_f
     tau::Float64
@@ -80,14 +80,14 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     R0::Float64
     bt::Float64
     sval_r::Float64
-    dr_val::Float64    = 0.0
-    dgeo_val::Float64  = 0.0
+    dr_val::Float64 = 0.0
+    dgeo_val::Float64 = 0.0
     eta::Float64
     d_beta::Float64
 
     # Critical-Δ offset
-    dc_tmp::Float64    = 0.0
-    dc_type::Symbol    = :none
+    dc_tmp::Float64 = 0.0
+    dc_type::Symbol = :none
 end
 
 # Allowed dc_type values (ports the Fortran `dc_type` SELECT CASE in the
@@ -111,37 +111,36 @@ the derivative of the surface minor radius with respect to ψ. The two
 respect to ψ_norm or both with respect to physical ψ — the conversion
 factor cancels in the ratio).
 
-This is the Julia analogue of the conversion `s_Fitz = s_psiN · r_s /
-(psi_N · da_dpsiN)` performed in the Fortran SLAYER `layerinputs` routine.
+This is the Julia analogue of the conversion `s_Fitz = s_psiN · r_s / (psi_N · da_dpsiN)` performed in the Fortran SLAYER `layerinputs` routine.
 """
 function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
     da_dpsi != 0 || throw(ArgumentError("r_based_shear: da/dψ must be non-zero"))
-    q       != 0 || throw(ArgumentError("r_based_shear: q must be non-zero"))
+    q != 0 || throw(ArgumentError("r_based_shear: q must be non-zero"))
     return rs * dq_dpsi / (q * da_dpsi)
 end
 
 # Internal: solve the Wd self-consistency loop for the chi_parallel-based
 # critical Δ. Ports the Fortran params routine. Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
-                        chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
-                        rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
-                        max_iter::Integer=100, tol::Real=1e-10)
+    chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
+    rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
+    max_iter::Integer=100, tol::Real=1e-10)
     dc_type in ALLOWED_DC_TYPES ||
         throw(ArgumentError("SLAYERParameters: unknown dc_type=$dc_type. " *
                             "Allowed: $(ALLOWED_DC_TYPES)"))
     (dc_type === :none || dr_val == 0.0) && return 0.0
 
-    vte           = sqrt(2.0 * t_e * E_CHG / M_E)
-    chi_par_smfp  = (1.581 * tau_ee * vte^2) / (1.0 + 0.2535 * zeff)
+    vte = sqrt(2.0 * t_e * E_CHG / M_E)
+    chi_par_smfp = (1.581 * tau_ee * vte^2) / (1.0 + 0.2535 * zeff)
 
     Wd = 0.1
     converged = false
     for _ in 1:max_iter
         chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
-        chi_par      = (chi_par_smfp * chi_par_lmfp) /
-                       (chi_par_smfp + chi_par_lmfp)
-        Wd_new       = sqrt(8.0) * (chi_perp / chi_par)^0.25 *
-                       (1.0 / sqrt((rs / R0) * sval_r * n_tor))
+        chi_par = (chi_par_smfp * chi_par_lmfp) /
+                  (chi_par_smfp + chi_par_lmfp)
+        Wd_new = sqrt(8.0) * (chi_perp / chi_par)^0.25 *
+                 (1.0 / sqrt((rs / R0) * sval_r * n_tor))
         if abs(Wd_new - Wd) / max(abs(Wd), 1e-30) < tol
             Wd = Wd_new
             converged = true
@@ -152,7 +151,7 @@ function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     converged || error("SLAYERParameters: Wd iteration failed to converge")
 
     chi_par_lmfp = (2.0 * R0 * vte) / (sqrt(π) * n_tor * sval_r * Wd)
-    chi_par      = (chi_par_smfp * chi_par_lmfp) / (chi_par_smfp + chi_par_lmfp)
+    chi_par = (chi_par_smfp * chi_par_lmfp) / (chi_par_smfp + chi_par_lmfp)
 
     if dc_type === :lar
         return 0.5 * (-dr_val) * π^1.5 *
@@ -174,10 +173,10 @@ end
                         m, n,
                         dr_val=0.0, dgeo_val=0.0,
                         dc_type=:none, ising=0,
-                        resistivity_model=SpitzerModel(),
+                        resistivity_model=SauterNeoModel(),
                         f_trap=nothing, nu_e_star=nothing,
                         R_major_eff=nothing,
-                        lnLambda_form=:wesson)
+                        lnLambda_form=:nrl)
         -> SLAYERParameters
 
 Build a `SLAYERParameters` for one rational surface from dimensional
@@ -209,21 +208,27 @@ formulations).
   - `dc_type` -- one of `:none`, `:lar`, `:rfitzp`, `:toroidal`
   - `ising`   -- singular-surface index for traceability
 
-# Neoclassical resistivity kwargs
+# Resistivity kwargs
 
-  - `resistivity_model` -- `SpitzerModel()` (default, preserves legacy
-    behaviour), `SauterNeoModel()`, or `RedlNeoModel()` from
-    `Utilities.NeoclassicalResistivity`. When non-Spitzer, the Sauter/Redl
-    F_33 correction is applied using `f_trap` and `nu_e_star`.
+The selected resistivity sets the resistive diffusion time
+`τ_R = μ₀ r_s² / η` and hence the Lundquist number and every normalized
+layer parameter derived from it.
+
+  - `resistivity_model` -- `SauterNeoModel()` (default: Sauter 1999 F_33
+    trapped-particle correction, the physically-appropriate choice for
+    H-mode tearing stability), `RedlNeoModel()` (improved high-ν* fit),
+    `SpitzerModel()` (Sauter 18a fit, no trapped-particle correction), or
+    `SpitzerHarmModel()` (Fitzpatrick/TJ σ_∥, LayerParameters.tex Eqs. 7-8
+    — the legacy SLAYER closure; pair with `lnLambda_form=:wesson` to
+    reproduce legacy τ_R exactly).
   - `f_trap`  -- trapped-particle fraction at this surface. If not provided
     with a neoclassical model, falls back to Lin-Liu-Miller ε-only form
     with `ε = rs / (R_major_eff or R0)`.
-  - `nu_e_star` -- electron collisionality. If `nothing` with a non-Spitzer
+  - `nu_e_star` -- electron collisionality. If `nothing` with a neoclassical
     model, computed from Sauter 1999 Eq. 18b using the same ε.
   - `R_major_eff` -- ⟨R⟩ at the surface for the ν*_e formula (default `R0`).
-  - `lnLambda_form` -- `:wesson` (legacy Fortran default), `:nrl`, or
-    `:sauter`. `:wesson` preserves identical η to the previous Julia SLAYER
-    output when `resistivity_model=SpitzerModel()`.
+  - `lnLambda_form` -- `:nrl` (default), `:sauter`, or `:wesson` (legacy
+    Fortran/TJ form).
 
 # Sign convention for diamagnetic frequencies
 
@@ -240,79 +245,73 @@ produces `Q_e > 0, Q_i < 0`, matching the opposite-drift expectation of the
 dispersion relation.
 """
 function slayer_parameters(;
-        n_e::Real, t_e::Real, t_i::Real,
-        omega::Real, omega_e::Real, omega_i::Real,
-        qval::Real, sval_r::Real, bt::Real,
-        rs::Real, R0::Real, mu_i::Real, zeff::Real,
-        chi_perp::Real, chi_tor::Real,
-        m::Integer, n::Integer,
-        dr_val::Real=0.0, dgeo_val::Real=0.0,
-        dc_type::Symbol=:none, ising::Integer=0,
-        resistivity_model::NeoResistivityModel=SpitzerModel(),
-        f_trap::Union{Real,Nothing}=nothing,
-        nu_e_star::Union{Real,Nothing}=nothing,
-        R_major_eff::Union{Real,Nothing}=nothing,
-        lnLambda_form::Symbol=:wesson)
+    n_e::Real, t_e::Real, t_i::Real,
+    omega::Real, omega_e::Real, omega_i::Real,
+    qval::Real, sval_r::Real, bt::Real,
+    rs::Real, R0::Real, mu_i::Real, zeff::Real,
+    chi_perp::Real, chi_tor::Real,
+    m::Integer, n::Integer,
+    dr_val::Real=0.0, dgeo_val::Real=0.0,
+    dc_type::Symbol=:none, ising::Integer=0,
+    resistivity_model::NeoResistivityModel=SauterNeoModel(),
+    f_trap::Union{Real,Nothing}=nothing,
+    nu_e_star::Union{Real,Nothing}=nothing,
+    R_major_eff::Union{Real,Nothing}=nothing,
+    lnLambda_form::Symbol=:nrl)
 
-    # Coulomb logarithm — default to legacy Wesson form so Spitzer results
-    # are bit-identical to the previous SLAYER η; :nrl / :sauter are opt-in.
+    # Coulomb logarithm shared by the resistivity closure and τ_ee.
     lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
 
-    # Resistivity closure.  SpitzerModel + :wesson reproduces the legacy
-    # Fortran formula η = 1.65e-9 · lnΛ / (T_e/keV)^1.5 to within the
-    # Sauter-vs-Wesson Zeff=1 agreement (~1%); other models apply the
-    # Sauter/Redl F_33 correction.
-    if resistivity_model isa SpitzerModel
-        if lnLambda_form === :wesson
-            # Preserve bit-identical legacy behaviour.
-            eta = 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
-        else
-            eta = eta_spitzer(n_e, t_e, zeff; lnLamb=lnLamb)
-        end
+    # Parallel resistivity entering τ_R. The model selects the closure:
+    #   SpitzerHarmModel — Fitzpatrick/TJ σ_∥ (LayerParameters.tex Eqs. 7-8);
+    #     with lnLambda_form=:wesson this is bit-identical to legacy SLAYER.
+    #   SpitzerModel     — Sauter 18a fit (legacy 1.65e-9 form under :wesson).
+    #   SauterNeoModel / RedlNeoModel — F_33 trapped-particle correction
+    #     using f_trap and ν*_e (from ResistGeometry or ε-only fallback).
+    if resistivity_model isa SpitzerModel && lnLambda_form === :wesson
+        # Preserve bit-identical legacy η diagnostic behaviour.
+        eta = 1.65e-9 * lnLamb / (t_e / 1e3)^1.5
+    elseif resistivity_model isa Union{SpitzerModel,SpitzerHarmModel}
+        eta = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
+            0.0, 0.0; lnLamb=lnLamb)
     else
         R_eff = R_major_eff === nothing ? R0 : Float64(R_major_eff)
         eps_here = clamp(rs / R_eff, 1e-6, 1.0 - 1e-6)
-        ft_here  = f_trap === nothing ? trapped_fraction_eps(eps_here) :
-                                         Float64(f_trap)
+        ft_here = f_trap === nothing ? trapped_fraction_eps(eps_here) :
+                  Float64(f_trap)
         nue_here = nu_e_star === nothing ?
                    nu_star_e(n_e, t_e, R_eff, eps_here, qval, zeff;
-                             lnLamb=lnLamb) :
+            lnLamb=lnLamb) :
                    Float64(nu_e_star)
         eta = eta_neoclassical(resistivity_model, n_e, t_e, zeff,
-                               ft_here, nue_here; lnLamb=lnLamb)
+            ft_here, nue_here; lnLamb=lnLamb)
     end
 
     # Basic plasma quantities
     tau = t_i / t_e
     rho = mu_i * M_P * n_e
 
-    # Electron-electron collision time and Spitzer-Härm conductivity.
-    # T_e enters in eV; the chag^(-2.5) factor in the denominator absorbs
-    # the eV→J conversion.
-    tau_ee_num   = 6.0 * sqrt(2.0) * π^1.5 *
-                   EPS_0^2 * sqrt(M_E) * t_e^1.5
-    tau_ee_denom = lnLamb * E_CHG^2.5 * n_e
-    tau_ee       = tau_ee_num / tau_ee_denom
-
-    sigma_par_1 = (sqrt(2.0) + 13.0 * (zeff / 4.0)) /
-                  (zeff * (sqrt(2.0) + zeff))
-    sigma_par_2 = (n_e * E_CHG^2 * tau_ee) / M_E
-    sigma_par   = sigma_par_1 * sigma_par_2
+    # Electron-electron collision time (still needed by the χ_∥-matching
+    # critical-Δ regardless of the resistivity model).
+    tau_ee = tau_ee_spitzer_harm(n_e, t_e; lnLamb=lnLamb)
 
     # Characteristic field, Alfven speed, length scales, fundamental
     # timescales.
     rho_s = 1.02e-4 * sqrt(mu_i * t_e) / bt                 # ion Larmor [m]
-    d_i   = sqrt((mu_i * M_P) / (n_e * E_CHG^2 * MU_0))     # ion skin depth [m]
+    d_i = sqrt((mu_i * M_P) / (n_e * E_CHG^2 * MU_0))     # ion skin depth [m]
 
     # Alfven time uses minor-radius shear directly (sval enters the
     # b_l = (n/m) r_s sval bt / R0 expression and cancels through to
     # tau_h = R0 sqrt(mu0 rho) / (n sval bt)).
     tau_h = R0 * sqrt(MU_0 * rho) / (n * sval_r * bt)
-    tau_r = MU_0 * rs^2 * sigma_par                          # Fitzpatrick
+    # Resistive diffusion time τ_R = μ₀ r_s² / η (TJ LayerParameters.tex
+    # Eq. 17, generalized so the selected η closure — neoclassical by
+    # default — actually sets the Lundquist number).
+    tau_r = MU_0 * rs^2 / eta
 
     # Lundquist number and Q-conversion factor
-    lu    = tau_r / tau_h
-    tauk  = lu^(1.0 / 3.0) * tau_h         # = Qconv
+    lu = tau_r / tau_h
+    tauk = lu^(1.0 / 3.0) * tau_h         # = Qconv
 
     # Normalized diamagnetic frequencies. Both Fortran SLAYER paths (the
     # params and layerinputs routines) use Q = -tauk·ω; see docstring sign convention.
@@ -322,25 +321,25 @@ function slayer_parameters(;
     iota_e = Q_e_minus_Q_i == 0 ? 0.0 : Q_e / Q_e_minus_Q_i
 
     # Plasma beta and compressibility
-    lbeta  = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
+    lbeta = (5.0 / 3.0) * MU_0 * n_e * E_CHG * (t_e + t_i) / bt^2
     c_beta = sqrt(lbeta / (1.0 + lbeta))
 
     # Effective Prandtl-like transport ratios
     tau_perp = rs^2 / chi_perp
-    P_perp   = tau_r / tau_perp
-    tau_tor  = rs^2 / chi_tor
-    P_tor    = tau_r / tau_tor
+    P_perp = tau_r / tau_perp
+    tau_tor = rs^2 / chi_tor
+    P_tor = tau_r / tau_tor
 
     # Normalized beta-related width and Δ-normalization
-    d_beta  = c_beta * d_i
-    D_norm  = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(tau / (1.0 + tau))
+    d_beta = c_beta * d_i
+    D_norm = (d_beta / rs) * lu^(1.0 / 3.0) * sqrt(tau / (1.0 + tau))
     delta_n = lu^(1.0 / 3.0) / rs
 
     # Critical-Δ offset from chi_parallel matching
     dc_tmp = _solve_dc_tmp(; dc_type=dc_type, dr_val=dr_val, dgeo_val=dgeo_val,
-                            chi_perp=chi_perp, t_e=t_e, zeff=zeff,
-                            tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,
-                            n_tor=n)
+        chi_perp=chi_perp, t_e=t_e, zeff=zeff,
+        tau_ee=tau_ee, rs=rs, R0=R0, sval_r=sval_r,
+        n_tor=n)
 
     return SLAYERParameters(;
         ising=ising, m=m, n=n,
@@ -351,6 +350,6 @@ function slayer_parameters(;
         rs=rs, R0=R0, bt=bt, sval_r=sval_r,
         dr_val=dr_val, dgeo_val=dgeo_val,
         eta=eta, d_beta=d_beta,
-        dc_tmp=dc_tmp, dc_type=dc_type,
+        dc_tmp=dc_tmp, dc_type=dc_type
     )
 end
