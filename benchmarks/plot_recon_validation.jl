@@ -97,7 +97,29 @@ println("\n================  δW VALUE CHECK  ================")
 @printf "v1/v2 (unit const, psio-dependent)    = %.6e\n" real(r1.dW_total/v2.dW_boundary)
 @printf "Fortran dW_gpec (∫, raw)              = %+.6e\n" fint(fdw)
 @printf "Fortran/Julia dW after epf-scale       = %.6f  (→1 means same shape & balance)\n" (fint(fdw)/(scale*r1.dW_total))
+@printf "v2 dW_running[end] (= ∫ over full ψ)  = %+.6e   (vs boundary %.10f)\n" v2.dW_running[end] (v2.dW_running[end]/real(v2.dW_boundary))
 println("=================================================")
+
+# --- (1) Julia vs Fortran setup/energies (locate the discrepancy) ---
+gq0 = gq95 = gbetan = NaN
+isfile(joinpath(tmp, "gpec.h5")) && h5open(joinpath(tmp, "gpec.h5"), "r") do f
+    haskey(f, "equil/q0") && (gq0 = read(f["equil/q0"]))
+    haskey(f, "equil/q95") && (gq95 = read(f["equil/q95"]))
+    haskey(f, "equil/betan") && (gbetan = read(f["equil/betan"]))
+end
+println("\n=====  Julia vs Fortran (same interchange EQDSK)  =====")
+@printf "%-14s %-14s %-14s\n" "quantity" "Julia" "Fortran"
+@printf "%-14s %-14.4f %-14.4f\n" "q0" gq0 1.048
+@printf "%-14s %-14.4f %-14.4f\n" "q95" gq95 3.844
+@printf "%-14s %-14.4f %-14.4f\n" "betan" gbetan 2.301
+@printf "%-14s %-14d %-14d\n" "mlow" intr.mlow -12
+@printf "%-14s %-14d %-14d\n" "mhigh" intr.mhigh 20
+@printf "%-14s %-14d %-14d\n" "mpert" intr.mpert 33
+@printf "%-14s %-14.4f %-14.4f\n" "psilim" intr.psilim 0.9781
+@printf "%-14s %-14.3e %-14.3e\n" "plasma ep" real(vac_data.ep[1]) -40.37
+@printf "%-14s %-14.3e %-14.3e\n" "vacuum ev" real(vac_data.ev[1]) 28.14
+@printf "%-14s %-14.3e %-14.3e\n" "total et" real(vac_data.et[1]) -12.23
+println("======================================================")
 
 # =====================  Figure 1: densities  =====================
 p1 = plot(r1.psi, scale .* r1.epf; lw=2, label="Julia v1 (scaled)", color=:dodgerblue,
@@ -141,7 +163,18 @@ h5open(joinpath(outdir, "recon.h5"), "r") do f
     end
 end
 
+# =====================  Figure 4: v2 running cumulative δW over full ψ  =====================
+# v2 cumulative δW(ψ) = Ξ_ψ(ψ)†·u₂(ψ): the matrix-form energy accumulated over the whole ψ
+# domain (regular through rationals; endpoint = exact boundary δW).
+fig4 = plot(v2.psi, v2.dW_running; lw=2.5, color=:purple, label="v2 running δW(ψ) = Ξ†u₂",
+    xlabel="ψ", ylabel="cumulative δW (DCON units)", title="v2 matrix-form δW over full ψ  (endpoint = exact δW)",
+    legend=:topright, left_margin=12Plots.mm, bottom_margin=4Plots.mm, size=(900, 500))
+hline!(fig4, [real(v2.dW_boundary)]; color=:black, ls=:dash, label="exact boundary δW = psio²·ep")
+hline!(fig4, [0.0]; color=:gray, ls=:dot, label="")
+f4 = joinpath(outdir, "recon_v2_running_dW.png"); savefig(fig4, f4)
+
 println("\nFigures saved:")
 println("  ", f1)
 println("  ", f2)
 f3 === nothing || println("  ", f3)
+println("  ", f4)

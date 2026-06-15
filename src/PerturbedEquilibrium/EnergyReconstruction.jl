@@ -191,7 +191,13 @@ function integrate_energy_v2(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFr
     alpha = u1_edge \ Vector{ComplexF64}(mode_vec)
     dW_boundary = dot(u1_edge * alpha, u2_edge * alpha)
 
-    return (; dW_volume, dW_boundary, rec.density, rec.psi)
+    # Running cumulative δW(ψ) = Ξ_ψ(ψ)†·u₂(ψ) over the full grid. This is the exact
+    # ψ-cumulative energy (u₂ = canonical momentum F̃Ξ_ψ'+K̃Ξ_ψ; ∫density dψ telescopes to
+    # it), regular through rational surfaces — unlike the naive A⁻¹ matrix density which
+    # spikes there. Its endpoint equals dW_boundary (= psio²·ep).
+    dW_running = [real(dot(@view(odet.u_store[:, :, 1, i]) * alpha, @view(odet.u_store[:, :, 2, i]) * alpha)) for i in 1:nstep]
+
+    return (; dW_volume, dW_boundary, dW_running, rec.density, rec.psi)
 end
 
 # ============================  v1 real-space  ============================
