@@ -1,18 +1,18 @@
 # SLAYER.jl
 #
-# SLAYER (Slab Layer) drift-MHD inner-layer model. Port of the Fortran
-# SLAYER code by J.K. Park (2023) at GPEC/slayer/, branch
-# `slayer_growthrate`. Implements the Fitzpatrick (riccati_f)
-# formulation: P_perp / P_tor transport, c_beta compressibility, D_norm
-# normalized ion-skin scale, two-fluid drift coupling via Q_e, Q_i,
-# iota_e. The standard `riccati()` growth-rate Fortran variant is not
-# ported (use this Fitzpatrick path for the dispersion relation).
+# SLAYER (Slab Layer) drift-MHD inner-layer model. Port of J.K. Park's
+# SLAYER (GPEC/slayer/delta.f, branch `slayer_growthrate`). The dispersion
+# path ports the Fortran `riccati_f` (Fitzpatrick layer formulation —
+# P_perp / P_tor transport, c_beta compressibility, D_norm normalized
+# ion-skin scale, two-fluid drift coupling via Q_e, Q_i, iota_e), verified
+# term-by-term against that Fortran and independently against Fitzpatrick's
+# TJ derivation (`TJ/Documentation/Layer.tex`); see `Riccati.jl`. The legacy
+# `riccati()` pr/pe/ds Fortran variant is not ported.
 #
-# The `riccati_del_s` Fortran variant IS ported, but as a standalone
-# layer-thickness diagnostic (`slayer_layer_thickness` in
-# `LayerThickness.jl`) rather than a `solve_inner` dispersion path: it
-# returns the resistive layer thickness in meters at each rational
-# surface, not an alternate growth rate.
+# A separate `del_s` layer-thickness diagnostic (`slayer_layer_thickness` in
+# `LayerThickness.jl`) ports the Fortran `riccati_del_s` and returns the
+# resistive layer width in meters at each rational surface (also verified
+# term-by-term against the Fortran).
 #
 # Type-parameter `S` of `SLAYERModel{S}` selects the Riccati formulation
 # used for the dispersion relation; only `:fitzpatrick` is implemented.
@@ -39,8 +39,8 @@ using ...Utilities.NeoclassicalResistivity: NeoResistivityModel, SpitzerModel,
 SLAYER inner-layer model selector. The type parameter `S` selects the
 Riccati formulation:
 
-  - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default,
-    mirrors the Fortran `riccati_f` routine)
+  - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default;
+    authoritative reference is TJ `Layer.cpp` / `Layer.tex`)
 
 Future dispersion variants (e.g. `:standard`) may be added but are not
 currently implemented. The `del_s` formulation is exposed separately as

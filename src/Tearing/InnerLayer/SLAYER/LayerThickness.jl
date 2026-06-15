@@ -1,19 +1,23 @@
 # LayerThickness.jl
 #
-# Resistive inner-layer thickness via the SLAYER `del_s` Riccati
-# formulation. Ports the Fortran `riccati_del_s` / `w_der_del_s` /
-# `jac_del_s` routines (branch `slayer_growthrate`) and the
-# meters-scaling `delta_s = (delta_s/d_beta) * d_beta`.
+# Resistive inner-layer *width* (del_s) diagnostic, ported from J.K. Park's
+# SLAYER `riccati_del_s` / `w_der_del_s` / `jac_del_s` routines
+# (GPEC/slayer/delta.f, branch `slayer_growthrate`). This is a distinct
+# quantity from the matching index Δ = π/W' returned by `riccati_f`
+# (Riccati.jl): `riccati_del_s` integrates a separate reduced Riccati ODE
+# evaluated at the electron diamagnetic frequency Q_e and extracts a
+# dimensionless width ratio delta_s/d_beta, which scales to a layer
+# thickness in metres via the beta-weighted ion length d_beta.
 #
-# Unlike `riccati_f` (which feeds the dispersion-relation root find for
-# the tearing growth rate), `riccati_del_s` is a one-shot diagnostic
-# evaluated at the electron diamagnetic frequency Q_e. It returns the
-# dimensionless ratio delta_s/d_beta; multiplying by the beta-weighted
-# ion scale d_beta gives the resistive layer thickness in meters at each
-# rational surface.
+# Q_i, c_beta, and the scanned Q are NOT referenced by this formulation
+# (matching the Fortran w_der_del_s, whose E/F use only Q_e, P_perp, P_tor,
+# tau, D_norm).
 #
-# Q_i, c_beta, and the scanned Q are NOT referenced by this formulation;
-# the layer width is set by Q_e, P_perp, P_tor, tau, and D_norm alone.
+# VERIFIED term-by-term against Fortran `slayer_growthrate` delta.f: the E/F
+# coefficients (w_der_del_s, delta.f:291-312), the Jacobian (jac_del_s,
+# delta.f:279-285), the boundary condition `α=√(P̂⊥/(1+1/τ)); W=-α·q²-0.5`
+# and the `delta_s = -(π/√(1+1/τ))·W'` extraction (riccati_del_s,
+# delta.f:173-275) all match exactly.
 
 using OrdinaryDiffEq
 
@@ -49,9 +53,9 @@ end
 end
 
 # Scalar ODE right-hand side dW/dq for the del_s Riccati (port of the
-# Fortran `w_der_del_s` routine). The E, F dispersion coefficients are
-# q-dependent and complex (via the `im·Q_hat` terms); everything else is
-# cached in `_DelSConsts`.
+# Fortran `w_der_del_s` routine, delta.f:291-312). The E, F dispersion
+# coefficients are q-dependent and complex (via the `im·Q_hat` terms);
+# everything else is cached in `_DelSConsts`.
 @inline function _dels_rhs(W::Number, c::_DelSConsts, q::Real)
     q2 = q * q
     q4 = q2 * q2
@@ -62,8 +66,9 @@ end
     return W / q - (W * W) / q + (q * E) / F
 end
 
-# Analytic Jacobian dF/dW (port of the Fortran `jac_del_s` routine): the q·E/F
-# term is W-independent, leaving d/dW(W/q - W²/q) = 1/q - 2W/q.
+# Analytic Jacobian dF/dW (port of the Fortran `jac_del_s` routine,
+# delta.f:279-285): the q·E/F term is W-independent, leaving
+# d/dW(W/q - W²/q) = 1/q - 2W/q.
 @inline _dels_jac(W::Number, c::_DelSConsts, q::Real) = 1.0 / q - 2.0 * W / q
 
 """
@@ -74,7 +79,8 @@ end
 
 Solve the SLAYER `del_s` inner-layer Riccati ODE and return the
 **dimensionless** layer-thickness ratio `δ_s / d_β` at one rational
-surface. Ports the Fortran `riccati_del_s` routine.
+surface. Port of the Fortran `riccati_del_s` routine (delta.f:173-275,
+branch `slayer_growthrate`), verified term-by-term (see file header).
 
 Integrates `dW/dq = W/q − W²/q + q·E/F` inward from `q_start = 5·D_norm`
 to `q_min`, with asymptotic boundary value `W = −α·q_start² − 0.5`,

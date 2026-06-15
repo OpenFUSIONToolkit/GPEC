@@ -1,15 +1,20 @@
 # Riccati.jl
 #
-# Inner-layer Δ via the Fitzpatrick (`riccati_f`) Riccati ODE. Ports the
-# Fortran SLAYER `riccati_f` / `w_der_f` / `jac_f` routines under the
-# simplifying assumptions that have been adopted for this Julia
-# port:
+# Inner-layer Δ via the Fitzpatrick Riccati ODE. Ports the Fortran SLAYER
+# `riccati_f` / `w_der_f` / `jac_f` routines (GPEC/slayer/delta.f, branch
+# `slayer_growthrate`) under PeOhmOnly with parflow off and pe = 0 (the
+# pressureless tearing channel only). VERIFIED term-by-term against that
+# Fortran: A, A', B, C (full form), the dW/dp RHS, both large-p boundary
+# conditions, the regime test D² > ι_e P_⊥/P_tor^(2/3), the small-p
+# Δ = π/W' extraction, and the analytic Jacobian all match exactly.
 #
-#   - PeOhmOnly_flag = .TRUE.  (Fortran default; the alternate path is
-#     not ported)
-#   - parflow_flag   = .FALSE. (Fortran default; the alternate path is
-#     not ported)
-#   - pe = 0
+# The underlying physics is Fitzpatrick's TJ layer formulation; the same
+# coefficients were independently confirmed against `TJ/Documentation/Layer.tex`
+# (A, B, C Eqs. 57-59; Riccati ODE Eq. 91; BCs Eqs. 93-95). Note the TJ C++
+# `Layer.cpp` applies low-D approximations the Fortran (and this port) do not
+# — it drops the D² terms of C and uses a runtime |gPD/PD| regime test
+# instead of the analytic inequality — so Julia matches the Fortran exactly
+# but can differ slightly from the C++ near the regime boundary.
 #
 # The complex normalized growth rate `Q = ω + iγ` is passed directly to
 # `solve_inner` rather than carried on the parameter struct. All other
@@ -24,7 +29,7 @@
 using OrdinaryDiffEq
 
 # ---------------------------------------------------------------------
-# Coefficient evaluation (port of the Fortran w_der_f routine).
+# Coefficient evaluation (port of the Fortran `w_der_f` routine; Layer.tex Eqs. 57-59).
 #
 # All x-independent quantities are bundled in `_RiccatiConsts` and computed
 # once per `solve_inner` call (see line ~200). The hot RHS / Jacobian
@@ -93,7 +98,7 @@ end
     return -(fA_prime / x) * W - W * W / x + (fB / (fA * fC)) * (x * x * x)
 end
 
-# Analytic Jacobian (port of the Fortran jac_f routine). The full RHS has
+# Analytic Jacobian (port of the Fortran `jac_f` routine). The full RHS has
 # both the explicit (fA'/p, fB·p³) terms and the W² term; for the
 # Jacobian only the W-dependent pieces survive. Returns a scalar — the
 # 1×1 Jacobian of the scalar ODE.
@@ -105,8 +110,8 @@ end
 end
 
 # ---------------------------------------------------------------------
-# Boundary-condition selection (port of the Fortran riccati_f
-# initialisation). Two regimes selected by D_norm² vs.
+# Boundary-condition selection (port of the Fortran `riccati_f`
+# initialisation; Layer.tex Eqs. 93/95). Two regimes selected by D_norm² vs.
 # iota_e·P_perp/P_tor^(2/3).
 # ---------------------------------------------------------------------
 
@@ -170,9 +175,11 @@ pressureless layer produces only the tearing channel.
 
 # Algorithm
 
-Ports the Fortran `riccati_f` routine with PeOhmOnly + parflow off and
-pe=0. Integrates `dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` from a
-large `p_start` (selected by `_riccati_f_initial` according to whether
+Ports the Fortran `riccati_f` routine (delta.f, branch `slayer_growthrate`)
+with PeOhmOnly + parflow off and pe=0; implements Fitzpatrick's TJ layer
+formulation (`Layer.tex` Eqs. 57-59, 91-95). Integrates
+`dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` from a large `p_start`
+(selected by `_riccati_f_initial` according to whether
 `D_norm² ≷ iota_e·P_perp/P_tor^(2/3)`) inward to `pmin`, then computes
 `Δ = π / W'(pmin)` from a single RHS evaluation at the inner endpoint.
 

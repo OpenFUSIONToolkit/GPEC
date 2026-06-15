@@ -6,9 +6,10 @@
 # frequencies and Δ values back to physical units.
 #
 # Constructor `SLAYERParameters(; ...)` ports the Fortran SLAYER `params`
-# subroutine (modified): no pr, no pe, no ds (those entered only the
-# legacy `riccati()` / `riccati_del_s()` paths which are not implemented
-# here). Q is not stored — it is passed directly to `solve_inner`.
+# subroutine (modified): no pr, no pe, no ds (those entered only the legacy
+# `riccati()` pr/pe/ds path, which is not ported — the `riccati_f` and
+# `riccati_del_s` paths used here take P_perp/P_tor/D_norm instead). Q is
+# not stored — it is passed directly to `solve_inner`.
 
 """
     SLAYERParameters
