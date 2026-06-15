@@ -210,6 +210,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `ode_flag::Bool` - Enable ODE integration diagnostics
   - `vac_flag::Bool` - Enable vacuum region calculation
   - `mer_flag::Bool` - Enable Mercier stability criterion
+  - `recon_flag::Bool` - Reconstruct the energy principle δW (real-space v1 and matrix v2) for the least-stable eigenmode and write the `recon/` HDF5 group. Mirrors the Fortran DCON `recon_flag`. Requires `vac_flag`.
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
@@ -241,6 +242,7 @@ A mutable struct containing control parameters for stability analysis, set by th
   - `diagnose_ca::Bool` - Enable asymptotic coefficient diagnostics (not yet implemented)
   - `write_outputs_to_HDF5::Bool` - Write results to HDF5 format
   - `HDF5_filename::String` - Name of HDF5 output file
+  - `recon_filename::String` - Name of the standalone energy-principle reconstruction output file (written when `recon_flag` is set)
   - `force_wv_symmetry::Bool` - Boolean flag to enforce symmetry in the vacuum response matrix
   - `save_interval::Int` - Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces. (Same as `euler_step` in the Fortran)
   - `force_termination::Bool` - Terminate after force-free states (skip perturbed equilibrium calculations)
@@ -257,6 +259,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     ode_flag::Bool = false
     vac_flag::Bool = false
     mer_flag::Bool = false
+    recon_flag::Bool = false   # Reconstruct the energy principle δW (real-space v1 + matrix v2) for the least-stable eigenmode and write the recon/ HDF5 group. Mirrors Fortran DCON recon_flag. Requires vac_flag.
     mthvac::Int = 480
     nzvac::Int = 1
     sing_start::Int = 0
@@ -289,6 +292,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     diagnose_ca::Bool = false
     write_outputs_to_HDF5::Bool = true
     HDF5_filename::String = "gpec.h5"
+    recon_filename::String = "recon.h5"
     force_wv_symmetry::Bool = true
     save_interval::Int = 3
     force_termination::Bool = false
