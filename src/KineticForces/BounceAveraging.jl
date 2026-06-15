@@ -519,7 +519,7 @@ function _bounce_integrate(
         # Fourier modes at this θ (Fortran lines 702-708) — write into pre-allocated
         # expm buffer using the ORIGINAL expression order to preserve bit-level parity.
         @inbounds for mi in 1:mpert
-            expm[mi] = exp(im * twopi * mfac[mi] * θ)
+            expm[mi] = cis(twopi * mfac[mi] * θ)
         end
         # Replaces `sum(dbob_m_f .* expm)` / `sum(divx_m_f .* expm) * divxfac`
         # with direct accumulators; same evaluation order as the broadcast + sum.
@@ -532,7 +532,7 @@ function _bounce_integrate(
         divx *= divxfac
 
         # Action integrand (Fortran line 706-708)
-        phase = exp(-twopi * im * n * q * (θ - theta0))
+        phase = cis(-twopi * n * q * (θ - theta0))
         jvtheta[i] = dt * jac * B_val *
             (divx * sqrt_vpar + dbob * (1.0 - 1.5 * lmda * B_val / bo) / sqrt_vpar) *
             phase
@@ -581,7 +581,7 @@ function _bounce_integrate(
     if do_matrices
         pl = Vector{ComplexF64}(undef, ntheta)
         @inbounds for i in 1:ntheta
-            pl[i] = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
+            pl[i] = cis(-twopi * lnq * cum_wb_arr[i] * nrm / pl_denom)
         end
         @inbounds for i in 1:ntheta
             w = (i == 1 || i == ntheta) ? 0.5 : 1.0
@@ -590,7 +590,7 @@ function _bounce_integrate(
     else
         pl = nothing
         @inbounds for i in 1:ntheta
-            pli = exp(-twopi * im * lnq * cum_wb_arr[i] * nrm / pl_denom)
+            pli = cis(-twopi * lnq * cum_wb_arr[i] * nrm / pl_denom)
             w = (i == 1 || i == ntheta) ? 0.5 : 1.0
             bj_integral += w * conj(jvtheta[i]) * (pli + one_minus_sigma / (pli + SINGULAR_EPS))
         end
