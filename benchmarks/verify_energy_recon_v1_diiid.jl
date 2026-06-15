@@ -22,7 +22,7 @@ end
 res = GPEC.main([tmp_dir])
 equil = res.equil; intr = res.intr; ffit = res.ffit; odet = res.odet; vac_data = res.vac_data
 metric = FFS.make_metric(equil; mband=intr.mband)
-de = FFS.build_tex_de_matrices(equil, intr, metric)
+de = PE.build_tex_de_matrices(equil, intr, metric)
 
 nmodes = min(6, size(vac_data.wt, 2))
 println("\n==============  v1 vs v2 on DIIID-like (non-marginal)  ==============")
@@ -32,7 +32,7 @@ ratios = Float64[]
 for k in 1:nmodes
     v = vac_data.wt[:, k]
     r1 = PE.reconstruct_energy_realspace(equil, intr, ffit, odet, metric, v)
-    v2 = FFS.integrate_energy_v2(equil, intr, ffit, odet, v; de=de)
+    v2 = PE.integrate_energy_v2(equil, intr, ffit, odet, v; de=de)
     rat = real(r1.dW_total / v2.dW_boundary)
     push!(ratios, rat)
     @printf "%-5d %+.5e %+.5e %+.5e %-12.5f\n" k real(vac_data.ep[k]) real(r1.dW_total) real(v2.dW_boundary) rat

@@ -8,7 +8,7 @@
 
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
-using GeneralizedPerturbedEquilibrium, LinearAlgebra, Printf, DelimitedFiles
+using GeneralizedPerturbedEquilibrium, LinearAlgebra, Printf, DelimitedFiles, HDF5
 using Plots
 const GPEC = GeneralizedPerturbedEquilibrium
 const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
@@ -72,7 +72,7 @@ end
 mode_vec = vac_data.wt[:, 1]
 metric = FFS.make_metric(equil; mband=intr.mband)
 r1 = PE.reconstruct_energy_realspace(equil, intr, ffit, odet, metric, mode_vec)
-v2 = FFS.integrate_energy_v2(equil, intr, ffit, odet, mode_vec)
+v2 = PE.integrate_energy_v2(equil, intr, ffit, odet, mode_vec)
 
 # --- Parse Fortran reference table ---
 ref = readdlm(joinpath(ref_dir, "gpec_recon_integration_sol1.out"))
@@ -124,6 +124,24 @@ plot!(fig2, fP, fcum; lw=2.5, ls=:dash, label="Fortran recon", color=:black)
 hline!(fig2, [0.0]; color=:gray, ls=:dot, label="")
 f2 = joinpath(outdir, "recon_cumulative_dW.png"); savefig(fig2, f2)
 
+# =====================  Figure 3: 2D (R,Z) energy-density maps from recon.h5  =====================
+f3 = nothing
+h5open(joinpath(outdir, "recon.h5"), "r") do f
+    if haskey(f, "recon/maps")
+        R = read(f["recon/maps/R"]); Z = read(f["recon/maps/Z"])
+        C2 = read(f["recon/maps/C2_density"]); KX = read(f["recon/maps/Kxin2_density"])
+        pA = scatter(vec(R), vec(Z); marker_z=vec(C2), ms=1.6, msw=0, c=:viridis, label="",
+            xlabel="R [m]", ylabel="Z [m]", title="|C|²/μ₀ density", aspect_ratio=:equal, colorbar=true)
+        pB = scatter(vec(R), vec(Z); marker_z=vec(KX), ms=1.6, msw=0, c=:plasma, label="",
+            xlabel="R [m]", ylabel="Z [m]", title="K|ξ_n|² density", aspect_ratio=:equal, colorbar=true)
+        fig3 = plot(pA, pB; layout=(1, 2), size=(1150, 620), left_margin=8Plots.mm, bottom_margin=4Plots.mm,
+            plot_title="recon 2D energy-density maps (recon.h5)")
+        global f3 = joinpath(outdir, "recon_rz_maps.png")
+        savefig(fig3, f3)
+    end
+end
+
 println("\nFigures saved:")
 println("  ", f1)
 println("  ", f2)
+f3 === nothing || println("  ", f3)

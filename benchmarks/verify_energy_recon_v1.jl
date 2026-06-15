@@ -27,7 +27,7 @@ equil = res.equil; intr = res.intr; ffit = res.ffit; odet = res.odet; vac_data =
 psio = equil.psio
 n = intr.numpert_total
 metric = FFS.make_metric(equil; mband=intr.mband)
-de = FFS.build_tex_de_matrices(equil, intr, metric)
+de = PE.build_tex_de_matrices(equil, intr, metric)
 
 # Build a set of well-conditioned test boundary displacements.
 Random.seed!(1234)
@@ -47,7 +47,7 @@ labels = ["eig wt[:,1]", "unit e_1", "unit e_$(n÷2)", "unit e_$n", "rand 1", "r
 ratios = Float64[]
 for (lab, v) in zip(labels, test_vecs)
     r1 = PE.reconstruct_energy_realspace(equil, intr, ffit, odet, metric, v)
-    v2 = FFS.integrate_energy_v2(equil, intr, ffit, odet, v; de=de)
+    v2 = PE.integrate_energy_v2(equil, intr, ffit, odet, v; de=de)
     rat = real(r1.dW_total / v2.dW_boundary)
     push!(ratios, rat)
     @printf "%-22s %+.6e %+.6e %-16.6f\n" lab real(r1.dW_total) real(v2.dW_boundary) rat

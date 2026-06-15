@@ -36,7 +36,7 @@ vac_data = res.vac_data
 psio = equil.psio
 # Build the tex D,E matrices once and reuse across modes.
 metric = FFS.make_metric(equil; mband=intr.mband)
-de = FFS.build_tex_de_matrices(equil, intr, metric)
+de = PE.build_tex_de_matrices(equil, intr, metric)
 
 nmodes = min(4, size(vac_data.wt, 2))
 println("\n=====================  v2 energy reconstruction  =====================")
@@ -46,7 +46,7 @@ println("----------------------------------------------------------------------"
 println("----------------------------------------------------------------------")
 for k in 1:nmodes
     mode_vec = vac_data.wt[:, k]
-    out = FFS.integrate_energy_v2(equil, intr, ffit, odet, mode_vec; de=de)
+    out = PE.integrate_energy_v2(equil, intr, ffit, odet, mode_vec; de=de)
     r_vb = real(out.dW_volume / out.dW_boundary)
     r_be = real(out.dW_boundary / (psio^2 * vac_data.ep[k]))
     @printf "%-5d %+.6e %+.6e %-12.6f %-12.6f\n" k real(out.dW_volume) real(out.dW_boundary) r_vb r_be

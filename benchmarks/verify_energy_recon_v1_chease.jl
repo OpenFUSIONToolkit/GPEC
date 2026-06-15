@@ -94,7 +94,7 @@ println("\nMatching fractions ⇒ v1 structurally correct. Diverging term ⇒ th
 
 # Integral sign + magnitude check vs verified v2 boundary energy (this case is robustly
 # unstable, so ∫δW is NOT a near-cancellation — a clean go/no-go).
-v2 = FFS.integrate_energy_v2(equil, intr, ffit, odet, vac_data.wt[:, 1])
+v2 = PE.integrate_energy_v2(equil, intr, ffit, odet, vac_data.wt[:, 1])
 println("\n--- integral check (robustly-unstable case) ---")
 @printf "v1 ∫dW dψ        = %+.5e   (sign should be NEGATIVE = unstable)\n" r1.dW_total
 @printf "v2 dW_boundary   = %+.5e   (= psio²·ep[1], verified)\n" real(v2.dW_boundary)
