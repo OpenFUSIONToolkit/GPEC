@@ -1,0 +1,129 @@
+# Plot + value validation of the energy-principle reconstruction (v1 real-space, v2 matrix)
+# against the Fortran gpout_recon reference on the same EFIT equilibrium.
+#
+# Saves figures to benchmarks/recon_plots/ and prints the δW value comparison.
+#
+# Run:  PATH=$HOME/julia-1.11.2/bin:$PATH \
+#       ~/julia-1.11.2/bin/julia --project=. benchmarks/plot_recon_validation.jl
+
+using Pkg
+Pkg.activate(joinpath(@__DIR__, ".."))
+using GeneralizedPerturbedEquilibrium, LinearAlgebra, Printf, DelimitedFiles
+using Plots
+const GPEC = GeneralizedPerturbedEquilibrium
+const FFS = GeneralizedPerturbedEquilibrium.ForceFreeStates
+const PE = GeneralizedPerturbedEquilibrium.PerturbedEquilibrium
+gr()
+
+outdir = joinpath(@__DIR__, "recon_plots")
+mkpath(outdir)
+
+ref_dir = get(ENV, "GPEC_RECON_REF_DIR",
+    "/home/satelite2517/data/chease/test/instabilities/cases/PT/01_interchange")
+
+# --- Run Julia GPEC on the same equilibrium ---
+tmp = mktempdir()
+cp(joinpath(ref_dir, "EQDSK_COCOS_02.OUT"), joinpath(tmp, "EQDSK_COCOS_02.OUT"); force=true)
+open(joinpath(tmp, "gpec.toml"), "w") do io
+    write(io, """
+[Equilibrium]
+eq_filename = "EQDSK_COCOS_02.OUT"
+eq_type = "efit"
+jac_type = "hamada"
+grid_type = "ldp"
+psilow = 1e-4
+psihigh = 0.993
+mpsi = 128
+mtheta = 256
+
+[Wall]
+shape = "nowall"
+
+[ForceFreeStates]
+bal_flag = false
+mat_flag = true
+ode_flag = true
+vac_flag = true
+mer_flag = true
+recon_flag = true
+qlow = 1.02
+qhigh = 1e3
+nn_low = 1
+nn_high = 1
+delta_mlow = 8
+delta_mhigh = 8
+mthvac = 512
+use_parallel = false
+populate_dense_xi = true
+set_psilim_via_dmlim = true
+dmlim = 0.2
+""")
+end
+res = GPEC.main([tmp])
+equil = res.equil; intr = res.intr; ffit = res.ffit; odet = res.odet; vac_data = res.vac_data
+psio = equil.psio
+
+# Persist the standalone recon.h5 the pipeline produced.
+if isfile(joinpath(tmp, "recon.h5"))
+    cp(joinpath(tmp, "recon.h5"), joinpath(outdir, "recon.h5"); force=true)
+    println("recon.h5 written to ", joinpath(outdir, "recon.h5"))
+end
+
+mode_vec = vac_data.wt[:, 1]
+metric = FFS.make_metric(equil; mband=intr.mband)
+r1 = PE.reconstruct_energy_realspace(equil, intr, ffit, odet, metric, mode_vec)
+v2 = FFS.integrate_energy_v2(equil, intr, ffit, odet, mode_vec)
+
+# --- Parse Fortran reference table ---
+ref = readdlm(joinpath(ref_dir, "gpec_recon_integration_sol1.out"))
+rows = [i for i in 1:size(ref, 1) if (ref[i, 1] isa Number) && (ref[i, 15] isa Number)]
+fP = Float64.(ref[rows, 1]); fC2 = Float64.(ref[rows, 2]); fKX = Float64.(ref[rows, 3])
+fdw = 0.5 .* (fC2 .- fKX)   # Fortran dW density = 0.5(c2_mu0 - k_xin2)
+
+# --- Single amplitude scale so Julia epf integral matches Fortran epf integral ---
+jint(y) = sum(0.5 .* (y[1:end-1] .+ y[2:end]) .* diff(r1.psi))
+fint(y) = sum(0.5 .* (y[1:end-1] .+ y[2:end]) .* diff(fP))
+scale = fint(fC2) / jint(r1.epf)
+@printf "\namplitude scale (Fortran/Julia, from epf integral) = %.4e\n" scale
+
+# =====================  δW value table  =====================
+println("\n================  δW VALUE CHECK  ================")
+@printf "Julia ep[1] (DCON plasma eigenvalue)   = %+.6e\n" real(vac_data.ep[1])
+@printf "Julia et[1] (total)                    = %+.6e\n" real(vac_data.et[1])
+@printf "v2 dW_boundary  = Ξ†u₂|edge            = %+.6e\n" real(v2.dW_boundary)
+@printf "v2 psio²·ep[1]                         = %+.6e   (ratio %.10f)\n" (psio^2*real(vac_data.ep[1])) real(v2.dW_boundary/(psio^2*vac_data.ep[1]))
+@printf "v2 dW_volume (matrix ∫)               = %+.6e   (vol/bndry %.6f)\n" real(v2.dW_volume) real(v2.dW_volume/v2.dW_boundary)
+@printf "v1 ∫dW dψ (real-space)                = %+.6e\n" r1.dW_total
+@printf "v1/v2 (unit const, psio-dependent)    = %.6e\n" real(r1.dW_total/v2.dW_boundary)
+@printf "Fortran dW_gpec (∫, raw)              = %+.6e\n" fint(fdw)
+@printf "Fortran/Julia dW after epf-scale       = %.6f  (→1 means same shape & balance)\n" (fint(fdw)/(scale*r1.dW_total))
+println("=================================================")
+
+# =====================  Figure 1: densities  =====================
+p1 = plot(r1.psi, scale .* r1.epf; lw=2, label="Julia v1 (scaled)", color=:dodgerblue,
+    xlabel="ψ", ylabel="|C|²/μ₀ density", title="epf  (field-line bending)", legend=:topleft)
+plot!(p1, fP, fC2; lw=2, ls=:dash, label="Fortran recon", color=:black)
+p2 = plot(r1.psi, scale .* r1.dst; lw=2, label="Julia v1 (scaled)", color=:crimson,
+    xlabel="ψ", ylabel="J K |ξ_n|² density", title="dst  (K destabilizing)", legend=:topleft)
+plot!(p2, fP, fKX; lw=2, ls=:dash, label="Fortran recon", color=:black)
+p3 = plot(r1.psi, scale .* r1.dW; lw=2, label="Julia v1 (scaled)", color=:seagreen,
+    xlabel="ψ", ylabel="½(epf−dst) density", title="dW  (energy-principle density)", legend=:topleft)
+plot!(p3, fP, fdw; lw=2, ls=:dash, label="Fortran recon", color=:black)
+fig1 = plot(p1, p2, p3; layout=(3, 1), size=(900, 1000),
+    left_margin=12Plots.mm, bottom_margin=4Plots.mm, plot_title="recon δW densities — Julia v1 vs Fortran gpout_recon")
+f1 = joinpath(outdir, "recon_densities.png"); savefig(fig1, f1)
+
+# =====================  Figure 2: cumulative dW  =====================
+cumtrapz(x, y) = [i == 1 ? 0.0 : sum(0.5 .* (y[1:i-1] .+ y[2:i]) .* diff(x[1:i])) for i in 1:length(x)]
+jcum = cumtrapz(r1.psi, r1.dW) .* scale
+fcum = cumtrapz(fP, fdw)
+fig2 = plot(r1.psi, jcum; lw=2.5, label="Julia v1 ∫dW (scaled)", color=:seagreen,
+    xlabel="ψ", ylabel="cumulative δW", title="Cumulative energy-principle δW(ψ)  (sign = stability)",
+    legend=:bottomleft, left_margin=12Plots.mm, bottom_margin=4Plots.mm, size=(900, 500))
+plot!(fig2, fP, fcum; lw=2.5, ls=:dash, label="Fortran recon", color=:black)
+hline!(fig2, [0.0]; color=:gray, ls=:dot, label="")
+f2 = joinpath(outdir, "recon_cumulative_dW.png"); savefig(fig2, f2)
+
+println("\nFigures saved:")
+println("  ", f1)
+println("  ", f2)
