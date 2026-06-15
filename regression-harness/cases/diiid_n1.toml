@@ -1,3 +1,8 @@
+# Regression case: DIII-D-like n=1 ideal stability + perturbed equilibrium.
+# Tracks energies, singular-surface metrics, Δ' (BVP diagonal), and resonant-flux
+# diagnostics for the canonical DIIID-like fixture. Each [quantities.*] block names an
+# HDF5 path in the run output, how to extract it, and the noise floor below which a
+# difference is treated as zero. Run via the regression-harness (see CLAUDE.md).
 [case]
 name = "diiid_n1"
 description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"

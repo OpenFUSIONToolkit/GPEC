@@ -1,3 +1,8 @@
+# DIII-D-like H-mode equilibrium — n=1 ideal stability + perturbed equilibrium.
+# Free-boundary (nowall) external-kink analysis with DIII-D C-coil forcing applied
+# via Biot-Savart from 3D coil wires. This is the canonical Δ'-matrix regression
+# fixture (stable, clean BVP Δ') and the default benchmark case.
+
 [Equilibrium]
 eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk" # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
@@ -28,37 +33,35 @@ equal_arc_wall = true          # Equal arc length distribution of nodes on wall
 [ForceFreeStates]
 bal_flag = false               # Ideal MHD ballooning criterion for short wavelengths
 mat_flag = true                # Construct coefficient matrices for diagnostic purposes
-ode_flag = true                # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
+ode_flag = true                # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
-mer_flag = true                # Evaluate the Mercier criterian
+mer_flag = true                # Evaluate the Mercier criterion
 
-psiedge = 0.99                 # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
-qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)...
-qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)...
+psiedge = 0.99                 # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
 
 nn_low = 1                     # Smallest toroidal mode number to include
 nn_high = 1                    # Largest toroidal mode number to include
 delta_mlow = 8                 # Expands lower bound of Fourier harmonics
 delta_mhigh = 8                # Expands upper bound of Fourier harmonics
-delta_mband = 0                # Integration keeps only this wide a band...
-mthvac = 512                   # Number of points used in splines over poloidal angle at plasma-vacuum interface.
-thmax0 = 1                     # Linear multiplier on the automatic choice of theta integration bounds
+delta_mband = 0                # Integration keeps only this wide a band of solutions (0 = full)
+mthvac = 512                   # Number of points in splines over poloidal angle at the plasma-vacuum interface
 
-kinetic_source = "fixed"       # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
+kinetic_source = "fixed"       # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
-eulerlagrange_tolerance = 1e-10# Relative tolerance for ODE integration of Euler-Lagrange equations
-save_interval = 3              # Save every Nth ODE step (1=all, 10=every 10th). Always saves near rational surfaces.
+eulerlagrange_tolerance = 1e-10 # Relative tolerance for ODE integration of Euler-Lagrange equations
+save_interval = 3              # Save every Nth ODE step (1=all). Always saves near rational surfaces.
 singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e4                    # Maximum fraction of solutions allowed before re-normalized
+ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
 
 # Δ' BVP + parallel integration (see ForceFreeStatesControl docstring for details)
 use_parallel          = true   # Run parallel FM-propagator BVP path (unlocks singular/delta_prime_matrix)
 parallel_threads      = 2      # BVP thread cap (1 = serial/bit-deterministic; 2 ≈ +20% speedup; ≥3 saturates)
-populate_dense_xi     = true   # REQUIRED for PerturbedEquilibrium (this TOML has a [PerturbedEquilibrium] section). Default is false; PE-using configs must set true when use_parallel=true.
-truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
-set_psilim_via_dmlim  = true   # TRUE for diverted geqdsks — q → ∞ at separatrix, so dmlim truncation avoids the δW kink instability at negligible domain cost
-dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim) / n
+populate_dense_xi     = true   # Append serial-EL pass so dense ξ is stored — REQUIRED with a [PerturbedEquilibrium] section
+set_psilim_via_dmlim  = true   # Truncate at (last_rational_q + dmlim)/n — TRUE for diverted equilibria (q → ∞ at separatrix)
+dmlim                 = 0.2    # Truncate integration at (last_rational_q + dmlim)/n (used when set_psilim_via_dmlim = true)
 
 [ForcingTerms]
 forcing_data_format = "coil"            # Format: "ascii", "hdf5", or "coil" (Biot-Savart from 3D wires)
@@ -67,7 +70,7 @@ mtheta_coil = 480                       # Poloidal grid for boundary B·n̂ eval
 nzeta_coil = 32                         # Toroidal grid (0 = auto = 32·n)
 
 [[ForcingTerms.coil_set]]
-name = "c"                              # DIII-D C-coil (6 coils); resolves to coil_geometries/d3d_c.dat
+name = "c"                              # Coil set; resolves to coil_geometries/d3d_c.dat (DIII-D C-coil, 6 coils)
 currents = [1000.0, 500.0, -500.0, -1000.0, -500.0, 500.0]  # n=1 cosine phasing, 1 kA peak [A]
 
 [PerturbedEquilibrium]
