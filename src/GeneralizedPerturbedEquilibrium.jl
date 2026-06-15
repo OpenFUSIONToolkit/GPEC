@@ -378,17 +378,14 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         if ctrl.use_parallel && !ctrl.populate_dense_xi
             @warn "recon_flag needs dense ξ: set populate_dense_xi=true when use_parallel=true, else u_store is in the Riccati basis and the reconstruction is invalid."
         end
-        mode_vec = vac_data.wt[:, 1]
-        metric_recon = make_metric(equil; mband=intr.mband)
-        v2rec = ForceFreeStates.integrate_energy_v2(equil, intr, ffit, odet, mode_vec)
-        v1rec = PerturbedEquilibrium.reconstruct_energy_realspace(equil, intr, ffit, odet, metric_recon, mode_vec)
+        recon = PerturbedEquilibrium.reconstruct_energy_principle(equil, intr, ffit, odet, vac_data)
         h5open(joinpath(intr.dir_path, ctrl.recon_filename), "w") do f
-            write_recon_group!(f, equil, intr, v1rec, v2rec, vac_data)
+            PerturbedEquilibrium.write_recon_group!(f, equil, intr, recon, vac_data)
         end
         @info "Energy-principle reconstruction written to $(ctrl.recon_filename)"
         if ctrl.write_outputs_to_HDF5 && isfile(joinpath(intr.dir_path, ctrl.HDF5_filename))
             h5open(joinpath(intr.dir_path, ctrl.HDF5_filename), "r+") do f
-                write_recon_group!(f, equil, intr, v1rec, v2rec, vac_data)
+                PerturbedEquilibrium.write_recon_group!(f, equil, intr, recon, vac_data)
             end
         end
         @info "Energy-principle reconstruction completed in $(@sprintf("%.3f", time() - recon_start)) s"
@@ -483,36 +480,6 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
 
     return (ctrl=ctrl, equil=equil, intr=intr, ffit=ffit, odet=odet, vac_data=ctrl.vac_flag ? vac_data : nothing)
 
-end
-
-"""
-    write_recon_group!(f, equil, intr, v1, v2, vac_data)
-
-Write the energy-principle reconstruction into an open HDF5 handle `f` under the
-`recon/` group: the v1 real-space densities (`epf`, `dst`) with their ψ/θ/ζ and
-shear/B²σ²/curvature splits, the v1 integrated `dW_total`, the v2 matrix-form
-`dW_volume`/`dW_boundary`, and the equilibrium context (`psio`, `ep1`, `et1`).
-Used for both the standalone `recon.h5` and the mirrored `gpec.h5` group.
-"""
-function write_recon_group!(f, equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, v1, v2, vac_data)
-    f["recon/mode_index"] = 1
-    f["recon/psi"] = v1.psi
-    f["recon/dW"] = v1.dW
-    f["recon/epf"] = v1.epf
-    f["recon/dst"] = v1.dst
-    f["recon/epf_psi"] = v1.epf_p
-    f["recon/epf_theta"] = v1.epf_t
-    f["recon/epf_zeta"] = v1.epf_z
-    f["recon/dst_shear"] = v1.dst1
-    f["recon/dst_bsq_sigma2"] = v1.dst2
-    f["recon/dst_curvature"] = v1.dst3
-    f["recon/dW_total_v1"] = v1.dW_total
-    f["recon/dW_volume_v2"] = real(v2.dW_volume)
-    f["recon/dW_boundary_v2"] = real(v2.dW_boundary)
-    f["recon/psio"] = equil.psio
-    f["recon/ep1"] = real(vac_data.ep[1])
-    f["recon/et1"] = real(vac_data.et[1])
-    return nothing
 end
 
 """

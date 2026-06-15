@@ -33,7 +33,6 @@ include("Utils.jl")
 include("PowerNorm.jl")
 include("Free.jl")
 include("Riccati.jl")
-include("EnergyReconstruction.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
 global eps = 1e-10
