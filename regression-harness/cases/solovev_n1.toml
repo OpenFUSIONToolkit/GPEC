@@ -178,6 +178,47 @@ label = "pressure profile (checksum)"
 noise_threshold = 0
 order = 71
 
+# Energy-principle reconstruction (recon_flag): δW reconstructed for the least-stable mode.
+[quantities.recon_dW_total_v1]
+h5path = "recon/dW_total_v1"
+type = "real_scalar"
+extract = "value"
+label = "recon v1 dW total (real-space)"
+noise_threshold = 1e-8
+order = 72
+
+[quantities.recon_dW_volume_v2]
+h5path = "recon/dW_volume_v2"
+type = "real_scalar"
+extract = "value"
+label = "recon v2 dW volume (matrix form)"
+noise_threshold = 1e-10
+order = 73
+
+[quantities.recon_dW_boundary_v2]
+h5path = "recon/dW_boundary_v2"
+type = "real_scalar"
+extract = "value"
+label = "recon v2 dW boundary (psio2 ep)"
+noise_threshold = 1e-10
+order = 74
+
+[quantities.recon_dst_checksum]
+h5path = "recon/dst"
+type = "real_vector"
+extract = "checksum"
+label = "recon K xi_n^2 density (checksum)"
+noise_threshold = 0
+order = 75
+
+[quantities.recon_epf_checksum]
+h5path = "recon/epf"
+type = "real_vector"
+extract = "checksum"
+label = "recon C^2/mu0 density (checksum)"
+noise_threshold = 0
+order = 76
+
 # Runtime (special: not from H5)
 [quantities.runtime]
 h5path = ""

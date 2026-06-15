@@ -50,6 +50,7 @@ mat_flag = true               # Construct coefficient matrices for diagnostic pu
 ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 mer_flag = true               # Evaluate the Mercier criterian
+recon_flag = true             # Reconstruct the energy principle δW (real-space v1 + matrix v2) → recon/ HDF5 group
 
 psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
