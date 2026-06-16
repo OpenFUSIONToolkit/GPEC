@@ -4,7 +4,7 @@ DCON eigenmode, both ways used by the Fortran DCON `recon` flag (`gpout_recon`/`
 in `~/GPEC/gpec`; `docs/tex/recon/main.tex`, Sunjae Lee):
 
   - **v1 (real-space)** — on the (ψ,θ) grid, the Bernstein integrand
-    `2μ₀ dδW/dψ = ∫dθ [|C|² − μ₀ K (ξ·n̂)²]`, split into `epf=(1/μ₀)∫J|C|²`
+    `2μ₀ δW = ∫dθ [|C|² − μ₀ K (ξ·n̂)²]`, split into `epf=(1/μ₀)∫J|C|²`
     (with ψ/θ/ζ pieces) and `dst=∫J K|ξ_n|²` (with shear/B²σ²/curvature pieces).
     `C = Q + (ξ·n̂)(μ₀ j×n̂)` (`gpeq_c`) is built from the perturbed field Q (the tested
     `compute_perturbed_field_modes`/`compute_cova_components` helpers) plus the
@@ -14,10 +14,15 @@ in `~/GPEC/gpec`; `docs/tex/recon/main.tex`, Sunjae Lee):
     A,B,C,H reuse `ffit.amats/bmats/cmats/hmats` (identical to the tex with χ'=const); the
     tex D,E are built by `build_tex_de_matrices`; Ξ_s = -A⁻¹(BΞ_ψ'+CΞ_ψ) is formed analytically.
 
-The v2 boundary term equals the DCON plasma energy `psio²·ep[k]` to machine precision, so
-it is the authoritative δW; v1 reconstructs the real-space decomposition (validated against
-the Fortran `gpec_recon_*` reference term-by-term). Integrals use cubic-spline integration
-(`FastInterpolations.integrate`, matching the Fortran `recon_int="spline"`).
+**Normalisation convention**: every returned/integrated energy here is `2μ₀δW` (the Bernstein
+/DCON form above), and every per-ψ density is `2μ₀ dδW/dψ`. So `v1.dW = μ₀(epf−dst)`,
+`v1.dW_total`, `v2.dW_volume`, `v2.dW_boundary`, `v2.dW_running`, `dW_of_shape().dW`,
+`plasma_energy(...)` and `energy_for_perturbation(...).dW` are all `2μ₀δW`. (For an eigenmode the
+v2 boundary term `psio²·ep[k]` equals this `2μ₀δW` to machine precision — the authoritative value.)
+
+v1 reconstructs the real-space decomposition (validated against the Fortran `gpec_recon_*`
+reference term-by-term). Integrals use cubic-spline integration (`FastInterpolations.integrate`,
+matching the Fortran `recon_int="spline"`).
 """
 
 const _MU0 = 4.0e-7 * π
@@ -212,9 +217,9 @@ analytic m=2 kink profile, or an ELITE eigenfunction converted to GPEC `(ψ, m)`
 variable is minimised analytically (Ξ_s = -A⁻¹(BΞ_ψ'+CΞ_ψ)); Ξ_ψ' is obtained by per-harmonic
 cubic-spline differentiation of the input in ψ.
 
-For an exact Euler-Lagrange solution this returns the true δW; for any other trial shape it is the
-variational (≥ minimum) energy of that shape, in the same DCON normalisation as
-`integrate_energy_v2`'s `dW_volume`. Returns `(; psi, density, dW)`.
+For an exact Euler-Lagrange solution this returns the true 2μ₀δW; for any other trial shape it is
+the variational (≥ minimum) energy of that shape, in the 2μ₀δW convention (same as
+`integrate_energy_v2`'s `dW_volume`). Returns `(; psi, density, dW)` with `dW = ∫density dψ = 2μ₀δW`.
 """
 function dW_of_shape(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ffit::FourFitVars, psi_grid::AbstractVector, xi_psi_modes::AbstractMatrix; de=nothing)
     n = intr.numpert_total
@@ -300,9 +305,11 @@ end
                                  ntheta=max(512,4·mpert), store_maps=false) -> NamedTuple
 
 v1 real-space reconstruction of the energy-principle density for boundary displacement
-`mode_vec`. Returns per-surface `psi`, `dW=½(epf−dst)`, `epf`, `dst`, their ψ/θ/ζ and
-shear/B²σ²/curvature splits, the spline-integrated `dW_total`, and (when `store_maps`)
-`maps` with per-(ψ,θ) `R, Z, C2_density, K, Kxin2_density` for R-Z heatmaps.
+`mode_vec`, in the 2μ₀δW convention. Returns per-surface `psi`, `dW = μ₀(epf−dst)` (the
+2μ₀δW density, i.e. 2μ₀ dδW/dψ), the `epf=(1/μ₀)∫J|C|²` and `dst=∫J K|ξ_n|²` pieces with
+their ψ/θ/ζ and shear/B²σ²/curvature splits, the spline-integrated `dW_total = 2μ₀δW`
+(consistent with v2's `dW_volume`/`dW_boundary`), and (when `store_maps`) `maps` with
+per-(ψ,θ) `R, Z, C2_density, K, Kxin2_density` for R-Z heatmaps.
 """
 function reconstruct_energy_realspace(equil::Equilibrium.PlasmaEquilibrium, ffs_intr::ForceFreeStatesInternal, ffit::FourFitVars, odet::OdeState, metric::MetricData, mode_vec::AbstractVector; ntheta::Int=max(512, 4 * ffs_intr.mpert), store_maps::Bool=false)
     npsi = size(odet.u_store, 4)
@@ -479,7 +486,9 @@ function reconstruct_energy_realspace(equil::Equilibrium.PlasmaEquilibrium, ffs_
         dst1[ipsi] = dst1_acc / nθ; dst2[ipsi] = dst2_acc / nθ; dst3[ipsi] = dst3_acc / nθ
     end
 
-    dW = 0.5 .* (epf .- dst)
+    # 2μ₀δW convention (Bernstein/DCON): density = 2μ₀ dδW/dψ = μ₀(epf − dst), so
+    # ∫dW dψ = 2μ₀δW — consistent with v2 (dW_volume/dW_boundary) and dW_of_shape.
+    dW = _MU0 .* (epf .- dst)
     dW_total = _spline_int(psi_grid, dW)
     maps = store_maps ? (; psi=psi_grid, theta=thetas, R=Rmap, Z=Zmap, C2_density=C2map, K=Kmap, Kxin2_density=KXmap) : nothing
     return (; psi=psi_grid, dW, epf, dst, dW_total, epf_p, epf_t, epf_z, dst1, dst2, dst3, maps)
@@ -490,9 +499,10 @@ end
 """
     plasma_energy(vac_data, equil, xi_b) -> Float64
 
-Exact plasma δW for an ARBITRARY boundary perturbation `xi_b` (normal-displacement vector in
-the (m) Fourier basis), evaluated directly from the DCON plasma-energy operator:
-`δW = psio²·(xi_b† W_p xi_b)` where `W_p = vac_data.wp`. This is the cheap "reverse" δW — it
+Exact plasma energy (2μ₀δW convention) for an ARBITRARY boundary perturbation `xi_b`
+(normal-displacement vector in the (m) Fourier basis), evaluated directly from the DCON
+plasma-energy operator: `2μ₀δW = psio²·(xi_b† W_p xi_b)` where `W_p = vac_data.wp` (= the
+v2 boundary term; for an eigenmode = psio²·ep[k]). This is the cheap "reverse" δW — it
 needs no spatial reconstruction. Every `xi_b` is an admissible perturbation: it maps to the
 unique regular Euler-Lagrange solution `ξ_ψ(ψ) = u_store(ψ)·(u_store(edge)⁻¹ xi_b)`, since the
 stored fundamental solutions span all regular EL solutions. The free-boundary eigenmodes
@@ -506,8 +516,8 @@ plasma_energy(vac_data::VacuumData, equil::Equilibrium.PlasmaEquilibrium, xi_b::
 
 Reverse-direction reconstruction: for an ARBITRARY perturbation `xi_b` (boundary
 normal-displacement, (m) basis), reconstruct the regular Euler-Lagrange solution it generates
-and its energy principle both ways (v1 real-space, v2 matrix). The exact plasma δW is
-`dW = v2.dW_boundary = psio²·(xi_b† W_p xi_b)` (= `plasma_energy(vac_data, equil, xi_b)`).
+and its energy principle both ways (v1 real-space, v2 matrix). The exact plasma energy is
+`dW = v2.dW_boundary = psio²·(xi_b† W_p xi_b) = 2μ₀δW` (= `plasma_energy(vac_data, equil, xi_b)`).
 Pass prebuilt `metric`/`de` to reuse across a scan over many perturbations.
 Returns `(; v1, v2, xi_b, dW)`.
 """

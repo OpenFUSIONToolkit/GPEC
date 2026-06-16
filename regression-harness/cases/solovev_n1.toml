@@ -183,7 +183,7 @@ order = 71
 h5path = "recon/dW_total_v1"
 type = "real_scalar"
 extract = "value"
-label = "recon v1 dW total (real-space)"
+label = "recon v1 2mu0 dW total (real-space)"
 noise_threshold = 1e-8
 order = 72
 
