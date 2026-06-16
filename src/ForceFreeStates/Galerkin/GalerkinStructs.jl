@@ -12,10 +12,14 @@
 # Hermite-cubic order: 4 DOFs per node-pair (value + slope at each end), indexed 0:np in Fortran.
 const GAL_NP = 3
 
-"""Cell type flanking a singular surface (Fortran `cell%etype`, gal.f)."""
+"""
+Cell type flanking a singular surface (Fortran `cell%etype`, gal.f).
+"""
 @enum GalCellType GCT_NONE GCT_RES GCT_EXT GCT_EXT1 GCT_EXT2
 
-"""Which side of the adjacent singular surface a cell lies on (Fortran `cell%extra`)."""
+"""
+Which side of the adjacent singular surface a cell lies on (Fortran `cell%extra`).
+"""
 @enum GalSide GAL_SIDE_NONE GAL_SIDE_LEFT GAL_SIDE_RIGHT
 
 """
@@ -50,7 +54,9 @@ mutable struct GalCell
     mat::Array{ComplexF64,4}
 end
 
-"""Construct an empty `GalCell` for `mpert` poloidal modes and Hermite order `np`."""
+"""
+Construct an empty `GalCell` for `mpert` poloidal modes and Hermite order `np`.
+"""
 function GalCell(mpert::Int, np::Int=GAL_NP)
     return GalCell(GCT_NONE, GAL_SIDE_NONE, 0,
         zeros(Int, mpert, np + 1), (0.0, 0.0), 0.0,
@@ -79,6 +85,7 @@ Global workspace for the Galerkin solve. Port of Fortran `gal_type` (gal.f:68-76
 
 `intvl` has length `msing+1` (Fortran `intvl(0:msing)`, accessed as `intvl[ising+1]`).
 `kl = ku = mpert*(np+1)`. The banded `mat` storage layout depends on `solver` (gal.f:164-168):
+
   - `"LU"`       → `ldab = 2*kl + ku + 1`, full band (LAPACK `gbtrf!`/`gbtrs!`)
   - `"cholesky"` → `ldab = kl + 1`, lower band only (LAPACK `pbtrf!`/`pbtrs!`, `'L'`)
 """
@@ -111,6 +118,24 @@ struct GalSingAsymp
 end
 
 """
+    GalerkinSolution
+
+Reconstructed outer-region radial solution on the gal-native grid (Piece 1 producer). Populated by
+`gal_output_solution` (GalerkinSolution.jl).
+
+  - `psi::Vector{Float64}`, `q::Vector{Float64}` — radial grid (inner→edge) and its safety factor.
+  - `issing::Vector{Bool}` — grid points sitting on a singular surface (skipped; left zero).
+  - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, nsol)` ξ and dξ/dψ.
+"""
+struct GalerkinSolution
+    psi::Vector{Float64}
+    q::Vector{Float64}
+    issing::Vector{Bool}
+    xi::Array{ComplexF64,3}
+    xi_deriv::Array{ComplexF64,3}
+end
+
+"""
     GalerkinResult
 
 Outputs of the outer-region Galerkin solve.
@@ -124,6 +149,8 @@ Outputs of the outer-region Galerkin solve.
   - `msing::Int` — number of resonant singular surfaces included.
   - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
+  - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
+    gal-native grid (Piece 1); `nothing` if no resonant surfaces.
 """
 struct GalerkinResult
     delta::Matrix{ComplexF64}
@@ -139,4 +166,5 @@ struct GalerkinResult
     di::Vector{Float64}
     alpha::Vector{ComplexF64}
     delta_coil::Matrix{ComplexF64}   # (mpert, 2*msing) coil-response block (rpec_flag); empty if not computed
+    solution::Union{Nothing,GalerkinSolution}
 end
