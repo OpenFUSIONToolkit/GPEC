@@ -187,8 +187,7 @@ end
                                   q .* (intr_ric.nlow:intr_ric.nhigh)'))
             w = -Kmat * S
             for i in 1:N
-                ;
-                w[i, i] += singfac[i];
+                w[i, i] += singfac[i]
             end
             v = copy(w)
             ldiv!(LowerTriangular(L), v)
