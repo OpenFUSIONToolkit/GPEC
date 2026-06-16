@@ -684,7 +684,9 @@ crossings (not marginal points) and are skipped. The first crossing is the first
 stability boundary, the second the second-stability boundary, and so on.
 
 Returns `(scales, alphas, reference)` with `alphas = alpha_ref * scales`, ordered in
-increasing α. Surfaces that never cross return empty vectors.
+increasing α. Surfaces that never cross return empty vectors. With `max_crossings > 0`
+the scan stops after that many crossings (e.g. `1` for a first-boundary-only search,
+which avoids scanning the full α range above the boundary).
 """
 function ballooning_alpha_crossings(
     psi_idx::Int,
@@ -692,7 +694,8 @@ function ballooning_alpha_crossings(
     theta_k::Float64=0.0,
     max_alpha_scale::Float64=8.0,
     n_scan::Int=24,
-    tol::Float64=1e-3
+    tol::Float64=1e-3,
+    max_crossings::Int=0
 )
     ref = salpha_reference(psi_idx, plasma_eq)
 
@@ -712,33 +715,48 @@ function ballooning_alpha_crossings(
     end
 
     samples = collect(range(0.0, max_alpha_scale; length=n_scan + 1))
-    scales = _ballooning_marginal_crossings(delta_at, samples, tol)
+    scales = _ballooning_marginal_crossings(delta_at, samples, tol; max_crossings=max_crossings)
 
     return (scales=scales, alphas=ref.alpha_ref .* scales, reference=ref)
 end
 
-# March along `samples` (monotone, either direction) from the stable anchor at
-# `samples[1]`, returning every sign change of `delta_at` between finite samples,
+# March along `samples` (monotone, either direction) from the stable anchor (first finite,
+# nonzero sample), returning every sign change of `delta_at` between finite samples,
 # bisected to `tol`. Sign changes whose endpoint magnitudes exceed pole_cap*|Δ'_anchor|
 # are Δ' pole crossings (not marginal points) and are skipped; on an adequately fine
 # scan all remaining crossings are genuine marginal zeros, ordered from the anchor.
-function _ballooning_marginal_crossings(delta_at, samples, tol; pole_cap=3.0)
-    vals = [delta_at(x) for x in samples]
-    k0 = findfirst(v -> isfinite(v) && v != 0.0, vals)
-    isnothing(k0) && return Float64[]
-    d_anchor = abs(vals[k0])
-    locs = Float64[]
-    for k in k0:length(samples)-1
-        a, b = vals[k], vals[k+1]
-        (isfinite(a) && isfinite(b) && sign(a) != sign(b)) || continue
-        max(abs(a), abs(b)) > pole_cap * d_anchor && continue
-        lo, hi = samples[k], samples[k+1]
-        while abs(hi - lo) > tol
-            mid = 0.5 * (lo + hi)
-            dm = delta_at(mid)
-            (isfinite(dm) && sign(dm) == sign(a)) ? (lo = mid) : (hi = mid)
+#
+# Samples are evaluated lazily; with `max_crossings > 0` the march stops once that many
+# crossings are found, so a first-boundary-only search costs only the samples up to it.
+function _ballooning_marginal_crossings(delta_at, samples, tol; pole_cap=3.0, max_crossings=0)
+    n = length(samples)
+    k0 = 0
+    d_prev = NaN
+    for k in 1:n
+        d = delta_at(samples[k])
+        if isfinite(d) && d != 0.0
+            k0 = k
+            d_prev = d
+            break
         end
-        push!(locs, 0.5 * (lo + hi))
+    end
+    k0 == 0 && return Float64[]
+    d_anchor = abs(d_prev)
+    locs = Float64[]
+    for k in k0+1:n
+        d = delta_at(samples[k])
+        if isfinite(d_prev) && isfinite(d) && sign(d) != sign(d_prev) && max(abs(d_prev), abs(d)) <= pole_cap * d_anchor
+            lo, hi = samples[k-1], samples[k]
+            sign_lo = sign(d_prev)
+            while abs(hi - lo) > tol
+                mid = 0.5 * (lo + hi)
+                dm = delta_at(mid)
+                (isfinite(dm) && sign(dm) == sign_lo) ? (lo = mid) : (hi = mid)
+            end
+            push!(locs, 0.5 * (lo + hi))
+            (max_crossings > 0 && length(locs) >= max_crossings) && break
+        end
+        d_prev = d
     end
     return locs
 end
@@ -762,13 +780,13 @@ function critical_ballooning_alpha(
     n_scan::Int=24,
     tol::Float64=1e-3
 )
-    cr = ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan, tol=tol)
+    cr = ballooning_alpha_crossings(psi_idx, plasma_eq; theta_k=theta_k, max_alpha_scale=max_alpha_scale, n_scan=n_scan, tol=tol, max_crossings=1)
     isempty(cr.scales) && return (alpha_crit=NaN, alpha_scale_crit=NaN, found=false)
     return (alpha_crit=cr.alphas[1], alpha_scale_crit=cr.scales[1], found=true)
 end
 
 """
-    ballooning_alpha_boundary(ctrl, plasma_eq; theta_k=0.0)
+    ballooning_alpha_boundary(ctrl, plasma_eq; theta_k=0.0, n_scan=24)
 
 Profile driver for the BALOO-style ballooning stability diagram. Loops over flux
 surfaces returning the experimental pressure gradient `alpha` (from
@@ -776,12 +794,19 @@ surfaces returning the experimental pressure gradient `alpha` (from
 [`critical_ballooning_alpha`](@ref)) versus normalized flux `psi`. Surfaces whose
 experimental `alpha` exceeds `alpha_critical` are ballooning-unstable.
 
+This is the fast first-boundary-only driver: `critical_ballooning_alpha` stops at the
+first crossing, so cost scales with the boundary location rather than the full α range.
+Use this (not [`ballooning_alpha_boundaries`](@ref)) when only the 1st boundary is
+needed, e.g. a pedestal-stability constraint. `n_scan` sets the scan resolution; raise
+it (e.g. 64) on edge surfaces where Δ' poles can shift a coarse first crossing.
+
 Per-surface failures and surfaces with no boundary within range are returned as `NaN`.
 """
 function ballooning_alpha_boundary(
     ctrl::ForceFreeStatesControl,
     plasma_eq::Equilibrium.PlasmaEquilibrium;
-    theta_k::Float64=0.0
+    theta_k::Float64=0.0,
+    n_scan::Int=24
 )
     xs = plasma_eq.profiles.xs
     npsi = length(xs)
@@ -793,7 +818,7 @@ function ballooning_alpha_boundary(
         xs[i] > 1.0 && continue
         try
             alpha[i] = salpha_reference(i, plasma_eq).alpha_ref
-            alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k).alpha_crit
+            alpha_critical[i] = critical_ballooning_alpha(i, plasma_eq; theta_k=theta_k, n_scan=n_scan).alpha_crit
         catch err
             if ctrl.verbose
                 @warn "ballooning alpha boundary failed" psi_idx = i exception = err
