@@ -80,11 +80,8 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
     ntheta = has_duplicate ? ny_full - 1 : ny_full
     fs_view = has_duplicate ? view(fs,:,(1:ntheta),:) : fs
 
-    # Clamp to Nyquist limit
-    nyquist_limit = ntheta ÷ 2
-    actual_mmax = min(mmax, nyquist_limit)
-
-    nmodes = actual_mmax + 1
+    @assert mmax <= ntheta ÷ 2 "mmax must be less than or equal to the Nyquist limit"
+    nmodes = mmax + 1
 
     # Compute Fourier coefficients using batched FFT
     fs_reshaped = reshape(permutedims(fs_view, (2, 1, 3)), ntheta, npsi * nqty)
@@ -103,14 +100,14 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
             @inbounds cos_coeffs[ipsi, 1, iq] = real(fft_col[1]) / ntheta
 
             # Higher modes
-            @inbounds for m in 1:actual_mmax
+            @inbounds for m in 1:mmax
                 cos_coeffs[ipsi, m+1, iq] = 2 * real(fft_col[m+1]) / ntheta
                 sin_coeffs[ipsi, m+1, iq] = -2 * imag(fft_col[m+1]) / ntheta
             end
         end
     end
 
-    FourierCoefficients(xs, actual_mmax, nqty, cos_coeffs, sin_coeffs)
+    FourierCoefficients(xs, mmax, nqty, cos_coeffs, sin_coeffs)
 end
 
 """
