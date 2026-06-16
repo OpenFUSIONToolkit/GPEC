@@ -314,6 +314,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     gal_sing_order::Int = 6         # base power-series order for the Galerkin singular asymptotics
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
     gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
+    gal_edge_onesided::Bool = false # pack the two end intervals (`[psilow,first rational]`, `[last rational,psihigh]`) one-sided toward their single rational end instead of the Fortran-faithful symmetric "both" pack. Leaves the regular domain boundary at coarse spacing, removing the gratuitous fine edge cell that inflates cond(A) (entry spread ~1/h²) and seeds the downstream edge-derivative artifact. Default false = faithful to gal.f.
     fixed_axis::Bool = false
 end
 

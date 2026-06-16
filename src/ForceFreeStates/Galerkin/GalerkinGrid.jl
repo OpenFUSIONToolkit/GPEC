@@ -147,7 +147,18 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
     xm = (xn[ixmax+1] + xn[ixmin+1]) / 2
     dxh = (xn[ixmax+1] - xn[ixmin+1]) / 2
     mx = (ixmax - ixmin) ÷ 2
-    packed = gal_pack(mx, pfac, "both")        # length 2*mx+1 = (ixmax-ixmin)+1
+    # Default: symmetric "both" pack (faithful to gal.f:438). With gal_edge_onesided, the two end
+    # intervals pack only toward their single rational end, leaving the regular boundary (psilow at
+    # interval 0, psihigh at interval msing) at coarse spacing — removes the gratuitous fine edge cell.
+    side = "both"
+    if ctrl.gal_edge_onesided && msing > 0
+        if ising == 0
+            side = "right"   # rational sits at the upper (ixmax) end
+        elseif ising == msing
+            side = "left"    # rational sits at the lower (ixmin) end
+        end
+    end
+    packed = gal_pack(mx, pfac, side)          # length 2*mx+1 = (ixmax-ixmin)+1
     for k in 0:(ixmax-ixmin)
         xn[ixmin+1+k] = xm + dxh * packed[k+1]
     end
