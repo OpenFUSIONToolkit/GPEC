@@ -315,6 +315,12 @@ A mutable struct containing control parameters for stability analysis, set by th
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)
     gal_rpec_flag::Bool = false     # append mpert coil-response columns to the Δ′ solve (RDCON rpec_flag): unit boundary sources whose plasma response is recorded; needed for the driven (resistive perturbed-equilibrium) Δ_gw
     gal_edge_onesided::Bool = false # pack the two end intervals (`[psilow,first rational]`, `[last rational,psihigh]`) one-sided toward their single rational end instead of the Fortran-faithful symmetric "both" pack. Leaves the regular domain boundary at coarse spacing, removing the gratuitous fine edge cell that inflates cond(A) (entry spread ~1/h²) and seeds the downstream edge-derivative artifact. Default false = faithful to gal.f.
+    # --- DRIVEN (RPEC) outer↔inner asymptotic matching (rmatch match_rpec port) ---
+    gal_match_flag::Bool = false    # enable the RPEC inner-layer matching: solve the coil-driven matched ξ(ψ) from the gal Δ′ + the inner-layer Δ(Q). Requires gal_rpec_flag=true.
+    gal_eta::Vector{Float64} = Float64[]      # per-surface resistivity η (length msing, core→edge); Fortran rmatch `eta`
+    gal_rho::Vector{Float64} = Float64[]      # per-surface mass density ρ [kg/m³] (length msing, core→edge); Fortran rmatch `massden`
+    gal_rotation::Vector{Float64} = Float64[] # per-surface rotation frequency f [Hz] (length msing, core→edge); forced eigenvalue γ_s = 2πi·n·f. Fortran rmatch `rotation`
+    gal_gamma::Float64 = 5 / 3       # ratio of specific heats Γ for the resistive-layer coefficients (resist_eval G term)
     fixed_axis::Bool = false
 end
 

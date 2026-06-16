@@ -136,6 +136,30 @@ struct GalerkinSolution
 end
 
 """
+    GalMatchResult
+
+Coil-driven RPEC matched solution from the outer↔inner asymptotic matching (Fortran rmatch
+`match_rpec`). Populated by `gal_match_rpec` (GalerkinMatch.jl) when `gal_match_flag`.
+
+  - `cout::Matrix{ComplexF64}` — `(2·msing, mcoil)` outer-region plasma-solution coefficients.
+  - `cin::Matrix{ComplexF64}` — `(2·msing, mcoil)` inner-region coefficients.
+  - `xi::Array{ComplexF64,3}`, `xi_deriv::Array{ComplexF64,3}` — `(mpert, ngrid, mcoil)` matched ξ(ψ) and
+    analytic ξ′(ψ) on the gal grid, one column per coil drive (identity-at-edge basis).
+  - `deltar::Matrix{ComplexF64}` — `(msing, 2)` inner-layer matching data `(Δ₁, Δ₂)` per surface.
+  - `rpec_eig::Vector{ComplexF64}` — forced eigenvalues `γ_s = 2πi·n·f_s` per surface.
+  - `residual::Float64` — relative linear-solve residual `‖mat·cof − rmat‖/‖rmat‖`.
+"""
+struct GalMatchResult
+    cout::Matrix{ComplexF64}
+    cin::Matrix{ComplexF64}
+    xi::Array{ComplexF64,3}
+    xi_deriv::Array{ComplexF64,3}
+    deltar::Matrix{ComplexF64}
+    rpec_eig::Vector{ComplexF64}
+    residual::Float64
+end
+
+"""
     GalerkinResult
 
 Outputs of the outer-region Galerkin solve.
@@ -167,4 +191,5 @@ struct GalerkinResult
     alpha::Vector{ComplexF64}
     delta_coil::Matrix{ComplexF64}   # (mpert, 2*msing) coil-response block (rpec_flag); empty if not computed
     solution::Union{Nothing,GalerkinSolution}
+    match::Union{Nothing,GalMatchResult}   # RPEC matched solution (gal_match_flag); nothing otherwise
 end

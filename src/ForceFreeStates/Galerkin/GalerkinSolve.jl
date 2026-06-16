@@ -70,7 +70,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
         empty2 = Matrix{ComplexF64}(undef, 0, 0)
         return GalerkinResult(Matrix{ComplexF64}(undef, 0, 0), empty2, empty2, empty2, empty2, 0,
-            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2, nothing)
+            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2, nothing, nothing)
     end
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
@@ -179,9 +179,21 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh)
 
+    sing_psi = [s.psifac for s in sings]
+    sing_q = [s.q for s in sings]
+    sing_m = [s.m[1] for s in sings]
+    sing_n = [s.n[1] for s in sings]
+    result = GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
+        sing_psi, sing_q, sing_m, sing_n, di, alpha, delta_coil, solution, nothing)
+
+    # DRIVEN (RPEC) outer↔inner matching: build the coil-driven matched ξ/ξ′ (gal_match_rpec).
+    ctrl.gal_match_flag || return result
+    ctrl.gal_rpec_flag || error("galerkin_solve: gal_match_flag=true requires gal_rpec_flag=true")
+    ctrl.verbose && @info "RPEC matching: inner-layer Δ(Q) + outer↔inner solve for the coil-driven ξ"
+    match = gal_match_rpec(ctrl, equil, intr, result)
+    ctrl.verbose && @info "RPEC matching: linear-solve residual = $(match.residual)"
     return GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
-        [s.psifac for s in sings], [s.q for s in sings],
-        [s.m[1] for s in sings], [s.n[1] for s in sings], di, alpha, delta_coil, solution)
+        sing_psi, sing_q, sing_m, sing_n, di, alpha, delta_coil, solution, match)
 end
 
 """
@@ -238,6 +250,16 @@ function write_galerkin!(out_h5, result::GalerkinResult)
         out_h5["galerkin/solution/issing"] = collect(sol.issing)
         out_h5["galerkin/solution/xi"] = sol.xi
         out_h5["galerkin/solution/xi_deriv"] = sol.xi_deriv
+    end
+    if result.match !== nothing
+        m = result.match
+        out_h5["galerkin/match/cout"] = m.cout
+        out_h5["galerkin/match/cin"] = m.cin
+        out_h5["galerkin/match/xi"] = m.xi
+        out_h5["galerkin/match/xi_deriv"] = m.xi_deriv
+        out_h5["galerkin/match/deltar"] = m.deltar
+        out_h5["galerkin/match/rpec_eig"] = m.rpec_eig
+        out_h5["galerkin/match/residual"] = m.residual
     end
     return nothing
 end
