@@ -70,7 +70,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         ctrl.verbose && @info "galerkin_solve: no resonant surfaces in domain; skipping Δ′ solve"
         empty2 = Matrix{ComplexF64}(undef, 0, 0)
         return GalerkinResult(Matrix{ComplexF64}(undef, 0, 0), empty2, empty2, empty2, empty2, 0,
-            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2)
+            Float64[], Float64[], Int[], Int[], Float64[], ComplexF64[], empty2, nothing)
     end
 
     ctrl.verbose && @info "Starting outer-region Galerkin Δ′ solve (msing=$msing, solver=$(ctrl.gal_solver))"
@@ -174,9 +174,14 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
     # Coil-response block (rpec_flag): rows 2*msing+1 : 2*msing+mpert of delta (empty otherwise).
     delta_coil = ncoil > 0 ? delta[(2*msing+1):(2*msing+ncoil), :] : Matrix{ComplexF64}(undef, 0, 0)
+
+    # Piece 1 producer: reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
+    ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
+    solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh)
+
     return GalerkinResult(delta, Ap, Bp, Gammap, Deltap, msing,
         [s.psifac for s in sings], [s.q for s in sings],
-        [s.m[1] for s in sings], [s.n[1] for s in sings], di, alpha, delta_coil)
+        [s.m[1] for s in sings], [s.n[1] for s in sings], di, alpha, delta_coil, solution)
 end
 
 """
@@ -225,6 +230,14 @@ function write_galerkin!(out_h5, result::GalerkinResult)
     out_h5["galerkin/alpha"] = result.alpha
     if !isempty(result.delta_coil)
         out_h5["galerkin/delta_coil"] = result.delta_coil
+    end
+    if result.solution !== nothing
+        sol = result.solution
+        out_h5["galerkin/solution/psi"] = sol.psi
+        out_h5["galerkin/solution/q"] = sol.q
+        out_h5["galerkin/solution/issing"] = collect(sol.issing)
+        out_h5["galerkin/solution/xi"] = sol.xi
+        out_h5["galerkin/solution/xi_deriv"] = sol.xi_deriv
     end
     return nothing
 end
