@@ -81,15 +81,14 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
     fs_view = has_duplicate ? view(fs,:,(1:ntheta),:) : fs
 
     @assert mmax <= ntheta ÷ 2 "mmax must be less than or equal to the Nyquist limit"
-    nmodes = mmax + 1
 
     # Compute Fourier coefficients using batched FFT
     fs_reshaped = reshape(permutedims(fs_view, (2, 1, 3)), ntheta, npsi * nqty)
     fft_results = fft(fs_reshaped, 1)
 
     # Extract and normalize coefficients
-    cos_coeffs = zeros(Float64, npsi, nmodes, nqty)
-    sin_coeffs = zeros(Float64, npsi, nmodes, nqty)
+    cos_coeffs = zeros(Float64, npsi, mmax + 1, nqty)
+    sin_coeffs = zeros(Float64, npsi, mmax + 1, nqty)
 
     for iq in 1:nqty
         for ipsi in 1:npsi
