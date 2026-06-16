@@ -4,7 +4,7 @@ Coordinate-invariant (root-area-weighted field) flux-surface operators.
 These building blocks implement the √area weighting of Pharr (2026),
 "Coordinate-invariant flux-surface Fourier analysis in tokamaks". They are the
 single source of truth for translating a flux-surface field component between the
-three Pharr field representations (all in tesla), shared by the ForceFreeStates and
+three field representations (all in tesla), shared by the ForceFreeStates and
 PerturbedEquilibrium modules:
 
   - `b`  bare / normal field         (Fourier weight W = 1)
