@@ -200,6 +200,70 @@ function integrate_energy_v2(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFr
     return (; dW_volume, dW_boundary, dW_running, rec.density, rec.psi)
 end
 
+"""
+    dW_of_shape(equil, intr, ffit, psi_grid, xi_psi_modes; de=nothing) -> NamedTuple
+
+Evaluate the energy principle for an ARBITRARY perturbation SHAPE given as the normal-
+displacement harmonics Ξ_ψ(ψ, m) on a radial grid (`xi_psi_modes` is `[length(psi_grid), mpert]`,
+columns ordered m = mlow … mhigh). Unlike `energy_for_perturbation` (which builds the DCON
+energy-minimising interior from a boundary displacement), this evaluates the v2 matrix energy
+functional for the *given* radial shape — so an externally-specified mode can be scored (e.g. an
+analytic m=2 kink profile, or an ELITE eigenfunction converted to GPEC `(ψ, m)`). The surface
+variable is minimised analytically (Ξ_s = -A⁻¹(BΞ_ψ'+CΞ_ψ)); Ξ_ψ' is obtained by per-harmonic
+cubic-spline differentiation of the input in ψ.
+
+For an exact Euler-Lagrange solution this returns the true δW; for any other trial shape it is the
+variational (≥ minimum) energy of that shape, in the same DCON normalisation as
+`integrate_energy_v2`'s `dW_volume`. Returns `(; psi, density, dW)`.
+"""
+function dW_of_shape(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStatesInternal, ffit::FourFitVars, psi_grid::AbstractVector, xi_psi_modes::AbstractMatrix; de=nothing)
+    n = intr.numpert_total
+    np = length(psi_grid)
+    @assert size(xi_psi_modes, 1) == np "xi_psi_modes must be [length(psi_grid), mpert]"
+    @assert size(xi_psi_modes, 2) == n "xi_psi_modes must have numpert_total columns"
+    if de === nothing
+        metric = ForceFreeStates.make_metric(equil; mband=intr.mband)
+        de = build_tex_de_matrices(equil, intr, metric)
+    end
+    psi = collect(float.(psi_grid))
+
+    # Radial derivative Ξ_ψ'(ψ, m) by per-harmonic cubic spline.
+    dxi = Matrix{ComplexF64}(undef, np, n)
+    for j in 1:n
+        cj = cubic_interp(psi, ComplexF64.(@view xi_psi_modes[:, j]); extrap=ExtendExtrap())
+        for i in 1:np
+            dxi[i, j] = cj(psi[i]; deriv=DerivOp(1))
+        end
+    end
+
+    density = Vector{ComplexF64}(undef, np)
+    A = Matrix{ComplexF64}(undef, n, n)
+    B = similar(A); C = similar(A); D = similar(A); E = similar(A); H = similar(A)
+    hint = Ref(1)
+    for i in 1:np
+        p = psi[i]
+        A .= reshape(ffit.amats(p; hint=hint), n, n)
+        B .= reshape(ffit.bmats(p; hint=hint), n, n)
+        C .= reshape(ffit.cmats(p; hint=hint), n, n)
+        H .= reshape(ffit.hmats(p; hint=hint), n, n)
+        D .= reshape(de.dmats(p; hint=hint), n, n)
+        E .= reshape(de.emats(p; hint=hint), n, n)
+
+        xpsi = ComplexF64.(@view xi_psi_modes[i, :])
+        xpsi1 = @view dxi[i, :]
+        bcx = B * xpsi1 + C * xpsi
+        xs = -(A \ bcx)                       # minimising surface variable
+        t1 = dot(xs, A, xs)
+        t2 = dot(xs, bcx)
+        t3 = dot(xpsi1, D, xpsi1)
+        t4 = dot(xpsi1, E, xpsi)
+        t5 = dot(xpsi, H, xpsi)
+        density[i] = t1 + (t2 + conj(t2)) + t3 + (t4 + conj(t4)) + t5
+    end
+    dW = _spline_int(psi, density)
+    return (; psi, density, dW)
+end
+
 # ============================  v1 real-space  ============================
 
 # d/dθ of a periodic θ-grid function via a periodic cubic spline (matches the Fortran
