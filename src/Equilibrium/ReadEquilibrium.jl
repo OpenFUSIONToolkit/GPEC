@@ -433,7 +433,12 @@ function read_imas(config::EquilibriumConfig, dd)
     q_1d = eqt.profiles_1d.q          # safety factor, COCOS-independent
 
     nw = length(psi_1d)
-    psi_norm_grid = range(0.0, 1.0; length=nw)
+
+    # Normalize the actual psi_1d values to [0, 1] using axis and boundary values.
+    # This correctly accounts for non-uniform radial grids from the Grad-Shafranov solver.
+    # Using range(0,1;length=nw) would assume uniform spacing and misplace rational surfaces.
+    # abs() handles both COCOS conventions: psi_1d may increase or decrease axis→edge.
+    psi_norm_grid = abs.(psi_1d .- psi_1d[1]) ./ abs(psi_1d[end] - psi_1d[1])
 
     # Build equilibrium source terms for spline interpolation
     # abs(f_1d): F(ψ) can be negative depending on toroidal field direction convention;
@@ -452,7 +457,15 @@ function read_imas(config::EquilibriumConfig, dd)
         error("read_imas: no profiles_2d found in equilibrium time slice. " *
               "Ensure the 2D ψ(R,Z) map is stored in dd.equilibrium.")
     end
-    prof2d = eqt.profiles_2d[1]
+
+    # Equilibrium solvers (e.g. TEQUILA) may store multiple profiles_2d representations,
+    # such as a Hamada/flux-coordinate map alongside the rectangular R,Z map. GPEC needs
+    # the rectangular grid (IMAS grid_type identifier index 1: dim1=R, dim2=Z).
+    rect_idx = findfirst(p -> p.grid_type.index == 1, eqt.profiles_2d)
+    if rect_idx === nothing
+        error("read_imas: no rectangular (grid_type.index == 1) profiles_2d found in equilibrium time slice.")
+    end
+    prof2d = eqt.profiles_2d[rect_idx]
     r_grid = prof2d.grid.dim1
     z_grid = prof2d.grid.dim2
 
