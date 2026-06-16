@@ -363,7 +363,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     a_inv_dmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
     a_inv_cmat_temp = Matrix{ComplexF64}(undef, intr.numpert_total, intr.numpert_total)
 
-    imat = zeros(ComplexF64, len)
+    imat = zeros(ComplexF64, 2 * intr.mpert - 1)
     imat[intr.mpert] = 1 + 0im
 
     hint = Ref(1)  # Linear search hint for sequential psi access
