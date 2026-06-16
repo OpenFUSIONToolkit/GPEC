@@ -264,6 +264,28 @@ function dW_of_shape(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
     return (; psi, density, dW)
 end
 
+"""
+    modes_from_theta(ffs_intr, xi_real) -> Matrix{ComplexF64}
+
+Convert a real-space perturbation `xi_real[ψ, θ]` (normal displacement on a uniform θ∈[0,1)
+grid of `nθ` points, one row per ψ) into the GPEC Fourier-harmonic shape Ξ_ψ(ψ, m)
+(`[npsi, mpert]`, m = mlow … mhigh) expected by `dW_of_shape`, via the forward DFT
+Ξ_m(ψ) = (1/nθ) Σ_θ ξ(ψ,θ) exp(-2πi m θ).
+
+Use this to feed an externally-computed mode shape (e.g. an ELITE eigenfunction) once it has been
+mapped onto GPEC's flux coordinates (ψ_norm, DCON straight-field-line θ): sample ξ_n(ψ,θ) on that
+grid, call `modes_from_theta`, then `dW_of_shape`.
+"""
+function modes_from_theta(ffs_intr::ForceFreeStatesInternal, xi_real::AbstractMatrix)
+    npsi, nθ = size(xi_real)
+    mlow = ffs_intr.mlow
+    mpert = ffs_intr.mpert
+    thetas = [(k - 1) / nθ for k in 1:nθ]
+    m_vals = [mlow + i - 1 for i in 1:mpert]
+    fwd = [exp(-2π * im * m_vals[i] * thetas[k]) for k in 1:nθ, i in 1:mpert]   # [nθ, mpert]
+    return (ComplexF64.(xi_real) * fwd) ./ nθ   # [npsi, mpert]
+end
+
 # ============================  v1 real-space  ============================
 
 # d/dθ of a periodic θ-grid function via a periodic cubic spline (matches the Fortran
