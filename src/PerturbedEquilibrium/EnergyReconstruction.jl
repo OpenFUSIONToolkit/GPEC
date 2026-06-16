@@ -402,17 +402,48 @@ end
 # ============================  driver + HDF5 writer  ============================
 
 """
-    reconstruct_energy_principle(equil, ffs_intr, ffit, odet, vac_data; mode_index=1, store_maps=true, ntheta=...) -> NamedTuple
+    plasma_energy(vac_data, equil, xi_b) -> Float64
 
-Run both reconstructions (v1 real-space, v2 matrix) for the `mode_index`-th free-boundary
-eigenmode (`vac_data.wt[:,mode_index]`). Returns `(; v1, v2, mode_index)`.
+Exact plasma δW for an ARBITRARY boundary perturbation `xi_b` (normal-displacement vector in
+the (m) Fourier basis), evaluated directly from the DCON plasma-energy operator:
+`δW = psio²·(xi_b† W_p xi_b)` where `W_p = vac_data.wp`. This is the cheap "reverse" δW — it
+needs no spatial reconstruction. Every `xi_b` is an admissible perturbation: it maps to the
+unique regular Euler-Lagrange solution `ξ_ψ(ψ) = u_store(ψ)·(u_store(edge)⁻¹ xi_b)`, since the
+stored fundamental solutions span all regular EL solutions. The free-boundary eigenmodes
+`vac_data.wt[:,k]` are the special perturbations that diagonalise `W_p` (giving `ep[k]`).
 """
-function reconstruct_energy_principle(equil::Equilibrium.PlasmaEquilibrium, ffs_intr::ForceFreeStatesInternal, ffit::FourFitVars, odet::OdeState, vac_data::VacuumData; mode_index::Int=1, store_maps::Bool=true, ntheta::Int=max(512, 4 * ffs_intr.mpert))
-    mode_vec = vac_data.wt[:, mode_index]
-    metric = ForceFreeStates.make_metric(equil; mband=ffs_intr.mband)
-    v2 = integrate_energy_v2(equil, ffs_intr, ffit, odet, mode_vec)
-    v1 = reconstruct_energy_realspace(equil, ffs_intr, ffit, odet, metric, mode_vec; ntheta=ntheta, store_maps=store_maps)
-    return (; v1, v2, mode_index)
+plasma_energy(vac_data::VacuumData, equil::Equilibrium.PlasmaEquilibrium, xi_b::AbstractVector) =
+    equil.psio^2 * real(dot(Vector{ComplexF64}(xi_b), vac_data.wp * Vector{ComplexF64}(xi_b)))
+
+"""
+    energy_for_perturbation(equil, ffs_intr, ffit, odet, vac_data, xi_b; store_maps=false, ntheta=..., de=nothing, metric=nothing) -> NamedTuple
+
+Reverse-direction reconstruction: for an ARBITRARY perturbation `xi_b` (boundary
+normal-displacement, (m) basis), reconstruct the regular Euler-Lagrange solution it generates
+and its energy principle both ways (v1 real-space, v2 matrix). The exact plasma δW is
+`dW = v2.dW_boundary = psio²·(xi_b† W_p xi_b)` (= `plasma_energy(vac_data, equil, xi_b)`).
+Pass prebuilt `metric`/`de` to reuse across a scan over many perturbations.
+Returns `(; v1, v2, xi_b, dW)`.
+"""
+function energy_for_perturbation(equil::Equilibrium.PlasmaEquilibrium, ffs_intr::ForceFreeStatesInternal, ffit::FourFitVars, odet::OdeState, vac_data::VacuumData, xi_b::AbstractVector; store_maps::Bool=false, ntheta::Int=max(512, 4 * ffs_intr.mpert), de=nothing, metric=nothing)
+    m = metric === nothing ? ForceFreeStates.make_metric(equil; mband=ffs_intr.mband) : metric
+    v2 = integrate_energy_v2(equil, ffs_intr, ffit, odet, xi_b; de=de)
+    v1 = reconstruct_energy_realspace(equil, ffs_intr, ffit, odet, m, xi_b; ntheta=ntheta, store_maps=store_maps)
+    return (; v1, v2, xi_b=Vector{ComplexF64}(xi_b), dW=real(v2.dW_boundary))
+end
+
+"""
+    reconstruct_energy_principle(equil, ffs_intr, ffit, odet, vac_data; mode_index=1, perturbation=nothing, store_maps=true, ntheta=...) -> NamedTuple
+
+Run both reconstructions for one perturbation. By default uses the `mode_index`-th
+free-boundary eigenmode (`vac_data.wt[:,mode_index]`); pass `perturbation` (an arbitrary
+boundary displacement vector) to reconstruct an arbitrary EL-satisfying perturbation instead
+(see `energy_for_perturbation`). Returns `(; v1, v2, mode_index, xi_b)`.
+"""
+function reconstruct_energy_principle(equil::Equilibrium.PlasmaEquilibrium, ffs_intr::ForceFreeStatesInternal, ffit::FourFitVars, odet::OdeState, vac_data::VacuumData; mode_index::Int=1, perturbation::Union{Nothing,AbstractVector}=nothing, store_maps::Bool=true, ntheta::Int=max(512, 4 * ffs_intr.mpert))
+    xi_b = perturbation === nothing ? vac_data.wt[:, mode_index] : perturbation
+    res = energy_for_perturbation(equil, ffs_intr, ffit, odet, vac_data, xi_b; store_maps=store_maps, ntheta=ntheta)
+    return (; res.v1, res.v2, mode_index, res.xi_b)
 end
 
 """
@@ -443,6 +474,10 @@ function write_recon_group!(f, equil::Equilibrium.PlasmaEquilibrium, ffs_intr::F
     f["recon/psio"] = equil.psio
     f["recon/ep1"] = real(vac_data.ep[1])
     f["recon/et1"] = real(vac_data.et[1])
+    # Boundary perturbation used + the plasma-energy operator, so δW for ANY perturbation ξ_b
+    # is reproducible offline as psio²·(ξ_b† W_plasma ξ_b) (the reverse-direction energy).
+    haskey(rec, :xi_b) && (f["recon/xi_b"] = rec.xi_b)
+    f["recon/W_plasma"] = vac_data.wp
     if v1.maps !== nothing
         f["recon/maps/psi"] = v1.maps.psi
         f["recon/maps/theta"] = v1.maps.theta
