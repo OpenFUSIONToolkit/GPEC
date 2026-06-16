@@ -43,6 +43,7 @@ include("Galerkin/GalerkinStructs.jl")
 include("Galerkin/GalerkinGrid.jl")
 include("Galerkin/GalerkinAssembly.jl")
 include("Galerkin/GalerkinSolution.jl")
+include("Galerkin/GalerkinMatch.jl")
 include("Galerkin/GalerkinSolve.jl")
 
 # These are used for various small tolerances and root finders throughout ForceFreeStates
