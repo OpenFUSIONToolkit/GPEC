@@ -33,14 +33,15 @@ function setup_solovev()
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     FFS.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+    intr.nlow = ctrl.nn_low;
+    intr.nhigh = ctrl.nn_high;
+    intr.npert = 1
     FFS.sing_find!(intr, equil)
-    intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.mband = intr.mpert - 1
     intr.numpert_total = intr.mpert * intr.npert
-    metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+    metric = FFS.make_metric(equil, intr.mpert)
     ffit = FFS.make_matrix(equil, intr, metric)
     return ctrl, equil, ffit, intr
 end
@@ -48,10 +49,10 @@ end
 # Evaluate the Riccati RHS explicitly from splines: dS = w†·F̄⁻¹·w - S·Ḡ·S
 function riccati_rhs_manual(S, psi, equil, ffit, intr)
     N = intr.numpert_total
-    L    = zeros(ComplexF64, N, N)
+    L = zeros(ComplexF64, N, N)
     Kmat = zeros(ComplexF64, N, N)
     Gmat = zeros(ComplexF64, N, N)
-    ffit.fmats_lower(vec(L),    psi; hint=ffit._hint)
+    ffit.fmats_lower(vec(L), psi; hint=ffit._hint)
     ffit.kmats(vec(Kmat), psi; hint=ffit._hint)
     ffit.gmats(vec(Gmat), psi; hint=ffit._hint)
 
@@ -103,7 +104,7 @@ max_err = let max_err = 0.0
         dS_manual = riccati_rhs_manual(S, psi, equil, ffit, intr)
 
         # riccati_der! RHS
-        u_ric  = zeros(ComplexF64, N, N, 2)
+        u_ric = zeros(ComplexF64, N, N, 2)
         du_ric = zeros(ComplexF64, N, N, 2)
         u_ric[:, :, 1] .= S
         u_ric[:, :, 2] .= Matrix{ComplexF64}(I, N, N)

@@ -48,7 +48,6 @@ nn_low = 1
 nn_high = 1
 delta_mlow = 6                  # Fortran dcon.in: delta_mlow=6
 delta_mhigh = 6                 # Fortran dcon.in: delta_mhigh=6
-delta_mband = 0
 mthvac = 512
 thmax0 = 1
 
