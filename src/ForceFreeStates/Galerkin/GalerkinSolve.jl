@@ -123,24 +123,14 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     ws.sol = zeros(ComplexF64, ws.ndim, nsol)
 
     # Free-boundary edge term wvac·psio² (vac_data.wv is already singfac-scaled at qlim in free_run!).
-    # rpec uses a fixed-boundary identity edge (the coil unit sources are injected as RHS below), so the
-    # vacuum block is not applied at the edge in that case — matching Fortran gal_set_boundary rpec branch.
+    # rpec passes wv_edge=nothing; gal_set_boundary! then applies the identity edge AND injects the coil
+    # unit sources (its three-way branch). The vacuum block is only built for the non-rpec free case.
     wv_edge = nothing
     if ctrl.vac_flag && vac_data !== nothing && ncoil == 0
         wv_edge = Matrix{ComplexF64}(vac_data.wv .* equil.psio^2)
     end
 
     gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
-
-    # rpec_flag: inject unit sources into the coil columns (gal.f:1544-1549). For each poloidal mode
-    # ipert, column (2*msing + ipert) gets a unit at the edge cell's value DOF (ip=3 → Julia index 4).
-    if ncoil > 0
-        edge_cell = ws.intvl[msing+1].cells[ws.nx]
-        for ipert in 1:mpert
-            imap = edge_cell.map[ipert, 4]
-            ws.rhs[imap, 2 * msing + ipert] = 1
-        end
-    end
 
     if get(ENV, "GAL_DEBUG", "") == "1"
         offdbg = ws.solver == "LU" ? ws.kl + ws.ku + 1 : 1
