@@ -1,0 +1,79 @@
+[Equilibrium]
+eq_filename = "TkMkr_D3Dlike_Hmode.geqdsk"
+eq_type = "efit"
+jac_type = "hamada"
+power_bp = 0
+power_b = 0
+power_r = 0
+grid_type = "ldp"
+psilow = 1e-4
+psihigh = 0.9981
+mpsi = 128
+psi_accuracy = 0.001
+mtheta = 256
+newq0 = 0
+etol = 1e-10
+force_termination = false
+
+[Wall]
+shape = "nowall"
+a = 0.2415
+aw = 0.05
+bw = 1.5
+cw = 0
+dw = 0.5
+tw = 0.05
+equal_arc_wall = true
+
+[ForceFreeStates]
+bal_flag = false
+mat_flag = true
+ode_flag = true
+vac_flag = true
+mer_flag = true
+
+psiedge = 0.99
+qlow = 1.02
+qhigh = 1e3
+sing_start = 0
+
+nn_low = 1
+nn_high = 1
+delta_mlow = 8
+delta_mhigh = 4
+delta_mband = 0
+mthvac = 512
+thmax0 = 1
+
+kinetic_source = "fixed"
+kinetic_factor = 0.0
+eulerlagrange_tolerance = 1e-10
+save_interval = 3
+singfac_min = 1e-4
+ucrit = 1e4
+
+# Riccati / STRIDE-style global BVP Δ′ matrix
+use_parallel        = true
+parallel_threads    = 2
+populate_dense_xi   = false
+truncate_at_dW_peak = false
+set_psilim_via_dmlim = false
+dmlim               = 0.2
+
+# RDCON outer-region singular Galerkin Δ′ solver with rpec coil columns (matched to Fortran &GAL_INPUT).
+# This case exercises the gal solve AND the rpec coil/edge path (delta_coil) for regression tracking.
+gal_flag               = true
+gal_solver             = "LU"
+gal_nx                 = 256
+gal_nq                 = 6
+gal_pfac               = 0.03
+gal_dx0                = 5e-4
+gal_dx1                = 1e-3
+gal_dx2                = 1e-3
+gal_cutoff             = 10
+gal_tol                = 1e-10
+gal_gnstep             = 5000
+gal_dx1dx2_flag        = true
+gal_sing_order         = 6
+gal_sing_order_ceiling = true
+gal_rpec_flag          = true

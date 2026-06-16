@@ -404,14 +404,21 @@ end
 """
     gal_set_boundary!(ws, mpert, wv_edge)
 
-Apply the axis (`u(0)=0` identity) and edge boundary conditions to the boundary cells' `mat` before
-global assembly. Port of `gal_set_boundary` (gal.f:1517-1583). `wv_edge::Union{Nothing,Matrix}` is the
-free-boundary vacuum block to add at the edge value DOF (index 3); `nothing` ⇒ fixed-boundary identity.
-The `rpec_flag` coil branch is not ported.
+Apply the axis (`u(0)=0` identity) and edge boundary conditions to the boundary cells' `mat`, plus the
+rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f:1554-1620),
+including its full three-way edge branch (rpec count `ncoil = ws.nsol - 2*msing`):
+  - rpec (`ncoil > 0`): identity edge **and** a unit source at the edge value DOF of coil column
+    `2*msing+ipert` for each poloidal mode `ipert` (gal.f:1573-1586). `ws.rhs` is already allocated and
+    `gal_assemble_rhs!` only fills columns `1:2*msing`, so the injection is not clobbered.
+  - free boundary (`wv_edge !== nothing`): add the vacuum block `wvac·psio²` at the edge value DOF
+    (gal.f:1603-1606).
+  - fixed boundary (else): identity edge (gal.f:1607-1614).
+`wv_edge` is `nothing` for the rpec and fixed cases.
 """
 function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
     chol = ws.solver == "cholesky"
     msing = length(ws.intvl) - 1
+    ncoil = ws.nsol - 2 * msing
 
     # axis u(0): first cell of interval 0, Hermite value DOF ip=0 (Julia index 1)
     cell = ws.intvl[1].cells[1]
@@ -423,14 +430,26 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
 
     # edge u(1): last cell of last interval, edge-value DOF ip=3 (Julia index 4, see gauss_quad swap)
     cell = ws.intvl[msing+1].cells[ws.nx]
-    if wv_edge === nothing
+    if ncoil > 0
+        # rpec: identity edge + unit coil sources (gal.f:1573-1586)
         cell.mat[:, :, 4, :] .= 0
         chol && (cell.mat[:, :, :, 4] .= 0)
         for idx in 1:mpert
             cell.mat[idx, idx, 4, 4] = 1
         end
-    else
+        for ipert in 1:mpert
+            ws.rhs[cell.map[ipert, 4], 2 * msing + ipert] = 1
+        end
+    elseif wv_edge !== nothing
+        # free boundary: vacuum block wvac·psio² (gal.f:1603-1606)
         @views cell.mat[:, :, 4, 4] .+= wv_edge
+    else
+        # fixed boundary: identity edge (gal.f:1607-1614)
+        cell.mat[:, :, 4, :] .= 0
+        chol && (cell.mat[:, :, :, 4] .= 0)
+        for idx in 1:mpert
+            cell.mat[idx, idx, 4, 4] = 1
+        end
     end
     return ws
 end
