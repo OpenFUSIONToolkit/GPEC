@@ -708,7 +708,7 @@ function solve_inner(::GGJModel{:galerkin}, params::GGJParameters, γ::Number;
     emap1 = res_cell.emap[1]
     Δ_raw = SVector{2,ComplexF64}(ws.sol[emap1, 1], ws.sol[emap1, 2])
 
-    # Apply deltac.f's swap convention (line 194-196)
+    # Apply deltac.f's swap convention (deltac.f:201-203)
     Δ_swapped = SVector{2,ComplexF64}(Δ_raw[2], Δ_raw[1])
 
     return rescale_delta(Δ_swapped, params)

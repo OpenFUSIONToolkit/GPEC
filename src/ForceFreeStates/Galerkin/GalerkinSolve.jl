@@ -3,7 +3,7 @@
 # Top-level driver for the RDCON outer-region singular Galerkin Δ′ solve, plus the per-cell assembly
 # orchestration, the banded solve, Δ′ extraction, PEST-3 blocks, and HDF5 output.
 # Ports gal_make_arrays (gal.f:1300-1359), gal_solve (gal.f:1367-1431), and gal_write_pest3_data
-# (gal.f:1712-1745). No inner-layer wiring (future thrust).
+# (gal.f:1749-1825). The DRIVEN/RPEC inner-layer matching is wired in via gal_match_rpec (GalerkinMatch.jl).
 
 """
     gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
@@ -170,6 +170,8 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
 
     Ap, Bp, Gammap, Deltap = gal_pest3_blocks(delta, msing)
 
+    # Mercier index D_I = -Re(α²); α is the small/large solution exponent (a surface property, taken
+    # from the right series — the left series reuses the same α via alpha_override above).
     di = [real(-asymps[i].right.alpha[1]^2) for i in 1:msing]
     alpha = [asymps[i].right.alpha[1] for i in 1:msing]
     # Coil-response block (rpec_flag): rows 2*msing+1 : 2*msing+mpert of delta (empty otherwise).
@@ -202,7 +204,8 @@ end
     gal_pest3_blocks(delta, msing) -> (Ap, Bp, Gammap, Deltap)
 
 PEST-3 matching blocks (each `msing×msing`) as ± combinations of the left/right Δ′ entries. Port of
-`gal_write_pest3_data` (gal.f:1726-1745). Row index `2i-1`/`2i` = left/right of surface `i`.
+`gal_write_pest3_data` (gal.f:1749-1825; the ± combinations are gal.f:1765-1777). Row index `2i-1`/`2i`
+= left/right of surface `i`.
 """
 function gal_pest3_blocks(delta::Matrix{ComplexF64}, msing::Int)
     Ap = zeros(ComplexF64, msing, msing)

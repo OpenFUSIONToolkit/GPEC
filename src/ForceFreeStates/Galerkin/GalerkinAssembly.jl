@@ -47,7 +47,8 @@ end
 
 Evaluate the `mpert×mpert` matrices `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ` at flux `x` with safety factor
 `q`, where `Q = diag(singfac)` and `singfac = m - n q` (direct). Port of `gal_get_fkg` (gal.f:999-1057).
-Uses the un-factored reduced `ffit.fmats_gal` (F̄), `ffit.kmats` (K̄), `ffit.gmats` (Ḡ).
+Uses the un-factored reduced `ffit.fmats_gal` (F̄), `ffit.kmats` (K̄), `ffit.gmats` (Ḡ). F/K/G are the
+ideal-MHD Euler–Lagrange coefficient matrices of the outer-region weak form (Glasser 2016, PoP 23, 112506).
 """
 function gal_get_fkg(ffit::FourFitVars, intr::ForceFreeStatesInternal, x::Float64, q::Float64)
     N = intr.numpert_total
@@ -304,8 +305,10 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         return out
     end
 
-    # QuadGK replaces Fortran's LSODE accumulation. Match Fortran's LSODE tolerance (gal_tol, 1e-10)
-    # with an evaluation cap (analogous to Fortran's gnstep limit) so a near-singular integrand cannot hang.
+    # Numerical-method deviation from gal_lsode_int: adaptive QuadGK (Gauss-Kronrod) replaces Fortran's
+    # LSODE accumulation over the same integrand/limits, so this path is NOT bit-exact with gal.f. Match
+    # Fortran's LSODE tolerance (gal_tol, 1e-10) with an evaluation cap (analogous to Fortran's gnstep
+    # limit) so a near-singular integrand cannot hang.
     raw, qerr = quadgk(integrand, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=20000)
     if get(ENV, "GAL_DEBUG", "") == "1"
         @info "  resonant jsing=$jsing side=$(cell.extra) qerr=$(qerr) res1=$(raw[1]) res2=$(raw[2])"
