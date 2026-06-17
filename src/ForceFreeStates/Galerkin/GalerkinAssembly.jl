@@ -1,14 +1,14 @@
 # GalerkinAssembly.jl
 #
 # Element-level assembly for the outer-region Galerkin solver. Ports:
-#   gal_hermite       (gal.f:222-254)   Hermite cubic basis
-#   gal_get_fkg       (gal.f:999-1057)  F, K, G at a point from F̄/K̄/Ḡ + singfac
-#   gal_gauss_quad    (gal.f:1065-1124) nonresonant stiffness via Gauss-Lobatto quadrature
-#   gal_extension     (gal.f:1132-1292) extension-cell matrix/rhs (big-solution driving + surface terms)
-#   gal_resonant      (gal.f:772-940)   resonant-cell integral (QuadGK in place of Fortran LSODE)
-#   gal_assemble_mat  (gal.f:686-764)   scatter cell blocks into the banded global matrix (LU/Cholesky)
-#   gal_assemble_rhs  (gal.f:634-678)   scatter cell rhs into the global RHS
-#   gal_set_boundary  (gal.f:1517-1583) axis identity + edge (vacuum or fixed) BCs
+#   gal_hermite       (gal.f)   Hermite cubic basis
+#   gal_get_fkg       (gal.f)  F, K, G at a point from F̄/K̄/Ḡ + singfac
+#   gal_gauss_quad    (gal.f) nonresonant stiffness via Gauss-Lobatto quadrature
+#   gal_extension     (gal.f) extension-cell matrix/rhs (big-solution driving + surface terms)
+#   gal_resonant      (gal.f)   resonant-cell integral (QuadGK in place of Fortran LSODE)
+#   gal_assemble_mat  (gal.f)   scatter cell blocks into the banded global matrix (LU/Cholesky)
+#   gal_assemble_rhs  (gal.f)   scatter cell rhs into the global RHS
+#   gal_set_boundary  (gal.f) axis identity + edge (vacuum or fixed) BCs
 #
 # Hermite DOF index ip (Fortran 0:3) ↔ Julia array index ip+1 throughout.
 
@@ -29,7 +29,7 @@ end
     gal_hermite(x, x0, x1) -> (pb, qb)
 
 Hermite cubic basis values `pb` and derivatives `qb` on `[x0, x1]` (length 4, Fortran `0:3`).
-Port of `gal_hermite` (gal.f:222-254).
+Port of `gal_hermite` (gal.f).
 """
 function gal_hermite(x::Real, x0::Real, x1::Real)
     dx = x1 - x0
@@ -46,7 +46,7 @@ end
     gal_get_fkg(ffit, intr, x, q) -> (F, K, G)
 
 Evaluate the `mpert×mpert` matrices `F = Q F̄ Qᴴ`, `K = Q K̄`, `G = Ḡ` at flux `x` with safety factor
-`q`, where `Q = diag(singfac)` and `singfac = m - n q` (direct). Port of `gal_get_fkg` (gal.f:999-1057).
+`q`, where `Q = diag(singfac)` and `singfac = m - n q` (direct). Port of `gal_get_fkg` (gal.f).
 Uses the un-factored reduced `ffit.fmats_gal` (F̄), `ffit.kmats` (K̄), `ffit.gmats` (Ḡ). F/K/G are the
 ideal-MHD Euler–Lagrange coefficient matrices of the outer-region weak form (Glasser 2016, PoP 23, 112506).
 """
@@ -73,9 +73,9 @@ end
     gal_gauss_quad!(cell, ffit, profiles, intr, nodes, weights, swap_edge)
 
 Accumulate the nonresonant Hermite stiffness block `cell.mat` by Gauss-Lobatto quadrature. Port of
-`gal_gauss_quad` (gal.f:1065-1124). When `swap_edge` (the final cell of the last interval), the
+`gal_gauss_quad` (gal.f). When `swap_edge` (the final cell of the last interval), the
 right-node value/slope DOFs (Fortran pb(2)↔pb(3)) are swapped so the edge-value DOF lands at index 3,
-matching the free-boundary BC (gal.f:1091-1098).
+matching the free-boundary BC (gal.f).
 """
 function gal_gauss_quad!(cell::GalCell, ffit::FourFitVars, profiles, intr::ForceFreeStatesInternal,
     nodes::Vector{Float64}, weights::Vector{Float64}, swap_edge::Bool)
@@ -120,7 +120,7 @@ end
     gal_extension!(cell, ising, ffit, profiles, intr, asymps, sings, nn, nodes, weights)
 
 Build `cell.emat`, `cell.ediag`, `cell.rhs`, `cell.erhs` for an extension cell (`ext`/`ext1`/`ext2`).
-Port of `gal_extension` (gal.f:1132-1292). The big solution (`isol` column) drives the RHS; for `ext`
+Port of `gal_extension` (gal.f). The big solution (`isol` column) drives the RHS; for `ext`
 cells the small solution (`isol+N` column) also forms the resonant coupling `emat`/`ediag`.
 """
 function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
@@ -139,7 +139,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     ua_at(x) = sing_get_ua_gal(asymp, x - psi_s)
     dua_at(x) = sing_get_dua_gal(asymp, x - psi_s)
 
-    # Boundary node and weights (gal.f:1147-1172)
+    # Boundary node and weights (gal.f)
     if cell.extra == GAL_SIDE_LEFT
         jp = 2          # Fortran jp (0-based) -> Julia jp+1
         xb = x2
@@ -160,7 +160,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     fill!(cell.emat, 0)
     cell.ediag = zero(ComplexF64)
 
-    # --- emat and ediag (ext cells only) (gal.f:1177-1208) ---
+    # --- emat and ediag (ext cells only) (gal.f) ---
     if cell.etype == GCT_EXT
         uab = ua_at(xb)
         duab = dua_at(xb)
@@ -185,7 +185,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         cell.ediag += sum(conj.(u) .* Fdu_Ku) * ws
     end
 
-    # --- rhs (gal.f:1210-1259) ---
+    # --- rhs (gal.f) ---
     ua1 = ua_at(x1)[:, isol, 1]    # big solution at left node
     du1 = dua_at(x1)[:, isol, 1]
     ua2 = ua_at(x2)[:, isol, 1]    # big solution at right node
@@ -226,7 +226,7 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
         end
     end
 
-    # --- surface terms (always; gal.f:1262-1286) ---
+    # --- surface terms (always; gal.f) ---
     q_l = profiles.q_spline(x1; hint=qhint)
     Fl, Kl, _ = gal_get_fkg(ffit, intr, x1, q_l)
     pbt, _ = gal_hermite(x1, x1, x2)
@@ -252,15 +252,15 @@ function gal_extension!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
 end
 
 """
-    gal_resonant!(cell, ising, ffit, profiles, intr, asymps, sings, nn, gal_tol)
+    gal_resonant!(cell, ising, ffit, profiles, intr, asymps, sings, nn, gal_tol, gal_gnstep, verbose)
 
 Compute the resonant-cell contributions `cell.erhs`, `cell.ediag`, `cell.rhs`, `cell.emat` by adaptive
 quadrature (QuadGK) of the residual-operator integrand. Port of `gal_lsode_int`/`gal_lsode_der`
-(gal.f:772-940): the Fortran LSODE accumulation is replaced by `quadgk` over `[x_bdy, x_lsode]`.
+(gal.f): the Fortran LSODE accumulation is replaced by `quadgk` over `[x_bdy, x_lsode]`.
 """
 function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     intr::ForceFreeStatesInternal, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
-    nn::Int, gal_tol::Float64)
+    nn::Int, gal_tol::Float64, gal_gnstep::Int, verbose::Bool)
 
     N = intr.numpert_total
     np = GAL_NP
@@ -274,7 +274,7 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
     isol_small = isol_big + N
     cols = [isol_big, isol_small]
 
-    # Integration limits (gal.f:805-815): right → [x2, x_lsode]; left → [x1, x_lsode]
+    # Integration limits (gal.f): right → [x2, x_lsode]; left → [x1, x_lsode]
     x0 = (cell.extra == GAL_SIDE_LEFT) ? x1 : x2
     x1l = cell.x_lsode
     sgn_u = (cell.extra == GAL_SIDE_RIGHT) ? -1.0 : 1.0
@@ -307,16 +307,16 @@ function gal_resonant!(cell::GalCell, ising::Int, ffit::FourFitVars, profiles,
 
     # Numerical-method deviation from gal_lsode_int: adaptive QuadGK (Gauss-Kronrod) replaces Fortran's
     # LSODE accumulation over the same integrand/limits, so this path is NOT bit-exact with gal.f. Match
-    # Fortran's LSODE tolerance (gal_tol, 1e-10) with an evaluation cap (analogous to Fortran's gnstep
-    # limit) so a near-singular integrand cannot hang.
-    raw, qerr = quadgk(integrand, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=20000)
-    if get(ENV, "GAL_DEBUG", "") == "1"
+    # Fortran's LSODE tolerance (gal_tol) and cap the evaluations at gal_gnstep (Fortran's gnstep limit)
+    # so a near-singular integrand cannot hang.
+    raw, qerr = quadgk(integrand, x0, x1l; rtol=gal_tol, atol=1e-30, maxevals=gal_gnstep)
+    if verbose
         @info "  resonant jsing=$jsing side=$(cell.extra) qerr=$(qerr) res1=$(raw[1]) res2=$(raw[2])"
     end
     hbig = reshape(@view(raw[3:2+N*(np+1)]), N, np + 1)
     hsmall = reshape(@view(raw[3+N*(np+1):end]), N, np + 1)
 
-    # Apply the right-side negation and the gal_make_arrays signs (gal.f:868, 1334-1337)
+    # Apply the right-side negation and the gal_make_arrays signs (gal.f gal_make_arrays)
     cell.erhs = -sgn_u * raw[1]
     cell.ediag = sgn_u * raw[2]
     cell.rhs .= (-sgn_u) .* hbig
@@ -328,7 +328,7 @@ end
     gal_assemble_mat!(ws, mpert)
 
 Scatter every cell's `mat`/`emat`/`ediag` into the banded global matrix `ws.mat`. Port of
-`gal_assemble_mat` (gal.f:686-764). Supports both `"LU"` (full band, `offset = kl+ku+1`) and
+`gal_assemble_mat` (gal.f). Supports both `"LU"` (full band, `offset = kl+ku+1`) and
 `"cholesky"` (lower band only, `offset = 1`).
 """
 function gal_assemble_mat!(ws::GalWorkspace, mpert::Int)
@@ -377,7 +377,7 @@ end
     gal_assemble_rhs!(ws, mpert)
 
 Scatter every cell's `rhs`/`erhs` into the global RHS `ws.rhs`. Port of `gal_assemble_rhs`
-(gal.f:634-678). A new RHS column (`isol`) begins at each big-solution driver: an `ext2`-left cell or a
+(gal.f). A new RHS column (`isol`) begins at each big-solution driver: an `ext2`-left cell or a
 `res`-right cell.
 """
 function gal_assemble_rhs!(ws::GalWorkspace, mpert::Int)
@@ -408,14 +408,14 @@ end
     gal_set_boundary!(ws, mpert, wv_edge)
 
 Apply the axis (`u(0)=0` identity) and edge boundary conditions to the boundary cells' `mat`, plus the
-rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f:1554-1620),
+rpec coil-source RHS injection, before global assembly. Port of `gal_set_boundary` (gal.f),
 including its full three-way edge branch (rpec count `ncoil = ws.nsol - 2*msing`):
   - rpec (`ncoil > 0`): identity edge **and** a unit source at the edge value DOF of coil column
-    `2*msing+ipert` for each poloidal mode `ipert` (gal.f:1573-1586). `ws.rhs` is already allocated and
+    `2*msing+ipert` for each poloidal mode `ipert` (gal.f). `ws.rhs` is already allocated and
     `gal_assemble_rhs!` only fills columns `1:2*msing`, so the injection is not clobbered.
   - free boundary (`wv_edge !== nothing`): add the vacuum block `wvac·psio²` at the edge value DOF
-    (gal.f:1603-1606).
-  - fixed boundary (else): identity edge (gal.f:1607-1614).
+    (gal.f).
+  - fixed boundary (else): identity edge (gal.f).
 `wv_edge` is `nothing` for the rpec and fixed cases.
 """
 function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,Matrix{ComplexF64}})
@@ -434,7 +434,7 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
     # edge u(1): last cell of last interval, edge-value DOF ip=3 (Julia index 4, see gauss_quad swap)
     cell = ws.intvl[msing+1].cells[ws.nx]
     if ncoil > 0
-        # rpec: identity edge + unit coil sources (gal.f:1573-1586)
+        # rpec: identity edge + unit coil sources (gal.f)
         cell.mat[:, :, 4, :] .= 0
         chol && (cell.mat[:, :, :, 4] .= 0)
         for idx in 1:mpert
@@ -444,10 +444,10 @@ function gal_set_boundary!(ws::GalWorkspace, mpert::Int, wv_edge::Union{Nothing,
             ws.rhs[cell.map[ipert, 4], 2 * msing + ipert] = 1
         end
     elseif wv_edge !== nothing
-        # free boundary: vacuum block wvac·psio² (gal.f:1603-1606)
+        # free boundary: vacuum block wvac·psio² (gal.f)
         @views cell.mat[:, :, 4, 4] .+= wv_edge
     else
-        # fixed boundary: identity edge (gal.f:1607-1614)
+        # fixed boundary: identity edge (gal.f)
         cell.mat[:, :, 4, :] .= 0
         chol && (cell.mat[:, :, :, 4] .= 0)
         for idx in 1:mpert

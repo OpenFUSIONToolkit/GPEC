@@ -500,7 +500,7 @@ function make_matrix(equil::Equilibrium.PlasmaEquilibrium, intr::ForceFreeStates
 
         # Capture the reduced Hermitian F̄ (full matrix) before it is overwritten by its Cholesky
         # factor below. The Galerkin solver (gal_get_fkg) needs F̄ directly: F = Q F̄ Qᴴ with
-        # Q = diag(singfac). Mirror of Fortran fmats_gal (fourfit.f:341).
+        # Q = diag(singfac). Mirror of Fortran fmats_gal (fourfit.f).
         @views fmats_gal_flat[ipsi, :] .= vec(fmat)
 
         # Store factorized F matrix (lower triangular only) since we always will need F⁻¹ later

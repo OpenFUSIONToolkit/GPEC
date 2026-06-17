@@ -120,7 +120,7 @@ end
 """
     sing_min!(intr::ForceFreeStatesInternal, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium)
 
-Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f:1295-1326):
+Set the lower integration bound `intr.psilow`. Port of Fortran RDCON `sing_min` (sing.f):
 when `qlow > qmin`, the q < qlow core (including any q ≤ 1 sawtooth/internal-kink surfaces) must be
 excluded from the outer-region Galerkin domain — otherwise the Hermite FEM integrates through those
 ideal singularities without imposing the ideal constraint, contaminating Δ′ at the innermost kept
@@ -735,7 +735,7 @@ end
 
 Compute the derivative of the asymptotic series solution with respect to the positive distance
 `dpsi = |ψ − ψ_res|`, consistent with `sing_get_ua`. Port of Fortran `sing_get_dua`
-(sing.f:839-906 / sing1.f:643-708). Shape `(numpert_total, 2*numpert_total, 2)`. Used by the
+(sing.f / sing1.f). Shape `(numpert_total, 2*numpert_total, 2)`. Used by the
 outer-region Galerkin solver (`gal_extension`, `sing_matvec`).
 
 Direction is carried by the `SingAsymptotics` (left vs right vmat built with sig=∓1), exactly as in
@@ -758,7 +758,7 @@ function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
     sqrtfac = sqrt(dpsi)
     N = size(sing_asymp.vmat, 1)
 
-    # Per-term total exponent (×2, in half-powers of dpsi). See sing.f:881-885.
+    # Per-term total exponent (×2, in half-powers of dpsi). See Fortran sing_get_dua.
     power = fill(ComplexF64(2 * order), N, 2 * N, 2)
     power[r1, :, 1] .-= 1
     power[r1, :, 2] .+= 1
@@ -767,14 +767,14 @@ function sing_get_dua(sing_asymp::SingAsymptotics, dpsi::Float64)
         power[:, r2[2*i], :] .+= 2 * sing_asymp.alpha[i]
     end
 
-    # Power series derivative by Horner's method (sing.f:889-893)
+    # Power series derivative by Horner's method (Fortran sing_get_dua)
     dua = sing_asymp.vmat[:, :, :, 2*order+1] .* power
     for iorder in (2*order-1):-1:0
         power .-= 1
         dua .= dua .* sqrtfac .+ sing_asymp.vmat[:, :, :, iorder+1] .* power
     end
 
-    # Restore shearing and resonant powers, then the chain-rule factor 1/(2·dpsi) (sing.f:897-901)
+    # Restore shearing and resonant powers, then the chain-rule factor 1/(2·dpsi) (Fortran sing_get_dua)
     for i in eachindex(r1)
         pfac = dpsi^sing_asymp.alpha[i]
         dua[:, r2[2*i-1], :] ./= pfac
@@ -791,7 +791,7 @@ end
     sing_matvec(ffit::FourFitVars, intr::ForceFreeStatesInternal, psi::Float64, q::Float64, ua, dua) -> matvec
 
 Apply the Euler-Lagrange residual operator `L u = -(F u' + K u)' + (K† u' + G u)` to the asymptotic
-solutions. Port of Fortran `sing_matvec` (sing.f:1045-1107). Returns `matvec`, shape
+solutions. Port of Fortran `sing_matvec` (sing.f). Returns `matvec`, shape
 `(numpert_total, size(ua,2))`.
 
 Uses the reduced (Schur-complemented) `ffit.kmats` (= K̄) and `ffit.gmats` (= Ḡ) directly, with the

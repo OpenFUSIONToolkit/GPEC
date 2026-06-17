@@ -2,22 +2,22 @@
 #
 # Reconstruct the outer-region radial displacement ξ(ψ) AND its analytic derivative ξ′(ψ) from the
 # solved Galerkin coefficients. Ports:
-#   gal_get_solution    (gal.f:1833-1997)  ξ (and optional ξ′) at one ψ for one solution column
-#   gal_output_solution (gal.f:2005-2273)  evaluate (ξ, ξ′) on a gal-native packed grid, all columns
+#   gal_get_solution    (gal.f)  ξ (and optional ξ′) at one ψ for one solution column
+#   gal_output_solution (gal.f)  evaluate (ξ, ξ′) on a gal-native packed grid, all columns
 #
 # The whole point of carrying ξ′ here is to evaluate it analytically from the Hermite derivative basis
 # (gal_hermite qb) and the asymptotic-series derivative (sing_get_dua_gal) rather than ever
 # spline-differentiating ξ at the packed edge — the spline-endpoint derivative was the root cause of
 # GPEC's fake ~100% shielding (fixed in Fortran by RDCON_singcoup commit c3e8c5bc).
 #
-# Fortran module flags restore_uh/us/ul default .TRUE. (gal.f:81); the full reconstruction is always
-# performed. The cut path (gal.f:1974-1992, used only for the matching diagnostic) is NOT ported here.
+# Fortran module flags restore_uh/us/ul default .TRUE. (gal.f); the full reconstruction is always
+# performed. The cut path (gal.f, used only for the matching diagnostic) is NOT ported here.
 
-# Dense / coarse sampling per cell, matching Fortran interp_np_res / interp_np (gal.f:88).
+# Dense / coarse sampling per cell, matching Fortran interp_np_res / interp_np (gal.f).
 const GAL_INTERP_NP = 3
 const GAL_INTERP_NP_RES = 60
 
-# Advance the monotone (iintvl, icell) cursor to the cell containing x. Port of gal.f:1863-1876.
+# Advance the monotone (iintvl, icell) cursor to the cell containing x. Port of gal.f.
 @inline function gal_locate_cell(ws::GalWorkspace, x::Float64, iintvl::Int, icell::Int)
     msing = length(ws.intvl) - 1
     for _ in 1:((msing+1)*ws.nx+1)
@@ -43,7 +43,7 @@ end
 
 Reconstruct the displacement `sol` (length `mpert`) — and, when `want_d`, its analytic radial
 derivative `dsol = d(sol)/dψ` — at flux `x` for solution column `isol`, from the solved Galerkin
-coefficients `ws.sol`. Port of `gal_get_solution` (gal.f:1833-1997, non-cut path). `iintvl`/`icell`
+coefficients `ws.sol`. Port of `gal_get_solution` (gal.f, non-cut path). `iintvl`/`icell`
 are a monotone cell cursor advanced and returned for the next call. `dsol` is `nothing` if `!want_d`.
 """
 function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
@@ -61,7 +61,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     pbt, qbt = gal_hermite(x, cell.x[1], cell.x[2])
     pb = collect(pbt)
     qb = collect(qbt)
-    if iintvl == msing && icell == ws.nx          # last edge cell: swap node-2/3 DOFs (gal.f:1888-1897)
+    if iintvl == msing && icell == ws.nx          # last edge cell: swap node-2/3 DOFs (gal.f)
         pb[3], pb[4] = pb[4], pb[3]
         qb[3], qb[4] = qb[4], qb[3]
     end
@@ -73,13 +73,13 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
 
     cell.etype == GCT_NONE && return sol, dsol, iintvl, icell
 
-    # --- small & large resonant/extension solutions (gal.f:1904-1970) ---
-    jsing = _cell_jsing(cell, iintvl)             # left → iintvl+1, right → iintvl (gal.f:1911/1919)
+    # --- small & large resonant/extension solutions (gal.f) ---
+    jsing = _cell_jsing(cell, iintvl)             # left → iintvl+1, right → iintvl (gal_get_solution)
     asymp = asymps[jsing]
     psi_s = sings[jsing].psifac
     ipert0 = _ipert_res(sings[jsing], intr)       # resonant (big) row; small row = ipert0+mpert
 
-    # Edge Hermite weights (fresh, unswapped) for ext/ext2 cells (gal.f:1912-1925)
+    # Edge Hermite weights (fresh, unswapped) for ext/ext2 cells (gal.f)
     pbe, qbe = gal_hermite(x, cell.x[1], cell.x[2])
     if cell.extra == GAL_SIDE_LEFT
         epb1, epb2 = pbe[3], pbe[4]
@@ -98,7 +98,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
     uaext = need_ext ? sing_get_ua_gal(asymp, xext - psi_s) : nothing
     duaext = need_ext ? sing_get_dua_gal(asymp, xext - psi_s) : nothing
 
-    # small solution Δ-coefficient restore (ext/res only), coeff = ws.sol[emap,isol] (gal.f:1937-1951)
+    # small solution Δ-coefficient restore (ext/res only), coeff = ws.sol[emap,isol] (gal.f)
     if cell.etype == GCT_RES || cell.etype == GCT_EXT
         delta = ws.sol[cell.emap, isol]
         if cell.etype == GCT_RES
@@ -110,7 +110,7 @@ function gal_get_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings:
         end
     end
 
-    # large solution (coeff 1) only for the column driving this surface/side (gal.f:1952-1970)
+    # large solution (coeff 1) only for the column driving this surface/side (gal.f)
     if (isol == 2jsing - 1 && cell.extra == GAL_SIDE_LEFT) ||
        (isol == 2jsing && cell.extra == GAL_SIDE_RIGHT)
         if cell.etype == GCT_RES || cell.etype == GCT_EXT || cell.etype == GCT_EXT1
@@ -130,7 +130,7 @@ end
 
 Build the gal-native packed radial grid (inner→edge; `GAL_INTERP_NP_RES` points per resonant/extension
 cell, `GAL_INTERP_NP` elsewhere, plus the edge point ψ=psihigh) and evaluate ξ AND the analytic ξ′ over
-it for every solution column. Port of `gal_output_solution` (gal.f:2027-2103); the binary/ASCII writes
+it for every solution column. Port of `gal_output_solution` (gal.f); the binary/ASCII writes
 and the `b_flag` ξ→b^ψ conversion (off by default) are not ported — we keep ξ itself.
 """
 function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sings::Vector{SingType},
@@ -139,7 +139,7 @@ function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sin
     mpert = intr.numpert_total
     msing = length(ws.intvl) - 1
 
-    # --- grid (gal.f:2038-2079): per-cell left-inclusive sampling, then the edge point ---
+    # --- grid (gal.f): per-cell left-inclusive sampling, then the edge point ---
     psi = Float64[]
     issing = Bool[]
     for iintvl in 0:msing
@@ -149,7 +149,7 @@ function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sin
             x1, x2 = cell.x
             for k in 0:(npts-1)
                 push!(psi, x1 + (x2 - x1) * (k / npts))
-                # res-right cell's first point sits exactly on the surface (gal.f:2070-2071)
+                # res-right cell's first point sits exactly on the surface (gal.f)
                 push!(issing, k == 0 && cell.extra == GAL_SIDE_RIGHT && cell.etype == GCT_RES)
             end
         end
@@ -160,7 +160,7 @@ function gal_output_solution(ws::GalWorkspace, asymps::Vector{GalSingAsymp}, sin
     qhint = Ref(1)
     q = [profiles.q_spline(p; hint=qhint) for p in psi]
 
-    # --- evaluate (gal.f:2090-2103) ---
+    # --- evaluate (gal.f) ---
     ngrid = length(psi)
     xi = zeros(ComplexF64, mpert, ngrid, ws.nsol)
     xi_deriv = zeros(ComplexF64, mpert, ngrid, ws.nsol)

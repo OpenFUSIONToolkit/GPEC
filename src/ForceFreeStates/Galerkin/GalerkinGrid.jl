@@ -1,7 +1,7 @@
 # GalerkinGrid.jl
 #
 # Grid construction and local→global DOF mapping for the outer-region Galerkin solver.
-# Ports gal_pack (gal.f:262-318), gal_make_grid (gal.f:326-451), and gal_make_map (gal.f:509-575).
+# Ports gal_pack (gal.f), gal_make_grid (gal.f), and gal_make_map (gal.f).
 #
 # Node arrays use Fortran 0-based `x(0:nx)` mapped to Julia `xn[i+1]` (so Fortran `x(i)` is `xn[i+1]`).
 # Cells are 1-based in both. Intervals `0:msing` (Fortran) are `ws.intvl[ising+1]` in Julia.
@@ -10,7 +10,7 @@
 """
     gal_pack(nx::Int, pfac::Float64, side::String) -> Vector{Float64}
 
-Packed logical grid on `[-1, 1]`. Port of Fortran `gal_pack` (gal.f:262-318). For `side="both"`
+Packed logical grid on `[-1, 1]`. Port of Fortran `gal_pack` (gal.f). For `side="both"`
 returns `2*nx+1` nodes (Fortran `-nx:nx`) clustered toward both ends when `pfac < 1` (strong packing
 near the bracketing singular surfaces). `pfac > 1` packs toward the centre; `pfac == 1` is uniform.
 """
@@ -52,12 +52,12 @@ end
 
 Set the cell types (`res`/`ext`/`ext1`/`ext2`/`none`), sides, resonant integration limits, and packed
 node positions for interval `ising` (0-based, `0:msing`). Port of Fortran `gal_make_grid`
-(gal.f:326-451), `dx1dx2_flag=true` path. `intvl.x`/`intvl.dx` have length `nx+1`, `intvl.cells` length
+(gal.f), `dx1dx2_flag=true` path. `intvl.x`/`intvl.dx` have length `nx+1`, `intvl.cells` length
 `nx` (preallocated by the caller). `sings` is the filtered list of resonant surfaces (1-based,
 `sings[ising]` = Fortran `sing(ising)`).
 
-Note (faithful to Fortran): the lower-surface width scale uses `|nn·q1|` (gal.f:356) but the
-upper-surface scale uses `|q1|` without `nn` (gal.f:398). Identical for `nn = 1`.
+Note (faithful to Fortran): the lower-surface width scale uses `|nn·q1|` (gal.f) but the
+upper-surface scale uses `|q1|` without `nn` (gal.f). Identical for `nn = 1`.
 """
 function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vector{SingType},
     nn::Int, psilow::Float64, psihigh::Float64, ctrl::ForceFreeStatesControl)
@@ -77,7 +77,7 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
         c.extra = GAL_SIDE_NONE
     end
 
-    # --- lower bound (gal.f:349-389) ---
+    # --- lower bound (gal.f) ---
     local ixmin::Int
     if ising == 0
         ixmin = 0
@@ -102,21 +102,21 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
             cells[ix].etype = GCT_EXT1
             cells[ix].extra = GAL_SIDE_RIGHT
         end
-        ix_ext2 = max(cutoff + 2, 3)   # Fortran loop-exit value of ix (gal.f:387)
+        ix_ext2 = max(cutoff + 2, 3)   # Fortran loop-exit value of ix (gal.f)
         (ix_ext2 > nx || cells[ix_ext2].etype != GCT_NONE) &&
             error("gal_make_grid: too many elements include the big solution (right side)")
         cells[ix_ext2].etype = GCT_EXT2
         cells[ix_ext2].extra = GAL_SIDE_RIGHT
     end
 
-    # --- upper bound (gal.f:391-429) ---
+    # --- upper bound (gal.f) ---
     local ixmax::Int
     if ising == msing
         ixmax = nx
         xn[nx+1] = psihigh
     else
         x1 = sings[ising+1].psifac
-        nq1 = abs(sings[ising+1].q1)   # NOTE: no nn factor, faithful to gal.f:398
+        nq1 = abs(sings[ising+1].q1)   # NOTE: no nn factor, faithful to gal.f
         xn[nx+1] = x1
         cells[nx].x_lsode = x1 - dx0 / nq1
         if ctrl.gal_dx1dx2_flag
@@ -134,20 +134,20 @@ function gal_make_grid!(intvl::GalInterval, ising::Int, msing::Int, sings::Vecto
             cells[ix].etype = GCT_EXT1
             cells[ix].extra = GAL_SIDE_LEFT
         end
-        ix_ext2 = min(nx - cutoff - 1, nx - 2)   # Fortran loop-exit value of ix (gal.f:427)
+        ix_ext2 = min(nx - cutoff - 1, nx - 2)   # Fortran loop-exit value of ix (gal.f)
         (ix_ext2 < 1 || cells[ix_ext2].etype != GCT_NONE) &&
             error("gal_make_grid: too many elements include the big solution (left side)")
         cells[ix_ext2].etype = GCT_EXT2
         cells[ix_ext2].extra = GAL_SIDE_LEFT
     end
 
-    # --- interior packed grid (gal.f:431-446) ---
+    # --- interior packed grid (gal.f) ---
     x0 = xn[ixmin+1]
     x1 = xn[ixmax+1]
     xm = (xn[ixmax+1] + xn[ixmin+1]) / 2
     dxh = (xn[ixmax+1] - xn[ixmin+1]) / 2
     mx = (ixmax - ixmin) ÷ 2
-    # Default: symmetric "both" pack (faithful to gal.f:438). With gal_edge_onesided, the two end
+    # Default: symmetric "both" pack (faithful to gal.f). With gal_edge_onesided, the two end
     # intervals pack only toward their single rational end, leaving the regular boundary (psilow at
     # interval 0, psihigh at interval msing) at coarse spacing — removes the gratuitous fine edge cell.
     side = "both"
@@ -179,7 +179,7 @@ end
     gal_make_map!(ws::GalWorkspace, mpert::Int)
 
 Build the local→global DOF numbering with the `2*mpert` C¹ overlap between adjacent Hermite cells and
-the interleaved extra (small resonant) DOFs (`emap`). Port of Fortran `gal_make_map` (gal.f:509-575).
+the interleaved extra (small resonant) DOFs (`emap`). Port of Fortran `gal_make_map` (gal.f).
 Sets `ws.ndim`. The `skip`/`emap` bookkeeping reserves a global slot for each resonant coefficient and
 shares it between the `res` cell and its neighbouring `ext` cell.
 """
