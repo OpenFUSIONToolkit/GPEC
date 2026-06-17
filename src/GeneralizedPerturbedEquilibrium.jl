@@ -54,7 +54,7 @@ using .ForceFreeStates: mercier_scan!, compute_ballooning_stability!
 using .ForceFreeStates: make_metric, make_matrix, make_kinetic_matrix
 using .ForceFreeStates: find_kinetic_singular_surfaces!
 using .ForceFreeStates: eulerlagrange_integration, free_run!
-using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult
+using .ForceFreeStates: galerkin_solve, write_galerkin!, GalerkinResult, gal_matched_odestate
 
 const _BANNER = "="^60
 const _SECTION = "-"^40
@@ -421,10 +421,20 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         )
         pe_intr = PerturbedEquilibrium.PerturbedEquilibriumInternal(; dir_path=intr.dir_path)
 
+        # DRIVEN (RPEC): feed the coil-matched gal solution to PE instead of the shooting solution.
+        # The matched OdeState is in the identity-at-edge basis; build_flux_matrix rederives the edge BC
+        # from u_store[:,:,1,step], so PE consumes it unchanged. The shooting odet is left untouched for
+        # the Force-Free States HDF5 output.
+        pe_odet = odet
+        if ctrl.gal_flag && ctrl.gal_match_flag && gal_data !== nothing && gal_data.match !== nothing
+            @info "PerturbedEquilibrium: using the RPEC-matched gal solution"
+            pe_odet = gal_matched_odestate(gal_data, ffit, intr)
+        end
+
         # Run perturbed equilibrium calculations
         # Pass vac_data and intr for response matrix calculations
         pe_state = PerturbedEquilibrium.compute_perturbed_equilibrium(
-            equil, odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
+            equil, pe_odet, ctrl.vac_flag ? vac_data : nothing, intr, ft_ctrl, pe_ctrl, pe_intr,
             metric, ffit
         )
 
