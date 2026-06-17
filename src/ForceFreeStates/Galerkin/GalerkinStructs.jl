@@ -2,7 +2,7 @@
 #
 # Data structures for the RDCON outer-region singular Galerkin solver — the Julia port of
 # `gal.f` (Dewar's Galerkin method for singular modes). These mirror the Fortran derived types
-# `cell_type`, `interval_type`, and `gal_type` (gal.f:48-76).
+# `cell_type`, `interval_type`, and `gal_type` (gal.f).
 #
 # Fortran uses 0-based dimensions `0:np` and `0:nx`/`0:msing`; here those become Julia 1-based with a
 # `+1` index shift (Hermite DOF `ip` ↔ array index `ip+1`; interval `ising` ↔ `intvl[ising+1]`).
@@ -25,7 +25,7 @@ Which side of the adjacent singular surface a cell lies on (Fortran `cell%extra`
 """
     GalCell
 
-One grid cell of the Galerkin discretization. Port of Fortran `cell_type` (gal.f:52-61).
+One grid cell of the Galerkin discretization. Port of Fortran `cell_type` (gal.f).
 
 ## Fields
 
@@ -70,7 +70,7 @@ end
     GalInterval
 
 One interval between consecutive singular surfaces (or between a surface and a domain edge).
-Port of Fortran `interval_type` (gal.f:63-66). `x`/`dx` are length `nx+1` (Fortran `0:nx`).
+Port of Fortran `interval_type` (gal.f). `x`/`dx` are length `nx+1` (Fortran `0:nx`).
 """
 struct GalInterval
     x::Vector{Float64}
@@ -81,10 +81,10 @@ end
 """
     GalWorkspace
 
-Global workspace for the Galerkin solve. Port of Fortran `gal_type` (gal.f:68-76).
+Global workspace for the Galerkin solve. Port of Fortran `gal_type` (gal.f).
 
 `intvl` has length `msing+1` (Fortran `intvl(0:msing)`, accessed as `intvl[ising+1]`).
-`kl = ku = mpert*(np+1)`. The banded `mat` storage layout depends on `solver` (gal.f:164-168):
+`kl = ku = mpert*(np+1)`. The banded `mat` storage layout depends on `solver` (gal.f):
 
   - `"LU"`       → `ldab = 2*kl + ku + 1`, full band (LAPACK `gbtrf!`/`gbtrs!`)
   - `"cholesky"` → `ldab = kl + 1`, lower band only (LAPACK `pbtrf!`/`pbtrs!`, `'L'`)
@@ -120,8 +120,8 @@ end
 """
     GalerkinSolution
 
-Reconstructed outer-region radial solution on the gal-native grid (Piece 1 producer). Populated by
-`gal_output_solution` (GalerkinSolution.jl).
+Reconstructed outer-region radial solution on the gal-native grid (ξ and analytic ξ′ consumed by
+PerturbedEquilibrium). Populated by `gal_output_solution` (GalerkinSolution.jl).
 
   - `psi::Vector{Float64}`, `q::Vector{Float64}` — radial grid (inner→edge) and its safety factor.
   - `issing::Vector{Bool}` — grid points sitting on a singular surface (skipped; left zero).
@@ -167,14 +167,14 @@ Outputs of the outer-region Galerkin solve.
 ## Fields
 
   - `delta::Matrix{ComplexF64}` — Δ′ matrix, `(nsol, 2*msing)` with `nsol = 2*msing`; the small
-    resonant coefficients (Fortran `delta`, gal.f:1405-1417).
+    resonant coefficients (Fortran `delta`, gal.f).
   - `Ap, Bp, Gammap, Deltap::Matrix{ComplexF64}` — PEST-3 matching blocks, each `(msing, msing)`
-    (Fortran `gal_write_pest3_data`, gal.f:1726-1745).
+    (Fortran `gal_write_pest3_data`, gal.f).
   - `msing::Int` — number of resonant singular surfaces included.
   - `sing_psi, sing_q::Vector{Float64}`, `sing_m, sing_n::Vector{Int}` — per-surface identifiers.
   - `di::Vector{Float64}`, `alpha::Vector{ComplexF64}` — Mercier index and exponent per surface.
   - `solution::Union{Nothing,GalerkinSolution}` — reconstructed radial ξ(ψ) and analytic ξ′(ψ) on the
-    gal-native grid (Piece 1); `nothing` if no resonant surfaces.
+    gal-native grid; `nothing` if no resonant surfaces.
 """
 struct GalerkinResult
     delta::Matrix{ComplexF64}

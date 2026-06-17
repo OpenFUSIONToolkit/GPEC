@@ -1,9 +1,9 @@
 # GalerkinMatch.jl
 #
-# DRIVEN (RPEC) outer↔inner asymptotic matching. Port of rmatch `match_rpec` (match.f:1318-1510) and the
-# outer total-solution construction of `match_output_solution` (match.f:1654-1671).
+# DRIVEN (RPEC) outer↔inner asymptotic matching. Port of rmatch `match_rpec` (match.f) and the
+# outer total-solution construction of `match_output_solution` (match.f).
 #
-# Per rational surface: the forced eigenvalue γ_s = 2πi·n·f_s (rpec, match.f:1359), the inner-layer
+# Per rational surface: the forced eigenvalue γ_s = 2πi·n·f_s (rpec, match.f), the inner-layer
 # matching data Δ(Q) via the Galerkin GGJ solver (InnerLayer.solve_inner), then the 4·msing matching
 # system mat·[cout;cin] = rmat is assembled (rmat = −transpose of the gal Δ′ coil block) and solved for
 # the per-coil outer/inner coefficients. The matched outer solution for coil drive j is
@@ -35,7 +35,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         error("gal_match_rpec: delta_coil is empty — gal_rpec_flag must be true for RPEC matching")
 
     if ctrl.gal_ideal_flag
-        # Ideal limit (Fortran rmatch coil%ideal_flag, match.f:1665-1671): skip the inner layer entirely
+        # Ideal limit (Fortran rmatch coil%ideal_flag, match.f): skip the inner layer entirely
         # and set the resistive plasma combination to zero. The gal outer solve is already fully ideal, so
         # the shared construction below collapses to the bare ideal coil column sols(:,:,csol).
         cout = zeros(ComplexF64, 2msing, mcoil)
@@ -56,7 +56,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
         length(sings) == msing && isapprox([s.psifac for s in sings], gal_result.sing_psi; rtol=1e-8) ||
             error("gal_match_rpec: re-derived surface set does not match gal Δ′ surfaces (filter drift?)")
 
-        # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f:1359-1363) ---
+        # --- inner-layer matching data Δ(Q) per surface (deltac_run; match.f) ---
         inner = InnerLayer.GGJModel(solver=:galerkin)
         deltar = zeros(ComplexF64, msing, 2)
         rpec_eig = zeros(ComplexF64, msing)
@@ -70,7 +70,7 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             deltar[i, 2] = Δ[2]
         end
 
-        # --- assemble the 4·msing matching system (match.f:1337-1376) ---
+        # --- assemble the 4·msing matching system (match.f) ---
         delta_out = gal_result.delta[1:2msing, 1:2msing]   # outer Δ′ plasma block
         mat = zeros(ComplexF64, 4msing, 4msing)
         rmat = zeros(ComplexF64, 4msing, mcoil)
@@ -95,14 +95,14 @@ function gal_match_rpec(ctrl::ForceFreeStatesControl, equil, intr::ForceFreeStat
             mat[idx4, idx4] = -delta2
         end
 
-        # --- solve mat·cof = rmat for the outer/inner coefficients (match.f:1402-1408) ---
+        # --- solve mat·cof = rmat for the outer/inner coefficients (match.f) ---
         cof = mat \ rmat
         residual = norm(mat * cof - rmat) / max(norm(rmat), 1e-300)
         cout = cof[1:2msing, :]
         cin = cof[2msing+1:4msing, :]
     end
 
-    # --- matched outer ξ/ξ′ per coil drive (match.f:1654-1671); ideal: cout=0 ⇒ bare coil column ---
+    # --- matched outer ξ/ξ′ per coil drive (match.f); ideal: cout=0 ⇒ bare coil column ---
     sols = gal_result.solution.xi          # (mpert, ngrid, nsol)
     sols_deriv = gal_result.solution.xi_deriv
     ngrid = size(sols, 2)
@@ -126,7 +126,7 @@ end
 
 Pack the RPEC-matched outer solution into an `OdeState` shaped exactly like the shooting integrator's,
 so `PerturbedEquilibrium` consumes it unchanged. Mirrors Fortran `idcon_build`'s gal branch
-(idcon.f:479-493) and `globalsol.bin` (the on-surface `issing` points are dropped, match.f:1468-1497):
+(idcon.f) and `globalsol.bin` (the on-surface `issing` points are dropped, match.f):
 
   - `u_store[:,:,1,ip] = ξ_ψ`  (matched fundamental matrix, mode×coil-drive, identity-at-edge basis)
   - `ud_store[:,:,1,ip] = dξ_ψ/dψ`  (analytic)

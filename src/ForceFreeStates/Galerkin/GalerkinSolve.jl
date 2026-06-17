@@ -2,8 +2,8 @@
 #
 # Top-level driver for the RDCON outer-region singular Galerkin Δ′ solve, plus the per-cell assembly
 # orchestration, the banded solve, Δ′ extraction, PEST-3 blocks, and HDF5 output.
-# Ports gal_make_arrays (gal.f:1300-1359), gal_solve (gal.f:1367-1431), and gal_write_pest3_data
-# (gal.f:1749-1825). The DRIVEN/RPEC inner-layer matching is wired in via gal_match_rpec (GalerkinMatch.jl).
+# Ports gal_make_arrays (gal.f), gal_solve (gal.f), and gal_write_pest3_data
+# (gal.f). The DRIVEN/RPEC inner-layer matching is wired in via gal_match_rpec (GalerkinMatch.jl).
 
 """
     gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
@@ -26,7 +26,7 @@ function gal_make_arrays!(ws::GalWorkspace, ctrl::ForceFreeStatesControl, equil,
             swap_edge = (ising == msing && ix == ws.nx)
             gal_gauss_quad!(cell, ffit, profiles, intr, nodes, weights, swap_edge)
             if cell.etype == GCT_RES
-                gal_resonant!(cell, ising, ffit, profiles, intr, asymps, sings, nn, ctrl.gal_tol)
+                gal_resonant!(cell, ising, ffit, profiles, intr, asymps, sings, nn, ctrl.gal_tol, ctrl.gal_gnstep, ctrl.verbose)
             elseif cell.etype == GCT_EXT || cell.etype == GCT_EXT1 || cell.etype == GCT_EXT2
                 gal_extension!(cell, ising, ffit, profiles, intr, asymps, sings, nn, nodes, weights)
             end
@@ -44,7 +44,7 @@ end
                    intr::ForceFreeStatesInternal; vac_data=nothing) -> GalerkinResult
 
 Compute the outer-region Δ′ matching matrix by the singular Galerkin method. Port of `gal_solve`
-(gal.f:1367-1431). Single toroidal mode only (`intr.npert == 1`). Returns a `GalerkinResult`; if there
+(gal.f). Single toroidal mode only (`intr.npert == 1`). Returns a `GalerkinResult`; if there
 are no resonant surfaces in the domain it returns an empty result.
 
 `vac_data` (a `VacuumData` from `free_run!`) supplies the free-boundary edge term
@@ -100,7 +100,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     kl = mpert * (np + 1)
     ku = kl
     ldab = ctrl.gal_solver == "LU" ? 2kl + ku + 1 : kl + 1
-    # rpec_flag (RDCON, gal.f:148-170): append mpert coil-response columns. Each is a unit source at
+    # rpec_flag (RDCON, gal.f): append mpert coil-response columns. Each is a unit source at
     # the edge value DOF in one poloidal mode; the recorded plasma response is the coil block of Δ_gw.
     # Cholesky's lower-only edge zeroing can't represent the rpec identity edge, so require LU.
     ncoil = ctrl.gal_rpec_flag ? mpert : 0
@@ -132,9 +132,9 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
 
     gal_make_arrays!(ws, ctrl, equil, ffit, intr, asymps, sings, nn, wv_edge)
 
-    if get(ENV, "GAL_DEBUG", "") == "1"
+    if ctrl.verbose
         offdbg = ws.solver == "LU" ? ws.kl + ws.ku + 1 : 1
-        @info "GAL_DEBUG ndim=$(ws.ndim) nsol=$nsol kl=$(ws.kl) ldab=$(ws.ldab) |rhs|=$(norm(ws.rhs))"
+        @info "Galerkin assembly: ndim=$(ws.ndim) nsol=$nsol kl=$(ws.kl) ldab=$(ws.ldab) |rhs|=$(norm(ws.rhs))"
         for ising in 0:msing
             for cell in ws.intvl[ising+1].cells
                 if cell.etype == GCT_RES || cell.etype == GCT_EXT
@@ -144,7 +144,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         end
     end
 
-    # --- banded solve (gal.f:1383-1396) ---
+    # --- banded solve (gal.f) ---
     ws.sol .= ws.rhs
     if ws.solver == "LU"
         ctrl.verbose && @info "Galerkin LU banded factorization + solve"
@@ -156,7 +156,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
         LinearAlgebra.LAPACK.pbtrs!('L', ws.kl, ws.mat, ws.sol)
     end
 
-    # --- extract Δ′ from the small resonant coefficients (gal.f:1405-1417) ---
+    # --- extract Δ′ from the small resonant coefficients (gal.f) ---
     delta = zeros(ComplexF64, nsol, 2 * msing)
     jsol = 0
     for ising in 0:msing
@@ -177,7 +177,7 @@ function galerkin_solve(ctrl::ForceFreeStatesControl, equil, ffit::FourFitVars,
     # Coil-response block (rpec_flag): rows 2*msing+1 : 2*msing+mpert of delta (empty otherwise).
     delta_coil = ncoil > 0 ? delta[(2*msing+1):(2*msing+ncoil), :] : Matrix{ComplexF64}(undef, 0, 0)
 
-    # Piece 1 producer: reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
+    # Reconstruct ξ(ψ) AND analytic ξ′(ψ) on the gal-native grid (gal_output_solution).
     ctrl.verbose && @info "Reconstructing outer-region ξ and analytic ξ′ on the gal grid"
     solution = gal_output_solution(ws, asymps, sings, intr, equil.profiles, psihigh)
 
@@ -204,8 +204,7 @@ end
     gal_pest3_blocks(delta, msing) -> (Ap, Bp, Gammap, Deltap)
 
 PEST-3 matching blocks (each `msing×msing`) as ± combinations of the left/right Δ′ entries. Port of
-`gal_write_pest3_data` (gal.f:1749-1825; the ± combinations are gal.f:1765-1777). Row index `2i-1`/`2i`
-= left/right of surface `i`.
+`gal_write_pest3_data`. Row index `2i-1`/`2i` = left/right of surface `i`.
 """
 function gal_pest3_blocks(delta::Matrix{ComplexF64}, msing::Int)
     Ap = zeros(ComplexF64, msing, msing)

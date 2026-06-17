@@ -309,7 +309,7 @@ A mutable struct containing control parameters for stability analysis, set by th
     gal_dx2::Float64 = 1e-3         # extension-element size (×1/|n q'|)
     gal_cutoff::Int = 10            # # of elements carrying the large solution as driving term
     gal_tol::Float64 = 1e-10        # resonant-quadrature (QuadGK) tolerance
-    gal_gnstep::Int = 5000          # max resonant-integration steps
+    gal_gnstep::Int = 20000         # max resonant-quadrature evaluations (QuadGK maxevals in gal_resonant!)
     gal_dx1dx2_flag::Bool = true    # enable special dx1/dx2 treatment for resonant/extension elements
     gal_sing_order::Int = 6         # base power-series order for the Galerkin singular asymptotics
     gal_sing_order_ceiling::Bool = true  # auto-raise order by ceil(2·Re(α)) per surface (high Mercier index)

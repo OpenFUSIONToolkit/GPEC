@@ -27,7 +27,7 @@
     resist_eval(sing, equil, intr; eta, rho, gamma, ising=0) -> InnerLayer.GGJParameters
 
 Compute the GGJ resistive inner-layer parameters at the rational surface `sing`.
-Port of RDCON `resist_eval` (resist.f:31-173), but with η and ρ supplied by the caller (no
+Port of RDCON `resist_eval` (resist.f), but with η and ρ supplied by the caller (no
 built-in Spitzer/density model). Returns an `InnerLayer.GGJParameters` carrying the curvature/mass
 coefficients E, F, G, H, K, M, the local time scales τ_A (`taua`), τ_R (`taur`), `v1` (V′ normalized
 by total volume), and the surface index `ising`.
@@ -62,7 +62,7 @@ function resist_eval(sing::SingType, equil::Equilibrium.PlasmaEquilibrium,
     q1 = sing.q1
     chi1 = 2π * equil.psio
 
-    # --- θ-integrate the six geometric averages (resist.f:71-103) ---
+    # --- θ-integrate the six geometric averages (resist.f) ---
     nth = length(equil.rzphi_ys)
     ff = zeros(nth, 6)
     hint2d = (Ref(1), Ref(1))
@@ -97,17 +97,17 @@ function resist_eval(sing::SingType, equil::Equilibrium.PlasmaEquilibrium,
     itp = cubic_interp(equil.rzphi_ys, Series(ff); bc=PeriodicBC())
     avg = FastInterpolations.integrate(itp)
 
-    # --- curvature terms E, F, H (resist.f:107-111) ---
+    # --- curvature terms E, F, H (resist.f) ---
     E = p1 * v1 / (q1 * chi1^2)^2 * avg[1] * (twopif * q1 * chi1 / avg[5] - v2)
     F = (p1 * v1 / (q1 * chi1^2))^2 * (avg[1] * avg[3] + (twopif / chi1)^2 * (avg[1] * avg[4] - avg[2]^2))
     H = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
 
-    # --- mass factor M and derived G, K (resist.f:122-125) ---
+    # --- mass factor M and derived G, K (resist.f) ---
     M = avg[1] * (avg[6] + (twopif / chi1)^2 * (avg[3] - 1 / avg[5]))
     G = avg[5] / (M * gamma * p)
     K = (q1 * chi1^2 / (p1 * v1))^2 * avg[5] / (M * avg[1])
 
-    # --- Alfvén and resistive times from caller-supplied η, ρ (resist.f:136-138) ---
+    # --- Alfvén and resistive times from caller-supplied η, ρ (resist.f) ---
     # τ_A = √(ρ·M·μ₀) / |2π n q₁ χ₁ / V′|   — geometric factor × √ρ.
     # τ_R = (⟨B²/|∇ψ|²⟩ / ⟨B²⟩) · μ₀ / η     — geometric factor × 1/η.
     # η, ρ enter once, explicitly (no RMATCH divide-out / re-multiply).
@@ -121,21 +121,4 @@ function resist_eval(sing::SingType, equil::Equilibrium.PlasmaEquilibrium,
 
     return InnerLayer.GGJParameters(; E=E, F=F, G=G, H=H, K=K, M=M,
         taua=taua, taur=taur, v1=v1norm, ising=ising)
-end
-
-"""
-    resist_eval_all(intr, equil; eta, rho, gamma) -> Vector{InnerLayer.GGJParameters}
-
-Evaluate [`resist_eval`](@ref) at every singular surface in `intr.sing`, returning one
-`GGJParameters` per surface (with `ising` set to the surface index).
-
-`eta` and `rho` may be supplied either as scalars (applied to every surface) or as
-vectors of length `intr.msing` (one value per surface, e.g. from a transport profile sampled
-at each rational surface). `gamma` is the (scalar) ratio of specific heats.
-"""
-function resist_eval_all(intr::ForceFreeStatesInternal, equil::Equilibrium.PlasmaEquilibrium;
-    eta, rho, gamma::Real)
-    _at(x, i) = x isa AbstractVector ? x[i] : x
-    return [resist_eval(intr.sing[i], equil, intr;
-        eta=_at(eta, i), rho=_at(rho, i), gamma=gamma, ising=i) for i in 1:intr.msing]
 end
