@@ -16,7 +16,8 @@ etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
-shape = "conformal"                     # Wall shape (nowall, conformal, ...); close conformal wall stabilizes the Solovev n=1 kink (see examples/Solovev_ideal_example/gpec.toml)
+# A close conformal wall stabilizes the Solovev n=1 kink for this fixture.
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
 bw = 1.5                                # Elongation parameter for wall shapes

@@ -61,6 +61,6 @@ electron = false               # Include electron contribution (false = ion-only
 nutype = "harmonic"            # Collision operator (zero, small, krook, harmonic)
 f0type = "maxwellian"          # Distribution function (maxwellian, jkp, cgl)
 atol_xlmda = 1e-9              # Absolute tolerance for inner pitch + energy integrations
-rtol_xlmda = 1e-5             # Relative tolerance for inner pitch + energy integrations
-atol_psi = 1e-9               # Absolute tolerance for the outer ψ quadrature
-rtol_psi = 1e-4              # Relative tolerance for the outer ψ quadrature
+rtol_xlmda = 1e-5              # Relative tolerance for inner pitch + energy integrations
+atol_psi = 1e-9                # Absolute tolerance for the outer ψ quadrature
+rtol_psi = 1e-4                # Relative tolerance for the outer ψ quadrature
