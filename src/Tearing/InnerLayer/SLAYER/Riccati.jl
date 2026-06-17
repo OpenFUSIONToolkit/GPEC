@@ -1,20 +1,14 @@
 # Riccati.jl
 #
-# Inner-layer Δ via the Fitzpatrick Riccati ODE. Ports the Fortran SLAYER
-# `riccati_f` / `w_der_f` / `jac_f` routines (GPEC/slayer/delta.f, branch
-# `slayer_growthrate`) under PeOhmOnly with parflow off and pe = 0 (the
-# pressureless tearing channel only). VERIFIED term-by-term against that
-# Fortran: A, A', B, C (full form), the dW/dp RHS, both large-p boundary
+# Inner-layer Δ via the Fitzpatrick two-fluid drift-MHD layer Riccati ODE
+# (Fitzpatrick, Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park
+# et al. 2022, Phys. Plasmas 29, 122505; Burgess et al. 2026), for the
+# pressureless tearing channel (no parallel flow, pe = 0). The A, B, C
+# coefficients, the dW/dp Riccati equation, the large-p asymptotic boundary
 # conditions, the regime test D² > ι_e P_⊥/P_tor^(2/3), the small-p
-# Δ = π/W' extraction, and the analytic Jacobian all match exactly.
-#
-# The underlying physics is Fitzpatrick's TJ layer formulation; the same
-# coefficients were independently confirmed against `TJ/Documentation/Layer.tex`
-# (A, B, C Eqs. 57-59; Riccati ODE Eq. 91; BCs Eqs. 93-95). Note the TJ C++
-# `Layer.cpp` applies low-D approximations the Fortran (and this port) do not
-# — it drops the D² terms of C and uses a runtime |gPD/PD| regime test
-# instead of the analytic inequality — so Julia matches the Fortran exactly
-# but can differ slightly from the C++ near the regime boundary.
+# Δ = π/W' extraction, and the analytic Jacobian all follow that layer
+# formulation; the full C(p) form is retained in every regime (no low-D
+# reduction).
 #
 # The complex normalized growth rate `Q = ω + iγ` is passed directly to
 # `solve_inner` rather than carried on the parameter struct. All other
@@ -29,7 +23,7 @@
 using OrdinaryDiffEq
 
 # ---------------------------------------------------------------------
-# Coefficient evaluation (port of the Fortran `w_der_f` routine; Layer.tex Eqs. 57-59).
+# Coefficient evaluation for the two-fluid layer A, B, C terms (Fitzpatrick 2023).
 #
 # All x-independent quantities are bundled in `_RiccatiConsts` and computed
 # once per `solve_inner` call (see line ~200). The hot RHS / Jacobian
@@ -98,7 +92,7 @@ end
     return -(fA_prime / x) * W - W * W / x + (fB / (fA * fC)) * (x * x * x)
 end
 
-# Analytic Jacobian (port of the Fortran `jac_f` routine). The full RHS has
+# Analytic Jacobian of the Riccati RHS. The full RHS has
 # both the explicit (fA'/p, fB·p³) terms and the W² term; for the
 # Jacobian only the W-dependent pieces survive. Returns a scalar — the
 # 1×1 Jacobian of the scalar ODE.
@@ -110,8 +104,8 @@ end
 end
 
 # ---------------------------------------------------------------------
-# Boundary-condition selection (port of the Fortran `riccati_f`
-# initialisation; Layer.tex Eqs. 93/95). Two regimes selected by D_norm² vs.
+# Boundary-condition selection (large-p asymptotics, Fitzpatrick 2023).
+# Two regimes selected by D_norm² vs.
 # iota_e·P_perp/P_tor^(2/3).
 # ---------------------------------------------------------------------
 
@@ -122,9 +116,8 @@ function _riccati_f_initial(p::SLAYERParameters, Q::ComplexF64;
     Pperp_over_Ptor23 = p.P_perp / p.P_tor^(2 / 3)
 
     if D2 > p.iota_e * Pperp_over_Ptor23
-        # Large-D_norm branch. Note: in the Fortran expression
-        # ((P_tor·D²)/(iota_e·P_tor·P_perp))^(1/4) the P_tor factor
-        # cancels — preserved here for traceability.
+        # Large-D_norm branch. In ((P_tor·D²)/(iota_e·P_tor·P_perp))^(1/4)
+        # the P_tor factor cancels — written out for traceability.
         p_start = max(((p.P_tor * D2) / (p.iota_e * p.P_tor * p.P_perp))^0.25,
             p_floor)
 
@@ -175,9 +168,9 @@ pressureless layer produces only the tearing channel.
 
 # Algorithm
 
-Ports the Fortran `riccati_f` routine (delta.f, branch `slayer_growthrate`)
-with PeOhmOnly + parflow off and pe=0; implements Fitzpatrick's TJ layer
-formulation (`Layer.tex` Eqs. 57-59, 91-95). Integrates
+Implements the Fitzpatrick two-fluid drift-MHD layer formulation
+(Fitzpatrick 2023; Park et al. 2022) for the pressureless tearing channel
+(no parallel flow, pe = 0). Integrates
 `dW/dp = -(fA'/p)·W − W²/p + (fB/(fA·fC))·p³` from a large `p_start`
 (selected by `_riccati_f_initial` according to whether
 `D_norm² ≷ iota_e·P_perp/P_tor^(2/3)`) inward to `pmin`, then computes
@@ -203,11 +196,11 @@ fields (`n_valid_roots`, `n_poles`), not just γ.
 
 # Keyword arguments
 
-  - `pmin`     -- inner-layer cutoff (Fortran `xmin = 1e-6`)
-  - `p_floor`  -- floor on `p_start` (Fortran `MAX(my_p, 6.0)`)
-  - `reltol`,`abstol`,`maxiters` -- LSODE defaults from the Fortran SLAYER
+  - `pmin`     -- inner-layer cutoff (default 1e-6)
+  - `p_floor`  -- floor on `p_start` (default 6.0)
+  - `reltol`,`abstol`,`maxiters` -- stiff-solver tolerance/iteration limits
   - `solver`   -- any OrdinaryDiffEq algorithm; pass `Tsit5()` for the
-    non-stiff path (rarely needed for `riccati_f`)
+    non-stiff path (rarely needed here)
 """
 function solve_inner(::SLAYERModel{:fitzpatrick},
     p::SLAYERParameters, Q::Number;
@@ -217,22 +210,21 @@ function solve_inner(::SLAYERModel{:fitzpatrick},
     abstol::Real=1e-10,
     maxiters::Integer=50_000,
     solver=Rodas5P(; autodiff=false))
-    # Convention bridge between our scan plane and Fitzpatrick's layer
-    # eigenvalue. We scan in the Park plane `Q = ω + iγ` (+γ on the +imag
-    # axis). Fitzpatrick's normalized eigenvalue is `ĝ = (γ − iω)·τ_k` in
-    # the co-rotating frame (TJ Layer.tex Eqs. 44, 108–109: γ = Re(ĝ)/τ_k,
-    # ω = −Im(ĝ)/τ_k), so +γ sits on his +real axis. The two planes differ
-    # by a pure −90° rotation, `ĝ = −i·Q` — relabeling which axis is growth,
-    # no physics.
+    # Convention bridge between our scan plane and the layer eigenvalue.
+    # We scan in the Park plane `Q = ω + iγ` (+γ on the +imag axis; Park
+    # et al. 2022). Fitzpatrick's normalized layer eigenvalue is
+    # `ĝ = (γ − iω)·τ_k` in the co-rotating frame (Fitzpatrick 2023:
+    # γ = Re(ĝ)/τ_k, ω = −Im(ĝ)/τ_k), so +γ sits on his +real axis. The two
+    # planes differ by a pure −90° rotation, `ĝ = −i·Q` — relabeling which
+    # axis is growth, no physics.
     #
-    # The layer ODE coefficients (Layer.tex Eqs. 57–59, 91–92) are analytic
-    # in ĝ with Q_e, Q_i, D, P_⊥, P_φ all real, so Schwarz reflection gives
-    # `Δ̂_s(conj ĝ) = conj(Δ̂_s(ĝ))`. We feed `Q_c = i·conj(Q) = conj(−i·Q)
-    # = conj(ĝ)`, hence evaluate `conj(Δ̂_s(ĝ))`. Conjugation maps zeros to
-    # zeros, so the extracted growth-rate roots are identical to those of
-    # Δ̂_s(ĝ); it only reflects the off-root residual surface, which aligns
-    # our integration-path orientation with the Fortran SLAYER internal
-    # `g_tmp = i·Q` so |Δ| contours match plot-Q for plot-Q.
+    # The layer ODE coefficients are analytic in ĝ with Q_e, Q_i, D, P_⊥,
+    # P_φ all real, so Schwarz reflection gives `Δ̂_s(conj ĝ) = conj(Δ̂_s(ĝ))`.
+    # We feed `Q_c = i·conj(Q) = conj(−i·Q) = conj(ĝ)`, hence evaluate
+    # `conj(Δ̂_s(ĝ))`. Conjugation maps zeros to zeros, so the extracted
+    # growth-rate roots are identical to those of Δ̂_s(ĝ); it only reflects
+    # the off-root residual surface, fixing the integration-path orientation
+    # so |Δ| contours are consistent across the scan plane.
     Q_c = im * conj(ComplexF64(Q))
 
     # Boundary condition at p_start

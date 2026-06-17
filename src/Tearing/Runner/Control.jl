@@ -22,7 +22,8 @@ constructor.
   - `coupling_mode` -- `:uncoupled` (default, per-surface) or `:coupled`
     (multi-surface determinant)
   - `dc_type`       -- critical-Δ offset selector, one of `:none`, `:lar`,
-    `:rfitzp`, `:toroidal` (Fortran SLAYER `params` critical-Δ formulas)
+    `:rfitzp`, `:toroidal` (χ_‖-matching critical-Δ formulas,
+    Connor-Hastie-Helander 2015)
   - `msing_max`     -- number of surfaces to include in the coupled
     determinant (default 3; capped at `length(sings)` at runtime)
 
@@ -37,7 +38,7 @@ constructor.
     (default 0.0, outboard midplane)
   - `resistivity_model` -- η closure setting τ_R = μ₀r_s²/η: `:sauter`
     (default, neoclassical F_33), `:redl`, `:spitzer` (Sauter 18a, no
-    trapped correction), or `:spitzer_harm` (legacy Fitzpatrick/TJ σ_∥)
+    trapped correction), or `:spitzer_harm` (legacy Fitzpatrick σ_∥)
   - `lnLambda_form` -- Coulomb-log form: `:nrl` (default), `:sauter`, or
     `:wesson` (legacy; pair with `:spitzer_harm` to reproduce old SLAYER)
 

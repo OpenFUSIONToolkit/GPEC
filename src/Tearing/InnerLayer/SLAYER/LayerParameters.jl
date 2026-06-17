@@ -1,28 +1,24 @@
 # LayerParameters.jl
 #
 # `SLAYERParameters` carries the dimensionless layer-physics parameters
-# that the Fitzpatrick `riccati_f` ODE consumes for one rational surface,
+# that the Fitzpatrick layer Riccati ODE consumes for one rational surface,
 # plus the dimensional conversion factors needed to translate normalized
 # frequencies and Δ values back to physical units.
 #
-# Constructor `SLAYERParameters(; ...)` ports the Fortran SLAYER `params`
-# subroutine (modified): no pr, no pe, no ds (those entered only the legacy
-# `riccati()` pr/pe/ds path, which is not ported — the `riccati_f` and
-# `riccati_del_s` paths used here take P_perp/P_tor/D_norm instead). Q is
-# not stored — it is passed directly to `solve_inner`.
+# The constructor builds the per-surface state from dimensional equilibrium
+# and kinetic-profile inputs. The Fitzpatrick two-fluid layer uses
+# P_perp/P_tor/D_norm rather than the older magnetic/electron Prandtl
+# (pr/pe) and ρ_s-based (ds) parametrization. Q is not stored — it is
+# passed directly to `solve_inner`.
 
 """
     SLAYERParameters
 
 Dimensionless layer-physics parameters at one rational surface for the
-Fitzpatrick (`riccati_f`) SLAYER inner-layer model, plus dimensional
-auxiliaries required for de-normalization.
-
-Mirrors the Fortran SLAYER per-surface state (`sglobal_mod` +
-`slayer_inputs_type`) restricted to the quantities consumed by
-`riccati_f`. The legacy magnetic Prandtl `pr`, electron Prandtl `pe`,
-and `ρ_s`-based `ds` parameters are intentionally absent — the
-`riccati_f` formulation uses `P_perp`, `P_tor`, and `D_norm` instead.
+Fitzpatrick two-fluid drift-MHD SLAYER inner-layer model (Fitzpatrick
+2023; Park et al. 2022), plus dimensional auxiliaries required for
+de-normalization. The parametrization uses `P_perp`, `P_tor`, and
+`D_norm` (not the older `pr`/`pe`/`ds` set).
 
 | field      | meaning                                                           |
 |:---------- |:----------------------------------------------------------------- |
@@ -91,8 +87,8 @@ Base.@kwdef struct SLAYERParameters <: InnerLayerParameters
     dc_type::Symbol = :none
 end
 
-# Allowed dc_type values (ports the Fortran `dc_type` SELECT CASE in the
-# params routine). `:none` reproduces the default `dc_tmp = 0` branch.
+# Allowed dc_type values for the critical-Δ offset. `:none` is the default
+# `dc_tmp = 0` branch.
 const ALLOWED_DC_TYPES = (:none, :lar, :rfitzp, :toroidal)
 
 """
@@ -112,7 +108,7 @@ the derivative of the surface minor radius with respect to ψ. The two
 respect to ψ_norm or both with respect to physical ψ — the conversion
 factor cancels in the ratio).
 
-This is the Julia analogue of the conversion `s_Fitz = s_psiN · r_s / (psi_N · da_dpsiN)` performed in the Fortran SLAYER `layerinputs` routine.
+Equivalent to the conversion `s_Fitz = s_psiN · r_s / (psi_N · da_dpsiN)`.
 """
 function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
     da_dpsi != 0 || throw(ArgumentError("r_based_shear: da/dψ must be non-zero"))
@@ -121,7 +117,7 @@ function r_based_shear(rs::Real, q::Real, dq_dpsi::Real, da_dpsi::Real)
 end
 
 # Internal: solve the Wd self-consistency loop for the chi_parallel-based
-# critical Δ. Ports the Fortran params routine. Returns dc_tmp as a Float64.
+# critical Δ (Connor-Hastie-Helander 2015). Returns dc_tmp as a Float64.
 function _solve_dc_tmp(; dc_type::Symbol, dr_val::Real, dgeo_val::Real,
     chi_perp::Real, t_e::Real, zeff::Real, tau_ee::Real,
     rs::Real, R0::Real, sval_r::Real, n_tor::Integer,
@@ -181,11 +177,9 @@ end
         -> SLAYERParameters
 
 Build a `SLAYERParameters` for one rational surface from dimensional
-equilibrium and kinetic-profile inputs. Mirrors the Fortran SLAYER
-`params` subroutine restricted to the Fitzpatrick (`riccati_f`) path: drops the
-magnetic Prandtl `pr`, electron Prandtl `pe`, and ρ_s-based `ds` (those
-parameters entered only the legacy `riccati()` and `riccati_del_s()`
-formulations).
+equilibrium and kinetic-profile inputs, in the Fitzpatrick two-fluid layer
+parametrization (P_perp/P_tor/D_norm; the older magnetic/electron Prandtl
+`pr`/`pe` and ρ_s-based `ds` parameters are not used).
 
 # Arguments
 
@@ -219,9 +213,9 @@ layer parameter derived from it.
     trapped-particle correction, the physically-appropriate choice for
     H-mode tearing stability), `RedlNeoModel()` (improved high-ν* fit),
     `SpitzerModel()` (Sauter 18a fit, no trapped-particle correction), or
-    `SpitzerHarmModel()` (Fitzpatrick/TJ σ_∥, LayerParameters.tex Eqs. 7-8
-    — the legacy SLAYER closure; pair with `lnLambda_form=:wesson` to
-    reproduce legacy τ_R exactly).
+    `SpitzerHarmModel()` (Fitzpatrick Spitzer-Härm σ_∥ — the legacy SLAYER
+    closure; pair with `lnLambda_form=:wesson` to reproduce legacy τ_R
+    exactly).
   - `f_trap`  -- trapped-particle fraction at this surface. If not provided
     with a neoclassical model, falls back to Lin-Liu-Miller ε-only form
     with `ε = rs / (R_major_eff or R0)`.
@@ -229,11 +223,11 @@ layer parameter derived from it.
     model, computed from Sauter 1999 Eq. 18b using the same ε.
   - `R_major_eff` -- ⟨R⟩ at the surface for the ν*_e formula (default `R0`).
   - `lnLambda_form` -- `:nrl` (default), `:sauter`, or `:wesson` (legacy
-    Fortran/TJ form).
+    form).
 
 # Sign convention for diamagnetic frequencies
 
-Both Fortran SLAYER paths (the `params` and `layerinputs` routines) use
+The diamagnetic normalization uses
 
 ```
 Q_e = -tauk · ω_*e
@@ -264,8 +258,8 @@ function slayer_parameters(;
     lnLamb = coulomb_log_e(n_e, t_e; form=lnLambda_form)
 
     # Parallel resistivity entering τ_R. The model selects the closure:
-    #   SpitzerHarmModel — Fitzpatrick/TJ σ_∥ (LayerParameters.tex Eqs. 7-8);
-    #     with lnLambda_form=:wesson this is bit-identical to legacy SLAYER.
+    #   SpitzerHarmModel — Fitzpatrick Spitzer-Härm σ_∥; with
+    #     lnLambda_form=:wesson this is bit-identical to the legacy SLAYER η.
     #   SpitzerModel     — Sauter 18a fit (legacy 1.65e-9 form under :wesson).
     #   SauterNeoModel / RedlNeoModel — F_33 trapped-particle correction
     #     using f_trap and ν*_e (from ResistGeometry or ε-only fallback).
@@ -305,17 +299,17 @@ function slayer_parameters(;
     # b_l = (n/m) r_s sval bt / R0 expression and cancels through to
     # tau_h = R0 sqrt(mu0 rho) / (n sval bt)).
     tau_h = R0 * sqrt(MU_0 * rho) / (n * sval_r * bt)
-    # Resistive diffusion time τ_R = μ₀ r_s² / η (TJ LayerParameters.tex
-    # Eq. 17, generalized so the selected η closure — neoclassical by
-    # default — actually sets the Lundquist number).
+    # Resistive diffusion time τ_R = μ₀ r_s² / η (Fitzpatrick 2023), with
+    # the selected η closure — neoclassical by default — setting the
+    # Lundquist number.
     tau_r = MU_0 * rs^2 / eta
 
     # Lundquist number and Q-conversion factor
     lu = tau_r / tau_h
     tauk = lu^(1.0 / 3.0) * tau_h         # = Qconv
 
-    # Normalized diamagnetic frequencies. Both Fortran SLAYER paths (the
-    # params and layerinputs routines) use Q = -tauk·ω; see docstring sign convention.
+    # Normalized diamagnetic frequencies, Q = -tauk·ω; see docstring sign
+    # convention.
     Q_e = -tauk * omega_e
     Q_i = -tauk * omega_i
     Q_e_minus_Q_i = Q_e - Q_i

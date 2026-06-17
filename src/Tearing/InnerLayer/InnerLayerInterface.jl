@@ -35,27 +35,25 @@ the `Δ_{j,±}(γ)` of Glasser, Wang & Park, Phys. Plasmas **23**, 112506
 
 # Fields
 
-  - `tearing` — the **odd-parity** matching coefficient (GWP Δ_+; Fortran
-    `rmatch/deltac.f` "odd mode"). Corresponds to a flux perturbation W
-    that is EVEN in x and a velocity/temperature perturbation that is ODD
-    — i.e., the reconnecting mode with a current sheet at the rational
-    surface. This is the tearing drive that appears as Δ' in the
-    classical constant-ψ tearing equation. Must be populated by every
-    resistive inner-layer model.
+  - `tearing` — the **odd-parity** matching coefficient (GWP Δ_+, the
+    "odd mode"). Corresponds to a flux perturbation W that is EVEN in x and
+    a velocity/temperature perturbation that is ODD — i.e., the
+    reconnecting mode with a current sheet at the rational surface. This is
+    the tearing drive that appears as Δ' in the classical constant-ψ
+    tearing equation. Must be populated by every resistive inner-layer model.
 
-  - `interchange` — the **even-parity** matching coefficient (GWP Δ_−;
-    Fortran `rmatch/deltac.f` "even mode"). Corresponds to W odd, N and
-    Θ even — i.e., the non-reconnecting interchange/ballooning channel.
-    Its dissipative piece in toroidal geometry is the Glasser, Greene &
-    Johnson stabilization term that opposes tearing growth (Glasser 1975;
+  - `interchange` — the **even-parity** matching coefficient (GWP Δ_−, the
+    "even mode"). Corresponds to W odd, N and Θ even — i.e., the
+    non-reconnecting interchange/ballooning channel. Its dissipative piece
+    in toroidal geometry is the Glasser, Greene & Johnson stabilization
+    term that opposes tearing growth (Glasser, Greene & Johnson 1975;
     Lütjens-Bondeson-Roy 1993). Pressureless inner-layer models (e.g.
     SLAYER's Fitzpatrick Riccati) set this identically zero.
 
-The naming follows the physics channel rather than a mathematical
-parity label because `odd/even` carries different meanings across the
-literature depending on whether you label by the parity of W (GWP paper
-convention) or the parity of (N, Θ) (Fortran `rmatch/deltac.f`
-convention). Using `tearing` and `interchange` avoids ambiguity.
+The naming follows the physics channel rather than a mathematical parity
+label because `odd/even` carries different meanings across the literature
+depending on whether you label by the parity of W (GWP paper convention)
+or the parity of (N, Θ). Using `tearing` and `interchange` avoids ambiguity.
 """
 struct InnerLayerResponse
     tearing::ComplexF64

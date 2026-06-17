@@ -348,8 +348,8 @@ function run_slayer(equil, ffs_intr, control::SLAYERControl,
             lnLambda_form=control.lnLambda_form)
     end
 
-    # Δ' matrix: prefer the parallel-FM STRIDE-style full matrix; fall
-    # back to a diagonal built from each SingType's scalar delta_prime.
+    # Δ' matrix: prefer the full parallel-FM matrix; fall back to a
+    # diagonal built from each SingType's scalar delta_prime.
     dp = if !isempty(ffs_intr.delta_prime_matrix) &&
        size(ffs_intr.delta_prime_matrix) == (length(params), length(params))
         Matrix{ComplexF64}(ffs_intr.delta_prime_matrix)

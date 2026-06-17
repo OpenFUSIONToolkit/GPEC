@@ -32,30 +32,30 @@ using DelaunayTriangulation
 
 Output of `find_growth_rates`.
 
-| field                | meaning                                                |
-|----------------------|--------------------------------------------------------|
-| `Q_root`             | Best (highest-γ surviving) root, normalized            |
-| `omega_Hz`           | `Re(Q_root) / tauk` — physical rotation frequency      |
-| `gamma_Hz`           | `Im(Q_root) / tauk` — physical growth rate             |
-| `Q_root_secondary`   | Second-most-unstable root flagged for ambiguity, or    |
-|                      | `NaN+NaNim` if the primary root was unambiguous.       |
-| `omega_Hz_secondary` | physical ω of the secondary root, or 0 if none         |
-| `gamma_Hz_secondary` | physical γ of the secondary root, or 0 if none         |
-| `warning_flags`      | `Vector{Symbol}` of warnings raised on `Q_root`:       |
-|                      | `:geom`, `:gap` (root accepted with caveat);           |
-|                      | `:spurious` when ≥1 contour near-miss was dropped by    |
-|                      | the validity gate (parked in `filtered_roots`); or     |
-|                      | `:no_root` when NO usable root was found (`Q_root` is   |
-|                      | `NaN`; `omega_Hz`/`gamma_Hz` fall back to 0 — check     |
-|                      | this flag to tell that apart from a true γ≈0 result).   |
-|                      | Empty if root is clean.                                 |
-| `valid_roots`        | All non-pole intersections that survived pole filter   |
-| `poles`              | Intersections classified as poles                      |
-| `filtered_roots`     | Intersections rejected by the above-pole/outside-Re    |
-|                      | filter or the new geom+gap recursion                   |
-| `re_contours`        | Extracted Re(Δ)=`re_target` polylines                  |
-| `im_contours`        | Extracted Im(Δ)=`im_target` polylines                  |
-| `pole_threshold`     | Threshold used for pole classification                 |
+| field                | meaning                                               |
+|:-------------------- |:----------------------------------------------------- |
+| `Q_root`             | Best (highest-γ surviving) root, normalized           |
+| `omega_Hz`           | `Re(Q_root) / tauk` — physical rotation frequency     |
+| `gamma_Hz`           | `Im(Q_root) / tauk` — physical growth rate            |
+| `Q_root_secondary`   | Second-most-unstable root flagged for ambiguity, or   |
+|                      | `NaN+NaNim` if the primary root was unambiguous.      |
+| `omega_Hz_secondary` | physical ω of the secondary root, or 0 if none        |
+| `gamma_Hz_secondary` | physical γ of the secondary root, or 0 if none        |
+| `warning_flags`      | `Vector{Symbol}` of warnings raised on `Q_root`:      |
+|                      | `:geom`, `:gap` (root accepted with caveat);          |
+|                      | `:spurious` when ≥1 contour near-miss was dropped by  |
+|                      | the validity gate (parked in `filtered_roots`); or    |
+|                      | `:no_root` when NO usable root was found (`Q_root` is |
+|                      | `NaN`; `omega_Hz`/`gamma_Hz` fall back to 0 — check   |
+|                      | this flag to tell that apart from a true γ≈0 result). |
+|                      | Empty if root is clean.                               |
+| `valid_roots`        | All non-pole intersections that survived pole filter  |
+| `poles`              | Intersections classified as poles                     |
+| `filtered_roots`     | Intersections rejected by the above-pole/outside-Re   |
+|                      | filter or the new geom+gap recursion                  |
+| `re_contours`        | Extracted Re(Δ)=`re_target` polylines                 |
+| `im_contours`        | Extracted Im(Δ)=`im_target` polylines                 |
+| `pole_threshold`     | Threshold used for pole classification                |
 """
 struct GrowthRateResult
     Q_root::ComplexF64
@@ -124,6 +124,7 @@ single-surface scans; `mc.surfaces[mc.ref_idx].tauk` for coupled scans).
 After the per-intersection pole / above-pole filters, the remaining roots
 are sorted by descending γ. The selection loop walks down this list and at
 each candidate evaluates two flags:
+
   - `:geom` — Re(Δ)=0 contour is locally a downward-concave "hill" at the
     candidate (clean polyline-following quadratic fit).
   - `:gap`  — candidate is unstable AND its γ exceeds the next root's by
@@ -136,26 +137,26 @@ primary with that warning recorded, and the next root is exposed as
 neither fires, the candidate is accepted cleanly.
 """
 function find_growth_rates(scan::ScanResult, tauk::Real;
-                           re_target::Real=0.0, im_target::Real=0.0,
-                           pole_threshold::Real=10.0,
-                           filter_above_poles::Bool=true,
-                           filter_outside_re::Bool=true,
-                           gap_kHz_threshold::Real=1.0,
-                           residual=nothing,
-                           polish_maxit::Integer=20,
-                           validity_rtol::Real=1e-3)
+    re_target::Real=0.0, im_target::Real=0.0,
+    pole_threshold::Real=10.0,
+    filter_above_poles::Bool=true,
+    filter_outside_re::Bool=true,
+    gap_kHz_threshold::Real=1.0,
+    residual=nothing,
+    polish_maxit::Integer=20,
+    validity_rtol::Real=1e-3)
     return _extract_growth_rates(scan.re_axis, scan.im_axis, scan.Δ,
-                                  Float64(tauk);
-                                  re_target=Float64(re_target),
-                                  im_target=Float64(im_target),
-                                  pole_threshold=Float64(pole_threshold),
-                                  filter_above_poles=filter_above_poles,
-                                  filter_outside_re=filter_outside_re,
-                                  gap_kHz_threshold=Float64(gap_kHz_threshold),
-                                  residual=residual,
-                                  polish_maxit=Int(polish_maxit),
-                                  validity_scale=_residual_scale(scan.Δ),
-                                  validity_rtol=Float64(validity_rtol))
+        Float64(tauk);
+        re_target=Float64(re_target),
+        im_target=Float64(im_target),
+        pole_threshold=Float64(pole_threshold),
+        filter_above_poles=filter_above_poles,
+        filter_outside_re=filter_outside_re,
+        gap_kHz_threshold=Float64(gap_kHz_threshold),
+        residual=residual,
+        polish_maxit=Int(polish_maxit),
+        validity_scale=_residual_scale(scan.Δ),
+        validity_rtol=Float64(validity_rtol))
 end
 
 """
@@ -174,25 +175,25 @@ quadtree's mixed refinement levels are resolved by the triangulation
 respecting every evaluated point uniformly.
 """
 function find_growth_rates(amr::AMRResult, tauk::Real;
-                           re_target::Real=0.0, im_target::Real=0.0,
-                           pole_threshold::Real=10.0,
-                           filter_above_poles::Bool=true,
-                           filter_outside_re::Bool=true,
-                           gap_kHz_threshold::Real=1.0,
-                           residual=nothing,
-                           polish_maxit::Integer=20,
-                           validity_rtol::Real=1e-3)
+    re_target::Real=0.0, im_target::Real=0.0,
+    pole_threshold::Real=10.0,
+    filter_above_poles::Bool=true,
+    filter_outside_re::Bool=true,
+    gap_kHz_threshold::Real=1.0,
+    residual=nothing,
+    polish_maxit::Integer=20,
+    validity_rtol::Real=1e-3)
     return _extract_growth_rates_amr(amr.Q, amr.Δ, Float64(tauk);
-                                      re_target=Float64(re_target),
-                                      im_target=Float64(im_target),
-                                      pole_threshold=Float64(pole_threshold),
-                                      filter_above_poles=filter_above_poles,
-                                      filter_outside_re=filter_outside_re,
-                                      gap_kHz_threshold=Float64(gap_kHz_threshold),
-                                      residual=residual,
-                                      polish_maxit=Int(polish_maxit),
-                                      validity_scale=_residual_scale(amr.Δ),
-                                      validity_rtol=Float64(validity_rtol))
+        re_target=Float64(re_target),
+        im_target=Float64(im_target),
+        pole_threshold=Float64(pole_threshold),
+        filter_above_poles=filter_above_poles,
+        filter_outside_re=filter_outside_re,
+        gap_kHz_threshold=Float64(gap_kHz_threshold),
+        residual=residual,
+        polish_maxit=Int(polish_maxit),
+        validity_scale=_residual_scale(amr.Δ),
+        validity_rtol=Float64(validity_rtol))
 end
 
 # ---------------------------------------------------------------------
@@ -202,25 +203,27 @@ end
 # Bilinear interpolation of `values` on the regular grid `(re_axis, im_axis)`
 # at point (qr, qi). Out-of-grid points are clamped to the boundary.
 function _bilinear(re_axis::Vector{Float64}, im_axis::Vector{Float64},
-                   values::Matrix{Float64}, qr::Real, qi::Real)
-    nre = length(re_axis); nim = length(im_axis)
+    values::Matrix{Float64}, qr::Real, qi::Real)
+    nre = length(re_axis)
+    nim = length(im_axis)
     i = clamp(searchsortedlast(re_axis, qr), 1, nre - 1)
     j = clamp(searchsortedlast(im_axis, qi), 1, nim - 1)
     tx = (qr - re_axis[i]) / (re_axis[i+1] - re_axis[i])
     ty = (qi - im_axis[j]) / (im_axis[j+1] - im_axis[j])
-    tx = clamp(tx, 0.0, 1.0); ty = clamp(ty, 0.0, 1.0)
-    return (1-tx)*(1-ty)*values[i,j]   + tx*(1-ty)*values[i+1,j] +
-           (1-tx)*ty    *values[i,j+1] + tx*ty    *values[i+1,j+1]
+    tx = clamp(tx, 0.0, 1.0)
+    ty = clamp(ty, 0.0, 1.0)
+    return (1 - tx) * (1 - ty) * values[i, j] + tx * (1 - ty) * values[i+1, j] +
+           (1 - tx) * ty * values[i, j+1] + tx * ty * values[i+1, j+1]
 end
 
 # Extract polylines for a single contour level on a regular grid.
 # Returns Vector{Vector{ComplexF64}} (one polyline per closed/open curve).
 function _extract_contours(re_axis::Vector{Float64}, im_axis::Vector{Float64},
-                            values::Matrix{Float64}, level::Float64)
+    values::Matrix{Float64}, level::Float64)
     polylines = Vector{Vector{ComplexF64}}()
     for cl in lines(contour(re_axis, im_axis, values, level))
         xs, ys = coordinates(cl)
-        path = ComplexF64[xs[i] + ys[i]*im for i in eachindex(xs)]
+        path = ComplexF64[xs[i] + ys[i] * im for i in eachindex(xs)]
         length(path) >= 2 && push!(polylines, path)
     end
     return polylines
@@ -230,7 +233,7 @@ end
 # intersection point if segments [a,b] and [c,d] cross strictly (parameters
 # in (0,1)), else nothing. Endpoint touches return the touch point.
 function _segment_intersection(a::ComplexF64, b::ComplexF64,
-                                c::ComplexF64, d::ComplexF64)
+    c::ComplexF64, d::ComplexF64)
     d1r, d1i = real(b - a), imag(b - a)
     d2r, d2i = real(d - c), imag(d - c)
     denom = d1r * d2i - d1i * d2r
@@ -247,7 +250,7 @@ end
 # Find all intersections between two families of polylines. Returns
 # Vector{ComplexF64}.
 function _all_intersections(re_paths::Vector{Vector{ComplexF64}},
-                             im_paths::Vector{Vector{ComplexF64}})
+    im_paths::Vector{Vector{ComplexF64}})
     out = ComplexF64[]
     for re_path in re_paths
         for i in 1:length(re_path)-1
@@ -266,11 +269,13 @@ end
 
 # Index of the closest vertex in a polyline to a point.
 function _closest_vertex(path::Vector{ComplexF64}, pt::ComplexF64)
-    best_i = 0; best_d = Inf
+    best_i = 0
+    best_d = Inf
     for i in eachindex(path)
         d = abs(path[i] - pt)
         if d < best_d
-            best_d = d; best_i = i
+            best_d = d
+            best_i = i
         end
     end
     return best_i, best_d
@@ -278,12 +283,16 @@ end
 
 # Find the polyline (and vertex within it) whose vertex is closest to pt.
 function _closest_polyline_vertex(paths::Vector{Vector{ComplexF64}},
-                                    pt::ComplexF64)
-    best_path_idx = 0; best_vert_idx = 0; best_d = Inf
+    pt::ComplexF64)
+    best_path_idx = 0
+    best_vert_idx = 0
+    best_d = Inf
     for (pi_, path) in enumerate(paths)
         vi, d = _closest_vertex(path, pt)
         if d < best_d
-            best_d = d; best_path_idx = pi_; best_vert_idx = vi
+            best_d = d
+            best_path_idx = pi_
+            best_vert_idx = vi
         end
     end
     return best_path_idx, best_vert_idx, best_d
@@ -340,10 +349,10 @@ end
 # version is preserved because we fit γ = f(ω) which has a sign-stable
 # second derivative regardless of traversal direction.
 function _is_geom_spurious(pt::ComplexF64,
-                            re_paths::Vector{Vector{ComplexF64}};
-                            max_walk::Float64=0.5,
-                            curvature_threshold::Float64=0.05,
-                            quality_threshold::Float64=0.15)
+    re_paths::Vector{Vector{ComplexF64}};
+    max_walk::Float64=0.5,
+    curvature_threshold::Float64=0.05,
+    quality_threshold::Float64=0.15)
     re_idx, re_v_idx, _ = _closest_polyline_vertex(re_paths, pt)
     re_idx == 0 && return false
     re_path = re_paths[re_idx]
@@ -354,14 +363,14 @@ function _is_geom_spurious(pt::ComplexF64,
     # within max_walk Q-distance of pt. Stop in each direction at the first
     # vertex that exceeds the walk radius.
     collected_idx = Int[re_v_idx]
-    @inbounds for k in (re_v_idx + 1):n_path
+    @inbounds for k in (re_v_idx+1):n_path
         if abs(re_path[k] - pt) < max_walk
             push!(collected_idx, k)
         else
             break
         end
     end
-    @inbounds for k in (re_v_idx - 1):-1:1
+    @inbounds for k in (re_v_idx-1):-1:1
         if abs(re_path[k] - pt) < max_walk
             push!(collected_idx, k)
         else
@@ -385,19 +394,28 @@ function _is_geom_spurious(pt::ComplexF64,
     # Quadratic least-squares fit γ = a + b·ω + c·ω² via the normal equations
     # MᵀM·coeffs = Mᵀγ, where M = [1 ω ω²]. Hand-rolled to avoid an allocation
     # for the n×3 design matrix (we just need the 3×3 normal-equation matrix).
-    sx  = 0.0; sx2 = 0.0; sx3 = 0.0; sx4 = 0.0
-    sy  = 0.0; sxy = 0.0; sx2y = 0.0
+    sx = 0.0
+    sx2 = 0.0
+    sx3 = 0.0
+    sx4 = 0.0
+    sy = 0.0
+    sxy = 0.0
+    sx2y = 0.0
     @inbounds for i in 1:n
-        ω = ωs[i]; γ = γs[i]
+        ω = ωs[i]
+        γ = γs[i]
         ω2 = ω * ω
-        sx  += ω;       sx2 += ω2
-        sx3 += ω2 * ω;  sx4 += ω2 * ω2
-        sy  += γ;       sxy += ω * γ
+        sx += ω
+        sx2 += ω2
+        sx3 += ω2 * ω
+        sx4 += ω2 * ω2
+        sy += γ
+        sxy += ω * γ
         sx2y += ω2 * γ
     end
-    M   = [Float64(n)  sx  sx2;
-                 sx  sx2  sx3;
-                sx2  sx3  sx4]
+    M = [Float64(n) sx sx2;
+        sx sx2 sx3;
+        sx2 sx3 sx4]
     rhs = [sy, sxy, sx2y]
     coeffs = M \ rhs
     c = coeffs[3]
@@ -419,11 +437,11 @@ end
 # AND clearly separated above the next-most-unstable candidate by more than
 # `gap_kHz_threshold` kHz. Flags an outlier "lone peak" root.
 function _is_gap_spurious(sorted_roots::Vector{ComplexF64}, idx::Int,
-                          tauk::Float64, gap_kHz_threshold::Float64)
+    tauk::Float64, gap_kHz_threshold::Float64)
     γ_idx = imag(sorted_roots[idx]) / tauk * 1e-3   # kHz
     γ_idx > 0.0 || return false                       # only suspicious if unstable
     idx >= length(sorted_roots) && return false       # nothing below to compare
-    γ_next = imag(sorted_roots[idx + 1]) / tauk * 1e-3
+    γ_next = imag(sorted_roots[idx+1]) / tauk * 1e-3
     return (γ_idx - γ_next) > gap_kHz_threshold
 end
 
@@ -447,7 +465,7 @@ end
 # Median contour-segment length — a robust proxy for the local grid/cell
 # resolution, used to cap how far a polish may move a root.
 function _median_segment_length(re_paths::Vector{Vector{ComplexF64}},
-                                 im_paths::Vector{Vector{ComplexF64}})
+    im_paths::Vector{Vector{ComplexF64}})
     lens = Float64[]
     for paths in (re_paths, im_paths), p in paths
         @inbounds for i in 1:length(p)-1
@@ -466,7 +484,7 @@ end
 # closer to its own contour point than to any other. Also capped at a few grid
 # cells (`k_cell·h`) so refinement only corrects the discretization error.
 function _polish_trust_radius(pts::Vector{ComplexF64}, idx::Int, h_grid::Real;
-                               k_cell::Float64=3.0, nn_frac::Float64=0.45)
+    k_cell::Float64=3.0, nn_frac::Float64=0.45)
     p0 = pts[idx]
     d_nn = Inf
     @inbounds for j in eachindex(pts)
@@ -485,9 +503,10 @@ end
 # projection + |f|-decrease backtracking keep it strictly "improve-or-no-op":
 # it cannot diverge, jump to another root, or be pulled into a pole.
 function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
-                       tol_step::Float64=1e-12, tol_f::Float64=1e-8)
+    tol_step::Float64=1e-12, tol_f::Float64=1e-8)
     (R > 0) || return (Q0, 0, false)
-    f0 = ComplexF64(f(Q0)); nev = 1
+    f0 = ComplexF64(f(Q0))
+    nev = 1
     isfinite(f0) || return (Q0, nev, false)
     a0 = abs(f0)
     a0 == 0 && return (Q0, nev, false)
@@ -495,7 +514,8 @@ function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
     # Second point for the secant slope: a small real offset scaled to R.
     Qk, fk = Q0, f0
     Qp = Q0 + complex(max(R * 1e-3, eps(Float64)), 0.0)
-    fp = ComplexF64(f(Qp)); nev += 1
+    fp = ComplexF64(f(Qp))
+    nev += 1
     Qbest, abest = Q0, a0
 
     for _ in 1:maxit
@@ -506,12 +526,14 @@ function _polish_root(f, Q0::ComplexF64, R::Float64; maxit::Int=8,
         if abs(Qt - Q0) > R                               # project into trust region
             Qt = Q0 + R * (Qt - Q0) / abs(Qt - Q0)
         end
-        ft = ComplexF64(f(Qt)); nev += 1
+        ft = ComplexF64(f(Qt))
+        nev += 1
         bt = 0
         while (!isfinite(ft) || abs(ft) >= abest) && bt < 3      # backtrack on no-decrease
             Qt = Qk + 0.5 * (Qt - Qk)
             (abs(Qt - Q0) <= R) || break
-            ft = ComplexF64(f(Qt)); nev += 1
+            ft = ComplexF64(f(Qt))
+            nev += 1
             bt += 1
         end
         if isfinite(ft) && abs(ft) < abest
@@ -538,25 +560,25 @@ function _residual_scale(Δ)
     isempty(a) && return 0.0
     sort!(a)
     n = length(a)
-    return isodd(n) ? a[(n + 1) ÷ 2] : 0.5 * (a[n ÷ 2] + a[n ÷ 2 + 1])
+    return isodd(n) ? a[(n+1)÷2] : 0.5 * (a[n÷2] + a[n÷2+1])
 end
 
 function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
-                        im_paths::Vector{Vector{ComplexF64}},
-                        im_re_vals::Vector{Vector{Float64}},
-                        tauk::Float64;
-                        pole_threshold::Float64,
-                        filter_above_poles::Bool,
-                        filter_outside_re::Bool,
-                        gap_kHz_threshold::Float64=1.0,
-                        residual=nothing,
-                        polish_maxit::Int=20,
-                        validity_scale::Float64=0.0,
-                        validity_rtol::Float64=1e-3)
+    im_paths::Vector{Vector{ComplexF64}},
+    im_re_vals::Vector{Vector{Float64}},
+    tauk::Float64;
+    pole_threshold::Float64,
+    filter_above_poles::Bool,
+    filter_outside_re::Bool,
+    gap_kHz_threshold::Float64=1.0,
+    residual=nothing,
+    polish_maxit::Int=20,
+    validity_scale::Float64=0.0,
+    validity_rtol::Float64=1e-3)
     raw_intersections = _all_intersections(re_paths, im_paths)
 
-    poles         = ComplexF64[]
-    candidates    = Tuple{ComplexF64,Bool}[]    # (pt, on_top_half_re_flag)
+    poles = ComplexF64[]
+    candidates = Tuple{ComplexF64,Bool}[]    # (pt, on_top_half_re_flag)
     spurious_roots = ComplexF64[]               # polished, but |residual| ≫ 0
 
     # Isolate-then-polish: when a residual callable is supplied, refine each
@@ -564,9 +586,9 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     # capped by the spacing to neighbouring intersections so closely-spaced
     # coupled roots stay coherently bound to their own contour crossing.
     do_polish = residual !== nothing
-    h_grid    = do_polish ? _median_segment_length(re_paths, im_paths) : 0.0
+    h_grid = do_polish ? _median_segment_length(re_paths, im_paths) : 0.0
     # Validity gate: a genuine root drives |residual| ≈ 0; a spurious contour
-    # near-miss (e.g. a surface whose STRIDE Δ' BVP failed → |Δ'| huge and
+    # near-miss (e.g. a surface whose Δ' BVP failed → |Δ'| huge and
     # uncancellable by the inner layer) leaves |residual| stuck near the typical
     # scan magnitude. Only active when polishing AND a scale is supplied.
     do_gate = do_polish && validity_scale > 0
@@ -583,8 +605,8 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             i_prev = max(1, best_im_vert_idx - 1)
             i_next = min(n, best_im_vert_idx + 1)
             local_max = max(abs(re_vals[i_prev]),
-                            abs(re_vals[i_next]),
-                            abs(re_vals[best_im_vert_idx]))
+                abs(re_vals[i_next]),
+                abs(re_vals[best_im_vert_idx]))
             is_pole = local_max > pole_threshold
         end
 
@@ -617,9 +639,10 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
         best_re_path_idx, _, _ = _closest_polyline_vertex(re_paths, pt)
         if best_im_path_idx > 0 && best_re_path_idx > 0
             re_path = re_paths[best_re_path_idx]
-            xs = real.(re_path); ys = imag.(re_path)
+            xs = real.(re_path)
+            ys = imag.(re_path)
             contour_extent = max(maximum(xs) - minimum(xs),
-                                  maximum(ys) - minimum(ys))
+                maximum(ys) - minimum(ys))
             closure_gap = abs(re_path[1] - re_path[end])
 
             if contour_extent > 0 && closure_gap < 0.1 * contour_extent
@@ -645,7 +668,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
                 if tlen > 0
                     step_size = 0.01 * contour_extent
                     step_pt = pt + (step_size / tlen) * tangent
-                    inside  = _point_in_polygon(step_pt, re_path)
+                    inside = _point_in_polygon(step_pt, re_path)
                     on_top_half_re = !inside
                 end
             end
@@ -655,11 +678,11 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     end
 
     # --- 3. pole + closed-loop filter (legacy), then geom + gap recursion (new)
-    valid_roots    = ComplexF64[c[1] for c in candidates]
+    valid_roots = ComplexF64[c[1] for c in candidates]
     filtered_roots = copy(spurious_roots)     # gate-rejected near-misses kept here
-    Q_root         = ComplexF64(NaN, NaN)
-    Q_root_2nd     = ComplexF64(NaN, NaN)
-    warning_flags  = Symbol[]
+    Q_root = ComplexF64(NaN, NaN)
+    Q_root_2nd = ComplexF64(NaN, NaN)
+    warning_flags = Symbol[]
     isempty(spurious_roots) || push!(warning_flags, :spurious)
 
     if !isempty(valid_roots)
@@ -671,7 +694,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
 
         chosen_idx = 0
         for k in 1:length(sorted_pts)
-            cand   = sorted_pts[k]
+            cand = sorted_pts[k]
             top_re = sorted_top[k]
             # Legacy filter: above-pole + closed-loop outside-Re
             legacy_reject = filter_above_poles && imag(cand) > max_pole_gamma &&
@@ -697,11 +720,11 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             # filtered_roots is preserved for the legacy above-pole +
             # outside-Re reject branch only.
             geom_flag = _is_geom_spurious(cand, re_paths)
-            gap_flag  = _is_gap_spurious(sorted_pts, k, tauk,
-                                          gap_kHz_threshold)
+            gap_flag = _is_gap_spurious(sorted_pts, k, tauk,
+                gap_kHz_threshold)
             chosen_idx = k
             geom_flag && push!(warning_flags, :geom)
-            gap_flag  && push!(warning_flags, :gap)
+            gap_flag && push!(warning_flags, :gap)
             break
         end
 
@@ -711,7 +734,7 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
             # downstream tools can plot/reanalyse. (Indices > chosen_idx in
             # sorted_pts are the next-most-unstable.)
             if !isempty(warning_flags) && chosen_idx < length(sorted_pts)
-                Q_root_2nd = sorted_pts[chosen_idx + 1]
+                Q_root_2nd = sorted_pts[chosen_idx+1]
             end
         end
     end
@@ -729,28 +752,28 @@ function _run_analysis(re_paths::Vector{Vector{ComplexF64}},
     gamma_Hz_2nd = isnan(imag(Q_root_2nd)) ? 0.0 : imag(Q_root_2nd) / tauk
 
     return GrowthRateResult(Q_root, omega_Hz, gamma_Hz,
-                             Q_root_2nd, omega_Hz_2nd, gamma_Hz_2nd,
-                             warning_flags,
-                             valid_roots, poles, filtered_roots,
-                             re_paths, im_paths, pole_threshold)
+        Q_root_2nd, omega_Hz_2nd, gamma_Hz_2nd,
+        warning_flags,
+        valid_roots, poles, filtered_roots,
+        re_paths, im_paths, pole_threshold)
 end
 
 # Regular-grid path: extract contours via Contour.jl, compute im_re_vals by
 # bilinear interpolation on the grid, then run the shared analysis.
 function _extract_growth_rates(re_axis::Vector{Float64},
-                                im_axis::Vector{Float64},
-                                Δ_grid::Matrix{ComplexF64},
-                                tauk::Float64;
-                                re_target::Float64,
-                                im_target::Float64,
-                                pole_threshold::Float64,
-                                filter_above_poles::Bool,
-                                filter_outside_re::Bool,
-                                gap_kHz_threshold::Float64=1.0,
-                                residual=nothing,
-                                polish_maxit::Int=20,
-                                validity_scale::Float64=0.0,
-                                validity_rtol::Float64=1e-3)
+    im_axis::Vector{Float64},
+    Δ_grid::Matrix{ComplexF64},
+    tauk::Float64;
+    re_target::Float64,
+    im_target::Float64,
+    pole_threshold::Float64,
+    filter_above_poles::Bool,
+    filter_outside_re::Bool,
+    gap_kHz_threshold::Float64=1.0,
+    residual=nothing,
+    polish_maxit::Int=20,
+    validity_scale::Float64=0.0,
+    validity_rtol::Float64=1e-3)
     re_field = real.(Δ_grid)
     im_field = imag.(Δ_grid)
 
@@ -758,19 +781,19 @@ function _extract_growth_rates(re_axis::Vector{Float64},
     im_paths = _extract_contours(re_axis, im_axis, im_field, im_target)
 
     im_re_vals = [Float64[_bilinear(re_axis, im_axis, re_field,
-                                     real(v), imag(v))
+        real(v), imag(v))
                           for v in path]
                   for path in im_paths]
 
     return _run_analysis(re_paths, im_paths, im_re_vals, tauk;
-                          pole_threshold=pole_threshold,
-                          filter_above_poles=filter_above_poles,
-                          filter_outside_re=filter_outside_re,
-                          gap_kHz_threshold=gap_kHz_threshold,
-                          residual=residual,
-                          polish_maxit=polish_maxit,
-                          validity_scale=validity_scale,
-                          validity_rtol=validity_rtol)
+        pole_threshold=pole_threshold,
+        filter_above_poles=filter_above_poles,
+        filter_outside_re=filter_outside_re,
+        gap_kHz_threshold=gap_kHz_threshold,
+        residual=residual,
+        polish_maxit=polish_maxit,
+        validity_scale=validity_scale,
+        validity_rtol=validity_rtol)
 end
 
 # ---------------------------------------------------------------------
@@ -785,22 +808,24 @@ end
 # where `a1`, `a2` carry the *complementary* field value at the endpoints
 # (Re-value for Im=0 segments, Im-value for Re=0 segments).
 function _march_triangle(p1::ComplexF64, p2::ComplexF64, p3::ComplexF64,
-                          v1::ComplexF64, v2::ComplexF64, v3::ComplexF64,
-                          re_target::Float64, im_target::Float64)
+    v1::ComplexF64, v2::ComplexF64, v3::ComplexF64,
+    re_target::Float64, im_target::Float64)
     return (_march_single(p1, p2, p3, real(v1), real(v2), real(v3),
-                          imag(v1), imag(v2), imag(v3), re_target),
-            _march_single(p1, p2, p3, imag(v1), imag(v2), imag(v3),
-                          real(v1), real(v2), real(v3), im_target))
+            imag(v1), imag(v2), imag(v3), re_target),
+        _march_single(p1, p2, p3, imag(v1), imag(v2), imag(v3),
+            real(v1), real(v2), real(v3), im_target))
 end
 
 # Core marching step for one scalar field `f` with complementary field `g`.
 # Produces the contour segment at level=L (if any) along with the value of
 # `g` linearly interpolated at each endpoint.
 @inline function _march_single(p1::ComplexF64, p2::ComplexF64, p3::ComplexF64,
-                                f1::Float64, f2::Float64, f3::Float64,
-                                g1::Float64, g2::Float64, g3::Float64,
-                                L::Float64)
-    a1 = f1 >= L; a2 = f2 >= L; a3 = f3 >= L
+    f1::Float64, f2::Float64, f3::Float64,
+    g1::Float64, g2::Float64, g3::Float64,
+    L::Float64)
+    a1 = f1 >= L
+    a2 = f2 >= L
+    a3 = f3 >= L
     count = Int(a1) + Int(a2) + Int(a3)
     (count == 0 || count == 3) && return nothing
 
@@ -822,8 +847,8 @@ end
 # Linear crossing on edge (pa, pb) for field `f` at level `L`, with
 # complementary value `g` interpolated at the same parameter.
 @inline function _cross_edge(pa::ComplexF64, pb::ComplexF64,
-                              fa::Float64, fb::Float64,
-                              ga::Float64, gb::Float64, L::Float64)
+    fa::Float64, fb::Float64,
+    ga::Float64, gb::Float64, L::Float64)
     denom = fb - fa
     t = denom == 0 ? 0.0 : (L - fa) / denom
     t = clamp(t, 0.0, 1.0)
@@ -844,36 +869,39 @@ function _chain_segments(segs::Vector{<:NamedTuple})
     end
 
     used = falses(length(segs))
-    paths    = Vector{Vector{ComplexF64}}()
+    paths = Vector{Vector{ComplexF64}}()
     aux_vals = Vector{Vector{Float64}}()
 
     # Walk a polyline starting from segment `start_seg` via endpoint
     # `start_pt`; returns the path and aux values.
     function _walk(start_seg::Int, start_pt::ComplexF64)
         path = ComplexF64[start_pt]
-        aux  = Float64[]
+        aux = Float64[]
         # Emit the aux value for start_pt on the first segment
-        s0   = segs[start_seg]
+        s0 = segs[start_seg]
         push!(aux, start_pt == s0.p1 ? s0.a1 : s0.a2)
 
-        cur_seg = start_seg; cur_pt = start_pt
+        cur_seg = start_seg
+        cur_pt = start_pt
         while true
             used[cur_seg] = true
             s = segs[cur_seg]
-            next_pt   = cur_pt == s.p1 ? s.p2 : s.p1
-            next_aux  = cur_pt == s.p1 ? s.a2 : s.a1
+            next_pt = cur_pt == s.p1 ? s.p2 : s.p1
+            next_aux = cur_pt == s.p1 ? s.a2 : s.a1
             push!(path, next_pt)
             push!(aux, next_aux)
 
             nbrs = adj[next_pt]
-            nxt  = 0
+            nxt = 0
             for j in nbrs
                 if !used[j] && j != cur_seg
-                    nxt = j; break
+                    nxt = j
+                    break
                 end
             end
             nxt == 0 && break
-            cur_seg = nxt; cur_pt = next_pt
+            cur_seg = nxt
+            cur_pt = next_pt
         end
         return path, aux
     end
@@ -909,18 +937,18 @@ end
 # to extract Re=0 and Im=0 contour segments with complementary-field values
 # at endpoints, chain into polylines, then run the shared analysis.
 function _extract_growth_rates_amr(Q::Vector{ComplexF64},
-                                     Δ::Vector{ComplexF64},
-                                     tauk::Float64;
-                                     re_target::Float64,
-                                     im_target::Float64,
-                                     pole_threshold::Float64,
-                                     filter_above_poles::Bool,
-                                     filter_outside_re::Bool,
-                                     gap_kHz_threshold::Float64=1.0,
-                                     residual=nothing,
-                                     polish_maxit::Int=20,
-                                     validity_scale::Float64=0.0,
-                                     validity_rtol::Float64=1e-3)
+    Δ::Vector{ComplexF64},
+    tauk::Float64;
+    re_target::Float64,
+    im_target::Float64,
+    pole_threshold::Float64,
+    filter_above_poles::Bool,
+    filter_outside_re::Bool,
+    gap_kHz_threshold::Float64=1.0,
+    residual=nothing,
+    polish_maxit::Int=20,
+    validity_scale::Float64=0.0,
+    validity_rtol::Float64=1e-3)
     length(Q) == length(Δ) ||
         throw(ArgumentError("_extract_growth_rates_amr: length(Q) ≠ length(Δ)"))
     length(Q) >= 3 ||
@@ -931,30 +959,34 @@ function _extract_growth_rates_amr(Q::Vector{ComplexF64},
 
     # Segment types (carry complementary-field value at each endpoint)
     re_segs = NamedTuple{(:p1, :p2, :a1, :a2),
-                          Tuple{ComplexF64,ComplexF64,Float64,Float64}}[]
+        Tuple{ComplexF64,ComplexF64,Float64,Float64}}[]
     im_segs = NamedTuple{(:p1, :p2, :a1, :a2),
-                          Tuple{ComplexF64,ComplexF64,Float64,Float64}}[]
+        Tuple{ComplexF64,ComplexF64,Float64,Float64}}[]
 
     for T in each_solid_triangle(tri)
         i1, i2, i3 = T
-        p1 = Q[i1]; p2 = Q[i2]; p3 = Q[i3]
-        v1 = Δ[i1]; v2 = Δ[i2]; v3 = Δ[i3]
+        p1 = Q[i1]
+        p2 = Q[i2]
+        p3 = Q[i3]
+        v1 = Δ[i1]
+        v2 = Δ[i2]
+        v3 = Δ[i3]
         re_seg, im_seg = _march_triangle(p1, p2, p3, v1, v2, v3,
-                                          re_target, im_target)
+            re_target, im_target)
         re_seg !== nothing && push!(re_segs, re_seg)
         im_seg !== nothing && push!(im_segs, im_seg)
     end
 
-    re_paths, _          = _chain_segments(re_segs)
+    re_paths, _ = _chain_segments(re_segs)
     im_paths, im_re_vals = _chain_segments(im_segs)
 
     return _run_analysis(re_paths, im_paths, im_re_vals, tauk;
-                          pole_threshold=pole_threshold,
-                          filter_above_poles=filter_above_poles,
-                          filter_outside_re=filter_outside_re,
-                          gap_kHz_threshold=gap_kHz_threshold,
-                          residual=residual,
-                          polish_maxit=polish_maxit,
-                          validity_scale=validity_scale,
-                          validity_rtol=validity_rtol)
+        pole_threshold=pole_threshold,
+        filter_above_poles=filter_above_poles,
+        filter_outside_re=filter_outside_re,
+        gap_kHz_threshold=gap_kHz_threshold,
+        residual=residual,
+        polish_maxit=polish_maxit,
+        validity_scale=validity_scale,
+        validity_rtol=validity_rtol)
 end

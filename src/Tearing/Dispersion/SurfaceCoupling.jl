@@ -10,13 +10,13 @@
 #
 # `tauk` is unused for single-surface evaluation but is required by the
 # multi-surface `MultiSurfaceCoupling` to rescale Q between each surface's
-# normalization (Fortran SLAYER convention).
+# normalization.
 #
 # Constructor convenience: `surface_coupling(model, params, dp_diag; dc=0.0)`
 # auto-fills `scale` and `tauk` based on the model type — `scale = S^(1/3)`
-# and `tauk = params.tauk` for SLAYER (Fortran de-normalization of the
-# inner-layer Δ to outer units), `scale = 1` and `tauk = 1` for GGJ (Δ already
-# in outer units after `rescale_delta`; no inter-surface Q rescaling).
+# and `tauk = params.tauk` for SLAYER (de-normalizes the inner-layer Δ to
+# outer units), `scale = 1` and `tauk = 1` for GGJ (Δ already in outer units
+# after `rescale_delta`; no inter-surface Q rescaling).
 
 """
     SurfaceCoupling{M<:InnerLayerModel, P}
@@ -35,7 +35,7 @@ full 2m×2m dispersion via `MultiSurfaceCoupling`, not this scalar form).
 Coupled multi-surface eigenvalues come from `MultiSurfaceCoupling`
 evaluating the determinant of the modified Δ' matrix.
 """
-struct SurfaceCoupling{M<:InnerLayerModel, P}
+struct SurfaceCoupling{M<:InnerLayerModel,P}
     model::M
     params::P
     dp_diag::ComplexF64
@@ -59,9 +59,9 @@ subtraction from the Δ' diagonal. `tauk` is taken from `params.tauk` for use
 by `MultiSurfaceCoupling` Q rescaling.
 """
 function surface_coupling(model::SLAYERModel, params::SLAYERParameters,
-                          dp_diag::Number; dc::Real=0.0)
+    dp_diag::Number; dc::Real=0.0)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-                           Float64(dc), params.lu^(1/3), params.tauk)
+        Float64(dc), params.lu^(1 / 3), params.tauk)
 end
 
 """
@@ -82,9 +82,9 @@ for GGJ it would double-count the interchange physics. The `SurfaceCoupling`
 struct's `dc` field is hard-wired to 0 here.
 """
 function surface_coupling(model::GGJModel, params::GGJParameters,
-                          dp_diag::Number)
+    dp_diag::Number)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-                           0.0, 1.0, 1.0)
+        0.0, 1.0, 1.0)
 end
 
 """
@@ -97,7 +97,7 @@ into the dispersion solver — pass the appropriate inner→outer-units `scale`
 and per-surface `tauk` explicitly.
 """
 function surface_coupling(model::InnerLayerModel, params, dp_diag::Number;
-                          dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0)
+    dc::Real=0.0, scale::Real=1.0, tauk::Real=1.0)
     return SurfaceCoupling(model, params, ComplexF64(dp_diag),
-                           Float64(dc), Float64(scale), Float64(tauk))
+        Float64(dc), Float64(scale), Float64(tauk))
 end

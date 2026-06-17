@@ -2,9 +2,9 @@
 #
 # Build per-surface `SLAYERParameters` from an in-memory `PlasmaEquilibrium`,
 # the `SingType` rational-surface data produced by `ForceFreeStates`, and a
-# `KineticProfiles` object. Replaces the STRIDE-NetCDF path that the Fortran
-# SLAYER `layerinputs` routine uses — julia_GPEC already holds everything
-# we need in memory.
+# `KineticProfiles` object. Everything needed is already held in memory, so
+# the layer inputs are assembled directly without an intermediate file
+# round-trip.
 #
 # Geometry extraction:
 #   - Minor radius at the outboard midplane (θ = 0) via
@@ -69,8 +69,8 @@ geometry (minor radius, r-based shear, q, dq/dψ, R₀) from the in-memory
 `equil::PlasmaEquilibrium` and kinetic data (n_e, T_e, T_i, ω, ω\\_\\*e,
 ω\\_\\*i) from `profiles::KineticProfiles`.
 
-This is the Julia analogue of the Fortran SLAYER `layerinputs` path,
-without the intermediate STRIDE NetCDF round-trip.
+Layer inputs are assembled directly from the in-memory equilibrium and
+profiles, without an intermediate file round-trip.
 
 # Arguments
 
@@ -101,16 +101,11 @@ without the intermediate STRIDE NetCDF round-trip.
     which uses `(−D_R)` in the χ_‖-matching critical-Δ. Pass a scalar /
     vector / callable to override.
 
-    **NOTE on Fortran/STRIDE divergence**: Fortran STRIDE writes the
-    netcdf variable `dr_rational` as `locstab%f(1)/respsi`, where
-    component 1 of `locstab` is actually `D_I × ψ` (the DCON Mercier
-    index). The intended index
-    is 2 (= `D_R × ψ`); using 1 silently substitutes the Mercier index
-    `D_I = E + F + H − 1/4` for `D_R`. They differ by `(H − 1/2)²`,
-    which is non-trivial on shaped equilibria (~factor 3 on DIII-D).
-    Julia uses the physically correct `D_R` here; benchmarks against
-    Fortran SLAYER's `dc_tmp` will therefore disagree until that
-    upstream Fortran bug is fixed.
+    **NOTE**: the χ_‖-matching critical-Δ requires the resistive
+    interchange index `D_R = E + F + H²` (Glasser-Greene-Johnson 1975),
+    NOT the Mercier index `D_I = E + F + H − 1/4`. The two differ by
+    `(H − 1/2)²`, which is non-trivial on shaped equilibria (~factor 3 on
+    DIII-D); this code uses the physically correct `D_R`.
   - `dgeo_val`  -- Connor 2015 (PPCF 57 065001) Eq. 59 geometric factor
     used by `dc_type=:toroidal`. When `nothing` (default), an error is
     raised if `dc_type=:toroidal` is also requested — the auto-derived
@@ -122,7 +117,7 @@ without the intermediate STRIDE NetCDF round-trip.
   - `theta`     -- poloidal angle at which to measure minor radius (default
     `0.0`, outboard midplane).
   - `resistivity_model` -- `SauterNeoModel()` (default), `RedlNeoModel()`,
-    `SpitzerModel()`, or `SpitzerHarmModel()` (legacy Fitzpatrick/TJ σ_∥).
+    `SpitzerModel()`, or `SpitzerHarmModel()` (legacy Fitzpatrick σ_∥).
     Sets the η entering τ_R = μ₀r_s²/η. With a neoclassical model, `f_trap`
     and ν*_e are taken from the surface's `ResistGeometry` if populated
     (via `ForceFreeStates.resist_eval_all!`), otherwise fall back to the
@@ -162,8 +157,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         end
 
     # Minor-radius extractor: `:midplane` = outboard-midplane chord
-    # (original behavior); `:fsa` = θ-mean of √rzphi_rsquared, matching
-    # Fortran STRIDE's `issurfint` flux-surface-averaged `a_surf`.
+    # (original behavior); `:fsa` = θ-mean of √rzphi_rsquared, the
+    # flux-surface-averaged minor radius.
     _rs_at(ψ) =
         if rs_method === :fsa
             integrand(θ) = sqrt(equil.rzphi_rsquared((Float64(ψ), Float64(θ))))
@@ -194,9 +189,9 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
             surface_da_dpsi(equil, ψ; theta=theta)
         end
 
-    # Per-surface ω_*e, ω_*i from spline derivatives — port of the Fortran
-    # SLAYER `layerinputs` routine. When `compute_omega_star=true` we
-    # override any ω_*e/ω_*i carried in `profiles`. Main-ion density is
+    # Per-surface ω_*e, ω_*i (diamagnetic frequencies) from spline
+    # derivatives. When `compute_omega_star=true` we override any ω_*e/ω_*i
+    # carried in `profiles`. Main-ion density is
     # taken equal to the electron density (quasi-neutrality, matching the
     # staging step).
     chi1 = 2π * equil.psio
@@ -256,9 +251,8 @@ function build_slayer_inputs(equil, sings, profiles::KineticProfiles;
         # (Glasser-Greene-Johnson 1975). Used by `_solve_dc_tmp` to compute
         # the χ_‖-matching critical-Δ via Connor-Hastie-Helander 2015 Eq. 59,
         # which has `(−D_R)` as a multiplier. NOT the Mercier index
-        # D_I = E + F + H − 1/4. Fortran STRIDE's `dr_rational` netcdf
-        # variable accidentally writes `D_I/ψ` instead (see this function's
-        # docstring); we use the physically correct D_R here.
+        # D_I = E + F + H − 1/4 (see this function's docstring); we use the
+        # physically correct D_R here.
         dr_val_k = if dr_val === nothing
             rg === nothing &&
                 throw(

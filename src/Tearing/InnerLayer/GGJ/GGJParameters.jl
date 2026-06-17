@@ -2,8 +2,7 @@
 #
 # Physical parameters for the Glasser–Greene–Johnson inner-layer model and
 # the derived scale factors that map between physical and inner-layer
-# (Wasow-normalized) variables. Mirrors the Fortran `resist_type` defined
-# in rmatch/deltar_mod and rmatch/deltac_mod.
+# (Wasow-normalized) variables.
 
 """
     GGJParameters
@@ -12,16 +11,16 @@ Dimensionless parameters of the Glasser–Greene–Johnson inner-layer model
 at a single rational surface, plus the local Alfvén/resistive timescales
 needed to scale the matching data back to physical Δ.
 
-Fields are the same as the Fortran `resist_type`:
+Fields:
 
-| field   | meaning                                                       |
-|---------|---------------------------------------------------------------|
+| field   | meaning                                                        |
+|:------- |:-------------------------------------------------------------- |
 | `E`     | Glasser interchange parameter (enters Mercier `D_I = E+F+H−¼`) |
-| `F`     | Glasser interchange parameter                                 |
-| `G`     | Coupling coefficient (curvature × pressure gradient)          |
-| `H`     | Pfirsch–Schlüter coefficient                                  |
-| `K`     | Glasser parameter                                             |
-| `M`     | Mercier-related auxiliary parameter (held but not used here)  |
+| `F`     | Glasser interchange parameter                                  |
+| `G`     | Coupling coefficient (curvature × pressure gradient)           |
+| `H`     | Pfirsch–Schlüter coefficient                                   |
+| `K`     | Glasser parameter                                              |
+| `M`     | Mercier-related auxiliary parameter (held but not used here)   |
 | `taua`  | Local Alfvén time at the rational surface                      |
 | `taur`  | Local resistive time at the rational surface                   |
 | `v1`    | Linear scale factor used in the V₁ rescaling                   |
@@ -46,15 +45,14 @@ end
 """
     mercier_di(p::GGJParameters) -> Float64
 
-Mercier interchange index `D_I = E + F + H − 1/4` (deltac_run line 143).
+Mercier interchange index `D_I = E + F + H − 1/4`.
 """
 mercier_di(p::GGJParameters) = p.E + p.F + p.H - 0.25
 
 """
     mercier_dr(p::GGJParameters) -> Float64
 
-Resistive interchange index `D_R = E + F + H²` (deltar_run derivation,
-deltac_run line 142).
+Resistive interchange index `D_R = E + F + H²`.
 """
 mercier_dr(p::GGJParameters) = p.E + p.F + p.H * p.H
 
@@ -81,14 +79,14 @@ sfac(p::GGJParameters) = p.taur / p.taua
 """
     x0(p::GGJParameters) -> Float64
 
-Inner-layer length scale `X₀ = S^(−1/3)` (deltac_run line 149).
+Inner-layer length scale `X₀ = S^(−1/3)`.
 """
 x0(p::GGJParameters) = sfac(p)^(-1.0 / 3.0)
 
 """
     q0(p::GGJParameters) -> Float64
 
-Inner-layer growth-rate scale `Q₀ = X₀ / τ_A` (deltac_run line 150).
+Inner-layer growth-rate scale `Q₀ = X₀ / τ_A`.
 """
 q0(p::GGJParameters) = x0(p) / p.taua
 
@@ -96,7 +94,7 @@ q0(p::GGJParameters) = x0(p) / p.taua
     inner_Q(p::GGJParameters, γ::Number) -> ComplexF64
 
 Dimensionless scaled inner-layer growth rate `Q = γ / Q₀` used by the inps Wasow
-basis (deltac_run line 151). The argument `γ` may be real or complex; the
+basis. The argument `γ` may be real or complex; the
 result is always complex.
 """
 inner_Q(p::GGJParameters, γ::Number) = ComplexF64(γ) / q0(p)
@@ -105,8 +103,8 @@ inner_Q(p::GGJParameters, γ::Number) = ComplexF64(γ) / q0(p)
     rescale_delta(Δ, p::GGJParameters) -> SVector{2,ComplexF64}
 
 Apply the Wang 2020 `X₀^(2√(−D_I))` rescaling that maps the inner-layer
-matching data back to physical Δ at the rational surface (deltac_run line
-192). Operates element-wise on a 2-vector of `(Δ_odd, Δ_even)`.
+matching data back to physical Δ at the rational surface. Operates
+element-wise on a 2-vector of `(Δ_odd, Δ_even)`.
 """
 function rescale_delta(Δ::AbstractVector, p::GGJParameters)
     s = sfac(p)

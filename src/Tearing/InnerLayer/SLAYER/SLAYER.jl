@@ -1,18 +1,15 @@
 # SLAYER.jl
 #
-# SLAYER (Slab Layer) drift-MHD inner-layer model. Port of J.K. Park's
-# SLAYER (GPEC/slayer/delta.f, branch `slayer_growthrate`). The dispersion
-# path ports the Fortran `riccati_f` (Fitzpatrick layer formulation —
-# P_perp / P_tor transport, c_beta compressibility, D_norm normalized
-# ion-skin scale, two-fluid drift coupling via Q_e, Q_i, iota_e), verified
-# term-by-term against that Fortran and independently against Fitzpatrick's
-# TJ derivation (`TJ/Documentation/Layer.tex`); see `Riccati.jl`. The legacy
-# `riccati()` pr/pe/ds Fortran variant is not ported.
+# SLAYER (Slab Layer) two-fluid drift-MHD inner-layer model (Fitzpatrick,
+# Tearing Mode Dynamics in Tokamak Plasmas, IOP 2023; Park et al. 2022,
+# Phys. Plasmas 29, 122505; Burgess et al. 2026). The dispersion path uses
+# the Fitzpatrick layer formulation — P_perp / P_tor transport, c_beta
+# compressibility, D_norm normalized ion-skin scale, two-fluid drift
+# coupling via Q_e, Q_i, iota_e (see `Riccati.jl`).
 #
 # A separate `del_s` layer-thickness diagnostic (`slayer_layer_thickness` in
-# `LayerThickness.jl`) ports the Fortran `riccati_del_s` and returns the
-# resistive layer width in meters at each rational surface (also verified
-# term-by-term against the Fortran).
+# `LayerThickness.jl`) returns the resistive layer width in meters at each
+# rational surface.
 #
 # Type-parameter `S` of `SLAYERModel{S}` selects the Riccati formulation
 # used for the dispersion relation; only `:fitzpatrick` is implemented.
@@ -40,7 +37,7 @@ SLAYER inner-layer model selector. The type parameter `S` selects the
 Riccati formulation:
 
   - `:fitzpatrick` -- P_perp/P_tor Fitzpatrick formulation (default;
-    authoritative reference is TJ `Layer.cpp` / `Layer.tex`)
+    Fitzpatrick 2023 two-fluid drift-MHD layer)
 
 Future dispersion variants (e.g. `:standard`) may be added but are not
 currently implemented. The `del_s` formulation is exposed separately as

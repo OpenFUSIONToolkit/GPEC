@@ -1,10 +1,10 @@
 # Coupled.jl
 #
-# Multi-surface coupled tearing dispersion residual `det(M(Q))` for the
-# Fortran SLAYER `coupling_flag = .TRUE.` path (`dispersion_det`).
-# Brought together with the per-surface
-# `SurfaceCoupling` (PR 3) so a brute-force or AMR scan in PRs 5-6 can
-# evaluate either residual through the same Q-callable interface.
+# Multi-surface coupled tearing dispersion residual `det(M(Q))` (the
+# coupled, tearing-only reduction of the full Pletzer-Dewar matching in
+# `CoupledFullMatch.jl`). Shares the per-surface `SurfaceCoupling`
+# Q-callable interface so a brute-force or AMR scan can evaluate either
+# residual identically.
 #
 # Construction:
 #
@@ -15,11 +15,10 @@
 #   det = mc(Q::ComplexF64)
 #
 # At each evaluation, for k = 1 .. msing_max, the inner-layer Δ is computed
-# at a Q rescaled by `tauk_ref / tauk_k` (mirrors the Fortran SLAYER
-# `dispersion_det`), then
-# subtracted (with the dc offset) from the diagonal of an `msing_max ×
-# msing_max` upper-left submatrix of `dp_matrix`. The off-diagonal Δ'
-# couplings are passed through unchanged.
+# at a Q rescaled by `tauk_ref / tauk_k`, then subtracted (with the dc
+# offset) from the diagonal of an `msing_max × msing_max` upper-left
+# submatrix of `dp_matrix`. The off-diagonal Δ' couplings are passed
+# through unchanged.
 
 """
     MultiSurfaceCoupling{V<:AbstractVector{<:SurfaceCoupling}}
@@ -52,12 +51,12 @@ end
 Construct a multi-surface coupling from a vector of `SurfaceCoupling` and
 the full outer-region Δ' matrix. `dp_matrix` must be square with side
 length `length(surfaces)` (it is the same matrix returned by
-`PerturbedEquilibrium.SingularCoupling`'s STRIDE-style Δ' BVP).
+`PerturbedEquilibrium.SingularCoupling`'s Δ' boundary-value problem).
 
 # Keyword arguments
 
   - `ref_idx`   -- index of the reference surface whose `tauk` defines the
-    Q normalization. Defaults to `1` (Fortran SLAYER convention).
+    Q normalization. Defaults to `1`.
   - `msing_max` -- number of surfaces from the front of `surfaces` to
     include in the determinant. Defaults to `min(3, length(surfaces))`:
     Δ' off-diagonal couplings beyond the third surface tend to be erratic
@@ -66,9 +65,9 @@ length `length(surfaces)` (it is the same matrix returned by
     explicitly (up to `length(surfaces)`) to override.
 """
 function multi_surface_coupling(surfaces::AbstractVector{<:SurfaceCoupling},
-                                dp_matrix::AbstractMatrix;
-                                ref_idx::Integer=1,
-                                msing_max::Integer=min(3, length(surfaces)))
+    dp_matrix::AbstractMatrix;
+    ref_idx::Integer=1,
+    msing_max::Integer=min(3, length(surfaces)))
     n = length(surfaces)
     size(dp_matrix) == (n, n) ||
         throw(ArgumentError("multi_surface_coupling: dp_matrix size " *
@@ -80,8 +79,8 @@ function multi_surface_coupling(surfaces::AbstractVector{<:SurfaceCoupling},
         throw(ArgumentError("multi_surface_coupling: msing_max=$msing_max " *
                             "out of range 1:$n"))
     return MultiSurfaceCoupling(surfaces,
-                                Matrix{ComplexF64}(dp_matrix),
-                                Int(ref_idx), Int(msing_max))
+        Matrix{ComplexF64}(dp_matrix),
+        Int(ref_idx), Int(msing_max))
 end
 
 function (mc::MultiSurfaceCoupling)(Q::Number)
@@ -91,21 +90,21 @@ function (mc::MultiSurfaceCoupling)(Q::Number)
 
     M = mc.dp_matrix[1:n, 1:n]
     @inbounds for k in 1:n
-        sc   = mc.surfaces[k]
-        Q_k  = Qc * (ref_tauk / sc.tauk)
+        sc = mc.surfaces[k]
+        Q_k = Qc * (ref_tauk / sc.tauk)
         # m×m scalar coupling: use only the tearing channel. The
         # interchange (Glasser-stabilization) channel is carried in the
-        # full 4m×4m dispersion in `CoupledFortranMatch.jl`; this reduced
+        # full 4m×4m dispersion in `CoupledFullMatch.jl`; this reduced
         # form is equivalent for pressureless SLAYER surfaces
         # (Δ_interchange=0) and approximate for GGJ surfaces (drops
         # Glasser stabilization).
-        Δ_k  = solve_inner(sc.model, sc.params, Q_k).tearing * sc.scale
+        Δ_k = solve_inner(sc.model, sc.params, Q_k).tearing * sc.scale
         # The inner-layer solver returns NaN when the Riccati integration fails
         # (clustered near poles). Propagate it as the residual so the scan flags
         # this Q-cell via its isfinite checks, rather than feeding NaN into the
         # LU factorization where it silently contaminates the whole determinant.
         isfinite(Δ_k) || return ComplexF64(NaN, NaN)
-        M[k,k] -= Δ_k + sc.dc
+        M[k, k] -= Δ_k + sc.dc
     end
     return det(M)
 end

@@ -5,13 +5,12 @@
 # with the inner-layer Δ(Q) from any `InnerLayerModel` to find growth-rate
 # eigenvalues.
 #
-# Operating modes (incremental as PRs land):
-#   - `SurfaceCoupling`     (this module, PR 3) -- per-surface residual r(Q)
-#   - `dispersion_det`      (Coupled.jl, PR 4)  -- multi-surface determinant
-#   - `brute_force_scan`    (PR 5)              -- regular 2D Q-plane scan
-#   - `find_growth_rates`   (PR 5)              -- contour-intersection root
-#                                                  extraction (Re=0 ∩ Im=0)
-#   - `amr_scan`            (PR 6)              -- adaptive Q-plane refinement
+# Operating modes:
+#   - `SurfaceCoupling`     -- per-surface residual r(Q)
+#   - `multi_surface_coupling` -- multi-surface determinant (Coupled.jl)
+#   - `brute_force_scan`    -- regular 2D Q-plane scan
+#   - `find_growth_rates`   -- contour-intersection root extraction (Re=0 ∩ Im=0)
+#   - `amr_scan`            -- adaptive Q-plane refinement
 #
 # Roots are ISOLATED by 2D contour intersection on Nyquist-style Q-plane scans
 # (`find_growth_rates`, Re=0 ∩ Im=0), then optionally POLISHED to the true zero
@@ -36,18 +35,18 @@ using StaticArrays
 
 using ..InnerLayer
 using ..InnerLayer: InnerLayerModel, solve_inner, GGJModel, GGJParameters,
-                    SLAYERModel, SLAYERParameters
+    SLAYERModel, SLAYERParameters
 
 include("SurfaceCoupling.jl")
 include("Coupled.jl")
-include("CoupledFortranMatch.jl")
+include("CoupledFullMatch.jl")
 include("BruteForceScan.jl")
 include("ContourSearchAMR.jl")
 include("GrowthRateExtraction.jl")
 
 export SurfaceCoupling, surface_coupling
 export MultiSurfaceCoupling, multi_surface_coupling
-export MultiSurfaceCouplingFortran, multi_surface_coupling_fortran
+export MultiSurfaceCouplingFull, multi_surface_coupling_full
 export ScanResult, brute_force_scan
 export AMRCell, AMRResult, amr_scan
 export BoxActivity, MultiBoxAMRResult, multi_box_amr_scan, as_amr_result
