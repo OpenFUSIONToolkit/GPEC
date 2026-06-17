@@ -1,4 +1,55 @@
 """
+    METHOD_REGISTRY
+
+Single source of truth for the NTV calculation methods. Each entry is a NamedTuple
+`(name, flag, kind, doc)`:
+- `name`  — short method identifier used as the HDF5 group key and in `intr.method`
+- `flag`  — the `KineticForcesControl` field symbol that enables the method
+- `kind`  — dispatch routing tag consumed by `method_kind` / `Torque.jl`
+            (`:gar` for the GAR/matrix family, `:fcgl`/`:rlar`/`:clar` for the
+            three special-cased methods)
+- `doc`   — one-line description printed in verbose output
+
+The method names/docs and the `Compute.jl` enable list are all derived from this
+tuple, and `Torque.jl` routes on `kind`, so the methods are enumerated in one place. 
+To add a method: append an entry here and add the matching `*_flag` field
+to `KineticForcesControl`.
+"""
+const METHOD_REGISTRY = (
+    (name="fgar", flag=:fgar_flag, kind=:gar, doc="Full general-aspect-ratio calculation"),
+    (name="tgar", flag=:tgar_flag, kind=:gar, doc="Trapped particle general-aspect-ratio calculation"),
+    (name="pgar", flag=:pgar_flag, kind=:gar, doc="Passing particle general-aspect-ratio calculation"),
+    (name="rlar", flag=:rlar_flag, kind=:rlar, doc="Trapped particle large-aspect-ratio calculation"),
+    (name="clar", flag=:clar_flag, kind=:clar, doc="Trapped particle cylindrical large-aspect-ratio calculation"),
+    (name="fcgl", flag=:fcgl_flag, kind=:fcgl, doc="Fluid Chew–Goldberger–Low calculation"),
+    (name="fwmm", flag=:fwmm_flag, kind=:gar, doc="Full energy calculation using MXM Euler–Lagrange matrix"),
+    (name="twmm", flag=:twmm_flag, kind=:gar, doc="Trapped energy calculation using MXM Euler–Lagrange matrix"),
+    (name="pwmm", flag=:pwmm_flag, kind=:gar, doc="Passing energy calculation using MXM Euler–Lagrange matrix"),
+    (name="ftmm", flag=:ftmm_flag, kind=:gar, doc="Full torque calculation using MXM Euler–Lagrange matrix"),
+    (name="ttmm", flag=:ttmm_flag, kind=:gar, doc="Trapped torque calculation using MXM Euler–Lagrange matrix"),
+    (name="ptmm", flag=:ptmm_flag, kind=:gar, doc="Passing torque calculation using MXM Euler–Lagrange matrix"),
+    (name="fkmm", flag=:fkmm_flag, kind=:gar, doc="Full MXM Euler–Lagrange energy matrix norm calculation"),
+    (name="tkmm", flag=:tkmm_flag, kind=:gar, doc="Trapped MXM Euler–Lagrange energy matrix norm calculation"),
+    (name="pkmm", flag=:pkmm_flag, kind=:gar, doc="Passing MXM Euler–Lagrange energy matrix norm calculation"),
+    (name="frmm", flag=:frmm_flag, kind=:gar, doc="Full MXM Euler–Lagrange torque matrix norm calculation"),
+    (name="trmm", flag=:trmm_flag, kind=:gar, doc="Trapped MXM Euler–Lagrange torque matrix norm calculation"),
+    (name="prmm", flag=:prmm_flag, kind=:gar, doc="Passing MXM Euler–Lagrange torque matrix norm calculation"))
+
+"""
+    method_kind(name) -> Symbol
+
+Return the dispatch routing tag (`:gar`, `:fcgl`, `:rlar`, `:clar`) for the NTV
+method `name`, looked up from [`METHOD_REGISTRY`]. Errors on an unknown method.
+"""
+function method_kind(name::AbstractString)
+    for entry in METHOD_REGISTRY
+        entry.name == name && return entry.kind
+    end
+    error("ERROR: torque - unknown method: $name")
+end
+
+
+"""
     KineticForcesControl
 
 User-facing control parameters from the TOML `[KineticForces]` section.
@@ -100,6 +151,15 @@ end
 # ============================================================================
 # Internal State/Working Variables
 # ============================================================================
+
+# Concrete type of the geometric-matrix interpolants built by
+# `ForceFreeStates.build_kinetic_metric_matrices`, derived from a representative
+# `cubic_interp` call so the 7-parameter `CubicSeriesInterpolant{...}` need not be
+# spelled out. Used to concretely type the smats..zmats fields below so the per-ψ
+# `intr.smats(psi)` reads in `Torque.jl` are statically dispatched, not boxed
+# `Any` calls (issue #247).
+const GeomInterp = typeof(cubic_interp(collect(0.0:0.25:1.0), Series(zeros(ComplexF64, 5, 1)); extrap=ExtendExtrap()))
+
 """
     KineticForcesInternal
 
@@ -164,11 +224,11 @@ this struct.
 
     # Raw geometric matrices for kinetic W vector construction
     # (Fortran dcon_interface.f fmodb s/t/x/y/z — NOT the DCON a/b/c/d/e/h matrices)
-    smats::Any = nothing           # CubicSeriesInterpolant, mpert² series over ψ
-    tmats::Any = nothing
-    xmats::Any = nothing
-    ymats::Any = nothing
-    zmats::Any = nothing
+    smats::Union{Nothing,GeomInterp} = nothing   # CubicSeriesInterpolant, mpert² series over ψ
+    tmats::Union{Nothing,GeomInterp} = nothing
+    xmats::Union{Nothing,GeomInterp} = nothing
+    ymats::Union{Nothing,GeomInterp} = nothing
+    zmats::Union{Nothing,GeomInterp} = nothing
 
     # Clebsch displacement vectors for mode-coupled dW contraction
     xs_m::Any = nothing            # Vector of 3 CubicSeriesInterpolants: [ξ_ψ, ξ_+, ξ_-]
@@ -178,32 +238,9 @@ this struct.
     tsurf::ComplexF64 = 0.0 + 0.0im   # Surface torque/energy
     teq::ComplexF64 = 0.0 + 0.0im     # Equilibrium grid result
 
-    # Method tracking
+    # Method tracking — available methods/docs come from `METHOD_REGISTRY`.
     method::String = ""
     wtw::Array{ComplexF64,3} = Array{ComplexF64}(undef, 0, 0, 0)
-    methods::Vector{String} = [
-        "fgar", "tgar", "pgar", "rlar", "clar", "fcgl",
-        "fwmm", "twmm", "pwmm", "ftmm", "ttmm", "ptmm",
-        "fkmm", "tkmm", "pkmm", "frmm", "trmm", "prmm"]
-    docs::Vector{String} = [
-        "Full general-aspect-ratio calculation",
-        "Trapped particle general-aspect-ratio calculation",
-        "Passing particle general-aspect-ratio calculation",
-        "Trapped particle large-aspect-ratio calculation",
-        "Trapped particle cylindrical large-aspect-ratio calculation",
-        "Fluid Chew–Goldberger–Low calculation",
-        "Full energy calculation using MXM Euler–Lagrange matrix",
-        "Trapped energy calculation using MXM Euler–Lagrange matrix",
-        "Passing energy calculation using MXM Euler–Lagrange matrix",
-        "Full torque calculation using MXM Euler–Lagrange matrix",
-        "Trapped torque calculation using MXM Euler–Lagrange matrix",
-        "Passing torque calculation using MXM Euler–Lagrange matrix",
-        "Full MXM Euler–Lagrange energy matrix norm calculation",
-        "Trapped MXM Euler–Lagrange energy matrix norm calculation",
-        "Passing MXM Euler–Lagrange energy matrix norm calculation",
-        "Full MXM Euler–Lagrange torque matrix norm calculation",
-        "Trapped MXM Euler–Lagrange torque matrix norm calculation",
-        "Passing MXM Euler–Lagrange torque matrix norm calculation"]
 
     verbose::Bool = false
 end

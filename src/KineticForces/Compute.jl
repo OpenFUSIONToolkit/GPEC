@@ -158,27 +158,16 @@ function compute_torque_all_methods!(state::KineticForcesState, intr::KineticFor
                                      ctrl::KineticForcesControl, equil,
                                      kinetic_profiles::Equilibrium.KineticProfileSplines)
 
-    flags = [
-        ctrl.fgar_flag, ctrl.tgar_flag, ctrl.pgar_flag,
-        ctrl.rlar_flag, ctrl.clar_flag, ctrl.fcgl_flag,
-        ctrl.fwmm_flag, ctrl.twmm_flag, ctrl.pwmm_flag,
-        ctrl.ftmm_flag, ctrl.ttmm_flag, ctrl.ptmm_flag,
-        ctrl.fkmm_flag, ctrl.tkmm_flag, ctrl.pkmm_flag,
-        ctrl.frmm_flag, ctrl.trmm_flag, ctrl.prmm_flag
-    ]
+    for entry in METHOD_REGISTRY
+        getfield(ctrl, entry.flag) || continue
 
-    for m in 1:length(intr.methods)
-        if !flags[m]
-            continue
-        end
-
-        method = intr.methods[m]
+        method = entry.name
         intr.method = method
         is_matrix_method = occursin("mm", method)
 
         if ctrl.verbose
             println("---------------------------------------------")
-            println("$method - $(intr.docs[m])")
+            println("$method - $(entry.doc)")
         end
 
         # Allocate full block-diagonal matrix if needed
