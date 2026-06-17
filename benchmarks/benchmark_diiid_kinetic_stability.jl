@@ -120,9 +120,6 @@ function build_benchmark_tomldir(eq_file::String, kin_file::String)
         eq_filename = "$eq_name"
         eq_type = "efit"
         jac_type = "hamada"
-        power_bp = 0
-        power_b = 0
-        power_r = 0
         grid_type = "pow1"             # Matches Fortran DIIID_kinetic_example (equil/grid.f90 powspace)
         psilow = 0.01
         psihigh = 0.993

@@ -7,12 +7,9 @@
 # The equilibrium g-file and kinetic profile are bundled in this directory.
 
 [Equilibrium]
-eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file (bundled CHEASE-format g-file)
+eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
-jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                   # Poloidal field power exponent for Jacobian
-power_b = 0                    # Toroidal field power exponent for Jacobian
-power_r = 0                    # Major radius power exponent for Jacobian
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"              # Radial grid packing type
 psilow = 1e-3                  # Lower limit of normalized flux coordinate
 psihigh = 0.99                 # Upper limit of normalized flux coordinate

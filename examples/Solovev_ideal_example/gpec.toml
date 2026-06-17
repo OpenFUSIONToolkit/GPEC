@@ -6,10 +6,7 @@
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
 eq_filename = "sol.toml"                # Path to equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                            # Poloidal field power exponent for Jacobian
-power_b = 0                             # Toroidal field power exponent for Jacobian
-power_r = 0                             # Major radius power exponent for Jacobian
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
 psilow = 1e-4                           # Lower limit of normalized flux coordinate
 psihigh = 0.9995                        # Upper limit of normalized flux coordinate

@@ -112,9 +112,6 @@ function build_benchmark_tomldir(eq_file::String)
         eq_filename = "$eq_name"
         eq_type = "efit"
         jac_type = "hamada"
-        power_bp = 0
-        power_b = 0
-        power_r = 0
         grid_type = "ldp"
         psilow = 1e-4
         psihigh = 0.993
