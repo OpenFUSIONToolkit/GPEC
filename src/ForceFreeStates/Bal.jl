@@ -21,7 +21,8 @@ to compute Delta Prime.
 This function modifies `locstab_fs` in place with:
 
   - Column 1: `det(d0bar) * ψ` (Mercier interchange `D_I`)
-  - Column 2: resistive interchange `D_R * ψ` (see [`resistive_interchange`](@ref))
+  - Column 2: resistive interchange `D_R * ψ`, using `det(d0bar)` for `D_I`
+    and the surface-average route for `H` (see [`resistive_interchange_h`](@ref))
   - Column 4: Delta Prime (Δ')
 """
 function compute_ballooning_stability!(
@@ -43,8 +44,10 @@ function compute_ballooning_stability!(
 
         psi = plasma_eq.profiles.xs[flux_surface_index]
         coeff_data = prepare_ballooning_coefficients(flux_surface_index, plasma_eq; theta_k=theta_k)
+        h = resistive_interchange_h(flux_surface_index, plasma_eq)
         locstab_fs[flux_surface_index, 1] = coeff_data.di * psi
-        locstab_fs[flux_surface_index, 2] = resistive_interchange(flux_surface_index, plasma_eq).dr * psi
+        # Keep D_R tied to the reported D_I. The surface-average route provides H.
+        locstab_fs[flux_surface_index, 2] = (coeff_data.di + (h - 0.5)^2) * psi
 
         if compute_delta_prime && plasma_eq.profiles.xs[flux_surface_index] <= 1.0
             result = integrate_ballooning_ode(
@@ -62,27 +65,27 @@ function compute_ballooning_stability!(
 end
 
 """
-    resistive_interchange(flux_surface_index, plasma_eq)
+    resistive_interchange_h(flux_surface_index, plasma_eq)
 
-Resistive interchange criterion `D_R = D_I + (H - 1/2)²` at a single flux surface
-[Glasser-Greene-Johnson; Glasser Phys. Plasmas 23, 112506 (2016)]. The Mercier
-`D_I` and the intermediate `H` are formed from flux-surface averages of the field
-and metric quantities. Returns a NamedTuple `(di, dr, h)`, all unscaled by ψ.
+Resistive interchange helper for `D_R = D_I + (H - 1/2)²` at a single
+flux surface [Glasser-Greene-Johnson; Glasser Phys. Plasmas 23, 112506
+(2016)]. The intermediate `H` is formed from flux-surface averages of the
+field and metric quantities.
 
-Note: this evaluates the Mercier `D_I` from the surface-average formulation, which
-is a distinct numerical route from the `det(d0bar)` value reported as `locstab/di`
-by [`compute_ballooning_stability!`](@ref).
+The main local-stability scan takes `D_I` from the `det(d0bar)` calculation
+reported as `locstab/di`, then combines it with this surface-average `H` to
+form `locstab/dr`. This avoids recomputing a separate surface-average `D_I`
+inside the `D_R` path.
 """
-function resistive_interchange(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
+function resistive_interchange_h(flux_surface_index::Int, plasma_eq::Equilibrium.PlasmaEquilibrium)
     profiles = plasma_eq.profiles
     ntheta = length(plasma_eq.rzphi_ys)
-    ff_fs = zeros(ntheta, 5)
+    ff_fs = zeros(ntheta, 3)
 
     psi = profiles.xs[flux_surface_index]
     twopif = profiles.F_spline.y[flux_surface_index]
     p1 = profiles.P_deriv(psi)
     v1 = profiles.dVdpsi_spline.y[flux_surface_index]
-    v2 = profiles.dVdpsi_deriv(psi)
     q = profiles.q_spline.y[flux_surface_index]
     q1 = profiles.q_deriv(psi)
     chi1 = 2π * plasma_eq.psio
@@ -110,20 +113,13 @@ function resistive_interchange(flux_surface_index::Int, plasma_eq::Equilibrium.P
 
         ff_fs[itheta, 1] = bsq / dpsisq
         ff_fs[itheta, 2] = 1.0 / dpsisq
-        ff_fs[itheta, 3] = 1.0 / bsq
-        ff_fs[itheta, 4] = 1.0 / (bsq * dpsisq)
-        ff_fs[itheta, 5] = bsq
+        ff_fs[itheta, 3] = bsq
         @views ff_fs[itheta, :] .*= jac / v1
     end
 
     avg = FastInterpolations.integrate(cubic_interp(plasma_eq.rzphi_ys, Series(ff_fs); bc=PeriodicBC()))
 
-    term = twopif * p1 * v1 / (q1 * chi1^3) * avg[2]
-    di = -0.25 + term * (1 - term) +
-         p1 * (v1 / (q1 * chi1^2))^2 * avg[1] *
-         (p1 * (avg[3] + (twopif / chi1)^2 * avg[4]) - v2 / v1)
-    h = twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[5])
-    return (di=di, dr=di + (h - 0.5)^2, h=h)
+    return twopif * p1 * v1 / (q1 * chi1^3) * (avg[2] - avg[1] / avg[3])
 end
 
 
@@ -1118,7 +1114,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         reltol=TOLERANCE,
         abstol=TOLERANCE^2,
         dtmin=MINIMUM_STEP,
-        adaptive=true
+        adaptive=true,
+        verbose=false
     )
     if sol_left.retcode != ReturnCode.Success
         return (value=NaN,)
@@ -1136,7 +1133,8 @@ function integrate_ballooning_ode(ode_coefficient_spline; theta_k::Float64=0.0)
         reltol=TOLERANCE,
         abstol=TOLERANCE^2,
         dtmin=MINIMUM_STEP,
-        adaptive=true
+        adaptive=true,
+        verbose=false
     )
     if sol_right.retcode != ReturnCode.Success
         return (value=NaN,)
