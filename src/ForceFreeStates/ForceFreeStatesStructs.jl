@@ -203,11 +203,10 @@ A mutable struct containing control parameters for stability analysis, set by th
 ## Fields
 
   - `verbose::Bool` - Enable verbose output
-  - `bal_flag::Bool` - Enable ballooning mode analysis
+  - `local_stability_flag::Bool` - Enable local stability analysis (`D_I` and ballooning)
   - `mat_flag::Bool` - Enable matrix output
   - `ode_flag::Bool` - Enable ODE integration diagnostics
   - `vac_flag::Bool` - Enable vacuum region calculation
-  - `mer_flag::Bool` - Enable Mercier stability criterion
   - `mthvac::Int` - Number of vacuum poloidal grid points (corresponds to `mtheta` in VacuumInput)
   - `nzvac::Int` - Number of vacuum toroidal grid points (corresponds to `nzeta` in VacuumInput3D)
   - `sing_start::Int` - Start integration at the `sing_start`-th singular surface
@@ -249,11 +248,10 @@ A mutable struct containing control parameters for stability analysis, set by th
 """
 @kwdef mutable struct ForceFreeStatesControl
     verbose::Bool = true
-    bal_flag::Bool = false
+    local_stability_flag::Bool = false
     mat_flag::Bool = false
     ode_flag::Bool = false
     vac_flag::Bool = false
-    mer_flag::Bool = false
     mthvac::Int = 480
     nzvac::Int = 1
     sing_start::Int = 0

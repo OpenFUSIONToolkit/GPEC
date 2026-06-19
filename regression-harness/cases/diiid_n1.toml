@@ -260,6 +260,32 @@ label = "pressure profile (checksum)"
 noise_threshold = 0
 order = 71
 
+# Local stability profiles (local_stability_flag = true). Checksums hash the full
+# profile so they are robust to NaN edge-surface entries and catch any change.
+[quantities.locstab_di]
+h5path = "locstab/di"
+type = "real_vector"
+extract = "checksum"
+label = "Mercier D_I profile (checksum)"
+noise_threshold = 0
+order = 72
+
+[quantities.locstab_dr]
+h5path = "locstab/dr"
+type = "real_vector"
+extract = "checksum"
+label = "resistive interchange D_R profile (checksum)"
+noise_threshold = 0
+order = 73
+
+[quantities.locstab_ballooning_dp]
+h5path = "locstab/ballooning_Delta_prime"
+type = "real_vector"
+extract = "checksum"
+label = "ballooning Delta' profile (checksum)"
+noise_threshold = 0
+order = 74
+
 # Runtime
 [quantities.runtime]
 h5path = ""
