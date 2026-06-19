@@ -140,6 +140,8 @@ zeroing vs GR), not from ODE tolerance; it is present in both 1-thread and 4-thr
 
 Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-``n``
 stability scan over every flux surface, in addition to the global ideal analysis above.
+For the derivation and implementation details behind these diagnostics, see
+[Ballooning and Mercier Local Stability](ballooning.md).
 Three diagnostics are produced and stored under the `locstab/` HDF5 group, each a profile
 in normalized poloidal flux ``\psi``:
 
@@ -147,8 +149,10 @@ in normalized poloidal flux ``\psi``:
   is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
   integrated local-mode matrix.
 - **Resistive interchange ``D_R``** (`locstab/dr`) — the Glasser–Greene–Johnson resistive
-  interchange criterion ``D_R = D_I + (H - 1/2)^2``, formed from flux-surface averages of
-  the field and metric quantities. ``D_R > 0`` indicates resistive interchange instability.
+  interchange criterion ``D_R = D_I + (H - 1/2)^2``. The ``D_I`` term is the same
+  ``\det(\bar{d}_0)`` value reported in `locstab/di`; ``H`` is computed from the legacy
+  Mercier/GGJ flux-surface averages of the field and metric quantities. ``D_R > 0``
+  indicates resistive interchange instability.
 - **Ballooning ``\Delta'``** (`locstab/ballooning_Delta_prime`) — the high-``n`` ballooning
   stability index, obtained by integrating the ballooning equation along the field line and
   taking the jump in the logarithmic derivative of the solution between the two asymptotic
