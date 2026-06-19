@@ -13,6 +13,7 @@
 *.pdf
 !docs/resources/*.pdf
 *.png
+!docs/src/assets/**/*.png
 *.jld2
 .gitattributes
 Manifest.toml
