@@ -1,7 +1,7 @@
 [case]
 name = "solovev_kinetic_nuzero"
-description = "Solovev analytical equilibrium, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral, issue #281)"
-example_dir = "test/test_data/regression_solovev_kinetic_nuzero"
+description = "Solovev, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral, issue #281), mode-converged band (delta_m=8, mpert=32). et[1]≈1.72-1.08i."
+example_dir = "examples/Solovev_kinetic_nuzero_example"
 
 # Energies — leading eigenvalues
 [quantities.et_real]

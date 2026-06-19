@@ -1,7 +1,7 @@
 [case]
 name = "solovev_kinetic_calculated"
-description = "Solovev analytical equilibrium, n=1, kinetic_source=calculated, kinetic_factor=1.0"
-example_dir = "test/test_data/regression_solovev_kinetic_calculated"
+description = "Solovev, n=1, kinetic_source=calculated, kinetic_factor=1.0, mode-converged band (delta_m=8, mpert=32). et[1]≈1.84-1.41i — Julia self-consistent (NOT the mpert=8 Fortran-benchmarked 15.9)."
+example_dir = "examples/Solovev_kinetic_calculated_example"
 
 # Energies — leading eigenvalues
 [quantities.et_real]
