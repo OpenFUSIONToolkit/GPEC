@@ -78,9 +78,9 @@ function FourierCoefficients(xs::Vector{Float64}, ys::Vector{Float64},
     # including the duplicate biases the DC coefficient by ~(f(0) − mean)/N.
     has_duplicate = ny_full > 1 && isapprox(ys[end] - ys[1], 2π; rtol=1e-10)
     ntheta = has_duplicate ? ny_full - 1 : ny_full
-    fs_view = has_duplicate ? view(fs,:,(1:ntheta),:) : fs
+    fs_view = has_duplicate ? view(fs, :, (1:ntheta), :) : fs
 
-    @assert mmax <= ntheta ÷ 2 "mmax must be less than or equal to the Nyquist limit"
+    @assert mmax <= ntheta ÷ 2 "Requested mmax=$mmax exceeds the θ-grid Nyquist limit $(ntheta ÷ 2) (ntheta=$ntheta); increase the poloidal grid resolution or reduce mpert."
 
     # Compute Fourier coefficients using batched FFT
     fs_reshaped = reshape(permutedims(fs_view, (2, 1, 3)), ntheta, npsi * nqty)

@@ -58,6 +58,20 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
+const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
+
+# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal from PR #286) so legacy
+# gpec.toml files keep parsing instead of throwing an unknown-keyword error.
+function _drop_deprecated_ffs_keys!(table)
+    for k in _DEPRECATED_FFS_KEYS
+        if haskey(table, k)
+            @warn "`$k` in [ForceFreeStates] is deprecated and ignored please remove it from gpec.toml."
+            delete!(table, k)
+        end
+    end
+    return table
+end
+
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
@@ -81,7 +95,9 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ffs_table = inputs["ForceFreeStates"]
+    _drop_deprecated_ffs_keys!(ffs_table)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
     # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
