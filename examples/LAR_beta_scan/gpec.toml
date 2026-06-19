@@ -65,7 +65,6 @@ nn_low       = 1                   # Lower bound of toroidal mode-number range  
 nn_high      = 1                   # Upper bound of toroidal mode-number range
 delta_mlow   = 8                   # Poloidal-mode padding below the resonant-m band
 delta_mhigh  = 8                   # Poloidal-mode padding above the resonant-m band
-delta_mband  = 0                   # Extra coupling-matrix band width (0 = full mpert × mpert)
 mthvac       = 960                 # Poloidal resolution used by the vacuum-response integrator
 thmax0       = 1                   # Number of poloidal periods spanned by the vacuum coordinate
 

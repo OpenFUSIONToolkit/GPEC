@@ -39,7 +39,6 @@ nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 2                   # Largest toroidal mode number to include
 delta_mlow = 0                # Expands lower bound of Fourier harmonics
 delta_mhigh = 0               # Expands upper bound of Fourier harmonics
-delta_mband = 0               # Integration keeps only this wide a band...
 mthvac = 64                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 

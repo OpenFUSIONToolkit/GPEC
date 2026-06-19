@@ -59,7 +59,6 @@ nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 8               # Expands upper bound of Fourier harmonics
-delta_mband = 0               # Integration keeps only this wide a band...
 mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
@@ -78,4 +77,3 @@ populate_dense_xi     = true   # REQUIRED for PerturbedEquilibrium (this TOML ha
 truncate_at_dW_peak   = false  # Edge-dW scan stays diagnostic; integration domain set by qhigh / psihigh / dmlim
 set_psilim_via_dmlim  = false  # FALSE for limited circular / analytical equilibria — rationals sparse, dmlim truncation would chop too much edge
 dmlim                 = 0.2    # Only used when set_psilim_via_dmlim = true: truncate at (last_rational_q + dmlim) / n
-

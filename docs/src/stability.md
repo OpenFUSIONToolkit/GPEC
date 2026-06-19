@@ -293,10 +293,9 @@ FFS.sing_find!(intr, equil)
 intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
 intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
 intr.mpert = intr.mhigh - intr.mlow + 1
-intr.mband = intr.mpert - 1
 intr.numpert_total = intr.mpert * intr.npert
 
-metric = FFS.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+metric = FFS.make_metric(equil, intr.mpert)
 ffit   = FFS.make_matrix(equil, intr, metric)
 
 # Choose integration driver.  The top-level `eulerlagrange_integration` dispatches
