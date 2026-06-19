@@ -48,7 +48,6 @@ nn_low       = 1               # Smallest toroidal mode number to include
 nn_high      = 1               # Largest toroidal mode number to include
 delta_mlow   = 8               # Expands lower bound of Fourier harmonics
 delta_mhigh  = 8               # Expands upper bound of Fourier harmonics
-delta_mband  = 0               # Integration keeps only this wide a band of solutions (0 = full)
 mthvac       = 960             # Number of points in splines over poloidal angle at the plasma-vacuum interface
 
 eulerlagrange_tolerance = 1e-12 # Relative tolerance for ODE integration of Euler-Lagrange equations

@@ -41,8 +41,8 @@ nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 0                # Expands lower bound of Fourier harmonics
 delta_mhigh = 0               # Expands upper bound of Fourier harmonics
-delta_mband = 0               # Integration keeps only this wide a band of solutions (0 = full)
-mthvac = 64                   # Number of points in splines over poloidal angle at the plasma-vacuum interface
+mthvac = 64                  # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
 kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
