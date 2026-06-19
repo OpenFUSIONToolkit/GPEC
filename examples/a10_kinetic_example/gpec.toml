@@ -30,11 +30,10 @@ etol = 1e-7
 shape = "nowall"
 
 [ForceFreeStates]
-bal_flag = false
+local_stability_flag = true
 mat_flag = true
 ode_flag = true
 vac_flag = true
-mer_flag = true
 
 # sas_flag=f in Fortran → no truncation via dmlim; Julia mirrors with
 # set_psilim_via_dmlim=false and psiedge=1.0 (full integration to psihigh).

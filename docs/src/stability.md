@@ -136,6 +136,44 @@ use_parallel = true
 The residual ~2% gap comes from the different crossing convention (Riccati-style direct
 zeroing vs GR), not from ODE tolerance; it is present in both 1-thread and 4-thread runs.
 
+## Local stability: Mercier and ballooning (s–α)
+
+Setting `local_stability_flag = true` in `[ForceFreeStates]` runs a local high-``n``
+stability scan over every flux surface, in addition to the global ideal analysis above.
+Three diagnostics are produced and stored under the `locstab/` HDF5 group, each a profile
+in normalized poloidal flux ``\psi``:
+
+- **Mercier criterion ``D_I``** (`locstab/di`) — the ideal interchange criterion. A surface
+  is Mercier-unstable where ``D_I > 0``. It is evaluated from the ``\det(\bar{d}_0)`` of the
+  integrated local-mode matrix.
+- **Resistive interchange ``D_R``** (`locstab/dr`) — the Glasser–Greene–Johnson resistive
+  interchange criterion ``D_R = D_I + (H - 1/2)^2``, formed from flux-surface averages of
+  the field and metric quantities. ``D_R > 0`` indicates resistive interchange instability.
+- **Ballooning ``\Delta'``** (`locstab/ballooning_Delta_prime`) — the high-``n`` ballooning
+  stability index, obtained by integrating the ballooning equation along the field line and
+  taking the jump in the logarithmic derivative of the solution between the two asymptotic
+  ends.
+
+!!! note "Two different Δ' quantities"
+    `locstab/ballooning_Delta_prime` is the **local high-``n`` ballooning** index and is
+    distinct from the **resistive tearing** ``\Delta'`` described in the next section, which
+    is written under `singular/` and `perturbed_equilibrium/singular_coupling/delta_prime`.
+    They measure different instabilities; do not confuse them.
+
+### s–α diagram
+
+The local criteria can be mapped over a two-parameter ``(p', q')`` scan at a single flux
+surface — the classic s–α (shear–pressure) stability diagram. For a chosen surface the
+pressure gradient ``p'`` and shear ``q'`` are scaled away from their equilibrium values, and
+``\Delta'`` and ``D_I`` are recomputed on the resulting grid. The ``\Delta' = 0`` and
+``D_I = 0`` contours bound the ballooning- and Mercier-stable regions, with the equilibrium
+operating point marked inside.
+
+The example script `examples/DIIID-like_ideal_example/analyze_example.jl` demonstrates the
+full workflow: it plots the ``s`` and ``\alpha`` profiles, the ``D_I`` and ballooning
+``\Delta'`` profiles, and the 2-D s–α maps with their zero contours, using
+`salpha_reference`, `compute_ballooning_stability!`, and `scan_delta_prime_map`.
+
 ## Δ' tearing stability parameter
 
 ### Per-surface Δ' (`delta_prime`)
@@ -211,6 +249,9 @@ delta_mhigh  = 0       # extra high poloidal modes (m > mhigh)
 numsteps_init     = 200    # initial step budget per chunk
 numunorms_init    = 50     # renorm checkpoint budget
 reltol            = 1e-6   # ODE relative tolerance
+
+# Local stability
+local_stability_flag = false  # scan Mercier D_I, resistive D_R, and ballooning Δ' over ψ
 
 # Output
 verbose              = true

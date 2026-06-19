@@ -373,7 +373,7 @@ GPEC consists of **seven main modules** organized in `src/`:
      - `Fourfit.jl` - Fourier fitting routines
      - `FixedBoundaryStability.jl` - Fixed boundary analysis
      - `Free.jl` - Free boundary stability
-     - `Mercier.jl` - Mercier stability criterion
+     - `Ballooning.jl` - Local stability scan: Mercier D_I, resistive interchange D_R, and high-n ballooning Δ' (s–α). Replaces the former standalone `Mercier.jl`.
    - Status: Stable, core DCON functionality implemented
 
 #### Perturbed Equilibrium Modules

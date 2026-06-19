@@ -17,7 +17,9 @@ makedocs(;
     sitename="GPEC.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", nothing) == "true",
-        canonical="https://OpenFUSIONToolkit.github.io/GPEC/"
+        canonical="https://OpenFUSIONToolkit.github.io/GPEC/",
+        size_threshold=409_600,      # 400 KiB — stability.md is a large single-page module reference
+        size_threshold_warn=204_800  # 200 KiB
     ),
     modules=[GeneralizedPerturbedEquilibrium],
     pages=[

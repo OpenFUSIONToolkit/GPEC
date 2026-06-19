@@ -25,11 +25,10 @@ tw = 0.05
 equal_arc_wall = true
 
 [ForceFreeStates]
-bal_flag = false              # Ideal MHD ballooning criterion for short wavelengths
+local_stability_flag = true # Local D_I and ballooning stability
 mat_flag = false              # Construct coefficient matrices for diagnostic purposes
 ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
-mer_flag = true               # Evaluate the Mercier criterian
 
 psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
 qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
