@@ -10,9 +10,9 @@
 [Equilibrium]
 eq_type      = "imas"          # Type of the input 2D equilibrium file
 eq_filename  = "from_dd"       # Path to equilibrium file (placeholder: equilibrium comes from the runtime dd argument)
-jac_type     = "boozer"        # Coordinate system (hamada, pest, boozer, equal_arc)
-psilow       = 0.01            # Lower limit of normalized flux coordinate
-psihigh      = 0.9995          # Upper limit of normalized flux coordinate
+jac_type     = "boozer"        # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+psilow       = 0.01            # Lower limit of normalized poloidal flux
+psihigh      = 0.9995          # Upper limit of normalized poloidal flux
 mpsi         = 128             # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta       = 256             # Number of poloidal grid points
 imas_cocos   = 11              # Expected COCOS convention of the input IMAS dd (11 = IMAS standard)

@@ -8,8 +8,8 @@ eq_type = "sol"                         # Type of the input 2D equilibrium file
 eq_filename = "sol.toml"                # Path to equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
-psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.9995                        # Upper limit of normalized flux coordinate
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.9995                        # Upper limit of normalized poloidal flux
 mpsi = 128                              # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)

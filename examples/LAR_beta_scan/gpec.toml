@@ -9,10 +9,10 @@
 
 [Equilibrium]
 eq_type   = "tj_analytic"      # TJ-analytic model (inverse pipeline; Fitzpatrick https://github.com/rfitzp/TJ)
-jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc)
+jac_type  = "hamada"           # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"              # Radial grid packing type
-psilow    = 0.01               # Lower limit of normalized flux coordinate
-psihigh   = 0.995              # Upper limit of normalized flux coordinate
+psilow    = 0.01               # Lower limit of normalized poloidal flux
+psihigh   = 0.995              # Upper limit of normalized poloidal flux
 mpsi      = 128                # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta    = 512                # Number of poloidal grid points
 

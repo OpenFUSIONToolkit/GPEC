@@ -11,8 +11,8 @@ eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
 eq_type = "efit"               # Type of the input 2D equilibrium file
 jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"              # Radial grid packing type
-psilow = 1e-3                  # Lower limit of normalized flux coordinate
-psihigh = 0.99                 # Upper limit of normalized flux coordinate
+psilow = 1e-3                  # Lower limit of normalized poloidal flux
+psihigh = 0.99                 # Upper limit of normalized poloidal flux
 mpsi = 16                      # Number of radial grid points (low value for fast iteration)
 mtheta = 256                   # Number of poloidal grid points
 newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
@@ -29,7 +29,7 @@ vac_flag = true                # Compute plasma, vacuum, and total energies for 
 mer_flag = true                # Evaluate the Mercier criterion
 
 set_psilim_via_dmlim = false   # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
-psiedge = 1.0                  # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; 1.0 ≥ psilim disables the scan (integrate full domain)
+psiedge = 1.0                  # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
 qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
 qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)

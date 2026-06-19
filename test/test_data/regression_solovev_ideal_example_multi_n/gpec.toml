@@ -7,8 +7,8 @@ eq_type = "sol"                         # Type of the input 2D equilibrium file
 eq_filename = "sol.toml"                # Path to equilibrium file
 jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
-psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.9995                        # Upper limit of normalized flux coordinate
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.9995                        # Upper limit of normalized poloidal flux
 mpsi = 16                               # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
@@ -16,7 +16,7 @@ etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
-shape = "conformal"                     # Wall shape (nowall, conformal, ...); close conformal wall stabilizes the Solovev n=1 kink (see examples/Solovev_ideal_example/gpec.toml)
+shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath); close conformal wall stabilizes the Solovev n=1 kink (see examples/Solovev_ideal_example/gpec.toml)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
 bw = 1.5                                # Elongation parameter for wall shapes
