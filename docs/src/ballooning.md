@@ -258,20 +258,7 @@ D_I^{\mathrm{avg}}
 ```
 
 This is the surface-average Mercier expression that appeared in the old
-`Mercier.jl` and, temporarily, in the earlier `resistive_interchange` helper.
-The associated GGJ resistive-interchange quantity used
-
-```math
-H =
-\frac{F P' V'}{q'\chi'^3}
-\left(
-  A_2 - \frac{A_1}{A_5}
-\right),
-\qquad
-D_R = D_I + \left(H-\frac12\right)^2.
-```
-
-The determinant route starts from the same ballooning equation, takes the
+`Mercier.jl` . The determinant route starts from the same ballooning equation, takes the
 large-``\theta`` limit, applies the ``\mathbf{R}`` and ``\mathbf{S}``
 transformations, and obtains the periodic lowest-order system
 
