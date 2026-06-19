@@ -1,33 +1,33 @@
-# GPEC configuration for running from an IMAS data dictionary (IMASdd.dd).
+# DIII-D-like equilibrium read from an IMAS data dictionary (IMASdd.dd) — n=1 ideal stability.
+# The equilibrium is passed in at runtime, not read from a file; eq_filename is a placeholder.
 #
 # Usage (from Julia):
 #   using GeneralizedPerturbedEquilibrium as GPEC
 #   GPEC.main([dirname(@__FILE__)]; dd=my_dd)
 #
-# The eq_filename field is a placeholder — the equilibrium is read directly
-# from the dd passed at runtime. See run_imas_example.jl for a full workflow.
+# See run_imas_example.jl for a full workflow.
 
 [Equilibrium]
-eq_type      = "imas"           # Type of the input 2D equilibrium (read from the runtime dd)
-eq_filename  = "from_dd"        # Placeholder: equilibrium comes from runtime dd argument
-jac_type     = "boozer"         # Coordinate system (hamada, pest, boozer, equal_arc)
-psilow       = 0.01             # Lower limit of normalized flux coordinate
-psihigh      = 0.9995           # Upper limit of normalized flux coordinate
-mpsi         = 128              # Number of radial grid points
-mtheta       = 256              # Number of poloidal grid points
-imas_cocos   = 11               # IMAS standard COCOS (input dd is COCOS 11)
+eq_type      = "imas"          # Type of the input 2D equilibrium file
+eq_filename  = "from_dd"       # Path to equilibrium file (placeholder: equilibrium comes from the runtime dd argument)
+jac_type     = "boozer"        # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+psilow       = 0.01            # Lower limit of normalized poloidal flux
+psihigh      = 0.9995          # Upper limit of normalized poloidal flux
+mpsi         = 128             # Number of radial grid points (0 = auto-compute from psi_accuracy)
+mtheta       = 256             # Number of poloidal grid points
+imas_cocos   = 11              # Expected COCOS convention of the input IMAS dd (11 = IMAS standard)
 
 [Wall]
-shape = "nowall"                # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
+shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 
 [ForceFreeStates]
-nn_low               = 1        # Smallest toroidal mode number to include
-nn_high              = 1        # Largest toroidal mode number to include
-vac_flag             = true     # Compute plasma, vacuum, and total energies for free-boundary modes
-ode_flag             = true     # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
-mat_flag             = true     # Construct coefficient matrices for diagnostic purposes
-local_stability_flag = false    # Evaluate local D_I (Mercier) and ballooning stability across ψ
-write_outputs_to_HDF5 = false   # Write ForceFreeStates outputs to HDF5
-verbose              = false    # Enable verbose logging
-delta_mhigh          = 16       # Expands upper bound of Fourier harmonics
-qlow                 = 1.02     # Integration initiated at q determined by min(q0, qlow)...
+nn_low               = 1       # Smallest toroidal mode number to include
+nn_high              = 1       # Largest toroidal mode number to include
+vac_flag             = true    # Compute plasma, vacuum, and total energies for free-boundary modes
+ode_flag             = true    # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
+mat_flag             = true    # Construct coefficient matrices for diagnostic purposes
+local_stability_flag = false   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+write_outputs_to_HDF5 = false  # Write outputs to the HDF5 file
+verbose              = false   # Enable verbose logging
+delta_mhigh          = 16      # Expands upper bound of Fourier harmonics
+qlow                 = 1.02    # Integration initiated at q determined by min(q0, qlow)

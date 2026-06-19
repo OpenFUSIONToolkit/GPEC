@@ -1,3 +1,7 @@
+# Regression case: GGJ inner-layer Galerkin solver reference (Glasser & Wang 2020, Eq. 55).
+# A "computed" case (kind = "computed", no example_dir) that calls solve_inner directly and
+# tracks the Δ_odd / Δ_even inner-layer coefficients. Each [quantities.*] block names an
+# HDF5 path in the computed output, how to extract it, and the noise floor for diffs.
 [case]
 name = "ggj_reference"
 description = "GGJ inner-layer Galerkin solver, Glasser & Wang 2020 Eq. 55, γ = 1+i"
