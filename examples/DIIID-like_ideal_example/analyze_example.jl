@@ -29,7 +29,7 @@ Plots.savefig(p_baloo, baloo_path)
 # ----------------------------------------------------------------------
 # Local stability: s-alpha profiles, D_I / ballooning Δ', and 2D s-alpha
 # maps (ported from the former Bal_salpha_delta_di_summary notebook).
-# These recompute directly from the equilibrium via the Bal.jl helpers
+# These recompute directly from the equilibrium via the Ballooning.jl helpers
 # rather than reading gpec.h5, so the s-alpha scan can perturb (p', q').
 # ----------------------------------------------------------------------
 

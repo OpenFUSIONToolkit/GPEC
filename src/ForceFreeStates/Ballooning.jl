@@ -602,7 +602,7 @@ end
 """
     scan_delta_prime_map(psi_idx, plasma_eq; s_scales, alpha_scales, ...)
 
-Run a local s-alpha style scan at one flux surface using the `Bal.jl`
+Run a local s-alpha style scan at one flux surface using the `Ballooning.jl`
 makefromZero ballooning path. The scan perturbs physical `dq/dpsi` and
 `dp/dpsi`, converts them to the normalized units expected by the local
 ballooning evaluator, and returns delta-prime and `det(d0bar)` `Di` maps.
