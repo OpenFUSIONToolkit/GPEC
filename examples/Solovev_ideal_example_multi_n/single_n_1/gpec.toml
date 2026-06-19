@@ -1,20 +1,22 @@
+# Solovev analytical equilibrium — n=1 only, companion to the multi-n parent run.
+# Runs n=1 in isolation (output euler_n1.h5) to cross-check the combined multi-n result.
+# Equilibrium is generated from sol.toml.
+
 [Equilibrium]
 eq_type = "sol"                         # Type of the input 2D equilibrium file
 eq_filename = "sol.toml"                # Path to equilibrium file
-jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc)
-power_bp = 0                            # Poloidal field power exponent for Jacobian
-power_b = 0                             # Toroidal field power exponent for Jacobian
-power_r = 0                             # Major radius power exponent for Jacobian
+jac_type = "pest"                       # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
 grid_type = "ldp"                       # Radial grid packing type
-psilow = 1e-4                           # Lower limit of normalized flux coordinate
-psihigh = 0.9995                        # Upper limit of normalized flux coordinate
-mpsi = 128                              # Number of radial grid points
+psilow = 1e-4                           # Lower limit of normalized poloidal flux
+psihigh = 0.9995                        # Upper limit of normalized poloidal flux
+mpsi = 128                              # Number of radial grid points (0 = auto-compute from psi_accuracy)
 mtheta = 256                            # Number of poloidal grid points
 newq0 = 0                               # Override for on-axis safety factor (0 = use input value)
 etol = 1e-7                             # Error tolerance for equilibrium solver
 force_termination = false               # Terminate after equilibrium setup (skip stability calculations)
 
 [Wall]
+# See examples/Solovev_ideal_example/gpec.toml for the rationale behind the close conformal wall.
 shape = "conformal"                     # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 a = 0.2415                              # Distance from plasma (conformal) or shape parameter
 aw = 0.05                               # Half-thickness parameter for Dee-shaped walls
@@ -25,27 +27,27 @@ tw = 0.05                               # Sharpness of wall corners (try 0.05 as
 equal_arc_wall = true                   # Equal arc length distribution of nodes on wall
 
 [ForceFreeStates]
-local_stability_flag = true # Local D_I and ballooning stability
+local_stability_flag = true   # Perform local stability analysis (Mercier and ballooning) across the ψ profile
 mat_flag = true               # Construct coefficient matrices for diagnostic purposes
-ode_flag = true               # Integrate ODE's for determining stability of internal long-wavelength mode (must be true for GPEC)
+ode_flag = true               # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
 vac_flag = true               # Compute plasma, vacuum, and total energies for free-boundary modes
 
-psiedge = 0.99                # Edge dW scan band: dW(ψ) computed for ψ ∈ [psiedge, psilim], integration truncated at peak
-qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)...
-qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)...
+psiedge = 0.99                # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                   # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                   # Integration terminated at q limit determined by min(qa, qhigh)
 sing_start = 0                # Start integration at the sing_start'th rational from the axis (psilow)
 
 nn_low = 1                    # Smallest toroidal mode number to include
 nn_high = 1                   # Largest toroidal mode number to include
 delta_mlow = 8                # Expands lower bound of Fourier harmonics
 delta_mhigh = 10              # Expands upper bound of Fourier harmonics
-mthvac = 960                  # Number of points used in splines over poloidal angle at plasma-vacuum interface.
+mthvac = 960                  # Number of points used in splines over poloidal angle at the plasma-vacuum interface
 thmax0 = 1                    # Linear multiplier on the automatic choice of theta integration bounds
 
-kinetic_source = "fixed"      # Kinetic matrix source ("fixed" test matrices, or "calculated" from PENTRC)
+kinetic_source = "fixed"      # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
 kinetic_factor = 0.0          # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode)
 eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
 singfac_min = 1e-4            # Fractional distance from rational q at which ideal jump enforced
-ucrit = 1e3                   # Maximum fraction of solutions allowed before re-normalized
-write_outputs_to_HDF5 = true
-HDF5_filename = "euler_n1.h5"
+ucrit = 1e3                   # Column-norm threshold that triggers solution renormalization
+write_outputs_to_HDF5 = true  # Write outputs to the HDF5 file
+HDF5_filename = "euler_n1.h5" # Output HDF5 filename

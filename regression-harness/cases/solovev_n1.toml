@@ -1,3 +1,7 @@
+# Regression case: Solovev n=1 ideal stability (near-marginal external kink).
+# Tracks the leading free-boundary energies and stability quantities for the analytic
+# Solovev fixture. Each [quantities.*] block names an HDF5 path in the run output, how to
+# extract it, and the noise floor below which a difference is treated as zero.
 [case]
 name = "solovev_n1"
 description = "Solovev analytical equilibrium, n=1, ideal stability"

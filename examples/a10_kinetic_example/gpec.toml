@@ -1,76 +1,65 @@
-# a10 kinetic-DCON example — Julia mirror of Fortran GPEC a10_kinetic_example.
-#
-# Source namelists: ~/Code/gpec/docs/examples/a10_kinetic_example/{dcon.in,equil.in,pentrc.in}
-# Shared inputs:    ~/Code/gpec/docs/examples/a10_ideal_example/
-#
-# This example depends on the user's local Fortran GPEC checkout at ~/Code/gpec
-# for the g-file and kinetic profile (a10_prof1.txt). Both are referenced by
-# absolute path so no inputs are duplicated into JPEC_ode. Adjust the paths
-# if your Fortran GPEC copy lives elsewhere.
-#
-# Term-by-term Fortran↔Julia mapping: see memory/project_a10_kinetic_settings.md
-# Reference Fortran run: mpsi=16 → kinetic DCON in ~48 s on a laptop.
+# a10 kinetic stability example — drift-kinetic MHD stability of a low-aspect-ratio
+# circular tokamak. Unlike the ideal examples, this run uses the calculated kinetic
+# (neoclassical toroidal viscosity) energy matrices at full strength, so the
+# free-boundary stability includes drift-kinetic effects from a single deuterium ion
+# species with a Maxwellian distribution and a harmonic collision operator.
+# force_termination stops the run after the kinetic stability eigenvalues.
+# The equilibrium g-file and kinetic profile are bundled in this directory.
 
 [Equilibrium]
-eq_filename = "/Users/nlogan/Code/gpec/docs/examples/a10_ideal_example/fix_a100_k10_q2_bn010_prof1"
-eq_type = "efit"
-jac_type = "hamada"
-power_bp = 0
-power_b = 0
-power_r = 0
-grid_type = "ldp"               # Fortran equil.in: grid_type="ldp"
-psilow = 1e-3
-psihigh = 0.99                  # Fortran: psihigh=0.99
-mpsi = 16                       # Fortran: mpsi=16 (fast-iteration setting)
-mtheta = 256
-newq0 = 0
-etol = 1e-7
+eq_filename = "fix_a100_k10_q2_bn010_prof1"  # Path to equilibrium file
+eq_type = "efit"               # Type of the input 2D equilibrium file
+jac_type = "hamada"            # Coordinate system (hamada, pest, boozer, equal_arc, park, other)
+grid_type = "ldp"              # Radial grid packing type
+psilow = 1e-3                  # Lower limit of normalized poloidal flux
+psihigh = 0.99                 # Upper limit of normalized poloidal flux
+mpsi = 16                      # Number of radial grid points (low value for fast iteration)
+mtheta = 256                   # Number of poloidal grid points
+newq0 = 0                      # Override for on-axis safety factor (0 = use input value)
+etol = 1e-7                    # Error tolerance for equilibrium solver
 
 [Wall]
-shape = "nowall"
+shape = "nowall"               # Wall shape (nowall, conformal, elliptical, dee, mod_dee, filepath)
 
 [ForceFreeStates]
-local_stability_flag = true
-mat_flag = true
-ode_flag = true
-vac_flag = true
+local_stability_flag = true    # Perform local stability analysis (Mercier and ballooning) across the ψ profile
+mat_flag = true                # Construct coefficient matrices for diagnostic purposes
+ode_flag = true                # Integrate ODEs for stability of the internal long-wavelength mode (must be true for GPEC)
+vac_flag = true                # Compute plasma, vacuum, and total energies for free-boundary modes
 
-# sas_flag=f in Fortran → no truncation via dmlim; Julia mirrors with
-# set_psilim_via_dmlim=false and psiedge=1.0 (full integration to psihigh).
-set_psilim_via_dmlim = false
-psiedge = 1.0
-qlow = 1.02
-qhigh = 1e3
-sing_start = 0
+set_psilim_via_dmlim = false   # FALSE for limited/analytical equilibria — rationals sparse, dmlim would chop too much edge
+psiedge = 1.0                  # Edge dW(ψ) diagnostic scan band [psiedge, psilim]; set ≥ psilim to disable
+qlow = 1.02                    # Integration initiated at q determined by min(q0, qlow)
+qhigh = 1e3                    # Integration terminated at q limit determined by min(qa, qhigh)
+sing_start = 0                 # Start integration at the sing_start'th rational from the axis (psilow)
 
-nn_low = 1
-nn_high = 1
-delta_mlow = 6                  # Fortran dcon.in: delta_mlow=6
-delta_mhigh = 6                 # Fortran dcon.in: delta_mhigh=6
-mthvac = 512
-thmax0 = 1
+nn_low = 1                     # Smallest toroidal mode number to include
+nn_high = 1                    # Largest toroidal mode number to include
+delta_mlow = 6                 # Expands lower bound of Fourier harmonics
+delta_mhigh = 6                # Expands upper bound of Fourier harmonics
+mthvac = 512                   # Number of points used in splines over poloidal angle at the plasma-vacuum interface
+thmax0 = 1                     # Linear multiplier on the automatic choice of theta integration bounds
 
-kinetic_source = "calculated"   # Fortran kin_flag=t
-kinetic_factor = 1.0            # Fortran kinfac1=kinfac2=1.0
-eulerlagrange_tolerance = 1e-7
-singfac_min = 1e-4
-ucrit = 1e4
-write_outputs_to_HDF5 = true
-force_termination = true        # Stop after FFS — kinetic DCON eigenvalues are what we benchmark
+kinetic_source = "calculated"  # Kinetic matrix source: "fixed" test matrices, or "calculated" from the kinetic NTV model
+kinetic_factor = 1.0           # Scaling of kinetic matrices (0 = ideal path; >0 enables kinetic mode; 1.0 = full strength)
+eulerlagrange_tolerance = 1e-7 # Relative tolerance for ODE integration of Euler-Lagrange equations
+singfac_min = 1e-4             # Fractional distance from rational q at which ideal jump enforced
+ucrit = 1e4                    # Column-norm threshold that triggers solution renormalization
+write_outputs_to_HDF5 = true   # Write outputs to the HDF5 file
+force_termination = true       # Stop after force-free states — the kinetic stability eigenvalues are the result of interest
 
 [KineticForces]
-kinetic_file = "/Users/nlogan/Code/gpec/docs/examples/a10_ideal_example/a10_prof1.txt"
-nn = 1
-nl = 6                          # Fortran pentrc.in: nl=6
-zi = 1
-mi = 2
-zimp = 6
-mimp = 12
-electron = false                # Fortran: electron_flag=f (ion-only)
-nutype = "harmonic"             # Fortran: nutype="harmonic"
-f0type = "maxwellian"           # Fortran: f0type="maxwellian"
-# Fortran pentrc.in tolerances
-atol_xlmda = 1e-9
-rtol_xlmda = 1e-5
-atol_psi = 1e-9
-rtol_psi = 1e-4
+kinetic_file = "a10_prof1.txt"  # Path to the kinetic profile file (bundled)
+nn = 1                         # Toroidal mode number
+nl = 6                         # Bounce-harmonic number
+zi = 1                         # Ion charge (fundamental units)
+mi = 2                         # Ion mass (proton masses)
+zimp = 6                       # Impurity charge
+mimp = 12                      # Impurity mass
+electron = false               # Include electron contribution (false = ion-only)
+nutype = "harmonic"            # Collision operator (zero, small, krook, harmonic)
+f0type = "maxwellian"          # Distribution function (maxwellian, jkp, cgl)
+atol_xlmda = 1e-9              # Absolute tolerance for inner pitch + energy integrations
+rtol_xlmda = 1e-5              # Relative tolerance for inner pitch + energy integrations
+atol_psi = 1e-9                # Absolute tolerance for the outer ψ quadrature
+rtol_psi = 1e-4                # Relative tolerance for the outer ψ quadrature
