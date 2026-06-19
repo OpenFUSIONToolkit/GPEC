@@ -72,6 +72,11 @@ using HDF5
             # well-conditioned (pinned tight); Im(et[1]) is the kinetic damping rate,
             # more FP-sensitive (bracketed loosely). The pre-PV `ximag` value (34.176)
             # was not physical; the PV+residue energy integral gives the correct result.
+            # The energy integral now runs through the unified real-x-space path (one
+            # integrator for all ν; collisionless is its ν→0 limit). vs the prior u-space
+            # collisional route this moves et[1] by ~1e-6 relative — per-integral
+            # reassociation (~5e-12) amplified through the ill-conditioned eigenproblem,
+            # still float noise (harness 0.00%) and well inside these rtol brackets.
             @test isfinite(real(et[1]))
             @test isfinite(imag(et[1]))
             @test real(et[1]) ≈ 15.888 rtol = 0.01

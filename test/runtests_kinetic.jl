@@ -235,10 +235,26 @@
             @test collisionless ≈ small_nu rtol = 1e-3
         end
 
-        @testset "xr > 700 Maxwellian-underflow guard" begin
-            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900 > 700.
-            # The pole sits where exp(-x_res) underflows; subtraction trips 0·log(-1) = NaN
-            # unless the guard at EnergyIntegration.jl:207 fires first.
+        @testset "Ω′ < 0 collisionless causal branch" begin
+            # The unified add-back R·[log(xmax-x_pole) - log(-x_pole)] gets the causal
+            # ∓iπ·sign(Ω′) branch from the SIGNED ZERO of pole_offset = ν/Ω′ at ν=0.
+            # Pick n·wd < 0 so Ω′ = leff·wb/(2√x) + n·wd flips sign in the tail; the
+            # collisionless result must still equal the ν→0⁺ (small-ν krook) limit, which
+            # carries the sign naturally through its off-axis pole.
+            args = (0.0, 2.0e3, 3.5e4, -5.0e2, 1.0e3)   # we>0, wd<0 ⟹ tail root with Ω′<0
+            tail = (0, 1.0, 1, 0.5, 0.5, "fgar")
+            collisionless = KF.integrate_energy(args..., 0.0, tail...;
+                nutype="zero", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            small_nu = KF.integrate_energy(args..., 1e-6, tail...;
+                nutype="krook", f0type="maxwellian", atol=1e-12, rtol=1e-10)
+            @test isfinite(collisionless)
+            @test collisionless ≈ small_nu rtol = 1e-3
+        end
+
+        @testset "tail pole beyond X_ENERGY_MAX dropped" begin
+            # Linear case (wd = 0): s = -c/b = -(n·we)/(leff·wb) = 30 ⟹ x_res = 900 > 72.
+            # The pole sits past X_ENERGY_MAX where exp(-x_res) underflows; the
+            # `xr >= X_ENERGY_MAX` check in _integrate_energy_resonant drops it cleanly.
             @test KF.find_resonance_energies(1.0, 1.0, 1, -30.0, 0.0)[1] ≈ 900.0
             result = KF.integrate_energy(
                 0.5, 0.0, -30.0, 0.0, 1.0, 0.3, 0, 1.0, 1, 0.5, 0.5, "fgar";
@@ -250,9 +266,9 @@
 
         @testset "pole_offset overflow guard" begin
             # Tiny wb gives small omega_prime = leff·wb/(2√x_res) = 5e-16 at x_res=1, while
-            # nuk = 1e300 forces nu_res / omega_prime = 2e315 → Inf. The guard at
-            # EnergyIntegration.jl:220 must skip this pole rather than build a non-finite
-            # u_pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
+            # nuk = 1e300 forces pole_offset = ν/omega_prime = 2e315 → Inf. The
+            # `isfinite(pole_offset) || continue` guard in _integrate_energy_resonant must skip
+            # this pole. Parameters keep abs(wb) > 1e-30 so find_resonance_energies still returns x_res.
             @test KF.find_resonance_energies(1.0, 1e-15, 1, -1e-15, 0.0)[1] ≈ 1.0
             result = KF.integrate_energy(
                 0.5, 0.0, -1e-15, 0.0, 1e-15, 1e300, 0, 1.0, 1, 0.5, 0.5, "fgar";

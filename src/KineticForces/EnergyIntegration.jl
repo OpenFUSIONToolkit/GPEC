@@ -4,12 +4,13 @@
 Energy-space integration for the kinetic resonance operator.
 Implements the energy integrand from [Logan, Park, et al., Phys. Plasmas, 2013] Eq. (8).
 
-The integral over normalized energy x = E/T is mapped to the finite interval
-u ∈ [0,1) by the substitution u = 1 - exp(-x), which absorbs the Maxwellian
-weight exp(-x) into du and covers the full [0,∞) domain without truncation.
-Resonance poles (where the denominator i·Ω(x) - ν vanishes) are removed
+The integral over normalized energy x = E/T is evaluated in real x-space over
+`[0, X_ENERGY_MAX]` (Fortran PENTRC convention; `exp(-72) ≈ 5e-32` is negligible
+to any tolerance). Resonance poles (where the denominator i·Ω(x) - ν vanishes,
+shifted off the real axis to x_pole = x_res - i·ν/Ω′ by collisions) are removed
 analytically by a Sokhotski-Plemelj decomposition, so the remaining integrand
-is smooth and integrated by QuadGK adaptive Gauss-Kronrod quadrature.
+is smooth and integrated by QuadGK adaptive Gauss-Kronrod quadrature. One path
+serves all collisionalities; the collisionless case is the exact ν→0 limit.
 """
 
 """
@@ -62,9 +63,8 @@ end
     _energy_numerator(x::Float64, p::EnergyParams) → ComplexF64
 
 Numerator N(x) of the energy integrand, **without** the resonance denominator
-and **without** the Maxwellian weight exp(-x). Under the u = 1-exp(-x)
-substitution the factor exp(-x)·dx is absorbed into du, so the u-space
-integrand is N(x)/denom(x).
+and **without** the Maxwellian weight exp(-x). The physical x-space integrand is
+N(x)·exp(-x)/denom(x); the residue at a pole uses N(x_res)·exp(-x_res).
 
 For CGL there is no resonance denominator: N_cgl = x^2.5 / (i·n).
 """
@@ -89,8 +89,8 @@ end
     _energy_numerator_deriv(x::Float64, p::EnergyParams) → ComplexF64
 
 x-derivative dN/dx of `_energy_numerator`, used for the analytic regular-part
-limit of the collisionless integrand at a resonance pole. CGL is excluded — the
-collisionless real-pole path never carries a CGL numerator (CGL has no pole).
+limit at a real-axis (ν=0) resonance pole. CGL is excluded — the real-pole path
+never carries a CGL numerator (CGL has no pole).
 """
 @inline function _energy_numerator_deriv(x::Float64, p::EnergyParams)::ComplexF64
     sx = sqrt(x)
@@ -114,8 +114,8 @@ end
     _energy_integrand_real(x::Float64, p::EnergyParams) → ComplexF64
 
 Physical energy integrand in x-space, N(x)·exp(-x)/denom(x), evaluated on the
-real axis. Used for diagnostics (`evaluate_energy_integrand`) and tests; the
-production integral works in u-space via `integrate_energy`.
+real axis. Used both by the production integral (`integrate_energy` via
+`_integrate_energy_resonant`) and for diagnostics (`evaluate_energy_integrand`).
 """
 @inline function _energy_integrand_real(x::Float64, p::EnergyParams)::ComplexF64
     sqx = sqrt(x)
@@ -177,17 +177,17 @@ end
 const X_ENERGY_MAX = 72.0
 
 """
-    _collisionless_regular_part(xr, p, leff, wb, n, wd) → ComplexF64
+    _real_pole_regular_part(xr, p, leff, wb, n, wd) → ComplexF64
 
 Laurent regular part (finite limit at `x → x_res`) of the pole-subtracted
-collisionless integrand `N(x)·exp(-x)/(i·Ω(x)) − R/(x − x_res)`, with
+real-axis (ν=0) integrand `N(x)·exp(-x)/(i·Ω(x)) − R/(x − x_res)`, with
 `Ω(x) = leff·wb·√x + n·(we+wd·x)` and `R = N(x_res)·exp(-x_res)/(i·Ω′)`.
 
 Writing `h(x) = N(x)·exp(-x)`, the limit is
 `[h′(x_res) − h(x_res)·Ω″/(2Ω′)] / (i·Ω′)`, with `h′ = (N′ − N)·exp(-x)`,
 `Ω′ = leff·wb/(2√x) + n·wd`, `Ω″ = −leff·wb/(4·x^{3/2})`.
 """
-@inline function _collisionless_regular_part(xr::Float64, p::EnergyParams, leff::Float64,
+@inline function _real_pole_regular_part(xr::Float64, p::EnergyParams, leff::Float64,
                                                  wb::Float64, n::Int, wd::Float64)::ComplexF64
     sx = sqrt(xr)
     op = leff * wb / (2.0 * sx) + n * wd          # Ω′(x_res)
@@ -198,26 +198,31 @@ Writing `h(x) = N(x)·exp(-x)`, the limit is
 end
 
 """
-    _integrate_energy_collisionless(p, leff, wb, n, we, wd, atol, rtol) → ComplexF64
+    _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol) → ComplexF64
 
-Collisionless (ν ≡ 0) energy integral in **real x-space** over `[0, X_ENERGY_MAX]`,
-matching Fortran PENTRC's real-space integration (energy.f90). Each real resonance
-pole `x_res ∈ (0, X_ENERGY_MAX)` is removed analytically by principal-value +
-residue (Sokhotski-Plemelj, causal ν→0⁺ branch ∓iπ following sign Ω′), leaving a
-smooth integrand for QuadGK.
+Energy integral in **real x-space** over `[0, X_ENERGY_MAX]`, matching Fortran
+PENTRC's real-space integration (energy.f90). One path for any collisionality:
+each resonance contributes a pole `x_pole = x_res − i·ν/Ω′` (real on the axis when
+ν ≡ 0, shifted off it when ν > 0), removed analytically by principal-value +
+residue (Sokhotski-Plemelj), leaving a smooth integrand for QuadGK. The
+collisionless case is the exact ν→0 limit of this single formula.
 
-The pole is on the real axis, so the resonance denominator
-`Ω(x) = leff·wb·√x + n·(we+wd·x)` — a difference of `O(10⁴)` terms — rounds to
-exactly `0` over a ~ULP-wide window around the pole, where the physical term is
-`0/0`. There QuadGK is handed the analytic regular-part limit
-(`_collisionless_regular_part`) instead. (The collisional path keeps the
-`u = 1-exp(-x)` substitution, whose off-axis complex pole has none of these issues.)
+The add-back `R·[log(xmax − x_pole) − log(−x_pole)]` carries the causal branch
+automatically: with `pole_offset = ν/Ω′`, the signed zero of `−pole_offset` for
+ν ≡ 0 makes `log(−x_pole) = log(x_res) + iπ·sign(Ω′)`, the retarded ν→0⁺ limit of
+Fortran's ximag>0 contour.
+
+For ν > 0 the off-axis pole keeps the integrand bounded (`|denom| ≥ ν > 0`). For
+ν ≡ 0 the pole is on the real axis, where `Ω(x) = leff·wb·√x + n·(we+wd·x)` — a
+difference of `O(10⁴)` terms — rounds to exactly `0` over a ~ULP-wide window, where
+the physical term is `0/0`; there QuadGK is handed the analytic regular-part limit
+(`_real_pole_regular_part`) instead. That guard only ever fires for ν ≡ 0.
 """
-function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Float64,
-                                             n::Int, we::Float64, wd::Float64,
-                                             atol::Float64, rtol::Float64)::ComplexF64
+function _integrate_energy_resonant(p::EnergyParams, leff::Float64, wb::Float64,
+                                        n::Int, we::Float64, wd::Float64,
+                                        atol::Float64, rtol::Float64)::ComplexF64
     x_res_list = find_resonance_energies(leff, wb, n, we, wd)
-    x_poles = Float64[]
+    x_poles = ComplexF64[]
     residues = ComplexF64[]
     pole_contribution = ComplexF64(0.0)
 
@@ -227,12 +232,17 @@ function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Flo
         # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
         omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
         abs(omega_prime) < SINGULAR_EPS && continue
+        # Collisions shift the pole off the real axis: x_pole = x_res - i·ν/Ω′ (real iff ν=0).
+        # If ν overflows (e.g. harmonic ν at tiny x_res) the pole is infinitely broadened —
+        # no localized pole; skip and let QuadGK integrate the smooth bounded integrand.
+        pole_offset = _energy_collision_frequency(xr, p) / omega_prime
+        isfinite(pole_offset) || continue
+        x_pole = complex(xr, -pole_offset)   # signed-zero imag part for ν=0 carries the causal branch
         # Residue of N(x)·exp(-x)/(i·Ω(x)) at x_res, where Ω ≈ Ω′·(x - x_res) near the pole.
         R = _energy_numerator(xr, p) * exp(-xr) / (im * omega_prime)
-        # Causal (ν→0⁺) add-back ∫₀^xmax R/(x - x_res) dx = R·[log(xmax - x_res) - log(x_res) ∓ iπ]:
-        # the ν→0⁺ retarded limit of Fortran's ximag>0 contour (energy.f90); ∓ sign from sign(Ω′).
-        pole_contribution += R * (log(X_ENERGY_MAX - xr) - log(xr) - im * π * sign(omega_prime))
-        push!(x_poles, xr)
+        # Add-back ∫₀^xmax R/(x - x_pole) dx = R·[log(xmax - x_pole) - log(-x_pole)].
+        pole_contribution += R * (log(X_ENERGY_MAX - x_pole) - log(-x_pole))
+        push!(x_poles, x_pole)
         push!(residues, R)
     end
 
@@ -244,15 +254,15 @@ function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Flo
         @inbounds for k in 1:npole
             val -= residues[k] / (x - x_poles[k])
         end
-        # Inside a pole's flat-Ω window the physical term is 0/0 → val non-finite. Replace
+        # Inside a ν=0 pole's flat-Ω window the physical term is 0/0 → val non-finite. Replace
         # it with the analytic regular-part limit of the nearest pole (the other poles'
-        # subtractions stay finite and are kept).
+        # subtractions stay finite and are kept). Never reached for ν>0 (integrand bounded).
         if !isfinite(val)
             k = 1
             @inbounds for j in 2:npole
-                abs(x - x_poles[j]) < abs(x - x_poles[k]) && (k = j)
+                abs(x - real(x_poles[j])) < abs(x - real(x_poles[k])) && (k = j)
             end
-            val = _collisionless_regular_part(x_poles[k], p, leff, wb, n, wd)
+            val = _real_pole_regular_part(real(x_poles[k]), p, leff, wb, n, wd)
             @inbounds for j in 1:npole
                 j == k && continue
                 val -= residues[j] / (x - x_poles[j])
@@ -267,9 +277,9 @@ function _integrate_energy_collisionless(p::EnergyParams, leff::Float64, wb::Flo
     end
 
     # Resonance locations as QuadGK breakpoints so the smooth-but-sharp integrand
-    # is resolved near each pole. Sort a copy — `x_poles` must stay aligned with
-    # `residues`, which the integrand pairs by index.
-    breaks = unique(sort(x_poles))
+    # is resolved near each pole. Sort a copy of the real parts — `x_poles` must stay
+    # aligned with `residues`, which the integrand pairs by index.
+    breaks = unique(sort(real.(x_poles)))
     smooth_val, _ = quadgk(integrand, 0.0, breaks..., X_ENERGY_MAX; atol=atol, rtol=rtol)
     return smooth_val + pole_contribution
 end
@@ -281,22 +291,14 @@ end
 
 Integrate the kinetic resonance operator over normalized energy x = E/T.
 
-The integral ∫₀^∞ N(x)·exp(-x)/denom(x) dx is mapped to u ∈ [0,1) by
-u = 1 - exp(-x) (Jacobian dx/du = 1/(1-u)), giving ∫₀¹ N(x(u))/denom(x(u)) du
-with no energy truncation.
-
-Each resonance pole (root of Ω(x) = leff·wb·√x + n·(we + wd·x), shifted off
-the real axis by collisions to x_pole = x_res - i·ν/Ω′) is removed by
-subtracting its singular part R/(u - u_pole) from the integrand and adding
-back the analytic contribution ∫₀¹ R/(u - u_pole) du = R·[log(1-u_pole) -
-log(-u_pole)]. The same pole u_pole is used in both the subtraction and the
-add-back, so the decomposition is exact and the remaining integrand is smooth.
-
-This u-space path is used only when collisions are present (ν > 0), where the
-pole is off the real axis. The collisionless case (ν ≡ 0) has a real-axis pole
-that the u-substitution would compress toward u=1 (numerically unresolvable in
-the Maxwellian tail), so it is dispatched to `_integrate_energy_collisionless`,
-which integrates in real x-space over `[0, X_ENERGY_MAX]` à la Fortran PENTRC.
+The integral ∫₀^∞ N(x)·exp(-x)/denom(x) dx is evaluated in real x-space over
+`[0, X_ENERGY_MAX]` (Fortran PENTRC convention; `exp(-72) ≈ 5e-32` is below any
+tolerance) via `_integrate_energy_resonant`. Each resonance pole (root of
+Ω(x) = leff·wb·√x + n·(we + wd·x), shifted off the real axis by collisions to
+x_pole = x_res - i·ν/Ω′) is removed by subtracting its singular part R/(x - x_pole)
+and adding back the analytic principal-value + residue. A single formula handles
+all collisionalities: the collisionless case (ν ≡ 0) is the exact ν→0 limit, with
+its real-axis pole resolved analytically (see `_integrate_energy_resonant`).
 
 Collision operator types (`nutype`): `"zero"`, `"small"`, `"krook"`, `"harmonic"`.
 Distribution function types (`f0type`): `"maxwellian"`, `"jkp"`, `"cgl"`.
@@ -324,77 +326,9 @@ function integrate_energy(wn::Float64, wt::Float64, we::Float64, wd::Float64,
         return val
     end
 
-    # Collisionless (ν ≡ 0): real-axis pole. Dispatch to the real-x-space integral
-    # (Fortran PENTRC convention); the u-substitution below is only well-behaved
-    # for the off-axis pole of the collisional case. ν vanishes identically iff it
-    # vanishes at any x, so probe at x = 1.
-    if _energy_collision_frequency(1.0, p) == 0.0
-        return _integrate_energy_collisionless(p, leff, wb, n, we, wd, atol, rtol)
-    end
-
-    # Locate resonance poles and build their Sokhotski-Plemelj decomposition.
-    x_res_list = find_resonance_energies(leff, wb, n, we, wd)
-    u_poles = ComplexF64[]
-    residues = ComplexF64[]
-    u_breaks = Float64[]
-    pole_contribution = ComplexF64(0.0)
-
-    for xr in x_res_list
-        xr <= 0.0 && continue
-        # A resonance beyond x ≈ 700 sits where the Maxwellian weight exp(-x_res) underflows
-        # to zero in Float64. Its pole contribution is genuinely zero, and the formula
-        # R·log(-u_pole) with R=0 and u_pole≈1 trips the 0·∞ = NaN trap.
-        xr > 700.0 && continue
-        # Ω′(x_res) = d/dx[leff·wb·√x + n·(we + wd·x)]
-        omega_prime = leff * wb / (2.0 * sqrt(xr)) + n * wd
-        abs(omega_prime) < SINGULAR_EPS && continue
-
-        u_res = -expm1(-xr)   # 1 - exp(-x_res)
-        # Reached only for the collisional case (the ν ≡ 0 case is dispatched above),
-        # so ν(x_res) > 0 and the pole is off the real axis. Guard defensively.
-        nu_res = _energy_collision_frequency(xr, p)
-        nu_res > 0.0 || continue
-
-        # i·Ω - ν = 0 ⟹ x_pole = x_res - i·ν/Ω′. If ν overflows at a (tiny) x_res, the
-        # pole is infinitely collisionally broadened — no localized pole; skip and let
-        # QuadGK integrate the smooth integrand directly.
-        pole_offset = nu_res / omega_prime
-        isfinite(pole_offset) || continue
-        x_pole = complex(xr, -pole_offset)
-        u_pole = 1.0 - exp(-x_pole)
-        R = _energy_numerator(xr, p) * (1.0 - u_pole) / (im * omega_prime)
-        pole_contribution += R * (log(1.0 - u_pole) - log(-u_pole))
-
-        push!(u_poles, u_pole)
-        push!(residues, R)
-        push!(u_breaks, u_res)
-    end
-
-    npole = length(residues)
-
-    # Smooth integrand: full u-space integrand minus the subtracted pole parts.
-    integrand = u -> begin
-        u >= 1.0 && return ComplexF64(0.0)
-        x = -log1p(-u)
-        nux = _energy_collision_frequency(x, p)
-        denom = complex(-nux, leff * wb * sqrt(x) + n * (we + wd * x))
-        val = _energy_numerator(x, p) / denom
-        @inbounds for k in 1:npole
-            val -= residues[k] / (u - u_poles[k])
-        end
-        return val
-    end
-
-    if npole == 0
-        val, _ = quadgk(integrand, 0.0, 1.0; atol=atol, rtol=rtol)
-        return val
-    end
-
-    # Resonance locations as QuadGK breakpoints so the (now smooth but possibly
-    # sharp) integrand is resolved near each pole.
-    breaks = unique!(sort!(filter(b -> 0.0 < b < 1.0, u_breaks)))
-    smooth_val, _ = quadgk(integrand, 0.0, breaks..., 1.0; atol=atol, rtol=rtol)
-    return smooth_val + pole_contribution
+    # Single resonant path for any collisionality: real x-space PV+residue with a
+    # pole x_pole = x_res - i·ν/Ω′ (off-axis for ν>0, real for ν≡0).
+    return _integrate_energy_resonant(p, leff, wb, n, we, wd, atol, rtol)
 end
 
 """
