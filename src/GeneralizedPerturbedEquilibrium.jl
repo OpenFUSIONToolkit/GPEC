@@ -58,6 +58,20 @@ using .ForceFreeStates: eulerlagrange_integration, free_run!
 const _BANNER = "="^60
 const _SECTION = "-"^40
 
+const _DEPRECATED_FFS_KEYS = ("delta_mband", "mband")
+
+# Drop deprecated [ForceFreeStates] keys (e.g. banded-matrix removal from PR #286) so legacy
+# gpec.toml files keep parsing instead of throwing an unknown-keyword error.
+function _drop_deprecated_ffs_keys!(table)
+    for k in _DEPRECATED_FFS_KEYS
+        if haskey(table, k)
+            @warn "`$k` in [ForceFreeStates] is deprecated and ignored please remove it from gpec.toml."
+            delete!(table, k)
+        end
+    end
+    return table
+end
+
 function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothing)
     # Parse command line arguments
     path = length(args) >= 1 ? args[1] : "./"
@@ -81,7 +95,9 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # Read input data and set up data structures
     intr = ForceFreeStatesInternal(; dir_path=path)
     inputs = TOML.parsefile(joinpath(intr.dir_path, "gpec.toml"))
-    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in inputs["ForceFreeStates"])...)
+    ffs_table = inputs["ForceFreeStates"]
+    _drop_deprecated_ffs_keys!(ffs_table)
+    ctrl = ForceFreeStatesControl(; (Symbol(k) => v for (k, v) in ffs_table)...)
 
     # Set up equilibrium from gpec.toml or fallback to equil.toml if it exists.
     # Analytic equilibria ("tj_analytic", "tj_analytic_direct", "sol", "lar") can
@@ -240,12 +256,6 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
         intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     end
     intr.mpert = intr.mhigh - intr.mlow + 1
-    if ctrl.delta_mband >= intr.mpert
-        @warn "Banded matrices not implemented yet, setting delta_mband to 0"
-        ctrl.delta_mband = 0
-    end
-    intr.mband = intr.mpert - 1 - ctrl.delta_mband
-    intr.mband = min(max(intr.mband, 0), intr.mpert - 1)
     intr.numpert_total = intr.mpert * intr.npert
 
     # Build KineticForces control and load kinetic profiles once — reused by
@@ -254,14 +264,15 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
     # stability does not need kinetic_profiles, but the post-PE block always
     # does, so we load whenever a [KineticForces] section is present or the
     # stability path requests the calculated source.
-    kf_ctrl = haskey(inputs, "KineticForces") ?
+    kf_ctrl =
+        haskey(inputs, "KineticForces") ?
         KineticForces.KineticForcesControl(;
             (Symbol(k) => v for (k, v) in inputs["KineticForces"])...) :
         KineticForces.KineticForcesControl()
 
     kinetic_profiles = nothing
     needs_kinetic_profiles = haskey(inputs, "KineticForces") ||
-        (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
+                             (ctrl.kinetic_factor > 0 && ctrl.kinetic_source == "calculated")
     if needs_kinetic_profiles
         kinetic_file = joinpath(intr.dir_path, kf_ctrl.kinetic_file)
         kinetic_profiles = Equilibrium.load_kinetic_profiles(
@@ -280,12 +291,12 @@ function main(args::Vector{String}=String[]; dd::Union{IMASdd.dd,Nothing}=nothin
                   "   q0 = $(@sprintf("%.3f", equil.params.q0)), qmin = $(@sprintf("%.3f", equil.params.qmin)), qmax = $(@sprintf("%.3f", equil.params.qmax)), q95 = $(@sprintf("%.3f", equil.params.q95))\n" *
                   "   qlim = $(@sprintf("%.3f", intr.qlim)), psilim = $(@sprintf("%.3f", intr.psilim))\n" *
                   "   betat = $(@sprintf("%.3f", equil.params.betat)), betan = $(@sprintf("%.3f", equil.params.betan)), betap1 = $(@sprintf("%.3f", equil.params.betap1))\n" *
-                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert)), mband = $(@sprintf("%4i", intr.mband))\n" *
+                  "   mlow = $(@sprintf("%4i", intr.mlow)), mhigh = $(@sprintf("%4i", intr.mhigh)), mpert = $(@sprintf("%4i", intr.mpert))\n" *
                   "   nlow = $(@sprintf("%4i", intr.nlow)), nhigh = $(@sprintf("%4i", intr.nhigh)), npert = $(@sprintf("%4i", intr.npert))"
         end
 
         # Compute metric tensor
-        metric = make_metric(equil; mband=intr.mband)
+        metric = make_metric(equil, intr.mpert)
 
         if ctrl.verbose
             @info "Computing F, G, and K matrices"
@@ -503,7 +514,6 @@ function write_outputs_to_HDF5(
 
         # Write derived run parameters
         out_h5["info/mpert"] = intr.mpert
-        out_h5["info/mband"] = intr.mband
         out_h5["info/mlow"] = intr.mlow
         out_h5["info/mhigh"] = intr.mhigh
         out_h5["info/npert"] = intr.npert
@@ -624,7 +634,7 @@ function write_outputs_to_HDF5(
         out_h5["singular/kinetic/scan_psi"] = intr.kinsing_scan_psi
         out_h5["singular/kinetic/scan_cond"] = intr.kinsing_scan_cond
         out_h5["singular/kinetic/scan_threshold"] = intr.kinsing_scan_threshold
-        
+
         # Write free-boundary stability data. Power-normalized flux (Φ-space) is the
         # default — Jacobian-invariant. ξ-space counterparts sit under
         # FreeBoundaryStability/XiNorm/ for Fortran benchmarking.
