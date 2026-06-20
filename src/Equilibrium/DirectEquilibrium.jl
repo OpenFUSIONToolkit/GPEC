@@ -413,14 +413,16 @@ function _estimate_mid_spacing(sq_in, psi_split_core, psi_split_edge, tau)
     psi_samp = range(psi_split_core, psi_split_edge; length=n_samp)
     h_samp = step(psi_samp)
     h_min = Inf
-    buf = zeros(4)
+    # Size the buffer to the actual profile count, not a hardcoded 4 (cf. InverseEquilibrium.jl).
+    nq = size(sq_in.y, 2)
+    buf = zeros(nq)
     all_vals = [
         begin
             sq_in(buf, ψ)
             copy(buf)
         end for ψ in psi_samp
     ]
-    for k in 1:4
+    for k in 1:nq
         vals = [all_vals[i][k] for i in 1:n_samp]
         f_scale = max(maximum(abs.(vals)), 1e-12)
         d2_max = 0.0
