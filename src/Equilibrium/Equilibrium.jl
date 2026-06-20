@@ -266,19 +266,16 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
     pe.params.crnt = crnt
     pe.params.bwall = bwall
 
-    # Flux surface integrals of profile quantities (used for betat, betap*, betaj)
+    # Flux-surface integrals over the full normalized flux [0, 1]; ExtendExtrap carries the integral past the first/last grid points (integrands are smooth/vanishing at the axis).
+    xs = profiles.xs
+    fsi(y) = FastInterpolations.integrate(cubic_interp(xs, y; extrap=ExtendExtrap()), 0.0, 1.0)
     P_vals = profiles.P_spline.y
     dVdpsi_vals = profiles.dVdpsi_spline.y
-    hs_pdv   = P_vals .* dVdpsi_vals              # p  * dV/dψ
-    hs_dv    = dVdpsi_vals                        # dV/dψ
-    hs_p2dv  = P_vals .^ 2 .* dVdpsi_vals         # p² * dV/dψ
 
-    dpsi_vec = diff(profiles.xs)
-    fsi_pdv  = sum((hs_pdv[1:(end-1)]  .+ hs_pdv[2:end])  .* dpsi_vec) / 2
-    fsi_dv   = sum((hs_dv[1:(end-1)]   .+ hs_dv[2:end])   .* dpsi_vec) / 2
-    fsi_p2dv = sum((hs_p2dv[1:(end-1)] .+ hs_p2dv[2:end]) .* dpsi_vec) / 2
-
-    volume = sum((dVdpsi_vals[1:(end-1)] .+ dVdpsi_vals[2:end]) .* dpsi_vec) / 2
+    fsi_pdv  = fsi(P_vals .* dVdpsi_vals)         # ∫ p  dV/dψ
+    fsi_dv   = fsi(dVdpsi_vals)                   # ∫ dV/dψ
+    fsi_p2dv = fsi(P_vals .^ 2 .* dVdpsi_vals)    # ∫ p² dV/dψ
+    volume   = fsi_dv                             # same integrand as hs col 2 in Fortran
 
     # Poloidal-field surface integral hs_bp2(ψ) = ψ₀² ∮dθ |∇ψ|² / (R² J).
     # This is Fortran equil_out.f's hs%fs(:,3) and is the correct integrand for
@@ -309,7 +306,7 @@ function equilibrium_global_parameters!(pe::PlasmaEquilibrium)
         # pattern used for the edge-surface integrals above.
         hs_bp2[ipsi+1] = (acc / (mtheta + 1)) * psio^2
     end
-    fsi_bp2 = sum((hs_bp2[1:(end-1)] .+ hs_bp2[2:end]) .* dpsi_vec) / 2
+    fsi_bp2 = fsi(hs_bp2)
 
     p0 = P_vals[1] - profiles.P_deriv(profiles.xs[1]; hint=Ref(1)) * profiles.xs[1]  # linear extrapolation
     betat  = 2 * (fsi_pdv / fsi_dv) / bt0^2
