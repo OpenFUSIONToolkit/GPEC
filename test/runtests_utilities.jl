@@ -16,7 +16,7 @@
         fc = GeneralizedPerturbedEquilibrium.Utilities.FourierCoefficients(xs, ys, fs, 4)
 
         # Check structure
-        @test fc.mband == 4
+        @test fc.mmax == 4
         @test fc.nqty == 1
         @test length(fc.xs) == npsi
 

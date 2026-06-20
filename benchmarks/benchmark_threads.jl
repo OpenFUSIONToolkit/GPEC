@@ -21,14 +21,15 @@ function run_ffs(ex; use_parallel, use_riccati=false)
     intr.wall_settings = GeneralizedPerturbedEquilibrium.Vacuum.WallShapeSettings(;
         (Symbol(k) => v for (k, v) in inputs["Wall"])...)
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_lim!(intr, ctrl, equil)
-    intr.nlow = ctrl.nn_low; intr.nhigh = ctrl.nn_high; intr.npert = 1
+    intr.nlow = ctrl.nn_low;
+    intr.nhigh = ctrl.nn_high;
+    intr.npert = 1
     GeneralizedPerturbedEquilibrium.ForceFreeStates.sing_find!(intr, equil)
-    intr.mlow  = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
+    intr.mlow = min(intr.nlow * equil.params.qmin, 0) - 4 - ctrl.delta_mlow
     intr.mhigh = trunc(Int, intr.nhigh * equil.params.qmax) + ctrl.delta_mhigh
     intr.mpert = intr.mhigh - intr.mlow + 1
-    intr.mband = intr.mpert - 1
     intr.numpert_total = intr.mpert * intr.npert
-    metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil; mband=intr.mband, fft_flag=ctrl.fft_flag)
+    metric = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_metric(equil, intr.mpert)
     ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.make_matrix(equil, intr, metric)
     odet, _, _, _ = GeneralizedPerturbedEquilibrium.ForceFreeStates.eulerlagrange_integration(ctrl, equil, ffit, intr)
     vac = GeneralizedPerturbedEquilibrium.ForceFreeStates.free_run!(odet, ctrl, equil, ffit, intr)
@@ -52,16 +53,16 @@ function timed_run(ex; use_parallel, use_riccati=false, nwarm=1, nrep=2)
 end
 
 nthreads = Threads.nthreads()
-root     = joinpath(@__DIR__, "..")
-sol_ex   = joinpath(root, "test", "test_data", "regression_solovev_ideal_example")
+root = joinpath(@__DIR__, "..")
+sol_ex = joinpath(root, "test", "test_data", "regression_solovev_ideal_example")
 diiid_ex = joinpath(root, "examples", "DIIID-like_ideal_example")
 
 println("\n=== Thread-scaling benchmark ($(nthreads) thread(s)) ===\n")
 
 for (label, ex) in [("Solovev", sol_ex), ("DIIID-like", diiid_ex)]
-    t_std,    et_std,  N = timed_run(ex; use_parallel=false, use_riccati=false)
-    t_ric,    et_ric,  _ = timed_run(ex; use_parallel=false, use_riccati=true)
-    t_par,    et_par,  _ = timed_run(ex; use_parallel=true,  use_riccati=false)
+    t_std, et_std, N = timed_run(ex; use_parallel=false, use_riccati=false)
+    t_ric, et_ric, _ = timed_run(ex; use_parallel=false, use_riccati=true)
+    t_par, et_par, _ = timed_run(ex; use_parallel=true, use_riccati=false)
 
     err_ric = abs(et_ric - et_std) / abs(et_std) * 100
     err_par = abs(et_par - et_std) / abs(et_std) * 100
@@ -69,8 +70,8 @@ for (label, ex) in [("Solovev", sol_ex), ("DIIID-like", diiid_ex)]
     println("$label (N=$N, nthreads=$nthreads)")
     @printf("  standard   et[1]=%.5f  t=%.2fs  speedup=1.00×\n", et_std, t_std)
     @printf("  riccati    et[1]=%.5f  t=%.2fs  speedup=%.2f×  err=%.4f%%\n",
-            et_ric, t_ric, t_std/t_ric, err_ric)
+        et_ric, t_ric, t_std/t_ric, err_ric)
     @printf("  parallel   et[1]=%.5f  t=%.2fs  speedup=%.2f×  err=%.4f%%\n",
-            et_par, t_par, t_std/t_par, err_par)
+        et_par, t_par, t_std/t_par, err_par)
     println()
 end

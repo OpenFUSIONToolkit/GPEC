@@ -44,6 +44,6 @@ fc = GeneralizedPerturbedEquilibrium.Utilities.FourierCoefficients(xs, ys, fs, 1
 c = GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeff(fc, 50, 3, 1)
 
 # Get all coefficients for a given radial index and quantity
-coeffs = Vector{ComplexF64}(undef, fc.mband + 1)
+coeffs = Vector{ComplexF64}(undef, fc.mmax + 1)
 GeneralizedPerturbedEquilibrium.Utilities.get_complex_coeffs!(coeffs, fc, 50, 1)
 ```

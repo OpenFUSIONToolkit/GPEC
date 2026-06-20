@@ -511,6 +511,9 @@ function _build_psi_grid(equil_params, psilow, psihigh, fieldline_int, raw_profi
     elseif equil_params.grid_type == "pow1"
         # Fortran powspace(psilow, psihigh, 1, mpsi+1, "upper") — edge-packed grid (equil/grid.f90:92-195)
         [psilow + (psihigh - psilow) * (3(ipsi / mpsi) - (ipsi / mpsi)^3) / 2 for ipsi in 0:mpsi]
+    elseif equil_params.grid_type == "uniform"
+        # Evenly spaced surfaces, e.g. for profile diagnostics at constant resolution
+        collect(range(psilow, psihigh; length=mpsi + 1))
     else
         error("Unsupported grid_type: $(equil_params.grid_type)")
     end
