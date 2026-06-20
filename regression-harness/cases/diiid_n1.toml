@@ -1,3 +1,8 @@
+# Regression case: DIII-D-like n=1 ideal stability + perturbed equilibrium.
+# Tracks energies, singular-surface metrics, Δ' (BVP diagonal), and resonant-flux
+# diagnostics for the canonical DIIID-like fixture. Each [quantities.*] block names an
+# HDF5 path in the run output, how to extract it, and the noise floor below which a
+# difference is treated as zero. Run via the regression-harness (see CLAUDE.md).
 [case]
 name = "diiid_n1"
 description = "DIII-D-like equilibrium, n=1, ideal + perturbed equilibrium"
@@ -254,6 +259,32 @@ extract = "checksum"
 label = "pressure profile (checksum)"
 noise_threshold = 0
 order = 71
+
+# Local stability profiles (local_stability_flag = true). Checksums hash the full
+# profile so they are robust to NaN edge-surface entries and catch any change.
+[quantities.locstab_di]
+h5path = "locstab/di"
+type = "real_vector"
+extract = "checksum"
+label = "Mercier D_I profile (checksum)"
+noise_threshold = 0
+order = 72
+
+[quantities.locstab_dr]
+h5path = "locstab/dr"
+type = "real_vector"
+extract = "checksum"
+label = "resistive interchange D_R profile (checksum)"
+noise_threshold = 0
+order = 73
+
+[quantities.locstab_ballooning_dp]
+h5path = "locstab/ballooning_Delta_prime"
+type = "real_vector"
+extract = "checksum"
+label = "ballooning Delta' profile (checksum)"
+noise_threshold = 0
+order = 74
 
 # Runtime
 [quantities.runtime]

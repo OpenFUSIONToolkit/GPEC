@@ -317,9 +317,20 @@
         @test intr.ro == 0.0
         @test intr.bo == 0.0
         @test intr.mpert == 0
-        @test length(intr.methods) == 18
-        @test length(intr.docs) == 18
         @test intr.chi1 == 0.0
+    end
+
+    @testset "METHOD_REGISTRY" begin
+        # The registry is the single source of truth for NTV methods. Every entry's
+        # flag must be a real KineticForcesControl field (the TOML kwargs splat relies
+        # on it) and carry a recognized dispatch kind. No fixed count is asserted —
+        # adding a method should not require editing a magic number here.
+        for entry in KF.METHOD_REGISTRY
+            @test entry.flag in fieldnames(KF.KineticForcesControl)
+            @test endswith(string(entry.flag), "_flag")
+            @test entry.kind in (:gar, :fcgl, :rlar, :clar)
+            @test KF.method_kind(entry.name) == entry.kind
+        end
     end
 
     @testset "KineticForcesState" begin

@@ -1,3 +1,7 @@
+# Regression case: Solovev n=1 with the "calculated" kinetic path at full strength.
+# Guards the real KineticForces (PENTRC-style) physics path against drift. Each
+# [quantities.*] block names an HDF5 path in the run output, how to extract it, and the
+# noise floor below which a difference is treated as zero.
 [case]
 name = "solovev_kinetic_calculated"
 description = "Solovev, n=1, kinetic_source=calculated, kinetic_factor=1.0, mode-converged band (delta_m=8, mpert=32). et[1]≈1.84-1.41i — Julia self-consistent (NOT the mpert=8 Fortran-benchmarked 15.9)."
