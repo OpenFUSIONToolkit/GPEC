@@ -124,6 +124,110 @@ label = "beta_n"
 noise_threshold = 1e-12
 order = 43
 
+[quantities.li1]
+h5path = "equil/li1"
+type = "real_scalar"
+extract = "value"
+label = "internal inductance li1"
+noise_threshold = 1e-12
+order = 44
+
+[quantities.li2]
+h5path = "equil/li2"
+type = "real_scalar"
+extract = "value"
+label = "internal inductance li2"
+noise_threshold = 1e-12
+order = 45
+
+[quantities.li3]
+h5path = "equil/li3"
+type = "real_scalar"
+extract = "value"
+label = "internal inductance li3"
+noise_threshold = 1e-12
+order = 46
+
+[quantities.betap1]
+h5path = "equil/betap1"
+type = "real_scalar"
+extract = "value"
+label = "poloidal beta betap1"
+noise_threshold = 1e-12
+order = 47
+
+[quantities.betap2]
+h5path = "equil/betap2"
+type = "real_scalar"
+extract = "value"
+label = "poloidal beta betap2"
+noise_threshold = 1e-12
+order = 48
+
+[quantities.betap3]
+h5path = "equil/betap3"
+type = "real_scalar"
+extract = "value"
+label = "poloidal beta betap3"
+noise_threshold = 1e-12
+order = 49
+
+[quantities.betaj]
+h5path = "equil/betaj"
+type = "real_scalar"
+extract = "value"
+label = "current beta betaj"
+noise_threshold = 1e-12
+order = 57
+
+[quantities.volume]
+h5path = "equil/volume"
+type = "real_scalar"
+extract = "value"
+label = "plasma volume"
+noise_threshold = 1e-12
+order = 58
+
+[quantities.crnt]
+h5path = "equil/crnt"
+type = "real_scalar"
+extract = "value"
+label = "plasma current"
+noise_threshold = 1e-12
+order = 59
+
+[quantities.bt0]
+h5path = "equil/bt0"
+type = "real_scalar"
+extract = "value"
+label = "toroidal field bt0"
+noise_threshold = 1e-12
+order = 62
+
+[quantities.bwall]
+h5path = "equil/bwall"
+type = "real_scalar"
+extract = "value"
+label = "wall field bwall"
+noise_threshold = 1e-12
+order = 63
+
+[quantities.aratio]
+h5path = "equil/aratio"
+type = "real_scalar"
+extract = "value"
+label = "aspect ratio"
+noise_threshold = 1e-12
+order = 64
+
+[quantities.kappa]
+h5path = "equil/kappa"
+type = "real_scalar"
+extract = "value"
+label = "elongation kappa"
+noise_threshold = 1e-12
+order = 65
+
 # Singular surfaces
 [quantities.msing]
 h5path = "singular/msing"
