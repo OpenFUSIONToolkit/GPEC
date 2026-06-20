@@ -127,7 +127,7 @@ using FastInterpolations: cubic_interp, CubicFit, LinearBinarySearch, Series, Ex
         odet.u[:, :, 1] .= umat_p1;
         odet.u[:, :, 2] .= umat_p2
 
-        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, mband=intr.mband, numpert_total=intr.numpert_total)
+        ffit = GeneralizedPerturbedEquilibrium.ForceFreeStates.FourFitVars(; mpert=intr.numpert_total, numpert_total=intr.numpert_total)
         ffit.amats = cubic_interp(psifac_dummy, Series(reshape(amats, points, :)); ffit.itp_opts...)
         ffit.bmats = cubic_interp(psifac_dummy, Series(reshape(bmats, points, :)); ffit.itp_opts...)
         ffit.cmats = cubic_interp(psifac_dummy, Series(reshape(cmats, points, :)); ffit.itp_opts...)

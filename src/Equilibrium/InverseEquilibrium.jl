@@ -180,6 +180,11 @@ function equilibrium_solver(input::InverseRunInput)
             mpsi = 128
         end
         sq_xs = [psilow + (psihigh - psilow) * (3(i / mpsi) - (i / mpsi)^3) / 2 for i in 0:mpsi]
+    elseif grid_type == "uniform"
+        if mpsi == 0
+            mpsi = 128
+        end
+        sq_xs = collect(range(psilow, psihigh; length=mpsi + 1))
     else
         error("Unsupported grid_type: $grid_type")
     end

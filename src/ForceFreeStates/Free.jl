@@ -10,7 +10,7 @@ and data dumping.
 @with_pool pool function free_run!(odet::OdeState, ctrl::ForceFreeStatesControl, equil::Equilibrium.PlasmaEquilibrium, ffit::FourFitVars, intr::ForceFreeStatesInternal)
 
     # Initializations and allocations
-    (; mpert, mlow, mhigh, mband, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
+    (; mpert, mlow, mhigh, numpert_total, psilim, qlim, npert, nlow, nhigh, wall_settings) = intr
     vac_data = VacuumData(ctrl.mthvac * ctrl.nzvac, intr.numpert_total, ctrl.mthvac)
     etemp = zeros!(pool, ComplexF64, numpert_total)
     wp = zeros!(pool, ComplexF64, numpert_total, numpert_total)
@@ -68,7 +68,7 @@ and data dumping.
         for ipert_n in 1:npert, ipert_m in 1:mpert, jpert_m in 1:mpert
             ipert = (ipert_n - 1) * mpert + ipert_m
             jpert = (ipert_n - 1) * mpert + jpert_m
-            norm += ffit.jmat[jpert_m-ipert_m+mband+1] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
+            norm += ffit.jmat[jpert_m-ipert_m+mpert] * vac_data.wt[ipert, isol] * conj(vac_data.wt[jpert, isol])
         end
         norm /= dV_dpsi
         vac_data.wt[:, isol] ./= sqrt(norm)
@@ -243,7 +243,7 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     for ipert_n in 1:intr.npert, ipert_m in 1:intr.mpert, jpert_m in 1:intr.mpert
         ipert = (ipert_n - 1) * intr.mpert + ipert_m
         jpert = (ipert_n - 1) * intr.mpert + jpert_m
-        norm += ffit.jmat[jpert_m-ipert_m+intr.mband+1] * v[ipert] * conj(v[jpert])
+        norm += ffit.jmat[jpert_m-ipert_m+intr.mpert] * v[ipert] * conj(v[jpert])
     end
     norm /= dV_dpsi
     eigenvalues[isol] /= norm
@@ -266,7 +266,7 @@ wv matrix spline to `free_compute_wv_spline` and pass it in `odet.edge_scan.wvma
     mpert = intr.mpert
     sqrtamat_flat = Vector{ComplexF64}(undef, mpert^2 + 1)
     es.sqrtamat_spline(sqrtamat_flat, odet.psifac; hint=es.sqrtamat_hint)
-    sqrtamat_local = reshape(@view(sqrtamat_flat[1:mpert^2]), mpert, mpert)
+    sqrtamat_local = reshape(@view(sqrtamat_flat[1:(mpert^2)]), mpert, mpert)
     jarea_local = real(sqrtamat_flat[end])
 
     pn_result = compute_power_norm_eigenvalues(wt_saved, wp, wv, sqrtamat_local, jarea_local, equil, odet.psifac, intr)
