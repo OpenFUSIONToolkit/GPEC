@@ -1,7 +1,11 @@
 [case]
 name = "solovev_kinetic_nuzero"
-description = "Solovev, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral, issue #281), mode-converged band (delta_m=8, mpert=32). et[1]≈1.72-1.08i."
-example_dir = "examples/Solovev_kinetic_nuzero_example"
+description = "Solovev, n=1, kinetic_source=calculated, nutype=zero (collisionless energy integral, issue #281), mode-converged band (delta_m=8, mpert=32). Reuses the calculated example deck via override; et[1]≈2.333-2.174i with the pressure-consistent kinetic.dat."
+example_dir = "examples/Solovev_kinetic_calculated_example"
+
+# Run the shared calculated deck collisionless (no separate nuzero example directory).
+[overrides]
+"KineticForces.nutype" = "zero"
 
 # Energies — leading eigenvalues
 [quantities.et_real]

@@ -84,7 +84,7 @@ using HDF5
             # without faulting/NaN (the bug this guards against). The precise collisionless
             # physics is locked down by the deterministic runtests_kinetic.jl unit tests
             # (tail-pole, ν→0⁺ limit, Ω′<0); the mode-converged eigenvalue is pinned in the
-            # harness (examples/Solovev_kinetic_nuzero_example). No value pinned here — only
+            # harness (calculated example deck run collisionless via override). No value pinned here — only
             # finite, positive total energy, negative resonant (Landau) damping.
             @test isfinite(real(et[1]))
             @test isfinite(imag(et[1]))
