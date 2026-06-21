@@ -66,6 +66,14 @@ Establishes the self-consistent plasma response calculation. Derives the permeab
 
 ---
 
+> J.-K. Park, A. H. Boozer, and J. E. Menard, "Spectral asymmetry due to magnetic coordinates,"
+> *Physics of Plasmas* **15**, 064501 (2008).
+> DOI: [10.1063/1.2932110](https://doi.org/10.1063/1.2932110)
+
+Shows that the Fourier spectrum of a perturbed field on a flux surface is asymmetric and depends on the magnetic working coordinate, so the raw spectrum is not by itself a physical measure of the field. Motivates normalizing the resonant harmonic by the scalar surface area to obtain the coordinate-independent resonant field — see the [Conventions Reference](conventions.md).
+
+---
+
 > M. Pharr, E. Bursch, N. C. Logan, P. Lunia, J.-K. Park, and C. Paz-Soldan, "Coordinate-invariant flux-surface Fourier analysis in tokamaks,"
 > Preprint (2026).
 > [arXiv:2606.02901](https://arxiv.org/abs/2606.02901)
@@ -163,4 +171,4 @@ Provides the complete theory and implementation details, including NTV in the pr
 > *Physics of Plasmas* **24**, 032505 (2017).
 > DOI: [10.1063/1.4977898](https://doi.org/10.1063/1.4977898)
 
-Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the the KineticForces functionality.
+Describes the fully self-consistent coupling between the perturbed equilibrium and neoclassical toroidal viscosity (NTV), providing the theoretical foundation for the KineticForces functionality.

@@ -61,6 +61,11 @@ The PerturbedEquilibrium module implements GPEC-style perturbed equilibrium calc
   - Published: Physical Review Letters **99**, 195003 (2007)
   - Describes: Plasma response to resonant magnetic perturbations (RMP)
 
+- **Park et al. (2008)**: "Spectral asymmetry due to magnetic coordinates"
+  - Location: `docs/resources/2008-Park-Spectral_asymmetry_due_to_magnetic_coordinates.pdf`
+  - Published: Physics of Plasmas **15**, 064501 (2008)
+  - Describes: Coordinate-dependence of the perturbed-field Fourier spectrum, motivating area-normalization of the resonant harmonic to obtain the coordinate-invariant resonant field
+
 - **Park et al. (2009)**: "Importance of plasma response to nonaxisymmetric perturbations in tokamaks"
   - Location: `docs/resources/2009-Park-Importance_of_plasma_response_to_nonaxisymmetric_perturbations_in_tokamaks-compressed.pdf`
   - Published: Physics of Plasmas **16**, 056115 (2009)

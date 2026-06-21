@@ -57,7 +57,7 @@ kernel ``\exp(-im\theta)``; the inverse transform reconstructs with ``\exp(+im\t
 
 ### Toroidal Coordinate ``\zeta`` and ``\phi``
 
-- The magnetic cooridante toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
+- The magnetic coordinate toroidal angle is ``\zeta = \phi/(2\pi) + \nu(\psi,\theta)``, where ``\nu`` is
   a single-valued straight-field-line offset that depends on the working coordinate. PEST
   coordinates have ``\nu = 0``.
 - The physical toroidal angle is reconstructed as
@@ -219,7 +219,11 @@ b^r = \frac{\Phi^r}{A^r} \qquad [\mathrm{T}].
 
 Dividing the resonant flux ``\Phi^r`` by the surface area turns it into a field amplitude in Tesla
 that is invariant under changes of the poloidal-angle (working) coordinate. This is the quantity
-reported as `resonant_flux`.
+reported as `resonant_flux`. The need for this normalization is the central point of Park, Boozer,
+and Menard (2008) (see [Citations](citations.md)): the raw Fourier spectrum of the perturbed field is
+*spectrally asymmetric* and changes with the magnetic working coordinate, so only the resonant
+harmonic scaled by the scalar surface area ``A^r`` is a coordinate-independent physical measure of
+the resonant field.
 
 Note that there is strictly NO resonant field in ideal MHD perturbed equilibrium calculations, and
 only the effective resonant field is non-zero in these cases. Effective resonant fields are computed
@@ -248,6 +252,74 @@ area-averaged squared normal field — the surface-averaged field "power",
 The ``\sqrt{A}`` weighting is the unique one for which the spectrum transforms unitarily between
 working coordinates, so the power-normalized amplitudes — and quantities derived from them, such as
 the singular values of the resonant coupling matrix — are coordinate-invariant.
+
+### The Three Field Amplitudes
+
+Following Pharr (2026), *Coordinate-invariant flux-surface Fourier analysis in tokamaks* (see
+[Citations](citations.md)), GPEC works with **three** Fourier decompositions of the normal field, **all
+in field units (tesla)**, distinguished only by the **area weight applied to the Fourier integrand**.
+These are the authoritative names used in prose, in code, and in the HDF5 output:
+
+| Pharr symbol | FT integrand weight ``W`` | English name | HDF5 token |
+|---|---|---|---|
+| ``b`` (bare) | ``1`` | **normal field** | `b_n` |
+| ``\bar b`` (bar) | ``\mathcal{J}\,\lvert\nabla\psi\rvert`` | **area-weighted field** | `area` |
+| ``\tilde b`` (tilde) | ``\sqrt{\mathcal{J}\,\lvert\nabla\psi\rvert}`` | **root-area-weighted field** | `root_area` |
+
+All three carry units of tesla because each integral is divided by the appropriate power of the
+coordinate-invariant scalar surface area ``A``:
+
+```math
+b_m = \oint (\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta, \qquad
+\bar b_m = \frac{1}{A}\oint \mathcal{J}\lvert\nabla\psi\rvert\,(\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta, \qquad
+\tilde b_m = \frac{1}{\sqrt{A}}\oint \sqrt{\mathcal{J}\lvert\nabla\psi\rvert}\,(\mathbf{b}\cdot\hat{\mathbf n})\, e^{-i m\theta}\, d\theta .
+```
+
+Only the **square-root-area weighting** ``\tilde b`` transforms unitarily between working coordinates, so
+its 2-norm (and quantities derived from it, such as the singular values of the resonant coupling matrix)
+are coordinate-invariant. Note that the "root-area-weighted field" sometimes appears as "power-normalized
+field" in early GPEC literature, as the latter names a Parseval *property* of ``\tilde b``. The **full-area weighting** ``\bar b`` is coordinate-invariant for the
+pitch-resonant ``m = nq`` harmonic on a rational surface — the **resonant area-weighted field**
+``\bar b^{\,r} = \Phi^r/A^r`` as described above.
+
+GPEC operates and outputs **only in these field representations — poloidal flux ``\Phi`` (weber) is never
+stored.** Flux appears, briefly, only internally when a user supplies flux-valued forcing, and is
+recovered on demand as the scalar product ``\Phi = A\,\bar b``.
+
+### Translation Operators
+
+With ``\Sigma`` ≡ `sqrtamat` (the mode-space ``\sqrt{}``weight convolution) and the scalar surface area
+``A`` ≡ `jarea`, the three fields are related by (`Equilibrium/CoordinateInvariant.jl`):
+
+```math
+\tilde b = \Sigma\, b, \qquad
+\bar b = (\Sigma/\sqrt{A})\,\tilde b, \qquad
+\Phi = A\,\bar b = \Sigma\sqrt{A}\;\tilde b .
+```
+
+- **`rootarea_to_area_weight`** ``= \Sigma/\sqrt{A}`` maps ``\tilde b \to \bar b``.
+- **`area_to_rootarea_weight`** ``= \sqrt{A}\,\Sigma^{-1}`` is its inverse (``\bar b \to \tilde b``).
+
+The internal flux-conform operator is just ``R = \Sigma\sqrt{A} = `` `rootarea_to_area_weight` ``\cdot A``.
+
+### Field Representations in GPEC Output
+
+- **`forcing_b` / `forcing_b_root_area` / `forcing_b_area`** (and the `response_*` triplet) — the
+  control-surface forcing and response spectra in the bare (``b``), root-area-weighted (``\tilde b``) and
+  area-weighted (``\bar b``) representations, under `perturbed_equilibrium/`.
+- **`b_n`** — the bare normal field ``\mathbf{b}\cdot\hat{\mathbf n}`` (and the area-weighted radial field
+  `b_psi_area_weighted`), under `perturbed_equilibrium/response/`.
+- **`resonant_area_weighted_field`** / **`C_resonant_area_weighted_field`** — the resonant area-weighted
+  field ``\bar b^{\,r} = \Phi^r/A^r`` and its coupling matrix, under
+  `perturbed_equilibrium/singular_coupling/`. The sibling `penetrated_area_weighted_field` follows the
+  same convention.
+- **Root-area-weighted (``\tilde b``) space** — the control-surface response matrices (`permeability`,
+  `reluctance`, `plasma_inductance`, `surface_inductance`) are stored in this coordinate-invariant space
+  under `perturbed_equilibrium/response_matrices/`. The stored `rootarea_to_area_weight_operator` ``S``
+  recovers the area-weighted field forms (``L_{\bar b} = S\,\tilde L\,S^\dagger``) and the scalar
+  `surface_area` ``A`` recovers flux (``\Phi = A\,\bar b``). The coordinate-invariant ideal-MHD energies
+  written by the stability stage (`FreeBoundaryStability/eigenmode_energies`) are the ``\tilde b``
+  quadratic form scaled by the scalar ``c = A``: ``\mathrm{d}W = c\,\tilde b^\dagger W_t\,\tilde b``.
 
 
 ## Rotation Velocity Conventions (KineticForces)

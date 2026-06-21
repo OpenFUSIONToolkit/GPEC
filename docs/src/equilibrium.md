@@ -12,7 +12,7 @@ Key responsibilities of the module:
 
 - Read equilibrium input files and TOML configuration (see `EquilibriumConfig`).
 - Provide convenient constructors for analytic / model equilibria (Large
-	Aspect Ratio, Solev'ev).
+	Aspect Ratio, Solovev).
 - Build spline representations used throughout the code (1D cubic and
 	2D bicubic splines).
 - Run the direct or inverse equilibrium solver and post-process results
@@ -89,7 +89,7 @@ Modules = [GeneralizedPerturbedEquilibrium.Equilibrium]
 - `PlasmaEquilibrium` — the runtime structure containing spline fields,
 	geometry, profiles, and computed diagnostics (q-profile, separatrix,
 	etc.).
-- `LargeAspectRatioConfig`, `SolevevConfig` — convenience structs to
+- `LargeAspectRatioConfig`, `SolovevConfig` — convenience structs to
 	construct analytic/model equilibria when using `eq_type = "lar"` or
 	`eq_type = "sol"`.
 
@@ -134,7 +134,7 @@ using GeneralizedPerturbedEquilibrium
 larcfg = GeneralizedPerturbedEquilibrium.Equilibrium.LargeAspectRatioConfig(lar_r0=10.0, lar_a=1.0, beta0=1e-3)
 pe = GeneralizedPerturbedEquilibrium.Equilibrium.setup_equilibrium(GeneralizedPerturbedEquilibrium.Equilibrium.EquilibriumConfig(control=Dict("eq_filename"=>"unused","eq_type"=>"lar")), larcfg)
 
-println("Built LAR equilibrium with a = ", lorcfg.lar_a)
+println("Built LAR equilibrium with a = ", larcfg.lar_a)
 ```
 
 ## Notes and Caveats
