@@ -79,9 +79,6 @@ verbose = true                          # Enable verbose logging
 write_outputs_to_HDF5 = true            # Write perturbed equilibrium outputs to HDF5
 reg_spot = 0.05                         # Regularization width for singular surfaces (0 = disabled)
 
-# NTV torque diagnostic on top of the ideal FFS + PE result. Presence of this
-# section triggers the post-PE KineticForces block; the stability solve stays
-# ideal (kinetic_source="fixed", kinetic_factor=0 above).
 [KineticForces]
 kinetic_file = "TkMkr_D3Dlike_Hmode_kinetic.gpeckf"  # 6-col: psi_n n_i n_e T_i T_e omega_E
 nn = 1                                  # Toroidal mode number (matches nn_low/nn_high)
